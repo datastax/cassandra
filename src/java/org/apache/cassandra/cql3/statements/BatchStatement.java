@@ -31,6 +31,7 @@ import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.function.UnaryOperator;
+import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.HashMultiset;
@@ -69,6 +70,10 @@ import org.apache.cassandra.metrics.ClientRequestSizeMetrics;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.sensors.Context;
+import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.RequestTracker;
+import org.apache.cassandra.sensors.SensorsCustomParams;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.service.QueryState;
@@ -448,7 +453,18 @@ public class BatchStatement implements CQLStatement
             executeWithoutConditions(getMutations(clientState, options, false, timestamp, nowInSeconds, requestTime),
                                      clientState, options.getConsistency(), requestTime);
 
-        return new ResultMessage.Void();
+        ResultMessage<ResultMessage.Void> result = new ResultMessage.Void();
+        RequestSensors sensors = RequestTracker.instance.get();
+        Map<TableId, TableMetadata> tableMetadataById = statements.stream()
+                                                                  .map(ModificationStatement::metadata)
+                                                                  .collect(Collectors.toMap(metadata -> metadata.id, Function.identity(), (existing, replacement) -> existing));
+        for (TableMetadata metadata : tableMetadataById.values())
+        {
+            Context context = Context.from(metadata);
+            SensorsCustomParams.addSensorToCQLResponse(result, options.wrapped.getProtocolVersion(), sensors, context, org.apache.cassandra.sensors.Type.WRITE_BYTES);
+        }
+
+        return result;
     }
 
     private void executeWithoutConditions(List<? extends IMutation> mutations,

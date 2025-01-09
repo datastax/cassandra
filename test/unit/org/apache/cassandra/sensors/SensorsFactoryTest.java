@@ -22,16 +22,27 @@ import org.junit.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-
-public class RequestSensorsFactoryTest
+public class SensorsFactoryTest
 {
     @Test
-    public void testCreateUsesNoOpByDefault()
+    public void testDefaultRequestSensors()
     {
         SensorsFactory factory = SensorsFactory.instance;
-        RequestSensors sensors = factory.createRequestSensors("ks1");
+        RequestSensors sensors = factory.createRequestSensors("ks1", "ks2");
+
         assertThat(sensors).isInstanceOf(NoOpRequestSensors.class);
-        RequestSensors anotherSensors = factory.createRequestSensors("k2");
-        assertThat(anotherSensors).isSameAs(sensors);
+        assertThat(factory.createRequestSensors("ks1", "ks2")).isSameAs(sensors);
+    }
+
+    @Test
+    public void testDefaultSensorEncoder()
+    {
+        SensorsFactory factory = SensorsFactory.instance;
+        SensorEncoder encoder = factory.createSensorEncoder();
+        Sensor sensor = new Sensor(new Context("ks1", "t1", "id1"), Type.READ_BYTES);
+
+        assertThat(encoder.encodeRequestSensorName(sensor)).isEmpty();
+        assertThat(encoder.encodeGlobalSensorName(sensor)).isEmpty();
+        assertThat(encoder).isSameAs(factory.createSensorEncoder());
     }
 }
