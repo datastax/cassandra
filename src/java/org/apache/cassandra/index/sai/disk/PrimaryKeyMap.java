@@ -77,6 +77,18 @@ public interface PrimaryKeyMap extends Closeable
     SSTableId<?> getSSTableId();
 
     /**
+     * Returns the minimum timestamp of the for the sstable associated with this {@link PrimaryKeyMap}
+     * @return the minimum timestamp
+     */
+    long getMinTimestamp();
+
+    /**
+     * Returns the maximum timestamp of the for the sstable associated with this {@link PrimaryKeyMap}
+     * @return the maximum timestamp
+     */
+    long getMaxTimestamp();
+
+    /**
      * Returns a {@link PrimaryKey} for a row Id
      *
      * @param sstableRowId the row Id to lookup

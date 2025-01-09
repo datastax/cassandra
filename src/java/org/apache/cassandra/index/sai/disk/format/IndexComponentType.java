@@ -111,7 +111,12 @@ public enum IndexComponentType
      *
      * V1 V2
      */
-    GROUP_COMPLETION_MARKER("GroupComplete");
+    GROUP_COMPLETION_MARKER("GroupComplete"),
+
+    /**
+     * Stores the list of row ids for null values
+     */
+    NULL_POSTING_LIST("NullPostingList"),;
 
     public final String representation;
 
