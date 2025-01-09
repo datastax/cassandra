@@ -24,7 +24,7 @@ import java.util.function.Predicate;
 
 /**
  * Groups {@link Sensor}s associated to a given request/response and related {@link Context}: this is the main entry
- * point to create and modify sensors. Actual implementations can be created via {@link RequestSensorsFactory}.
+ * point to create and modify sensors. Actual implementations can be created via {@link SensorsFactory}.
  */
 public interface RequestSensors
 {
