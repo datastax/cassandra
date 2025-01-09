@@ -46,7 +46,7 @@ import com.google.common.annotations.VisibleForTesting;
  * {@link RequestSensors} objects, hence {@link #syncAllSensors()} MUST be invoked to propagate the sensors values
  * at a global level to the {@link SensorsRegistry}.
  * <br/>
- * Please note instances of this class should be created via the configured {@link RequestSensorsFactory}.
+ * Please note instances of this class should be created via the configured {@link SensorsFactory}.
  */
 public class ActiveRequestSensors implements RequestSensors
 {

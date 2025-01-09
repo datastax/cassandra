@@ -131,6 +131,11 @@ import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.sensors.Context;
+import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.RequestTracker;
+import org.apache.cassandra.sensors.SensorsFactory;
+import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.service.paxos.Ballot;
 import org.apache.cassandra.service.paxos.Commit;
 import org.apache.cassandra.service.paxos.ContentionStrategy;
@@ -235,6 +240,10 @@ public class StorageProxy implements StorageProxyMBean
 
             QueryInfoTracker.WriteTracker writeTracker = queryTracker().onWrite(clientState, true, mutations, consistencyLevel);
 
+            // Request sensors are utilized to track usages from replicas serving atomic batch request
+            RequestSensors sensors = SensorsFactory.instance.createRequestSensors(mutations.stream().map(IMutation::getKeyspaceName).toArray(String[]::new));
+            RequestTracker.instance.set(sensors);
+
             if (mutations.stream().anyMatch(mutation -> Keyspace.open(mutation.getKeyspaceName()).getReplicationStrategy().hasTransientReplicas()))
                 throw new AssertionError("Logged batches are unsupported with transient replication");
 
@@ -263,7 +272,7 @@ public class StorageProxy implements StorageProxyMBean
                                                               () -> asyncRemoveFromBatchlog(replicaPlan, batchUUID, requestTime));
 
                 // add a handler for each mutation - includes checking availability, but doesn't initiate any writes, yet
-                List<WriteResponseHandlerWrapper> wrappers = wrapBatchResponseHandlers(mutations, consistencyLevel, batchConsistencyLevel, cleanup, requestTime);
+                List<WriteResponseHandlerWrapper> wrappers = wrapBatchResponseHandlers(mutations, consistencyLevel, batchConsistencyLevel, cleanup, requestTime, sensors);
 
                 // write to the batchlog
                 syncWriteToBatchlog(mutations, replicaPlan, batchUUID, requestTime);
@@ -344,6 +353,37 @@ public class StorageProxy implements StorageProxyMBean
         {
             // write to the batchlog
             StorageProxy.syncWriteToBatchlog(mutations, replicaPlan, batchUUID, requestTime);
+        }
+
+        private List<WriteResponseHandlerWrapper> wrapBatchResponseHandlers(Collection<Mutation> mutations,
+                                                                              ConsistencyLevel consistencyLevel,
+                                                                              ConsistencyLevel batchConsistencyLevel,
+                                                                              BatchlogResponseHandler.BatchlogCleanup cleanup,
+                                                                              Dispatcher.RequestTime requestTime,
+                                                                              RequestSensors sensors)
+        {
+            List<StorageProxy.WriteResponseHandlerWrapper> wrappers = new ArrayList<>(mutations.size());
+
+            // add a handler for each mutation - includes checking availability, but doesn't initiate any writes, yet
+            for (Mutation mutation : mutations)
+            {
+                // register the sensors for the mutation before the actual write is performed
+                for (PartitionUpdate pu: mutation.getPartitionUpdates())
+                {
+                    if (pu.metadata().isIndex()) continue;
+                    sensors.registerSensor(Context.from(pu.metadata()), Type.WRITE_BYTES);
+                }
+                StorageProxy.WriteResponseHandlerWrapper wrapper = StorageProxy.wrapBatchResponseHandler(mutation,
+                                                                                                         consistencyLevel,
+                                                                                                         batchConsistencyLevel,
+                                                                                                         WriteType.BATCH,
+                                                                                                         cleanup,
+                                                                                                         requestTime);
+                // exit early if we can't fulfill the CL at this time.
+                wrappers.add(wrapper);
+            }
+
+            return wrappers;
         }
 
         private void asyncWriteBatchedMutations(List<StorageProxy.WriteResponseHandlerWrapper> wrappers, Dispatcher.RequestTime requestTime)
@@ -520,6 +560,12 @@ public class StorageProxy implements StorageProxyMBean
                                                                                 key,
                                                                                 consistencyForPaxos,
                                                                                 consistencyForCommit);
+        // Request sensors are utilized to track usages from replicas serving a cas request
+        RequestSensors sensors = SensorsFactory.instance.createRequestSensors(keyspaceName);
+        Context context = Context.from(metadata);
+        sensors.registerSensor(context, Type.WRITE_BYTES); // track user table + paxos table write bytes
+        sensors.registerSensor(context, Type.READ_BYTES); // track user table + paxos table read bytes
+        RequestTracker.instance.set(sensors);
         try
         {
             consistencyForPaxos.validateForCas(keyspaceName, clientState);
@@ -969,7 +1015,7 @@ public class StorageProxy implements StorageProxyMBean
         long startTimeNanos = Clock.Global.nanoTime();
         try
         {
-            ProposeCallback callback = new ProposeCallback(replicaPlan.contacts().size(), replicaPlan.requiredParticipants(), !backoffIfPartial, replicaPlan.consistencyLevel(), requestTime);
+            ProposeCallback callback = new ProposeCallback(proposal.update.metadata(), replicaPlan.contacts().size(), replicaPlan.requiredParticipants(), !backoffIfPartial, replicaPlan.consistencyLevel(), requestTime);
             Message<Commit> message = Message.out(PAXOS_PROPOSE_REQ, proposal);
             for (Replica replica : replicaPlan.contacts())
             {
@@ -1142,6 +1188,10 @@ public class StorageProxy implements StorageProxyMBean
 
         QueryInfoTracker.WriteTracker writeTracker = queryTracker().onWrite(state, false, mutations, consistencyLevel);
 
+        // Request sensors are utilized to track usages from replicas serving a write request
+        RequestSensors sensors = SensorsFactory.instance.createRequestSensors(mutations.stream().map(IMutation::getKeyspaceName).toArray(String[]::new));
+        RequestTracker.instance.set(sensors);
+
         List<AbstractWriteResponseHandler<IMutation>> responseHandlers = new ArrayList<>(mutations.size());
         WriteType plainWriteType = mutations.size() <= 1 ? WriteType.SIMPLE : WriteType.UNLOGGED_BATCH;
 
@@ -1149,6 +1199,13 @@ public class StorageProxy implements StorageProxyMBean
         {
             for (IMutation mutation : mutations)
             {
+                // register the sensors for the mutation before the actual write is performed
+                for (PartitionUpdate pu: mutation.getPartitionUpdates())
+                {
+                    if (pu.metadata().isIndex()) continue;
+                    sensors.registerSensor(Context.from(pu.metadata()), Type.WRITE_BYTES);
+                }
+
                 if (mutation instanceof CounterMutation)
                     responseHandlers.add(mutateCounter((CounterMutation)mutation, localDataCenter, requestTime));
                 else
@@ -2067,6 +2124,11 @@ public class StorageProxy implements StorageProxyMBean
                                                                                       group.metadata(),
                                                                                       group.queries,
                                                                                       consistencyLevel);
+        // Request sensors are utilized to track usages from replicas serving a read request
+        RequestSensors requestSensors = SensorsFactory.instance.createRequestSensors(group.metadata().keyspace);
+        Context context = Context.from(group.metadata());
+        requestSensors.registerSensor(context, Type.READ_BYTES);
+        RequestTracker.instance.set(requestSensors);
         PartitionIterator partitions = read(group, consistencyLevel, clientState, requestTime, readTracker);
         partitions = PartitionIterators.filteredRowTrackingIterator(partitions, readTracker::onFilteredPartition, readTracker::onFilteredRow, readTracker::onFilteredRow);
         return PartitionIterators.doOnClose(partitions, readTracker::onDone);
@@ -2559,6 +2621,11 @@ public class StorageProxy implements StorageProxyMBean
                                                                               command.metadata(),
                                                                               command,
                                                                               consistencyLevel);
+        // Request sensors are utilized to track usages from replicas serving a range request
+        RequestSensors sensors = SensorsFactory.instance.createRequestSensors(command.metadata().keyspace);
+        Context context = Context.from(command);
+        sensors.registerSensor(context, Type.READ_BYTES);
+        RequestTracker.instance.set(sensors);
 
         PartitionIterator partitions = RangeCommands.partitions(command, consistencyLevel, requestTime, readTracker);
         partitions = PartitionIterators.filteredRowTrackingIterator(partitions, readTracker::onFilteredPartition, readTracker::onFilteredRow, readTracker::onFilteredRow);

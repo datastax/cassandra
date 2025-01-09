@@ -23,10 +23,10 @@ import org.apache.cassandra.sensors.RequestTracker;
 import org.apache.cassandra.service.paxos.Commit;
 import org.apache.cassandra.service.paxos.PaxosState;
 import org.apache.cassandra.service.paxos.PrepareResponse;
-import org.apache.cassandra.net.SensorsCustomParams;
 import org.apache.cassandra.sensors.Context;
 import org.apache.cassandra.sensors.RequestSensors;
-import org.apache.cassandra.sensors.RequestSensorsFactory;
+import org.apache.cassandra.sensors.SensorsCustomParams;
+import org.apache.cassandra.sensors.SensorsFactory;
 import org.apache.cassandra.sensors.Type;
 
 public class PrepareVerbHandler extends AbstractPaxosVerbHandler
@@ -42,7 +42,7 @@ public class PrepareVerbHandler extends AbstractPaxosVerbHandler
     public void processMessage(Message<Commit> message)
     {
         // Initialize the sensor and set ExecutorLocals
-        RequestSensors sensors = RequestSensorsFactory.instance.create(message.payload.update.metadata().keyspace);
+        RequestSensors sensors = SensorsFactory.instance.createRequestSensors(message.payload.update.metadata().keyspace);
         Context context = Context.from(message.payload.update.metadata());
 
         // Prepare phase incorporates a read to check the cas condition, so a read sensor is registered in addition to the write sensor
@@ -58,7 +58,7 @@ public class PrepareVerbHandler extends AbstractPaxosVerbHandler
         int size = reply.currentPayloadSize(MessagingService.current_version);
         sensors.incrementSensor(context, Type.INTERNODE_BYTES, size);
         sensors.syncAllSensors();
-        SensorsCustomParams.addSensorsToResponse(sensors, reply);
+        SensorsCustomParams.addSensorsToInternodeResponse(sensors, reply);
         MessagingService.instance().send(reply.build(), message.from());
     }
 }
