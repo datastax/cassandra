@@ -110,8 +110,8 @@ public class ChunkCache
     private Function<ChunkReader, RebuffererFactory> wrapper = this::wrap;
 
     // Global file id management
-    private static final ConcurrentHashMap<File, Long> fileIdMap = new ConcurrentHashMap<>();
-    private static final AtomicLong nextFileId = new AtomicLong(0);
+    private final ConcurrentHashMap<File, Long> fileIdMap = new ConcurrentHashMap<>();
+    private final AtomicLong nextFileId = new AtomicLong(0);
 
     // number of bits required to store the log2 of the chunk size (highestOneBit(highestOneBit(Integer.MAX_VALUE)))
     private final static int CHUNK_SIZE_LOG2_BITS = 5;
@@ -119,15 +119,6 @@ public class ChunkCache
     // number of bits required to store the ready type
     private final static int READER_TYPE_BITS = Integer.highestOneBit(ChunkReader.ReaderType.COUNT - 1);
 
-
-    /**
-     * Removes FileId for given file if cache is initialized.
-     * @param file file to remove from the map.
-     */
-    public static void removeFileIdFromCache(File file)
-    {
-        if (instance != null) instance.invalidateFile(file);
-    }
 
     /**
      * Invalidate all buffers from the given file, i.e. make sure they can not be accessed by any reader using a
@@ -145,7 +136,7 @@ public class ChunkCache
         fileIdMap.remove(file);
     }
 
-    protected static long assignFileId(File file)
+    protected long assignFileId(File file)
     {
         return nextFileId.getAndIncrement();
     }
@@ -158,9 +149,9 @@ public class ChunkCache
      * are occupied by log 2 of chunk size (we assume the chunk size is the power of 2), and the rest of the bits
      * are occupied by fileId counter which is incremented with for each unseen file name)
      */
-    protected static long fileIdFor(File file, ChunkReader.ReaderType type, int chunkSize)
+    protected long fileIdFor(File file, ChunkReader.ReaderType type, int chunkSize)
     {
-        return (((fileIdMap.computeIfAbsent(file, ChunkCache::assignFileId)
+        return (((fileIdMap.computeIfAbsent(file, this::assignFileId)
                   << CHUNK_SIZE_LOG2_BITS) | Integer.numberOfTrailingZeros(chunkSize))
                 << READER_TYPE_BITS) | type.ordinal();
     }
@@ -168,7 +159,7 @@ public class ChunkCache
     /**
      * Maps a reader to a file id, used by the cache to find content.
      */
-    protected static long fileIdFor(ChunkReader source)
+    protected long fileIdFor(ChunkReader source)
     {
         return fileIdFor(source.channel().getFile(), source.type(), source.chunkSize());
     }
@@ -231,7 +222,8 @@ public class ChunkCache
         /** The number of bytes read from disk, this could be less than the memory space allocated */
         int bytesRead;
 
-        volatile int references;
+        private volatile int references;
+        private static final AtomicIntegerFieldUpdater<Chunk> referencesUpdater = AtomicIntegerFieldUpdater.newUpdater(Chunk.class, "references");
 
         Chunk(long offset)
         {
@@ -278,6 +270,14 @@ public class ChunkCache
         }
 
         /**
+         * Used in assertions, returns false if the chunk is not still referenced.
+         */
+        boolean isReferenced()
+        {
+            return references > 0;
+        }
+
+        /**
          * Load the data for this chunk.
          *
          * @param key The key / file & position that this chunk corresponds to.
@@ -306,8 +306,6 @@ public class ChunkCache
          */
         abstract void releaseBuffers();
     }
-
-    private static final AtomicIntegerFieldUpdater<Chunk> referencesUpdater = AtomicIntegerFieldUpdater.newUpdater(Chunk.class, "references");
 
     /**
      * A chunk is a group of buffers of size {@link PageAware#PAGE_SIZE} that will be allocated and released
@@ -378,7 +376,7 @@ public class ChunkCache
             @Override
             public ByteBuffer buffer()
             {
-                assert references > 0 : "Already unreferenced";
+                assert isReferenced() : "Already unreferenced";
                 return MemoryUtil.allocateByteBuffer(address, limit, PageAware.PAGE_SIZE, ByteOrder.BIG_ENDIAN, null);
             }
 
@@ -420,7 +418,7 @@ public class ChunkCache
 
         public ByteBuffer buffer()
         {
-            assert references > 0 : "Already unreferenced";
+            assert isReferenced() : "Already unreferenced";
             return MemoryUtil.allocateByteBuffer(address, bytesRead, capacity, ByteOrder.BIG_ENDIAN, null);
         }
 
@@ -557,7 +555,7 @@ public class ChunkCache
 
     public void invalidateFile(String filePath)
     {
-        removeFileIdFromCache(new File(filePath));
+        invalidateFile(new File(filePath));
     }
 
     @VisibleForTesting
