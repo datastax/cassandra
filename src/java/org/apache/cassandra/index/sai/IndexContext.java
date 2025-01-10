@@ -271,9 +271,7 @@ public class IndexContext
 
     public void index(DecoratedKey key, Row row, Memtable memtable, OpOrder.Group opGroup)
     {
-        // Index must have been created before switching the memtable
-        MemtableIndex target = liveMemtables.get(memtable);
-        assert target != null : "Index not found for memtable " + memtable;
+        MemtableIndex target = liveMemtables.computeIfAbsent(memtable, mt -> MemtableIndex.createIndex(this, mt));
 
         long start = System.nanoTime();
 
@@ -418,11 +416,6 @@ public class IndexContext
         ByteBuffer oldValue = getValueOf(key, oldRow, 0);
         ByteBuffer newValue = getValueOf(key, newRow, FBUtilities.nowInSeconds());
         target.update(key, oldRow.clustering(), oldValue, newValue, memtable, opGroup);
-    }
-
-    public void registerMemtable(Memtable memtable)
-    {
-        liveMemtables.computeIfAbsent(memtable, mt -> MemtableIndex.createIndex(this, mt));
     }
 
     public void renewMemtable(Memtable renewed)
@@ -1008,5 +1001,4 @@ public class IndexContext
         getView().getIndexes().stream().map(SSTableIndex::indexFeatureSet).forEach(set -> accumulator.accumulate(set));
         return accumulator.complete();
     }
-
 }

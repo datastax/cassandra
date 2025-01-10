@@ -164,34 +164,40 @@ public class QueryView implements AutoCloseable
                     for (Memtable memtable : refViewFragment.memtables)
                     {
                         // Empty memtables have no index but that's not a problem, we can ignore them.
-                        if (memtable.isClean())
+                        if (memtable.getLiveDataSize() == 0)
                             continue;
 
                         MemtableIndex index = indexContext.getMemtableIndex(memtable);
-                        if (index == null)
+                        if (index != null)
+                        {
+                            memtableIndexes.add(index);
+                        }
+                        else if (indexContext.isDropped())
+                        {
+                            // Index was dropped deliberately by the user.
+                            // We cannot recover here.
+                            refViewFragment.release();
+                            throw new MissingIndexException(indexContext, "Index " + indexContext.getIndexName() +
+                                                                          " not found for memtable: " + memtable);
+                        }
+                        else if (!processedMemtables.contains(memtable))
                         {
                             // We can end up here if a flush happened right after we referenced the refViewFragment
                             // but before looking up the memtable index.
                             // In that case, we need to retry with the updated view
                             // (we expect the updated view to not contain this memtable).
-                            refViewFragment.release();
 
-                            if (!processedMemtables.contains(memtable))
-                            {
-                                // Protect from infinite looping in case we have a permanent inconsistency between
-                                // the index set and the memtable set.
-                                processedMemtables.add(memtable);
-                                continue outer;
-                            }
-                            else
-                            {
-                                // So the memtable still exists in the second attempt, but it is not empty
-                                // and has no index. The index might have been dropped.
-                                throw new MissingIndexException(indexContext, "Index " + indexContext.getIndexName() +
-                                                                              " not found for memtable: " + memtable);
-                            }
+                            // Protect from infinite looping in case we have a permanent inconsistency between
+                            // the index set and the memtable set.
+                            processedMemtables.add(memtable);
+                            refViewFragment.release();
+                            continue outer;
                         }
-                        memtableIndexes.add(index);
+                        // If the memtable was non-empty, the index context hasn't been dropped, but the
+                        // index doesn't exist on the second attempt, then his means there is no indexed data
+                        // in that memtable. In this case we just continue without it.
+                        // Memtable indexes are created lazily, on the first insert, therefore a missing index
+                        // is a normal situation.
                     }
 
                     // Lookup and reference the indexes corresponding to the sstables:
