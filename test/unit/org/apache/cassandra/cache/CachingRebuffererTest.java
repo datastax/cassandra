@@ -97,7 +97,7 @@ public class CachingRebuffererTest
     public void calculateMemoryOverhead() throws InterruptedException
     {
         // Allocate 1,5M items
-        long count = 1_500_000;
+        long count = 500_000;
 
         class EmptyAllocatingChunkReader implements ChunkReader
         {
@@ -172,6 +172,9 @@ public class CachingRebuffererTest
         final long populatedHeap = memoryMeter.measureDeep(ChunkCache.instance);
         System.out.println("populated deepSize = " + FBUtilities.prettyPrintMemory(populatedHeap));
         System.out.println("deepSizeDelta/cachedCount = " + FBUtilities.prettyPrintBinary((populatedHeap - initialHeap) * 1.0 / cachedCount, "B", ""));
+
+        System.out.println("Take jmap -histo:live <pid>");
+        Thread.sleep(10000);
 
         ChunkCache.instance.clear();
 
