@@ -227,7 +227,7 @@ public class BufferPool
      */
     public ByteBuffer[] getMultiple(int totalSize, int chunkSize, BufferType bufferType)
     {
-        if (bufferType == BufferType.ON_HEAP || totalSize > NORMAL_CHUNK_SIZE || totalSize <= chunkSize)
+        if (bufferType == BufferType.ON_HEAP)
             return new ByteBuffer[] { allocate(totalSize, bufferType) };
 
         // Try to find a buffer to fit the full request. Fragmentation can make this impossible even if we are below
