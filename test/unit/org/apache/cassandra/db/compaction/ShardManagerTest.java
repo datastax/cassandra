@@ -438,6 +438,42 @@ public class ShardManagerTest
     }
 
     @Test
+    public void testGetShardRanges()
+    {
+        CompactionRealm realm = Mockito.mock(CompactionRealm.class);
+        when(realm.getPartitioner()).thenReturn(partitioner);
+        SortedLocalRanges sortedRanges = SortedLocalRanges.forTestingFull(realm);
+
+        for (int numDisks = 1; numDisks <= 3; ++numDisks)
+        {
+            List<Token> diskBoundaries = sortedRanges.split(numDisks);
+            DiskBoundaries db = Mockito.mock(DiskBoundaries.class);
+            when(db.getLocalRanges()).thenReturn(sortedRanges);
+            when(db.getPositions()).thenReturn(diskBoundaries);
+
+            var rs = Mockito.mock(AbstractReplicationStrategy.class);
+
+            ShardManager shardManager = ShardManager.create(db, rs, false);
+            for (int numShardsPerDisk = 1; numShardsPerDisk <= 3; ++numShardsPerDisk)
+            {
+                var ranges = shardManager.getShardRanges(numShardsPerDisk);
+                var boundaries = shardManager.boundaries(numShardsPerDisk);
+                assertEquals(numShardsPerDisk * numDisks, ranges.size());
+                for (int i = 0; i < ranges.size(); ++i)
+                {
+                    Range<Token> range = ranges.get(i);
+                    boundaries.advanceTo(range.left.nextValidToken());
+                    assertEquals(i, boundaries.shardIndex());
+                    boundaries.advanceTo(partitioner.split(range.left, range.right, 0.5));
+                    assertEquals(i, boundaries.shardIndex());
+                    boundaries.advanceTo(range.right);
+                    assertEquals(i, boundaries.shardIndex());
+                }
+            }
+        }
+    }
+
+    @Test
     public void testSplitSSTablesInRanges()
     {
         testSplitSSTablesInRanges(8, ints(1, 2, 4));
