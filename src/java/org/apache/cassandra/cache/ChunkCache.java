@@ -29,7 +29,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
-
 import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -145,9 +144,9 @@ public class ChunkCache
      * Maps a reader to a file id, used by the cache to find content.
      *
      * Uses the file name (through the fileId map), reader type and chunk size to define the id.
-     * The lowest {@link #READER_TYPE_BITS} are occupied by ready type, then the next {@link #CHUNK_SIZE_LOG2_BITS}
+     * The lowest {@link #READER_TYPE_BITS} are occupied by reader type, then the next {@link #CHUNK_SIZE_LOG2_BITS}
      * are occupied by log 2 of chunk size (we assume the chunk size is the power of 2), and the rest of the bits
-     * are occupied by fileId counter which is incremented with for each unseen file name)
+     * are occupied by fileId counter which is incremented with for each unseen file name.
      */
     protected long fileIdFor(File file, ChunkReader.ReaderType type, int chunkSize)
     {
@@ -166,18 +165,12 @@ public class ChunkCache
 
     static class Key
     {
-        final ChunkReader file;
         final long fileId;
         final long position;
 
-        /**
-         * Attention!  internedPath must be interned by caller -- intern() is too expensive
-         * to be done for every Key instantiation.
-         */
-        private Key(ChunkReader file, long fileId, long position)
+        private Key(long fileId, long position)
         {
             super();
-            this.file = file;
             this.position = position;
             this.fileId = fileId;
         }
@@ -189,7 +182,6 @@ public class ChunkCache
             int result = 1;
             result = prime * result + Long.hashCode(fileId);
             result = prime * result + Long.hashCode(position);
-            result = prime * result + Integer.hashCode(file.chunkSize());
             return result;
         }
 
@@ -203,8 +195,7 @@ public class ChunkCache
 
             Key other = (Key) obj;
             return (position == other.position)
-                   && fileId == other.fileId
-                   && file.chunkSize() == other.file.chunkSize(); // TODO we should not allow different chunk sizes
+                   && fileId == other.fileId;
         }
     }
 
@@ -279,11 +270,8 @@ public class ChunkCache
 
         /**
          * Load the data for this chunk.
-         *
-         * @param key The key / file & position that this chunk corresponds to.
-         * @return a future holding the loaded chunk when it completes.
          */
-        abstract void read(Key key);
+        abstract void read(ChunkReader file);
 
         /**
          * Return the correct buffer depending on the position requested by the client. The returned buffer cannot be
@@ -336,9 +324,9 @@ public class ChunkCache
                 bufferPool.put(MemoryUtil.allocateByteBuffer(pages[i], PageAware.PAGE_SIZE, PageAware.PAGE_SIZE, ByteOrder.BIG_ENDIAN, attachments[i]));
         }
 
-        void read(Key key)
+        void read(ChunkReader file)
         {
-            bytesRead = readScattering(key.file, offset, capacity(), pages);
+            bytesRead = readScattering(file, offset, capacity(), pages);
         }
 
         @Nullable
@@ -397,7 +385,7 @@ public class ChunkCache
     /**
      * A chunk with a single memory region. This can be used for reading chunks of up to PageAware.PAGE_SIZE but note
      * that the memory allocated will be always at least PageAware.PAGE_SIZE. It can also be used for larger chunks if
-     * the individual memory regions are contiguous, see {@link this#newChunk(Key)}.
+     * the individual memory regions are contiguous, see {@link this#newChunk}.
      * <p/>
      * This class is a chunk but it behaves also as a {@link Rebufferer.BufferHolder} to save an allocation when {@link this#getBuffer(long)}
      * is invoked.
@@ -432,11 +420,10 @@ public class ChunkCache
             bufferPool.put(MemoryUtil.allocateByteBuffer(address, capacity, capacity, ByteOrder.BIG_ENDIAN, attachment));
         }
 
-        void read(Key key)
+        void read(ChunkReader file)
         {
-            assert offset == key.position;
             ByteBuffer buffer = buffer();
-            key.file.readChunk(offset, buffer);
+            file.readChunk(offset, buffer);
             bytesRead = buffer.limit();
         }
 
@@ -452,18 +439,18 @@ public class ChunkCache
         }
     }
 
-    Chunk newChunk(Key key)
+    Chunk newChunk(int chunkSize, long position)
     {
-        if (key.file.chunkSize() == PageAware.PAGE_SIZE)
-            return new SingleRegionChunk(key.position, bufferPool.get(PageAware.PAGE_SIZE, BufferType.OFF_HEAP));
-        if (key.file.chunkSize() < PageAware.PAGE_SIZE)
-            return new SingleRegionChunk(key.position, bufferPool.get(PageAware.PAGE_SIZE, BufferType.OFF_HEAP).limit(key.file.chunkSize()).slice());
+        if (chunkSize == PageAware.PAGE_SIZE)
+            return new SingleRegionChunk(position, bufferPool.get(PageAware.PAGE_SIZE, BufferType.OFF_HEAP));
+        if (chunkSize < PageAware.PAGE_SIZE)
+            return new SingleRegionChunk(position, bufferPool.get(PageAware.PAGE_SIZE, BufferType.OFF_HEAP).limit(chunkSize).slice());
 
-        ByteBuffer[] buffers = bufferPool.getMultiple(key.file.chunkSize(), PageAware.PAGE_SIZE, BufferType.OFF_HEAP);
+        ByteBuffer[] buffers = bufferPool.getMultiple(chunkSize, PageAware.PAGE_SIZE, BufferType.OFF_HEAP);
         if (buffers.length > 1)
-            return new MultiRegionChunk(key.position, buffers);
+            return new MultiRegionChunk(position, buffers);
         else
-            return new SingleRegionChunk(key.position, buffers[0]);
+            return new SingleRegionChunk(position, buffers[0]);
     }
 
     public ChunkCache(BufferPool pool, int cacheSizeInMB, Function<ChunkCache, ChunkCacheMetrics> createMetrics)
@@ -491,13 +478,13 @@ public class ChunkCache
     }
 
 
-    private Chunk load(Key key)
+    private Chunk load(ChunkReader file, long position)
     {
         Chunk chunk = null;
         try
         {
-            chunk = newChunk(key);  // Note: we need `chunk` to be assigned before we call read to release on error
-            chunk.read(key);
+            chunk = newChunk(file.chunkSize(), position);  // Note: we need `chunk` to be assigned before we call read to release on error
+            chunk.read(file);
         }
         catch (RuntimeException t)
         {
@@ -641,7 +628,7 @@ public class ChunkCache
             {
                 long pageAlignedPos = position & alignmentMask;
                 BufferHolder buf = null;
-                Key chunkKey = new Key(source, fileId, pageAlignedPos);
+                Key chunkKey = new Key(fileId, pageAlignedPos);
 
                 int spin = 0;
                 //There is a small window when a released buffer/invalidated chunk
@@ -660,7 +647,7 @@ public class ChunkCache
                         {
                             try
                             {
-                                chunk = load(chunkKey);
+                                chunk = load(source, pageAlignedPos);
                             }
                             catch (Throwable t)
                             {
@@ -714,7 +701,7 @@ public class ChunkCache
         public void invalidateIfCached(long position)
         {
             long pageAlignedPos = position & alignmentMask;
-            synchronousCache.invalidate(new Key(source, fileId, pageAlignedPos));
+            synchronousCache.invalidate(new Key(fileId, pageAlignedPos));
         }
 
         @Override
