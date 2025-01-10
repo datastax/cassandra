@@ -21,6 +21,7 @@
 package org.apache.cassandra.cache;
 
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -54,10 +55,10 @@ import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.io.util.RebuffererFactory;
 import org.apache.cassandra.metrics.ChunkCacheMetrics;
-import org.apache.cassandra.utils.FastByteOperations;
 import org.apache.cassandra.utils.PageAware;
 import org.apache.cassandra.utils.memory.BufferPool;
 import org.apache.cassandra.utils.memory.BufferPools;
+import org.apache.cassandra.utils.memory.MemoryUtil;
 import org.github.jamm.Unmetered;
 
 public class ChunkCache
@@ -222,9 +223,28 @@ public class ChunkCache
         }
     }
 
+    /**
+     * An abstract chunk contains the common implementation for the single and multi-regions chunks, normally
+     * this is related to ref counting and calling the read methods in the chunk reader. The chunk implementations
+     * will then take care of implementing the read target so that they can accommodate the data that was read into
+     * either a single memory region or into multiple memory regions.
+     */
     abstract static class Chunk
     {
-        volatile int references = 1; // Start referenced
+        /** The offset in the file where the chunk is read */
+        final long offset;
+
+        /** The number of bytes read from disk, this could be less than the memory space allocated */
+        int bytesRead;
+
+        volatile int references;
+
+        Chunk(long offset)
+        {
+            this.offset = offset;
+            this.bytesRead = 0; // To be filled by the read method
+            this.references = 1; // Start referenced
+        }
 
         /**
          * Return the correct buffer depending on the position requested by the client, also taking a reference to this
@@ -258,13 +278,9 @@ public class ChunkCache
                 releaseBuffers();
         }
 
-        <B> Chunk handleLoadResult(B loadResult, Throwable loadError)
+        public long offset()
         {
-            if (loadError == null)
-                return this;
-
-            release();
-            throw Throwables.propagate(loadError);
+            return offset;
         }
 
         /**
@@ -292,7 +308,7 @@ public class ChunkCache
         abstract int capacity();
 
         /**
-         * Release the buffers when this chunk is no longer used. Called when all references are released.
+         * Release the addresses when this chunk is no longer used. Called when all references are released.
          */
         abstract void releaseBuffers();
     }
@@ -303,58 +319,73 @@ public class ChunkCache
      * A chunk is a group of buffers of size {@link PageAware#PAGE_SIZE} that will be allocated and released
      * at the same time. The {@link ChunkReader} will read into the buffers of a chunk.
      */
-    public class MultiBufferChunk extends Chunk
+    public class MultiRegionChunk extends Chunk
     {
-        private final ByteBuffer[] buffers;
-        private final long offset;
+        /** A list of memory addresses, each page has capacity of PageAware.PAGE_SIZE */
+        private final long[] pages;
+        /** List of attachments, necessary to be able to release pool buffers properly */
+        private final Object[] attachments;
 
-        public MultiBufferChunk(long offset, ByteBuffer[] buffers)
+        public MultiRegionChunk(long offset, ByteBuffer[] buffers)
         {
-            this.offset = offset;
-            this.buffers = buffers;
+            super(offset);
+            this.pages = new long[buffers.length];
+            this.attachments = new Object[buffers.length];
+            for (int i = 0; i < buffers.length; ++i)
+            {
+                pages[i] = MemoryUtil.getAddress(buffers[i]);
+                attachments[i] = MemoryUtil.getAttachment(buffers[i]);
+            }
         }
 
         void releaseBuffers()
         {
-            bufferPool.putMultiple(buffers);
+            for (int i = 0; i < pages.length; ++i)
+                bufferPool.put(MemoryUtil.allocateByteBuffer(pages[i], PageAware.PAGE_SIZE, PageAware.PAGE_SIZE, ByteOrder.BIG_ENDIAN, attachments[i]));
         }
 
         void read(Key key)
         {
-            readScattering(key.file, offset, capacity(), buffers);
+            bytesRead = readScattering(key.file, offset, capacity(), pages);
         }
 
         @Nullable
         Buffer getBuffer(long position)
         {
             int index = PageAware.pageNum(position - offset);
-            Preconditions.checkArgument(index >= 0 && index < buffers.length, "Invalid position: %s, index: %s", position, index);
+            Preconditions.checkArgument(index >= 0 && index < pages.length, "Invalid position: %s, index: %s", position, index);
 
             long pageAlignedPosition = PageAware.pageStart(position);
-            return new Buffer(buffers[index], pageAlignedPosition);
+            int bufferSize = Math.min(PageAware.PAGE_SIZE, Math.toIntExact(bytesRead - (index * PageAware.PAGE_SIZE)));
+            assert bufferSize > 0 && bufferSize <= PageAware.PAGE_SIZE : "Wrong buffer size: " + bufferSize + " at position " + position;
+
+            return new Buffer(pages[index], pageAlignedPosition, bufferSize);
         }
 
         public int capacity()
         {
-            return buffers.length * PageAware.PAGE_SIZE;
+            return pages.length * PageAware.PAGE_SIZE;
         }
 
         class Buffer implements Rebufferer.BufferHolder
         {
-            private final ByteBuffer buffer;
+            private final long address;
             private final long offset;
+            private final int limit;
 
-            public Buffer(ByteBuffer buffer, long offset)
+
+            public Buffer(long address, long offset, int limit)
             {
-                this.buffer = buffer;
+                this.address = address;
                 this.offset = offset;
+                this.limit = limit;
             }
 
             @Override
             public ByteBuffer buffer()
             {
                 assert references > 0 : "Already unreferenced";
-                return buffer.duplicate();
+                return MemoryUtil.allocateByteBuffer(address, limit, PageAware.PAGE_SIZE, ByteOrder.BIG_ENDIAN, null);
             }
 
             @Override
@@ -366,25 +397,37 @@ public class ChunkCache
             @Override
             public void release()
             {
-                MultiBufferChunk.this.release();
+                MultiRegionChunk.this.release();
             }
         }
     }
 
-    class SingleBuffer extends Chunk implements Rebufferer.BufferHolder
+    /**
+     * A chunk with a single memory region. This can be used for reading chunks of up to PageAware.PAGE_SIZE but note
+     * that the memory allocated will be always at least PageAware.PAGE_SIZE. It can also be used for larger chunks if
+     * the individual memory regions are contiguous, see {@link this#newChunk(Key)}.
+     * <p/>
+     * This class is a chunk but it behaves also as a {@link Rebufferer.BufferHolder} to save an allocation when {@link this#getBuffer(long)}
+     * is invoked.
+     */
+    class SingleRegionChunk extends Chunk implements Rebufferer.BufferHolder
     {
-        private final ByteBuffer buffer;
-        private final long offset;
+        private final long address;
+        private final int capacity;
+        private final Object attachment;
 
-        public SingleBuffer(long offset, ByteBuffer buffer)
+        public SingleRegionChunk(long offset, ByteBuffer buffer)
         {
-            this.buffer = buffer;
-            this.offset = offset;
+            super(offset);
+            this.address = MemoryUtil.getAddress(buffer);
+            this.capacity = buffer.capacity();
+            this.attachment = MemoryUtil.getAttachment(buffer);
         }
 
         public ByteBuffer buffer()
         {
-            return buffer.duplicate();
+            assert references > 0 : "Already unreferenced";
+            return MemoryUtil.allocateByteBuffer(address, bytesRead, capacity, ByteOrder.BIG_ENDIAN, null);
         }
 
         public long offset()
@@ -394,15 +437,15 @@ public class ChunkCache
 
         void releaseBuffers()
         {
-            bufferPool.put(buffer);
+            bufferPool.put(MemoryUtil.allocateByteBuffer(address, capacity, capacity, ByteOrder.BIG_ENDIAN, attachment));
         }
 
         void read(Key key)
         {
             assert offset == key.position;
-
-            buffer.limit(key.file.chunkSize());
+            ByteBuffer buffer = buffer();
             key.file.readChunk(offset, buffer);
+            bytesRead = buffer.limit();
         }
 
         @Nullable
@@ -420,18 +463,15 @@ public class ChunkCache
     Chunk newChunk(Key key)
     {
         if (key.file.chunkSize() == PageAware.PAGE_SIZE)
-            return new SingleBuffer(key.position, bufferPool.get(PageAware.PAGE_SIZE, BufferType.OFF_HEAP));
+            return new SingleRegionChunk(key.position, bufferPool.get(PageAware.PAGE_SIZE, BufferType.OFF_HEAP));
         if (key.file.chunkSize() < PageAware.PAGE_SIZE)
-        {
-
-            return new SingleBuffer(key.position, bufferPool.get(PageAware.PAGE_SIZE, BufferType.OFF_HEAP).limit(key.file.chunkSize()).slice());
-        }
+            return new SingleRegionChunk(key.position, bufferPool.get(PageAware.PAGE_SIZE, BufferType.OFF_HEAP).limit(key.file.chunkSize()).slice());
 
         ByteBuffer[] buffers = bufferPool.getMultiple(key.file.chunkSize(), PageAware.PAGE_SIZE, BufferType.OFF_HEAP);
         if (buffers.length > 1)
-            return new MultiBufferChunk(key.position, buffers);
+            return new MultiRegionChunk(key.position, buffers);
         else
-            return new SingleBuffer(key.position, buffers[0]);
+            return new SingleRegionChunk(key.position, buffers[0]);
     }
 
     public ChunkCache(BufferPool pool, int cacheSizeInMB, Function<ChunkCache, ChunkCacheMetrics> createMetrics)
@@ -547,9 +587,9 @@ public class ChunkCache
      *
      * @param position the start position of the chunk
      * @param chunkSize the amount of data to read
-     * @param buffers an array of smaller-sized buffers whose total capacity needs to be >= chunkSize
+     * @param pages an array of page-sized memory allocations whose total capacity needs to be >= chunkSize
      */
-    void readScattering(ChunkReader file, long position, int chunkSize, ByteBuffer[] buffers)
+    int readScattering(ChunkReader file, long position, int chunkSize, long[] pages)
     {
         // Note: We cannot use ThreadLocalByteBufferHolder because readChunk uses it for its temporary buffer.
         // Note: This uses the "Networking" buffer pool, which is meant to serve short-term buffers. Using
@@ -559,16 +599,21 @@ public class ChunkCache
         try
         {
             file.readChunk(position, scratchBuffer);
-            int remaining = scratchBuffer.remaining();
-            int pos = 0;
-            for (ByteBuffer buf : buffers)
+            int limit = scratchBuffer.limit();
+            int idx = 0;
+            int pageEnd;
+            for (pageEnd = PageAware.PAGE_SIZE; pageEnd <= limit; pageEnd += PageAware.PAGE_SIZE)
             {
-                int len = Math.min(remaining, buf.capacity());
-                FastByteOperations.copy(scratchBuffer, pos, buf, 0, len);
-                buf.position(0).limit(len);
-                pos += len;
-                remaining -= len;
+                scratchBuffer.limit(pageEnd);
+                MemoryUtil.setBytes(pages[idx++], scratchBuffer);
+                scratchBuffer.position(pageEnd);
             }
+            if (scratchBuffer.position() < limit)   // if the limit is not a multiple of the page size
+            {
+                scratchBuffer.limit(limit);
+                MemoryUtil.setBytes(pages[idx], scratchBuffer);
+            }
+            return limit;
         }
         finally
         {
