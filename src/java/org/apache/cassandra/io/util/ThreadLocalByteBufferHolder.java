@@ -70,24 +70,14 @@ public final class ThreadLocalByteBufferHolder
      */
     public ByteBuffer getBuffer(int size)
     {
-        return getByteBuffer(size, bufferType, reusableBB);
-    }
-
-    private static ByteBuffer getByteBuffer(int size, BufferType bufferType, FastThreadLocal<ByteBuffer> bufferThreadLocal)
-    {
-        ByteBuffer buffer = bufferThreadLocal.get();
+        ByteBuffer buffer = reusableBB.get();
         if (buffer.capacity() < size)
         {
             FileUtils.clean(buffer);
             buffer = bufferType.allocate(size);
-            bufferThreadLocal.set(buffer);
+            reusableBB.set(buffer);
         }
         buffer.clear().limit(size);
         return buffer;
-    }
-
-    public static ByteBuffer getBuffer(BufferType type, int size)
-    {
-        return getByteBuffer(size, type, reusableBBHolder.get(type));
     }
 }
