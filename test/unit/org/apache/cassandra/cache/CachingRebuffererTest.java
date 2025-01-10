@@ -93,12 +93,13 @@ public class CachingRebuffererTest
 
         when(chunkReader.chunkSize()).thenReturn(PAGE_SIZE);
         when(chunkReader.channel()).thenReturn(blockingChannel);
+        when(chunkReader.type()).thenReturn(ChunkReader.ReaderType.SIMPLE);
 
         ChunkCache.instance.invalidateFile(file.path());
     }
 
     // Helper test to estimate the memory overhead caused by buffer cache
-//    @Ignore
+    @Ignore
     @Test
     public void calculateMemoryOverhead() throws InterruptedException
     {

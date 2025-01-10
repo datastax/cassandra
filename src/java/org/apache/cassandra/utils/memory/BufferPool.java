@@ -131,6 +131,7 @@ public class BufferPool
     private static final Logger logger = LoggerFactory.getLogger(BufferPool.class);
     private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(logger, 15L, TimeUnit.MINUTES);
     private static final ByteBuffer EMPTY_BUFFER = ByteBuffer.allocateDirect(0);
+    private static boolean DISABLE_COMBINED_ALLOCATION = Boolean.getBoolean("cassandra.bufferpool.disable_combined_allocation");
 
     private volatile Debug debug = Debug.NO_OP;
 
@@ -226,15 +227,18 @@ public class BufferPool
      */
     public ByteBuffer[] getMultiple(int totalSize, int chunkSize, BufferType bufferType)
     {
-        if (bufferType == BufferType.ON_HEAP || totalSize > NORMAL_CHUNK_SIZE)
+        if (bufferType == BufferType.ON_HEAP || totalSize > NORMAL_CHUNK_SIZE || totalSize <= chunkSize)
             return new ByteBuffer[] { allocate(totalSize, bufferType) };
 
         // Try to find a buffer to fit the full request. Fragmentation can make this impossible even if we are below
         // the limits.
         LocalPool pool = localPool.get();
-        ByteBuffer full = pool.tryGet(totalSize, false);
-        if (full != null)
-            return new ByteBuffer[] { full };
+        if (!DISABLE_COMBINED_ALLOCATION)
+        {
+            ByteBuffer full = pool.tryGet(totalSize, false);
+            if (full != null)
+                return new ByteBuffer[]{ full };
+        }
 
         // If we don't get a whole buffer, allocate buffers of the requested minimum size.
         int numBuffers = (totalSize + chunkSize - 1) / chunkSize;
