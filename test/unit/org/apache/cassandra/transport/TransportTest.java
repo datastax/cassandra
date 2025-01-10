@@ -134,7 +134,7 @@ public class TransportTest extends CQLTester
 
             BatchMessage batchMessage = new BatchMessage(BatchStatement.Type.UNLOGGED,
                                                          Collections.singletonList("INSERT INTO " + KEYSPACE + ".atable (pk,v) VALUES (1, 'foo')"),
-                                                         Collections.singletonList(Collections.emptyList()),
+                                                         Collections.singletonList(Collections.<ByteBuffer>emptyList()),
                                                          QueryOptions.DEFAULT);
             Message.Response batchResponse = client.execute(batchMessage);
             Assert.assertEquals(1, executeResponse.getWarnings().size());
