@@ -27,6 +27,7 @@ import java.util.stream.IntStream;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -45,6 +46,13 @@ public class BasicReadTest extends CQLTester
     final int DELETIONS = 55;
 
     Random rand;
+
+    @BeforeClass
+    public static void setupBasicReadTest()
+    {
+        // Make sure to go through the multiple page path for chunk cache entries
+        System.setProperty("cassandra.bufferpool.disable_combined_allocation", "true");
+    }
 
     @Before
     public void setUp()
