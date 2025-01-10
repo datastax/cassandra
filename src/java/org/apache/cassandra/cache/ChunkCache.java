@@ -178,7 +178,6 @@ public class ChunkCache
         final ChunkReader file;
         final long fileId;
         final long position;
-        final int hashCode;
 
         /**
          * Attention!  internedPath must be interned by caller -- intern() is too expensive
@@ -190,15 +189,10 @@ public class ChunkCache
             this.file = file;
             this.position = position;
             this.fileId = fileId;
-            hashCode = hashCodeInternal();
         }
 
         @Override
-        public int hashCode() {
-            return hashCode;
-        }
-
-        private int hashCodeInternal()
+        public int hashCode()
         {
             final int prime = 31;
             int result = 1;
