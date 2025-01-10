@@ -118,7 +118,7 @@ public class TransportTest extends CQLTester
             ExecuteMessage executeMessage = new ExecuteMessage(prepareResponse.statementId, prepareResponse.resultMetadataId, QueryOptions.DEFAULT);
             Message.Response executeResponse = client.execute(executeMessage);
             Assert.assertEquals(1, executeResponse.getWarnings().size());
-            Assert.assertEquals("async-prepared", executeResponse.getWarnings().getFirst());
+            Assert.assertEquals("async-prepared", executeResponse.getWarnings().get(0));
             awaitUntil(() -> Stage.COORDINATE_READ.getCompletedTaskCount() == ref.expectedCoordinateReadTasks);
             awaitUntil(() -> Stage.READ.getCompletedTaskCount() == ref.expectedExecuteReadTasks);
 
@@ -128,7 +128,7 @@ public class TransportTest extends CQLTester
             QueryMessage readMessage = new QueryMessage("SELECT * FROM " + KEYSPACE + ".atable", QueryOptions.DEFAULT);
             Message.Response readResponse = client.execute(readMessage);
             Assert.assertEquals(1, executeResponse.getWarnings().size());
-            Assert.assertEquals("async-process", readResponse.getWarnings().getFirst());
+            Assert.assertEquals("async-process", readResponse.getWarnings().get(0));
             awaitUntil(() -> Stage.COORDINATE_READ.getCompletedTaskCount() == ref.expectedCoordinateReadTasks);
             awaitUntil(() -> Stage.READ.getCompletedTaskCount() == ref.expectedExecuteReadTasks);
 
@@ -138,7 +138,7 @@ public class TransportTest extends CQLTester
                                                          QueryOptions.DEFAULT);
             Message.Response batchResponse = client.execute(batchMessage);
             Assert.assertEquals(1, executeResponse.getWarnings().size());
-            Assert.assertEquals("async-batch", batchResponse.getWarnings().getFirst());
+            Assert.assertEquals("async-batch", batchResponse.getWarnings().get(0));
             awaitUntil(() -> Stage.COORDINATE_READ.getCompletedTaskCount() == ref.expectedCoordinateReadTasks);
             awaitUntil(() -> Stage.READ.getCompletedTaskCount() == ref.expectedExecuteReadTasks);
 
@@ -148,7 +148,7 @@ public class TransportTest extends CQLTester
             QueryMessage insertMessage = new QueryMessage("INSERT INTO " + KEYSPACE + ".atable (pk,v) VALUES (1, 'foo')", QueryOptions.DEFAULT);
             Message.Response insertResponse = client.execute(insertMessage);
             Assert.assertEquals(1, executeResponse.getWarnings().size());
-            Assert.assertEquals("async-process", insertResponse.getWarnings().getFirst());
+            Assert.assertEquals("async-process", insertResponse.getWarnings().get(0));
             awaitUntil(() -> Stage.COORDINATE_READ.getCompletedTaskCount() == ref.expectedCoordinateReadTasks);
             awaitUntil(() -> Stage.READ.getCompletedTaskCount() == ref.expectedExecuteReadTasks);
         }
