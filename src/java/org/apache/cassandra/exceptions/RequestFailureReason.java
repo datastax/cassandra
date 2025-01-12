@@ -18,6 +18,8 @@
 package org.apache.cassandra.exceptions;
 
 import java.io.IOException;
+import java.util.HashMap;
+import java.util.Map;
 
 import com.google.common.primitives.Ints;
 
@@ -62,6 +64,7 @@ public enum RequestFailureReason
     }
 
     private static final RequestFailureReason[] codeToReasonMap;
+    private static final Map<Class<? extends Throwable>, RequestFailureReason> exceptionToReasonMap = new HashMap<>();
 
     static
     {
@@ -81,6 +84,16 @@ public enum RequestFailureReason
         }
 
         codeToReasonMap = codeMap;
+
+        exceptionToReasonMap.put(TombstoneOverwhelmingException.class, READ_TOO_MANY_TOMBSTONES);
+        exceptionToReasonMap.put(IncompatibleSchemaException.class, INCOMPATIBLE_SCHEMA);
+        exceptionToReasonMap.put(AbortedOperationException.class, TIMEOUT);
+        exceptionToReasonMap.put(IndexNotAvailableException.class, INDEX_NOT_AVAILABLE);
+        exceptionToReasonMap.put(UnknownColumnException.class, UNKNOWN_COLUMN);
+        exceptionToReasonMap.put(UnknownTableException.class, UNKNOWN_TABLE);
+
+        if (exceptionToReasonMap.size() != reasons.length-2)
+            throw new RuntimeException("A new RequestFailureReasons was probably added and you may need to update the exceptionToReasonMap");
     }
 
     public static RequestFailureReason fromCode(int code)
@@ -94,19 +107,7 @@ public enum RequestFailureReason
 
     public static RequestFailureReason forException(Throwable t)
     {
-        if (t instanceof TombstoneOverwhelmingException)
-            return READ_TOO_MANY_TOMBSTONES;
-
-        if (t instanceof IncompatibleSchemaException)
-            return INCOMPATIBLE_SCHEMA;
-
-        if (t instanceof AbortedOperationException)
-            return TIMEOUT;
-
-        if (t instanceof IndexNotAvailableException)
-            return INDEX_NOT_AVAILABLE;
-
-        return UNKNOWN;
+        return exceptionToReasonMap.getOrDefault(t.getClass(), UNKNOWN);
     }
 
     public static final class Serializer implements IVersionedSerializer<RequestFailureReason>
