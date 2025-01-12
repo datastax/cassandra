@@ -22,6 +22,7 @@ import java.io.IOException;
 import com.google.common.primitives.Ints;
 
 import org.apache.cassandra.db.filter.TombstoneOverwhelmingException;
+import org.apache.cassandra.index.IndexNotAvailableException;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
@@ -101,6 +102,9 @@ public enum RequestFailureReason
 
         if (t instanceof AbortedOperationException)
             return TIMEOUT;
+
+        if (t instanceof IndexNotAvailableException)
+            return INDEX_NOT_AVAILABLE;
 
         return UNKNOWN;
     }
