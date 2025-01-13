@@ -129,7 +129,7 @@ public class LegacySSTableTest
     {
         for (String legacyVersion : legacyVersions)
         {
-            truncateTables(legacyVersion);
+            truncateLegacyTables(legacyVersion);
         }
     }
 
@@ -207,7 +207,7 @@ public class LegacySSTableTest
             // Skip 2.0.1 sstables as it doesn't have repaired information
             if (legacyVersion.equals("jb"))
                 continue;
-            truncateTables(legacyVersion);
+            truncateLegacyTables(legacyVersion);
             loadLegacyTables(legacyVersion);
 
             for (ColumnFamilyStore cfs : Keyspace.open("legacy_tables").getColumnFamilyStores())
@@ -434,6 +434,8 @@ public class LegacySSTableTest
         Keyspace.open("legacy_tables").getColumnFamilyStore(String.format("legacy_%s_simple_counter", legacyVersion)).truncateBlocking();
         Keyspace.open("legacy_tables").getColumnFamilyStore(String.format("legacy_%s_clust", legacyVersion)).truncateBlocking();
         Keyspace.open("legacy_tables").getColumnFamilyStore(String.format("legacy_%s_clust_counter", legacyVersion)).truncateBlocking();
+        CacheService.instance.invalidateCounterCache();
+        CacheService.instance.invalidateKeyCache();
     }
 
     private static void compactLegacyTables(String legacyVersion)
@@ -551,16 +553,6 @@ public class LegacySSTableTest
         QueryProcessor.executeInternal(String.format("CREATE TABLE legacy_tables.legacy_%s_simple_counter (pk text PRIMARY KEY, val counter)", legacyVersion));
         QueryProcessor.executeInternal(String.format("CREATE TABLE legacy_tables.legacy_%s_clust (pk text, ck text, val text, PRIMARY KEY (pk, ck))", legacyVersion));
         QueryProcessor.executeInternal(String.format("CREATE TABLE legacy_tables.legacy_%s_clust_counter (pk text, ck text, val counter, PRIMARY KEY (pk, ck))", legacyVersion));
-    }
-
-    private static void truncateTables(String legacyVersion)
-    {
-        QueryProcessor.executeInternal(String.format("TRUNCATE legacy_tables.legacy_%s_simple", legacyVersion));
-        QueryProcessor.executeInternal(String.format("TRUNCATE legacy_tables.legacy_%s_simple_counter", legacyVersion));
-        QueryProcessor.executeInternal(String.format("TRUNCATE legacy_tables.legacy_%s_clust", legacyVersion));
-        QueryProcessor.executeInternal(String.format("TRUNCATE legacy_tables.legacy_%s_clust_counter", legacyVersion));
-        CacheService.instance.invalidateCounterCache();
-        CacheService.instance.invalidateKeyCache();
     }
 
     private static void assertLegacyClustRows(int count, UntypedResultSet rs)
