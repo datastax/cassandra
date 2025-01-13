@@ -160,6 +160,7 @@ public class IndexViewManagerTest extends SAITester
                                                 .map(desc -> new Descriptor(new File(tmpDir), KEYSPACE, tableName, desc.id))
                                                 .map(desc -> desc.getFormat().getReaderFactory().open(desc))
                                                 .collect(Collectors.toList());
+
         assertThat(sstables).hasSize(4);
 
         List<SSTableReader> none = Collections.emptyList();
@@ -178,7 +179,7 @@ public class IndexViewManagerTest extends SAITester
                 initialIndexes.add(mockSSTableIndex);
             }
 
-            IndexViewManager tracker = new IndexViewManager(columnContext, initialIndexes);
+            IndexViewManager tracker = new IndexViewManager(columnContext, descriptors, initialIndexes);
             View initialView = tracker.getView();
             assertEquals(2, initialView.size());
 

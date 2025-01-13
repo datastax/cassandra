@@ -52,16 +52,17 @@ public class IndexViewManager
     private final IndexContext context;
     private final AtomicReference<View> view = new AtomicReference<>();
 
+
     public IndexViewManager(IndexContext context)
     {
-        this(context, Collections.emptySet());
+        this(context, Collections.emptySet(), Collections.emptySet());
     }
 
     @VisibleForTesting
-    IndexViewManager(IndexContext context, Collection<SSTableIndex> indices)
+    IndexViewManager(IndexContext context, Collection<Descriptor> sstables, Collection<SSTableIndex> indices)
     {
         this.context = context;
-        this.view.set(new View(context, indices));
+        this.view.set(new View(context, sstables, indices));
     }
 
     public View getView()
@@ -87,12 +88,18 @@ public class IndexViewManager
         Map<Descriptor, SSTableIndex> newViewIndexes = new HashMap<>();
         Collection<SSTableIndex> releasableIndexes = new ArrayList<>();
         Collection<SSTableReader> toRemove = new HashSet<>(oldSSTables);
-        
+
         do
         {
             currentView = view.get();
             newViewIndexes.clear();
             releasableIndexes.clear();
+
+            Set<Descriptor> newSSTables = new HashSet<>(currentView.getSSTables());
+            for (SSTableReader sstable : oldSSTables)
+                newSSTables.remove(sstable.descriptor);
+            for (SSTableContext sstable : newSSTableContexts)
+                newSSTables.add(sstable.descriptor());
 
             for (SSTableIndex sstableIndex : currentView)
             {
@@ -111,7 +118,7 @@ public class IndexViewManager
                 addOrUpdateSSTableIndex(sstableIndex, newViewIndexes, releasableIndexes);
             }
 
-            newView = new View(context, newViewIndexes.values());
+            newView = new View(context, newSSTables, newViewIndexes.values());
         }
         while (!view.compareAndSet(currentView, newView));
 
@@ -169,9 +176,15 @@ public class IndexViewManager
      */
     public void invalidate(boolean indexWasDropped)
     {
-        View previousView = view.getAndSet(new View(context, Collections.emptyList()));
+        View oldView, newView;
+        do
+        {
+            oldView = view.get();
+            newView = new View(context, oldView.getSSTables(), Collections.emptySet());
 
-        for (SSTableIndex index : previousView)
+        } while (!view.compareAndSet(oldView, newView));
+
+        for (SSTableIndex index : oldView)
         {
             if (indexWasDropped)
                 index.markIndexDropped();
