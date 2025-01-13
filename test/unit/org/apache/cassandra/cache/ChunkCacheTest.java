@@ -81,7 +81,7 @@ public class ChunkCacheTest
 
         ChunkCache.instance.clear();
         assertEquals(0, ChunkCache.instance.size());
-        assertEquals(0, ChunkCache.instance.sizeOfFile(file.path()));
+        assertEquals(0, ChunkCache.instance.sizeOfFile(file));
 
         try (SequentialWriter writer = new SequentialWriter(file))
         {
@@ -96,11 +96,11 @@ public class ChunkCacheTest
             r.reBuffer();
 
             assertEquals(1, ChunkCache.instance.size());
-            assertEquals(1, ChunkCache.instance.sizeOfFile(file.path()));
+            assertEquals(1, ChunkCache.instance.sizeOfFile(file));
         }
 
         // Make sure that the file is invalidated
-        assertEquals(0, ChunkCache.instance.sizeOfFile(file.path()));
+        assertEquals(0, ChunkCache.instance.sizeOfFile(file));
     }
 
     @Test
@@ -119,7 +119,7 @@ public class ChunkCacheTest
 
         ChunkCache.instance.clear();
         assertEquals(0, ChunkCache.instance.size());
-        assertEquals(0, ChunkCache.instance.sizeOfFile(file.path()));
+        assertEquals(0, ChunkCache.instance.sizeOfFile(file));
 
         writeBytes(file, new byte[RandomAccessReader.DEFAULT_BUFFER_SIZE * 3]);
 
@@ -145,14 +145,14 @@ public class ChunkCacheTest
                  assertEquals((byte) 1, reader1.readByte());
 
                  assertEquals(3, ChunkCache.instance.size());
-                 assertEquals(3, ChunkCache.instance.sizeOfFile(file.path()));
+                 assertEquals(3, ChunkCache.instance.sizeOfFile(file));
              }
 
             // Invalidate cache for both chunks
             ChunkCache.instance.invalidateFile(file);
 
             // Verify cache does not contain an entry for the file
-            assertEquals(0, ChunkCache.instance.sizeOfFile(file.path()));
+            assertEquals(0, ChunkCache.instance.sizeOfFile(file));
 
             // Existing handles and readers keep using the old file id. To make sure we get a new one, recreate the
             // handle and reader.
@@ -161,12 +161,12 @@ public class ChunkCacheTest
             {
                 for (int i = 0; i < RandomAccessReader.DEFAULT_BUFFER_SIZE * 3; i++)
                     assertEquals((byte) 1, reader2.readByte());
-                assertEquals(3, ChunkCache.instance.sizeOfFile(file.path()));
+                assertEquals(3, ChunkCache.instance.sizeOfFile(file));
             }
         }
 
         // Make sure that the file is invalidated
-        assertEquals(0, ChunkCache.instance.sizeOfFile(file.path()));
+        assertEquals(0, ChunkCache.instance.sizeOfFile(file));
     }
 
     @Test
@@ -179,8 +179,8 @@ public class ChunkCacheTest
 
         ChunkCache.instance.clear();
         assertEquals(0, ChunkCache.instance.size());
-        assertEquals(0, ChunkCache.instance.sizeOfFile(fileFoo.path()));
-        assertEquals(0, ChunkCache.instance.sizeOfFile(fileBar.path()));
+        assertEquals(0, ChunkCache.instance.sizeOfFile(fileFoo));
+        assertEquals(0, ChunkCache.instance.sizeOfFile(fileBar));
 
         writeBytes(fileFoo, new byte[64]);
         // Write different bytes for meaningful content validation
@@ -195,7 +195,7 @@ public class ChunkCacheTest
             assertEquals((byte) 0, readerFoo.readByte());
 
             assertEquals(1, ChunkCache.instance.size());
-            assertEquals(1, ChunkCache.instance.sizeOfFile(fileFoo.path()));
+            assertEquals(1, ChunkCache.instance.sizeOfFile(fileFoo));
 
             try (FileHandle.Builder builderBar = new FileHandle.Builder(fileBar).withChunkCache(ChunkCache.instance);
                  FileHandle handleBar = builderBar.complete();
@@ -204,17 +204,17 @@ public class ChunkCacheTest
                 assertEquals((byte) 1, readerBar.readByte());
 
                 assertEquals(2, ChunkCache.instance.size());
-                assertEquals(1, ChunkCache.instance.sizeOfFile(fileFoo.path()));
-                assertEquals(1, ChunkCache.instance.sizeOfFile(fileBar.path()));
+                assertEquals(1, ChunkCache.instance.sizeOfFile(fileFoo));
+                assertEquals(1, ChunkCache.instance.sizeOfFile(fileBar));
 
                 // Invalidate fileFoo and verify that only fileFoo's chunks are removed
                 ChunkCache.instance.invalidateFile(fileFoo);
-                assertEquals(0, ChunkCache.instance.sizeOfFile(fileFoo.path()));
-                assertEquals(1, ChunkCache.instance.sizeOfFile(fileBar.path()));
+                assertEquals(0, ChunkCache.instance.sizeOfFile(fileFoo));
+                assertEquals(1, ChunkCache.instance.sizeOfFile(fileBar));
             }
         }
-        assertEquals(0, ChunkCache.instance.sizeOfFile(fileFoo.path()));
-        assertEquals(0, ChunkCache.instance.sizeOfFile(fileBar.path()));
+        assertEquals(0, ChunkCache.instance.sizeOfFile(fileFoo));
+        assertEquals(0, ChunkCache.instance.sizeOfFile(fileBar));
     }
 
     private void writeBytes(File file, byte[] bytes) throws IOException
@@ -331,7 +331,7 @@ public class ChunkCacheTest
                 {
                     mockFileControl.waitOnRead.complete(null);
                 }
-                assertEquals(0, chunkCache.sizeOfFile(file.path()));
+                assertEquals(0, chunkCache.sizeOfFile(file));
             }
 
             ExecutorService threadPool = Executors.newFixedThreadPool(numFiles);
@@ -345,7 +345,7 @@ public class ChunkCacheTest
 
                 results[i] = threadPool.submit(() -> {
                     r.reBuffer();
-                    assertEquals(1, chunkCache.sizeOfFile(file.path()));
+                    assertEquals(1, chunkCache.sizeOfFile(file));
                 });
             }
 
@@ -416,7 +416,7 @@ public class ChunkCacheTest
             mockFileControl1.waitOnRead.completeExceptionally(new RuntimeException("some weird runtime error"));
             RandomAccessReader r1 = mockFileControl1.openReader();
             assertThrows(CompletionException.class, r1::reBuffer);
-            assertEquals(0, chunkCache.sizeOfFile(mockFileControl1.file.path()));
+            assertEquals(0, chunkCache.sizeOfFile(mockFileControl1.file));
             assertEquals(0, chunkCache.size());
             assertEquals(0, allocated.size());
 
@@ -424,7 +424,7 @@ public class ChunkCacheTest
             mockFileControl2.waitOnRead.complete(null);
             RandomAccessReader r2 = mockFileControl2.openReader();
             r2.reBuffer();
-            assertEquals(1, chunkCache.sizeOfFile(mockFileControl2.file.path()));
+            assertEquals(1, chunkCache.sizeOfFile(mockFileControl2.file));
             assertEquals(1, chunkCache.size());
             assertEquals(1, allocated.size());
         }
@@ -505,7 +505,7 @@ public class ChunkCacheTest
             assertFalse(mockFileControl2.waitOnRead.isDone());
         }
 
-        assertEquals(0, ChunkCache.instance.sizeOfFile(file1.path()));
+        assertEquals(0, ChunkCache.instance.sizeOfFile(file1));
     }
 
     @Test
@@ -569,6 +569,6 @@ public class ChunkCacheTest
             assertTrue(mockFileControl2.waitOnRead.isDone());
         }
 
-        assertEquals(0, ChunkCache.instance.sizeOfFile(file1.path()));
+        assertEquals(0, ChunkCache.instance.sizeOfFile(file1));
     }
 }
