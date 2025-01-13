@@ -157,7 +157,7 @@ public class ChunkCacheLoadingTest
         // cause an async read for the partition index during the counter read on cache reload. This will cause a jump from the
         // BackgroundIoStage thread to a TPC thread, and we want the BackgroundIoStage to keep going until it blocks due to a
         // blocking secondary read done in some of the ReadingNopCompressor methods.
-        Set<String> sstableDataFilePaths = new HashSet<>();
+        Set<File> sstableDataFilePaths = new HashSet<>();
         for (var dataDirectory : Directories.dataDirectories)
             addNonPartitionFiles(sstableDataFilePaths, dataDirectory.location);
         sstableDataFilePaths.forEach(ChunkCache.instance::invalidateFile);
@@ -175,7 +175,7 @@ public class ChunkCacheLoadingTest
         assertEquals(12L, counterCfs.getCachedCounter(CounterCacheKey.create(counterCfs.metadata(), bytes(1), Clustering.EMPTY, cm, null)).count);
     }
 
-    private static void addNonPartitionFiles(Set<String> sstableDataFilePaths, File... roots)
+    private static void addNonPartitionFiles(Set<File> sstableDataFilePaths, File... roots)
     {
         if (roots == null)
             return;
@@ -190,7 +190,7 @@ public class ChunkCacheLoadingTest
             assert file.isFile();
             String absolutePath = file.path();
             if (!absolutePath.contains("Partitions.db"))
-                sstableDataFilePaths.add(absolutePath);
+                sstableDataFilePaths.add(file);
         }
     }
 
@@ -321,7 +321,7 @@ public class ChunkCacheLoadingTest
 
         // Invalidate everything from the chunk cache (except the SSTable partition index files) to make sure that follow-up
         // reads for that table trigger chunk cache loading.
-        Set<String> sstableDataFilePaths = new HashSet<>();
+        Set<File> sstableDataFilePaths = new HashSet<>();
         for (var dataDirectory : Directories.dataDirectories)
             addNonPartitionFiles(sstableDataFilePaths, dataDirectory.location);
         sstableDataFilePaths.forEach(ChunkCache.instance::invalidateFile);
