@@ -282,12 +282,12 @@ public abstract class SortedTableWriter extends SSTableWriter
             throw new AssertionError("Last written key " + currentKey + " >= current key " + decoratedKey + " writing into " + getDataFile());
     }
 
-    protected void invalidateCacheAtBoundary(FileHandle dfile)
+    protected void invalidateCacheAtPreviousBoundary(FileHandle dfile, long newBoundary)
     {
-        if (lastEarlyOpenLength != 0 && dfile.dataLength() > lastEarlyOpenLength)
+        if (lastEarlyOpenLength != 0 && newBoundary > lastEarlyOpenLength)
             dfile.invalidateIfCached(lastEarlyOpenLength);
 
-        lastEarlyOpenLength = dfile.dataLength();
+        lastEarlyOpenLength = newBoundary;
     }
 
     public long getFilePointer()

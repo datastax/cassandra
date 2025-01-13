@@ -203,7 +203,7 @@ public class BigTableWriter extends SortedTableWriter
             dbuilder.withCompressionMetadata(((CompressedSequentialWriter) dataFile).open(boundary.dataLength));
         int dataBufferSize = optimizationStrategy.bufferSize(stats.estimatedPartitionSize.percentile(DatabaseDescriptor.getDiskOptimizationEstimatePercentile()));
         FileHandle dfile = dbuilder.bufferSize(dataBufferSize).complete(boundary.dataLength);
-        invalidateCacheAtBoundary(dfile);
+        invalidateCacheAtPreviousBoundary(dfile, boundary.dataLength);
         SSTableReader sstable = BigTableReader.internalOpen(descriptor,
                                                            components(), metadata,
                                                            ifile, dfile,
@@ -246,7 +246,7 @@ public class BigTableWriter extends SortedTableWriter
         if (compression)
             dbuilder.withCompressionMetadata(((CompressedSequentialWriter) dataFile).open(0));
         FileHandle dfile = dbuilder.bufferSize(dataBufferSize).complete();
-        invalidateCacheAtBoundary(dfile);
+        invalidateCacheAtPreviousBoundary(dfile, Long.MAX_VALUE);
         SSTableReader sstable = SSTableReader.internalOpen(descriptor,
                                                            components(),
                                                            metadata,
