@@ -118,35 +118,121 @@ public class ChunkCache
     // number of bits required to store the ready type
     private final static int READER_TYPE_BITS = Integer.SIZE - Integer.numberOfLeadingZeros(ChunkReader.ReaderType.COUNT - 1);
 
-    /**
-     * Removes FileId for given file if cache is initialized.
-     * @param file file to remove from the map.
-     */
-    public static void removeFileIdFromCache(File file)
+    public ChunkCache(BufferPool pool, int cacheSizeInMB, Function<ChunkCache, ChunkCacheMetrics> createMetrics)
     {
-        if (instance != null)
-            instance.invalidateFile(file);
+        cacheSize = 1024L * 1024L * Math.max(0, cacheSizeInMB - RESERVED_POOL_SPACE_IN_MB);
+        cleanupExecutor = ParkedExecutor.createParkedExecutor("ChunkCacheCleanup", CLEANER_THREADS);
+        enabled = cacheSize > 0;
+        bufferPool = pool;
+        metrics = createMetrics.apply(this);
+        cache = Caffeine.newBuilder()
+                        .maximumWeight(cacheSize)
+                        .initialCapacity(INITIAL_CAPACITY)
+                        .executor(r -> {
+                            if (ASYNC_CLEANUP && r.getClass() == PERFORM_CLEANUP_TASK_CLASS)
+                                cleanupExecutor.execute(r);
+                            else
+                                r.run();
+                        })
+                        .weigher((key, buffer) -> ((Chunk) buffer).capacity())
+                        .removalListener(this)
+                        .recordStats(() -> metrics)
+                        .buildAsync();
+        synchronousCache = cache.synchronous();
+        cacheAsMap = cache.asMap();
+    }
+
+
+    private Chunk load(ChunkReader file, long position)
+    {
+        Chunk chunk = null;
+        try
+        {
+            chunk = newChunk(file.chunkSize(), position);  // Note: we need `chunk` to be assigned before we call read to release on error
+            chunk.read(file);
+        }
+        catch (RuntimeException t)
+        {
+            if (chunk != null)
+                chunk.release();
+            throw t;
+        }
+        return chunk;
+    }
+
+    Chunk newChunk(int chunkSize, long position)
+    {
+        if (chunkSize == PageAware.PAGE_SIZE)
+            return new SingleRegionChunk(position, bufferPool.get(PageAware.PAGE_SIZE, BufferType.OFF_HEAP));
+        if (chunkSize < PageAware.PAGE_SIZE)
+            return new SingleRegionChunk(position, bufferPool.get(PageAware.PAGE_SIZE, BufferType.OFF_HEAP).limit(chunkSize).slice());
+
+        ByteBuffer[] buffers = bufferPool.getMultiple(chunkSize, PageAware.PAGE_SIZE, BufferType.OFF_HEAP);
+        if (buffers.length > 1)
+            return new MultiRegionChunk(position, buffers);
+        else
+            return new SingleRegionChunk(position, buffers[0]);
+    }
+
+    @Override
+    public void onRemoval(Key key, Chunk chunk, RemovalCause cause)
+    {
+        chunk.release();
     }
 
     /**
-     * Invalidate all buffers from the given file, i.e. make sure they can not be accessed by any reader using a
-     * FileHandle opened after this call. The buffers themselves will remain in the cache until they get normally
-     * evicted, because it is too costly to remove them.
-     *
-     * Note that this call has no effect of handles that are already opened. The correct usage is to call this when
-     * a file is deleted, or when a file is created for writing. It cannot be used to update and resynchronize the
-     * cached view of an existing file.
+     * Clears the cache, used in the CNDB Writer for testing purposes.
      */
-    public void invalidateFile(File file)
-    {
-        // Removing the name from the id map suffices -- the next time someone wants to read this file, it will get
-        // assigned a fresh id.
-        fileIdMap.remove(file);
+    public void clear() {
+        // Clear keysByFile first to prevent unnecessary computation in onRemoval method.
+        synchronousCache.invalidateAll();
     }
 
-    private long assignFileId(File file)
+    public void close()
     {
-        return nextFileId.getAndIncrement();
+        clear();
+        try
+        {
+            cleanupExecutor.shutdown();
+        }
+        catch (InterruptedException e)
+        {
+            logger.debug("Interrupted during shutdown: ", e);
+        }
+    }
+
+    private RebuffererFactory wrap(ChunkReader file)
+    {
+        return new CachingRebufferer(file);
+    }
+
+    public RebuffererFactory maybeWrap(ChunkReader file)
+    {
+        if (!enabled)
+            return file;
+
+        return wrapper.apply(file);
+    }
+
+    @VisibleForTesting
+    public void enable(boolean enabled)
+    {
+        this.enabled = enabled;
+        wrapper = this::wrap;
+        synchronousCache.invalidateAll();
+        metrics.reset();
+    }
+
+    public boolean isEnabled()
+    {
+        return enabled;
+    }
+
+    @VisibleForTesting
+    public void intercept(Function<RebuffererFactory, RebuffererFactory> interceptor)
+    {
+        final Function<ChunkReader, RebuffererFactory> prevWrapper = wrapper;
+        wrapper = rdr -> interceptor.apply(prevWrapper.apply(rdr));
     }
 
     /**
@@ -170,6 +256,37 @@ public class ChunkCache
     protected long readerIdFor(ChunkReader source)
     {
         return readerIdFor(source.channel().getFile(), source.type(), source.chunkSize());
+    }
+
+    private long assignFileId(File file)
+    {
+        return nextFileId.getAndIncrement();
+    }
+
+    /**
+     * Invalidate all buffers from the given file, i.e. make sure they can not be accessed by any reader using a
+     * FileHandle opened after this call. The buffers themselves will remain in the cache until they get normally
+     * evicted, because it is too costly to remove them.
+     *
+     * Note that this call has no effect of handles that are already opened. The correct usage is to call this when
+     * a file is deleted, or when a file is created for writing. It cannot be used to update and resynchronize the
+     * cached view of an existing file.
+     */
+    public void invalidateFile(File file)
+    {
+        // Removing the name from the id map suffices -- the next time someone wants to read this file, it will get
+        // assigned a fresh id.
+        fileIdMap.remove(file);
+    }
+
+    /**
+     * Removes FileId for given file if cache is initialized.
+     * @param file file to remove from the map.
+     */
+    public static void removeFileIdFromCache(File file)
+    {
+        if (instance != null)
+            instance.invalidateFile(file);
     }
 
     static class Key
@@ -475,125 +592,6 @@ public class ChunkCache
             return capacity;
         }
     }
-
-    Chunk newChunk(int chunkSize, long position)
-    {
-        if (chunkSize == PageAware.PAGE_SIZE)
-            return new SingleRegionChunk(position, bufferPool.get(PageAware.PAGE_SIZE, BufferType.OFF_HEAP));
-        if (chunkSize < PageAware.PAGE_SIZE)
-            return new SingleRegionChunk(position, bufferPool.get(PageAware.PAGE_SIZE, BufferType.OFF_HEAP).limit(chunkSize).slice());
-
-        ByteBuffer[] buffers = bufferPool.getMultiple(chunkSize, PageAware.PAGE_SIZE, BufferType.OFF_HEAP);
-        if (buffers.length > 1)
-            return new MultiRegionChunk(position, buffers);
-        else
-            return new SingleRegionChunk(position, buffers[0]);
-    }
-
-    public ChunkCache(BufferPool pool, int cacheSizeInMB, Function<ChunkCache, ChunkCacheMetrics> createMetrics)
-    {
-        cacheSize = 1024L * 1024L * Math.max(0, cacheSizeInMB - RESERVED_POOL_SPACE_IN_MB);
-        cleanupExecutor = ParkedExecutor.createParkedExecutor("ChunkCacheCleanup", CLEANER_THREADS);
-        enabled = cacheSize > 0;
-        bufferPool = pool;
-        metrics = createMetrics.apply(this);
-        cache = Caffeine.newBuilder()
-                        .maximumWeight(cacheSize)
-                        .initialCapacity(INITIAL_CAPACITY)
-                        .executor(r -> {
-                            if (ASYNC_CLEANUP && r.getClass() == PERFORM_CLEANUP_TASK_CLASS)
-                                cleanupExecutor.execute(r);
-                            else
-                                r.run();
-                        })
-                        .weigher((key, buffer) -> ((Chunk) buffer).capacity())
-                        .removalListener(this)
-                        .recordStats(() -> metrics)
-                        .buildAsync();
-        synchronousCache = cache.synchronous();
-        cacheAsMap = cache.asMap();
-    }
-
-
-    private Chunk load(ChunkReader file, long position)
-    {
-        Chunk chunk = null;
-        try
-        {
-            chunk = newChunk(file.chunkSize(), position);  // Note: we need `chunk` to be assigned before we call read to release on error
-            chunk.read(file);
-        }
-        catch (RuntimeException t)
-        {
-            if (chunk != null)
-                chunk.release();
-            throw t;
-        }
-        return chunk;
-    }
-
-    @Override
-    public void onRemoval(Key key, Chunk chunk, RemovalCause cause)
-    {
-        chunk.release();
-    }
-
-    /**
-     * Clears the cache, used in the CNDB Writer for testing purposes.
-     */
-    public void clear() {
-        // Clear keysByFile first to prevent unnecessary computation in onRemoval method.
-        synchronousCache.invalidateAll();
-    }
-
-    public void close()
-    {
-        clear();
-        try
-        {
-            cleanupExecutor.shutdown();
-        }
-        catch (InterruptedException e)
-        {
-            logger.debug("Interrupted during shutdown: ", e);
-        }
-    }
-
-    private RebuffererFactory wrap(ChunkReader file)
-    {
-        return new CachingRebufferer(file);
-    }
-
-    public RebuffererFactory maybeWrap(ChunkReader file)
-    {
-        if (!enabled)
-            return file;
-
-        return wrapper.apply(file);
-    }
-
-    public boolean isEnabled()
-    {
-        return enabled;
-    }
-
-    @VisibleForTesting
-    public void enable(boolean enabled)
-    {
-        this.enabled = enabled;
-        wrapper = this::wrap;
-        synchronousCache.invalidateAll();
-        metrics.reset();
-    }
-
-    @VisibleForTesting
-    public void intercept(Function<RebuffererFactory, RebuffererFactory> interceptor)
-    {
-        final Function<ChunkReader, RebuffererFactory> prevWrapper = wrapper;
-        wrapper = rdr -> interceptor.apply(prevWrapper.apply(rdr));
-    }
-
-    // TODO: Invalidate caches for obsoleted/MOVED_START tables?
 
     /**
      * Rebufferer providing cached chunks where data is obtained from the specified ChunkReader.
