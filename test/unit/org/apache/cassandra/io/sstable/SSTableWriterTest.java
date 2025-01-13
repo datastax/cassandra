@@ -20,12 +20,18 @@ package org.apache.cassandra.io.sstable;
 
 import java.nio.ByteBuffer;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
 
+import org.junit.Assume;
 import org.junit.Test;
 
 import org.apache.cassandra.UpdateBuilder;
 import org.apache.cassandra.Util;
+import org.apache.cassandra.cache.ChunkCache;
+import org.apache.cassandra.config.Config;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.Slices;
@@ -100,6 +106,76 @@ public class SSTableWriterTest extends SSTableWriterTestBase
             datafiles = assertFileCounts(dir.tryListNames());
             assertEquals(datafiles, 0);
             validateCFS(cfs);
+        }
+    }
+
+    @Test
+    public void testFinalOpenRetainsCachedData() throws InterruptedException
+    {
+        Assume.assumeNotNull(ChunkCache.instance);
+        Keyspace keyspace = Keyspace.open(KEYSPACE);
+        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF);
+        truncate(cfs);
+        var previousAccessMode = DatabaseDescriptor.getDiskAccessMode();
+        try
+        {
+            DatabaseDescriptor.setDiskAccessMode(Config.DiskAccessMode.standard);
+
+            CountDownLatch latch = new CountDownLatch(2);
+            File dir = cfs.getDirectories().getDirectoryForNewSSTables();
+            LifecycleTransaction txn = LifecycleTransaction.offline(OperationType.WRITE, cfs.metadata);
+            try (SSTableWriter writer = getWriter(cfs, dir, txn))
+            {
+                for (int i = 0; i < 10000; i++)
+                {
+                    UpdateBuilder builder = UpdateBuilder.create(cfs.metadata(), random(i, 10)).withTimestamp(1);
+                    for (int j = 0; j < 100; j++)
+                        builder.newRow("" + j).add("val", ByteBuffer.allocate(1000));
+                    writer.append(builder.build().unfilteredIterator());
+                }
+                writer.setMaxDataAge(1000).openEarly(s -> {
+                    assert s != null;
+                    assertFileCounts(dir.tryListNames());
+                    s.getScanner(ColumnFilter.NONE, DataRange.allData(s.getPartitioner()), SSTableReadsListener.NOOP_LISTENER)
+//                    s.getScanner()
+                     .forEachRemaining(row -> {
+                        // consume all rows, so that the data is cached
+                        row.forEachRemaining(column -> {
+                            // consume all columns
+                        });
+                    });
+                    assertTrue("Chunk cache is not used",
+                               ChunkCache.instance.sizeOfFile(s.getDataFile()) > 0);
+                    s.runOnClose(latch::countDown);
+                    s.selfRef().release();
+                    latch.countDown();
+                });
+                for (int i = 10000; i < 20000; i++)
+                {
+                    UpdateBuilder builder = UpdateBuilder.create(cfs.metadata(), random(i, 10)).withTimestamp(1);
+                    for (int j = 0; j < 100; j++)
+                        builder.newRow("" + j).add("val", ByteBuffer.allocate(1000));
+                    writer.append(builder.build().unfilteredIterator());
+                }
+                latch.await();
+
+                SSTableReader finalReader = writer.finish(true);
+                int datafiles = assertFileCounts(dir.tryListNames());
+                assertEquals(datafiles, 1);
+                assertTrue("Chunk cache is not retained for early open sstable",
+                           ChunkCache.instance.sizeOfFile(finalReader.getDataFile()) > 0);
+                finalReader.getScanner().forEachRemaining(row -> {
+                    // consume all rows to verify the boundary point is invalidated
+                    row.forEachRemaining(column -> {
+                        // consume all columns
+                    });
+                });
+                finalReader.selfRef().release();
+            }
+        }
+        finally
+        {
+            DatabaseDescriptor.setDiskAccessMode(previousAccessMode);
         }
     }
 

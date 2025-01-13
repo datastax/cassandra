@@ -238,7 +238,8 @@ public class FileHandle extends SharedCloseableImpl
 
         public void tidy()
         {
-            ChunkCache.removeFileIdFromCache(channel.getFile());
+            // Note: we cannot release data held by the chunk cache at this point, because this would release data that
+            // is pre-cached by early open. See SSTableWriterTest.testFinalOpenRetainsCachedData.
             try
             {
                 if (compressionMetadata != null)
