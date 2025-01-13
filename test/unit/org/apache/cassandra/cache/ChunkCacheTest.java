@@ -108,7 +108,7 @@ public class ChunkCacheTest
     {
         ChunkCache.instance.clear();
         assertEquals(0, ChunkCache.instance.size());
-        ChunkCache.instance.invalidateFile("/tmp/does/not/exist/in/cache/or/on/file/system");
+        ChunkCache.instance.invalidateFile(new File("/tmp/does/not/exist/in/cache/or/on/file/system"));
     }
 
     @Test
@@ -149,7 +149,7 @@ public class ChunkCacheTest
              }
 
             // Invalidate cache for both chunks
-            ChunkCache.instance.invalidateFile(file.path());
+            ChunkCache.instance.invalidateFile(file);
 
             // Verify cache does not contain an entry for the file
             assertEquals(0, ChunkCache.instance.sizeOfFile(file.path()));
@@ -208,7 +208,7 @@ public class ChunkCacheTest
                 assertEquals(1, ChunkCache.instance.sizeOfFile(fileBar.path()));
 
                 // Invalidate fileFoo and verify that only fileFoo's chunks are removed
-                ChunkCache.instance.invalidateFile(fileFoo.path());
+                ChunkCache.instance.invalidateFile(fileFoo);
                 assertEquals(0, ChunkCache.instance.sizeOfFile(fileFoo.path()));
                 assertEquals(1, ChunkCache.instance.sizeOfFile(fileBar.path()));
             }

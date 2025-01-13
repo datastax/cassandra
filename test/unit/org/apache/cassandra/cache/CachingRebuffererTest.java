@@ -95,7 +95,7 @@ public class CachingRebuffererTest
         when(chunkReader.channel()).thenReturn(blockingChannel);
         when(chunkReader.type()).thenReturn(ChunkReader.ReaderType.SIMPLE);
 
-        ChunkCache.instance.invalidateFile(file.path());
+        ChunkCache.instance.invalidateFile(file);
     }
 
     // Helper test to estimate the memory overhead caused by buffer cache
