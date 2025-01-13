@@ -762,8 +762,8 @@ public class ChunkCache
      * Returns the number of cached chunks of given file.
      */
     @VisibleForTesting
-    public int sizeOfFile(String filePath) {
-        Long fileIdMaybeNull = fileIdMap.get(new File(filePath));
+    public int sizeOfFile(File file) {
+        Long fileIdMaybeNull = fileIdMap.get(file);
         if (fileIdMaybeNull == null)
             return 0;
         long fileId = fileIdMaybeNull << (CHUNK_SIZE_LOG2_BITS + READER_TYPE_BITS);
