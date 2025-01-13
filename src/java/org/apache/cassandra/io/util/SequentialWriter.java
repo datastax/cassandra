@@ -127,7 +127,7 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
                 }
 
                 // Invalidate any cache entries that may exist for a previous file with the same name.
-                ChunkCache.instance.invalidateFile(file);
+                ChunkCache.removeFileIdFromCache(file);
                 return channel;
             }
         }

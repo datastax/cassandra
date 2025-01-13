@@ -238,7 +238,7 @@ public class FileHandle extends SharedCloseableImpl
 
         public void tidy()
         {
-            chunkCache.ifPresent(cache -> cache.invalidateFile(name()));
+            ChunkCache.removeFileIdFromCache(channel.getFile());
             try
             {
                 if (compressionMetadata != null)
