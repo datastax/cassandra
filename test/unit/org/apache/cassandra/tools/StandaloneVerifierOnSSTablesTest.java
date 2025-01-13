@@ -94,11 +94,11 @@ public class StandaloneVerifierOnSSTablesTest extends OfflineToolUtils
     public void testCheckVersionWithWrongVersion() throws Exception
     {
         String keyspace = "StandaloneVerifierTestWrongVersions";
-        String tableName = "legacy_ma_simple";
+        String tableName = "legacy_me_simple";
 
         createAndPopulateTable(keyspace, tableName, cfs -> {
             // let's just copy old version files from test data into the source dir
-            File testDataDir = new File("test/data/legacy-sstables/ma/legacy_tables/legacy_ma_simple");
+            File testDataDir = new File("test/data/legacy-sstables/me/legacy_tables/legacy_me_simple");
             for (File cfsDir : cfs.getDirectories().getCFDirectories())
             {
                 FileUtils.copyDirectory(testDataDir.toJavaIOFile(), cfsDir.toJavaIOFile());
