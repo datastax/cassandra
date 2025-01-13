@@ -131,7 +131,7 @@ public class BufferPool
     private static final Logger logger = LoggerFactory.getLogger(BufferPool.class);
     private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(logger, 15L, TimeUnit.MINUTES);
     private static final ByteBuffer EMPTY_BUFFER = ByteBuffer.allocateDirect(0);
-    private static boolean DISABLE_COMBINED_ALLOCATION = Boolean.getBoolean("cassandra.bufferpool.disable_combined_allocation");
+    private static final boolean DISABLE_COMBINED_ALLOCATION = Boolean.getBoolean("cassandra.bufferpool.disable_combined_allocation");
 
     private volatile Debug debug = Debug.NO_OP;
 
@@ -217,14 +217,16 @@ public class BufferPool
     }
 
 
-    /**
-     * Allocate the given amount of memory, where the caller can accept the space to be split into multiple buffers.
-     *
-     * @param totalSize the total size to be allocated
-     * @param chunkSize the minimum size of each buffer returned
-     *
-     * @return an array of allocated buffers
-     */
+    /// Allocate the given amount of memory, where the caller can accept either of:
+    /// - a single buffer that can fit the whole region;
+    /// - multiple buffers of the given `chunkSize`.
+    ///
+    /// The total size must be a multiple of the chunk size.
+    ///
+    /// @param totalSize the total size to be allocated
+    /// @param chunkSize the size of each buffer returned, if the space cannot be allocated as one buffer
+    ///
+    /// @return an array of allocated buffers
     public ByteBuffer[] getMultiple(int totalSize, int chunkSize, BufferType bufferType)
     {
         if (bufferType == BufferType.ON_HEAP)
@@ -240,22 +242,14 @@ public class BufferPool
                 return new ByteBuffer[]{ full };
         }
 
-        // If we don't get a whole buffer, allocate buffers of the requested minimum size.
-        int numBuffers = (totalSize + chunkSize - 1) / chunkSize;
+        // If we don't get a whole buffer, allocate buffers of the requested chunk size.
+        int numBuffers = totalSize / chunkSize;
+        assert totalSize == chunkSize * numBuffers
+            : "Total size " + totalSize + " is not a multiple of chunk size " + chunkSize;
         ByteBuffer[] buffers = new ByteBuffer[numBuffers];
-        int remainingSize = totalSize;
-        int idx = 0;
 
-        while (remainingSize >= chunkSize)
-        {
-            buffers[idx] = pool.getAtLeast(chunkSize);
-            remainingSize -= buffers[idx].capacity();
-            ++idx;
-        }
-        if (remainingSize > 0)
-            buffers[idx++] = pool.get(chunkSize);
-        if (idx < numBuffers)
-            buffers = Arrays.copyOf(buffers, idx);
+        for (int idx = 0; idx < numBuffers; ++idx)
+            buffers[idx] = pool.get(chunkSize);
 
         return buffers;
     }

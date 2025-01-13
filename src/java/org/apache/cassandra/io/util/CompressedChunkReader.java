@@ -136,21 +136,20 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
                         if (channel.read(compressed, chunkOffset) != length)
                             throw new CorruptBlockException(channel.filePath(), chunk);
 
-                        compressed.flip();
-                        compressed.limit(chunk.length);
-                        uncompressed.clear();
-
                         if (shouldCheckCrc)
                         {
+                            // compute checksum of the compressed data
+                            compressed.position(0).limit(chunk.length);
                             int checksum = (int) ChecksumType.CRC32.of(compressed);
-
+                            // the remaining bytes are the checksum
                             compressed.limit(length);
                             int storedChecksum = compressed.getInt();
                             if (storedChecksum != checksum)
                                 throw new CorruptBlockException(channel.filePath(), chunk, storedChecksum, checksum);
-
-                            compressed.position(0).limit(chunk.length);
                         }
+
+                        compressed.position(0).limit(chunk.length);
+                        uncompressed.clear();
 
                         try
                         {
@@ -224,23 +223,21 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
                 int chunkOffsetInSegment = Ints.checkedCast(chunk.offset - segmentOffset);
                 ByteBuffer compressedChunk = region.buffer();
 
-                compressedChunk.position(chunkOffsetInSegment).limit(chunkOffsetInSegment + chunk.length);
-
-                uncompressed.clear();
-
                 try
                 {
                     if (shouldCheckCrc())
                     {
+                        compressedChunk.position(chunkOffsetInSegment).limit(chunkOffsetInSegment + chunk.length);
                         int checksum = (int) ChecksumType.CRC32.of(compressedChunk);
 
                         compressedChunk.limit(compressedChunk.capacity());
                         int storedChecksum = compressedChunk.getInt();
                         if (storedChecksum != checksum)
                             throw new CorruptBlockException(channel.filePath(), chunk, storedChecksum, checksum);
-
-                        compressedChunk.position(chunkOffsetInSegment).limit(chunkOffsetInSegment + chunk.length);
                     }
+
+                    compressedChunk.position(chunkOffsetInSegment).limit(chunkOffsetInSegment + chunk.length);
+                    uncompressed.clear();
 
                     if (chunk.length < maxCompressedLength)
                         metadata.compressor().uncompress(compressedChunk, uncompressed);
