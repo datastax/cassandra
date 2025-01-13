@@ -42,6 +42,7 @@ import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.memory.MemtableIndex;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
+import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.MonotonicClock;
@@ -139,19 +140,28 @@ public class QueryView implements AutoCloseable
             try
             {
                 // Keeps track of which memtables we've already tried to match the index to.
-                // If we fail to match the index to the memtable for the first time, this is not necessarily an
-                // error, because the memtable could be flushed and its index removed between the moment we
+                // If we fail to match the index to the memtable for the first time, we have to retry
+                // because the memtable could be flushed and its index removed between the moment we
                 // got the view and the moment we did the lookup.
-                // However, if we get the same memtable in the view again, and there is no index,
-                // then the missing index is not due to a concurrent modification but likely a bug, so
-                // we log an error and break the loop. This makes debugging easier (infinite looping is much worse
-                // than erroring out).
+                // If we get the same memtable in the view again, and there is no index,
+                // then the missing index is not due to a concurrent modification, but it doesn't contain indexed
+                // data, so we can ignore it.
                 var processedMemtables = new HashSet<Memtable>();
 
+                var start = MonotonicClock.approxTime.now();
+                Memtable unmatchedMemtable = null;
+                Descriptor unmatchedSStable = null;
+
+                // This loop will spin only if there is a mismatch between the view managed by IndexViewManager
+                // and the view managed by Cassandra Tracker. Such a mismatch can happen at the moment when
+                // the sstable or memtable sets are updated, e.g. on flushes or compactions. The mismatch
+                // should last only until all Tracker notifications get processed by SAI
+                // (which doesn't involve I/O and should be very fast). We expect the mismatch to resolve in order
+                // of nanoceconds, but the timeout is large enough just in case of unpredictable performance hiccups.
                 outer:
-                while (true)
+                while (!MonotonicClock.approxTime.isAfter(start + TimeUnit.MILLISECONDS.toNanos(1000)))
                 {
-                    // Prevent an infinite loop
+                    // Prevent exceeding the query timeout
                     queryContext.checkpoint();
 
                     // Lock a consistent view of memtables and sstables.
@@ -187,10 +197,13 @@ public class QueryView implements AutoCloseable
                             // In that case, we need to retry with the updated view
                             // (we expect the updated view to not contain this memtable).
 
-                            // Protect from infinite looping in case we have a permanent inconsistency between
-                            // the index set and the memtable set.
+                            // Remember this metable to protect from infinite looping in case we have a permanent
+                            // inconsistency between the index set and the memtable set.
                             processedMemtables.add(memtable);
+
                             refViewFragment.release();
+
+                            unmatchedMemtable = memtable;
                             continue outer;
                         }
                         // If the memtable was non-empty, the index context hasn't been dropped, but the
@@ -205,26 +218,45 @@ public class QueryView implements AutoCloseable
                     {
                         SSTableIndex index = indexContext.getSSTableIndex(sstable.descriptor);
 
-                        // If there is no index for given sstable, we don't retry, because we should never
-                        // release an index before we release the sstable. The sstables are already referenced
-                        // in the refViewFragment, so that protects indexes from being released. Hence, we should
-                        // always get an index and if we don't, it is a bug.
+                        // It is possible we won't find the index if:
+                        // - the live sstable set was updated shortly before grabbing the refViewFragment
+                        //   and the notification about updating it hasn't gotten to SAI yet, or
+                        // - the live sstable set was updated after we grabbed it, the notification about it
+                        //   got to the SAI already and the index has been already removed.
                         if (index == null)
                         {
                             refViewFragment.release();
-                            throw new MissingIndexException(indexContext, "Index " + indexContext.getIndexName() +
-                                                                          " not found for sstable: " + sstable);
+
+                            if (indexContext.isDropped())
+                                throw new MissingIndexException(indexContext, "Index " + indexContext.getIndexName() +
+                                                                              " not found for sstable: " + sstable.descriptor);
+
+                            if (MonotonicClock.approxTime.isAfter(start + 100))
+                                NoSpamLogger.log(logger, NoSpamLogger.Level.WARN, 1, TimeUnit.SECONDS,
+                                                 "Spinning trying to get the index for sstable {} becasue index was not found", sstable.descriptor);
+
+                            unmatchedSStable = sstable.descriptor;
+                            continue outer;
                         }
 
                         if (!indexInRange(index))
                             continue;
 
+                        // It is unlikely but possible the index got unreferenced just between the moment we grabbed the
+                        // refViewFragment and getting here. In that case we won't be able to reference it and we have
+                        // to retry.
                         if (!index.reference())
                         {
                             refViewFragment.release();
-                            throw new MissingIndexException(indexContext, "Index " + indexContext.getIndexName() + " for sstable " + sstable +
-                                                                          " found but already released and cannot be referenced");
+
+                            if (MonotonicClock.approxTime.isAfter(start + 100))
+                                NoSpamLogger.log(logger, NoSpamLogger.Level.WARN, 1, TimeUnit.SECONDS,
+                                                 "Spinning trying to get the index for sstable {} because index was released", sstable.descriptor);
+
+                            unmatchedSStable = sstable.descriptor;
+                            continue outer;
                         }
+
                         referencedIndexes.add(index);
                     }
 
@@ -236,6 +268,18 @@ public class QueryView implements AutoCloseable
                                          Collections.unmodifiableSet(memtableIndexes),
                                          indexContext);
                 }
+
+
+                if (unmatchedMemtable != null)
+                    throw new MissingIndexException(indexContext, "Index " + indexContext.getIndexName() +
+                                                                  " not found for memtable " + unmatchedMemtable);
+                if (unmatchedSStable != null)
+                    throw new MissingIndexException(indexContext, "Index " + indexContext.getIndexName() +
+                                                                  " not found for sstable " + unmatchedSStable);
+
+                // This should be unreachable, because whenever we retry, we always set unmatchedMemtable
+                // or unmatchedSSTable, so we'd log a better message above.
+                throw new MissingIndexException(indexContext, "Failed to build QueryView for index " + indexContext.getIndexName());
             }
             finally
             {
