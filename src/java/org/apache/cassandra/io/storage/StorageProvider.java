@@ -152,10 +152,25 @@ public interface StorageProvider
     FileHandle.Builder fileHandleBuilderFor(Descriptor descriptor, Component component);
 
     /**
+     * Creates a new {@link FileHandle.Builder} for the data component during sstable writing time.
+     * <p>
+     * The returned builder will be configured with the appropriate "access mode" (mmap or not), and the "chunk cache"
+     * will have been set if appropriate, and a request to invalidate any previous data in the chunk cache for a file
+     * with the same name will be made.
+     *
+     * @param descriptor    descriptor for the sstable whose handler is built.
+     * @param zeroCopyMetadata zero copy metadata for the sstable
+     * @return a new {@link FileHandle.Builder} for the data component with access mode and chunk cache
+     * configured as appropriate.
+     */
+    FileHandle.Builder dataFileWriteTimeBuilder(Descriptor descriptor, ZeroCopyMetadata zeroCopyMetadata);
+
+    /**
      * Creates a new {@link FileHandle.Builder} for the given primary index component during primary index writing time.
      * <p>
      * The returned builder will be configured with the appropriate "access mode" (mmap or not), and the "chunk cache"
-     * will have been set if appropriate.
+     * will have been set if appropriate, and a request to invalidate any previous data in the chunk cache for a file
+     * with the same name will be made.
      *
      * @param descriptor    descriptor for the sstable whose handler is built.
      * @param component     sstable component for which to build the handler.
@@ -288,13 +303,23 @@ public interface StorageProvider
                    .withChunkCache(ChunkCache.instance);
         }
 
+        public FileHandle.Builder dataFileWriteTimeBuilder(Descriptor descriptor, ZeroCopyMetadata zeroCopyMetadata)
+        {
+            // By default, the only difference between accesses during sstable writing and "at query time" is a request
+            // to invalidate caches to ensure we don't get corruption because of stale data in the cache.
+            // Subclasses may need to differenciate more.
+            return fileHandleBuilderFor(descriptor, Component.DATA, zeroCopyMetadata).invalidateCache();
+        }
+
         @Override
         public FileHandle.Builder primaryIndexWriteTimeFileHandleBuilderFor(Descriptor descriptor, Component component, OperationType operationType)
         {
-            // By default, no difference between accesses during sstable writing and "at query time", but subclasses may need
-            // to differenciate both.
-            return fileHandleBuilderFor(descriptor, component);
+            // By default, the only difference between accesses during sstable writing and "at query time" is a request
+            // to invalidate caches to ensure we don't get corruption because of stale data in the cache.
+            // Subclasses may need to differenciate more.
+            return fileHandleBuilderFor(descriptor, component).invalidateCache();
         }
+
 
         @Override
         @SuppressWarnings("resource")
@@ -337,9 +362,10 @@ public interface StorageProvider
         @Override
         public FileHandle.Builder indexBuildTimeFileHandleBuilderFor(IndexComponent.ForRead component)
         {
-            // By default, no difference between accesses "at flush time" and "at query time", but subclasses may need
-            // to differenciate both.
-            return fileHandleBuilderFor(component);
+            // By default, the only difference between accesses during sstable writing and "at query time" is a request
+            // to invalidate caches to ensure we don't get corruption because of stale data in the cache.
+            // Subclasses may need to differenciate more.
+            return fileHandleBuilderFor(component).invalidateCache();
         }
     }
 }

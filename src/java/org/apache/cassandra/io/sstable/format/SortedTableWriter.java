@@ -95,7 +95,7 @@ public abstract class SortedTableWriter extends SSTableWriter
         lifecycleNewTracker.trackNew(this); // must track before any files are created
 
         dataFile = constructDataFileWriter(descriptor, metadata, metadataCollector, lifecycleNewTracker, writerOption);
-        dbuilder = SSTableReaderBuilder.defaultDataHandleBuilder(descriptor, ZeroCopyMetadata.EMPTY).compressed(compression);
+        dbuilder = SSTableReaderBuilder.dataFileWriteTimeBuilder(descriptor, ZeroCopyMetadata.EMPTY).compressed(compression);
         isInternalKeyspace = SchemaConstants.isInternalKeyspace(metadata.keyspace);
     }
 
