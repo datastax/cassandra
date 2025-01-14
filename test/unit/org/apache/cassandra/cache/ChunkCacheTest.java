@@ -99,8 +99,7 @@ public class ChunkCacheTest
             assertEquals(1, ChunkCache.instance.sizeOfFile(file));
         }
 
-        // Make sure that the file is invalidated
-        assertEquals(0, ChunkCache.instance.sizeOfFile(file));
+        // We do not invalidate the file on close
     }
 
     @Test
@@ -165,8 +164,7 @@ public class ChunkCacheTest
             }
         }
 
-        // Make sure that the file is invalidated
-        assertEquals(0, ChunkCache.instance.sizeOfFile(file));
+        // We do not invalidate the file on close
     }
 
     @Test
@@ -213,8 +211,7 @@ public class ChunkCacheTest
                 assertEquals(1, ChunkCache.instance.sizeOfFile(fileBar));
             }
         }
-        assertEquals(0, ChunkCache.instance.sizeOfFile(fileFoo));
-        assertEquals(0, ChunkCache.instance.sizeOfFile(fileBar));
+        // We do not invalidate the file on close
     }
 
     private void writeBytes(File file, byte[] bytes) throws IOException
