@@ -150,7 +150,7 @@ public class LegacySSTableTest
     {
         for (String legacyVersion : legacyVersions)
         {
-            truncateTables(legacyVersion);
+            truncateLegacyTables(legacyVersion);
         }
     }
 
@@ -231,7 +231,7 @@ public class LegacySSTableTest
         // we need to make sure we write old version metadata in the format for that version
         for (String legacyVersion : legacyVersions)
             assertions.assertThatCode(() -> {
-                truncateTables(legacyVersion);
+                truncateLegacyTables(legacyVersion);
                 loadLegacyTables(legacyVersion);
 
                 for (ColumnFamilyStore cfs : Keyspace.open(LEGACY_TABLES_KEYSPACE).getColumnFamilyStores())
@@ -675,16 +675,6 @@ public class LegacySSTableTest
             QueryProcessor.executeInternal(String.format("CREATE TABLE legacy_tables.legacy_%1$s_tuple (pk text PRIMARY KEY, " +
                 "val frozen<tuple<set<int>,set<text>>>, val2 tuple<set<int>,set<text>>, val3 frozen<legacy_%1$s_tuple_udt>, val4 legacy_%1$s_tuple_udt, extra text)", legacyVersion));
         }
-    }
-
-    private static void truncateTables(String legacyVersion)
-    {
-        QueryProcessor.executeInternal(String.format("TRUNCATE legacy_tables.legacy_%s_simple", legacyVersion));
-        QueryProcessor.executeInternal(String.format("TRUNCATE legacy_tables.legacy_%s_simple_counter", legacyVersion));
-        QueryProcessor.executeInternal(String.format("TRUNCATE legacy_tables.legacy_%s_clust", legacyVersion));
-        QueryProcessor.executeInternal(String.format("TRUNCATE legacy_tables.legacy_%s_clust_counter", legacyVersion));
-        CacheService.instance.invalidateCounterCache();
-        CacheService.instance.invalidateKeyCache();
     }
 
     private static void assertLegacyClustRows(int count, UntypedResultSet rs)
