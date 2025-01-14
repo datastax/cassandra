@@ -25,14 +25,13 @@ import org.junit.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.config.Config;
+import org.apache.cassandra.cache.ChunkCache;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SequenceBasedSSTableId;
-import org.apache.cassandra.io.sstable.format.SSTableReaderBuilder;
+import org.apache.cassandra.utils.PageAware;
 
 import static org.junit.Assert.assertEquals;
 
@@ -44,7 +43,6 @@ public class WriteAndReadTest
     public static void setupDD()
     {
         DatabaseDescriptor.daemonInitialization();
-        DatabaseDescriptor.setIndexAccessMode(Config.DiskAccessMode.standard);
     }
 
     @Test
@@ -62,7 +60,9 @@ public class WriteAndReadTest
 
         File parentDir = new File(System.getProperty("java.io.tmpdir"));
         Descriptor descriptor = new Descriptor(parentDir, "ks", "cf" + length, new SequenceBasedSSTableId(1));
-        try (FileHandle.Builder fhBuilder = SSTableReaderBuilder.primaryIndexWriteTimeBuilder(descriptor, Component.PARTITION_INDEX, OperationType.WRITE))
+        try (FileHandle.Builder fhBuilder = new FileHandle.Builder(descriptor.fileFor(Component.PARTITION_INDEX))
+                                            .withChunkCache(ChunkCache.instance)
+                                            .bufferSize(PageAware.PAGE_SIZE))
         {
             long root = length;
             long keyCount = root * length;
@@ -74,7 +74,6 @@ public class WriteAndReadTest
                             .trickleFsync(DatabaseDescriptor.getTrickleFsync())
                             .trickleFsyncByteInterval(DatabaseDescriptor.getTrickleFsyncIntervalInKb() * 1024)
                             .bufferType(BufferType.OFF_HEAP)
-                            .finishOnClose(true)
                             .build()))
 
             {
@@ -91,12 +90,11 @@ public class WriteAndReadTest
                 writer.sync();
             }
 
-            File filePath = null;
+            File filePath;
             // Now read it like PartitionIndex.load
             try (FileHandle fh = fhBuilder.complete();
                  FileDataInput rdr = fh.createReader(fh.dataLength() - 3 * 8))
             {
-                filePath = rdr.getFile();
                 long firstPosR = rdr.readLong();
                 long keyCountR = rdr.readLong();
                 long rootR = rdr.readLong();
@@ -105,12 +103,10 @@ public class WriteAndReadTest
                 assertEquals(keyCount, keyCountR);
                 assertEquals(rootR, root);
 
+                filePath = rdr.getFile();
             }
-            finally
-            {
-                if (filePath != null)
-                    FileUtils.deleteWithConfirm(filePath);
-            }
+
+            FileUtils.deleteWithConfirm(filePath);
         }
     }
 }

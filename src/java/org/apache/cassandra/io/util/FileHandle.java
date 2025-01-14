@@ -236,9 +236,7 @@ public class FileHandle extends SharedCloseableImpl
         public void tidy()
         {
             // Note: we cannot release data held by the chunk cache at this point, because this would release data that
-            // is pre-cached by early open. See EarlyOpenCachingTest.
-            // If release is necessary, apply it during SSTableReader cleanup e.g. by modifying
-            // StorageProvider.invalidateFileSystemCache.
+            // is pre-cached by early open. See SSTableWriterTest.testFinalOpenRetainsCachedData.
             try
             {
                 if (compressionMetadata != null)
@@ -280,7 +278,6 @@ public class FileHandle extends SharedCloseableImpl
         private boolean mmapped = false;
         private boolean compressed = false;
         private boolean adviseRandom = false;
-        private boolean invalidateCache = false;
         private long length = -1;
 
         public Builder(File file)
@@ -310,23 +307,11 @@ public class FileHandle extends SharedCloseableImpl
         public Builder withChunkCache(ChunkCache chunkCache)
         {
             this.chunkCache = chunkCache;
-            if (invalidateCache && chunkCache != null)
+            // Invalidate the cache for any previous version of the file that may differ from the one we are opening.
+            // It is important to do this here (rather than e.g. in complete) to ensure that we don't invalidate when
+            // opening a file multiple times e.g. when opening sstables early during compaction.
+            if (chunkCache != null)
                 chunkCache.invalidateFile(file);
-            return this;
-        }
-
-        /**
-         * Invalidate any pre-exising cache data for the file. This is called when a new file is being created, to
-         * ensure we don't get invalid data from a previous version of the file.
-         */
-        public Builder invalidateCache()
-        {
-            if (!invalidateCache)
-            {
-                invalidateCache = true;
-                if (chunkCache != null)
-                    chunkCache.invalidateFile(file);
-            }
             return this;
         }
 

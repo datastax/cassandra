@@ -118,11 +118,6 @@ public abstract class SSTableReaderBuilder
         return StorageProvider.instance.fileHandleBuilderFor(descriptor, Component.DATA, zeroCopyMetadata);
     }
 
-    public static FileHandle.Builder dataFileWriteTimeBuilder(Descriptor descriptor, ZeroCopyMetadata zeroCopyMetadata)
-    {
-        return StorageProvider.instance.dataFileWriteTimeBuilder(descriptor, zeroCopyMetadata);
-    }
-
     /**
      * Load index summary, first key and last key from Summary.db file if it exists.
      *
