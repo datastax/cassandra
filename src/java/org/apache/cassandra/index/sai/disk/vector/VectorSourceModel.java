@@ -34,7 +34,7 @@ import static org.apache.cassandra.index.sai.disk.vector.VectorCompression.Compr
 
 public enum VectorSourceModel
 {
-    ADA002((dimension) -> new VectorCompression(PRODUCT_QUANTIZATION, dimension, 0.125), 1.25),
+    ADA002((dimension) -> new VectorCompression(BINARY_QUANTIZATION, dimension, 0.125), 2.0),
     OPENAI_V3_SMALL((dimension) -> new VectorCompression(PRODUCT_QUANTIZATION, dimension, 0.0625), 1.5),
     OPENAI_V3_LARGE((dimension) -> new VectorCompression(PRODUCT_QUANTIZATION, dimension, 0.0625), 1.25),
     BERT(COSINE, (dimension) -> new VectorCompression(PRODUCT_QUANTIZATION, dimension, 0.25), __ -> 1.0),
