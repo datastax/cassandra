@@ -23,6 +23,7 @@ import java.util.concurrent.TimeUnit;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.metrics.TableMetrics;
+import org.apache.cassandra.sensors.SensorsFactory;
 import org.apache.cassandra.service.reads.range.EndpointGroupingRangeCommandIterator;
 
 /** A class that extracts system properties for the cassandra node it runs within. */
@@ -519,10 +520,10 @@ public enum CassandraRelevantProperties
     SAI_INDEX_READS_DISABLED("cassandra.sai.disabled_reads", "false"),
 
     /**
-     * Allows custom implementation of {@link org.apache.cassandra.sensors.RequestSensorsFactory} to optionally create
+     * Allows custom implementation of {@link SensorsFactory} to optionally create
      * and configure {@link org.apache.cassandra.sensors.RequestSensors} instances.
      */
-    REQUEST_SENSORS_FACTORY("cassandra.request_sensors_factory_class"),
+    SENSORS_FACTORY("cassandra.sensors_factory_class"),
 
     /**
      * This property allows configuring the maximum time that CachingRebufferer.rebuffer will wait when waiting for a
@@ -568,7 +569,12 @@ public enum CassandraRelevantProperties
      * Do not wait for gossip to be enabled before starting stabilisation period. This is required especially for tests
      * which do not enable gossip at all.
      */
-    CLUSTER_VERSION_PROVIDER_SKIP_WAIT_FOR_GOSSIP("cassandra.test.cluster_version_provider.skip_wait_for_gossip");
+    CLUSTER_VERSION_PROVIDER_SKIP_WAIT_FOR_GOSSIP("cassandra.test.cluster_version_provider.skip_wait_for_gossip"),
+
+    /**
+     * If true, the coordinator will propagate sensors via the native protocol custom payload bytes map.
+     */
+    SENSORS_VIA_NATIVE_PROTOCOL("cassandra.sensors_via_native_protocol", "false");
 
     CassandraRelevantProperties(String key, String defaultVal)
     {

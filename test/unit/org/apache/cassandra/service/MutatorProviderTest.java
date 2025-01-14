@@ -36,6 +36,7 @@ import org.apache.cassandra.exceptions.UnavailableException;
 import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.locator.ReplicaPlan;
 import org.apache.cassandra.metrics.ClientRequestsMetrics;
+import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.service.paxos.Commit;
 
 public class MutatorProviderTest extends TestCase

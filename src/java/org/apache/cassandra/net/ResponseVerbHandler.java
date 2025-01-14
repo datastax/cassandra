@@ -17,10 +17,21 @@
  */
 package org.apache.cassandra.net;
 
+import java.util.Optional;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.db.IMutation;
+import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.exceptions.RequestFailureReason;
+import org.apache.cassandra.sensors.Context;
+import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.Sensor;
+import org.apache.cassandra.sensors.SensorsCustomParams;
+import org.apache.cassandra.sensors.Type;
+import org.apache.cassandra.service.paxos.AbstractPaxosCallback;
+import org.apache.cassandra.service.reads.ReadCallback;
 import org.apache.cassandra.tracing.Tracing;
 
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
@@ -47,7 +58,7 @@ public class ResponseVerbHandler implements IVerbHandler
         long latencyNanos = approxTime.now() - callbackInfo.createdAtNanos;
         Tracing.trace("Processing response from {}", message.from());
 
-        RequestCallback cb = callbackInfo.callback;
+        RequestCallback<?> cb = callbackInfo.callback;
         if (message.isFailureResponse())
         {
             cb.onFailure(message.from(), (RequestFailureReason) message.payload);
@@ -55,7 +66,61 @@ public class ResponseVerbHandler implements IVerbHandler
         else
         {
             MessagingService.instance().latencySubscribers.maybeAdd(cb, message.from(), latencyNanos, NANOSECONDS);
+            trackReplicaSensors(callbackInfo, message);
             cb.onResponse(message);
         }
+    }
+
+    private void trackReplicaSensors(RequestCallbacks.CallbackInfo callbackInfo, Message<?> message)
+    {
+        RequestSensors sensors = callbackInfo.callback.getRequestSensors();
+        if (sensors == null)
+            return;
+
+        if (callbackInfo instanceof RequestCallbacks.WriteCallbackInfo)
+        {
+            RequestCallbacks.WriteCallbackInfo writerInfo = (RequestCallbacks.WriteCallbackInfo) callbackInfo;
+            IMutation mutation = writerInfo.iMutation();
+            if (mutation == null)
+                return;
+
+            for (PartitionUpdate pu : mutation.getPartitionUpdates())
+            {
+                Context context = Context.from(pu.metadata());
+                if (pu.metadata().isIndex()) continue;
+                incrementSensor(sensors, context, Type.WRITE_BYTES, message);
+            }
+        }
+        else if (callbackInfo.callback instanceof ReadCallback)
+        {
+            ReadCallback<?, ?> readCallback = (ReadCallback<?, ?>) callbackInfo.callback;
+            Context context = Context.from(readCallback.command());
+            incrementSensor(sensors, context, Type.READ_BYTES, message);
+        }
+        // Covers Paxos Prepare and Propose callbacks. Paxos Commit callback is a regular WriteCallbackInfo
+        else if (callbackInfo.callback instanceof AbstractPaxosCallback)
+        {
+            AbstractPaxosCallback<?> paxosCallback = (AbstractPaxosCallback<?>) callbackInfo.callback;
+            Context context = Context.from(paxosCallback.getMetadata());
+            incrementSensor(sensors, context, Type.READ_BYTES, message);
+            incrementSensor(sensors, context, Type.WRITE_BYTES, message);
+        }
+    }
+
+    /**
+     * Increments the sensor for the given context and type based on the value encoded in the replica response message.
+     */
+    private void incrementSensor(RequestSensors sensors, Context context, Type type, Message<?> message)
+    {
+        Optional<Sensor> sensor = sensors.getSensor(context, type);
+        if (sensor.isEmpty())
+            return;
+
+        Optional<String> customParam = SensorsCustomParams.paramForRequestSensor(sensor.get());
+        if (customParam.isEmpty())
+            return;
+
+        double sensorValue = SensorsCustomParams.sensorValueFromInternodeResponse(message, customParam.get());
+        sensors.incrementSensor(context, type, sensorValue);
     }
 }

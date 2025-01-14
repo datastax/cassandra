@@ -30,11 +30,11 @@ import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.NoPayload;
 import org.apache.cassandra.net.ParamType;
-import org.apache.cassandra.net.SensorsCustomParams;
+import org.apache.cassandra.sensors.SensorsCustomParams;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.sensors.Context;
 import org.apache.cassandra.sensors.RequestSensors;
-import org.apache.cassandra.sensors.RequestSensorsFactory;
+import org.apache.cassandra.sensors.SensorsFactory;
 import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.tracing.Tracing;
 
@@ -51,7 +51,7 @@ public class MutationVerbHandler implements IVerbHandler<Mutation>
 
         Message.Builder<NoPayload> response = respondToMessage.emptyResponseBuilder();
         // no need to calculate outbound internode bytes because the response is NoPayload
-        SensorsCustomParams.addSensorsToResponse(requestSensors, response);
+        SensorsCustomParams.addSensorsToInternodeResponse(requestSensors, response);
         MessagingService.instance().send(response.build(), respondToAddress);
     }
 
@@ -86,7 +86,7 @@ public class MutationVerbHandler implements IVerbHandler<Mutation>
         try
         {
             // Initialize the sensor and set ExecutorLocals
-            RequestSensors requestSensors = RequestSensorsFactory.instance.create(message.payload.getKeyspaceName());
+            RequestSensors requestSensors = SensorsFactory.instance.createRequestSensors(message.payload.getKeyspaceName());
             ExecutorLocals locals = ExecutorLocals.create(requestSensors);
             ExecutorLocals.set(locals);
 

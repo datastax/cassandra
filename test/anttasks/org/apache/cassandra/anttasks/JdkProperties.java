@@ -16,17 +16,18 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.sensors;
+package org.apache.cassandra.anttasks;
 
-/**
- * Implementation of the {@link RequestSensorsFactory} that creates a new instance of {@link ActiveRequestSensors}
- * enabled for all keyspaces.
- */
-public class ActiveRequestSensorsFactory implements RequestSensorsFactory
+import org.apache.tools.ant.Project;
+import org.apache.tools.ant.Task;
+
+public class JdkProperties extends Task
 {
-    @Override
-    public RequestSensors create(String keyspace)
+
+    public void execute()
     {
-        return new ActiveRequestSensors();
+        Project project = getProject();
+        project.setNewProperty("java.version." + project.getProperty("ant.java.version"), "true");
+        project.setNewProperty("use-jdk" + project.getProperty("ant.java.version"), "true");
     }
 }

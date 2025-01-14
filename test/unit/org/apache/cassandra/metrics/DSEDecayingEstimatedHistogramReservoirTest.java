@@ -16,22 +16,17 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.sensors;
+package org.apache.cassandra.metrics;
 
-import org.junit.Test;
+import org.junit.BeforeClass;
 
-import static org.assertj.core.api.Assertions.assertThat;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 
-
-public class RequestSensorsFactoryTest
+public class DSEDecayingEstimatedHistogramReservoirTest extends DecayingEstimatedHistogramReservoirTestBase
 {
-    @Test
-    public void testCreateUsesNoOpByDefault()
+    @BeforeClass
+    public static void setup()
     {
-        SensorsFactory factory = SensorsFactory.instance;
-        RequestSensors sensors = factory.createRequestSensors("ks1");
-        assertThat(sensors).isInstanceOf(NoOpRequestSensors.class);
-        RequestSensors anotherSensors = factory.createRequestSensors("k2");
-        assertThat(anotherSensors).isSameAs(sensors);
+        CassandraRelevantProperties.USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES.setBoolean(true);
     }
 }
