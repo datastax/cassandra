@@ -632,7 +632,7 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
         if (Tracing.traceSinglePartitions())
             Tracing.trace("Acquiring sstable references");
 
-        view.sstables.sort(SSTableReader.maxTimestampDescending);
+        view.sortSSTablesByMaxTimestampDescending();
         ClusteringIndexFilter filter = clusteringIndexFilter();
         long minTimestamp = Long.MAX_VALUE;
         long mostRecentPartitionTombstone = Long.MIN_VALUE;
@@ -673,7 +673,7 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
              * In other words, iterating in descending maxTimestamp order allow to do our mostRecentPartitionTombstone
              * elimination in one pass, and minimize the number of sstables for which we read a partition tombstone.
             */
-            view.sstables.sort(SSTableReader.maxTimestampDescending);
+            view.sortSSTablesByMaxTimestampDescending();
             int nonIntersectingSSTables = 0;
             int includedDueToTombstones = 0;
 
@@ -903,7 +903,7 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
         }
 
         /* add the SSTables on disk */
-        view.sstables.sort(SSTableReader.maxTimestampDescending);
+        view.sortSSTablesByMaxTimestampDescending();
         // read sorted sstables
         SSTableReadMetricsCollector metricsCollector = new SSTableReadMetricsCollector();
         for (SSTableReader sstable : view.sstables)
