@@ -163,6 +163,6 @@ public class PrimaryKeyWithSource implements PrimaryKey
     @Override
     public String toString()
     {
-        return String.format("%s (source sstable: %s, %s)", primaryKey(), sourceSstableId, sourceRowId);
+        return String.format("%s (source sstable: %s, %s)", delegatePrimaryKey, sourceSstableId, sourceRowId);
     }
 }
