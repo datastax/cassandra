@@ -457,14 +457,18 @@ customIndexExpression [WhereClause.Builder clause]
     ;
 
 orderByClause[List<Ordering.Raw> orderings]
-    @init{
+    @init {
         Ordering.Direction direction = Ordering.Direction.ASC;
+        Ordering.Raw.Expression expr = null;
     }
-    : c=cident (K_ANN_OF t=term)? (K_ASC | K_DESC { direction = Ordering.Direction.DESC; })?
+    : c=cident
+        ( K_ANN_OF t=term { expr = new Ordering.Raw.Ann(c, t); }
+        | K_BM25_OF t=term { expr = new Ordering.Raw.Bm25(c, t); }
+        )?
+        (K_ASC | K_DESC { direction = Ordering.Direction.DESC; })?
     {
-        Ordering.Raw.Expression expr = (t == null)
-            ? new Ordering.Raw.SingleColumn(c)
-            : new Ordering.Raw.Ann(c, t);
+        if (expr == null)
+            expr = new Ordering.Raw.SingleColumn(c);
         orderings.add(new Ordering.Raw(expr, direction));
     }
     ;
@@ -1967,6 +1971,7 @@ basic_unreserved_keyword returns [String str]
         | K_COLUMN
         | K_RECORD
         | K_ANN_OF
+        | K_BM25_OF
         | K_OFFSET
         ) { $str = $k.text; }
     ;

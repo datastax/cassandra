@@ -1129,6 +1129,7 @@ public class RowFilter
                 case LIKE_MATCHES:
                 case ANALYZER_MATCHES:
                 case ANN:
+                case BM25:
                     {
                         assert !column.isComplex() : "Only CONTAINS and CONTAINS_KEY are supported for 'complex' types";
                         ByteBuffer foundValue = getValue(metadata, partitionKey, row);
