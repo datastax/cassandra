@@ -45,7 +45,9 @@ import static org.junit.Assert.fail;
 
 public class SingleRestrictionEstimatedRowCountTest extends SAITester
 {
-    static protected Map<Map.Entry<Version, CQL3Type.Native>, ColumnFamilyStore> map = new HashMap<>();
+    static protected Map<Map.Entry<Version, CQL3Type.Native>, ColumnFamilyStore> tables = new HashMap<>();
+    static Version[] versions = new Version[]{ Version.DB, Version.EB };
+    static CQL3Type.Native[] types = new CQL3Type.Native[]{ INT, DECIMAL, VARINT };
 
     static protected Object getFilterValue(CQL3Type.Native type, int value)
     {
@@ -62,9 +64,16 @@ public class SingleRestrictionEstimatedRowCountTest extends SAITester
         return null;
     }
 
-    @Test
-    public void testInequality()
+    static Map.Entry<Version, CQL3Type.Native> tablesEntrykey(Version version, CQL3Type.Native type)
     {
+        return new AbstractMap.SimpleEntry<>(version, type);
+    }
+
+    @Test
+    public void testMemtablesSAI()
+    {
+        createTables();
+
         var test = new RowCountTest(Operator.NEQ, 25);
         test.doTest(Version.DB, INT, 97.0);
         test.doTest(Version.EB, INT, 97.0);
@@ -72,56 +81,57 @@ public class SingleRestrictionEstimatedRowCountTest extends SAITester
         test.doTest(Version.DB, DECIMAL, 97.0);
         test.doTest(Version.EB, DECIMAL, 97.0);
         test.doTest(Version.EB, VARINT, 97.0);
-    }
 
-    @Test
-    public void testHalfRangeMiddle()
-    {
-        var test = new RowCountTest(Operator.LT, 50);
+        test = new RowCountTest(Operator.LT, 50);
         test.doTest(Version.DB, INT, 48);
         test.doTest(Version.EB, INT, 48);
         test.doTest(Version.DB, DECIMAL, 48);
         test.doTest(Version.EB, DECIMAL, 48);
-    }
 
-    @Test
-    public void testHalfRangeEverything()
-    {
-        var test = new RowCountTest(Operator.LT, 150);
+        test = new RowCountTest(Operator.LT, 150);
         test.doTest(Version.DB, INT, 97);
         test.doTest(Version.EB, INT, 97);
         test.doTest(Version.DB, DECIMAL, 97);
         test.doTest(Version.EB, DECIMAL, 97);
-    }
 
-    @Test
-    public void testEquality()
-    {
-        var test = new RowCountTest(Operator.EQ, 31);
+        test = new RowCountTest(Operator.EQ, 31);
         test.doTest(Version.DB, INT, 15);
         test.doTest(Version.EB, INT, 0);
         test.doTest(Version.DB, DECIMAL, 15);
         test.doTest(Version.EB, DECIMAL, 0);
     }
 
-    protected ColumnFamilyStore prepareTable(CQL3Type.Native type)
-    {
-        createTable("CREATE TABLE %s (pk text PRIMARY KEY, age " + type + ')');
-        createIndex("CREATE CUSTOM INDEX ON %s(age) USING 'StorageAttachedIndex'");
-        ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
 
-        // Avoid race condition of flushing after the index creation
+    void createTables()
+    {
+        for (Version version : versions)
+        {
+            SAIUtil.setLatestVersion(version);
+            for (CQL3Type.Native type : types)
+            {
+                createTable("CREATE TABLE %s (pk text PRIMARY KEY, age " + type + ')');
+                createIndex("CREATE CUSTOM INDEX ON %s(age) USING 'StorageAttachedIndex'");
+                tables.put(tablesEntrykey(version, type), getCurrentColumnFamilyStore());
+            }
+        }
+        flush();
+        for (ColumnFamilyStore cfs : tables.values())
+            populateTable(cfs);
+    }
+
+    void populateTable(ColumnFamilyStore cfs)
+    {
+        // Avoid race condition of starting before flushing completed
         cfs.unsafeRunWithoutFlushing(() -> {
             for (int i = 0; i < 100; i++)
             {
-                execute("INSERT INTO %s (pk, age) VALUES (?," + i + ')', "key" + i);
+                String query = String.format("INSERT INTO %s (pk, age) VALUES (?, " + i + ')', cfs.keyspace.getName() + '.' + cfs.name);
+                executeFormattedQuery(query, "key" + i);
             }
         });
-
-        return cfs;
     }
 
-    class RowCountTest
+    static class RowCountTest
     {
         final Operator op;
         final int filterValue;
@@ -134,15 +144,8 @@ public class SingleRestrictionEstimatedRowCountTest extends SAITester
 
         void doTest(Version version, CQL3Type.Native type, double expectedRows)
         {
-            Version latest = Version.latest();
-            SAIUtil.setLatestVersion(version);
-
-            var key = new AbstractMap.SimpleEntry<>(version, type);
-            ColumnFamilyStore cfs = map.computeIfAbsent(key, k -> prepareTable(type));
-
-//            ColumnFamilyStore cfs = prepareTable(type);
+            ColumnFamilyStore cfs = tables.get(new AbstractMap.SimpleEntry<>(version, type));
             Object filter = getFilterValue(type, filterValue);
-
             ReadCommand rc = Util.cmd(cfs)
                                  .columns("age")
                                  .filterOn("age", op, filter)
@@ -152,6 +155,7 @@ public class SingleRestrictionEstimatedRowCountTest extends SAITester
                                                              version.onDiskFormat().indexFeatureSet(),
                                                              new QueryContext(),
                                                              null);
+
             long totalRows = controller.planFactory.tableMetrics.rows;
             assertEquals(0, cfs.metrics().liveSSTableCount.getValue().intValue());
             assertEquals(97, totalRows);
@@ -165,8 +169,6 @@ public class SingleRestrictionEstimatedRowCountTest extends SAITester
             assertEquals(expectedRows, root.expectedRows(), 0.1);
             assertEquals(expectedRows, planNode.expectedKeys(), 0.1);
             assertEquals(expectedRows / totalRows, planNode.selectivity(), 0.001);
-
-            SAIUtil.setLatestVersion(latest);
         }
     }
 }
