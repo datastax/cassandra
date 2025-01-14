@@ -381,7 +381,7 @@ public class ClusteringComparator implements Comparator<Clusterable>
     /**
      * Produces a clustering from the given byte-comparable value. The method will throw an exception if the value
      * does not correctly encode a clustering of this type, including if it encodes a position before or after a
-     * clustering (i.e. a bound/boundary).
+     * clustering (i.e. a bound/boundary). Uses the OSS50 version of the byte-comparable encoding.
      *
      * @param accessor Accessor to use to construct components. Because this will be used to construct individual
      *                 arrays/buffers for each component, it may be sensible to use an accessor that allocates larger
@@ -391,7 +391,24 @@ public class ClusteringComparator implements Comparator<Clusterable>
     public <V> Clustering<?> clusteringFromByteComparable(ValueAccessor<V> accessor,
                                                           ByteComparable comparable)
     {
-        ByteComparable.Version version = ByteComparable.Version.OSS50;
+        return clusteringFromByteComparable(accessor, comparable, ByteComparable.Version.OSS50);
+    }
+
+    /**
+     * Produces a clustering from the given byte-comparable value. The method will throw an exception if the value
+     * does not correctly encode a clustering of this type, including if it encodes a position before or after a
+     * clustering (i.e. a bound/boundary). Uses the OSS50 version of the byte-comparable encoding.
+     *
+     * @param accessor Accessor to use to construct components. Because this will be used to construct individual
+     *                 arrays/buffers for each component, it may be sensible to use an accessor that allocates larger
+     *                 buffers in advance.
+     * @param comparable The clustering encoded as a byte-comparable sequence.
+     * @param version The version of the byte-comparable encoding.
+     */
+    public <V> Clustering<?> clusteringFromByteComparable(ValueAccessor<V> accessor,
+                                                          ByteComparable comparable,
+                                                          ByteComparable.Version version)
+    {
         ByteSource.Peekable orderedBytes = ByteSource.peekable(comparable.asComparableBytes(version));
         if (orderedBytes == null)
             return null;
