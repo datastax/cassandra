@@ -123,6 +123,10 @@ public class View implements Iterable<SSTableIndex>
         return view.get(descriptor);
     }
 
+    public boolean hasIndexForSSTable(SSTableReader sstable)
+    {
+        return view.containsKey(sstable.descriptor);
+    }
 
     /**
      * This is required since IntervalTree doesn't support custom Comparator

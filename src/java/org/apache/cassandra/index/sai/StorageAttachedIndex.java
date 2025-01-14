@@ -801,7 +801,7 @@ public class StorageAttachedIndex implements Index
             //   1. The current view does not contain the SSTable
             //   2. The SSTable is not marked compacted
             //   3. The column index does not have a completion marker
-            if (!view.containsSSTable(sstable)
+            if (!view.hasIndexForSSTable(sstable)
                 && !sstable.isMarkedCompacted()
                 && !IndexDescriptor.isIndexBuildCompleteOnDisk(sstable, indexContext))
             {
