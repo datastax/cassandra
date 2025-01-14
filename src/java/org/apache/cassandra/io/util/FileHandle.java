@@ -236,7 +236,7 @@ public class FileHandle extends SharedCloseableImpl
         public void tidy()
         {
             // Note: we cannot release data held by the chunk cache at this point, because this would release data that
-            // is pre-cached by early open. See SSTableWriterTest.testFinalOpenRetainsCachedData.
+            // is pre-cached by early open. Release is done during SSTableReader cleanup. See EarlyOpenCachingTest.
             try
             {
                 if (compressionMetadata != null)
@@ -307,11 +307,6 @@ public class FileHandle extends SharedCloseableImpl
         public Builder withChunkCache(ChunkCache chunkCache)
         {
             this.chunkCache = chunkCache;
-            // Invalidate the cache for any previous version of the file that may differ from the one we are opening.
-            // It is important to do this here (rather than e.g. in complete) to ensure that we don't invalidate when
-            // opening a file multiple times e.g. when opening sstables early during compaction.
-            if (chunkCache != null)
-                chunkCache.invalidateFile(file);
             return this;
         }
 
