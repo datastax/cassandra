@@ -49,10 +49,10 @@ import io.github.jbellis.jvector.graph.disk.InlineVectors;
 import io.github.jbellis.jvector.graph.disk.OnDiskGraphIndexWriter;
 import io.github.jbellis.jvector.graph.disk.OrdinalMapper;
 import io.github.jbellis.jvector.graph.similarity.SearchScoreProvider;
-import io.github.jbellis.jvector.pq.BinaryQuantization;
-import io.github.jbellis.jvector.pq.CompressedVectors;
-import io.github.jbellis.jvector.pq.ProductQuantization;
-import io.github.jbellis.jvector.pq.VectorCompressor;
+import io.github.jbellis.jvector.quantization.BinaryQuantization;
+import io.github.jbellis.jvector.quantization.CompressedVectors;
+import io.github.jbellis.jvector.quantization.ProductQuantization;
+import io.github.jbellis.jvector.quantization.VectorCompressor;
 import io.github.jbellis.jvector.util.Accountable;
 import io.github.jbellis.jvector.util.Bits;
 import io.github.jbellis.jvector.util.DenseIntMap;
@@ -509,7 +509,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
                 if (matcher.apply(cv))
                 {
                     // We can exit now because we won't find a better candidate
-                    var candidate = new PqInfo(searcher.getPQ(), searcher.containsUnitVectors());
+                    var candidate = new PqInfo(searcher.getPQ(), searcher.containsUnitVectors(), segment.metadata.numRows);
                     if (segment.metadata.numRows >= ProductQuantization.MAX_PQ_TRAINING_SET_SIZE)
                         return candidate;
 
@@ -536,9 +536,8 @@ public class CassandraOnHeapGraph<T> implements Accountable
             // build encoder (expensive for PQ, cheaper for BQ)
             if (preferredCompression.type == CompressionType.PRODUCT_QUANTIZATION)
             {
-                var cvi = getPqIfPresent(indexContext, preferredCompression::equals);
-                var previousCV = cvi == null ? null : cvi.pq;
-                compressor = computeOrRefineFrom(previousCV, preferredCompression);
+                var pqi = getPqIfPresent(indexContext, preferredCompression::equals);
+                compressor = computeOrRefineFrom(pqi, preferredCompression);
             }
             else
             {
@@ -581,25 +580,25 @@ public class CassandraOnHeapGraph<T> implements Accountable
         writer.writeByte(type.ordinal());
     }
 
-    VectorCompressor<?> computeOrRefineFrom(ProductQuantization previousPQ, VectorCompression preferredCompression)
+    ProductQuantization computeOrRefineFrom(PqInfo existingInfo, VectorCompression preferredCompression)
     {
-        // refining an existing codebook is much faster than starting from scratch
-        VectorCompressor<?> compressor;
-        if (previousPQ == null)
+        if (existingInfo == null)
         {
+            // no previous PQ, compute a new one if we have enough rows to do it
             if (vectorValues.size() < MIN_PQ_ROWS)
-                compressor = null;
+                return null;
             else
-                compressor = ProductQuantization.compute(vectorValues, preferredCompression.getCompressedSize(), 256, false);
+                return ProductQuantization.compute(vectorValues, preferredCompression.getCompressedSize(), 256, false);
         }
-        else
-        {
-            if (vectorValues.size() < MIN_PQ_ROWS)
-                compressor = previousPQ;
-            else
-                compressor = previousPQ.refine(vectorValues);
-        }
-        return compressor;
+
+        // use the existing one unmodified if we either don't have enough rows to fine-tune, or
+        // the existing one was built with a large enough set
+        var existingPQ = existingInfo.pq;
+        if (vectorValues.size() < MIN_PQ_ROWS || existingInfo.rowCount >= ProductQuantization.MAX_PQ_TRAINING_SET_SIZE)
+            return existingPQ;
+
+        // refine the existing one
+        return existingPQ.refine(vectorValues);
     }
 
     public long ramBytesUsed()
@@ -625,11 +624,13 @@ public class CassandraOnHeapGraph<T> implements Accountable
         public final ProductQuantization pq;
         /** an empty Optional indicates that the index was written with an older version that did not record this information */
         public final boolean unitVectors;
+        public final long rowCount;
 
-        public PqInfo(ProductQuantization pq, boolean unitVectors)
+        public PqInfo(ProductQuantization pq, boolean unitVectors, long rowCount)
         {
             this.pq = pq;
             this.unitVectors = unitVectors;
+            this.rowCount = rowCount;
         }
     }
 

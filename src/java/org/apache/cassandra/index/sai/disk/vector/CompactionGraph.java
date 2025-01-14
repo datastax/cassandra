@@ -22,16 +22,22 @@ import java.io.Closeable;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
+import java.util.ArrayList;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.stream.IntStream;
 
+import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.github.jbellis.jvector.graph.GraphIndexBuilder;
+import io.github.jbellis.jvector.graph.ListRandomAccessVectorValues;
 import io.github.jbellis.jvector.graph.disk.Feature;
 import io.github.jbellis.jvector.graph.disk.FeatureId;
 import io.github.jbellis.jvector.graph.disk.FusedADC;
@@ -40,8 +46,14 @@ import io.github.jbellis.jvector.graph.disk.OnDiskGraphIndex;
 import io.github.jbellis.jvector.graph.disk.OnDiskGraphIndexWriter;
 import io.github.jbellis.jvector.graph.disk.OrdinalMapper;
 import io.github.jbellis.jvector.graph.similarity.BuildScoreProvider;
-import io.github.jbellis.jvector.pq.MutablePQVectors;
-import io.github.jbellis.jvector.pq.ProductQuantization;
+import io.github.jbellis.jvector.quantization.BQVectors;
+import io.github.jbellis.jvector.quantization.BinaryQuantization;
+import io.github.jbellis.jvector.quantization.MutableBQVectors;
+import io.github.jbellis.jvector.quantization.MutableCompressedVectors;
+import io.github.jbellis.jvector.quantization.MutablePQVectors;
+import io.github.jbellis.jvector.quantization.PQVectors;
+import io.github.jbellis.jvector.quantization.ProductQuantization;
+import io.github.jbellis.jvector.quantization.VectorCompressor;
 import io.github.jbellis.jvector.util.Accountable;
 import io.github.jbellis.jvector.util.RamUsageEstimator;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
@@ -54,6 +66,7 @@ import net.openhft.chronicle.hash.serialization.BytesWriter;
 import net.openhft.chronicle.map.ChronicleMap;
 import net.openhft.chronicle.map.ChronicleMapBuilder;
 import org.apache.cassandra.concurrent.ExecutorFactory;
+import org.agrona.collections.Int2ObjectHashMap;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -90,12 +103,18 @@ public class CompactionGraph implements Closeable, Accountable
                                                                        new LowPriorityThreadFactory(),
                                                                        null,
                                                                        false);
+    // see comments to JVector PhysicalCoreExecutor -- HT tends to cause contention for the SIMD units
+    private static final ForkJoinPool compactionSimdPool = new ForkJoinPool(Runtime.getRuntime().availableProcessors() / 2, // checkstyle: permit this instantiation
+                                                                            new LowPriorityThreadFactory(),
+                                                                            null,
+                                                                            false);
 
-    private final GraphIndexBuilder builder;
+    @VisibleForTesting
+    public static int PQ_TRAINING_SIZE = ProductQuantization.MAX_PQ_TRAINING_SET_SIZE;
+
     private final VectorType.VectorSerializer serializer;
     private final VectorSimilarityFunction similarityFunction;
     private final ChronicleMap<VectorFloat<?>, CompactionVectorPostings> postingsMap;
-    private final MutablePQVectors pqVectors;
     private final IndexComponents.ForWrite perIndexComponents;
     private final IndexContext context;
     private final boolean unitVectors;
@@ -104,7 +123,6 @@ public class CompactionGraph implements Closeable, Accountable
     private final File termsFile;
     private final int dimension;
     private Structure postingsStructure;
-    private final ProductQuantization compressor;
     private OnDiskGraphIndexWriter writer;
     private final long termsOffset;
     private int lastRowId = -1;
@@ -112,7 +130,16 @@ public class CompactionGraph implements Closeable, Accountable
     private final boolean useSyntheticOrdinals;
     private int nextOrdinal = 0;
 
-    public CompactionGraph(IndexComponents.ForWrite perIndexComponents, ProductQuantization compressor, boolean unitVectors, long keyCount, boolean allRowsHaveVectors) throws IOException
+    // protects the fine-tuning changes (done in maybeAddVector) from addGraphNode threads
+    // (and creates happens-before events so we don't need to mark the other fields volatile)
+    private final ReadWriteLock trainingLock = new ReentrantReadWriteLock();
+    private boolean pqFinetuned = false;
+    // not final; will be updated to different objects after fine-tuning
+    private VectorCompressor<?> compressor;
+    private MutableCompressedVectors compressedVectors;
+    private GraphIndexBuilder builder;
+
+    public CompactionGraph(IndexComponents.ForWrite perIndexComponents, VectorCompressor<?> compressor, boolean unitVectors, long keyCount, boolean allRowsHaveVectors) throws IOException
     {
         this.perIndexComponents = perIndexComponents;
         this.context = perIndexComponents.context();
@@ -158,14 +185,29 @@ public class CompactionGraph implements Closeable, Accountable
                                          .createPersistedTo(postingsFile.toJavaIOFile());
 
         // VSTODO add LVQ
-        pqVectors = new MutablePQVectors(compressor);
-        builder = new GraphIndexBuilder(BuildScoreProvider.pqBuildScoreProvider(similarityFunction, pqVectors),
+        BuildScoreProvider bsp;
+        if (compressor instanceof ProductQuantization)
+        {
+            compressedVectors = new MutablePQVectors((ProductQuantization) compressor);
+            bsp = BuildScoreProvider.pqBuildScoreProvider(similarityFunction, (PQVectors) compressedVectors);
+        }
+        else if (compressor instanceof BinaryQuantization)
+        {
+            var bq = new BinaryQuantization(dimension);
+            compressedVectors = new MutableBQVectors(bq);
+            bsp = BuildScoreProvider.bqBuildScoreProvider((BQVectors) compressedVectors);
+        }
+        else
+        {
+            throw new IllegalArgumentException("Unsupported compressor: " + compressor);
+        }
+        builder = new GraphIndexBuilder(bsp,
                                         dimension,
                                         indexConfig.getAnnMaxDegree(),
                                         indexConfig.getConstructionBeamWidth(),
                                         1.2f,
                                         dimension > 3 ? 1.2f : 1.4f,
-                                        compactionFjp, compactionFjp);
+                                        compactionSimdPool, compactionFjp);
 
         termsFile = perIndexComponents.addOrGet(IndexComponentType.TERMS_DATA).file();
         termsOffset = (termsFile.exists() ? termsFile.length() : 0)
@@ -182,9 +224,9 @@ public class CompactionGraph implements Closeable, Accountable
         var writerBuilder = new OnDiskGraphIndexWriter.Builder(builder.getGraph(), termsFile.toPath())
                       .withStartOffset(termsOffset)
                       .with(new InlineVectors(dimension));
-        if (V3OnDiskFormat.WRITE_JVECTOR3_FORMAT)
+        if (V3OnDiskFormat.WRITE_JVECTOR3_FORMAT && compressor instanceof ProductQuantization)
         {
-            writerBuilder = writerBuilder.with(new FusedADC(indexConfig.getAnnMaxDegree(), compressor));
+            writerBuilder = writerBuilder.with(new FusedADC(indexConfig.getAnnMaxDegree(), (ProductQuantization) compressor));
         }
         else
         {
@@ -248,11 +290,57 @@ public class CompactionGraph implements Closeable, Accountable
             int ordinal = useSyntheticOrdinals ? nextOrdinal++ : segmentRowId;
             postings = new CompactionVectorPostings(ordinal, segmentRowId);
             postingsMap.put(vector, postings);
+
+            // fine-tune the PQ if we've collected enough vectors
+            if (compressor instanceof ProductQuantization && !pqFinetuned && postingsMap.size() >= PQ_TRAINING_SIZE)
+            {
+                // walk the on-disk Postings once to build (1) a dense list of vectors with no missing entries or zeros
+                // and (2) a map of vectors keyed by ordinal
+                var trainingVectors = new ArrayList<VectorFloat<?>>(postingsMap.size());
+                var vectorsByOrdinal = new Int2ObjectHashMap<VectorFloat<?>>();
+                postingsMap.forEach((v, p) -> {
+                    trainingVectors.add(v);
+                    vectorsByOrdinal.put(p.getOrdinal(), v);
+                });
+
+                // lock the addGraphNode threads out so they don't try to use old pq codepoints against the new codebook
+                trainingLock.writeLock().lock();
+                try
+                {
+                    // Fine tune the pq codebook
+                    compressor = ((ProductQuantization) compressor).refine(new ListRandomAccessVectorValues(trainingVectors, dimension));
+                    trainingVectors.clear(); // don't need these anymore so let GC reclaim if it wants to
+
+                    // re-encode the vectors added so far
+                    compressedVectors = new MutablePQVectors((ProductQuantization) compressor);
+                    compactionFjp.submit(() -> {
+                        IntStream.range(0, builder.getGraph().getIdUpperBound())
+                                 // FIXME parallel is disabled until 4.0.0 beta2 (encodeAndSet is not threadsafe before then)
+//                                 .parallel()
+                                 .forEach(i -> {
+                                     var v = vectorsByOrdinal.get(i);
+                                     if (v == null)
+                                         compressedVectors.setZero(i);
+                                     else
+                                         compressedVectors.encodeAndSet(i, v);
+                                 });
+                    }).join();
+
+                    // Keep the existing edges but recompute their scores
+                    builder = GraphIndexBuilder.rescore(builder, BuildScoreProvider.pqBuildScoreProvider(similarityFunction, (PQVectors) compressedVectors));
+                }
+                finally
+                {
+                    trainingLock.writeLock().unlock();
+                }
+                pqFinetuned = true;
+            }
+
             writer.writeInline(ordinal, Feature.singleState(FeatureId.INLINE_VECTORS, new InlineVectors.State(vector)));
             // Fill in any holes in the pqVectors (setZero has the side effect of increasing the count)
-            while (pqVectors.count() < ordinal)
-                pqVectors.setZero(pqVectors.count());
-            pqVectors.encodeAndSet(ordinal, vector);
+            while (compressedVectors.count() < ordinal)
+                compressedVectors.setZero(compressedVectors.count());
+            compressedVectors.encodeAndSet(ordinal, vector);
 
             bytesUsed += postings.ramBytesUsed();
             return new InsertionResult(bytesUsed, ordinal, vector);
@@ -271,7 +359,15 @@ public class CompactionGraph implements Closeable, Accountable
 
     public long addGraphNode(InsertionResult result)
     {
-        return builder.addGraphNode(result.ordinal, result.vector);
+        trainingLock.readLock().lock();
+        try
+        {
+            return builder.addGraphNode(result.ordinal, result.vector);
+        }
+        finally
+        {
+            trainingLock.readLock().unlock();
+        }
     }
 
     public SegmentMetadata.ComponentMetadataMap flush() throws IOException
@@ -284,15 +380,15 @@ public class CompactionGraph implements Closeable, Accountable
         assert nInProgress == 0 : String.format("Attempting to write graph while %d inserts are in progress", nInProgress);
         assert !useSyntheticOrdinals || nextOrdinal == builder.getGraph().size() : String.format("nextOrdinal %d != graph size %d -- ordinals should be sequential",
                                                                                                  nextOrdinal, builder.getGraph().size());
-        assert pqVectors.count() == builder.getGraph().getIdUpperBound() : String.format("Largest vector id %d != largest graph id %d",
-                                                                                         pqVectors.count(), builder.getGraph().getIdUpperBound());
+        assert compressedVectors.count() == builder.getGraph().getIdUpperBound() : String.format("Largest vector id %d != largest graph id %d",
+                                                                                                 compressedVectors.count(), builder.getGraph().getIdUpperBound());
         assert postingsMap.keySet().size() == builder.getGraph().size() : String.format("postings map entry count %d != vector count %d",
                                                                                         postingsMap.keySet().size(), builder.getGraph().size());
         if (logger.isDebugEnabled())
         {
             logger.debug("Writing graph with {} rows and {} distinct vectors",
                          postingsMap.values().stream().mapToInt(VectorPostings::size).sum(), builder.getGraph().size());
-            logger.debug("Estimated size is {} + {}", pqVectors.ramBytesUsed(), builder.getGraph().ramBytesUsed());
+            logger.debug("Estimated size is {} + {}", compressedVectors.ramBytesUsed(), builder.getGraph().ramBytesUsed());
         }
 
         try (var postingsOutput = perIndexComponents.addOrGet(IndexComponentType.POSTING_LISTS).openOutput(true);
@@ -304,7 +400,7 @@ public class CompactionGraph implements Closeable, Accountable
             // write PQ (time to do this is negligible, don't bother doing it async)
             long pqOffset = pqOutput.getFilePointer();
             CassandraOnHeapGraph.writePqHeader(pqOutput.asSequentialWriter(), unitVectors, VectorCompression.CompressionType.PRODUCT_QUANTIZATION);
-            pqVectors.write(pqOutput.asSequentialWriter(), JVECTOR_2_VERSION); // VSTODO old version until we add APQ
+            compressedVectors.write(pqOutput.asSequentialWriter(), JVECTOR_2_VERSION); // VSTODO old version until we add APQ
             long pqLength = pqOutput.getFilePointer() - pqOffset;
 
             // write postings asynchronously while we run cleanup()
@@ -362,7 +458,7 @@ public class CompactionGraph implements Closeable, Accountable
             {
                 try (var view = builder.getGraph().getView())
                 {
-                    var supplier = Feature.singleStateFactory(FeatureId.FUSED_ADC, ordinal -> new FusedADC.State(view, pqVectors, ordinal));
+                    var supplier = Feature.singleStateFactory(FeatureId.FUSED_ADC, ordinal -> new FusedADC.State(view, (PQVectors) compressedVectors, ordinal));
                     writer.write(supplier);
                 }
             }
@@ -389,7 +485,7 @@ public class CompactionGraph implements Closeable, Accountable
 
     public long ramBytesUsed()
     {
-        return pqVectors.ramBytesUsed() + builder.getGraph().ramBytesUsed();
+        return compressedVectors.ramBytesUsed() + builder.getGraph().ramBytesUsed();
     }
 
     public boolean requiresFlush()
