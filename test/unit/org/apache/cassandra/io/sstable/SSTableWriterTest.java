@@ -20,16 +20,11 @@ package org.apache.cassandra.io.sstable;
 
 import java.nio.ByteBuffer;
 import java.util.UUID;
-import java.util.concurrent.CountDownLatch;
 
-import org.junit.Assume;
 import org.junit.Test;
 
 import org.apache.cassandra.UpdateBuilder;
 import org.apache.cassandra.Util;
-import org.apache.cassandra.cache.ChunkCache;
-import org.apache.cassandra.config.Config;
-import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Keyspace;
@@ -38,7 +33,6 @@ import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
-import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
@@ -108,96 +102,6 @@ public class SSTableWriterTest extends SSTableWriterTestBase
             validateCFS(cfs);
         }
     }
-
-    @Test
-    public void testFinalOpenRetainsCachedDataBIG() throws InterruptedException
-    {
-        testFinalOpenRetainsCachedData(SSTableFormat.Type.BIG);
-    }
-
-    @Test
-    public void testFinalOpenRetainsCachedDataBTI() throws InterruptedException
-    {
-        testFinalOpenRetainsCachedData(SSTableFormat.Type.BTI);
-    }
-
-
-    public void testFinalOpenRetainsCachedData(SSTableFormat.Type format) throws InterruptedException
-    {
-        Assume.assumeNotNull(ChunkCache.instance);
-        Keyspace keyspace = Keyspace.open(KEYSPACE);
-        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF);
-        truncate(cfs);
-        var previousAccessMode = DatabaseDescriptor.getDiskAccessMode();
-        try
-        {
-            DatabaseDescriptor.setDiskAccessMode(Config.DiskAccessMode.standard);
-
-            CountDownLatch latch = new CountDownLatch(2);
-            File dir = cfs.getDirectories().getDirectoryForNewSSTables();
-            try (LifecycleTransaction txn = LifecycleTransaction.offline(OperationType.WRITE, cfs.metadata);
-                 SSTableWriter writer = getWriter(format, cfs, dir, txn))
-            {
-                for (int i = 0; i < 10000; i++)
-                {
-                    UpdateBuilder builder = UpdateBuilder.create(cfs.metadata(), random(i, 10)).withTimestamp(1);
-                    for (int j = 0; j < 100; j++)
-                        builder.newRow("" + j).add("val", ByteBuffer.allocate(1000));
-                    writer.append(builder.build().unfilteredIterator());
-                }
-                writer.setMaxDataAge(1000).openEarly(s -> {
-                    assert s != null;
-                    assertFileCounts(dir.tryListNames());
-                    readAllAndVerifyKeySpan(s);
-                    assertTrue("Chunk cache is not used",
-                               ChunkCache.instance.sizeOfFile(s.getDataFile()) > 0);
-                    s.runOnClose(latch::countDown);
-                    s.selfRef().release();
-                    latch.countDown();
-                });
-                for (int i = 10000; i < 20000; i++)
-                {
-                    UpdateBuilder builder = UpdateBuilder.create(cfs.metadata(), random(i, 10)).withTimestamp(1);
-                    for (int j = 0; j < 100; j++)
-                        builder.newRow("" + j).add("val", ByteBuffer.allocate(1000));
-                    writer.append(builder.build().unfilteredIterator());
-                }
-                latch.await();
-
-                SSTableReader finalReader = writer.finish(true);
-                int datafiles = assertFileCounts(dir.tryListNames());
-                assertEquals(datafiles, 1);
-                assertTrue("Chunk cache is not retained for early open sstable",
-                           ChunkCache.instance.sizeOfFile(finalReader.getDataFile()) > 0);
-                readAllAndVerifyKeySpan(finalReader);
-                finalReader.selfRef().release();
-            }
-        }
-        finally
-        {
-            DatabaseDescriptor.setDiskAccessMode(previousAccessMode);
-        }
-    }
-
-    private static void readAllAndVerifyKeySpan(SSTableReader s)
-    {
-        DecoratedKey firstKey = null;
-        DecoratedKey lastKey = null;
-        for (var iter = s.getScanner(); iter.hasNext(); )
-        {
-            var partition = iter.next();
-            // consume all rows, so that the data is cached
-            partition.forEachRemaining(column -> {
-                // consume all columns
-            });
-            if (firstKey == null)
-                firstKey = partition.partitionKey();
-            lastKey = partition.partitionKey();
-        }
-        assertEquals("Simple scanner does not iterate all content", firstKey, s.first);
-        assertEquals("Simple scanner does not iterate all content", lastKey, s.last);
-    }
-
 
     @Test
     public void testAbortTxnWithClosedWriterShouldRemoveSSTable() throws InterruptedException

@@ -218,17 +218,14 @@ public class FileHandle extends SharedCloseableImpl
         final ChannelProxy channel;
         final RebuffererFactory rebufferer;
         final CompressionMetadata compressionMetadata;
-        final Optional<ChunkCache> chunkCache;
 
         private Cleanup(ChannelProxy channel,
                         RebuffererFactory rebufferer,
-                        CompressionMetadata compressionMetadata,
-                        ChunkCache chunkCache)
+                        CompressionMetadata compressionMetadata)
         {
             this.channel = channel;
             this.rebufferer = rebufferer;
             this.compressionMetadata = compressionMetadata;
-            this.chunkCache = Optional.ofNullable(chunkCache);
         }
 
         public String name()
@@ -310,6 +307,8 @@ public class FileHandle extends SharedCloseableImpl
         public Builder withChunkCache(ChunkCache chunkCache)
         {
             this.chunkCache = chunkCache;
+            if (chunkCache != null)
+                chunkCache.invalidateFile(file);
             return this;
         }
 
@@ -468,7 +467,7 @@ public class FileHandle extends SharedCloseableImpl
                         rebuffererFactory = maybeCached(new SimpleChunkReader(channelCopy, sliceDescriptor.dataEndOr(length), bufferType, chunkSize, sliceDescriptor.sliceStart));
                     }
                 }
-                Cleanup cleanup = new Cleanup(channelCopy, rebuffererFactory, compressionMetadata, chunkCache);
+                Cleanup cleanup = new Cleanup(channelCopy, rebuffererFactory, compressionMetadata);
                 return new FileHandle(cleanup, channelCopy, rebuffererFactory, compressionMetadata, order, length, sliceDescriptor);
             }
             catch (Throwable t)
