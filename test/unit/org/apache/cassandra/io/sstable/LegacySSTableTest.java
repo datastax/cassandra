@@ -155,7 +155,7 @@ public class LegacySSTableTest
     {
         for (String legacyVersion : legacyVersions)
         {
-            truncateTables(legacyVersion);
+            truncateLegacyTables(legacyVersion);
         }
     }
 
@@ -236,7 +236,7 @@ public class LegacySSTableTest
         // we need to make sure we write old version metadata in the format for that version
         for (String legacyVersion : legacyVersions)
             assertions.assertThatCode(() -> {
-                truncateTables(legacyVersion);
+                truncateLegacyTables(legacyVersion);
                 loadLegacyTables(legacyVersion);
 
                 for (ColumnFamilyStore cfs : Keyspace.open(LEGACY_TABLES_KEYSPACE).getColumnFamilyStores())
