@@ -34,7 +34,7 @@ import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.github.jbellis.jvector.pq.ProductQuantization;
+import io.github.jbellis.jvector.quantization.VectorCompressor;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
@@ -43,8 +43,8 @@ import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.RAMStringIndexer;
 import org.apache.cassandra.index.sai.disk.TermsIterator;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
-import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.BKDTreeRamBuffer;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.MutableOneDimPointValues;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.NumericIndexWriter;
@@ -232,12 +232,18 @@ public abstract class SegmentBuilder
     {
         private final CompactionGraph graphIndex;
 
-        public VectorOffHeapSegmentBuilder(IndexComponents.ForWrite components, long rowIdOffset, long keyCount, ProductQuantization pq, boolean unitVectors, boolean allRowsHaveVectors, NamedMemoryLimiter limiter)
+        public VectorOffHeapSegmentBuilder(IndexComponents.ForWrite components,
+                                           long rowIdOffset,
+                                           long keyCount,
+                                           VectorCompressor<?> compressor,
+                                           boolean unitVectors,
+                                           boolean allRowsHaveVectors,
+                                           NamedMemoryLimiter limiter)
         {
             super(components, rowIdOffset, limiter);
             try
             {
-                graphIndex = new CompactionGraph(components, pq, unitVectors, keyCount, allRowsHaveVectors);
+                graphIndex = new CompactionGraph(components, compressor, unitVectors, keyCount, allRowsHaveVectors);
             }
             catch (IOException e)
             {
