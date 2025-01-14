@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.index.sai.plan;
 
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Set;
@@ -125,6 +126,7 @@ public class QueryView implements AutoCloseable
         protected QueryView build() throws MissingIndexException
         {
             var referencedIndexes = new HashSet<SSTableIndex>();
+            ColumnFamilyStore.RefViewFragment refViewFragment = null;
 
             // We must use the canonical view in order for the equality check for source sstable/memtable
             // to work correctly.
@@ -144,6 +146,7 @@ public class QueryView implements AutoCloseable
                 // data, so we can ignore it.
                 var processedMemtables = new HashSet<Memtable>();
 
+
                 var start = MonotonicClock.approxTime.now();
                 Memtable unmatchedMemtable = null;
                 Descriptor unmatchedSStable = null;
@@ -157,17 +160,20 @@ public class QueryView implements AutoCloseable
                 outer:
                 while (!MonotonicClock.approxTime.isAfter(start + TimeUnit.MILLISECONDS.toNanos(2000)))
                 {
+                    // cleanup after the previous iteration if we're retrying
+                    release(referencedIndexes);
+                    release(refViewFragment);
+
                     // Prevent exceeding the query timeout
                     queryContext.checkpoint();
 
                     // Lock a consistent view of memtables and sstables.
                     // A consistent view is required for correctness of order by and vector queries.
-                    var refViewFragment = cfs.selectAndReference(filter);
+                    refViewFragment = cfs.selectAndReference(filter);
                     var indexView = indexContext.getView();
 
                     // Lookup the indexes corresponding to memtables:
                     var memtableIndexes = new HashSet<MemtableIndex>();
-
                     for (Memtable memtable : refViewFragment.memtables)
                     {
                         // Empty memtables have no index but that's not a problem, we can ignore them.
@@ -198,7 +204,6 @@ public class QueryView implements AutoCloseable
                             // inconsistency between the index set and the memtable set.
                             processedMemtables.add(memtable);
 
-                            refViewFragment.release();
                             unmatchedMemtable = memtable;
                             continue outer;
                         }
@@ -222,7 +227,6 @@ public class QueryView implements AutoCloseable
                                                  "Spinning trying to get the index for sstable {} because index view is out of sync", sstable.descriptor);
 
                             unmatchedSStable = sstable.descriptor;
-                            refViewFragment.release();
                             continue outer;
                         }
 
@@ -248,7 +252,6 @@ public class QueryView implements AutoCloseable
                                                  "Spinning trying to get the index for sstable {} because index was released", sstable.descriptor);
 
                             unmatchedSStable = sstable.descriptor;
-                            refViewFragment.release();
                             continue outer;
                         }
 
@@ -278,8 +281,8 @@ public class QueryView implements AutoCloseable
             }
             catch (MissingIndexException e)
             {
-                for (SSTableIndex index : referencedIndexes)
-                    index.release();
+                release(referencedIndexes);
+                release(refViewFragment);
                 throw e;
             }
             finally
@@ -294,6 +297,19 @@ public class QueryView implements AutoCloseable
                     Tracing.trace("Querying storage-attached indexes {}", summary);
                 }
             }
+        }
+
+        private void release(ColumnFamilyStore.RefViewFragment refViewFragment)
+        {
+            if (refViewFragment != null)
+                refViewFragment.release();
+        }
+
+        private void release(Collection<SSTableIndex> indexes)
+        {
+            for (var index : indexes)
+                index.release();
+            indexes.clear();
         }
 
         // I've removed the concept of "most selective index" since we don't actually have per-sstable
