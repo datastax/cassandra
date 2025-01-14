@@ -275,7 +275,8 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
             Clustering clustering = clusteringComparator.size() == 0
                                     ? Clustering.EMPTY
                                     : clusteringComparator.clusteringFromByteComparable(ByteBufferAccessor.instance,
-                                                                                        v -> ByteSourceInverse.nextComponentSource(peekable));
+                                                                                        v -> ByteSourceInverse.nextComponentSource(peekable),
+                                                                                        TypeUtil.BYTE_COMPARABLE_VERSION);
 
             return primaryKeyFactory.create(partitionKey, clustering);
         }
