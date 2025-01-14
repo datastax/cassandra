@@ -19,6 +19,9 @@
 package org.apache.cassandra.io.util;
 
 import java.io.IOException;
+import java.util.Collections;
+import java.util.Set;
+import java.util.concurrent.CountDownLatch;
 
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -26,11 +29,30 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.cache.ChunkCache;
+import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.DataRange;
+import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.PartitionPosition;
+import org.apache.cassandra.db.SerializationHeader;
+import org.apache.cassandra.db.Slices;
+import org.apache.cassandra.db.filter.ColumnFilter;
+import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
+import org.apache.cassandra.io.sstable.ISSTableScanner;
+import org.apache.cassandra.io.sstable.IndexSummary;
 import org.apache.cassandra.io.sstable.SequenceBasedSSTableId;
+import org.apache.cassandra.io.sstable.format.PartitionIndexIterator;
+import org.apache.cassandra.io.sstable.format.RowIndexEntry;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
+import org.apache.cassandra.io.sstable.format.ScrubPartitionIterator;
+import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
+import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.schema.TableMetadataRef;
+import org.apache.cassandra.utils.IFilter;
 import org.apache.cassandra.utils.PageAware;
 
 import static org.junit.Assert.assertEquals;
@@ -46,15 +68,76 @@ public class WriteAndReadTest
     }
 
     @Test
-    public void testPartitionIndexFailure() throws IOException
+    public void testPartitionIndexFailure() throws IOException, InterruptedException
     {
         for (int i = 4001; i < 4200; ++i)
             testPartitionIndexFailure(i);
     }
 
+    static class MockSSTableReader extends SSTableReader
+    {
+
+        protected MockSSTableReader(Descriptor desc, Set<Component> components, TableMetadataRef metadata, FileHandle ifile)
+        {
+            super(desc, components, metadata, 1000, null, OpenReason.NORMAL, null, null, null, ifile, null);
+        }
+
+        public void setup(boolean trackHotness)
+        {
+            tidy.setup(this, trackHotness);
+            tidy.addCloseable(ifile);
+            super.setup(trackHotness);
+        }
+
+        public boolean hasIndex()
+        {
+            return false;
+        }
+
+        public PartitionIndexIterator allKeysIterator() throws IOException
+        {
+            return null;
+        }
+
+        public ScrubPartitionIterator scrubPartitionsIterator() throws IOException
+        {
+            return null;
+        }
+
+        protected RowIndexEntry getPosition(PartitionPosition key, Operator op, boolean updateCacheAndStats, boolean permitMatchPastLast, SSTableReadsListener listener)
+        {
+            return null;
+        }
+
+        public UnfilteredRowIterator iterator(DecoratedKey key, Slices slices, ColumnFilter selectedColumns, boolean reversed, SSTableReadsListener listener)
+        {
+            return null;
+        }
+
+        public UnfilteredRowIterator simpleIterator(FileDataInput dfile, DecoratedKey key, boolean tombstoneOnly)
+        {
+            return null;
+        }
+
+        public ISSTableScanner getScanner(ColumnFilter columns, DataRange dataRange, SSTableReadsListener listener)
+        {
+            return null;
+        }
+
+        public DecoratedKey keyAt(FileDataInput reader) throws IOException
+        {
+            return null;
+        }
+
+        public RandomAccessReader openKeyComponentReader()
+        {
+            return null;
+        }
+    }
+
     // This tests failure on restore (DB-2489/DSP-17193) caused by chunk cache retaining
     // data from a previous version of a file with the same name.
-    public void testPartitionIndexFailure(int length) throws IOException
+    public void testPartitionIndexFailure(int length) throws IOException, InterruptedException
     {
         System.out.println("Prefix " + length);
 
@@ -90,11 +173,13 @@ public class WriteAndReadTest
                 writer.sync();
             }
 
-            File filePath;
+            SSTableReader reader = null;
             // Now read it like PartitionIndex.load
             try (FileHandle fh = fhBuilder.complete();
                  FileDataInput rdr = fh.createReader(fh.dataLength() - 3 * 8))
             {
+                reader = new MockSSTableReader(descriptor, Collections.singleton(Component.PARTITION_INDEX), TableMetadataRef.forOfflineTools(TableMetadata.minimal(descriptor.ksname, descriptor.cfname)), fh);
+                reader.setup(false);
                 long firstPosR = rdr.readLong();
                 long keyCountR = rdr.readLong();
                 long rootR = rdr.readLong();
@@ -102,11 +187,19 @@ public class WriteAndReadTest
                 assertEquals(firstPos, firstPosR);
                 assertEquals(keyCount, keyCountR);
                 assertEquals(rootR, root);
-
-                filePath = rdr.getFile();
             }
-
-            FileUtils.deleteWithConfirm(filePath);
+            finally
+            {
+                if (reader != null)
+                {
+                    reader.selfRef().release();
+                    CountDownLatch latch = new CountDownLatch(1);
+                    ScheduledExecutors.nonPeriodicTasks.execute(latch::countDown);
+                    latch.await();  // wait for the release to complete
+                    // we don't have a data component and the release above won't delete the index file
+                    FileUtils.deleteWithConfirm(reader.getIndexFile().channel.getFile());
+                }
+            }
         }
     }
 }
