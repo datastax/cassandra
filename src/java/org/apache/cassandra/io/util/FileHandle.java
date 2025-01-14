@@ -307,6 +307,9 @@ public class FileHandle extends SharedCloseableImpl
         public Builder withChunkCache(ChunkCache chunkCache)
         {
             this.chunkCache = chunkCache;
+            // Invalidate the cache for any previous version of the file that may differ from the one we are opening.
+            // It is important to do this here (rather than e.g. in complete) to ensure that we don't invalidate when
+            // opening a file multiple times e.g. when opening sstables early during compaction.
             if (chunkCache != null)
                 chunkCache.invalidateFile(file);
             return this;

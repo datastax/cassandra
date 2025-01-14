@@ -279,16 +279,6 @@ public class ChunkCache
         fileIdMap.remove(file);
     }
 
-    /**
-     * Removes FileId for given file if cache is initialized.
-     * @param file file to remove from the map.
-     */
-    public static void removeFileIdFromCache(File file)
-    {
-        if (instance != null)
-            instance.invalidateFile(file);
-    }
-
     static class Key
     {
         final long readerId;
