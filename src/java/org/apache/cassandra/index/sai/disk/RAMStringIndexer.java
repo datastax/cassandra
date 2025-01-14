@@ -31,8 +31,6 @@ import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.BytesRefHash;
 import org.apache.lucene.util.Counter;
 
-import static java.lang.Math.min;
-
 /**
  * Indexes strings into an on-heap inverted index to be flushed in an SSTable attached index later.
  * For flushing use the PostingTerms interface.
@@ -165,35 +163,30 @@ public class RAMStringIndexer
             {
                 // first time seeing this term in any row, create the term's first slice !
                 slices.createNewSlice(termID);
+                // grow the termID -> last segment array if necessary
                 if (termID >= lastSegmentRowID.length - 1)
                     lastSegmentRowID = ArrayUtil.grow(lastSegmentRowID, termID + 1);
+                if (includeFrequencies)
+                    frequencies.put(termID, 1);
             }
             else
             {
                 termID = (-termID) - 1;
                 // compaction should call this method only with increasing segmentRowIds
                 assert segmentRowId >= lastSegmentRowID[termID];
-                // Skip if we've already seen this term in this row
+                // increment frequency
+                if (includeFrequencies)
+                    frequencies.put(termID, frequencies.getOrDefault(termID, 0) + 1);
+                // Skip computing a delta if we've already seen this term in this row
                 if (segmentRowId == lastSegmentRowID[termID])
-                {
-                    if (includeFrequencies)
-                    {
-                        int freq = frequencies.get(termID);
-                        assert freq > 0 : freq;
-                        frequencies.put(termID, min(freq + 1, 255));
-                    }
                     continue;
-                }
             }
 
-            // adding term -> segmentRowId posting
-            frequencies.put(termID, 1);
-
+            // Compute the delta from the last time this term was seen, to this row
             int delta = segmentRowId - lastSegmentRowID[termID];
             // sanity check that we're advancing the row id, i.e. no duplicate entries.
             assert firstOccurrence || delta > 0;
             deltas.put(termID, delta);
-
             lastSegmentRowID[termID] = segmentRowId;
         }
 
