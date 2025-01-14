@@ -137,14 +137,10 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                     continue;
                 }
 
-                // If we end up here, this is likely a bug.
-                // If the index hasn't been dropped, but is not available, then the indexes must have gotten out
-                // of sync from sstables / memtables somehow.
-                // If the index has been dropped, the retry above should have handled that and the query
-                // should either succeed or fail with invalidRequest at the planning stage.
+                // If we end up here, this is either a bug or a problem with an index (corrupted / missing components?).
                 controller.abort();
                 logger.error("Index not found", e);
-                throw invalidRequest("Index may have been dropped: " + e.context.getIndexName());
+                throw invalidRequest("Index missing or corrupt: " + e.context.getIndexName());
             }
             catch (Throwable t)
             {

@@ -566,9 +566,12 @@ public class IndexContext
     /**
      * @return A set of SSTables which have attached to them invalid index components.
      */
-    public Set<SSTableContext> onSSTableChanged(Collection<SSTableReader> oldSSTables, Collection<SSTableContext> newSSTables, boolean validate)
+    public Set<SSTableContext> onSSTableChanged(Collection<SSTableReader> oldSSTables,
+                                                Collection<SSTableReader> newSSTables,
+                                                Collection<SSTableContext> newContexts,
+                                                boolean validate)
     {
-        return viewManager.update(oldSSTables, newSSTables, validate);
+        return viewManager.update(oldSSTables, newSSTables, newContexts, validate);
     }
 
     public ColumnMetadata getDefinition()
