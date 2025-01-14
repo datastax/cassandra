@@ -256,6 +256,8 @@ public interface StorageProvider
         public void invalidateFileSystemCache(File file)
         {
             INativeLibrary.instance.trySkipCache(file, 0, 0);
+            if (ChunkCache.instance != null)
+                ChunkCache.instance.invalidateFile(file);
         }
 
         @Override

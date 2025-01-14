@@ -25,6 +25,7 @@ import java.nio.file.StandardOpenOption;
 import org.apache.cassandra.cache.ChunkCache;
 import org.apache.cassandra.io.FSReadError;
 import org.apache.cassandra.io.FSWriteError;
+import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.utils.PageAware;
 import org.apache.cassandra.utils.SyncUtil;
 import org.apache.cassandra.utils.concurrent.Transactional;
@@ -126,6 +127,8 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
                     catch (Throwable t2) { t.addSuppressed(t2); }
                 }
 
+                // Invalidate any cache entries that may exist for a previous file with the same name.
+                StorageProvider.instance.invalidateFileSystemCache(file);
                 return channel;
             }
         }
