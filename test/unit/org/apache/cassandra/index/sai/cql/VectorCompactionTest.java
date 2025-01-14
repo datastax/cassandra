@@ -23,8 +23,9 @@ import java.util.ArrayList;
 import org.junit.Test;
 
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
-import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
+import org.apache.cassandra.index.sai.disk.vector.CompactionGraph;
 
+import static org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph.MIN_PQ_ROWS;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
@@ -34,10 +35,9 @@ public class VectorCompactionTest extends VectorTester.Versioned
     public void testCompactionWithEnoughRowsForPQAndDeleteARow()
     {
         createTable();
-
         disableCompaction();
 
-        for (int i = 0; i <= CassandraOnHeapGraph.MIN_PQ_ROWS; i++)
+        for (int i = 0; i <= MIN_PQ_ROWS; i++)
             execute("INSERT INTO %s (pk, v) VALUES (?, ?)", i, vector(i, i + 1));
         flush();
 
@@ -54,12 +54,36 @@ public class VectorCompactionTest extends VectorTester.Versioned
     }
 
     @Test
+    public void testPQRefine()
+    {
+        createTable();
+        disableCompaction();
+
+        // 3 sstables
+        for (int j = 0; j < 3; j++)
+        {
+            for (int i = 0; i <= MIN_PQ_ROWS; i++)
+            {
+                var pk = j * MIN_PQ_ROWS + i;
+                execute("INSERT INTO %s (pk, v) VALUES (?, ?)", pk, vector(pk, pk + 1));
+            }
+            flush();
+        }
+
+        CompactionGraph.PQ_TRAINING_SIZE = 2 * MIN_PQ_ROWS;
+        compact();
+
+        // Confirm we can query the data
+        assertRowCount(execute("SELECT * FROM %s ORDER BY v ANN OF [1,2] LIMIT 1"), 1);
+    }
+
+    @Test
     public void testOneToManyCompaction()
     {
         for (int sstables = 2; sstables <= 3; sstables++)
         {
             testOneToManyCompactionInternal(10, sstables);
-            testOneToManyCompactionInternal(CassandraOnHeapGraph.MIN_PQ_ROWS, sstables);
+            testOneToManyCompactionInternal(MIN_PQ_ROWS, sstables);
         }
     }
 
@@ -83,7 +107,7 @@ public class VectorCompactionTest extends VectorTester.Versioned
     {
         int sstables = 2;
         testOneToManyCompactionInternal(10, sstables);
-        testOneToManyCompactionHolesInternal(CassandraOnHeapGraph.MIN_PQ_ROWS, sstables);
+        testOneToManyCompactionHolesInternal(MIN_PQ_ROWS, sstables);
     }
 
     public void testOneToManyCompactionHolesInternal(int vectorsPerSstable, int sstables)
