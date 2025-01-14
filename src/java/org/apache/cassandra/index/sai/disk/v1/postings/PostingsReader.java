@@ -69,10 +69,6 @@ public class PostingsReader implements OrdinalPostingList
     private long currentPosition;
     private LongValues currentFORValues;
     private int postingsDecoded = 0;
-    
-    private boolean includesFrequencies;
-    private LongValues frequencyFORValues;
-    private int currentFrequency;
 
     @VisibleForTesting
     public PostingsReader(IndexInput input, long summaryOffset, QueryEventListener.PostingListEventListener listener) throws IOException
@@ -99,8 +95,6 @@ public class PostingsReader implements OrdinalPostingList
         assert input instanceof IndexInputReader;
         logger.trace("Opening postings reader for {}", input);
         this.input = input;
-        // TODO backwards compatibility
-        this.includesFrequencies = true; // = input.readByte() > 0;
         this.seekingInput = new SeekingRandomAccessInput(input);
         this.blockOffsets = summary.offsets;
         this.blockSize = summary.blockSize;
@@ -342,8 +336,6 @@ public class PostingsReader implements OrdinalPostingList
         if (next != END_OF_STREAM)
         {
             advanceOnePosition(next);
-            if (includesFrequencies)
-                currentFrequency = peekNextFrequency();
         }
         return next;
     }
@@ -390,34 +382,6 @@ public class PostingsReader implements OrdinalPostingList
         blockIdx++;
     }
 
-    public boolean includesFrequencies()
-    {
-        return includesFrequencies;
-    }
-
-    public int frequency()
-    {
-        return includesFrequencies ? currentFrequency : 1;
-    }
-
-    private int peekNextFrequency() throws IOException
-    {
-        if (!includesFrequencies)
-            return 1;
-        if (totalPostingsRead > numPostings)
-            return 1;
-        return readFrequencyValue();
-    }
-
-    private int readFrequencyValue()
-    {
-        if (frequencyFORValues == null)
-        {
-            return 0;
-        }
-        return Math.toIntExact(frequencyFORValues.get(blockIdx - 1));
-    }
-
     private void reBuffer() throws IOException
     {
         final long pointer = blockOffsets.get(postingsBlockIdx);
@@ -431,37 +395,29 @@ public class PostingsReader implements OrdinalPostingList
         final long left = numPostings - totalPostingsRead;
         assert left > 0;
 
-        // Read postings block
-        currentFORValues = readFoRBlock(input);
-
-        // If frequencies are included, read the frequency block right after
-        if (includesFrequencies)
-        {
-            frequencyFORValues = readFoRBlock(input);
-        }
-        else
-        {
-            frequencyFORValues = null;
-        }
+        readFoRBlock(input);
 
         postingsBlockIdx++;
         blockIdx = 0;
     }
 
-    private LongValues readFoRBlock(IndexInput in) throws IOException
+    private void readFoRBlock(IndexInput in) throws IOException
     {
         final byte bitsPerValue = in.readByte();
+
         currentPosition = in.getFilePointer();
 
         if (bitsPerValue == 0)
         {
-            return LongValues.ZEROES;
+            // If bitsPerValue is 0 then all the values in the block are the same
+            currentFORValues = LongValues.ZEROES;
+            return;
         }
-        else if (bitsPerValue > 14)
+        else if (bitsPerValue > 64)
         {
             throw new CorruptIndexException(
-                    String.format("Postings list #%s block is corrupted. Bits per value should be no more than 14 and is %d.", postingsBlockIdx, bitsPerValue), input);
+                    String.format("Postings list #%s block is corrupted. Bits per value should be no more than 64 and is %d.", postingsBlockIdx, bitsPerValue), input);
         }
-        return LuceneCompat.directReaderGetInstance(seekingInput, bitsPerValue, currentPosition);
+        currentFORValues = LuceneCompat.directReaderGetInstance(seekingInput, bitsPerValue, currentPosition);
     }
 }
