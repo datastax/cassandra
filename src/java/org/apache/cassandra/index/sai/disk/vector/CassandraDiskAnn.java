@@ -33,10 +33,10 @@ import io.github.jbellis.jvector.graph.disk.CachingGraphIndex;
 import io.github.jbellis.jvector.graph.disk.FeatureId;
 import io.github.jbellis.jvector.graph.disk.OnDiskGraphIndex;
 import io.github.jbellis.jvector.graph.similarity.SearchScoreProvider;
-import io.github.jbellis.jvector.pq.BQVectors;
-import io.github.jbellis.jvector.pq.CompressedVectors;
-import io.github.jbellis.jvector.pq.PQVectors;
-import io.github.jbellis.jvector.pq.ProductQuantization;
+import io.github.jbellis.jvector.quantization.BQVectors;
+import io.github.jbellis.jvector.quantization.CompressedVectors;
+import io.github.jbellis.jvector.quantization.PQVectors;
+import io.github.jbellis.jvector.quantization.ProductQuantization;
 import io.github.jbellis.jvector.util.Bits;
 import io.github.jbellis.jvector.util.ExplicitThreadLocal;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
@@ -130,7 +130,7 @@ public class CassandraDiskAnn
                 if (compressionType == VectorCompression.CompressionType.PRODUCT_QUANTIZATION)
                 {
                     compressedVectors = PQVectors.load(reader, reader.getFilePointer());
-                    pq = ((PQVectors) compressedVectors).getProductQuantization();
+                    pq = ((PQVectors) compressedVectors).getCompressor();
                     compression = new VectorCompression(compressionType,
                                                         compressedVectors.getOriginalSize(),
                                                         compressedVectors.getCompressedSize());

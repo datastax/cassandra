@@ -113,11 +113,12 @@ public class SimpleClientBurnTest
                 QueryMessage queryMessage = QueryMessage.codec.decode(body, version);
                 return new QueryMessage(queryMessage.query, queryMessage.options)
                 {
-                    public Message.Response executeSync(QueryState state, long queryStartNanoTime, boolean traceRequest)
+                    @Override
+                    public CompletableFuture<Response> maybeExecuteAsync(QueryState state, long queryStartNanoTime, boolean traceRequest)
                     {
                         int idx = Integer.parseInt(queryMessage.query);
                         SizeCaps caps = idx % largeMessageFrequency == 0 ? largeMessageCap : smallMessageCap;
-                        return generateRows(idx, caps);
+                        return CompletableFuture.completedFuture(generateRows(idx, caps));
                     }
                 };
             }

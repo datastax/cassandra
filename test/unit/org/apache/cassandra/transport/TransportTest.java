@@ -17,8 +17,6 @@
  */
 package org.apache.cassandra.transport;
 
-import java.lang.reflect.Field;
-import java.lang.reflect.Modifier;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.Collections;
@@ -26,7 +24,6 @@ import java.util.Map;
 import java.util.concurrent.Callable;
 
 import org.junit.After;
-import org.junit.AfterClass;
 import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -57,47 +54,12 @@ import org.awaitility.core.TimeoutEvent;
 
 public class TransportTest extends CQLTester
 {
-    private static Field cqlQueryHandlerField;
-    private static boolean modifiersAccessible;
-
     @BeforeClass
-    public static void makeCqlQueryHandlerAccessible()
+    public static void setUpClass()
     {
-        try
-        {
-            cqlQueryHandlerField = ClientState.class.getDeclaredField("cqlQueryHandler");
-            cqlQueryHandlerField.setAccessible(true);
-
-            Field modifiersField = Field.class.getDeclaredField("modifiers");
-            modifiersAccessible = modifiersField.isAccessible();
-            modifiersField.setAccessible(true);
-            modifiersField.setInt(cqlQueryHandlerField, cqlQueryHandlerField.getModifiers() & ~Modifier.FINAL);
-        }
-        catch (IllegalAccessException | NoSuchFieldException e)
-        {
-            throw new RuntimeException(e);
-        }
-    }
-
-    @AfterClass
-    public static void resetCqlQueryHandlerField()
-    {
-        if (cqlQueryHandlerField == null)
-            return;
-        try
-        {
-            Field modifiersField = Field.class.getDeclaredField("modifiers");
-            modifiersField.setAccessible(true);
-            modifiersField.setInt(cqlQueryHandlerField, cqlQueryHandlerField.getModifiers() | Modifier.FINAL);
-
-            cqlQueryHandlerField.setAccessible(false);
-
-            modifiersField.setAccessible(modifiersAccessible);
-        }
-        catch (IllegalAccessException | NoSuchFieldException e)
-        {
-            throw new RuntimeException(e);
-        }
+        System.setProperty("cassandra.custom_query_handler_class", "org.apache.cassandra.transport.TransportTest$TestQueryHandler");
+        CQLTester.setUpClass();
+        CQLTester.requireNetwork();
     }
 
     @After
@@ -116,6 +78,8 @@ public class TransportTest extends CQLTester
     @Test
     public void testAsyncTransport() throws Throwable
     {
+        Assert.assertSame(TransportTest.TestQueryHandler.class, ClientState.getCQLQueryHandler().getClass());
+
         CassandraRelevantProperties.NATIVE_TRANSPORT_ASYNC_READ_WRITE_ENABLED.setBoolean(true);
         try
         {
@@ -129,13 +93,8 @@ public class TransportTest extends CQLTester
 
     private void doTestTransport() throws Throwable
     {
-        SimpleClient client = new SimpleClient(nativeAddr.getHostAddress(), nativePort);
-        QueryHandler queryHandler = (QueryHandler) cqlQueryHandlerField.get(null);
-        cqlQueryHandlerField.set(null, new TransportTest.TestQueryHandler());
-        try
+        try (SimpleClient client = new SimpleClient(nativeAddr.getHostAddress(), nativePort))
         {
-            requireNetwork();
-
             client.connect(false);
 
             // Async native transport causes native transport requests to be executed asynchronously on the coordinator read and coordinator write
@@ -153,7 +112,7 @@ public class TransportTest extends CQLTester
             QueryMessage createMessage = new QueryMessage("CREATE TABLE " + KEYSPACE + ".atable (pk int PRIMARY KEY, v text)", QueryOptions.DEFAULT);
             PrepareMessage prepareMessage = new PrepareMessage("SELECT * FROM " + KEYSPACE + ".atable", null);
 
-            Message.Response createResponse = client.execute(createMessage);
+            client.execute(createMessage);
             ResultMessage.Prepared prepareResponse = (ResultMessage.Prepared) client.execute(prepareMessage);
 
             ExecuteMessage executeMessage = new ExecuteMessage(prepareResponse.statementId, prepareResponse.resultMetadataId, QueryOptions.DEFAULT);
@@ -193,11 +152,6 @@ public class TransportTest extends CQLTester
             awaitUntil(() -> Stage.COORDINATE_READ.getCompletedTaskCount() == ref.expectedCoordinateReadTasks);
             awaitUntil(() -> Stage.READ.getCompletedTaskCount() == ref.expectedExecuteReadTasks);
         }
-        finally
-        {
-            client.close();
-            cqlQueryHandlerField.set(null, queryHandler);
-        }
     }
 
     private void awaitUntil(Callable<Boolean> condition)
@@ -209,16 +163,19 @@ public class TransportTest extends CQLTester
 
     public static class TestQueryHandler implements QueryHandler
     {
+        @Override
         public QueryProcessor.Prepared getPrepared(MD5Digest id)
         {
             return QueryProcessor.instance.getPrepared(id);
         }
 
+        @Override
         public CQLStatement parse(String query, QueryState state, QueryOptions options)
         {
             return QueryProcessor.instance.parse(query, state, options);
         }
 
+        @Override
         public ResultMessage.Prepared prepare(String query,
                                               ClientState clientState,
                                               Map<String, ByteBuffer> customPayload)
@@ -227,6 +184,7 @@ public class TransportTest extends CQLTester
             return QueryProcessor.instance.prepare(query, clientState, customPayload);
         }
 
+        @Override
         public ResultMessage process(CQLStatement statement,
                                      QueryState state,
                                      QueryOptions options,
@@ -238,6 +196,7 @@ public class TransportTest extends CQLTester
             return QueryProcessor.instance.process(statement, state, options, customPayload, queryStartNanoTime);
         }
 
+        @Override
         public ResultMessage processBatch(BatchStatement statement,
                                           QueryState state,
                                           BatchQueryOptions options,
@@ -249,6 +208,7 @@ public class TransportTest extends CQLTester
             return QueryProcessor.instance.processBatch(statement, state, options, customPayload, queryStartNanoTime);
         }
 
+        @Override
         public ResultMessage processPrepared(CQLStatement statement,
                                              QueryState state,
                                              QueryOptions options,

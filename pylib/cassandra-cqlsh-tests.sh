@@ -50,9 +50,6 @@ fi
 if [[ -z "${java_version}" ]]; then
   java_version=$(java -version 2>&1 | awk -F '"' '/version/ {print $2}' | sed 's/^1\.//g' | awk -F. '{print $1}')
 fi
-if [[ ${java_version} -ge 11 ]]; then
-  export CASSANDRA_USE_JDK11=true
-fi
 
 if [[ -z "${python_version}" ]]; then
   python_version="3.8"

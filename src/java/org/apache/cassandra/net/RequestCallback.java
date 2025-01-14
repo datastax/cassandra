@@ -17,8 +17,11 @@
  */
 package org.apache.cassandra.net;
 
+import javax.annotation.Nullable;
+
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.sensors.RequestSensors;
 
 /**
  * implementors of {@link RequestCallback} need to make sure that any public methods
@@ -55,5 +58,15 @@ public interface RequestCallback<T>
     default boolean trackLatencyForSnitch()
     {
         return false;
+    }
+
+    /**
+     * @return the {@link RequestSensors} associated with the request to track sensors as reported by response replicas.
+     * If null, sensor tracking will be disabled for this request.
+     */
+    @Nullable
+    default RequestSensors getRequestSensors()
+    {
+        return null;
     }
 }

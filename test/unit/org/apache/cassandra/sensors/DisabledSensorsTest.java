@@ -77,7 +77,7 @@ public class DisabledSensorsTest
     @BeforeClass
     public static void beforeClass() throws Exception
     {
-        CassandraRelevantProperties.REQUEST_SENSORS_FACTORY.setString(SensorsTestUtil.NoOpRequestSensorsFactory.class.getName());
+        CassandraRelevantProperties.SENSORS_FACTORY.setString(SensorsTestUtil.NoOpRequestSensorsFactory.class.getName());
 
         // build SAI indexes
         Indexes.Builder saiIndexes = Indexes.builder();
