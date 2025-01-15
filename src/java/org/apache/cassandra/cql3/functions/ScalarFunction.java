@@ -28,16 +28,16 @@ import org.apache.cassandra.transport.ProtocolVersion;
  */
 public interface ScalarFunction extends Function
 {
-    public boolean isCalledOnNullInput();
+    boolean isCalledOnNullInput();
 
     /**
      * Checks if the function is monotonic.
-     *
-     *<p>A function is monotonic if it is either entirely nonincreasing or nondecreasing given an ordered set of inputs.</p>
+     * </p>
+     * A function is monotonic if it is either entirely nonincreasing or nondecreasing given an ordered set of inputs.
      *
      * @return {@code true} if the function is monotonic {@code false} otherwise.
      */
-    public default boolean isMonotonic()
+    default boolean isMonotonic()
     {
         return false;
     }
@@ -49,7 +49,7 @@ public interface ScalarFunction extends Function
      * @return the result of applying this function to the arguments
      * @throws InvalidRequestException if this function cannot not be applied to the arguments
      */
-    public ByteBuffer execute(Arguments arguments) throws InvalidRequestException;
+    ByteBuffer execute(Arguments arguments) throws InvalidRequestException;
 
     /**
      * Does a partial application of the function. That is, given only some of the arguments of the function provided,
@@ -69,7 +69,7 @@ public interface ScalarFunction extends Function
      * @param partialArguments a list of input arguments for the function where some arguments can be {@link #UNRESOLVED}.
      *                         The input <b>must</b> be of size {@code this.argsType().size()}. For convenience, it is
      *                         allowed both to pass a list with all arguments being {@link #UNRESOLVED} (the function is
-     *                         then returned directly) and with none of them unresolved (in which case, if the function is pure,
+     *                         then returned directly) and with none of them unresolved (in which case, if the function is deterministic,
      *                         it is computed and a dummy no-arg function returning the result is returned).
      * @return a function corresponding to the partial application of this function to the arguments of
      * {@code partialArguments} that are not {@link #UNRESOLVED}.
@@ -86,7 +86,7 @@ public interface ScalarFunction extends Function
         if (unresolvedCount == argTypes().size())
             return this;
 
-        if (isPure() && unresolvedCount == 0)
+        if (isDeterministic() && unresolvedCount == 0)
         {
             Arguments arguments = newArguments(protocolVersion);
             for (int i = 0, m = partialArguments.size(); i < m; i++)
@@ -102,5 +102,17 @@ public interface ScalarFunction extends Function
         }
 
         return new PartiallyAppliedScalarFunction(this, partialArguments, unresolvedCount);
+    }
+
+    /**
+     * Checks if a partial application of the function is monotonic.
+     *
+     *<p>A function is monotonic if it is either entirely nonincreasing or nondecreasing.</p>
+     * @param partialParameters the input parameters used to create the partial application of the function
+     * @return {@code true} if the partial application of the function is monotonic {@code false} otherwise.
+     */
+    default boolean isPartialApplicationMonotonic(List<ByteBuffer> partialParameters)
+    {
+        return isMonotonic();
     }
 }

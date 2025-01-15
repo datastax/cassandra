@@ -721,6 +721,8 @@ bc(syntax)..
                             '(' <arg-name> <arg-type> ( ',' <arg-name> <arg-type> )* ')'
                             ( CALLED | RETURNS NULL ) ON NULL INPUT
                             RETURNS <type>
+                            ( DETERMINISTIC )?
+                            ( MONOTONIC ( ON <arg-name> )? )?
                             LANGUAGE <language>
                             AS <body>
 p. 
@@ -766,6 +768,10 @@ If the optional @IF NOT EXISTS@ keywords are used, the function will only be cre
 
 @OR REPLACE@ and @IF NOT EXIST@ cannot be used together.
 
+The optional @DETERMINISTIC@ keyword specifies that the function is deterministic. This means that given a particular input, the function will always produce the same output.
+
+The optional @MONOTONIC@ keyword specifies that the function is monotonic. This means that it is either entirely nonincreasing or nondecreasing. Even if the function is not monotonic on all its arguments, it is possible to specify that it is monotonic @ON@ one of its arguments, meaning that partial applications of the function over that argument will be monotonic. Monotonicity is required to use the function in a @GROUP BY@ clause.
+
 Functions belong to a keyspace. If no keyspace is specified in @<function-name>@, the current keyspace is used (i.e. the keyspace specified using the "@USE@":#useStmt statement). It is not possible to create a user-defined function in one of the system keyspaces.
 
 See the section on "user-defined functions":#udfs for more information.
@@ -806,6 +812,7 @@ bc(syntax)..
                             STYPE <state-type>
                             ( FINALFUNC <final-functionname> )?
                             ( INITCOND <init-cond> )?
+                            ( DETERMINISTIC )?
 p. 
 __Sample:__
 
@@ -825,6 +832,8 @@ See the section on "user-defined aggregates":#udas for a complete example.
 @CREATE AGGREGATE@ with the optional @IF NOT EXISTS@ keywords either creates an aggregate if it does not already exist.
 
 @OR REPLACE@ and @IF NOT EXIST@ cannot be used together.
+
+The optional @DETERMINISTIC@ keyword specifies that the aggregate function is deterministic. This means that given a particular input, the function will always produce the same output.
 
 Aggregates belong to a keyspace. If no keyspace is specified in @<aggregate-name>@, the current keyspace is used (i.e. the keyspace specified using the "@USE@":#useStmt statement). It is not possible to create a user-defined aggregate in one of the system keyspaces.
 
