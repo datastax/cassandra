@@ -834,7 +834,9 @@ public class OutboundConnection
 
                 sending.finish();
                 debug.onSendSmallFrame(sendingCount, sendingBytes);
+                logger.info("Right before the place where we fail");
                 ChannelFuture flushResult = AsyncChannelPromise.writeAndFlush(established.channel, sending);
+                logger.info("Right after the place where we fail");
                 sending = null;
 
                 if (flushResult.isSuccess())
@@ -1002,6 +1004,7 @@ public class OutboundConnection
                                                || cause instanceof AsyncChannelOutputPlus.FlushException))
                     {
                         // close the channel, and wait for eventLoop to execute
+                        logger.info("Disconnecting from stack", new Exception());
                         disconnectNow(established).awaitUninterruptibly();
                         tryAgain = false;
                         try
