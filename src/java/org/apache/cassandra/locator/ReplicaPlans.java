@@ -659,11 +659,11 @@ public class ReplicaPlans
     }
 
 
-    private static <E extends Endpoints<E>> E candidatesForRead(Keyspace keyspace, Index.QueryPlan indexQueryPlan, ConsistencyLevel consistencyLevel, E liveNaturalReplicas)
+    private static <E extends Endpoints<E>> E candidatesForRead(Keyspace keyspace, Index.QueryPlan indexQueryPlan, ConsistencyLevel consistencyLevel, E liveNaturalReplicas, boolean allowsFiltering)
     {
         E replicas = consistencyLevel.isDatacenterLocal() ? liveNaturalReplicas.filter(InOurDcTester.replicas()) : liveNaturalReplicas;
 
-        return indexQueryPlan != null ? SecondaryIndexManager.filterForQuery(replicas, keyspace, indexQueryPlan, consistencyLevel) : replicas;
+        return indexQueryPlan != null ? SecondaryIndexManager.filterForQuery(replicas, keyspace, indexQueryPlan, consistencyLevel, allowsFiltering) : replicas;
     }
 
     private static <E extends Endpoints<E>> E contactForEachQuorumRead(NetworkTopologyStrategy replicationStrategy, E candidates)
@@ -723,11 +723,11 @@ public class ReplicaPlans
      * The candidate collection can be used for speculation, although at present
      * it would break EACH_QUORUM to do so without further filtering
      */
-    public static ReplicaPlan.ForTokenRead forRead(Keyspace keyspace, Token token, Index.QueryPlan indexQueryPlan, ConsistencyLevel consistencyLevel, SpeculativeRetryPolicy retry)
+    public static ReplicaPlan.ForTokenRead forRead(Keyspace keyspace, Token token, Index.QueryPlan indexQueryPlan, ConsistencyLevel consistencyLevel, SpeculativeRetryPolicy retry, boolean allowsFiltering)
     {
         AbstractReplicationStrategy replicationStrategy = keyspace.getReplicationStrategy();
         IEndpointSnitch endpointSnitch = DatabaseDescriptor.getEndpointSnitch();
-        EndpointsForToken candidates = candidatesForRead(keyspace, indexQueryPlan, consistencyLevel, ReplicaLayout.forTokenReadLiveSorted(replicationStrategy, token).natural())
+        EndpointsForToken candidates = candidatesForRead(keyspace, indexQueryPlan, consistencyLevel, ReplicaLayout.forTokenReadLiveSorted(replicationStrategy, token).natural(), allowsFiltering)
                                        .filter(endpointSnitch.filterByAffinity(keyspace.getName()));
         EndpointsForToken contacts = contactForRead(replicationStrategy, consistencyLevel, retry.equals(AlwaysSpeculativeRetryPolicy.INSTANCE), candidates)
                                      .filter(endpointSnitch.filterByAffinity(keyspace.getName()));
@@ -743,11 +743,11 @@ public class ReplicaPlans
      *
      * There is no speculation for range read queries at present, so we never 'always speculate' here, and a failed response fails the query.
      */
-    public static ReplicaPlan.ForRangeRead forRangeRead(Keyspace keyspace, Index.QueryPlan indexQueryPlan, ConsistencyLevel consistencyLevel, AbstractBounds<PartitionPosition> range, int vnodeCount)
+    public static ReplicaPlan.ForRangeRead forRangeRead(Keyspace keyspace, Index.QueryPlan indexQueryPlan, ConsistencyLevel consistencyLevel, AbstractBounds<PartitionPosition> range, int vnodeCount, boolean allowsFiltering)
     {
         AbstractReplicationStrategy replicationStrategy = keyspace.getReplicationStrategy();
         IEndpointSnitch endpointSnitch = DatabaseDescriptor.getEndpointSnitch();
-        EndpointsForRange candidates = candidatesForRead(keyspace, indexQueryPlan, consistencyLevel, ReplicaLayout.forRangeReadLiveSorted(replicationStrategy, range).natural())
+        EndpointsForRange candidates = candidatesForRead(keyspace, indexQueryPlan, consistencyLevel, ReplicaLayout.forRangeReadLiveSorted(replicationStrategy, range).natural(), allowsFiltering)
                                        .filter(endpointSnitch.filterByAffinity(keyspace.getName()));
         EndpointsForRange contacts = contactForRead(replicationStrategy, consistencyLevel, false, candidates)
                                      .filter(endpointSnitch.filterByAffinity(keyspace.getName()));
