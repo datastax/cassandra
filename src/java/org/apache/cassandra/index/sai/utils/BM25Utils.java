@@ -20,14 +20,17 @@ package org.apache.cassandra.index.sai.utils;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.function.Function;
 
 import org.apache.cassandra.db.memtable.Memtable;
+import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.index.sai.IndexContext;
+import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
 import org.apache.cassandra.io.sstable.SSTableId;
 import org.apache.cassandra.utils.CloseableIterator;
 
@@ -73,15 +76,50 @@ public class BM25Utils
         {
             return frequencies.getOrDefault(term, 0);
         }
+
+        public static DocTF createFromDocument(PrimaryKey pk,
+                                             Cell<?> cell,
+                                             AbstractAnalyzer docAnalyzer,
+                                             Collection<ByteBuffer> queryTerms)
+        {
+            int count = 0;
+            Map<ByteBuffer, Integer> frequencies = new HashMap<>();
+
+            docAnalyzer.reset(cell.buffer());
+            try
+            {
+                while (docAnalyzer.hasNext())
+                {
+                    ByteBuffer term = docAnalyzer.next();
+                    count++;
+                    if (queryTerms.contains(term))
+                        frequencies.merge(term, 1, Integer::sum);
+                }
+            }
+            finally
+            {
+                docAnalyzer.end();
+            }
+
+            return new DocTF(pk, count, frequencies);
+        }
     }
 
-    public static CloseableIterator<PrimaryKeyWithSortKey> computeScores(Iterator<KeyWithFrequencies> keyIterator,
+    @FunctionalInterface
+    public interface CellReader
+    {
+        Cell<?> readCell(PrimaryKey pk);
+    }
+
+    public static CloseableIterator<PrimaryKeyWithSortKey> computeScores(Iterator<PrimaryKey> keyIterator,
                                                                          List<ByteBuffer> queryTerms,
                                                                          DocStats docStats,
                                                                          IndexContext indexContext,
                                                                          Object source,
-                                                                         Function<PrimaryKey, Integer> termCounter)
+                                                                         CellReader cellReader)
     {
+        var docAnalyzer = indexContext.getAnalyzerFactory().create();
+
         // data structures for document stats and frequencies
         ArrayList<DocTF> documents = new ArrayList<>();
         double totalTermCount = 0;
@@ -89,8 +127,11 @@ public class BM25Utils
         // Compute TF within each document
         while (keyIterator.hasNext())
         {
-            var v = keyIterator.next();
-            var tf = new DocTF(v.key, termCounter.apply(v.key), v.termFrequencies);
+            var pk = keyIterator.next();
+            var cell = cellReader.readCell(pk);
+            if (cell == null)
+                continue;
+            var tf = DocTF.createFromDocument(pk, cell, docAnalyzer, queryTerms);
 
             // sstable index will only send documents that contain all query terms to this method,
             // but memtable is not indexed and will send all documents, so we have to skip documents
@@ -137,17 +178,5 @@ public class BM25Utils
         Collections.sort(scoredDocs);
 
         return (CloseableIterator<PrimaryKeyWithSortKey>) (CloseableIterator) CloseableIterator.wrap(scoredDocs.iterator());
-    }
-
-    public static class KeyWithFrequencies
-    {
-        final PrimaryKey key;
-        final Map<ByteBuffer, Integer> termFrequencies;
-
-        public KeyWithFrequencies(PrimaryKey key, Map<ByteBuffer, Integer> termFrequencies)
-        {
-            this.key = key;
-            this.termFrequencies = termFrequencies;
-        }
     }
 }

@@ -19,11 +19,7 @@
 package org.apache.cassandra.index.sai.disk.v1.postings;
 
 import java.io.IOException;
-import java.nio.ByteBuffer;
-import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import org.apache.cassandra.index.sai.disk.PostingList;
@@ -36,16 +32,14 @@ import org.apache.cassandra.io.util.FileUtils;
 @NotThreadSafe
 public class IntersectingPostingList implements PostingList
 {
-    private final Map<ByteBuffer, PostingList> postingsByTerm;
-    private final List<PostingList> postingLists; // so we can access by ordinal in intersection code
+    private final List<PostingList> postingLists;
     private final int size;
 
-    private IntersectingPostingList(Map<ByteBuffer, PostingList> postingsByTerm)
+    private IntersectingPostingList(List<PostingList> postingLists)
     {
-        if (postingsByTerm.isEmpty())
+        if (postingLists.isEmpty())
             throw new AssertionError();
-        this.postingsByTerm = postingsByTerm;
-        this.postingLists = new ArrayList<>(postingsByTerm.values());
+        this.postingLists = postingLists;
         this.size = postingLists.stream()
                                 .mapToInt(PostingList::size)
                                 .min()
@@ -53,14 +47,17 @@ public class IntersectingPostingList implements PostingList
     }
 
     /**
-     * @return the intersection of the provided term-posting list mappings
+     * @return the intersection of the provided posting lists
      */
-    public static IntersectingPostingList intersect(Map<ByteBuffer, PostingList> postingsByTerm)
+    public static PostingList intersect(List<PostingList> postingLists)
     {
-        // TODO optimize cases where
-        // - we have a single postinglist
-        // - any posting list is empty (intersection also empty)
-        return new IntersectingPostingList(postingsByTerm);
+        if (postingLists.size() == 1)
+            return postingLists.get(0);
+
+        if (postingLists.stream().anyMatch(PostingList::isEmpty))
+            return new EmptyIntersectingList(postingLists);
+
+        return new IntersectingPostingList(postingLists);
     }
 
     @Override
@@ -74,21 +71,6 @@ public class IntersectingPostingList implements PostingList
     {
         assert targetRowID >= 0 : targetRowID;
         return findNextIntersection(targetRowID, true);
-    }
-
-    @Override
-    public int frequency()
-    {
-        // call frequencies() instead
-        throw new UnsupportedOperationException();
-    }
-
-    public Map<ByteBuffer, Integer> frequencies()
-    {
-        Map<ByteBuffer, Integer> result = new HashMap<>();
-        for (Map.Entry<ByteBuffer, PostingList> entry : postingsByTerm.entrySet())
-            result.put(entry.getKey(), entry.getValue().frequency());
-        return result;
     }
 
     private int findNextIntersection(int targetRowID, boolean isAdvance) throws IOException
@@ -135,6 +117,23 @@ public class IntersectingPostingList implements PostingList
     {
         for (PostingList list : postingLists)
             FileUtils.closeQuietly(list);
+    }
+
+    private static class EmptyIntersectingList extends EmptyPostingList
+    {
+        private final List<PostingList> lists;
+
+        public EmptyIntersectingList(List<PostingList> postingLists)
+        {
+            this.lists = postingLists;
+        }
+
+        @Override
+        public void close()
+        {
+            for (PostingList list : lists)
+                FileUtils.closeQuietly(list);
+        }
     }
 }
 

@@ -269,7 +269,8 @@ public class TrieMemtableIndex implements MemtableIndex
                                                queryTerms,
                                                docStats,
                                                indexContext,
-                                               memtable));
+                                               memtable,
+                                               this::getCellForKey));
     }
 
     private List<KeyRangeIterator> keyIteratorsPerTerm(QueryContext queryContext, AbstractBounds<PartitionPosition> keyRange, List<ByteBuffer> queryTerms)
@@ -332,8 +333,8 @@ public class TrieMemtableIndex implements MemtableIndex
                                        queryTerms,
                                        docStats,
                                        indexContext,
-                                       memtable
-        );
+                                       memtable,
+                                       this::getCellForKey);
     }
 
     /**
