@@ -34,36 +34,37 @@ public interface Function extends AssignmentTestable
      * A marker buffer used to represent function parameters that cannot be resolved at some stage of CQL processing.
      * This is used for partial function application in particular.
      */
-    public static final ByteBuffer UNRESOLVED = ByteBuffer.allocate(0);
+    ByteBuffer UNRESOLVED = ByteBuffer.allocate(0);
 
-    public FunctionName name();
-    public List<AbstractType<?>> argTypes();
-    public AbstractType<?> returnType();
+    FunctionName name();
+    List<AbstractType<?>> argTypes();
+    AbstractType<?> returnType();
 
     /**
      * Checks whether the function is a native/hard coded one or not.
      *
      * @return {@code true} if the function is a native/hard coded one, {@code false} otherwise.
      */
-    public boolean isNative();
+    boolean isNative();
 
     /**
-     * Checks whether the function is a pure function (as in doesn't depend on, nor produces side effects) or not.
+     * Checks whether the function is a deterministic function (as in given a particular input, will always produce the
+     * same output) or not.
      *
-     * @return {@code true} if the function is a pure function, {@code false} otherwise.
+     * @return {@code true} if the function is a deterministic function, {@code false} otherwise.
      */
-    public boolean isPure();
+    boolean isDeterministic();
 
     /**
      * Checks whether the function is an aggregate function or not.
      *
      * @return {@code true} if the function is an aggregate function, {@code false} otherwise.
      */
-    public boolean isAggregate();
+    boolean isAggregate();
 
-    public void addFunctionsTo(List<Function> functions);
+    void addFunctionsTo(List<Function> functions);
 
-    public boolean referencesUserType(ByteBuffer name);
+    boolean referencesUserType(ByteBuffer name);
 
     /**
      * Returns the name of the function to use within a ResultSet.
@@ -71,7 +72,7 @@ public interface Function extends AssignmentTestable
      * @param columnNames the names of the columns used to call the function
      * @return the name of the function to use within a ResultSet
      */
-    public String columnName(List<String> columnNames);
+    String columnName(List<String> columnNames);
 
     /**
      * Creates some new input arguments for this function.
@@ -81,7 +82,7 @@ public interface Function extends AssignmentTestable
      */
     Arguments newArguments(ProtocolVersion version);
 
-    public default Optional<Difference> compare(Function other)
+    default Optional<Difference> compare(Function other)
     {
         throw new UnsupportedOperationException();
     }
