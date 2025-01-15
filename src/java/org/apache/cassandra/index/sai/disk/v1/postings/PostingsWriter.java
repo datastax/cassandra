@@ -65,7 +65,7 @@ import static java.lang.Math.min;
  * <p>
  * Each posting list ends with a meta section and a skip table, that are written right after all postings blocks. Skip
  * interval is the same as block size, and each skip entry points to the end of each block.  Skip table consist of
- * block offsets and last values of each block, compressed as two FoR blocks.
+ * block offsets and maximum rowids of each block, compressed as two FoR blocks.
  * </p>
  *
  * Visual representation of the disk format:
@@ -80,7 +80,7 @@ import static java.lang.Math.min;
  *                                                        | LIST SIZE     | SKIP TABLE |
  *                                                        +---------------+------------+
  *                                                                        | BLOCKS POS.|
- *                                                                        | MAX VALUES |
+ *                                                                        | MAX ROWIDS |
  *                                                                        +------------+
  *
  *  </pre>
@@ -91,7 +91,7 @@ public class PostingsWriter implements Closeable
     protected static final Logger logger = LoggerFactory.getLogger(PostingsWriter.class);
 
     // import static org.apache.lucene.codecs.lucene50.Lucene50PostingsFormat.BLOCK_SIZE;
-    private final static int BLOCK_SIZE = 128;
+    private final static int BLOCK_ENTRIES = 128;
 
     private static final String POSTINGS_MUST_BE_SORTED_ERROR_MSG = "Postings must be sorted ascending, got [%s] after [%s]";
 
@@ -113,12 +113,12 @@ public class PostingsWriter implements Closeable
 
     public PostingsWriter(IndexComponents.ForWrite components) throws IOException
     {
-        this(components, BLOCK_SIZE);
+        this(components, BLOCK_ENTRIES);
     }
 
     public PostingsWriter(IndexOutput dataOutput) throws IOException
     {
-        this(dataOutput, BLOCK_SIZE);
+        this(dataOutput, BLOCK_ENTRIES);
     }
 
     @VisibleForTesting
