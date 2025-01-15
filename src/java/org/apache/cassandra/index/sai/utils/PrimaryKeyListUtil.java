@@ -24,33 +24,25 @@ import java.util.List;
 public class PrimaryKeyListUtil
 {
 
-    /** Create a sublist of the keys within (inclusive) the segment's bounds */
+    /** Create a sublist of the keys within the provided bounds (inclusive) */
     public static List<PrimaryKey> getKeysInRange(List<PrimaryKey> keys, PrimaryKey minKey, PrimaryKey maxKey)
     {
-        int minIndex = PrimaryKeyListUtil.findBoundaryIndex(keys, minKey, true);
-        int maxIndex = PrimaryKeyListUtil.findBoundaryIndex(keys, maxKey, false);
+        int minIndex = PrimaryKeyListUtil.findBoundaryIndex(keys, minKey, false);
+        int maxIndex = PrimaryKeyListUtil.findBoundaryIndex(keys, maxKey, true);
         return keys.subList(minIndex, maxIndex);
     }
 
-    private static int findBoundaryIndex(List<PrimaryKey> keys, PrimaryKey key, boolean findMin)
+    private static int findBoundaryIndex(List<PrimaryKey> keys, PrimaryKey key, boolean findMax)
     {
-        // The minKey and maxKey are sometimes just partition keys (not primary keys), so binarySearch
-        // may not return the index of the least/greatest match.
         int index = Collections.binarySearch(keys, key);
+
         if (index < 0)
             return -index - 1;
-        if (findMin)
-        {
-            while (index > 0 && keys.get(index - 1).equals(key))
-                index--;
-        }
-        else
-        {
-            while (index < keys.size() - 1 && keys.get(index + 1).equals(key))
-                index++;
-            // Because we use this for subList, we need to return the index of the next element
+
+        if (findMax)
+            // We use this value for the subList upper bound, which is exclusive, so increment by 1.
             index++;
-        }
+
         return index;
     }
 }
