@@ -48,7 +48,7 @@
       <pattern>%-5level [%thread] %date{ISO8601} %F:%L - %msg%n</pattern>
     </encoder>
     <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
-      <level>DEBUG</level>
+      <level>TRACE</level>
     </filter>
   </appender>
 
@@ -72,7 +72,7 @@
     <filter class="org.apache.cassandra.ForbiddenLogEntriesFilter"/>
   </appender>
 
-  <root level="DEBUG">
+  <root level="TRACE">
     <appender-ref ref="ASYNC"/>
   </root>
 </configuration>
