@@ -73,6 +73,7 @@ class RAMPostingSlices
                 else
                 {
                     lastSegmentRowId.value += reader.readVInt();
+                    // TODO wrong place to write frequencies
                     if (includeFrequencies)
                         frequency = reader.readVInt();
                     return lastSegmentRowId.value;

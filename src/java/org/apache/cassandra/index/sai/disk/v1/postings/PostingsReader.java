@@ -358,10 +358,10 @@ public class PostingsReader implements OrdinalPostingList
             reBuffer();
         }
 
-        return actualSegmentRowId + nextRowID();
+        return actualSegmentRowId + nextRowDelta();
     }
 
-    private int nextRowID()
+    private int nextRowDelta()
     {
         // currentFORValues is null when the all the values in the block are the same
         if (currentFORValues == null)
