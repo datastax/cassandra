@@ -43,7 +43,6 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.fail;
 
-@Ignore
 public class SingleRestrictionEstimatedRowCountTest extends SAITester
 {
     private int queryOptLevel;
@@ -120,7 +119,7 @@ public class SingleRestrictionEstimatedRowCountTest extends SAITester
 
     protected ColumnFamilyStore prepareTable(CQL3Type.Native type)
     {
-        createTable("CREATE TABLE %s (pk text PRIMARY KEY, age " + type + ')');
+        createTable("CREATE TABLE %s (pk text PRIMARY KEY, age " + type + ")    with memtable = {'class' : 'trie', 'shards' : '16'} ");
         createIndex("CREATE CUSTOM INDEX ON %s(age) USING 'StorageAttachedIndex'");
         return getCurrentColumnFamilyStore();
     }
