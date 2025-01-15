@@ -83,17 +83,17 @@ public class RAMStringIndexerTest extends SaiRandomizedTest
         RAMStringIndexer indexer = new RAMStringIndexer(true);
 
         // Add same term twice in same row to increment frequency
-        indexer.addAll(List.of(new BytesRef("0"), new BytesRef("0")), 100);
-        indexer.addAll(List.of(new BytesRef("2")), 102);
-        indexer.addAll(List.of(new BytesRef("0"), new BytesRef("0"), new BytesRef("0")), 200);
-        indexer.addAll(List.of(new BytesRef("2"), new BytesRef("2")), 202);
-        indexer.addAll(List.of(new BytesRef("2")), 302);
+        indexer.addAll(List.of(new BytesRef("A"), new BytesRef("A")), 100);
+        indexer.addAll(List.of(new BytesRef("B")), 102);
+        indexer.addAll(List.of(new BytesRef("A"), new BytesRef("A"), new BytesRef("A")), 200);
+        indexer.addAll(List.of(new BytesRef("B"), new BytesRef("B")), 202);
+        indexer.addAll(List.of(new BytesRef("B")), 302);
 
         // Expected results: rowID -> frequency
         List<Map<Long, Integer>> matches = Arrays.asList(Map.of(100L, 2, 200L, 3),
                                                          Map.of(102L, 1, 202L, 2, 302L, 1));
 
-        try (TermsIterator terms = indexer.getTermsWithPostings(ByteBufferUtil.bytes("0"), ByteBufferUtil.bytes("2"), TypeUtil.BYTE_COMPARABLE_VERSION))
+        try (TermsIterator terms = indexer.getTermsWithPostings(ByteBufferUtil.bytes("A"), ByteBufferUtil.bytes("B"), TypeUtil.BYTE_COMPARABLE_VERSION))
         {
             int ord = 0;
             while (terms.hasNext())
@@ -110,8 +110,8 @@ public class RAMStringIndexerTest extends SaiRandomizedTest
                     assertEquals(matches.get(ord++), results);
                 }
             }
-            assertArrayEquals("0".getBytes(), terms.getMinTerm().array());
-            assertArrayEquals("2".getBytes(), terms.getMaxTerm().array());
+            assertArrayEquals("A".getBytes(), terms.getMinTerm().array());
+            assertArrayEquals("B".getBytes(), terms.getMaxTerm().array());
         }
     }
 

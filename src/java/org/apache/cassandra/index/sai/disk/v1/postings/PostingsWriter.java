@@ -213,7 +213,8 @@ public class PostingsWriter implements Closeable
         return totalPostings;
     }
 
-    private void writePosting(long segmentRowId) throws IOException
+    // TODO handle frequency
+    private void writePosting(long segmentRowId, int frequency) throws IOException
     {
         if (!(segmentRowId >= lastSegmentRowId || lastSegmentRowId == 0))
             throw new IllegalArgumentException(String.format(POSTINGS_MUST_BE_SORTED_ERROR_MSG, segmentRowId, lastSegmentRowId));
