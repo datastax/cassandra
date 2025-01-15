@@ -67,6 +67,7 @@ import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.utils.FBUtilities;
+import org.awaitility.Awaitility;
 
 import static java.util.concurrent.TimeUnit.MINUTES;
 import static java.util.concurrent.TimeUnit.SECONDS;
@@ -298,6 +299,7 @@ public class ConnectionTest
                 inbound = new InboundSockets(settings.inbound.apply(new InboundConnectionSettings()));
                 logger.info("Open 2");
                 inbound.open().sync();
+                Awaitility.await().timeout(10, SECONDS).until(() -> !outbound.isConnected());
 
                 CountDownLatch latch2 = new CountDownLatch(1);
                 unsafeSetHandler(Verb._TEST_1, () -> msg ->
