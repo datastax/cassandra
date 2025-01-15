@@ -38,9 +38,12 @@ import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.cql3.UntypedResultSet.Row;
+import org.apache.cassandra.cql3.functions.UDAggregate;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.TypeParser;
 import org.apache.cassandra.exceptions.FunctionExecutionException;
+import org.apache.cassandra.schema.KeyspaceMetadata;
+import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.service.ClientState;
@@ -2204,6 +2207,36 @@ public class AggregationTest extends CQLTester
     }
 
     @Test
+    public void testParseDeterministic() throws Throwable
+    {
+        testParseDeterministic(false);
+        testParseDeterministic(true);
+    }
+
+    private void testParseDeterministic(boolean deterministic) throws Throwable
+    {
+        createTable("CREATE TABLE %s (key int PRIMARY KEY, d double)");
+
+        String sfunc = shortFunctionName(createFunction(KEYSPACE,
+                                                        "int, int",
+                                                        "CREATE FUNCTION %s(a int, b int) " +
+                                                        "CALLED ON NULL INPUT " +
+                                                        "RETURNS int " +
+                                                        "LANGUAGE java " +
+                                                        "AS 'return a + b;'"));
+
+        String query = "CREATE AGGREGATE %s(int) SFUNC " + sfunc + " STYPE int";
+        if (deterministic)
+            query += " DETERMINISTIC";
+        String name = createAggregate(KEYSPACE, "int", query);
+
+        KeyspaceMetadata ksm = Schema.instance.getKeyspaceMetadata(keyspace());
+        assertNotNull(ksm);
+        UDAggregate f = (UDAggregate) ksm.userFunctions.get(parseFunctionName(name)).iterator().next();
+        assertEquals(deterministic, f.isDeterministic());
+    }
+
+    @Test
     public void testAggregatesAreNonDeterministicByDefault() throws Throwable
     {
         String fName = createFunction(KEYSPACE, "int", "CREATE FUNCTION %s(i int, j int) RETURNS NULL ON NULL INPUT " +
@@ -2213,8 +2246,8 @@ public class AggregationTest extends CQLTester
         String aName = createAggregate(KEYSPACE, "int", String.format("CREATE AGGREGATE %%s (int) SFUNC %s STYPE int INITCOND 1;", shortFunctionName(fName)));
 
         UntypedResultSet aggregates = execute("SELECT * FROM system_schema.aggregates " +
-                                             "WHERE keyspace_name=? AND aggregate_name=?;",
-                                             KEYSPACE, shortFunctionName(aName));
+                                              "WHERE keyspace_name=? AND aggregate_name=?;",
+                                              KEYSPACE, shortFunctionName(aName));
 
         Assert.assertEquals(1, aggregates.size());
         Assert.assertFalse(aggregates.one().getBoolean("deterministic"));

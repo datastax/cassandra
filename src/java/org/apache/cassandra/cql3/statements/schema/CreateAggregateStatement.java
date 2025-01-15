@@ -71,6 +71,7 @@ public final class CreateAggregateStatement extends AlterSchemaStatement
     private final Term.Raw rawInitialValue;
     private final boolean orReplace;
     private final boolean ifNotExists;
+    private final boolean deterministic;
 
     public CreateAggregateStatement(String queryString,
                                     String keyspaceName,
@@ -81,7 +82,8 @@ public final class CreateAggregateStatement extends AlterSchemaStatement
                                     FunctionName finalFunctionName,
                                     Term.Raw rawInitialValue,
                                     boolean orReplace,
-                                    boolean ifNotExists)
+                                    boolean ifNotExists,
+                                    boolean deterministic)
     {
         super(queryString, keyspaceName);
         this.aggregateName = aggregateName;
@@ -92,6 +94,7 @@ public final class CreateAggregateStatement extends AlterSchemaStatement
         this.rawInitialValue = rawInitialValue;
         this.orReplace = orReplace;
         this.ifNotExists = ifNotExists;
+        this.deterministic = deterministic;
     }
 
     public Keyspaces apply(Keyspaces schema)
@@ -206,7 +209,8 @@ public final class CreateAggregateStatement extends AlterSchemaStatement
                             returnType,
                             (ScalarFunction) stateFunction,
                             (ScalarFunction) finalFunction,
-                            initialValue);
+                            initialValue,
+                            deterministic);
 
         UserFunction existingAggregate = keyspace.userFunctions.find(aggregate.name(), argumentTypes).orElse(null);
         if (null != existingAggregate)
@@ -314,6 +318,7 @@ public final class CreateAggregateStatement extends AlterSchemaStatement
         private final Term.Raw rawInitialValue;
         private final boolean orReplace;
         private final boolean ifNotExists;
+        private final boolean deterministic;
 
         public Raw(FunctionName aggregateName,
                    List<CQL3Type.Raw> rawArgumentTypes,
@@ -322,7 +327,8 @@ public final class CreateAggregateStatement extends AlterSchemaStatement
                    String finalFunctionName,
                    Term.Raw rawInitialValue,
                    boolean orReplace,
-                   boolean ifNotExists)
+                   boolean ifNotExists,
+                   boolean deterministic)
         {
             this.aggregateName = aggregateName;
             this.rawArgumentTypes = rawArgumentTypes;
@@ -332,6 +338,7 @@ public final class CreateAggregateStatement extends AlterSchemaStatement
             this.rawInitialValue = rawInitialValue;
             this.orReplace = orReplace;
             this.ifNotExists = ifNotExists;
+            this.deterministic = deterministic;
         }
 
         @Override
@@ -353,7 +360,8 @@ public final class CreateAggregateStatement extends AlterSchemaStatement
                                                 null != finalFunctionName ? new FunctionName(keyspaceName, finalFunctionName) : null,
                                                 rawInitialValue,
                                                 orReplace,
-                                                ifNotExists);
+                                                ifNotExists,
+                                                deterministic);
         }
     }
 }
