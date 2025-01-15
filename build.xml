@@ -42,10 +42,9 @@
         All releases are built with the default JDK.
         Builds with non-default JDKs are considered experimental and for development and testing purposes.
         When building, javac's source and target flags are set to the jdk used, so lower JDKs are not supported at runtime.
-        The use of both CASSANDRA_USE_JDK11 and use-jdk11 is deprecated.
     -->
     <property name="java.default" value="11" />
-    <property name="java.supported" value="11,17" />
+    <property name="java.supported" value="11,17,22" />
 
     <!-- directory details -->
     <property name="basedir" value="."/>
@@ -315,12 +314,84 @@
         <string>--add-opens java.base/java.lang=ALL-UNNAMED</string>
         <string>--add-opens java.base/java.util=ALL-UNNAMED</string>
         <string>--add-opens java.base/java.nio=ALL-UNNAMED</string>
+        <string>--add-opens java.base/java.nio.file.attribute=ALL-UNNAMED</string>
 
         <string>--add-opens java.rmi/sun.rmi.transport.tcp=ALL-UNNAMED</string>
     </resources>
     <pathconvert property="_jvm17_args_concat" refid="_jvm17_arg_items" pathsep=" "/>
     <condition property="java-jvmargs" value="${_jvm17_args_concat}">
         <equals arg1="${ant.java.version}" arg2="17"/>
+    </condition>
+
+    <resources id="_jvm22_arg_items">
+        <string>-XX:+UnlockDiagnosticVMOptions</string>
+        <string>-Djdk.attach.allowAttachSelf=true</string>
+        <string>-XX:+UseG1GC</string>
+        <string>-XX:+ParallelRefProcEnabled</string>
+        <!-- Below two are used in Cassandra, not in CNDB-->
+        <!--<string>-XX:MaxTenuringThreshold=1</string>
+        <string>-XX:G1HeapRegionSize=16m</string>-->
+        <string>-XX:G1RSetUpdatingPauseTimePercent=5</string>
+        <string>-XX:MaxGCPauseMillis=100</string>
+
+        <!-- Copy-paste for now these options from cndb/docker-entrypoint.sh; we will verify later whether we
+         want all of them for tests-->
+        <string>-XX:-RestrictContended</string>
+        <string>-XX:+UseThreadPriorities</string>
+        <string>-XX:+DebugNonSafepoints</string>
+        <string>-XX:+UseStringDeduplication</string>
+        <string>-XX:StringTableSize=1000003</string>
+        <string>-XX:+PerfDisableSharedMem</string>
+        <string>-XX:+AlwaysPreTouch</string>
+        <string>-XX:+UseTLAB</string>
+        <string>-XX:+ResizeTLAB</string>
+        <string>-XX:+UseNUMA</string>
+
+
+        <string>--add-exports java.base/jdk.internal.misc=ALL-UNNAMED</string>
+        <string>--add-exports java.base/jdk.internal.ref=ALL-UNNAMED</string>
+        <string>--add-exports java.base/jdk.internal.perf=ALL-UNNAMED</string>
+        <string>--add-exports java.base/sun.nio.ch=ALL-UNNAMED</string>
+        <string>--add-exports java.management.rmi/com.sun.jmx.remote.internal.rmi=ALL-UNNAMED</string>
+        <string>--add-exports java.rmi/sun.rmi.registry=ALL-UNNAMED</string>
+        <string>--add-exports java.rmi/sun.rmi.server=ALL-UNNAMED</string>
+        <string>--add-exports jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED</string>
+        <string>--add-exports jdk.naming.dns/com.sun.jndi.dns=java.naming</string>
+        <string>--add-exports jdk.unsupported/sun.misc=ALL-UNNAMED</string>
+
+        <string>--add-opens java.base/java.io=ALL-UNNAMED</string>
+        <string>--add-opens java.base/java.lang=ALL-UNNAMED</string>
+        <string>--add-opens java.base/java.lang.module=ALL-UNNAMED</string>
+        <string>--add-opens java.base/java.lang.ref=ALL-UNNAMED</string>
+        <string>--add-opens java.base/java.lang.reflect=ALL-UNNAMED</string>
+        <string>--add-opens java.base/java.math=ALL-UNNAMED</string>
+        <string>--add-opens java.base/java.net=ALL-UNNAMED</string>
+        <string>--add-opens java.base/java.nio=ALL-UNNAMED</string>
+        <string>--add-opens java.base/java.nio.file.spi=ALL-UNNAMED</string>
+        <string>--add-opens java.base/java.util=ALL-UNNAMED</string>
+        <string>--add-opens java.base/java.util.concurrent.locks=ALL-UNNAMED</string>
+        <string>--add-opens java.base/jdk.internal.loader=ALL-UNNAMED</string>
+        <string>--add-opens java.base/jdk.internal.math=ALL-UNNAMED</string>
+        <string>--add-opens java.base/jdk.internal.module=ALL-UNNAMED</string>
+        <string>--add-opens java.base/jdk.internal.ref=ALL-UNNAMED</string>
+        <string>--add-opens java.base/jdk.internal.reflect=ALL-UNNAMED</string>
+        <string>--add-opens java.base/jdk.internal.vm=ALL-UNNAMED</string>
+        <string>--add-opens java.base/sun.nio.ch=ALL-UNNAMED</string>
+        <string>--add-opens jdk.compiler/com.sun.tools.javac=ALL-UNNAMED</string>
+        <string>--add-opens jdk.management.jfr/jdk.management.jfr=ALL-UNNAMED</string>
+        <string>--add-opens jdk.management/com.sun.management.internal=ALL-UNNAMED</string>
+        <string>--add-opens jdk.naming.dns/com.sun.jndi.dns=ALL-UNNAMED</string>
+        <!-- required for org.apache.cassandra.Util.getSupportedMTimeGranularity-->
+        <string>--add-opens java.base/java.nio.file.attribute=ALL-UNNAMED</string>
+
+        <!-- below 2 were added to support jamm and fix BatchCommitLogTest -->
+        <string>--add-opens java.base/java.util.concurrent=ALL-UNNAMED</string>
+        <string>--add-opens java.base/java.util.concurrent.atomic=ALL-UNNAMED</string>
+        <string>--add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED</string>
+    </resources>
+    <pathconvert property="_jvm22_args_concat" refid="_jvm22_arg_items" pathsep=" "/>
+    <condition property="java-jvmargs" value="${_jvm22_args_concat}">
+        <equals arg1="${ant.java.version}" arg2="22"/>
     </condition>
 
     <!--
@@ -349,6 +420,21 @@
     </condition>
     <condition property="_std-test-jvmargs" value="${_jvm17_test_arg_items_concat}">
         <equals arg1="${ant.java.version}" arg2="17"/>
+    </condition>
+    <resources id="_jvm22_test_arg_items">
+        <string>-Djava.security.manager=allow</string>
+        <string>-Dio.netty.tryReflectionSetAccessible=true</string>
+        <string>-Dnet.bytebuddy.experimental=true</string>
+
+        <!-- Enable vector incubator feature (simd support)-->
+        <string>--add-modules jdk.incubator.vector</string>
+    </resources>
+    <pathconvert property="_jvm22_test_arg_items_concat" refid="_jvm22_test_arg_items" pathsep=" "/>
+    <condition property="_std-test-jvmargs" value="${_jvm11_test_arg_items_concat}">
+        <equals arg1="${ant.java.version}" arg2="11"/>
+    </condition>
+    <condition property="_std-test-jvmargs" value="${_jvm22_test_arg_items_concat}">
+        <equals arg1="${ant.java.version}" arg2="22"/>
     </condition>
 
     <!-- needed to compile org.apache.cassandra.utils.JMXServerUtils -->
@@ -531,6 +617,7 @@
         <jvmarg value="-Dstorage-config=${test.conf}"/>
         <jvmarg value="-Dcassandra.reads.thresholds.coordinator.defensive_checks_enabled=true" /> <!-- enable defensive checks -->
         <jvmarg value="-javaagent:${build.dir.lib}/jars/jamm-${jamm.version}.jar" />
+
         <jvmarg value="-ea"/>
         <jvmarg line="${java-jvmargs}"/>
       </java>
@@ -1216,6 +1303,7 @@
         <jvmarg value="-Dcassandra.use_nix_recursive_delete=${cassandra.use_nix_recursive_delete}"/>
         <jvmarg value="-Dio.netty.allocator.useCacheForAllThreads=true"/>
         <jvmarg value="-Dio.netty.allocator.maxOrder=11"/>
+
         <jvmarg line="${java-jvmargs}"/>
         <!-- disable shrinks in quicktheories CASSANDRA-15554 -->
         <jvmarg value="-DQT_SHRINKS=0"/>
@@ -1267,6 +1355,7 @@
       <jvmarg value="-Dcassandra.ring_delay_ms=1000"/>
       <jvmarg value="-Dcassandra.tolerate_sstable_size=true"/>
       <jvmarg value="-Dcassandra.skip_sync=true" />
+
     </testmacro>
     <fileset dir="${test.unit.src}" />
   </target>
@@ -1285,6 +1374,7 @@
         <jvmarg value="-Dcassandra.tolerate_sstable_size=true"/>
         <jvmarg value="-Dcassandra.skip_sync=true" />
         <jvmarg value="-Xmx${maxMemory}"/>
+
         <jvmarg value="-Dlogback.configurationFile=file://${test.logback.configurationFile}"/>
       </testmacrohelper>
     </sequential>
@@ -1309,6 +1399,7 @@
         <jvmarg value="-Dcassandra.tolerate_sstable_size=true"/>
         <jvmarg value="-Dcassandra.config=file:///${compressed_yaml}"/>
         <jvmarg value="-Dcassandra.skip_sync=true" />
+
         <jvmarg value="-Dlogback.configurationFile=file://${test.logback.configurationFile}"/>
       </testmacrohelper>
     </sequential>
@@ -1330,6 +1421,7 @@
         <jvmarg value="-Dcassandra.tolerate_sstable_size=true"/>
         <jvmarg value="-Dcassandra.config=file:///${cdc_yaml}"/>
         <jvmarg value="-Dcassandra.skip_sync=true" />
+
         <jvmarg value="-Dlogback.configurationFile=file://${test.logback.configurationFile}"/>
       </testmacrohelper>
     </sequential>
@@ -1375,6 +1467,7 @@
         <jvmarg value="-Dcassandra.config=file:///${scm_none_yaml}"/>
         <jvmarg value="-Dcassandra.test.storage_compatibility_mode=NONE"/>
         <jvmarg value="-Dcassandra.skip_sync=true" />
+
         <jvmarg value="-Dlogback.configurationFile=file://${test.logback.configurationFile}"/>
       </testmacrohelper>
     </sequential>
@@ -1392,6 +1485,7 @@
                 <jvmarg value="-Dcassandra.tolerate_sstable_size=true"/>
                 <jvmarg value="-Dcassandra.config.loader=org.apache.cassandra.OffsetAwareConfigurationLoader"/>
                 <jvmarg value="-Dcassandra.skip_sync=true" />
+
                 <jvmarg value="-Dcassandra.allow_cursor_compaction=false" />
                 <jvmarg value="-Dunified_compaction.parallelize_output_shards=false" />
                 <jvmarg value="-Dlogback.configurationFile=file://${test.logback.configurationFile}"/>
@@ -1415,6 +1509,7 @@
         <jvmarg value="-Dcassandra.tolerate_sstable_size=true"/>
         <jvmarg value="-Dcassandra.config=file:///${system_keyspaces_directory_yaml}"/>
         <jvmarg value="-Dcassandra.skip_sync=true" />
+
         <jvmarg value="-Dlogback.configurationFile=file://${test.logback.configurationFile}"/>
       </testmacrohelper>
     </sequential>
@@ -1431,6 +1526,7 @@
             <jvmarg value="-Dcassandra.tolerate_sstable_size=true"/>
             <jvmarg value="-Dcassandra.sai.latest.version=aa"/>
             <jvmarg value="-Dcassandra.skip_sync=true" />
+
             <jvmarg value="-Dlogback.configurationFile=file://${test.logback.configurationFile}"/>
         </testmacrohelper>
     </sequential>
@@ -1446,6 +1542,7 @@
               <jvmarg value="-Dcassandra.ring_delay_ms=1000"/>
               <jvmarg value="-Dcassandra.tolerate_sstable_size=true"/>
               <jvmarg value="-Dcassandra.skip_sync=true" />
+
               <jvmarg value="-Dlogback.configurationFile=file://\${test.logback.configurationFile}"/>
           </testmacrohelper>
       </sequential>
@@ -1476,6 +1573,7 @@
       <jvmarg value="-Dcassandra.ring_delay_ms=1000"/>
       <jvmarg value="-Dcassandra.tolerate_sstable_size=true"/>
       <jvmarg value="-Dcassandra.skip_sync=true" />
+
     </testmacro>
   </target>
 
@@ -1489,6 +1587,7 @@
       <test if="withoutMethods" name="${test.name}" todir="${build.test.output.dir}/" outfile="TEST-${test.name}"/>
       <jvmarg value="-Dcassandra.ring_delay_ms=1000"/>
       <jvmarg value="-Dcassandra.tolerate_sstable_size=true"/>
+
     </testmacro>
   </target>
 
@@ -1501,6 +1600,7 @@
       <test if="withMethods" name="${test.name}" methods="${test.methods}" todir="${build.test.output.dir}/" outfile="TEST-${test.name}-${test.methods}"/>
       <test if="withoutMethods" name="${test.name}" todir="${build.test.output.dir}/" outfile="TEST-${test.name}"/>
       <jvmarg value="-Dlogback.configurationFile=test/conf/logback-burntest.xml"/>
+
     </testmacro>
   </target>
 
@@ -1581,18 +1681,21 @@
     <testmacro inputdir="${test.unit.src}"
         timeout="${test.timeout}" filter="**/SerializationsTest.java">
       <jvmarg value="-Dcassandra.test-serialization-writes=True"/>
+
     </testmacro>
   </target>
 
   <target name="msg-ser-test" depends="maybe-build-test" description="Tests message serializations">
       <testmacro inputdir="${test.unit.src}" timeout="${test.timeout}"
                filter="**/SerializationsTest.java"/>
+
   </target>
 
   <target name="msg-ser-test-7" depends="maybe-build-test" description="Generates message serializations">
     <testmacro inputdir="${test.unit.src}"
         timeout="${test.timeout}" filter="**/SerializationsTest.java">
       <jvmarg value="-Dcassandra.version=0.7"/>
+
     </testmacro>
   </target>
 
@@ -1600,6 +1703,7 @@
     <testmacro inputdir="${test.unit.src}"
         timeout="${test.timeout}" filter="**/SerializationsTest.java">
       <jvmarg value="-Dcassandra.version=1.0"/>
+
     </testmacro>
   </target>
 
@@ -1614,6 +1718,7 @@
                timeout="${test.long.timeout}">
       <jvmarg value="-Dcassandra.ring_delay_ms=1000"/>
       <jvmarg value="-Dcassandra.tolerate_sstable_size=true"/>
+
     </testmacro>
   </target>
 
@@ -1621,6 +1726,7 @@
       <testmacro inputdir="${test.memory.src}"
                  timeout="${test.memory.timeout}">
           <jvmarg value="-javaagent:${build.dir}/test/lib/jars/java-allocation-instrumenter-${allocation-instrumenter.version}.jar"/>
+
       </testmacro>
   </target>
 
@@ -1639,6 +1745,7 @@
         <jvmarg value="-Dcassandra.memtable_row_overhead_computation_step=100"/>
         <jvmarg value="-Dcassandra.test.use_prepared=${cassandra.test.use_prepared}"/>
         <jvmarg value="-Dcassandra.skip_sync=true" />
+
         <classpath>
           <path refid="cassandra.classpath.test" />
           <pathelement location="${test.classes}"/>
@@ -1685,6 +1792,7 @@
         <jvmarg value="-Dcassandra.test.use_prepared=${cassandra.test.use_prepared}"/>
         <jvmarg value="-Dcassandra.memtable_row_overhead_computation_step=100"/>
         <jvmarg value="-Dcassandra.skip_sync=true" />
+
         <classpath>
           <path refid="cassandra.classpath.test" />
           <pathelement location="${test.classes}"/>
@@ -1910,6 +2018,7 @@
       <jvmarg value="-Dcassandra.ring_delay_ms=10000"/>
       <jvmarg value="-Dcassandra.tolerate_sstable_size=true"/>
       <jvmarg value="-Dcassandra.skip_sync=true" />
+
     </testmacro>
   </target>
 
@@ -1947,6 +2056,7 @@
       <jvmarg value="-Dcassandra.tolerate_sstable_size=true"/>
       <jvmarg value="-Dcassandra.skip_sync=true" />
       <jvmarg value="-Xmx8G"/>
+
     </testmacro>
   </target>
 
@@ -1963,6 +2073,7 @@
       <jvmarg value="-Dcassandra.tolerate_sstable_size=true"/>
       <jvmarg value="-Dcassandra.skip_sync=true" />
       <jvmarg value="-Xmx8G"/>
+
     </testmacro>
   </target>
 
@@ -2081,10 +2192,10 @@
 </project>]]></echo>
       <antcall target="_maybe_update_idea_to_java11plus"/>
       <echo>
-      IDE configuration in .idea/ updated for use with JDK${ant.java.version}.
+          IDE configuration in .idea/ updated for use with JDK${ant.java.version}.
 
-      In IntelliJ verify that the SDK is ${ant.java.version}, and its path is valid.
-      This can be verified in 'Project Structure/Project Setting/Project' and 'Project Structure/Platform Setting/SDKs'.
+          In IntelliJ verify that the SDK is ${ant.java.version}, and its path is valid.
+          This can be verified in 'Project Structure/Project Setting/Project' and 'Project Structure/Platform Setting/SDKs'.
       </echo>
   </target>
 
