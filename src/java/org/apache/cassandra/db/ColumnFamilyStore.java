@@ -3465,9 +3465,12 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         }
         else
         {
-            if (logger.isTraceEnabled())
-                logger.trace("Recycling CL segments for dropping {}", metadata);
-            CommitLog.instance.forceRecycleAllSegments(Collections.singleton(metadata.id));
+            if (!DatabaseDescriptor.isUnsafeSystem())
+            {
+                if (logger.isTraceEnabled())
+                    logger.trace("Recycling CL segments for dropping {}", metadata);
+                CommitLog.instance.forceRecycleAllSegments(Collections.singleton(metadata.id));
+            }
         }
 
         if (logger.isTraceEnabled())
