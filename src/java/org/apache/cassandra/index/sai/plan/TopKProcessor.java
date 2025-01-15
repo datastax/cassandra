@@ -180,7 +180,9 @@ public class TopKProcessor
         // rows in the requested index order, but we'll also reorder and return them in primary key order, so it doesn't
         // confuse the reconciliation process or any other thing in the way to the call to Idex.QueryPlan#postProcessor,
         // which will go back here again with filtered rows.
-        // TODO: given that top-k queries don't support CL>ONE, we might not need to return the unfiltered rows in PK order.
+        // Note that due to sstable overlap and how the full data set of each node is queried for top-k queries we can
+        // have multiple versions of the same row in the coordinator even with CL=ONE. Reconciliation should remove
+        // those duplicates, but it needs the rows to be ordered by primary key to do so. See CNDB-12308 for details.
         TreeMap<PartitionInfo, TreeSet<Unfiltered>> unfilteredByPartition = null;
         if (partitions instanceof PartitionIterator)
         {
