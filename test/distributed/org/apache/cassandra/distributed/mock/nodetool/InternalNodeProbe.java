@@ -37,6 +37,7 @@ import org.apache.cassandra.locator.DynamicEndpointSnitchMBean;
 import org.apache.cassandra.locator.EndpointSnitchInfo;
 import org.apache.cassandra.locator.EndpointSnitchInfoMBean;
 import org.apache.cassandra.metrics.CassandraMetricsRegistry;
+import org.apache.cassandra.metrics.CompactionMetrics;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.service.CacheService;
