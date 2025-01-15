@@ -139,17 +139,29 @@ public class ShardManagerDiskAware extends ShardManagerNoDisks
 
         public Token shardStart()
         {
+            ensureInitialized();
             return currentStart;
         }
 
         public Token shardEnd()
         {
+            ensureInitialized();
             return currentEnd;
         }
 
         public Range<Token> shardSpan()
         {
+            ensureInitialized();
             return new Range<>(currentStart, currentEnd != null ? currentEnd : currentStart.minValue());
+        }
+
+        private void ensureInitialized()
+        {
+            if (diskIndex < 0)
+            {
+                enterDisk(0);
+                setEndToken();
+            }
         }
 
         public double shardSpanSize()
