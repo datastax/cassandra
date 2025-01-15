@@ -46,14 +46,13 @@ final class PartiallyAppliedScalarFunction extends NativeScalarFunction implemen
     @Override
     public boolean isMonotonic()
     {
-        return function.isNative() ? ((NativeScalarFunction) function).isPartialApplicationMonotonic(partialParameters)
-                                   : function.isMonotonic();
+        return function.isPartialApplicationMonotonic(partialParameters);
     }
 
     @Override
-    public boolean isPure()
+    public boolean isDeterministic()
     {
-        return function.isPure();
+        return function.isDeterministic();
     }
 
     @Override
