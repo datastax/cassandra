@@ -237,6 +237,8 @@ public class TopKProcessor
                 if (pr == null)
                     continue;
                 topK.addAll(pr.rows);
+                assert unfilteredByPartition != null || pr.tombstones.isEmpty()
+                        : "Filtered partition results should not contain tombstones.";
                 for (var uf: pr.tombstones)
                     addUnfiltered(unfilteredByPartition, pr.partitionInfo, uf);
             }
