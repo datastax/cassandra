@@ -155,7 +155,7 @@ public class EndpointGroupingRangeCommandIteratorTest extends CQLTester
     private static CloseableIterator<ReplicaPlan.ForRangeRead> replicaPlanIterator(PartitionRangeReadCommand command)
     {
         AbstractBounds<PartitionPosition> keyRange = command.dataRange().keyRange();
-        CloseableIterator<ReplicaPlan.ForRangeRead> replicaPlans = new ReplicaPlanIterator(keyRange, null, keyspace, ConsistencyLevel.ONE);
+        CloseableIterator<ReplicaPlan.ForRangeRead> replicaPlans = new ReplicaPlanIterator(keyRange, null, keyspace, ConsistencyLevel.ONE, command.rowFilter().allowFitlering);
         return new ReplicaPlanMerger(replicaPlans, keyspace, ConsistencyLevel.ONE);
     }
 }

@@ -66,7 +66,7 @@ public class IndexAvailabilityTest extends TestBaseImpl
     private List<String> indexesPerKs;
 
     @Test
-    public void verifyIndexStatusPropagation() throws Exception
+    public void testIndexStatusPropagation() throws Exception
     {
         try (Cluster cluster = init(Cluster.build(2)
                                            .withConfig(config -> config.with(GOSSIP)
@@ -231,6 +231,79 @@ public class IndexAvailabilityTest extends TestBaseImpl
                 executeOnAllCoordinators(cluster, stringQuery, ConsistencyLevel.ALL, rows);
                 executeOnAllCoordinators(cluster, multiIndexQuery, ConsistencyLevel.ALL, rows);
             }
+        }
+    }
+
+    @Test
+    public void testAllowFilteringWithIndexBuildingOn3NodeCluster() throws Exception
+    {
+        try (Cluster cluster = init(Cluster.build(3)
+                .withConfig(config -> config.with(GOSSIP)
+                        .with(NETWORK))
+                .start()))
+        {
+            String ks2 = "ks2";
+            String cf1 = "cf1";
+            String index2 = "cf1_idx2";
+
+            cluster.schemaChange(String.format(CREATE_KEYSPACE, ks2, 2));
+            cluster.schemaChange(String.format(CREATE_TABLE, ks2, cf1));
+            //executeOnAllCoordinators(cluster, "SELECT pk FROM ks2.cf1 WHERE v2='0' ALLOW FILTERING", ConsistencyLevel.LOCAL_QUORUM, 0);
+            cluster.schemaChange(String.format(CREATE_INDEX, index2, ks2, cf1, "v2"));
+            waitForIndexQueryable(cluster, ks2);
+            cluster.forEach(node -> expectedNodeIndexQueryability.put(NodeIndex.create(ks2, index2, node), Index.Status.BUILD_SUCCEEDED));
+
+            executeOnAllCoordinators(cluster, "SELECT pk FROM ks2.cf1 WHERE v2='0'", ConsistencyLevel.LOCAL_QUORUM, 0);
+            executeOnAllCoordinators(cluster, "SELECT pk FROM ks2.cf1 WHERE v2='0' ALLOW FILTERING", ConsistencyLevel.LOCAL_QUORUM, 0);
+
+            // mark ks2 index2 as indexing on node1
+            markIndexBuilding(cluster.get(1), ks2, cf1, index2);
+            // on node2, it observes that node1 ks2.index2 is not queryable
+            waitForIndexingStatus(cluster.get(2), ks2, index2, cluster.get(1), Index.Status.FULL_REBUILD_STARTED);
+            markIndexBuilding(cluster.get(2), ks2, cf1, index2);
+            waitForIndexingStatus(cluster.get(3), ks2, index2, cluster.get(2), Index.Status.FULL_REBUILD_STARTED);
+            markIndexQueryable(cluster.get(3), ks2, cf1, index2);
+            waitForIndexingStatus(cluster.get(2), ks2, index2, cluster.get(3), Index.Status.BUILD_SUCCEEDED);
+            waitForIndexingStatus(cluster.get(1), ks2, index2, cluster.get(2), Index.Status.FULL_REBUILD_STARTED);
+            // other indexes or keyspaces should not be affected
+            assertIndexingStatus(cluster, ks2, index2);
+
+            //executeOnAllCoordinators(cluster, "SELECT pk FROM ks2.cf1 WHERE v2='0'", ConsistencyLevel.LOCAL_QUORUM, 0);
+            executeOnAllCoordinators(cluster, "SELECT pk FROM ks2.cf1 WHERE v2='0' ALLOW FILTERING", ConsistencyLevel.LOCAL_QUORUM, 0);
+        }
+    }
+
+    @Test
+    public void testAllowFilteringWithIndexBuildingOn1NodeCluster() throws Exception
+    {
+        try (Cluster cluster = init(Cluster.build(1)
+                .withConfig(config -> config.with(GOSSIP)
+                        .with(NETWORK))
+                .start()))
+        {
+            String ks2 = "ks2";
+            String cf1 = "cf1";
+            String index2 = "cf1_idx2";
+
+            cluster.schemaChange(String.format(CREATE_KEYSPACE, ks2, 1));
+            cluster.schemaChange(String.format(CREATE_TABLE, ks2, cf1));
+            executeOnAllCoordinators(cluster, "SELECT pk FROM ks2.cf1 WHERE v2='0' ALLOW FILTERING", ConsistencyLevel.LOCAL_QUORUM, 0);
+            cluster.schemaChange(String.format(CREATE_INDEX, index2, ks2, cf1, "v2"));
+            waitForIndexQueryable(cluster, ks2);
+            cluster.forEach(node -> expectedNodeIndexQueryability.put(NodeIndex.create(ks2, index2, node), Index.Status.BUILD_SUCCEEDED));
+
+            executeOnAllCoordinators(cluster, "SELECT pk FROM ks2.cf1 WHERE v2='0'", ConsistencyLevel.LOCAL_QUORUM, 0);
+            executeOnAllCoordinators(cluster, "SELECT pk FROM ks2.cf1 WHERE v2='0' ALLOW FILTERING", ConsistencyLevel.LOCAL_QUORUM, 0);
+
+            // mark ks2 index2 as indexing on node1
+            markIndexBuilding(cluster.get(1), ks2, cf1, index2);
+            // on node2, it observes that node1 ks2.index2 is not queryable
+            waitForIndexingStatus(cluster.get(1), ks2, index2, cluster.get(1), Index.Status.FULL_REBUILD_STARTED);
+            // other indexes or keyspaces should not be affected
+            assertIndexingStatus(cluster, ks2, index2);
+
+            //executeOnAllCoordinators(cluster, "SELECT pk FROM ks2.cf1 WHERE v2='0'", ConsistencyLevel.LOCAL_QUORUM, 0);
+            executeOnAllCoordinators(cluster, "SELECT pk FROM ks2.cf1 WHERE v2='0' ALLOW FILTERING", ConsistencyLevel.LOCAL_QUORUM, 0);
         }
     }
 

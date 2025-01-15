@@ -121,6 +121,25 @@ public class SingletonIndexGroup implements Index.Group
     }
 
     @Override
+    public Index.QueryPlan queryPlanForIndices(RowFilter rowFilter, Set<Index> indexes)
+    {
+        Preconditions.checkNotNull(delegate);
+
+        if (indexes.contains(delegate))
+            return null;
+
+        // Indexes using a singleton group don't support disjunctions,
+        // so we only consider the top-level AND expressions for index selection.
+        for (RowFilter.Expression e : rowFilter.withoutDisjunctions().expressions())
+        {
+            if (delegate.supportsExpression(e.column(), e.operator()))
+                return new SingletonIndexQueryPlan(delegate, delegate.getPostIndexQueryFilter(rowFilter));
+        }
+
+        return null;
+    }
+
+    @Override
     public SSTableFlushObserver getFlushObserver(Descriptor descriptor, LifecycleNewTracker tracker, TableMetadata tableMetadata, long keyCount)
     {
         Preconditions.checkNotNull(delegate);

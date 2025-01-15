@@ -985,12 +985,12 @@ public class StatementRestrictions
         return table.clusteringColumns().size() != clusteringColumnsRestrictions.size();
     }
 
-    public RowFilter getRowFilter(IndexRegistry indexManager, QueryOptions options, QueryState queryState)
+    public RowFilter getRowFilter(IndexRegistry indexManager, QueryOptions options, QueryState queryState, boolean allowsFiltering)
     {
         if (filterRestrictions.isEmpty() && children.isEmpty())
             return RowFilter.NONE;
 
-        return RowFilter.builder(indexManager).buildFromRestrictions(this, table, options, queryState);
+        return RowFilter.builder(indexManager, allowsFiltering).buildFromRestrictions(this, table, options, queryState);
     }
 
     /**

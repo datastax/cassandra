@@ -36,7 +36,6 @@ import org.apache.cassandra.locator.LocalStrategy;
 import org.apache.cassandra.locator.ReplicaPlan;
 import org.apache.cassandra.locator.ReplicaPlans;
 import org.apache.cassandra.locator.TokenMetadata;
-import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.Pair;
 
@@ -45,6 +44,7 @@ class ReplicaPlanIterator extends AbstractIterator<ReplicaPlan.ForRangeRead>
     private final Keyspace keyspace;
     private final ConsistencyLevel consistency;
     private final Index.QueryPlan indexQueryPlan;
+    private final boolean allowsFiltering;
     @VisibleForTesting
     final Iterator<? extends AbstractBounds<PartitionPosition>> ranges;
     private final int rangeCount;
@@ -52,11 +52,13 @@ class ReplicaPlanIterator extends AbstractIterator<ReplicaPlan.ForRangeRead>
     ReplicaPlanIterator(AbstractBounds<PartitionPosition> keyRange,
                         Index.QueryPlan indexQueryPlan,
                         Keyspace keyspace,
-                        ConsistencyLevel consistency)
+                        ConsistencyLevel consistency,
+                        boolean allowsFiltering)
     {
         this.indexQueryPlan = indexQueryPlan;
         this.keyspace = keyspace;
         this.consistency = consistency;
+        this.allowsFiltering = allowsFiltering;
 
 
         List<? extends AbstractBounds<PartitionPosition>> l = keyspace.getReplicationStrategy() instanceof LocalStrategy
@@ -80,7 +82,7 @@ class ReplicaPlanIterator extends AbstractIterator<ReplicaPlan.ForRangeRead>
         if (!ranges.hasNext())
             return endOfData();
 
-        return ReplicaPlans.forRangeRead(keyspace, indexQueryPlan, consistency, ranges.next(), 1);
+        return ReplicaPlans.forRangeRead(keyspace, indexQueryPlan, consistency, ranges.next(), 1, allowsFiltering);
     }
 
     /**
@@ -102,7 +104,7 @@ class ReplicaPlanIterator extends AbstractIterator<ReplicaPlan.ForRangeRead>
         while (ringIter.hasNext())
         {
             /*
-             * remainder is a range/bounds of partition positions and we want to split it with a token. We want to split
+             * remainder is a range/bounds of partition positions, and we want to split it with a token. We want to split
              * using the key returned by token.maxKeyBound. For instance, if remainder is [DK(10, 'foo'), DK(20, 'bar')],
              * and we have 3 nodes with tokens 0, 15, 30, we want to split remainder to A=[DK(10, 'foo'), 15] and
              * B=(15, DK(20, 'bar')]. But since we can't mix tokens and keys at the same time in a range, we use
