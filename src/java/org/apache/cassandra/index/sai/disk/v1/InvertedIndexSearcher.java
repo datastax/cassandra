@@ -35,10 +35,6 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.PartitionPosition;
-import org.apache.cassandra.db.Slice;
-import org.apache.cassandra.db.Slices;
-import org.apache.cassandra.db.rows.Cell;
-import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
@@ -54,12 +50,12 @@ import org.apache.cassandra.index.sai.metrics.QueryEventListener;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.plan.Orderer;
 import org.apache.cassandra.index.sai.utils.BM25Utils;
+import org.apache.cassandra.index.sai.utils.BM25Utils.KeyWithFrequencies;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.RowIdWithByteComparable;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.CloseableIterator;
@@ -149,19 +145,6 @@ public class InvertedIndexSearcher extends IndexSearcher
         throw new IllegalArgumentException(indexContext.logMessage("Unsupported expression: " + exp));
     }
 
-    private Cell<?> readColumn(SSTableReader sstable, PrimaryKey primaryKey)
-    {
-        var dk = primaryKey.partitionKey();
-        var slices = Slices.with(indexContext.comparator(), Slice.make(primaryKey.clustering()));
-        try (var rowIterator = sstable.iterator(dk, slices, columnFilter, false, SSTableReadsListener.NOOP_LISTENER))
-        {
-            var unfiltered = rowIterator.next();
-            assert unfiltered.isRow() : unfiltered;
-            Row row = (Row) unfiltered;
-            return row.getCell(indexContext.getDefinition());
-        }
-    }
-
     @Override
     public CloseableIterator<PrimaryKeyWithSortKey> orderBy(Orderer orderer, Expression slice, AbstractBounds<PartitionPosition> keyRange, QueryContext queryContext, int limit) throws IOException
     {
@@ -187,17 +170,17 @@ public class InvertedIndexSearcher extends IndexSearcher
         try (var pkm = primaryKeyMapFactory.newPerSSTablePrimaryKeyMap();
              var merged = IntersectingPostingList.intersect(List.copyOf(postingLists.values())))
         {
-            // construct an Iterator<PrimaryKey>() from our intersected postings
-            var it = new AbstractIterator<PrimaryKey>() {
+            // construct an Iterator from our intersected postings
+            var it = new AbstractIterator<KeyWithFrequencies>() {
                 @Override
-                protected PrimaryKey computeNext()
+                protected KeyWithFrequencies computeNext()
                 {
                     try
                     {
                         int rowId = merged.nextPosting();
                         if (rowId == PostingList.END_OF_STREAM)
                             return endOfData();
-                        return pkm.primaryKeyFromRowId(rowId);
+                        return new KeyWithFrequencies(pkm.primaryKeyFromRowId(rowId), merged.frequencies());
                     }
                     catch (IOException e)
                     {
@@ -209,7 +192,7 @@ public class InvertedIndexSearcher extends IndexSearcher
         }
     }
 
-    private CloseableIterator<PrimaryKeyWithSortKey> bm25Internal(Iterator<PrimaryKey> keyIterator,
+    private CloseableIterator<PrimaryKeyWithSortKey> bm25Internal(Iterator<KeyWithFrequencies> keyIterator,
                                                                   List<ByteBuffer> queryTerms,
                                                                   Map<ByteBuffer, Long> documentFrequencies)
     {
@@ -224,7 +207,7 @@ public class InvertedIndexSearcher extends IndexSearcher
                                        docStats,
                                        indexContext,
                                        sstable.descriptor.id,
-                                       pk -> readColumn(sstable, pk));
+                                       pk -> 100); // TODO implement term counting
     }
 
     @Override
