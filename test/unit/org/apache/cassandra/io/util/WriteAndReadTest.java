@@ -34,28 +34,26 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
-import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.Slices;
 import org.apache.cassandra.db.filter.ColumnFilter;
+import org.apache.cassandra.db.lifecycle.AbstractLogTransaction;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
-import org.apache.cassandra.io.sstable.IndexSummary;
 import org.apache.cassandra.io.sstable.SequenceBasedSSTableId;
 import org.apache.cassandra.io.sstable.format.PartitionIndexIterator;
 import org.apache.cassandra.io.sstable.format.RowIndexEntry;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
 import org.apache.cassandra.io.sstable.format.ScrubPartitionIterator;
-import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
-import org.apache.cassandra.utils.IFilter;
 import org.apache.cassandra.utils.PageAware;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 
 public class WriteAndReadTest
 {
@@ -157,6 +155,7 @@ public class WriteAndReadTest
                             .trickleFsync(DatabaseDescriptor.getTrickleFsync())
                             .trickleFsyncByteInterval(DatabaseDescriptor.getTrickleFsyncIntervalInKb() * 1024)
                             .bufferType(BufferType.OFF_HEAP)
+                            .finishOnClose(true)
                             .build()))
 
             {
@@ -170,7 +169,6 @@ public class WriteAndReadTest
                 writer.writeLong(firstPos);
                 writer.writeLong(keyCount);
                 writer.writeLong(root);
-                writer.sync();
             }
 
             SSTableReader reader = null;
@@ -192,14 +190,30 @@ public class WriteAndReadTest
             {
                 if (reader != null)
                 {
-                    reader.selfRef().release();
+                    releaseReader(reader);
                     CountDownLatch latch = new CountDownLatch(1);
                     ScheduledExecutors.nonPeriodicTasks.execute(latch::countDown);
                     latch.await();  // wait for the release to complete
-                    // we don't have a data component and the release above won't delete the index file
-                    FileUtils.deleteWithConfirm(reader.getIndexFile().channel.getFile());
+                    assertFalse(reader.getIndexFile().channel.getFile().exists());
                 }
             }
         }
+    }
+
+    private static void releaseReader(SSTableReader reader)
+    {
+        reader.markObsolete(new AbstractLogTransaction.ReaderTidier() {
+            public void commit()
+            {
+                for (Component component : reader.components())
+                    FileUtils.deleteWithConfirm(reader.descriptor.fileFor(component));
+            }
+
+            public Throwable abort(Throwable accumulate)
+            {
+                return null;
+            }
+        });
+        reader.selfRef().release();
     }
 }
