@@ -19,7 +19,9 @@ package org.apache.cassandra.index.sai.disk.v1;
 
 import java.io.IOException;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 import org.junit.Test;
@@ -33,6 +35,7 @@ import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.disk.MemtableTermsIterator;
 import org.apache.cassandra.index.sai.disk.PostingList;
+import org.apache.cassandra.index.sai.disk.RAMStringIndexer;
 import org.apache.cassandra.index.sai.disk.TermsIterator;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
@@ -44,9 +47,11 @@ import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.index.sai.utils.SaiRandomizedTest;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
+import org.apache.lucene.util.BytesRef;
 
 import static org.apache.cassandra.index.sai.disk.v1.InvertedIndexBuilder.buildStringTermsEnum;
 import static org.apache.cassandra.index.sai.metrics.QueryEventListeners.NO_OP_TRIE_LISTENER;
@@ -207,6 +212,67 @@ public class TermsReaderTest extends SaiRandomizedTest
                     long lastResult = actualPostingList.nextPosting();
                     assertEquals(PostingList.END_OF_STREAM, lastResult);
                 }
+            }
+        }
+    }
+
+    @Test
+    public void testTermQueriesWithFrequencies() throws IOException {
+        final IndexDescriptor indexDescriptor = newIndexDescriptor();
+        final String index = newIndex();
+        final IndexContext indexContext = SAITester.createIndexContext(index, UTF8Type.instance);
+
+        // Build terms with frequencies using RAMStringIndexer
+        var indexer = new RAMStringIndexer(true); // true to track frequencies
+        indexer.addAll(List.of(new BytesRef("A"), new BytesRef("A")), 100);
+        indexer.addAll(List.of(new BytesRef("B")), 102);
+        indexer.addAll(List.of(new BytesRef("A"), new BytesRef("A"), new BytesRef("A")), 200);
+        indexer.addAll(List.of(new BytesRef("B"), new BytesRef("B")), 202);
+        indexer.addAll(List.of(new BytesRef("B")), 302);
+
+        // Write the index
+        SegmentMetadata.ComponentMetadataMap indexMetas;
+        IndexComponents.ForWrite components = indexDescriptor.newPerIndexComponentsForWrite(indexContext);
+        try (InvertedIndexWriter writer = new InvertedIndexWriter(components)) {
+            TermsIterator termsIter = indexer.getTermsWithPostings(ByteBufferUtil.bytes("A"),
+                                                                   ByteBufferUtil.bytes("B"),
+                                                                   TypeUtil.BYTE_COMPARABLE_VERSION);
+            indexMetas = writer.writeAll(termsIter);
+        }
+
+        // Open readers
+        FileHandle termsData = components.get(IndexComponentType.TERMS_DATA).createFileHandle();
+        FileHandle postingLists = components.get(IndexComponentType.POSTING_LISTS).createFileHandle();
+        long termsFooterPointer = Long.parseLong(indexMetas.get(IndexComponentType.TERMS_DATA).attributes.get(SAICodecUtils.FOOTER_POINTER));
+
+        // Read and verify
+        try (TermsReader reader = new TermsReader(indexContext,
+                                                  termsData,
+                                                  components.byteComparableVersionFor(IndexComponentType.TERMS_DATA),
+                                                  postingLists,
+                                                  indexMetas.get(IndexComponentType.TERMS_DATA).root,
+                                                  termsFooterPointer,
+                                                  version)) {
+            try (TermsIterator termsIter = reader.allTerms()) {
+                int termCount = 0;
+                while (termsIter.next() != null) {
+                    try (PostingList postings = termsIter.postings()) {
+                        Map<Long, Integer> frequencies = new HashMap<>();
+                        long rowId;
+                        while ((rowId = postings.nextPosting()) != PostingList.END_OF_STREAM) {
+                            frequencies.put(rowId, postings.frequency());
+                        }
+
+                        // Verify frequencies match expected
+                        if (termCount == 0) {
+                            assertEquals(Map.of(100L, 2, 200L, 3), frequencies);
+                        } else {
+                            assertEquals(Map.of(102L, 1, 202L, 2, 302L, 1), frequencies);
+                        }
+                        termCount++;
+                    }
+                }
+                assertEquals(2, termCount);
             }
         }
     }

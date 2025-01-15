@@ -186,9 +186,6 @@ public class PostingsWriter implements Closeable
         blockOffsets.clear();
         blockMaxIDs.clear();
 
-        // TODO frequency inclusion is uniform at the index level, we probably don't want to write it with every postingslist
-        dataOutput.writeByte((byte) (postings.includesFrequencies() ? 1 : 0));
-
         int segmentRowId;
         // When postings list are merged, we don't know exact size, just an upper bound.
         // We need to count how many postings we added to the block ourselves.
