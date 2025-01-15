@@ -311,22 +311,4 @@ public class PostingsWriter implements Closeable
             writer.finish();
         }
     }
-
-    private void writeSortedFoRBlock(IntArrayList values, IndexOutput output) throws IOException
-    {
-        final int maxValue = values.getInt(values.size() - 1);
-
-        assert values.size() > 0;
-        final int bitsPerValue = maxValue == 0 ? 0 : LuceneCompat.directWriterUnsignedBitsRequired(output.order(), maxValue);
-        output.writeByte((byte) bitsPerValue);
-        if (bitsPerValue > 0)
-        {
-            final DirectWriterAdapter writer = LuceneCompat.directWriterGetInstance(output.order(), output, values.size(), bitsPerValue);
-            for (int i = 0; i < values.size(); ++i)
-            {
-                writer.add(values.getInt(i));
-            }
-            writer.finish();
-        }
-    }
 }
