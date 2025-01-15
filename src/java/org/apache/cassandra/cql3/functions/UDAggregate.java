@@ -57,13 +57,15 @@ public class UDAggregate extends UserFunction implements AggregateFunction
     protected final ByteBuffer initcond;
     private final ScalarFunction stateFunction;
     private final ScalarFunction finalFunction;
+    private final boolean deterministic;
 
     public UDAggregate(FunctionName name,
                        List<AbstractType<?>> argTypes,
                        AbstractType<?> returnType,
                        ScalarFunction stateFunc,
                        ScalarFunction finalFunc,
-                       ByteBuffer initcond)
+                       ByteBuffer initcond,
+                       boolean deterministic)
     {
         super(name, argTypes, returnType);
         this.stateFunction = stateFunc;
@@ -72,6 +74,7 @@ public class UDAggregate extends UserFunction implements AggregateFunction
         this.resultType = UDFDataType.wrap(returnType, false);
         this.stateType = stateFunc != null ? UDFDataType.wrap(stateFunc.returnType(), false) : null;
         this.initcond = initcond;
+        this.deterministic = deterministic;
     }
 
     public static UDAggregate create(Collection<UDFunction> functions,
@@ -81,7 +84,8 @@ public class UDAggregate extends UserFunction implements AggregateFunction
                                      FunctionName stateFunc,
                                      FunctionName finalFunc,
                                      AbstractType<?> stateType,
-                                     ByteBuffer initcond)
+                                     ByteBuffer initcond,
+                                     boolean deterministic)
     {
         List<AbstractType<?>> stateTypes = new ArrayList<>(argTypes.size() + 1);
         stateTypes.add(stateType);
@@ -92,7 +96,8 @@ public class UDAggregate extends UserFunction implements AggregateFunction
                                returnType,
                                findFunction(name, functions, stateFunc, stateTypes),
                                null == finalFunc ? null : findFunction(name, functions, finalFunc, finalTypes),
-                               initcond);
+                               initcond,
+                               deterministic);
     }
 
     private static UDFunction findFunction(FunctionName udaName, Collection<UDFunction> functions, FunctionName name, List<AbstractType<?>> arguments)
@@ -103,10 +108,10 @@ public class UDAggregate extends UserFunction implements AggregateFunction
                         .orElseThrow(() -> new ConfigurationException(String.format("Unable to find function %s referenced by UDA %s", name, udaName)));
     }
 
-    public boolean isPure()
+    @Override
+    public boolean isDeterministic()
     {
-        // Right now, we have no way to check if an UDA is pure. Due to that we consider them as non pure to avoid any risk.
-        return false;
+        return deterministic;
     }
 
     @Override
@@ -140,7 +145,8 @@ public class UDAggregate extends UserFunction implements AggregateFunction
                                returnType.withUpdatedUserType(udt),
                                findFunction(name, udfs, stateFunction.name(), stateFunction.argTypes()),
                                null == finalFunction ? null : findFunction(name, udfs, finalFunction.name(), finalFunction.argTypes()),
-                               initcond);
+                               initcond,
+                               deterministic);
     }
 
     public UDAggregate withNewKeyspace(String newKeyspace, Collection<UDFunction> udfs, Types types)
@@ -157,7 +163,8 @@ public class UDAggregate extends UserFunction implements AggregateFunction
                                                                     udfs,
                                                                     new FunctionName(newKeyspace, finalFunction.name().name),
                                                                     withUpdatedUserTypes(finalFunction.argTypes(), types)),
-                               initcond);
+                               initcond,
+                               deterministic);
     }
 
     private List<AbstractType<?>> withUpdatedUserTypes(List<AbstractType<?>> argTypes, Types types)
@@ -398,6 +405,10 @@ public class UDAggregate extends UserFunction implements AggregateFunction
             builder.newLine()
                    .append("INITCOND ")
                    .append(stateType().asCQL3Type().toCQLLiteral(initialCondition()));
+
+        if (deterministic)
+            builder.newLine()
+                   .append("DETERMINISTIC");
 
         return builder.append(";")
                       .toString();
