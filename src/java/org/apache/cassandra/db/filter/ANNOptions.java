@@ -37,6 +37,9 @@ import org.apache.cassandra.utils.FBUtilities;
  */
 public class ANNOptions
 {
+    public static final String REQUIRES_HIGHER_MESSAGING_VERSION =
+    "ANN options are not supported in clusters below DS 11.";
+
     public static final String RERANK_K_OPTION_NAME = "rerank_k";
 
     public static final ANNOptions NONE = new ANNOptions(null);
@@ -81,7 +84,7 @@ public class ANNOptions
         if (MessagingService.current_version < MessagingService.VERSION_DS_11)
             badNodes.add(FBUtilities.getBroadcastAddressAndPort());
         if (!badNodes.isEmpty())
-            throw new InvalidRequestException("ANN options are not supported in clusters below DS 11.");
+            throw new InvalidRequestException(REQUIRES_HIGHER_MESSAGING_VERSION);
     }
 
     /**

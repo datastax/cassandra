@@ -21,6 +21,11 @@ import java.util.Optional;
 
 import javax.annotation.Nullable;
 
+import org.apache.cassandra.index.IndexNotAvailableException;
+import org.apache.cassandra.index.sai.SAITester;
+import org.apache.cassandra.index.sai.StorageAttachedIndex;
+import org.apache.cassandra.inject.Injections;
+import org.apache.cassandra.inject.InvokePointBuilder;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -50,6 +55,7 @@ import org.apache.cassandra.utils.Pair;
 import org.assertj.core.api.Assertions;
 import org.quicktheories.QuickTheory;
 
+import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
 import static org.quicktheories.generators.SourceDSL.integers;
 
 /**
