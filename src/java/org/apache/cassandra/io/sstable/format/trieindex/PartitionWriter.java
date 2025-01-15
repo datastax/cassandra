@@ -92,4 +92,9 @@ class PartitionWriter extends SortedTablePartitionWriter
         firstClustering = null;
         ++rowIndexCount;
     }
+
+    long partitionStart()
+    {
+        return initialPosition;
+    }
 }

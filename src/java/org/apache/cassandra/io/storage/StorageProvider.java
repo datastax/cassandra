@@ -36,6 +36,7 @@ import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
+import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.sstable.metadata.ZeroCopyMetadata;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
@@ -256,14 +257,15 @@ public interface StorageProvider
         public void invalidateFileSystemCache(File file)
         {
             INativeLibrary.instance.trySkipCache(file, 0, 0);
+            if (ChunkCache.instance != null)
+                ChunkCache.instance.invalidateFile(file);
         }
 
         @Override
         public void invalidateFileSystemCache(Descriptor desc, boolean tidied)
         {
-            StorageProvider.instance.invalidateFileSystemCache(desc.fileFor(Component.DATA));
-            StorageProvider.instance.invalidateFileSystemCache(desc.fileFor(Component.ROW_INDEX));
-            StorageProvider.instance.invalidateFileSystemCache(desc.fileFor(Component.PARTITION_INDEX));
+            for (Component component : SSTable.discoverComponentsFor(desc))
+                invalidateFileSystemCache(desc.fileFor(component));
         }
 
         protected Config.DiskAccessMode accessMode(Component component)

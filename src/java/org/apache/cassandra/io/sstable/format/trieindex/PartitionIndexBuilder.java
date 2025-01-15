@@ -21,8 +21,8 @@ import java.io.IOException;
 import java.util.function.Consumer;
 
 import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.tries.IncrementalTrieWriter;
-import org.apache.cassandra.io.tries.Walker;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.SequentialWriter;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -112,7 +112,14 @@ public class PartitionIndexBuilder implements AutoCloseable
 
         try (FileHandle fh = fhBuilder.complete(writer.getLastFlushOffset()))
         {
-            PartitionIndex pi = new PartitionIndexEarly(fh, partialIndexTail.root(), partialIndexTail.count(), firstKey, partialIndexLastKey, partialIndexTail.cutoff(), partialIndexTail.tail(), version);
+            PartitionIndex pi = new PartitionIndexEarly(fh,
+                                                        partialIndexTail.root(),
+                                                        partialIndexTail.count(),
+                                                        SSTable.getMinimalKey(firstKey),
+                                                        SSTable.getMinimalKey(partialIndexLastKey),
+                                                        partialIndexTail.cutoff(),
+                                                        partialIndexTail.tail(),
+                                                        version);
             partialIndexConsumer.accept(pi);
             partialIndexConsumer = null;
         }
