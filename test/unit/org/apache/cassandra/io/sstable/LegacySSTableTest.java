@@ -95,6 +95,13 @@ public class LegacySSTableTest
      * When adding a new sstable version, add that one here.
      * See {@link #testGenerateSstables()} to generate sstables.
      * Take care on commit as you need to add the sstable files using {@code git add -f}
+     *
+     * There are two me sstables, where the sequence number indicates the C* version they come from.
+     * For example:
+     *     me-3025-big-* sstables are generated from 3.0.25
+     *     me-31111-big-* sstables are generated from 3.11.11
+     * Both exist because of differences introduced in 3.6 (and 3.11) in how frozen multi-cell headers are serialised
+     *  without the sstable format `me` being bumped, ref CASSANDRA-15035
      */
     public static final String[] legacyVersions = {"nc", "nb", "na", "me", "md", "mc", "mb", "ma", "aa", "ac", "ad", "ba", "bb", "ca", "cb", "cc"};
 
@@ -610,8 +617,17 @@ public class LegacySSTableTest
 
         QueryProcessor.executeInternal(String.format("CREATE TYPE legacy_tables.legacy_%s_tuple_udt (name tuple<text,text>)", legacyVersion));
 
-        QueryProcessor.executeInternal(String.format("CREATE TABLE legacy_tables.legacy_%1$s_tuple (pk text PRIMARY KEY, " +
+        if (legacyVersion.startsWith("m") && legacyVersion.compareTo("me") <= 0)
+        {
+            // sstable formats possibly from 3.0.x would have had a schema with everything frozen
+            QueryProcessor.executeInternal(String.format("CREATE TABLE legacy_tables.legacy_%1$s_tuple (pk text PRIMARY KEY, " +
+                    "val frozen<tuple<set<int>,set<text>>>, val2 frozen<tuple<set<int>,set<text>>>, val3 frozen<legacy_%1$s_tuple_udt>, val4 frozen<legacy_%1$s_tuple_udt>, extra text)", legacyVersion));
+        }
+        else
+        {
+            QueryProcessor.executeInternal(String.format("CREATE TABLE legacy_tables.legacy_%1$s_tuple (pk text PRIMARY KEY, " +
                 "val frozen<tuple<set<int>,set<text>>>, val2 tuple<set<int>,set<text>>, val3 frozen<legacy_%1$s_tuple_udt>, val4 legacy_%1$s_tuple_udt, extra text)", legacyVersion));
+        }
     }
 
     private static void assertLegacyClustRows(int count, UntypedResultSet rs)
@@ -651,12 +667,12 @@ public class LegacySSTableTest
             }
         }
 
-        // if reading mc or lower format sstables, behave like upgrading from a CassandraVersion 3.0
-        if (legacyVersion.compareTo("mc") <= 0)
-            FBUtilities.setPreviousReleaseVersionString("3.0.8");
-
-        // mimic what StorageService does
-        //FIXME – SSTableHeaderFix.fixNonFrozenUDTIfUpgradeFrom30();
+        if (legacyVersion.startsWith("m") && legacyVersion.compareTo("me") <= 0)
+        {
+            // sstables <= me are potentially broken, pretend offline upgrade where the user ran the scrub's header fix
+            FBUtilities.setPreviousReleaseVersionString("3.0.25");
+            SSTableHeaderFix.fixDroppedNonFrozenUDTIfUpgradeFrom30();
+        }
 
         int s0 = cfs.getLiveSSTables().size();
         cfs.loadNewSSTables();
