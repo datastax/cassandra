@@ -23,6 +23,7 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.Before;
 import org.junit.BeforeClass;
@@ -168,8 +169,8 @@ public class RecoveryManagerTruncateTest
         {
             // Expect exactly three records, only one replayed (the 3rd row-update above)
             CommitLog.instance.resetUnsafe(false);
-            assertEquals(1, filteringInitiator.replayed);
-            assertEquals(2, filteringInitiator.skipped);
+            assertEquals(1, filteringInitiator.replayed.get());
+            assertEquals(2, filteringInitiator.skipped.get());
 
             // and validate truncation.
             assertEquals(1, Util.getAll(Util.cmd(cfs).build()).size());
@@ -181,8 +182,8 @@ public class RecoveryManagerTruncateTest
 
             // No replayed mutations this time
             CommitLog.instance.resetUnsafe(false);
-            assertEquals(0, filteringInitiator.replayed);
-            assertEquals(0, filteringInitiator.skipped);
+            assertEquals(0, filteringInitiator.replayed.get());
+            assertEquals(0, filteringInitiator.skipped.get());
         }
         finally
         {
@@ -195,15 +196,15 @@ public class RecoveryManagerTruncateTest
 
     private static class FilteringInitiator extends CommitLogReplayer.MutationInitiator
     {
-        volatile int replayed;
-        volatile int skipped;
+        private final AtomicInteger replayed = new AtomicInteger();
+        private final AtomicInteger skipped = new AtomicInteger();
 
         @Override
         protected void onReplayed(PartitionUpdate update, long segmentId, int position)
         {
             if (KEYSPACE1.equals(update.metadata().keyspace))
             {
-                replayed++;
+                replayed.incrementAndGet();
             }
         }
 
@@ -212,13 +213,14 @@ public class RecoveryManagerTruncateTest
         {
             if (KEYSPACE1.equals(update.metadata().keyspace))
             {
-                skipped++;
+                skipped.incrementAndGet();
             }
         }
 
         public void reset()
         {
-            replayed = skipped = 0;
+            replayed.set(0);
+            skipped.set(0);
         }
     }
 }
