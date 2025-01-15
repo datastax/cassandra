@@ -372,7 +372,8 @@ public class PostingsReader implements OrdinalPostingList
         }
         else
         {
-            final long id = currentFORValues.get(blockIdx);
+            long id = currentFORValues.get(2L * blockIdx);
+            currentFrequency = Math.toIntExact(currentFORValues.get(2L * blockIdx + 1));
             postingsDecoded++;
             return Math.toIntExact(id);
         }
@@ -426,6 +427,6 @@ public class PostingsReader implements OrdinalPostingList
 
     @Override
     public int frequency() {
-        return currentFreqValues == null ? 1 : Math.toIntExact(currentFreqValues.get(blockIdx - 1));
+        return currentFrequency;
     }
 }
