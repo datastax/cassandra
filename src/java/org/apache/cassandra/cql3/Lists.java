@@ -285,9 +285,9 @@ public abstract class Lists
     }
 
     /**
-     * Basically similar to a Value, but with some non-pure function (that need
+     * Basically similar to a Value, but with some non-deterministic function (that need
      * to be evaluated at execution time) in it.
-     *
+     * </p>
      * Note: this would also work for a list with bind markers, but we don't support
      * that because 1) it's not excessively useful and 2) we wouldn't have a good
      * column name to return in the ColumnSpecification for those markers (not a

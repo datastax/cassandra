@@ -65,7 +65,7 @@ public interface Term
      * Whether or not that term contains at least one bind marker.
      *
      * Note that this is slightly different from being or not a NonTerminal,
-     * because calls to non pure functions will be NonTerminal (see #5616)
+     * because calls to non-deterministic functions will be NonTerminal (see #5616)
      * even if they don't have bind markers.
      */
     public abstract boolean containsBindMarker();
@@ -151,15 +151,15 @@ public interface Term
 
     /**
      * A terminal term, one that can be reduced to a byte buffer directly.
-     *
+     * </p>
      * This includes most terms that don't have a bind marker (an exception
-     * being delayed call for non pure function that are NonTerminal even
+     * being delayed call for non-deterministic function that are NonTerminal even
      * if they don't have bind markers).
-     *
+     * </p>
      * This can be only one of:
      *   - a constant value
      *   - a collection value
-     *
+     * </p>
      * Note that a terminal term will always have been type checked, and thus
      * consumer can (and should) assume so.
      */
@@ -212,14 +212,14 @@ public interface Term
     }
 
     /**
-     * A non terminal term, i.e. a term that can only be reduce to a byte buffer
+     * A non-terminal term, i.e. a term that can only be reduce to a byte buffer
      * at execution time.
-     *
+     * </p>
      * We have the following type of NonTerminal:
      *   - marker for a constant value
      *   - marker for a collection value (list, set, map)
      *   - a function having bind marker
-     *   - a non pure function (even if it doesn't have bind marker - see #5616)
+     *   - a non-deterministic function (even if it doesn't have bind marker - see #5616)
      */
     public abstract class NonTerminal implements Term
     {
