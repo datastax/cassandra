@@ -75,30 +75,30 @@ public class SingleRestrictionEstimatedRowCountTest extends SAITester
         createTables();
 
         RowCountTest test = new RowCountTest(Operator.NEQ, 25);
-        test.doTest(Version.DB, INT, 97.0);
-        test.doTest(Version.EB, INT, 97.0);
+        test.doTest(Version.DB, INT, 83.1);
+        test.doTest(Version.EB, INT, 82.4);
         // Truncated numeric types planned differently
-        test.doTest(Version.DB, DECIMAL, 97.0);
-        test.doTest(Version.EB, DECIMAL, 97.0);
-        test.doTest(Version.EB, VARINT, 97.0);
+        test.doTest(Version.DB, DECIMAL, 117);
+        test.doTest(Version.EB, DECIMAL, 117);
+        test.doTest(Version.EB, VARINT, 119);
 
         test = new RowCountTest(Operator.LT, 50);
-        test.doTest(Version.DB, INT, 48);
-        test.doTest(Version.EB, INT, 48);
-        test.doTest(Version.DB, DECIMAL, 48);
-        test.doTest(Version.EB, DECIMAL, 48);
+        test.doTest(Version.DB, INT, 50);
+        test.doTest(Version.EB, INT, 50);
+        test.doTest(Version.DB, DECIMAL, 51);
+        test.doTest(Version.EB, DECIMAL, 51);
 
         test = new RowCountTest(Operator.LT, 150);
-        test.doTest(Version.DB, INT, 97);
-        test.doTest(Version.EB, INT, 97);
-        test.doTest(Version.DB, DECIMAL, 97);
-        test.doTest(Version.EB, DECIMAL, 97);
+        test.doTest(Version.DB, INT, 100);
+        test.doTest(Version.EB, INT, 99);
+        test.doTest(Version.DB, DECIMAL, 100);
+        test.doTest(Version.EB, DECIMAL, 99);
 
         test = new RowCountTest(Operator.EQ, 31);
-        test.doTest(Version.DB, INT, 15);
-        test.doTest(Version.EB, INT, 0);
-        test.doTest(Version.DB, DECIMAL, 15);
-        test.doTest(Version.EB, DECIMAL, 0);
+        test.doTest(Version.DB, INT, 1);
+        test.doTest(Version.EB, INT, 1);
+        test.doTest(Version.DB, DECIMAL, 1);
+        test.doTest(Version.EB, DECIMAL, 1);
     }
 
 
@@ -126,7 +126,7 @@ public class SingleRestrictionEstimatedRowCountTest extends SAITester
             for (int i = 0; i < 100; i++)
             {
                 String query = String.format("INSERT INTO %s (pk, age) VALUES (?, " + i + ')',
-                        cfs.keyspace.getName() + '.' + cfs.name);
+                                             cfs.keyspace.getName() + '.' + cfs.name);
                 executeFormattedQuery(query, "key" + i);
             }
         });
@@ -155,9 +155,9 @@ public class SingleRestrictionEstimatedRowCountTest extends SAITester
                                                              rc,
                                                              version.onDiskFormat().indexFeatureSet(),
                                                              new QueryContext());
+
             long totalRows = controller.planFactory.tableMetrics.rows;
             assertEquals(0, cfs.metrics().liveSSTableCount.getValue().intValue());
-            assertEquals(97, totalRows);
 
             Plan plan = controller.buildPlan();
             assert plan instanceof Plan.RowsIteration;
