@@ -64,7 +64,7 @@ public class SingleRestrictionEstimatedRowCountTest extends SAITester
         return null;
     }
 
-    static Map.Entry<Version, CQL3Type.Native> tablesEntrykey(Version version, CQL3Type.Native type)
+    static Map.Entry<Version, CQL3Type.Native> tablesEntryKey(Version version, CQL3Type.Native type)
     {
         return new AbstractMap.SimpleEntry<>(version, type);
     }
@@ -74,7 +74,7 @@ public class SingleRestrictionEstimatedRowCountTest extends SAITester
     {
         createTables();
 
-        var test = new RowCountTest(Operator.NEQ, 25);
+        RowCountTest test = new RowCountTest(Operator.NEQ, 25);
         test.doTest(Version.DB, INT, 97.0);
         test.doTest(Version.EB, INT, 97.0);
         // Truncated numeric types planned differently
@@ -111,7 +111,7 @@ public class SingleRestrictionEstimatedRowCountTest extends SAITester
             {
                 createTable("CREATE TABLE %s (pk text PRIMARY KEY, age " + type + ')');
                 createIndex("CREATE CUSTOM INDEX ON %s(age) USING 'StorageAttachedIndex'");
-                tables.put(tablesEntrykey(version, type), getCurrentColumnFamilyStore());
+                tables.put(tablesEntryKey(version, type), getCurrentColumnFamilyStore());
             }
         }
         flush();
@@ -125,7 +125,8 @@ public class SingleRestrictionEstimatedRowCountTest extends SAITester
         cfs.unsafeRunWithoutFlushing(() -> {
             for (int i = 0; i < 100; i++)
             {
-                String query = String.format("INSERT INTO %s (pk, age) VALUES (?, " + i + ')', cfs.keyspace.getName() + '.' + cfs.name);
+                String query = String.format("INSERT INTO %s (pk, age) VALUES (?, " + i + ')',
+                        cfs.keyspace.getName() + '.' + cfs.name);
                 executeFormattedQuery(query, "key" + i);
             }
         });
