@@ -450,6 +450,7 @@ public class MessagingService extends MessagingServiceMBeanImpl
      */
     public void interruptOutbound(InetAddressAndPort to)
     {
+        logger.info("Are we closing outbound?");
         OutboundConnections pool = channelManagers.get(to);
         if (pool != null)
             pool.interrupt();

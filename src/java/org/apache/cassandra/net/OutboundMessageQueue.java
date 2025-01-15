@@ -274,6 +274,7 @@ class OutboundMessageQueue
 
             public void onPruned(Message<?> message)
             {
+                logger.info("Discarding expired message: {}", message);
                 onExpired.accept(message);
             }
 

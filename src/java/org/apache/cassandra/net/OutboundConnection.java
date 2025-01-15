@@ -1070,6 +1070,8 @@ public class OutboundConnection
      */
     Future<?> initiate()
     {
+        logger.debug("initiating from stack trace", new Exception());
+
         class Initiate
         {
             /**
@@ -1227,6 +1229,7 @@ public class OutboundConnection
             Future<Result<MessagingSuccess>> initiate()
             {
                 Promise<Result<MessagingSuccess>> result = new AsyncPromise<>(eventLoop);
+                logger.info("Attempting initiate");
                 state = new Connecting(state.disconnected(), result);
                 attempt(result);
                 return result;
@@ -1244,6 +1247,7 @@ public class OutboundConnection
      */
     private Future<?> requestConnect()
     {
+        logger.info("Requesting connect from stacktrace", new Exception());
         // we may race with updates to this variable, but this is fine, since we only guarantee that we see a value
         // that did at some point represent an active connection attempt - if it is stale, it will have been completed
         // and the caller can retry (or utilise the successfully established connection)
@@ -1389,6 +1393,7 @@ public class OutboundConnection
      */
     private void setDisconnected()
     {
+        logger.info("Disconnecting from stack", new Exception());
         assert state == null || state.isEstablished();
         state = Disconnected.dormant(eventLoop.scheduleAtFixedRate(queue::maybePruneExpired, 100L, 100L, TimeUnit.MILLISECONDS));
     }
