@@ -107,7 +107,6 @@ public class PostingsWriter implements Closeable
 
     private int bufferUpto;
     private long lastSegmentRowId;
-    private long maxDelta;
     // This number is the count of row ids written to the postings for this segment. Because a segment row id can be in
     // multiple postings list for the segment, this number could exceed Integer.MAX_VALUE, so we use a long.
     private long totalPostings;
@@ -220,14 +219,13 @@ public class PostingsWriter implements Closeable
             throw new IllegalArgumentException(String.format(POSTINGS_MUST_BE_SORTED_ERROR_MSG, segmentRowId, lastSegmentRowId));
 
         final long delta = segmentRowId - lastSegmentRowId;
-        maxDelta = max(maxDelta, delta);
         deltaBuffer[bufferUpto] = delta;
         freqBuffer[bufferUpto] = min(freq, 255);
         bufferUpto++;
 
         if (bufferUpto == blockEntries) {
             addBlockToSkipTable(segmentRowId);
-            writePostingsBlock(maxDelta, bufferUpto);
+            writePostingsBlock(bufferUpto);
             resetBlockCounters();
         }
         lastSegmentRowId = segmentRowId;
@@ -239,7 +237,7 @@ public class PostingsWriter implements Closeable
         {
             addBlockToSkipTable(lastSegmentRowId);
 
-            writePostingsBlock(maxDelta, bufferUpto);
+            writePostingsBlock(bufferUpto);
         }
     }
 
@@ -247,7 +245,6 @@ public class PostingsWriter implements Closeable
     {
         bufferUpto = 0;
         lastSegmentRowId = 0;
-        maxDelta = 0;
     }
 
     private void addBlockToSkipTable(long maxSegmentRowID)
@@ -277,8 +274,11 @@ public class PostingsWriter implements Closeable
         writeSortedFoRBlock(blockMaxIDs, dataOutput);
     }
 
-    private void writePostingsBlock(long maxDelta, int entries) throws IOException {
+    private void writePostingsBlock(int entries) throws IOException {
         // Write deltas
+        long maxDelta = 0;
+        for (int i = 0; i < entries; i++)
+            maxDelta = max(maxDelta, deltaBuffer[i]);
         final int bitsPerDelta = maxDelta == 0 ? 0 : LuceneCompat.directWriterUnsignedBitsRequired(dataOutput.order(), maxDelta);
         dataOutput.writeByte((byte) bitsPerDelta);
         if (bitsPerDelta > 0) {
@@ -291,9 +291,8 @@ public class PostingsWriter implements Closeable
 
         // Write frequencies right after their corresponding deltas
         int maxFreq = 0;
-        for (int i = 0; i < entries; i++) {
+        for (int i = 0; i < entries; i++)
             maxFreq = max(maxFreq, freqBuffer[i]);
-        }
         final int bitsPerFreq = maxFreq == 0 ? 0 : LuceneCompat.directWriterUnsignedBitsRequired(dataOutput.order(), maxFreq);
         dataOutput.writeByte((byte) bitsPerFreq);
         if (bitsPerFreq > 0) {
