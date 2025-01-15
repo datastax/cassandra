@@ -1227,6 +1227,8 @@ CREATE FUNCTION akeyspace.fname IF NOT EXISTS
 ( someArg int )
 CALLED ON NULL INPUT
 RETURNS text
+( DETERMINISTIC )?
+( MONOTONIC ( ON <arg-name> )? )?
 LANGUAGE java
 AS $$
 // some Java code
@@ -1265,6 +1267,17 @@ only be created if another function with the same signature does not
 exist.
 
 `OR REPLACE` and `IF NOT EXIST` cannot be used together.
+
+The optional `DETERMINISTIC` keyword specifies that the function is
+deterministic. This means that given a particular input, the function
+will always produce the same output.
+
+The optional `MONOTONIC` keyword specifies that the function is monotonic.
+This means that it is either entirely nonincreasing or nondecreasing.
+Even if the function is not monotonic on all its arguments, it is possible
+to specify that it is monotonic `ON` one of its arguments, meaning that
+partial applications of the function over that argument will be monotonic.
+Monotonicity is required to use the function in a `GROUP BY` clause.
 
 Functions belong to a keyspace. If no keyspace is specified in
 `<function-name>`, the current keyspace is used (i.e. the keyspace
@@ -1318,6 +1331,7 @@ SFUNC
 STYPE
 ( FINALFUNC )?
 ( INITCOND )?
+( DETERMINISTIC )?
 ----
 
 _Sample:_
@@ -1345,6 +1359,10 @@ aggregate with the same signature already exists.
 creates an aggregate if it does not already exist.
 
 `OR REPLACE` and `IF NOT EXIST` cannot be used together.
+
+The optional `DETERMINISTIC` keyword specifies that the aggregate
+function is deterministic. This means that given a particular input,
+the function will always produce the same output.
 
 Aggregates belong to a keyspace. If no keyspace is specified in
 `<aggregate-name>`, the current keyspace is used (i.e. the keyspace
