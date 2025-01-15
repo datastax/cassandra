@@ -56,7 +56,10 @@ public class CompactionStats extends NodeToolCmd
 
     @Option(title = "overlap",
     name = {"-O", "--overlap"},
-    description = "Show a map of the maximum sstable overlap per compaction region.")
+    description = "Show a map of the maximum sstable overlap per compaction region.\n" +
+                  "Note: This map includes all sstables in the system, including ones that are currently being compacted, " +
+                  "and also takes into account early opened sstables. Overlaps per level may be greater than the values " +
+                  "the --aggregate option reports.")
     private boolean overlap = false;
 
     @Arguments(usage = "[<keyspace> <tables>...]", description = "With --aggregate or --overlap, optionally list only the data for the specified keyspace and tables.")
