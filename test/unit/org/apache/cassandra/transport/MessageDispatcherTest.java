@@ -33,6 +33,8 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.metrics.ClientMetrics;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.messages.AuthResponse;
+import org.apache.cassandra.utils.concurrent.Future;
+import org.apache.cassandra.utils.concurrent.ImmediateFuture;
 
 public class MessageDispatcherTest
 {
@@ -91,9 +93,9 @@ public class MessageDispatcherTest
             long auths = completedAuth();
             long requests = tryAuth(this::completedRequests, new Message.Request(type)
             {
-                public Response execute(QueryState queryState, long queryStartNanoTime, boolean traceRequest)
+                public Future<Response> maybeExecuteAsync(QueryState queryState, long queryStartNanoTime, boolean traceRequest)
                 {
-                    return null;
+                    return ImmediateFuture.success(null);
                 }
             });
             Assert.assertEquals(requests, 1);

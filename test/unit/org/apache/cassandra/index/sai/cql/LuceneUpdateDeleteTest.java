@@ -21,6 +21,7 @@ package org.apache.cassandra.index.sai.cql;
 import org.junit.Test;
 
 import org.apache.cassandra.cql3.UntypedResultSet;
+import org.apache.cassandra.cql3.conditions.ColumnCondition;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.SAITester;
 
@@ -32,15 +33,13 @@ import static org.junit.Assert.assertEquals;
 public class LuceneUpdateDeleteTest extends SAITester
 {
     @Test
-    public void updateAndDeleteWithAnalyzerRestrictionQueryShouldFail() throws Throwable
+    public void updateAndDeleteWithAnalyzerRestrictionQueryShouldFail()
     {
         createTable("CREATE TABLE %s (id int PRIMARY KEY, val text)");
 
         createIndex("CREATE CUSTOM INDEX ON %s(val) " +
                     "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
                     "WITH OPTIONS = { 'index_analyzer': 'standard' }");
-
-        waitForTableIndexesQueryable();
 
         execute("INSERT INTO %s (id, val) VALUES (0, 'a sad doG.')");
 
@@ -60,20 +59,18 @@ public class LuceneUpdateDeleteTest extends SAITester
         // UPDATE with LWT fails (different error message because it fails at a different point)
         assertThatThrownBy(() -> execute("UPDATE %s SET val = 'something new' WHERE id = 0 IF val : 'dog'"))
         .isInstanceOf(InvalidRequestException.class)
-        .hasMessageContaining("LWT Conditions do not support the : operator");
+        .hasMessageContaining(ColumnCondition.ANALYZER_MATCHES_ERROR);
     }
 
     // No flushes
     @Test
-    public void removeUpdateAndDeleteTextInMemoryTest() throws Throwable
+    public void removeUpdateAndDeleteTextInMemoryTest()
     {
         createTable("CREATE TABLE %s (id int PRIMARY KEY, val text)");
 
         createIndex("CREATE CUSTOM INDEX ON %s(val) " +
                     "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
                     "WITH OPTIONS = { 'index_analyzer': 'standard' }");
-
-        waitForTableIndexesQueryable();
 
         // The analyzed text column will result in overlapping and non-overlapping tokens in the in memory trie map.
         // Note that capitalization is covered as well as tokenization.
@@ -113,15 +110,13 @@ public class LuceneUpdateDeleteTest extends SAITester
 
     // Flush after every insert/update/delete
     @Test
-    public void removeUpdateAndDeleteTextOnDiskTest() throws Throwable
+    public void removeUpdateAndDeleteTextOnDiskTest()
     {
         createTable("CREATE TABLE %s (id int PRIMARY KEY, val text)");
 
         createIndex("CREATE CUSTOM INDEX ON %s(val) " +
                     "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
                     "WITH OPTIONS = { 'index_analyzer': 'standard' }");
-
-        waitForTableIndexesQueryable();
 
         // The analyzed text column will result in overlapping and non-overlapping tokens in the in memory trie map.
         // Note that capitalization is covered as well as tokenization.
@@ -175,15 +170,13 @@ public class LuceneUpdateDeleteTest extends SAITester
 
     // Insert entries, flush them, then perform updates without flushing.
     @Test
-    public void removeUpdateAndDeleteTextMixInMemoryOnDiskTest() throws Throwable
+    public void removeUpdateAndDeleteTextMixInMemoryOnDiskTest()
     {
         createTable("CREATE TABLE %s (id int PRIMARY KEY, val text)");
 
         createIndex("CREATE CUSTOM INDEX ON %s(val) " +
                     "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
                     "WITH OPTIONS = { 'index_analyzer': 'standard' }");
-
-        waitForTableIndexesQueryable();
 
         // The analyzed text column will result in overlapping and non-overlapping tokens in the in memory trie map.
         // Note that capitalization is covered as well as tokenization.
@@ -233,13 +226,12 @@ public class LuceneUpdateDeleteTest extends SAITester
 
     // row delete will trigger UpdateTransaction#onUpdated
     @Test
-    public void rowDeleteRowInMemoryAndFlushTest() throws Throwable
+    public void rowDeleteRowInMemoryAndFlushTest()
     {
         createTable("CREATE TABLE %s (pk int, ck int, str_val text, val text, PRIMARY KEY(pk, ck))");
         createIndex("CREATE CUSTOM INDEX ON %s(val) " +
                     "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
                     "WITH OPTIONS = { 'index_analyzer': 'standard' }");
-        waitForTableIndexesQueryable();
 
         execute("INSERT INTO %s (pk, ck, str_val, val) VALUES (0, 0, 'A', 'dog 0')");
         execute("INSERT INTO %s (pk, ck, str_val, val) VALUES (1, 1, 'B', 'dog 1')");
@@ -258,13 +250,12 @@ public class LuceneUpdateDeleteTest extends SAITester
 
     // range delete won't trigger UpdateTransaction#onUpdated
     @Test
-    public void rangeDeleteRowInMemoryAndFlushTest() throws Throwable
+    public void rangeDeleteRowInMemoryAndFlushTest()
     {
         createTable("CREATE TABLE %s (pk int, ck int, ck2 int, str_val text, val text, PRIMARY KEY(pk, ck, ck2))");
         createIndex("CREATE CUSTOM INDEX ON %s(val) " +
                     "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
                     "WITH OPTIONS = { 'index_analyzer': 'standard' }");
-        waitForTableIndexesQueryable();
 
         execute("INSERT INTO %s (pk, ck, ck2, str_val, val) VALUES (0, 0, 0, 'A', 'first insert')");
         execute("INSERT INTO %s (pk, ck, ck2, str_val, val) VALUES (1, 1, 1, 'B', 'second insert')");
@@ -282,13 +273,12 @@ public class LuceneUpdateDeleteTest extends SAITester
     }
 
     @Test
-    public void updateRowInMemoryAndFlushTest() throws Throwable
+    public void updateRowInMemoryAndFlushTest()
     {
         createTable("CREATE TABLE %s (pk int, str_val text, val text, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(val) " +
                     "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
                     "WITH OPTIONS = { 'index_analyzer': 'standard' }");
-        waitForTableIndexesQueryable();
 
         execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', 'first insert')");
         execute("INSERT INTO %s (pk, str_val, val) VALUES (1, 'B', 'second insert')");
@@ -306,13 +296,12 @@ public class LuceneUpdateDeleteTest extends SAITester
     }
 
     @Test
-    public void deleteRowPostFlushTest() throws Throwable
+    public void deleteRowPostFlushTest()
     {
         createTable("CREATE TABLE %s (pk int, str_val text, val text, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(val) " +
                     "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
                     "WITH OPTIONS = { 'index_analyzer': 'standard' }");
-        waitForTableIndexesQueryable();
 
         execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', 'first insert')");
         execute("INSERT INTO %s (pk, str_val, val) VALUES (1, 'B', 'second insert')");
@@ -336,13 +325,12 @@ public class LuceneUpdateDeleteTest extends SAITester
     }
 
     @Test
-    public void deletedInOtherSSTablesTest() throws Throwable
+    public void deletedInOtherSSTablesTest()
     {
         createTable("CREATE TABLE %s (pk int, str_val text, val text, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(val) " +
                     "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
                     "WITH OPTIONS = { 'index_analyzer': 'standard' }");
-        waitForTableIndexesQueryable();
 
         execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', 'first insert')");
         execute("INSERT INTO %s (pk, str_val, val) VALUES (1, 'B', 'second insert')");
@@ -361,7 +349,7 @@ public class LuceneUpdateDeleteTest extends SAITester
     }
 
     @Test
-    public void deletedInOtherSSTablesMultiIndexTest() throws Throwable
+    public void deletedInOtherSSTablesMultiIndexTest()
     {
         createTable("CREATE TABLE %s (pk int, str_val text, val text, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(str_val) " +
@@ -369,7 +357,6 @@ public class LuceneUpdateDeleteTest extends SAITester
         createIndex("CREATE CUSTOM INDEX ON %s(val) " +
                     "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
                     "WITH OPTIONS = { 'index_analyzer': 'standard' }");
-        waitForTableIndexesQueryable();
 
         execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', 'first insert')");
         execute("INSERT INTO %s (pk, str_val, val) VALUES (1, 'A', 'second insert')");
@@ -388,13 +375,12 @@ public class LuceneUpdateDeleteTest extends SAITester
     }
 
     @Test
-    public void rangeDeletedInOtherSSTablesTest() throws Throwable
+    public void rangeDeletedInOtherSSTablesTest()
     {
         createTable("CREATE TABLE %s (pk int, ck1 int, ck2 int, str_val text, val text, PRIMARY KEY(pk, ck1, ck2))");
         createIndex("CREATE CUSTOM INDEX ON %s(val) " +
                     "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
                     "WITH OPTIONS = { 'index_analyzer': 'standard' }");
-        waitForTableIndexesQueryable();
 
         execute("INSERT INTO %s (pk, ck1, ck2, str_val, val) VALUES (0, 0, 1, 'A', 'first insert')");
         execute("INSERT INTO %s (pk, ck1, ck2, str_val, val) VALUES (0, 0, 2, 'B', 'second insert')");
@@ -414,13 +400,12 @@ public class LuceneUpdateDeleteTest extends SAITester
     }
 
     @Test
-    public void partitionDeletedInOtherSSTablesTest() throws Throwable
+    public void partitionDeletedInOtherSSTablesTest()
     {
         createTable("CREATE TABLE %s (pk int, ck1 int, ck2 int, str_val text, val text, PRIMARY KEY(pk, ck1, ck2))");
         createIndex("CREATE CUSTOM INDEX ON %s(val) " +
                     "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
                     "WITH OPTIONS = { 'index_analyzer': 'standard' }");
-        waitForTableIndexesQueryable();
 
         execute("INSERT INTO %s (pk, ck1, ck2, str_val, val) VALUES (0, 0, 1, 'A', 'some text')");
         execute("INSERT INTO %s (pk, ck1, ck2, str_val, val) VALUES (0, 0, 2, 'B', 'updated text')");
@@ -444,13 +429,12 @@ public class LuceneUpdateDeleteTest extends SAITester
     }
 
     @Test
-    public void upsertTest() throws Throwable
+    public void upsertTest()
     {
         createTable("CREATE TABLE %s (pk int PRIMARY KEY, not_analyzed text, val text)");
         createIndex("CREATE CUSTOM INDEX ON %s(val) " +
                     "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
                     "WITH OPTIONS = { 'index_analyzer': 'standard' }");
-        waitForTableIndexesQueryable();
 
         execute("INSERT INTO %s (pk, not_analyzed, val) VALUES (0, 'A', 'this will be tokenized')");
         execute("INSERT INTO %s (pk, not_analyzed, val) VALUES (0, 'A', 'this will be tokenized')");
@@ -483,13 +467,12 @@ public class LuceneUpdateDeleteTest extends SAITester
     }
 
     @Test
-    public void updateOtherColumnsTest() throws Throwable
+    public void updateOtherColumnsTest()
     {
         createTable("CREATE TABLE %s (id int PRIMARY KEY, val text, not_analyzed text)");
         createIndex("CREATE CUSTOM INDEX ON %s(val) " +
                     "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
                     "WITH OPTIONS = { 'index_analyzer': 'standard' }");
-        waitForTableIndexesQueryable();
 
         execute("INSERT INTO %s (id, val, not_analyzed) VALUES (0, 'a sad doG.', 'more text')");
         execute("INSERT INTO %s (id, val, not_analyzed) VALUES (1, 'A Happy DOG.', 'different text')");
@@ -500,13 +483,12 @@ public class LuceneUpdateDeleteTest extends SAITester
     }
 
     @Test
-    public void updateManySSTablesTest() throws Throwable
+    public void updateManySSTablesTest()
     {
         createTable("CREATE TABLE %s (pk int PRIMARY KEY, val text)");
         createIndex("CREATE CUSTOM INDEX ON %s(val) " +
                     "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
                     "WITH OPTIONS = { 'index_analyzer': 'standard' }");
-        waitForTableIndexesQueryable();
 
         execute("INSERT INTO %s (pk, val) VALUES (0, 'this is')");
         flush();
@@ -539,13 +521,12 @@ public class LuceneUpdateDeleteTest extends SAITester
     }
 
     @Test
-    public void shadowedPrimaryKeyInDifferentSSTable() throws Throwable
+    public void shadowedPrimaryKeyInDifferentSSTable()
     {
         createTable("CREATE TABLE %s (pk int PRIMARY KEY, str_val text, val text)");
         createIndex("CREATE CUSTOM INDEX ON %s(val) " +
                     "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
                     "WITH OPTIONS = { 'index_analyzer': 'standard' }");
-        waitForTableIndexesQueryable();
         disableCompaction(KEYSPACE);
 
         // flush a sstable with one vector

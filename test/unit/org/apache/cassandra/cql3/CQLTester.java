@@ -77,6 +77,7 @@ import org.junit.AfterClass;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.BeforeClass;
+import org.junit.Ignore;
 import org.junit.Rule;
 import org.junit.rules.TestName;
 import org.junit.rules.TestWatcher;
@@ -119,10 +120,12 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.EncryptionOptions;
 import org.apache.cassandra.cql3.functions.FunctionName;
 import org.apache.cassandra.cql3.functions.types.ParseUtils;
+import org.apache.cassandra.cql3.statements.SelectStatement;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.SystemKeyspace;
+import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.BooleanType;
 import org.apache.cassandra.db.marshal.ByteBufferAccessor;
@@ -237,7 +240,7 @@ public abstract class CQLTester
     public static final String DATA_CENTER = ServerTestUtils.DATA_CENTER;
     public static final String DATA_CENTER_REMOTE = ServerTestUtils.DATA_CENTER_REMOTE;
     public static final String RACK1 = ServerTestUtils.RACK1;
-    protected static final int ASSERTION_TIMEOUT_SECONDS = 15;
+    private static final int ASSERTION_TIMEOUT_SECONDS = 15;
 
     private static org.apache.cassandra.transport.Server server;
     private static JMXConnectorServer jmxServer;
@@ -1251,8 +1254,8 @@ public abstract class CQLTester
                   .atMost(10, TimeUnit.MINUTES)
                   .pollDelay(0, TimeUnit.MILLISECONDS)
                   .pollInterval(1, TimeUnit.MILLISECONDS)
-                  .until(() -> Stage.VIEW_MUTATION.executor().getPendingTaskCount() == 0 &&
-                               Stage.VIEW_MUTATION.executor().getActiveTaskCount() == 0);
+                  .until(() -> Stage.VIEW_MUTATION.getPendingTaskCount() == 0 &&
+                               Stage.VIEW_MUTATION.getActiveTaskCount() == 0);
     }
 
     /**
@@ -1395,7 +1398,7 @@ public abstract class CQLTester
 
     public void waitForTableIndexesQueryable()
     {
-        waitForTableIndexesQueryable(currentTable(), 60);
+        waitForTableIndexesQueryable(60);
     }
 
     public void waitForTableIndexesQueryable(int seconds)
@@ -1513,6 +1516,34 @@ public abstract class CQLTester
         return manager.isIndexQueryable(index);
     }
 
+    protected boolean areAllTableIndexesQueryable()
+    {
+        return areAllTableIndexesQueryable(KEYSPACE, currentTable());
+    }
+
+    protected boolean areAllTableIndexesQueryable(String keyspace, String table)
+    {
+        ColumnFamilyStore cfs = Keyspace.open(keyspace).getColumnFamilyStore(table);
+        for (Index index : cfs.indexManager.listIndexes())
+        {
+            if (!cfs.indexManager.isIndexQueryable(index))
+                return false;
+        }
+        return true;
+    }
+
+    protected boolean indexNeedsFullRebuild(String index)
+    {
+        ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(currentTable());
+        return cfs.indexManager.needsFullRebuild(index);
+    }
+
+    protected void verifyInitialIndexFailed(String indexName)
+    {
+        // Verify that the initial index build fails...
+        waitForAssert(() -> assertTrue(indexNeedsFullRebuild(indexName)));
+    }
+
     @Nullable
     protected SecondaryIndexManager getIndexManager(String keyspace, String indexName)
     {
@@ -1557,7 +1588,7 @@ public abstract class CQLTester
     {
         try
         {
-            Stage.TRACING.executor().submit(() -> {}).get();
+            Stage.TRACING.submit(() -> {}).get();
         }
         catch (Throwable t)
         {
@@ -1740,6 +1771,18 @@ public abstract class CQLTester
     {
         String currentView = currentView();
         return currentView == null ? query : String.format(query, keyspace + "." + currentView);
+    }
+
+    protected CQLStatement parseStatement(String query)
+    {
+        String formattedQuery = formatQuery(query);
+        return QueryProcessor.parseStatement(formattedQuery, ClientState.forInternalCalls());
+    }
+
+    protected ReadCommand parseReadCommand(String query)
+    {
+        SelectStatement select = (SelectStatement) parseStatement(query);
+        return  (ReadCommand) select.getQuery(QueryOptions.DEFAULT, FBUtilities.nowInSeconds());
     }
 
     protected ResultMessage.Prepared prepare(String query) throws Throwable
@@ -2271,7 +2314,7 @@ public abstract class CQLTester
         return rows;
     }
 
-    protected void assertEmpty(UntypedResultSet result) throws Throwable
+    protected void assertEmpty(UntypedResultSet result)
     {
         if (result != null && !result.isEmpty())
             throw new AssertionError(String.format("Expected empty result but got %d rows: %s \n", result.size(), makeRowStrings(result)));
@@ -2841,6 +2884,7 @@ public abstract class CQLTester
                                                                             : "";
     }
 
+    @Ignore // Check TinySegmentFlushingFailureTest for details why this annotation is needed here despite this is not a test
     public static class Vector<T> extends AbstractList<T>
     {
         private final T[] values;
@@ -3126,6 +3170,8 @@ public abstract class CQLTester
             fs.clearListeners();
         }
     }
+
+    @Ignore // Check TinySegmentFlushingFailureTest for details why this annotation is needed here despite this is not a test
     public static class Randomization
     {
         private long seed;
@@ -3222,6 +3268,7 @@ public abstract class CQLTester
         }
     }
 
+    @Ignore // Check TinySegmentFlushingFailureTest for details why this annotation is needed here despite this is not a test
     public static class FailureWatcher extends TestWatcher
     {
         @Override

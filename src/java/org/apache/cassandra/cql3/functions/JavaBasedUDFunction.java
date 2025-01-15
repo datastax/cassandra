@@ -40,6 +40,8 @@ import java.util.regex.Pattern;
 import com.google.common.io.ByteStreams;
 
 import org.apache.commons.lang3.StringUtils;
+import org.eclipse.jdt.internal.compiler.lookup.LookupEnvironment;
+import org.eclipse.jdt.internal.compiler.lookup.ModuleBinding;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -59,8 +61,6 @@ import org.eclipse.jdt.internal.compiler.env.ICompilationUnit;
 import org.eclipse.jdt.internal.compiler.env.INameEnvironment;
 import org.eclipse.jdt.internal.compiler.env.NameEnvironmentAnswer;
 import org.eclipse.jdt.internal.compiler.impl.CompilerOptions;
-import org.eclipse.jdt.internal.compiler.lookup.LookupEnvironment;
-import org.eclipse.jdt.internal.compiler.lookup.ModuleBinding;
 import org.eclipse.jdt.internal.compiler.problem.DefaultProblemFactory;
 
 public final class JavaBasedUDFunction extends UDFunction
@@ -186,10 +186,17 @@ public final class JavaBasedUDFunction extends UDFunction
 
     private static final Pattern patternJavaDriver = Pattern.compile("com\\.datastax\\.driver\\.core\\.");
 
-    JavaBasedUDFunction(FunctionName name, List<ColumnIdentifier> argNames, List<AbstractType<?>> argTypes,
-                        AbstractType<?> returnType, boolean calledOnNullInput, String body)
+    JavaBasedUDFunction(FunctionName name,
+                        List<ColumnIdentifier> argNames,
+                        List<AbstractType<?>> argTypes,
+                        AbstractType<?> returnType,
+                        boolean calledOnNullInput,
+                        String body,
+                        boolean deterministic,
+                        boolean monotonic,
+                        List<ColumnIdentifier> monotonicOn)
     {
-        super(name, argNames, argTypes, returnType, calledOnNullInput, "java", body);
+        super(name, argNames, argTypes, returnType, calledOnNullInput, "java", body, deterministic, monotonic, monotonicOn);
 
         // put each UDF in a separate package to prevent cross-UDF code access
         String pkgName = BASE_PACKAGE + '.' + generateClassName(name, 'p');

@@ -166,6 +166,9 @@ public class Config
 
     public volatile DurationSpec.LongMillisecondsBound repair_prepare_message_timeout_in_ms = new DurationSpec.LongMillisecondsBound("10000ms");
 
+    @Replaces(oldName = "native_transport_timeout_in_ms", converter = Converters.MILLIS_DURATION_LONG, deprecated = true)
+    public volatile DurationSpec.LongMillisecondsBound native_transport_timeout = new DurationSpec.LongMillisecondsBound("12000ms");
+
     public Integer streaming_connections_per_host = 1;
     @Replaces(oldName = "streaming_keep_alive_period_in_secs", converter = Converters.SECONDS_DURATION, deprecated = true)
     public DurationSpec.IntSecondsBound streaming_keep_alive_period = new DurationSpec.IntSecondsBound("300s");
@@ -182,6 +185,8 @@ public class Config
 
     public int concurrent_reads = 32;
     public int concurrent_writes = 32;
+    public int concurrent_coordinator_reads = 32;
+    public int concurrent_coordinator_writes = 32;
     public int concurrent_counter_writes = 32;
     public int concurrent_materialized_view_writes = 32;
     public int available_processors = -1;
@@ -957,6 +962,10 @@ public class Config
     // Limit the offset used in SELECT queries
     public volatile int offset_rows_warn_threshold = -1;
     public volatile int offset_rows_fail_threshold = -1;
+
+    // Limit the number of column value filters per SELECT query (after applying analyzers, in case they are used)
+    public volatile int query_filters_warn_threshold = -1;
+    public volatile int query_filters_fail_threshold = -1;
 
     /**
      * The variants of paxos implementation and semantics supported by Cassandra.

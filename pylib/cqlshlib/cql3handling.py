@@ -1338,6 +1338,8 @@ syntax_rules += r'''
                             ")" )?
                             ("RETURNS" "NULL" | "CALLED") "ON" "NULL" "INPUT"
                             "RETURNS" <storageType>
+                            ( "DETERMINISTIC" )?
+                            ( "MONOTONIC" ( "ON" <cident> )? )?
                             "LANGUAGE" <cident> "AS" <stringLiteral>
                          ;
 
@@ -1351,6 +1353,7 @@ syntax_rules += r'''
                             "STYPE" <storageType>
                             ( "FINALFUNC" <refUserFunctionName> )?
                             ( "INITCOND" <term> )?
+                            ( "DETERMINISTIC" )?
                          ;
 
 '''

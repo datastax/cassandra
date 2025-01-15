@@ -21,6 +21,7 @@ import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Iterator;
+import java.util.SortedSet;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.utils.AbstractIterator;
@@ -333,6 +334,14 @@ public class RangeTombstoneList implements Iterable<RangeTombstone>, IMeasurable
         return new RangeTombstone(Slice.make(starts[idx], ends[idx]), DeletionTime.buildUnsafeWithUnsignedInteger(markedAts[idx], delTimesUnsignedIntegers[idx]));
     }
 
+    /**
+     * Return range tombstone with give clustering and recorded deletion time.
+     */
+    private RangeTombstone rangeTombstone(int idx, Clustering clustering)
+    {
+        return new RangeTombstone(Slice.make(clustering), DeletionTime.buildUnsafeWithUnsignedInteger(markedAts[idx], delTimesUnsignedIntegers[idx]));
+    }
+
     private RangeTombstone rangeTombstoneWithNewStart(int idx, ClusteringBound<?> newStart)
     {
         return new RangeTombstone(Slice.make(newStart, ends[idx]), DeletionTime.buildUnsafeWithUnsignedInteger(markedAts[idx], delTimesUnsignedIntegers[idx]));
@@ -380,6 +389,36 @@ public class RangeTombstoneList implements Iterable<RangeTombstone>, IMeasurable
                      return rangeTombstone(idx++);
                  }
              };
+    }
+
+    public Iterator<RangeTombstone> iterator(SortedSet<Clustering<?>> names, boolean isReversed)
+    {
+        return new AbstractIterator<RangeTombstone>() {
+
+            int startIdx = 0;
+            int endIdx = size;
+            Iterator<Clustering<?>> iterator = names.iterator();
+
+            @Override
+            protected RangeTombstone computeNext()
+            {
+                int idx = -1;
+                Clustering clustering = null;
+
+                while (idx < 0 && iterator.hasNext())
+                {
+                    clustering = iterator.next();
+                    idx = searchInternal(clustering, startIdx, endIdx);
+
+                    if (isReversed)
+                        endIdx = (idx < 0 ? -idx - 2 : idx) + 1; // exclusive
+                    else
+                        startIdx = idx < 0 ? -idx - 1 : idx;
+                }
+
+                return idx < 0 ? endOfData() : rangeTombstone(idx, clustering);
+            }
+        };
     }
 
     public Iterator<RangeTombstone> iterator(final Slice slice, boolean reversed)

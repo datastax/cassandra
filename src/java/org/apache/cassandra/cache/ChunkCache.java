@@ -27,6 +27,7 @@ import java.nio.IntBuffer;
 import java.nio.LongBuffer;
 import java.util.concurrent.CompletableFuture; // checkstyle: permit this import
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 
@@ -47,6 +48,7 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.ParkedExecutor;
 import org.apache.cassandra.concurrent.ShutdownableExecutor;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.util.ChannelProxy;
@@ -72,6 +74,8 @@ public class ChunkCache
     private static final int CLEANER_THREADS = CHUNKCACHE_CLEANER_THREADS.getInt();
 
     private static final Class PERFORM_CLEANUP_TASK_CLASS;
+    // cached value in order to not call System.getProperty on a hotpath
+    private static final int CHUNK_CACHE_REBUFFER_WAIT_TIMEOUT_MS = CassandraRelevantProperties.CHUNK_CACHE_REBUFFER_WAIT_TIMEOUT_MS.getInt();
 
     static
     {
@@ -422,12 +426,12 @@ public class ChunkCache
                         }
                         else
                         {
-                            chunk = existing.join();
+                            chunk = existing.get(CHUNK_CACHE_REBUFFER_WAIT_TIMEOUT_MS, TimeUnit.MILLISECONDS);
                         }
                     }
                     else
                     {
-                        chunk = cachedValue.join();
+                        chunk = cachedValue.get(CHUNK_CACHE_REBUFFER_WAIT_TIMEOUT_MS, TimeUnit.MILLISECONDS);
                     }
 
                     buf = chunk.reference();

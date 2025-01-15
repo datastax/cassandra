@@ -20,35 +20,51 @@ package org.apache.cassandra.concurrent;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.Callable;
+import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Function;
 import java.util.function.IntSupplier;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import javax.annotation.Nullable;
+
 import com.google.common.annotations.VisibleForTesting;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.metrics.ThreadPoolMetrics;
+import org.apache.cassandra.cql3.CQLStatement;
+import org.apache.cassandra.cql3.statements.BatchStatement;
+import org.apache.cassandra.cql3.statements.ModificationStatement;
+import org.apache.cassandra.cql3.statements.SelectStatement;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.Verb;
+import org.apache.cassandra.utils.Clock;
 import org.apache.cassandra.utils.ExecutorUtils;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.concurrent.Future;
 
 import static java.util.stream.Collectors.toMap;
 import static org.apache.cassandra.concurrent.ExecutorFactory.Global.executorFactory;
+import static org.apache.cassandra.config.CassandraRelevantProperties.CUSTOM_STAGE_EXECUTOR_FACTORY_PROPERTY;
 
 public enum Stage
 {
-    READ              (false, "ReadStage",             "request",  DatabaseDescriptor::getConcurrentReaders,        DatabaseDescriptor::setConcurrentReaders,        Stage::multiThreadedLowSignalStage),
-    MUTATION          (true,  "MutationStage",         "request",  DatabaseDescriptor::getConcurrentWriters,        DatabaseDescriptor::setConcurrentWriters,        Stage::multiThreadedLowSignalStage),
-    COUNTER_MUTATION  (true,  "CounterMutationStage",  "request",  DatabaseDescriptor::getConcurrentCounterWriters, DatabaseDescriptor::setConcurrentCounterWriters, Stage::multiThreadedLowSignalStage),
-    VIEW_MUTATION     (true,  "ViewMutationStage",     "request",  DatabaseDescriptor::getConcurrentViewWriters,    DatabaseDescriptor::setConcurrentViewWriters,    Stage::multiThreadedLowSignalStage),
+    READ              (false, "ReadStage",             "request",  DatabaseDescriptor::getConcurrentReaders,        DatabaseDescriptor::setConcurrentReaders,        maybeCustomStageExecutor(Stage::multiThreadedLowSignalStage)),
+    MUTATION          (true,  "MutationStage",         "request",  DatabaseDescriptor::getConcurrentWriters,        DatabaseDescriptor::setConcurrentWriters,        maybeCustomStageExecutor(Stage::multiThreadedLowSignalStage)),
+    COORDINATE_READ   (false, "CoordReadStage",        "request",  DatabaseDescriptor::getConcurrentCoordinatorReaders,        DatabaseDescriptor::setConcurrentCoordinatorReaders,        maybeCustomStageExecutor(Stage::multiThreadedLowSignalStage)),
+    COORDINATE_MUTATION(true, "CoordMutationStage",    "request",  DatabaseDescriptor::getConcurrentCoordinatorWriters,        DatabaseDescriptor::setConcurrentCoordinatorWriters,        maybeCustomStageExecutor(Stage::multiThreadedLowSignalStage)),
+    COUNTER_MUTATION  (true,  "CounterMutationStage",  "request",  DatabaseDescriptor::getConcurrentCounterWriters, DatabaseDescriptor::setConcurrentCounterWriters, maybeCustomStageExecutor(Stage::multiThreadedLowSignalStage)),
+    VIEW_MUTATION     (true,  "ViewMutationStage",     "request",  DatabaseDescriptor::getConcurrentViewWriters,    DatabaseDescriptor::setConcurrentViewWriters,    maybeCustomStageExecutor(Stage::multiThreadedLowSignalStage)),
     GOSSIP            (true,  "GossipStage",           "internal", () -> 1,                                         null,                                            Stage::singleThreadedStage),
-    REQUEST_RESPONSE  (false, "RequestResponseStage",  "request",  FBUtilities::getAvailableProcessors,             null,                                            Stage::multiThreadedLowSignalStage),
+    REQUEST_RESPONSE  (false, "RequestResponseStage",  "request",  FBUtilities::getAvailableProcessors,             null,                                            maybeCustomStageExecutor(Stage::multiThreadedLowSignalStage)),
     ANTI_ENTROPY      (false, "AntiEntropyStage",      "internal", () -> 1,                                         null,                                            Stage::singleThreadedStage),
     MIGRATION         (false, "MigrationStage",        "internal", () -> 1,                                         null,                                            Stage::migrationStage),
     MISC              (false, "MiscStage",             "internal", () -> 1,                                         null,                                            Stage::singleThreadedStage),
@@ -57,8 +73,7 @@ public enum Stage
     IMMEDIATE         (false, "ImmediateStage",        "internal", () -> 0,                                         null,                                            Stage::immediateExecutor),
     PAXOS_REPAIR      (false, "PaxosRepairStage",      "internal", FBUtilities::getAvailableProcessors,             null,                                            Stage::multiThreadedStage),
     IO                (false, "Internal IO Stage",     "internal", FBUtilities::getAvailableProcessors,             null,                                            Stage::multiThreadedStage),
-    NATIVE_TRANSPORT_REQUESTS  (false, "Native-Transport-Requests","transport", DatabaseDescriptor::getNativeTransportMaxThreads, DatabaseDescriptor::setNativeTransportMaxThreads, Stage::multiThreadedLowSignalStage),
-    ;
+    NATIVE_TRANSPORT_REQUESTS  (false, "Native-Transport-Requests","transport", DatabaseDescriptor::getNativeTransportMaxThreads, DatabaseDescriptor::setNativeTransportMaxThreads, maybeCustomStageExecutor(Stage::multiThreadedLowSignalStage));
 
     public final String jmxName;
     private final Supplier<ExecutorPlus> executorSupplier;
@@ -133,13 +148,70 @@ public enum Stage
         }
     }
 
+    public static Optional<Stage> fromStatement(CQLStatement statement)
+    {
+        if (CassandraRelevantProperties.NATIVE_TRANSPORT_ASYNC_READ_WRITE_ENABLED.getBoolean())
+        {
+            if (statement instanceof SelectStatement)
+            {
+                return Optional.of(Stage.COORDINATE_READ);
+            }
+            else if (statement instanceof ModificationStatement || statement instanceof BatchStatement)
+            {
+                return Optional.of(Stage.COORDINATE_MUTATION);
+            }
+        }
+        return Optional.empty();
+    }
+
     // Convenience functions to execute on this stage
-    public void execute(Runnable task) { executor().execute(task); }
-    public void execute(ExecutorLocals locals, Runnable task) { executor().execute(locals, task); }
-    public void maybeExecuteImmediately(Runnable task) { executor().maybeExecuteImmediately(task); }
-    public <T> Future<T> submit(Callable<T> task) { return executor().submit(task); }
-    public Future<?> submit(Runnable task) { return executor().submit(task); }
-    public <T> Future<T> submit(Runnable task, T result) { return executor().submit(task, result); }
+    public void execute(Runnable command)
+    {
+        long enqueueStartTime = Clock.Global.nanoTime();
+        executor().execute(withTimeMeasurement(command, enqueueStartTime));
+    }
+
+    public void execute(Runnable command, ExecutorLocals locals)
+    {
+        long enqueueStartTime = Clock.Global.nanoTime();
+        executor().execute(locals, withTimeMeasurement(command, enqueueStartTime));
+    }
+
+    public void maybeExecuteImmediately(Runnable command)
+    {
+        long enqueueStartTime = Clock.Global.nanoTime();
+        executor().maybeExecuteImmediately(withTimeMeasurement(command, enqueueStartTime));
+    }
+
+    public <T> Future<T> submit(Callable<T> task)
+    {
+        long enqueueStartTime = Clock.Global.nanoTime();
+        return executor().submit(() -> {
+            try
+            {
+                return withTimeMeasurement(task, enqueueStartTime).call();
+            }
+            catch (Exception e)
+            {
+                throw Throwables.unchecked(e);
+            }
+        });
+    }
+
+    public Future<?> submit(Runnable task)
+    {
+        long enqueueStartTime = Clock.Global.nanoTime();
+        return executor().submit(withTimeMeasurement(task, enqueueStartTime), executor());
+    }
+
+    public <T> Future<T> submit(Runnable task, T result)
+    {
+        long enqueueStartTime = Clock.Global.nanoTime();
+        return executor().submit(() -> {
+            withTimeMeasurement(task, enqueueStartTime).run();
+            return result;
+        });
+    }
 
     public ExecutorPlus executor()
     {
@@ -222,6 +294,11 @@ public enum Stage
                .sequential(jmxName);
     }
 
+    private static ExecutorServiceInitialiser maybeCustomStageExecutor(ExecutorServiceInitialiser fallbackInitializer)
+    {
+        return CUSTOM_STAGE_EXECUTOR_FACTORY_PROPERTY.isPresent() ? Stage::customExecutor : fallbackInitializer;
+    }
+
     private static LocalAwareExecutorPlus singleThreadedStage(String jmxName, String jmxType, int numThreads, LocalAwareExecutorPlus.MaximumPoolSizeListener onSetMaximumPoolSize)
     {
         return executorFactory()
@@ -249,6 +326,47 @@ public enum Stage
     static LocalAwareExecutorPlus immediateExecutor(String jmxName, String jmxType, int numThreads, LocalAwareExecutorPlus.MaximumPoolSizeListener onSetMaximumPoolSize)
     {
         return ImmediateExecutor.INSTANCE;
+    }
+
+    static LocalAwareExecutorPlus customExecutor(String jmxName, String jmxType, int numThreads, LocalAwareExecutorPlus.MaximumPoolSizeListener onSetMaximumPoolSize)
+    {
+        StageExecutorFactory customStageExecutorFactory = FBUtilities.construct(CUSTOM_STAGE_EXECUTOR_FACTORY_PROPERTY.getString(), "Custom stage executor factory");
+        return customStageExecutorFactory.init(jmxName, jmxType, numThreads, onSetMaximumPoolSize);
+    }
+
+    public int getPendingTaskCount()
+    {
+        return executor().getPendingTaskCount();
+    }
+
+    public int getActiveTaskCount()
+    {
+        return executor().getActiveTaskCount();
+    }
+
+    public long getCompletedTaskCount()
+    {
+        return executor().getCompletedTaskCount();
+    }
+
+    /**
+     * return additional, executor-related ThreadPoolMetrics for the executor
+     * @param metricsExtractor function to extract metrics from the executor
+     * @return ThreadPoolMetrics or null if the extractor was not able to extract metrics
+     */
+    public @Nullable ThreadPoolMetrics getExecutorMetrics(Function<Executor, ThreadPoolMetrics> metricsExtractor)
+    {
+        return metricsExtractor.apply(executor());
+    }
+
+    public boolean isShutdown()
+    {
+        return executor().isShutdown();
+    }
+
+    public boolean isTerminated()
+    {
+        return executor().isTerminated();
     }
 
     @FunctionalInterface
@@ -287,5 +405,37 @@ public enum Stage
     public void setMaximumPoolSize(int newMaximumPoolSize)
     {
         executor().setMaximumPoolSize(newMaximumPoolSize);
+    }
+
+    private Runnable withTimeMeasurement(Runnable command, long queueStartTime)
+    {
+        return () -> {
+            long executionStartTime = Clock.Global.nanoTime();
+            try
+            {
+                TaskExecutionCallback.instance.onDequeue(this, executionStartTime - queueStartTime);
+                command.run();
+            }
+            finally
+            {
+                TaskExecutionCallback.instance.onCompleted(this, Clock.Global.nanoTime() - executionStartTime);
+            }
+        };
+    }
+
+    private <T> Callable<T> withTimeMeasurement(Callable<T> command, long queueStartTime)
+    {
+        return () -> {
+            long executionStartTime = Clock.Global.nanoTime();
+            try
+            {
+                TaskExecutionCallback.instance.onDequeue(this, executionStartTime - queueStartTime);
+                return command.call();
+            }
+            finally
+            {
+                TaskExecutionCallback.instance.onCompleted(this, Clock.Global.nanoTime() - executionStartTime);
+            }
+        };
     }
 }

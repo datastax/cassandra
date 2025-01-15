@@ -29,16 +29,18 @@ import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.NoPayload;
 import org.apache.cassandra.net.ParamType;
-import org.apache.cassandra.net.SensorsCustomParams;
+import org.apache.cassandra.sensors.SensorsCustomParams;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.sensors.Context;
 import org.apache.cassandra.sensors.RequestSensors;
-import org.apache.cassandra.sensors.RequestSensorsFactory;
 import org.apache.cassandra.sensors.RequestTracker;
+import org.apache.cassandra.sensors.SensorsFactory;
 import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.tracing.Tracing;
+import org.apache.cassandra.utils.MonotonicClock;
 
 import static org.apache.cassandra.db.commitlog.CommitLogSegment.ENTRY_OVERHEAD_SIZE;
+import static java.util.concurrent.TimeUnit.NANOSECONDS;
 
 public class MutationVerbHandler implements IVerbHandler<Mutation>
 {
@@ -50,7 +52,7 @@ public class MutationVerbHandler implements IVerbHandler<Mutation>
 
         Message.Builder<NoPayload> response = respondToMessage.emptyResponseBuilder();
         // no need to calculate outbound internode bytes because the response is NoPayload
-        SensorsCustomParams.addSensorsToResponse(requestSensors, response);
+        SensorsCustomParams.addSensorsToInternodeResponse(requestSensors, response);
         MessagingService.instance().send(response.build(), respondToAddress);
     }
 
@@ -62,6 +64,12 @@ public class MutationVerbHandler implements IVerbHandler<Mutation>
     public void doVerb(Message<Mutation> message)
     {
         message.payload.validateSize(MessagingService.current_version, ENTRY_OVERHEAD_SIZE);
+        if (MonotonicClock.Global.approxTime.now() > message.expiresAtNanos())
+        {
+            Tracing.trace("Discarding mutation from {} (timed out)", message.from());
+            MessagingService.instance().metrics.recordDroppedMessage(message, message.elapsedSinceCreated(NANOSECONDS), NANOSECONDS);
+            return;
+        }
 
         // Check if there were any forwarding headers in this message
         ForwardingInfo forwardTo = message.forwardTo();
@@ -72,7 +80,7 @@ public class MutationVerbHandler implements IVerbHandler<Mutation>
         try
         {
             // Initialize the sensor and set ExecutorLocals
-            RequestSensors requestSensors = RequestSensorsFactory.instance.create(message.payload.getKeyspaceName());
+            RequestSensors requestSensors = SensorsFactory.instance.createRequestSensors(message.payload.getKeyspaceName());
             RequestTracker.instance.set(requestSensors);
 
             // Initialize internode bytes with the inbound message size:

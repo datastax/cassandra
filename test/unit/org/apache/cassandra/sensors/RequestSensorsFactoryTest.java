@@ -28,10 +28,10 @@ public class RequestSensorsFactoryTest
     @Test
     public void testCreateUsesNoOpByDefault()
     {
-        RequestSensorsFactory factory = RequestSensorsFactory.instance;
-        RequestSensors sensors = factory.create("ks1");
+        SensorsFactory factory = SensorsFactory.instance;
+        RequestSensors sensors = factory.createRequestSensors("ks1");
         assertThat(sensors).isInstanceOf(NoOpRequestSensors.class);
-        RequestSensors anotherSensors = factory.create("k2");
+        RequestSensors anotherSensors = factory.createRequestSensors("k2");
         assertThat(anotherSensors).isSameAs(sensors);
     }
 }
