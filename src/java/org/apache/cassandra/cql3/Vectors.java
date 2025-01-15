@@ -184,7 +184,7 @@ public class Vectors
     }
 
     /**
-     * Basically similar to a Value, but with some non-pure function (that need
+     * Basically similar to a Value, but with some non-deterministic function (that need
      * to be evaluated at execution time) in it.
      */
     public static class DelayedValue<T> extends Term.NonTerminal

@@ -37,5 +37,11 @@ public abstract class UuidFcts
         {
             return UUIDSerializer.instance.serialize(UUID.randomUUID());
         }
+
+        @Override
+        public boolean isDeterministic()
+        {
+            return false; // since UUIDs are generated randomly and so function calls are not deterministic
+        }
     };
 }
