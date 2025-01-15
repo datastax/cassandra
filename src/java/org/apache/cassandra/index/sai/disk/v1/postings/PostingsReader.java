@@ -98,7 +98,7 @@ public class PostingsReader implements OrdinalPostingList
         this.input = input;
         this.seekingInput = new SeekingRandomAccessInput(input);
         this.blockOffsets = summary.offsets;
-        this.blockSize = summary.blockSize;
+        this.blockSize = summary.blockEntries;
         this.numPostings = summary.numPostings;
         this.blockMaxValues = summary.maxValues;
         this.listener = listener;
@@ -123,7 +123,7 @@ public class PostingsReader implements OrdinalPostingList
 
     public static class BlocksSummary
     {
-        final int blockSize;
+        final int blockEntries;
         final int numPostings;
         final LongArray offsets;
         final LongArray maxValues;
@@ -140,7 +140,7 @@ public class PostingsReader implements OrdinalPostingList
             this.runOnClose = runOnClose;
 
             input.seek(offset);
-            this.blockSize = input.readVInt();
+            this.blockEntries = input.readVInt();
             // This is the count of row ids in a single posting list. For now, a segment cannot have more than
             // Integer.MAX_VALUE row ids, so it is safe to use an int here.
             this.numPostings = input.readVInt();
