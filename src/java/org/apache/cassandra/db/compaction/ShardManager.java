@@ -24,7 +24,9 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.PriorityQueue;
 import java.util.Set;
+import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
+import java.util.function.ObjIntConsumer;
 
 import org.apache.cassandra.db.DiskBoundaries;
 import org.apache.cassandra.db.PartitionPosition;
@@ -100,9 +102,7 @@ public interface ShardManager
 
     /// Construct a boundary/shard iterator for the given number of shards.
     ///
-    /// Note: This does not offer a method of listing the shard boundaries it generates, just to advance to the
-    /// corresponding one for a given token.  The only usage for listing is currently in tests. Should a need for this
-    /// arise, see `CompactionSimulationTest` for a possible implementation.
+    /// If a list of the ranges for each shard is required instead, use [#getShardRanges].
     ShardTracker boundaries(int shardCount);
 
     static Range<Token> coveringRange(CompactionSSTable sstable)
@@ -166,16 +166,24 @@ public interface ShardManager
         return onDiskLength / adjustSmallSpans(span, approximatePartitionCount);
     }
 
+
     /// Seggregate the given sstables into the shard ranges that intersect sstables from the collection, and call
-    /// the given function on the combination of each shard range and the intersecting sstable set.
-    default <T, R extends CompactionSSTable> List<T> splitSSTablesInShards(Collection<R> sstables,
-                                                                           int numShardsForDensity,
-                                                                           BiFunction<Collection<R>, Range<Token>, T> maker)
+    /// the given function on the intersecting sstable set, with access to the shard tracker from which information
+    /// about the shard can be recovered.
+    ///
+    /// If an operationRange is given, this method restricts the collection to the given range and assumes all sstables
+    /// cover at least some portion of that range.
+    private <R extends CompactionSSTable> void assignSSTablesInShards(Collection<R> sstables,
+                                                                      Range<Token> operationRange,
+                                                                      int numShardsForDensity,
+                                                                      BiConsumer<Collection<R>, ShardTracker> consumer)
     {
         var boundaries = boundaries(numShardsForDensity);
-        List<T> tasks = new ArrayList<>();
         SortingIterator<R> items = SortingIterator.create(CompactionSSTable.firstKeyComparator, sstables);
         PriorityQueue<R> active = new PriorityQueue<>(CompactionSSTable.lastKeyComparator);
+        // Advance inside the range. This will add all sstables that start before the end of the covering shard.
+        if (operationRange != null)
+            boundaries.advanceTo(operationRange.left.nextValidToken());
         while (items.hasNext() || !active.isEmpty())
         {
             if (active.isEmpty())
@@ -184,13 +192,16 @@ public interface ShardManager
                 active.add(items.next());
             }
             Token shardEnd = boundaries.shardEnd();
+            if (operationRange != null &&
+                !operationRange.right.isMinimum() &&
+                shardEnd != null &&
+                shardEnd.compareTo(operationRange.right) >= 0)
+                shardEnd = null;    // Take all remaining sstables.
 
             while (items.hasNext() && (shardEnd == null || items.peek().getFirst().getToken().compareTo(shardEnd) <= 0))
                 active.add(items.next());
 
-            final T result = maker.apply(active, boundaries.shardSpan());
-            if (result != null)
-                tasks.add(result);
+            consumer.accept(active, boundaries);
 
             while (!active.isEmpty() && (shardEnd == null || active.peek().getLast().getToken().compareTo(shardEnd) <= 0))
                 active.poll();
@@ -198,7 +209,29 @@ public interface ShardManager
             if (!active.isEmpty()) // shardEnd must be non-null (otherwise the line above exhausts all)
                 boundaries.advanceTo(shardEnd.nextValidToken());
         }
-        return tasks;
+    }
+
+    /// Seggregate the given sstables into the shard ranges that intersect sstables from the collection, and call
+    /// the given function on the combination of each shard index and the intersecting sstable set.
+    ///
+    /// If an operationRange is given, this method restricts the collection to the given range and assumes all sstables
+    /// cover at least some portion of that range.
+    default <R extends CompactionSSTable> void assignSSTablesToShardIndexes(Collection<R> sstables,
+                                                                            Range<Token> operationRange,
+                                                                            int numShardsForDensity,
+                                                                            ObjIntConsumer<Collection<R>> consumer)
+    {
+        assignSSTablesInShards(sstables, operationRange, numShardsForDensity,
+                               (rangeSSTables, boundaries) -> consumer.accept(rangeSSTables, boundaries.shardIndex()));
+    }
+
+    /// Seggregate the given sstables into the shard ranges that intersect sstables from the collection, and call
+    /// the given function on the combination of each shard range and the intersecting sstable set.
+    default <T, R extends CompactionSSTable> List<T> splitSSTablesInShards(Collection<R> sstables,
+                                                                           int numShardsForDensity,
+                                                                           BiFunction<Collection<R>, Range<Token>, T> maker)
+    {
+        return splitSSTablesInShards(sstables, null, numShardsForDensity, maker);
     }
 
     /// Seggregate the given sstables into the shard ranges that intersect sstables from the collection, and call
@@ -211,39 +244,12 @@ public interface ShardManager
                                                                            int numShardsForDensity,
                                                                            BiFunction<Collection<R>, Range<Token>, T> maker)
     {
-        if (operationRange == null)
-            return splitSSTablesInShards(sstables, numShardsForDensity, maker);
-
-        var boundaries = boundaries(numShardsForDensity);
         List<T> tasks = new ArrayList<>();
-        SortingIterator<R> items = SortingIterator.create(CompactionSSTable.firstKeyComparator, sstables);
-        PriorityQueue<R> active = new PriorityQueue<>(CompactionSSTable.lastKeyComparator);
-        // Advance inside the range. This will add all sstables that start before the end of the covering shard.
-        boundaries.advanceTo(operationRange.left.nextValidToken());
-        while (items.hasNext() || !active.isEmpty())
-        {
-            if (active.isEmpty())
-            {
-                boundaries.advanceTo(items.peek().getFirst().getToken());
-                active.add(items.next());
-            }
-            Token shardEnd = boundaries.shardEnd();
-            if (!operationRange.right.isMinimum() && shardEnd != null && shardEnd.compareTo(operationRange.right) >= 0)
-                shardEnd = null;    // Take all remaining sstables.
-
-            while (items.hasNext() && (shardEnd == null || items.peek().getFirst().getToken().compareTo(shardEnd) <= 0))
-                active.add(items.next());
-
-            final T result = maker.apply(active, boundaries.shardSpan());
+        assignSSTablesInShards(sstables, operationRange, numShardsForDensity, (rangeSSTables, boundaries) -> {
+            final T result = maker.apply(rangeSSTables, boundaries.shardSpan());
             if (result != null)
                 tasks.add(result);
-
-            while (!active.isEmpty() && (shardEnd == null || active.peek().getLast().getToken().compareTo(shardEnd) <= 0))
-                active.poll();
-
-            if (!active.isEmpty()) // shardEnd must be non-null (otherwise the line above exhausts all)
-                boundaries.advanceTo(shardEnd.nextValidToken());
-        }
+        });
         return tasks;
     }
 
@@ -335,5 +341,20 @@ public interface ShardManager
         boundaries.advanceTo(last.getToken());
         int lastShard = boundaries.shardIndex();
         return lastShard - firstShard + 1;
+    }
+
+    /// Get the list of shard ranges for the given shard count. Useful for diagnostics and debugging.
+    default List<Range<Token>> getShardRanges(int shardCount)
+    {
+        var boundaries = boundaries(shardCount);
+        var result = new ArrayList<Range<Token>>(shardCount);
+        while (true)
+        {
+            result.add(boundaries.shardSpan());
+            if (boundaries.shardEnd() == null)
+                break;
+            boundaries.advanceTo(boundaries.shardEnd().nextValidToken());
+        }
+        return result;
     }
 }
