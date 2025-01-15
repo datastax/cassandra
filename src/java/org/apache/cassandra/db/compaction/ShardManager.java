@@ -26,6 +26,7 @@ import java.util.PriorityQueue;
 import java.util.Set;
 import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
+import java.util.function.ObjIntConsumer;
 
 import org.apache.cassandra.db.DiskBoundaries;
 import org.apache.cassandra.db.PartitionPosition;
@@ -218,7 +219,7 @@ public interface ShardManager
     default <R extends CompactionSSTable> void assignSSTablesToShardIndexes(Collection<R> sstables,
                                                                             Range<Token> operationRange,
                                                                             int numShardsForDensity,
-                                                                            BiConsumer<Collection<R>, Integer> consumer)
+                                                                            ObjIntConsumer<Collection<R>> consumer)
     {
         assignSSTablesInShards(sstables, operationRange, numShardsForDensity,
                                (rangeSSTables, boundaries) -> consumer.accept(rangeSSTables, boundaries.shardIndex()));

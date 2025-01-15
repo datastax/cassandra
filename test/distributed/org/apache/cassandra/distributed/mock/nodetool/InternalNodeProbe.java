@@ -22,6 +22,9 @@ import java.lang.management.ManagementFactory;
 import java.util.Iterator;
 import java.util.Map;
 
+import javax.management.JMX;
+import javax.management.ObjectName;
+
 import com.google.common.collect.Multimap;
 
 import org.apache.cassandra.batchlog.BatchlogManager;
@@ -37,6 +40,7 @@ import org.apache.cassandra.locator.DynamicEndpointSnitchMBean;
 import org.apache.cassandra.locator.EndpointSnitchInfo;
 import org.apache.cassandra.locator.EndpointSnitchInfoMBean;
 import org.apache.cassandra.metrics.CassandraMetricsRegistry;
+import org.apache.cassandra.metrics.CompactionMetrics;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.service.CacheService;
@@ -160,7 +164,28 @@ public class InternalNodeProbe extends NodeProbe
     @Override
     public Object getCompactionMetric(String metricName)
     {
-        throw new UnsupportedOperationException();
+        CompactionMetrics metrics = CompactionManager.instance.getMetrics();
+        switch(metricName)
+        {
+            case "BytesCompacted":
+                return metrics.bytesCompacted;
+            case "CompletedTasks":
+                return metrics.completedTasks.getValue();
+            case "PendingTasks":
+                return metrics.pendingTasks.getValue();
+            case "PendingTasksByTableName":
+                return metrics.pendingTasksByTableName.getValue();
+            case "WriteAmplificationByTableName":
+                return metrics.writeAmplificationByTableName.getValue();
+            case "AggregateCompactions":
+                return metrics.aggregateCompactions.getValue();
+            case "MaxOverlapsMap":
+                return metrics.overlapsMap.getValue();
+            case "TotalCompactionsCompleted":
+                return metrics.totalCompactionsCompleted;
+            default:
+                throw new RuntimeException("Unknown compaction metric.");
+        }
     }
 
     @Override

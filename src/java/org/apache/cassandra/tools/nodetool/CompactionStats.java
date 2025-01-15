@@ -77,7 +77,7 @@ public class CompactionStats extends NodeToolCmd
         }
 
         out.println("pending tasks: " + numTotalPendingTask);
-        System.out.println(String.format("write amplification: %.2f", totWriteAmplification));
+        out.println(String.format("write amplification: %.2f", totWriteAmplification));
         for (Entry<String, Map<String, Integer>> ksEntry : pendingTaskNumberByTable.entrySet())
         {
             String ksName = ksEntry.getKey();
@@ -88,8 +88,8 @@ public class CompactionStats extends NodeToolCmd
                 int pendingTaskCount = tableEntry.getValue();
 
                 double wa = ksWriteAmplification == null ? 0 : ksWriteAmplification.get(tableName);
-                System.out.println(String.format("- %s.%s: %d", ksName, tableName, pendingTaskCount));
-                System.out.println(String.format("- %s.%s write amplification.: %.2f", ksName, tableName, wa));
+                out.println(String.format("- %s.%s: %d", ksName, tableName, pendingTaskCount));
+                out.println(String.format("- %s.%s write amplification.: %.2f", ksName, tableName, wa));
             }
         }
         out.println();
@@ -97,11 +97,11 @@ public class CompactionStats extends NodeToolCmd
 
         if (aggregate)
         {
-            reportAggregateCompactions(probe);
+            reportAggregateCompactions(probe, out);
         }
 
         if (overlap)
-            reportOverlap((Map<String, Map<String, Map<String, String>>>) probe.getCompactionMetric("MaxOverlapsMap"));
+            reportOverlap((Map<String, Map<String, Map<String, String>>>) probe.getCompactionMetric("MaxOverlapsMap"), out);
     }
 
     public static void reportCompactionTable(List<Map<String,String>> compactions, int compactionThroughput, boolean humanReadable, PrintStream out)
@@ -140,21 +140,24 @@ public class CompactionStats extends NodeToolCmd
         }
     }
 
-    private static void reportAggregateCompactions(NodeProbe probe)
+    private static void reportAggregateCompactions(NodeProbe probe, PrintStream out)
     {
         List<CompactionStrategyStatistics> statistics = (List<CompactionStrategyStatistics>) probe.getCompactionMetric("AggregateCompactions");
         if (statistics.isEmpty())
             return;
 
-        System.out.println("Aggregated view:");
+        out.println("Aggregated view:");
         for (CompactionStrategyStatistics stat : statistics)
-            System.out.println(stat.toString());
+            out.println(stat.toString());
     }
 
-    private static void reportOverlap(Map<String, Map<String, Map<String, String>>> maxOverlap)
+    private static void reportOverlap(Map<String, Map<String, Map<String, String>>> maxOverlap, PrintStream out)
     {
         if (maxOverlap == null)
-            System.out.println("Overlap map is not available.");
+        {
+            out.println("Overlap map is not available.");
+            return;
+        }
 
         for (Map.Entry<String, Map<String, Map<String, String>>> ksEntry : maxOverlap.entrySet())
         {
@@ -162,10 +165,10 @@ public class CompactionStats extends NodeToolCmd
             for (Map.Entry<String, Map<String, String>> tableEntry : ksEntry.getValue().entrySet())
             {
                 String tableName = tableEntry.getKey();
-                System.out.println("Max overlap map for " + ksName + "." + tableName + ":");
+                out.println("Max overlap map for " + ksName + "." + tableName + ":");
                 for (Map.Entry<String, String> compactionEntry : tableEntry.getValue().entrySet())
                 {
-                    System.out.println("  " + compactionEntry.getKey() + ": " + compactionEntry.getValue());
+                    out.println("  " + compactionEntry.getKey() + ": " + compactionEntry.getValue());
                 }
             }
         }
