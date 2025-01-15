@@ -37,6 +37,7 @@ import org.apache.cassandra.locator.DynamicEndpointSnitchMBean;
 import org.apache.cassandra.locator.EndpointSnitchInfo;
 import org.apache.cassandra.locator.EndpointSnitchInfoMBean;
 import org.apache.cassandra.metrics.CassandraMetricsRegistry;
+import org.apache.cassandra.metrics.CompactionMetrics;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.service.CacheService;
@@ -160,7 +161,34 @@ public class InternalNodeProbe extends NodeProbe
     @Override
     public Object getCompactionMetric(String metricName)
     {
-        throw new UnsupportedOperationException();
+        CompactionMetrics metrics = CompactionManager.instance.getMetrics();
+        switch(metricName)
+        {
+            case "BytesCompacted":
+                return metrics.bytesCompacted;
+            case "CompletedTasks":
+                return metrics.completedTasks.getValue();
+            case "CompactionsAborted":
+                return metrics.compactionsAborted;
+            case "CompactionsReduced":
+                return metrics.compactionsReduced;
+            case "PendingTasks":
+                return metrics.pendingTasks.getValue();
+            case "PendingTasksByTableName":
+                return metrics.pendingTasksByTableName.getValue();
+            case "WriteAmplificationByTableName":
+                return metrics.writeAmplificationByTableName.getValue();
+            case "AggregateCompactions":
+                return metrics.aggregateCompactions.getValue();
+            case "MaxOverlapsMap":
+                return metrics.overlapsMap.getValue();
+            case "SSTablesDroppedFromCompaction":
+                return metrics.sstablesDropppedFromCompactions;
+            case "TotalCompactionsCompleted":
+                return metrics.totalCompactionsCompleted;
+            default:
+                throw new RuntimeException("Unknown compaction metric: " + metricName);
+        }
     }
 
     @Override
