@@ -778,6 +778,11 @@ public class StatementRestrictions
         return nonPrimaryKeyRestrictions.restrictions().stream().anyMatch(SingleRestriction::isIndexBasedOrdering);
     }
 
+    public boolean hasIndxBasedBoundedAnn()
+    {
+        return nonPrimaryKeyRestrictions.restrictions().stream().anyMatch(SingleRestriction::isBoundedAnn);
+    }
+
     public void throwRequiresAllowFilteringError(TableMetadata table)
     {
         if (hasIndxBasedOrdering())
@@ -994,7 +999,7 @@ public class StatementRestrictions
         return table.clusteringColumns().size() != clusteringColumnsRestrictions.size();
     }
 
-    public RowFilter getRowFilter(IndexRegistry indexManager, QueryOptions options, QueryState queryState, SelectOptions selectOptions)
+    public RowFilter getRowFilter(IndexRegistry indexManager, QueryOptions options, QueryState queryState, SelectOptions selectOptions, boolean allowsFiltering)
     {
         boolean hasAnnOptions = selectOptions.hasANNOptions();
 
@@ -1007,7 +1012,11 @@ public class StatementRestrictions
         }
 
         ANNOptions annOptions = selectOptions.parseANNOptions();
-        RowFilter rowFilter = RowFilter.builder(indexManager)
+
+        if (allowsFiltering && (hasIndxBasedOrdering() || hasIndxBasedBoundedAnn()))
+            allowsFiltering = false;
+
+        RowFilter rowFilter = RowFilter.builder(indexManager, allowsFiltering)
                                        .buildFromRestrictions(this, table, options, queryState, annOptions);
 
         if (hasAnnOptions && !rowFilter.hasANN())

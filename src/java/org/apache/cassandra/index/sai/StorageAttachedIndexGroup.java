@@ -241,6 +241,22 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
     }
 
     @Override
+    public StorageAttachedIndexQueryPlan queryPlanForIndices(RowFilter rowFilter, Set<Index> indexes)
+    {
+        Set<StorageAttachedIndex> saiIndexes = new HashSet<>();
+        for (Index index : indexes)
+        {
+            assert index instanceof StorageAttachedIndex : "Index is not a StorageAttachedIndex";
+            saiIndexes.add((StorageAttachedIndex) index);
+        }
+
+        // Verify that all provided indexes belong to this group
+        assert indexes.size() < indices.size() && indices.containsAll(saiIndexes);
+
+        return StorageAttachedIndexQueryPlan.create(baseCfs, queryMetrics, saiIndexes, rowFilter);
+    }
+
+    @Override
     public SSTableFlushObserver getFlushObserver(Descriptor descriptor, LifecycleNewTracker tracker, TableMetadata tableMetadata, long keyCount)
     {
         IndexDescriptor indexDescriptor = IndexDescriptor.empty(descriptor);

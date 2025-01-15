@@ -1156,6 +1156,8 @@ public class SecondaryIndexTest extends CQLTester
         {
             execute("DROP index " + KEYSPACE + ".testIndex");
         }
+
+        execute("SELECT value FROM %s WHERE value = 2 ALLOW FILTERING");
     }
 
     @Test // A Bad init could leave an index only accepting reads

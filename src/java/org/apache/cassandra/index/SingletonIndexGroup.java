@@ -72,7 +72,7 @@ public class SingletonIndexGroup implements Index.Group
         // This class does not work for SAI because the `componentsForNewBuid` method would be incorrect (so more
         // generally, it does not work for indexes that use dedicated sstable components, which is only SAI). See
         // comments on `componentsForNewBuid` for more details.
-        Preconditions.checkState(!(index instanceof StorageAttachedIndex), "This shoudl not be used with SAI");
+        Preconditions.checkState(!(index instanceof StorageAttachedIndex), "This should not be used with SAI");
         delegate = index;
         indexes.add(index);
     }
@@ -108,6 +108,25 @@ public class SingletonIndexGroup implements Index.Group
     public Index.QueryPlan queryPlanFor(RowFilter rowFilter)
     {
         Preconditions.checkNotNull(delegate);
+
+        // Indexes using a singleton group don't support disjunctions,
+        // so we only consider the top-level AND expressions for index selection.
+        for (RowFilter.Expression e : rowFilter.withoutDisjunctions().expressions())
+        {
+            if (delegate.supportsExpression(e.column(), e.operator()))
+                return new SingletonIndexQueryPlan(delegate, delegate.getPostIndexQueryFilter(rowFilter));
+        }
+
+        return null;
+    }
+
+    @Override
+    public Index.QueryPlan queryPlanForIndices(RowFilter rowFilter, Set<Index> indexes)
+    {
+        Preconditions.checkNotNull(delegate);
+
+        if (indexes.contains(delegate))
+            return null;
 
         // Indexes using a singleton group don't support disjunctions,
         // so we only consider the top-level AND expressions for index selection.

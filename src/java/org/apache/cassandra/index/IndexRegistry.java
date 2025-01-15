@@ -241,6 +241,13 @@ public interface IndexRegistry
 
             @Nullable
             @Override
+            public Index.QueryPlan queryPlanForIndices(RowFilter rowFilter, Set<Index> indexes)
+            {
+                return null;
+            }
+
+            @Nullable
+            @Override
             public SSTableFlushObserver getFlushObserver(Descriptor descriptor, LifecycleNewTracker tracker, TableMetadata tableMetadata, long keyCount)
             {
                 return null;

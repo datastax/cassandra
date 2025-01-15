@@ -21,8 +21,10 @@ package org.apache.cassandra.distributed.test.sai;
 import java.net.InetAddress;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
@@ -32,6 +34,7 @@ import com.google.common.base.Objects;
 import org.junit.Test;
 
 import org.apache.cassandra.cql3.ColumnIdentifier;
+import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.distributed.Cluster;
@@ -50,6 +53,7 @@ import org.apache.cassandra.utils.FBUtilities;
 import static org.apache.cassandra.distributed.api.Feature.GOSSIP;
 import static org.apache.cassandra.distributed.api.Feature.NETWORK;
 import static org.apache.cassandra.distributed.test.sai.SAIUtil.waitForIndexQueryable;
+import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
 import static org.awaitility.Awaitility.await;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
@@ -61,7 +65,7 @@ public class IndexAvailabilityTest extends TestBaseImpl
                                                "WITH compaction = {'class' : 'SizeTieredCompactionStrategy', 'enabled' : false }";
     private static final String CREATE_INDEX = "CREATE CUSTOM INDEX %s ON %s.%s(%s) USING 'StorageAttachedIndex'";
     
-    private static Map<NodeIndex, Index.Status> expectedNodeIndexQueryability = new ConcurrentHashMap<>();
+    private static final Map<NodeIndex, Index.Status> expectedNodeIndexQueryability = new ConcurrentHashMap<>();
     private List<String> keyspaces;
     private List<String> indexesPerKs;
 
@@ -134,7 +138,7 @@ public class IndexAvailabilityTest extends TestBaseImpl
             assertIndexingStatus(cluster);
 
             // drop ks2 index2, there should be no ks2 index2 status on all node
-            cluster.schemaChange("DROP INDEX " + ks2 + "." + index2);
+            cluster.schemaChange("DROP INDEX " + ks2 + '.' + index2);
             expectedNodeIndexQueryability.keySet().forEach(k -> {
                 if (k.keyspace.equals(ks2) && k.index.equals(index2))
                     expectedNodeIndexQueryability.put(k, Index.Status.UNKNOWN);
@@ -142,7 +146,7 @@ public class IndexAvailabilityTest extends TestBaseImpl
             assertIndexingStatus(cluster);
 
             // drop ks3 cf1, there should be no ks3 index1/index2 status
-            cluster.schemaChange("DROP TABLE " + ks3 + "." + cf1);
+            cluster.schemaChange("DROP TABLE " + ks3 + '.' + cf1);
             expectedNodeIndexQueryability.keySet().forEach(k -> {
                 if (k.keyspace.equals(ks3))
                     expectedNodeIndexQueryability.put(k, Index.Status.UNKNOWN);
@@ -234,7 +238,196 @@ public class IndexAvailabilityTest extends TestBaseImpl
         }
     }
 
-    private void executeOnAllCoordinatorsAllConsistencies(Cluster cluster, String statement, int liveReplicas, int num) throws Exception
+    @Test
+    public void testAllowFilteringDuringIndexBuildsOn3NodeCluster() throws Exception
+    {
+        try (Cluster cluster = init(Cluster.build(3)
+                                           .withConfig(config -> config.with(GOSSIP)
+                                                                       .with(NETWORK))
+                                           .start()))
+        {
+            String ks2 = "ks2";
+            String table = "tbl";
+            String index1 = "tbl_idx1";
+            String index2 = "tbl_idx2";
+            String vectorIndex = "tbl_vec_idx";
+
+            cluster.schemaChange(String.format(CREATE_KEYSPACE, ks2, 2));
+            cluster.schemaChange("CREATE TABLE " + ks2 + '.' + table +
+                                 " (pk text, i int, j int, k int, v1 int, v2 int, vec vector<float, 2>, " +
+                                 "PRIMARY KEY((pk, i), j))");
+
+            // Insert test data
+            cluster.coordinator(1).execute(String.format("INSERT INTO %s.%s(pk, i, j, k, v1, v2, vec) VALUES " +
+                                                         "('partition1', 1, 100, 200, 0, 0, [0.5, 1.5])",
+                                                         ks2, table),
+                                           ConsistencyLevel.QUORUM);
+            cluster.coordinator(1).execute(String.format("INSERT INTO %s.%s(pk, i, j, k, v1, v2, vec) VALUES " +
+                                                         "('partition2', 2, 101, 201, 1, 1, [1.5, 2.5])",
+                                                         ks2, table),
+                                           ConsistencyLevel.QUORUM);
+            cluster.coordinator(1).execute(String.format("INSERT INTO %s.%s(pk, i, j, k, v1, v2, vec) VALUES " +
+                                                         "('partition3', 1, 102, 202, 0, 1, [2.5, 3.5])",
+                                                         ks2, table),
+                                           ConsistencyLevel.QUORUM);
+            cluster.coordinator(1).execute(String.format("INSERT INTO %s.%s(pk, i, j, k, v1, v2, vec) VALUES " +
+                                                         "('partition4', 2, 103, 203, 1, 0, [3.5, 4.5])",
+                                                         ks2, table),
+                                           ConsistencyLevel.QUORUM);
+            cluster.coordinator(1).execute(String.format("INSERT INTO %s.%s(pk, i, j, k, v1, v2, vec) VALUES " +
+                                                         "('partition5', 1, 104, 204, 0, 0, [4.5, 5.5])",
+                                                         ks2, table),
+                                           ConsistencyLevel.QUORUM);
+
+            // Test queries before any index exists
+            executeOnAllCoordinators(cluster,
+                                     "SELECT pk FROM " + ks2 + '.' + table + " WHERE v1=0 AND v2=0 ALLOW FILTERING",
+                                     ConsistencyLevel.LOCAL_QUORUM,
+                                     2);
+            // Verify actual results using a direct query
+            Object[][] results = cluster.coordinator(1)
+                                        .execute("SELECT pk FROM " + ks2 + '.' + table + " WHERE v1=0 AND v2=0 ALLOW FILTERING",
+                                                 ConsistencyLevel.LOCAL_QUORUM);
+            assertResultContains(results, Arrays.asList("partition1", "partition5"));
+
+            assertThatThrownBy(() ->
+                               executeOnAllCoordinators(cluster,
+                                                        "SELECT pk FROM " + ks2 + '.' + table + " WHERE v1=0 AND v2=0",
+                                                        ConsistencyLevel.LOCAL_QUORUM,
+                                                        0))
+            .hasMessageContaining(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE);
+
+            assertThatThrownBy(() ->
+                               executeOnAllCoordinators(cluster,
+                                                        "SELECT * FROM " + ks2 + '.' + table + " ORDER BY vec ANN OF [1, 1] ALLOW FILTERING",
+                                                        ConsistencyLevel.LOCAL_QUORUM,
+                                                        0))
+            .hasMessageContaining(String.format(StatementRestrictions.NON_CLUSTER_ORDERING_REQUIRES_INDEX_MESSAGE, "vec"));
+
+            assertThatThrownBy(() ->
+                               executeOnAllCoordinators(cluster,
+                                                        "SELECT pk FROM " + ks2 + '.' + table + " WHERE GEO_DISTANCE(vec, [1, 1]) < 1000",
+                                                        ConsistencyLevel.LOCAL_QUORUM,
+                                                        0))
+            .hasMessageContaining(StatementRestrictions.GEO_DISTANCE_REQUIRES_INDEX_MESSAGE);
+
+            assertThatThrownBy(() ->
+                               executeOnAllCoordinators(cluster,
+                                                        "SELECT pk FROM " + ks2 + '.' + table + " WHERE GEO_DISTANCE(vec, [1, 1]) < 1000 ALLOW FILTERING",
+                                                        ConsistencyLevel.LOCAL_QUORUM,
+                                                        0))
+            .hasMessageContaining(StatementRestrictions.GEO_DISTANCE_REQUIRES_INDEX_MESSAGE);
+
+            // Create and verify indexes
+            cluster.schemaChange(String.format("CREATE CUSTOM INDEX %s ON %s.%s(vec) USING 'StorageAttachedIndex'",
+                                               vectorIndex, ks2, table));
+            cluster.schemaChange(String.format(CREATE_INDEX, index1, ks2, table, "v1"));
+
+            cluster.forEach(node -> expectedNodeIndexQueryability.put(NodeIndex.create(ks2, index1, node), Index.Status.BUILD_SUCCEEDED));
+            cluster.forEach(node -> expectedNodeIndexQueryability.put(NodeIndex.create(ks2, vectorIndex, node), Index.Status.BUILD_SUCCEEDED));
+            waitForIndexQueryable(cluster, ks2);
+
+            executeOnAllCoordinators(cluster,
+                                     "SELECT pk FROM " + ks2 + '.' + table + " WHERE v1=0 AND v2=0 ALLOW FILTERING",
+                                     ConsistencyLevel.LOCAL_QUORUM,
+                                     2);
+            // Verify actual results using a direct query
+            results = cluster.coordinator(1)
+                                        .execute("SELECT pk FROM " + ks2 + '.' + table + " WHERE v1=0 AND v2=0 ALLOW FILTERING",
+                                                 ConsistencyLevel.LOCAL_QUORUM);
+            assertResultContains(results, Arrays.asList("partition1", "partition5"));
+
+            executeOnAllCoordinators(cluster,
+                                     "SELECT * FROM " + ks2 + '.' + table + " ORDER BY vec ANN OF [1, 1] LIMIT 10 ALLOW FILTERING",
+                                     ConsistencyLevel.LOCAL_QUORUM,
+                                     5);
+
+            // Create one more index but mark it as building
+            cluster.schemaChange(String.format(CREATE_INDEX, index2, ks2, table, "v2"));
+            markIndexBuilding(cluster.get(1), ks2, table, index2);
+            waitForIndexingStatus(cluster.get(2), ks2, index2, cluster.get(1), Index.Status.FULL_REBUILD_STARTED);
+            waitForIndexingStatus(cluster.get(3), ks2, index2, cluster.get(1), Index.Status.FULL_REBUILD_STARTED);
+            waitForIndexingStatus(cluster.get(1), ks2, index2, cluster.get(1), Index.Status.FULL_REBUILD_STARTED);
+            markIndexBuilding(cluster.get(2), ks2, table, index2);
+            waitForIndexingStatus(cluster.get(2), ks2, index2, cluster.get(2), Index.Status.FULL_REBUILD_STARTED);
+            waitForIndexingStatus(cluster.get(3), ks2, index2, cluster.get(2), Index.Status.FULL_REBUILD_STARTED);
+            waitForIndexingStatus(cluster.get(1), ks2, index2, cluster.get(2), Index.Status.FULL_REBUILD_STARTED);
+
+            assertThatThrownBy(() ->
+                               executeOnAllCoordinators(cluster,
+                                                        "SELECT * FROM " + ks2 + '.' + table +
+                                                        " WHERE k > 0 ORDER BY vec ANN OF [1.0, 1.0] LIMIT 10 ALLOW FILTERING",
+                                                        ConsistencyLevel.LOCAL_QUORUM,
+                                                        0))
+            .hasMessageContaining(StatementRestrictions.NON_CLUSTER_ORDERING_REQUIRES_ALL_RESTRICTED_NON_PARTITION_KEY_COLUMNS_INDEXED_MESSAGE);
+
+            // Verify that the query works with ALLOW FILTERING
+            executeOnAllCoordinators(cluster,
+                                     "SELECT pk FROM " + ks2 + '.' + table + " WHERE v1=0 AND v2=0 ALLOW FILTERING",
+                                     ConsistencyLevel.LOCAL_QUORUM,
+                                     2);
+            // Verify actual results using a direct query
+            results = cluster.coordinator(1)
+                                        .execute("SELECT pk FROM " + ks2 + '.' + table + " WHERE v1=0 AND v2=0 ALLOW FILTERING",
+                                                 ConsistencyLevel.LOCAL_QUORUM);
+            assertResultContains(results, Arrays.asList("partition1", "partition5"));
+
+            // mark the vector index as building, we should not be able to query it yet
+            markIndexBuilding(cluster.get(1), ks2, table, vectorIndex);
+            waitForIndexingStatus(cluster.get(2), ks2, vectorIndex, cluster.get(1), Index.Status.FULL_REBUILD_STARTED);
+            waitForIndexingStatus(cluster.get(3), ks2, vectorIndex, cluster.get(1), Index.Status.FULL_REBUILD_STARTED);
+            waitForIndexingStatus(cluster.get(1), ks2, vectorIndex, cluster.get(1), Index.Status.FULL_REBUILD_STARTED);
+            markIndexBuilding(cluster.get(2), ks2, table, vectorIndex);
+            waitForIndexingStatus(cluster.get(2), ks2, vectorIndex, cluster.get(2), Index.Status.FULL_REBUILD_STARTED);
+            waitForIndexingStatus(cluster.get(3), ks2, vectorIndex, cluster.get(2), Index.Status.FULL_REBUILD_STARTED);
+            waitForIndexingStatus(cluster.get(1), ks2, vectorIndex, cluster.get(2), Index.Status.FULL_REBUILD_STARTED);
+
+            assertThatThrownBy(() ->
+                               executeOnAllCoordinators(cluster,
+                                                        "SELECT * FROM " + ks2 + '.' + table + " ORDER BY vec ANN OF [1, 1] LIMIT 10 ALLOW FILTERING",
+                                                        ConsistencyLevel.LOCAL_QUORUM,
+                                                        0))
+            .hasMessageContaining("Operation failed - received 0 responses and 2 failures: INDEX_NOT_AVAILABLE");
+
+            assertThatThrownBy(() ->
+                               executeOnAllCoordinators(cluster,
+                                                        "SELECT pk FROM " + ks2 + '.' + table + " WHERE GEO_DISTANCE(vec, [1, 1]) < 1000",
+                                                        ConsistencyLevel.LOCAL_QUORUM,
+                                                        0))
+            .hasMessageContaining(StatementRestrictions.VECTOR_INDEX_PRESENT_NOT_SUPPORT_GEO_DISTANCE_MESSAGE);
+
+            assertThatThrownBy(() ->
+                               executeOnAllCoordinators(cluster,
+                                                        "SELECT pk FROM " + ks2 + '.' + table + " WHERE GEO_DISTANCE(vec, [1, 1]) < 1000 ALLOW FILTERING",
+                                                        ConsistencyLevel.LOCAL_QUORUM,
+                                                        0))
+            .hasMessageContaining(StatementRestrictions.VECTOR_INDEX_PRESENT_NOT_SUPPORT_GEO_DISTANCE_MESSAGE);
+
+            // drop the index that does not support GEO DISTANCE
+            cluster.schemaChange("DROP INDEX IF EXISTS " + ks2 + '.' + vectorIndex);
+
+            // create a new index that supports GEO DISTANCE
+            cluster.schemaChange(String.format("CREATE CUSTOM INDEX %s ON %s.%s(vec) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}",
+                                               vectorIndex, ks2, table));
+            markIndexQueryable(cluster.get(1), ks2, table, index2);
+            markIndexQueryable(cluster.get(2), ks2, table, index2);
+            cluster.forEach(node -> expectedNodeIndexQueryability.put(NodeIndex.create(ks2, index2, node), Index.Status.BUILD_SUCCEEDED));
+            cluster.forEach(node -> expectedNodeIndexQueryability.put(NodeIndex.create(ks2, vectorIndex, node), Index.Status.BUILD_SUCCEEDED));
+            waitForIndexQueryable(cluster, ks2);
+
+            executeOnAllCoordinators(cluster,
+                                     "SELECT pk FROM " + ks2 + '.' + table + " WHERE GEO_DISTANCE(vec, [1, 1]) < 1000",
+                                     ConsistencyLevel.LOCAL_QUORUM,
+                                     0);
+
+            executeOnAllCoordinators(cluster,
+                                     "SELECT pk FROM " + ks2 + '.' + table + " WHERE GEO_DISTANCE(vec, [1, 1]) < 1000 ALLOW FILTERING",
+                                     ConsistencyLevel.LOCAL_QUORUM,
+                                     0);
+        }
+    }
+
+    private void executeOnAllCoordinatorsAllConsistencies(Cluster cluster, String statement, int liveReplicas, int num)
     {
         int allReplicas = cluster.size();
 
@@ -245,7 +438,7 @@ public class IndexAvailabilityTest extends TestBaseImpl
         executeOnAllCoordinators(cluster, statement, ConsistencyLevel.ALL, liveReplicas >= allReplicas ? num : -1);
     }
 
-    private void executeOnAllCoordinators(Cluster cluster, String query, ConsistencyLevel level, int expected) throws Exception
+    private void executeOnAllCoordinators(Cluster cluster, String query, ConsistencyLevel level, int expected)
     {
         // test different coordinator
         for (int nodeId = 1; nodeId <= cluster.size(); nodeId++)
@@ -261,13 +454,13 @@ public class IndexAvailabilityTest extends TestBaseImpl
                 }
                 catch (Throwable e)
                 {
-                    assertTrue(e.getClass().getSimpleName().equals("ReadFailureException"));
+                    assertEquals("ReadFailureException", e.getClass().getSimpleName());
                 }
             }
         }
     }
 
-    private void markIndexNonQueryable(IInvokableInstance node, String keyspace, String table, String indexName) throws Exception
+    private void markIndexNonQueryable(IInvokableInstance node, String keyspace, String table, String indexName)
     {
         expectedNodeIndexQueryability.put(NodeIndex.create(keyspace, indexName, node), Index.Status.BUILD_FAILED);
 
@@ -278,7 +471,7 @@ public class IndexAvailabilityTest extends TestBaseImpl
         });
     }
 
-    private void markIndexQueryable(IInvokableInstance node, String keyspace, String table, String indexName) throws Exception
+    private void markIndexQueryable(IInvokableInstance node, String keyspace, String table, String indexName)
     {
         expectedNodeIndexQueryability.put(NodeIndex.create(keyspace, indexName, node), Index.Status.BUILD_SUCCEEDED);
 
@@ -289,7 +482,7 @@ public class IndexAvailabilityTest extends TestBaseImpl
         });
     }
 
-    private void markIndexBuilding(IInvokableInstance node, String keyspace, String table, String indexName) throws Exception
+    private void markIndexBuilding(IInvokableInstance node, String keyspace, String table, String indexName)
     {
         expectedNodeIndexQueryability.put(NodeIndex.create(keyspace, indexName, node), Index.Status.FULL_REBUILD_STARTED);
 
@@ -345,7 +538,7 @@ public class IndexAvailabilityTest extends TestBaseImpl
     {
         InetAddressAndPort replicaAddressAndPort = getFullAddress(replica);
         await().atMost(5, TimeUnit.SECONDS)
-               .until(() -> node.callOnInstance(() -> getIndexStatus(keyspace, index, replicaAddressAndPort) == status).booleanValue());
+               .until(() -> node.callOnInstance(() -> getIndexStatus(keyspace, index, replicaAddressAndPort) == status));
     }
 
     private static Index.Status getNodeIndexStatus(IInvokableInstance node, String keyspaceName, String indexName, InetAddressAndPort replica)
@@ -373,6 +566,19 @@ public class IndexAvailabilityTest extends TestBaseImpl
         InetAddress address = node.broadcastAddress().getAddress();
         int port = node.callOnInstance(() -> FBUtilities.getBroadcastAddressAndPort().port);
         return InetAddressAndPort.getByAddressOverrideDefaults(address, port);
+    }
+
+    private void assertResultContains(Object[][] results, List<String> expectedValues)
+    {
+        Set<String> actualValues = new HashSet<>();
+        for (Object[] row : results)
+            actualValues.add((String) row[0]); // Assuming first column contains the values we're checking
+
+        assertEquals("Result set size doesn't match expected values",
+                     expectedValues.size(), actualValues.size());
+        assertTrue("Results don't contain all expected values: " +
+                   "Expected=" + expectedValues + ", Actual=" + actualValues,
+                   actualValues.containsAll(expectedValues));
     }
     
     private static class NodeIndex

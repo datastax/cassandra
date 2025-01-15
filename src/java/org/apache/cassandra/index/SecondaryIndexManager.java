@@ -125,6 +125,7 @@ import org.apache.cassandra.notifications.SSTableListChangedNotification;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.Indexes;
+import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.service.pager.SinglePartitionPager;
 import org.apache.cassandra.tracing.Tracing;
@@ -134,6 +135,7 @@ import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.concurrent.Refs;
 import org.json.simple.JSONValue;
 
+import static java.lang.String.format;
 import static org.apache.cassandra.utils.ExecutorUtils.awaitTermination;
 import static org.apache.cassandra.utils.ExecutorUtils.shutdown;
 
@@ -172,7 +174,7 @@ import static org.apache.cassandra.utils.ExecutorUtils.shutdown;
  * <br><br>
  * Finally, this class provides a clear and safe lifecycle to manage index builds, either full rebuilds via
  * {@link this#rebuildIndexesBlocking(Set)} or builds of new sstables
- * added via {@link org.apache.cassandra.notifications.SSTableAddedNotification}s, guaranteeing
+ * added via {@link SSTableAddedNotification}s, guaranteeing
  * the following:
  * <ul>
  * <li>The initialization task and any subsequent successful (re)build mark the index as built.</li>
@@ -185,6 +187,7 @@ import static org.apache.cassandra.utils.ExecutorUtils.shutdown;
 public class SecondaryIndexManager implements IndexRegistry, INotificationConsumer
 {
     private static final Logger logger = LoggerFactory.getLogger(SecondaryIndexManager.class);
+    public static final String FELL_BACK_TO_ALLOW_FILTERING = "Query fell back to ALLOW FILTERING because index %s is still building.";
 
     // default page size (in rows) when rebuilding the index for a whole partition
     public static final int DEFAULT_PAGE_SIZE = 10000;
@@ -362,13 +365,24 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
      * @param queryPlan a query plan
      * @throws IndexNotAvailableException if the query plan has any index that is not queryable
      */
-    public void checkQueryability(Index.QueryPlan queryPlan)
+    public boolean isQueryableThroughIndex(Index.QueryPlan queryPlan, boolean allowsFiltering)
     {
         for (Index index : queryPlan.getIndexes())
         {
+            if (isIndexBuilding(index))
+              if (allowsFiltering)
+              {
+                  ClientWarn.instance.warn(format(SecondaryIndexManager.FELL_BACK_TO_ALLOW_FILTERING, index.getIndexMetadata().name));
+                  logger.warn(format(SecondaryIndexManager.FELL_BACK_TO_ALLOW_FILTERING, index.getIndexMetadata().name));
+                  return false;
+              }
+
+            // We will reject the query here if the index is building and ALLOW FILTERING is not allowed
             if (!isIndexQueryable(index))
                 throw new IndexNotAvailableException(index);
         }
+
+        return true;
     }
 
     /**
@@ -380,6 +394,17 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
     public boolean isIndexQueryable(Index index)
     {
         return isIndexQueryable(index.getIndexMetadata().name);
+    }
+
+    /**
+     +     * Checks if the specified index is building.
+     +     *
+     +     * @param index the index
+     +     * @return <code>true</code> if the specified index is building, <code>false</code> otherwise
+     +     */
+    public boolean isIndexBuilding(Index index)
+    {
+            return isIndexBuilding(index.getIndexMetadata().name);
     }
 
     /**
@@ -616,7 +641,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
                     sstables.stream().map(SSTableReader::toString).collect(Collectors.joining(",")));
 
         // Group all building tasks
-        Map<Index.IndexBuildingSupport, Set<Index>> byType = new HashMap<>();
+        Map<IndexBuildingSupport, Set<Index>> byType = new HashMap<>();
         for (Index index : indexes)
         {
             IndexBuildingSupport buildOrRecoveryTask = isFullRebuild
@@ -1168,7 +1193,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
     /**
      * Called at query time to choose which (if any) of the registered index implementations to use for a given query.
      * <p>
-     * This is a two step processes, firstly compiling the set of searchable indexes then choosing the one which reduces
+     * This is a two-step processes, firstly compiling the set of searchable indexes then choosing the one which reduces
      * the search space the most.
      * <p>
      * In the first phase, if the command's RowFilter contains any custom index expressions, the indexes that they
@@ -1808,13 +1833,16 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
      * @param indexQueryPlan index query plan used in the read command
      * @param level consistency level of read command
      */
-    public static <E extends Endpoints<E>> E filterForQuery(E liveEndpoints, Keyspace keyspace, Index.QueryPlan indexQueryPlan, ConsistencyLevel level)
+    public static <E extends Endpoints<E>> E filterForQuery(E liveEndpoints, Keyspace keyspace, Index.QueryPlan indexQueryPlan, ConsistencyLevel level, boolean allowsFiltering)
     {
         E queryableEndpoints = liveEndpoints.filter(replica -> {
-
             for (Index index : indexQueryPlan.getIndexes())
             {
                 Index.Status status = getIndexStatus(replica.endpoint(), keyspace.getName(), index.getIndexMetadata().name);
+                // if the status of the index is building and there is allow filtering - that is ok too
+                if (status == Index.Status.FULL_REBUILD_STARTED && allowsFiltering)
+                    continue;
+
                 if (!index.isQueryable(status))
                     return false;
             }
