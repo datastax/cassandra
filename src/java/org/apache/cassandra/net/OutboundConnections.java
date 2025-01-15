@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.net;
 
+import java.lang.reflect.InvocationTargetException;
 import java.nio.channels.ClosedChannelException;
 import java.util.List;
 import java.util.concurrent.ConcurrentMap;
@@ -32,14 +33,17 @@ import org.slf4j.LoggerFactory;
 
 import com.carrotsearch.hppc.ObjectObjectHashMap;
 import io.netty.util.concurrent.Future;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.metrics.InternodeOutboundMetrics;
 import org.apache.cassandra.nodes.Nodes;
+import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.utils.concurrent.SimpleCondition;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.CUSTOM_INTERNODE_OUTBOUND_METRICS_PROVIDER_PROPERTY;
 import static org.apache.cassandra.net.MessagingService.current_version;
 import static org.apache.cassandra.net.ConnectionType.URGENT_MESSAGES;
 import static org.apache.cassandra.net.ConnectionType.LARGE_MESSAGES;
@@ -95,7 +99,25 @@ public class OutboundConnections
 
             if (existing == null)
             {
-                connections.metrics = new InternodeOutboundMetrics(settings.to, connections);
+                if (CUSTOM_INTERNODE_OUTBOUND_METRICS_PROVIDER_PROPERTY.isPresent())
+                {
+                    Class<InternodeOutboundMetrics> klass = FBUtilities.classForName(CUSTOM_INTERNODE_OUTBOUND_METRICS_PROVIDER_PROPERTY.getString(), "Internode Outbound Metrics Provider");
+                    InternodeOutboundMetrics obInstance;
+                    try
+                    {
+                        obInstance = klass.getDeclaredConstructor(InetAddressAndPort.class, OutboundConnections.class).newInstance(settings.to, connections);
+                    }
+                    catch (NoSuchMethodException | InstantiationException | IllegalAccessException |
+                           InvocationTargetException e)
+                    {
+                        throw new RuntimeException(e);
+                    }
+                    connections.metrics = obInstance;
+                }
+                else
+                {
+                    connections.metrics = new InternodeOutboundMetrics(settings.to, connections);
+                }
                 connections.metricsReady.signalAll();
             }
             else
