@@ -107,8 +107,13 @@ public final class CreateFunctionStatement extends AlterSchemaStatement
         if (!FunctionName.isNameValid(functionName))
             throw ire("Function name '%s' is invalid", functionName);
 
-        if (new HashSet<>(argumentNames).size() != argumentNames.size())
+        HashSet<ColumnIdentifier> argumentNamesSet = new HashSet<>(argumentNames);
+
+        if (argumentNamesSet.size() != argumentNames.size())
             throw ire("Duplicate argument names for given function %s with argument names %s", functionName, argumentNames);
+
+        if (!argumentNamesSet.containsAll(monotonicOn))
+            throw ire("Monotony should be declared on one of the arguments, '%s' is not an argument", monotonicOn.get(0));
 
         rawArgumentTypes.stream()
                         .filter(raw -> !raw.isImplicitlyFrozen() && raw.isFrozen())

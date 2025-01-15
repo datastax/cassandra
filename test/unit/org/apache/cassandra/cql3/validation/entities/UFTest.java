@@ -1123,22 +1123,17 @@ public class UFTest extends CQLTester
                            "Monotony should be declared on one of the arguments, 'c' is not an argument");
     }
 
-    private void testParseMonotonic(String parameters, String monotonicModifier, String expectedMessage) {
-        try
-        {
-            createFunction(KEYSPACE, "int", "CREATE FUNCTION %s (" +
-                                            parameters +
-                                            ") CALLED ON NULL INPUT " +
-                                            "RETURNS int " +
-                                            monotonicModifier +
-                                            " LANGUAGE java " +
-                                            "AS 'return 1;'");
-        }
-        catch (Throwable e)
-        {
-            Assert.assertTrue("Got " + e.getClass(), e instanceof InvalidRequestException);
-            Assert.assertEquals(expectedMessage, e.getMessage());
-        }
+    private void testParseMonotonic(String parameters, String monotonicModifier, String expectedMessage)
+    {
+        assertThatThrownBy(() -> createFunction(KEYSPACE, "int", "CREATE FUNCTION %s (" +
+                                                                 parameters +
+                                                                 ") CALLED ON NULL INPUT " +
+                                                                 "RETURNS int " +
+                                                                 monotonicModifier +
+                                                                 " LANGUAGE java " +
+                                                                 "AS 'return 1;'"))
+                .isInstanceOf(InvalidRequestException.class)
+                .hasMessage(expectedMessage);
     }
 
     @Test
