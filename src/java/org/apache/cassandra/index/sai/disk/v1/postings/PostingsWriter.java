@@ -27,7 +27,6 @@ import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.agrona.collections.IntArrayList;
 import org.agrona.collections.LongArrayList;
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
@@ -42,6 +41,7 @@ import org.apache.lucene.store.DataOutput;
 
 import static com.google.common.base.Preconditions.checkArgument;
 import static java.lang.Math.max;
+import static java.lang.Math.min;
 
 
 /**
@@ -96,9 +96,9 @@ public class PostingsWriter implements Closeable
     private static final String POSTINGS_MUST_BE_SORTED_ERROR_MSG = "Postings must be sorted ascending, got [%s] after [%s]";
 
     private final IndexOutput dataOutput;
-    private final int blockSize;
+    private final int blockEntries;
     private final long[] deltaBuffer;
-    private final int[] freqBuffer;
+    private final int[] freqBuffer; // frequency is capped at 255
     private final LongArrayList blockOffsets = new LongArrayList();
     private final LongArrayList blockMaxIDs = new LongArrayList();
     private final ResettableByteBuffersIndexOutput inMemoryOutput;
@@ -123,20 +123,20 @@ public class PostingsWriter implements Closeable
     }
 
     @VisibleForTesting
-    PostingsWriter(IndexComponents.ForWrite components, int blockSize) throws IOException
+    PostingsWriter(IndexComponents.ForWrite components, int blockEntries) throws IOException
     {
-        this(components.addOrGet(IndexComponentType.POSTING_LISTS).openOutput(true), blockSize);
+        this(components.addOrGet(IndexComponentType.POSTING_LISTS).openOutput(true), blockEntries);
     }
 
-    private PostingsWriter(IndexOutput dataOutput, int blockSize) throws IOException
+    private PostingsWriter(IndexOutput dataOutput, int blockEntries) throws IOException
     {
         assert dataOutput instanceof IndexOutputWriter;
         logger.debug("Creating postings writer for output {}", dataOutput);
-        this.blockSize = blockSize;
+        this.blockEntries = blockEntries;
         this.dataOutput = dataOutput;
         startOffset = dataOutput.getFilePointer();
-        deltaBuffer = new long[blockSize];
-        freqBuffer = new int[blockSize];
+        deltaBuffer = new long[blockEntries];
+        freqBuffer = new int[blockEntries];
         inMemoryOutput = LuceneCompat.getResettableByteBuffersIndexOutput(dataOutput.order(), 1024, "blockOffsets");
         SAICodecUtils.writeHeader(dataOutput);
     }
@@ -222,10 +222,10 @@ public class PostingsWriter implements Closeable
         final long delta = segmentRowId - lastSegmentRowId;
         maxDelta = max(maxDelta, delta);
         deltaBuffer[bufferUpto] = delta;
-        freqBuffer[bufferUpto] = freq;
+        freqBuffer[bufferUpto] = min(freq, 255);
         bufferUpto++;
 
-        if (bufferUpto == blockSize) {
+        if (bufferUpto == blockEntries) {
             addBlockToSkipTable(segmentRowId);
             writePostingsBlock(maxDelta, bufferUpto);
             resetBlockCounters();
@@ -258,7 +258,7 @@ public class PostingsWriter implements Closeable
 
     private void writeSummary(int exactSize) throws IOException
     {
-        dataOutput.writeVInt(blockSize);
+        dataOutput.writeVInt(blockEntries);
         dataOutput.writeVInt(exactSize);
         writeSkipTable();
     }
@@ -277,13 +277,13 @@ public class PostingsWriter implements Closeable
         writeSortedFoRBlock(blockMaxIDs, dataOutput);
     }
 
-    private void writePostingsBlock(long maxDelta, int blockSize) throws IOException {
+    private void writePostingsBlock(long maxDelta, int entries) throws IOException {
         // Write deltas
         final int bitsPerDelta = maxDelta == 0 ? 0 : LuceneCompat.directWriterUnsignedBitsRequired(dataOutput.order(), maxDelta);
         dataOutput.writeByte((byte) bitsPerDelta);
         if (bitsPerDelta > 0) {
-            final DirectWriterAdapter writer = LuceneCompat.directWriterGetInstance(dataOutput.order(), dataOutput, blockSize, bitsPerDelta);
-            for (int i = 0; i < blockSize; ++i) {
+            final DirectWriterAdapter writer = LuceneCompat.directWriterGetInstance(dataOutput.order(), dataOutput, entries, bitsPerDelta);
+            for (int i = 0; i < entries; ++i) {
                 writer.add(deltaBuffer[i]);
             }
             writer.finish();
@@ -291,14 +291,14 @@ public class PostingsWriter implements Closeable
 
         // Write frequencies right after their corresponding deltas
         int maxFreq = 0;
-        for (int i = 0; i < blockSize; i++) {
+        for (int i = 0; i < entries; i++) {
             maxFreq = max(maxFreq, freqBuffer[i]);
         }
         final int bitsPerFreq = maxFreq == 0 ? 0 : LuceneCompat.directWriterUnsignedBitsRequired(dataOutput.order(), maxFreq);
         dataOutput.writeByte((byte) bitsPerFreq);
         if (bitsPerFreq > 0) {
-            final DirectWriterAdapter writer = LuceneCompat.directWriterGetInstance(dataOutput.order(), dataOutput, blockSize, bitsPerFreq);
-            for (int i = 0; i < blockSize; ++i) {
+            final DirectWriterAdapter writer = LuceneCompat.directWriterGetInstance(dataOutput.order(), dataOutput, entries, bitsPerFreq);
+            for (int i = 0; i < entries; ++i) {
                 writer.add(freqBuffer[i]);
             }
             writer.finish();
