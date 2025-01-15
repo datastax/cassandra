@@ -51,7 +51,7 @@ public class PostingsReader implements OrdinalPostingList
 
     protected final IndexInput input;
     protected final InputCloser runOnClose;
-    private final int blockSize;
+    private final int blockEntries;
     private final int numPostings;
     private final LongArray blockOffsets;
     private final LongArray blockMaxValues;
@@ -98,7 +98,7 @@ public class PostingsReader implements OrdinalPostingList
         this.input = input;
         this.seekingInput = new SeekingRandomAccessInput(input);
         this.blockOffsets = summary.offsets;
-        this.blockSize = summary.blockEntries;
+        this.blockEntries = summary.blockEntries;
         this.numPostings = summary.numPostings;
         this.blockMaxValues = summary.maxValues;
         this.listener = listener;
@@ -324,10 +324,10 @@ public class PostingsReader implements OrdinalPostingList
         // blockMaxValues is integer only
         actualSegmentRowId = Math.toIntExact(blockMaxValues.get(block));
         //upper bound, since we might've advanced to the last block, but upper bound is enough
-        totalPostingsRead += (blockSize - blockIdx) + (block - postingsBlockIdx + 1) * blockSize;
+        totalPostingsRead += (blockEntries - blockIdx) + (block - postingsBlockIdx + 1) * blockEntries;
 
         postingsBlockIdx = block + 1;
-        blockIdx = blockSize;
+        blockIdx = blockEntries;
     }
 
     @Override
@@ -342,9 +342,9 @@ public class PostingsReader implements OrdinalPostingList
     }
 
     @VisibleForTesting
-    int getBlockSize()
+    int getBlockEntries()
     {
-        return blockSize;
+        return blockEntries;
     }
 
     private int peekNext() throws IOException
@@ -353,7 +353,7 @@ public class PostingsReader implements OrdinalPostingList
         {
             return END_OF_STREAM;
         }
-        if (blockIdx == blockSize)
+        if (blockIdx == blockEntries)
         {
             reBuffer();
         }
