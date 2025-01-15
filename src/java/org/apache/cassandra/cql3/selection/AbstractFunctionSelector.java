@@ -208,8 +208,8 @@ abstract class AbstractFunctionSelector<T extends Function> extends Selector
                 // We have some terminal arguments, do a partial application
                 ScalarFunction partialFunction = function.partialApplication(version, terminalArgs);
 
-                // If all the arguments are terminal and the function is pure we can reduce to a simple value.
-                if (terminalCount == argSelectors.size() && fun.isPure())
+                // If all the arguments are terminal and the function is deterministic we can reduce to a simple value.
+                if (terminalCount == argSelectors.size() && fun.isDeterministic())
                 {
                     Arguments arguments = partialFunction.newArguments(version);
                     return new TermSelector(partialFunction.execute(arguments), partialFunction.returnType());

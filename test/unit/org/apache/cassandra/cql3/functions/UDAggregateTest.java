@@ -60,7 +60,8 @@ public class UDAggregateTest extends CQLTester
                                               new FunctionName(oldKeyspaceName, functionName),
                                               null,
                                               Int32Type.instance,
-                                              null);
+                                              null,
+                                              false);
 
         String newKeyspaceName = "new_ks";
         UDFunction newFunction = createUDFunction(newKeyspaceName, functionName, userType);
@@ -80,6 +81,9 @@ public class UDAggregateTest extends CQLTester
                                  Int32Type.instance,
                                  true,
                                  "java",
-                                 "return val2;");
+                                 "return val2;",
+                                 false,
+                                 false,
+                                 Collections.emptyList());
     }
 }

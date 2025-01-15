@@ -186,10 +186,17 @@ public final class JavaBasedUDFunction extends UDFunction
 
     private static final Pattern patternJavaDriver = Pattern.compile("com\\.datastax\\.driver\\.core\\.");
 
-    JavaBasedUDFunction(FunctionName name, List<ColumnIdentifier> argNames, List<AbstractType<?>> argTypes,
-                        AbstractType<?> returnType, boolean calledOnNullInput, String body)
+    JavaBasedUDFunction(FunctionName name,
+                        List<ColumnIdentifier> argNames,
+                        List<AbstractType<?>> argTypes,
+                        AbstractType<?> returnType,
+                        boolean calledOnNullInput,
+                        String body,
+                        boolean deterministic,
+                        boolean monotonic,
+                        List<ColumnIdentifier> monotonicOn)
     {
-        super(name, argNames, argTypes, returnType, calledOnNullInput, "java", body);
+        super(name, argNames, argTypes, returnType, calledOnNullInput, "java", body, deterministic, monotonic, monotonicOn);
 
         // put each UDF in a separate package to prevent cross-UDF code access
         String pkgName = BASE_PACKAGE + '.' + generateClassName(name, 'p');
