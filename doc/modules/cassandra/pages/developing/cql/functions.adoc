@@ -415,6 +415,16 @@ If the optional `IF NOT EXISTS` keywords are used, the function will only be cre
 exist.
 `OR REPLACE` and `IF NOT EXISTS` cannot be used together.
 
+The optional `DETERMINISTIC` keyword specifies that the aggregate function is deterministic.
+This means that given a particular input, the function will always produce the same output.
+
+The optional `MONOTONIC` keyword specifies that the function is monotonic.
+This means that it is either entirely nonincreasing or nondecreasing.
+Even if the function is not monotonic on all its arguments, it is possible
+to specify that it is monotonic `ON` one of its arguments, meaning that
+partial applications of the function over that argument will be monotonic.
+Monotonicity is required to use the function in a `GROUP BY` clause.
+
 Behavior for `null` input values must be defined for each function:
 
 * `RETURNS NULL ON NULL INPUT` declares that the function will always return `null` if any of the input arguments is `null`.
@@ -576,6 +586,9 @@ signature.
 A `CREATE AGGREGATE` without `OR REPLACE` fails if an aggregate with the same signature already exists.
 The `CREATE AGGREGATE` command with the optional `IF NOT EXISTS` keywords creates an aggregate if it does not already exist.
 The `OR REPLACE` and `IF NOT EXISTS` phrases cannot be used together.
+
+The optional `DETERMINISTIC` keyword specifies that the aggregate function is deterministic.
+This means that given a particular input, the function will always produce the same output.
 
 The `STYPE` value defines the type of the state value and must be specified.
 The optional `INITCOND` defines the initial state value for the aggregate; the default value is `null`.

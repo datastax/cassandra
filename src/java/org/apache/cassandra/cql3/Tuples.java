@@ -176,7 +176,7 @@ public class Tuples
     }
 
     /**
-     * Similar to Value, but contains at least one NonTerminal, such as a non-pure functions or bind marker.
+     * Similar to Value, but contains at least one NonTerminal, such as a non-deterministic functions or bind marker.
      */
     public static class DelayedValue extends Term.NonTerminal
     {

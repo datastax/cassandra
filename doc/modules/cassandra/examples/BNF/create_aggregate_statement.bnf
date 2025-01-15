@@ -4,3 +4,4 @@ create_aggregate_statement ::= CREATE [ OR REPLACE ] AGGREGATE [ IF NOT EXISTS ]
                                 STYPE cql_type:
                                 [ FINALFUNC function_name]
                                 [ INITCOND term ]
+                                [ DETERMINISTIC ]

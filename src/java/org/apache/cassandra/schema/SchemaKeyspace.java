@@ -911,10 +911,9 @@ public final class SchemaKeyspace
                .add("return_type", function.returnType().asCQL3Type().toSchemaString())
                .add("called_on_null_input", function.isCalledOnNullInput())
                .add("argument_names", function.argNames().stream().map((c) -> bbToString(c.bytes)).collect(toList()))
-               // below values (deterministic, monotonic, monotonic_on) are needed to keep the backward compatibility with some drivers (C# driver for instance)
-               .add("deterministic", false)
-               .add("monotonic", false)
-               .add("monotonic_on", Collections.emptyList());
+               .add("deterministic", function.isDeterministic())
+               .add("monotonic", function.isMonotonic())
+               .add("monotonic_on", function.monotonicOn().stream().map((c) -> bbToString(c.bytes)).collect(toList()));
     }
 
     private static String bbToString(ByteBuffer bb)
@@ -942,8 +941,7 @@ public final class SchemaKeyspace
                .add("state_func", aggregate.stateFunction().name().name)
                .add("state_type", aggregate.stateType().asCQL3Type().toSchemaString())
                .add("final_func", aggregate.finalFunction() != null ? aggregate.finalFunction().name().name : null)
-                // below value (deterministic) is needed to keep the backward compatibility with some drivers (C# driver for instance)
-               .add("deterministic", false)
+               .add("deterministic", aggregate.isDeterministic())
                .add("initcond", aggregate.initialCondition() != null
                                 // must use the frozen state type here, as 'null' for unfrozen collections may mean 'empty'
                                 ? aggregate.stateType().freeze().asCQL3Type().toCQLLiteral(aggregate.initialCondition())
@@ -1343,6 +1341,15 @@ public final class SchemaKeyspace
         String language = row.getString("language");
         String body = row.getString("body");
         boolean calledOnNullInput = row.getBoolean("called_on_null_input");
+        boolean deterministic = row.has("deterministic") && row.getBoolean("deterministic");
+        boolean monotonic = row.has("monotonic") && row.getBoolean("monotonic");
+
+        List<ColumnIdentifier> monotonicOn = row.has("monotonic_on")
+                                             ? row.getFrozenList("monotonic_on", UTF8Type.instance)
+                                                  .stream()
+                                                  .map(arg -> new ColumnIdentifier(arg, true))
+                                                  .collect(toList())
+                                             : Collections.emptyList();
 
         /*
          * TODO: find a way to get rid of Schema.instance dependency; evaluate if the opimisation below makes a difference
@@ -1371,12 +1378,12 @@ public final class SchemaKeyspace
 
         try
         {
-            return UDFunction.create(name, argNames, argTypes, returnType, calledOnNullInput, language, body);
+            return UDFunction.create(name, argNames, argTypes, returnType, calledOnNullInput, language, body, deterministic, monotonic, monotonicOn);
         }
         catch (InvalidRequestException e)
         {
             logger.error(String.format("Cannot load function '%s' from schema: this function won't be available (on this node)", name), e);
-            return UDFunction.createBrokenFunction(name, argNames, argTypes, returnType, calledOnNullInput, language, body, e);
+            return UDFunction.createBrokenFunction(name, argNames, argTypes, returnType, calledOnNullInput, language, body, deterministic, monotonic, monotonicOn, e);
         }
     }
 
@@ -1408,8 +1415,9 @@ public final class SchemaKeyspace
         FunctionName finalFunc = row.has("final_func") ? new FunctionName(ksName, row.getString("final_func")) : null;
         AbstractType<?> stateType = row.has("state_type") ? CQLTypeParser.parse(ksName, row.getString("state_type"), types) : null;
         ByteBuffer initcond = row.has("initcond") ? Terms.asBytes(ksName, row.getString("initcond"), stateType) : null;
+        boolean deterministic = row.has("deterministic") && row.getBoolean("deterministic");
 
-        return UDAggregate.create(functions, name, argTypes, returnType, stateFunc, finalFunc, stateType, initcond);
+        return UDAggregate.create(functions, name, argTypes, returnType, stateFunc, finalFunc, stateType, initcond, deterministic);
     }
 
     private static UntypedResultSet query(String query, Object... variables)
