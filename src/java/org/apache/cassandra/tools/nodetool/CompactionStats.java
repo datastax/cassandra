@@ -20,17 +20,23 @@ package org.apache.cassandra.tools.nodetool;
 import java.io.PrintStream;
 import java.text.DecimalFormat;
 import java.text.NumberFormat;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.Set;
 
+import com.codahale.metrics.Counter;
+import com.codahale.metrics.Meter;
+import io.airlift.airline.Arguments;
 import io.airlift.airline.Command;
 import io.airlift.airline.Option;
 
 import org.apache.cassandra.db.compaction.CompactionStrategyStatistics;
 import org.apache.cassandra.db.compaction.TableOperation;
 import org.apache.cassandra.io.util.FileUtils;
-import org.apache.cassandra.metrics.CassandraMetricsRegistry;
 import org.apache.cassandra.tools.NodeProbe;
 import org.apache.cassandra.tools.NodeTool.NodeToolCmd;
 import org.apache.cassandra.tools.nodetool.formatter.TableBuilder;
@@ -55,6 +61,17 @@ public class CompactionStats extends NodeToolCmd
     description = "Show the compaction aggregates for the compactions in progress, e.g. the levels for LCS or the buckets for STCS and TWCS.")
     private boolean aggregate = false;
 
+    @Option(title = "overlap",
+    name = {"-O", "--overlap"},
+    description = "Show a map of the maximum sstable overlap per compaction region.\n" +
+                  "Note: This map includes all sstables in the system, including ones that are currently being compacted, " +
+                  "and also takes into account early opened sstables. Overlaps per level may be greater than the values " +
+                  "the --aggregate option reports.")
+    private boolean overlap = false;
+
+    @Arguments(usage = "[<keyspace> <tables>...]", description = "With --aggregate or --overlap, optionally list only the data for the specified keyspace and tables.")
+    private List<String> args = new ArrayList<>();
+
     @Override
     public void execute(NodeProbe probe)
     {
@@ -64,10 +81,16 @@ public class CompactionStats extends NodeToolCmd
         compactionsStats(probe, tableBuilder);
         reportCompactionTable(probe.getCompactionManagerProxy().getCompactions(), probe.getCompactionThroughputBytes(), humanReadable, vtableOutput, out, tableBuilder);
 
+        Set<String> keyspaces = new HashSet<>(parseOptionalKeyspace(args, probe));
+        Set<String> tableNames = new HashSet<>(Arrays.asList(parseOptionalTables(args)));
+
         if (aggregate)
         {
-            reportAggregateCompactions(probe);
+            reportAggregateCompactions(probe, keyspaces, tableNames, out);
         }
+
+        if (overlap)
+            reportOverlap((Map<String, Map<String, Map<String, String>>>) probe.getCompactionMetric("MaxOverlapsMap"), keyspaces, tableNames, out);
     }
 
     private void pendingTasksAndConcurrentCompactorsStats(NodeProbe probe, TableBuilder tableBuilder)
@@ -107,23 +130,23 @@ public class CompactionStats extends NodeToolCmd
 
     private void compactionsStats(NodeProbe probe, TableBuilder tableBuilder)
     {
-        CassandraMetricsRegistry.JmxMeterMBean totalCompactionsCompletedMetrics =
-        (CassandraMetricsRegistry.JmxMeterMBean) probe.getCompactionMetric("TotalCompactionsCompleted");
+        Meter totalCompactionsCompletedMetrics =
+        (Meter) probe.getCompactionMetric("TotalCompactionsCompleted");
         tableBuilder.add("compactions completed", String.valueOf(totalCompactionsCompletedMetrics.getCount()));
 
-        CassandraMetricsRegistry.JmxCounterMBean bytesCompacted = (CassandraMetricsRegistry.JmxCounterMBean) probe.getCompactionMetric("BytesCompacted");
+        Counter bytesCompacted = (Counter) probe.getCompactionMetric("BytesCompacted");
         if (humanReadable)
             tableBuilder.add("data compacted", FileUtils.stringifyFileSize(Double.parseDouble(Long.toString(bytesCompacted.getCount()))));
         else
             tableBuilder.add("data compacted", Long.toString(bytesCompacted.getCount()));
 
-        CassandraMetricsRegistry.JmxCounterMBean compactionsAborted = (CassandraMetricsRegistry.JmxCounterMBean) probe.getCompactionMetric("CompactionsAborted");
+        Counter compactionsAborted = (Counter) probe.getCompactionMetric("CompactionsAborted");
         tableBuilder.add("compactions aborted", Long.toString(compactionsAborted.getCount()));
 
-        CassandraMetricsRegistry.JmxCounterMBean compactionsReduced = (CassandraMetricsRegistry.JmxCounterMBean) probe.getCompactionMetric("CompactionsReduced");
+        Counter compactionsReduced = (Counter) probe.getCompactionMetric("CompactionsReduced");
         tableBuilder.add("compactions reduced", Long.toString(compactionsReduced.getCount()));
 
-        CassandraMetricsRegistry.JmxCounterMBean sstablesDroppedFromCompaction = (CassandraMetricsRegistry.JmxCounterMBean) probe.getCompactionMetric("SSTablesDroppedFromCompaction");
+        Counter sstablesDroppedFromCompaction = (Counter) probe.getCompactionMetric("SSTablesDroppedFromCompaction");
         tableBuilder.add("sstables dropped from compaction", Long.toString(sstablesDroppedFromCompaction.getCount()));
 
         NumberFormat formatter = new DecimalFormat("0.00");
@@ -191,14 +214,47 @@ public class CompactionStats extends NodeToolCmd
         table.printTo(out);
     }
 
-    private static void reportAggregateCompactions(NodeProbe probe)
+    private static void reportAggregateCompactions(NodeProbe probe, Set<String> keyspaces, Set<String> tableNames, PrintStream out)
     {
         List<CompactionStrategyStatistics> statistics = (List<CompactionStrategyStatistics>) probe.getCompactionMetric("AggregateCompactions");
         if (statistics.isEmpty())
             return;
 
-        System.out.println("Aggregated view:");
+        out.println("Aggregated view:");
         for (CompactionStrategyStatistics stat : statistics)
-            System.out.println(stat.toString());
+        {
+            if (!keyspaces.contains(stat.keyspace()))
+                continue;
+            if (!tableNames.isEmpty() && !tableNames.contains(stat.table()))
+                continue;
+            out.println(stat.toString());
+        }
+    }
+
+    private static void reportOverlap(Map<String, Map<String, Map<String, String>>> maxOverlap, Set<String> keyspaces, Set<String> tableNames, PrintStream out)
+    {
+        if (maxOverlap == null)
+        {
+            out.println("Overlap map is not available.");
+            return;
+        }
+
+        for (Map.Entry<String, Map<String, Map<String, String>>> ksEntry : maxOverlap.entrySet())
+        {
+            String ksName = ksEntry.getKey();
+            if (!keyspaces.contains(ksName))
+                continue;
+            for (Map.Entry<String, Map<String, String>> tableEntry : ksEntry.getValue().entrySet())
+            {
+                String tableName = tableEntry.getKey();
+                if (!tableNames.isEmpty() && !tableNames.contains(tableName))
+                    continue;
+                out.println("Max overlap map for " + ksName + "." + tableName + ":");
+                for (Map.Entry<String, String> compactionEntry : tableEntry.getValue().entrySet())
+                {
+                    out.println("  " + compactionEntry.getKey() + ": " + compactionEntry.getValue());
+                }
+            }
+        }
     }
 }
