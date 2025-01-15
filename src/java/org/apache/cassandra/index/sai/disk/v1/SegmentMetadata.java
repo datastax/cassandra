@@ -32,8 +32,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.index.sai.IndexContext;
+import org.apache.cassandra.index.sai.SSTableContext;
 import org.apache.cassandra.index.sai.disk.ModernResettableByteBuffersIndexOutput;
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyWithSource;
@@ -136,9 +138,8 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
     private static final Logger logger = LoggerFactory.getLogger(SegmentMetadata.class);
 
     @SuppressWarnings("resource")
-    private SegmentMetadata(IndexInput input, IndexContext context, Version version, SSTableId<?> sstableId) throws IOException
+    private SegmentMetadata(IndexInput input, IndexContext context, Version version, SSTableContext sstableContext) throws IOException
     {
-        PrimaryKey.Factory primaryKeyFactory = context.keyFactory();
         AbstractType<?> termsType = context.getValidator();
 
         this.version = version;
@@ -146,10 +147,35 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
         this.numRows = input.readLong();
         this.minSSTableRowId = input.readLong();
         this.maxSSTableRowId = input.readLong();
-        PrimaryKey min = primaryKeyFactory.createPartitionKeyOnly(DatabaseDescriptor.getPartitioner().decorateKey(readBytes(input)));
-        PrimaryKey max = primaryKeyFactory.createPartitionKeyOnly(DatabaseDescriptor.getPartitioner().decorateKey(readBytes(input)));
-        this.minKey = new PrimaryKeyWithSource(min, sstableId, minSSTableRowId, min, max);
-        this.maxKey = new PrimaryKeyWithSource(max, sstableId, maxSSTableRowId, min, max);
+
+        // Read the real min and max partition from the segment metadata.
+        DecoratedKey minPartition = DatabaseDescriptor.getPartitioner().decorateKey(readBytes(input));
+        DecoratedKey maxPartition = DatabaseDescriptor.getPartitioner().decorateKey(readBytes(input));
+
+        // Get the fully qualified PrimaryKey min and max objects to ensure that we skip several edge cases related
+        // to possibly confusing equality semantics where PrimaryKeyWithSource slightly diverges from PrimaryKey where
+        // PrimaryKey is just a partition key without a materializable clustering key.
+        PrimaryKey min, max;
+        if (sstableContext.sstable.metadata().comparator.size() > 0)
+        {
+            try (var pkm = sstableContext.primaryKeyMapFactory().newPerSSTablePrimaryKeyMap())
+            {
+                min = pkm.primaryKeyFromRowId(minSSTableRowId);
+                max = pkm.primaryKeyFromRowId(maxSSTableRowId);
+                assert min.partitionKey().equals(minPartition) : String.format("Min partition key mismatch: %s != %s", min, minPartition);
+                assert max.partitionKey().equals(maxPartition) : String.format("Max partition key mismatch: %s != %s", max, maxPartition);
+            }
+        }
+        else
+        {
+            var primaryKeyFactory = context.keyFactory();
+            min = primaryKeyFactory.createPartitionKeyOnly(minPartition);
+            max = primaryKeyFactory.createPartitionKeyOnly(maxPartition);
+        }
+
+        this.minKey = new PrimaryKeyWithSource(min, sstableContext.sstable.getId(), minSSTableRowId, min, max);
+        this.maxKey = new PrimaryKeyWithSource(max, sstableContext.sstable.getId(), maxSSTableRowId, min, max);
+
         this.minTerm = readBytes(input);
         this.maxTerm = readBytes(input);
         TermsDistribution td = null;
@@ -168,7 +194,7 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
     }
 
     @SuppressWarnings("resource")
-    public static List<SegmentMetadata> load(MetadataSource source, IndexContext context, SSTableId<?> sstableId) throws IOException
+    public static List<SegmentMetadata> load(MetadataSource source, IndexContext context, SSTableContext sstableContext) throws IOException
     {
 
         IndexInput input = source.get(NAME);
@@ -179,7 +205,7 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
 
         for (int i = 0; i < segmentCount; i++)
         {
-            segmentMetadata.add(new SegmentMetadata(input, context, source.getVersion(), sstableId));
+            segmentMetadata.add(new SegmentMetadata(input, context, source.getVersion(), sstableContext));
         }
 
         return segmentMetadata;

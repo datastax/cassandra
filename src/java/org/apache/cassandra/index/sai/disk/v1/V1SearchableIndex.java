@@ -88,7 +88,7 @@ public class V1SearchableIndex implements SearchableIndex
 
             final MetadataSource source = MetadataSource.loadMetadata(perIndexComponents);
 
-            metadatas = SegmentMetadata.load(source, indexContext, sstableContext.sstable().getId());
+            metadatas = SegmentMetadata.load(source, indexContext, sstableContext);
 
             for (SegmentMetadata metadata : metadatas)
             {
