@@ -27,6 +27,7 @@ import org.junit.Test;
 import org.junit.rules.ExpectedException;
 
 import com.datastax.driver.core.ResultSet;
+import org.apache.cassandra.index.sai.SAIUtil;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.metrics.CassandraMetricsRegistry;
 
@@ -37,6 +38,10 @@ import static org.junit.Assert.assertTrue;
 
 public class QueryMetricsTest extends AbstractMetricsTest
 {
+    static {
+        SAIUtil.setLatestVersion(Version.latest().onOrAfter(Version.EB) ? Version.latest() : Version.EB);
+    }
+
     private static final String CREATE_TABLE_TEMPLATE = "CREATE TABLE %s.%s (id1 TEXT PRIMARY KEY, v1 INT, v2 TEXT) WITH compaction = " +
                                                         "{'class' : 'SizeTieredCompactionStrategy', 'enabled' : false }";
     private static final String CREATE_INDEX_TEMPLATE = "CREATE CUSTOM INDEX IF NOT EXISTS %s ON %s.%s(%s) USING 'StorageAttachedIndex'";
