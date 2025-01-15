@@ -275,29 +275,23 @@ public class PostingsWriter implements Closeable
     }
 
     private void writePostingsBlock(int entries) throws IOException {
-        // Write deltas
-        long maxDelta = 0;
-        for (int i = 0; i < entries; i++)
-            maxDelta = max(maxDelta, deltaBuffer[i]);
-        final int bitsPerDelta = maxDelta == 0 ? 0 : LuceneCompat.directWriterUnsignedBitsRequired(dataOutput.order(), maxDelta);
-        dataOutput.writeByte((byte) bitsPerDelta);
-        if (bitsPerDelta > 0) {
-            final DirectWriterAdapter writer = LuceneCompat.directWriterGetInstance(dataOutput.order(), dataOutput, entries, bitsPerDelta);
+        // Find max value to determine bits needed
+        long maxValue = 0;
+        for (int i = 0; i < entries; i++) {
+            maxValue = max(maxValue, deltaBuffer[i]);
+            // TODO do we care that frequency will never be zero?  I think the 0 code path is premature optimization but not sure
+            maxValue = max(maxValue, freqBuffer[i]);
+        }
+        
+        // Use the maximum bits needed for either value type
+        final int bitsPerValue = maxValue == 0 ? 0 : LuceneCompat.directWriterUnsignedBitsRequired(dataOutput.order(), maxValue);
+        
+        dataOutput.writeByte((byte) bitsPerValue);
+        if (bitsPerValue > 0) {
+            // Write interleaved [delta][freq] pairs
+            final DirectWriterAdapter writer = LuceneCompat.directWriterGetInstance(dataOutput.order(), dataOutput, entries * 2, bitsPerValue);
             for (int i = 0; i < entries; ++i) {
                 writer.add(deltaBuffer[i]);
-            }
-            writer.finish();
-        }
-
-        // Write frequencies right after their corresponding deltas
-        int maxFreq = 0;
-        for (int i = 0; i < entries; i++)
-            maxFreq = max(maxFreq, freqBuffer[i]);
-        final int bitsPerFreq = maxFreq == 0 ? 0 : LuceneCompat.directWriterUnsignedBitsRequired(dataOutput.order(), maxFreq);
-        dataOutput.writeByte((byte) bitsPerFreq);
-        if (bitsPerFreq > 0) {
-            final DirectWriterAdapter writer = LuceneCompat.directWriterGetInstance(dataOutput.order(), dataOutput, entries, bitsPerFreq);
-            for (int i = 0; i < entries; ++i) {
                 writer.add(freqBuffer[i]);
             }
             writer.finish();

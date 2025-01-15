@@ -69,6 +69,7 @@ public class PostingsReader implements OrdinalPostingList
     private long currentPosition;
     private LongValues currentFORValues;
     private int postingsDecoded = 0;
+    private int currentFrequency;
 
     @VisibleForTesting
     public PostingsReader(IndexInput input, long summaryOffset, QueryEventListener.PostingListEventListener listener) throws IOException
@@ -365,6 +366,8 @@ public class PostingsReader implements OrdinalPostingList
         // currentFORValues is null when the all the values in the block are the same
         if (currentFORValues == null)
         {
+            // see TODO in PostingsWriter -- currently this will never be executed
+            currentFrequency = 1;
             return 0;
         }
         else
@@ -419,5 +422,10 @@ public class PostingsReader implements OrdinalPostingList
                     String.format("Postings list #%s block is corrupted. Bits per value should be no more than 64 and is %d.", postingsBlockIdx, bitsPerValue), input);
         }
         currentFORValues = LuceneCompat.directReaderGetInstance(seekingInput, bitsPerValue, currentPosition);
+    }
+
+    @Override
+    public int frequency() {
+        return currentFreqValues == null ? 1 : Math.toIntExact(currentFreqValues.get(blockIdx - 1));
     }
 }
