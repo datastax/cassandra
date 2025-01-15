@@ -41,12 +41,14 @@ import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.cql3.functions.FunctionName;
 import org.apache.cassandra.cql3.functions.UDAggregate;
 import org.apache.cassandra.cql3.functions.UDFunction;
+import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.exceptions.FunctionExecutionException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.transport.ProtocolVersion;
+import org.assertj.core.api.Assertions;
 
 public class UFJavaTest extends CQLTester
 {
@@ -806,19 +808,104 @@ public class UFJavaTest extends CQLTester
     @Test
     public void testUDFToCqlString()
     {
-        UDFunction function = UDFunction.create(new FunctionName("my_ks", "my_function"),
-                                                Arrays.asList(ColumnIdentifier.getInterned("column", false)),
-                                                Arrays.asList(UTF8Type.instance),
+        FunctionName functionName = new FunctionName("my_ks", "my_function");
+        ColumnIdentifier column = ColumnIdentifier.getInterned("column", false);
+        List<ColumnIdentifier> argNames = Collections.singletonList(column);
+        List<AbstractType<?>> argTypes = Collections.singletonList(UTF8Type.instance);
+
+        UDFunction function = UDFunction.create(functionName,
+                                                argNames,
+                                                argTypes,
                                                 Int32Type.instance,
                                                 false,
                                                 "java",
-                                                "return 0;");
+                                                "return 0;",
+                                                false,
+                                                false,
+                                                Collections.emptyList());
 
         Assert.assertTrue(function.toCqlString(true, true).contains("CREATE FUNCTION IF NOT EXISTS"));
         Assert.assertFalse(function.toCqlString(true, false).contains("CREATE FUNCTION IF NOT EXISTS"));
 
         Assert.assertEquals(function.toCqlString(true, true), function.toCqlString(false, true));
         Assert.assertEquals(function.toCqlString(true, false), function.toCqlString(false, false));
+
+        // test DETERMINISTIC
+        Assertions.assertThat(UDFunction.create(functionName,
+                                                argNames,
+                                                argTypes,
+                                                Int32Type.instance,
+                                                false,
+                                                "java",
+                                                "return 0;",
+                                                true,
+                                                false,
+                                                Collections.emptyList())
+                                        .toCqlString(true, false))
+                  .isEqualTo("CREATE FUNCTION my_ks.my_function(column text)\n" +
+                             "    RETURNS NULL ON NULL INPUT\n" +
+                             "    RETURNS int\n" +
+                             "    DETERMINISTIC\n" +
+                             "    LANGUAGE java\n" +
+                             "    AS $$return 0;$$;");
+
+        // test MONOTONIC
+        Assertions.assertThat(UDFunction.create(functionName,
+                                                argNames,
+                                                argTypes,
+                                                Int32Type.instance,
+                                                false,
+                                                "java",
+                                                "return 0;",
+                                                false,
+                                                true,
+                                                Collections.emptyList())
+                                        .toCqlString(true, false))
+                  .isEqualTo("CREATE FUNCTION my_ks.my_function(column text)\n" +
+                             "    RETURNS NULL ON NULL INPUT\n" +
+                             "    RETURNS int\n" +
+                             "    MONOTONIC\n" +
+                             "    LANGUAGE java\n" +
+                             "    AS $$return 0;$$;");
+
+        // test MONOTONIC ON
+        Assertions.assertThat(UDFunction.create(functionName,
+                                                argNames,
+                                                argTypes,
+                                                Int32Type.instance,
+                                                false,
+                                                "java",
+                                                "return 0;",
+                                                false,
+                                                false,
+                                                argNames)
+                                        .toCqlString(true, false))
+                  .isEqualTo("CREATE FUNCTION my_ks.my_function(column text)\n" +
+                             "    RETURNS NULL ON NULL INPUT\n" +
+                             "    RETURNS int\n" +
+                             "    MONOTONIC ON column\n" +
+                             "    LANGUAGE java\n" +
+                             "    AS $$return 0;$$;");
+
+        // test DETERMINISTIC and MONOTONIC ON
+        Assertions.assertThat(UDFunction.create(functionName,
+                                                argNames,
+                                                argTypes,
+                                                Int32Type.instance,
+                                                false,
+                                                "java",
+                                                "return 0;",
+                                                true,
+                                                false,
+                                                argNames)
+                                        .toCqlString(true, false))
+                  .isEqualTo("CREATE FUNCTION my_ks.my_function(column text)\n" +
+                             "    RETURNS NULL ON NULL INPUT\n" +
+                             "    RETURNS int\n" +
+                             "    DETERMINISTIC\n" +
+                             "    MONOTONIC ON column\n" +
+                             "    LANGUAGE java\n" +
+                             "    AS $$return 0;$$;");
     }
 
     @Test
@@ -834,29 +921,51 @@ public class UFJavaTest extends CQLTester
                                                   "        return state + val;\n" +
                                                   "    $$;");
 
-        // Java representation of state function so we can construct aggregate programmatically
-        UDFunction stateFunction = UDFunction.create(new FunctionName(KEYSPACE, stateFunctionName.split("\\.")[1]),
+        stateFunctionName = stateFunctionName.split("\\.")[1];
+
+        // Java representation of state function, so we can construct aggregate programmatically
+        UDFunction stateFunction = UDFunction.create(new FunctionName(KEYSPACE, stateFunctionName),
                                                      Arrays.asList(ColumnIdentifier.getInterned("state", false),
                                                                    ColumnIdentifier.getInterned("val", false)),
                                                      Arrays.asList(Int32Type.instance, Int32Type.instance),
                                                      Int32Type.instance,
                                                      true,
                                                      "java",
-                                                     "return state + val;");
+                                                     "return state + val;",
+                                                     false,
+                                                     false,
+                                                     Collections.emptyList());
 
         UDAggregate aggregate = UDAggregate.create(Collections.singleton(stateFunction),
                                                    new FunctionName(KEYSPACE, "my_aggregate"),
                                                    Collections.singletonList(Int32Type.instance),
                                                    Int32Type.instance,
-                                                   new FunctionName(KEYSPACE, stateFunctionName.split("\\.")[1]),
+                                                   new FunctionName(KEYSPACE, stateFunctionName),
                                                    null,
                                                    Int32Type.instance,
-                                                   null);
+                                                   null,
+                                                   false);
 
         Assert.assertTrue(aggregate.toCqlString(true, true).contains("CREATE AGGREGATE IF NOT EXISTS"));
         Assert.assertFalse(aggregate.toCqlString(true, false).contains("CREATE AGGREGATE IF NOT EXISTS"));
 
         Assert.assertEquals(aggregate.toCqlString(true, true), aggregate.toCqlString(false, true));
         Assert.assertEquals(aggregate.toCqlString(true, false), aggregate.toCqlString(false, false));
+
+        // test DETERMINISTIC
+        Assertions.assertThat(UDAggregate.create(Collections.singleton(stateFunction),
+                                                 new FunctionName(KEYSPACE, "my_aggregate"),
+                                                 Collections.singletonList(Int32Type.instance),
+                                                 Int32Type.instance,
+                                                 new FunctionName(KEYSPACE, stateFunctionName),
+                                                 null,
+                                                 Int32Type.instance,
+                                                 null,
+                                                 true)
+                                         .toCqlString(true, false))
+                  .isEqualTo("CREATE AGGREGATE cql_test_keyspace.my_aggregate(int)\n" +
+                             "    SFUNC " + stateFunctionName + '\n' +
+                             "    STYPE int\n" +
+                             "    DETERMINISTIC;");
     }
 }
