@@ -19,10 +19,15 @@ package org.apache.cassandra.tools.nodetool;
 
 import java.io.PrintStream;
 import java.text.DecimalFormat;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.Set;
 
+import io.airlift.airline.Arguments;
 import io.airlift.airline.Command;
 import io.airlift.airline.Option;
 
@@ -54,6 +59,9 @@ public class CompactionStats extends NodeToolCmd
     description = "Show a map of the maximum sstable overlap per compaction region.")
     private boolean overlap = false;
 
+    @Arguments(usage = "[<keyspace> <tables>...]", description = "With --aggregate or --overlap, optionally list only the data for the specified keyspace and tables.")
+    private List<String> args = new ArrayList<>();
+
     @Override
     public void execute(NodeProbe probe)
     {
@@ -76,6 +84,9 @@ public class CompactionStats extends NodeToolCmd
             }
         }
 
+        Set<String> keyspaces = new HashSet<>(parseOptionalKeyspace(args, probe));
+        Set<String> tableNames = new HashSet<>(Arrays.asList(parseOptionalTables(args)));
+
         out.println("pending tasks: " + numTotalPendingTask);
         out.println(String.format("write amplification: %.2f", totWriteAmplification));
         for (Entry<String, Map<String, Integer>> ksEntry : pendingTaskNumberByTable.entrySet())
@@ -97,11 +108,11 @@ public class CompactionStats extends NodeToolCmd
 
         if (aggregate)
         {
-            reportAggregateCompactions(probe, out);
+            reportAggregateCompactions(probe, keyspaces, tableNames, out);
         }
 
         if (overlap)
-            reportOverlap((Map<String, Map<String, Map<String, String>>>) probe.getCompactionMetric("MaxOverlapsMap"), out);
+            reportOverlap((Map<String, Map<String, Map<String, String>>>) probe.getCompactionMetric("MaxOverlapsMap"), keyspaces, tableNames, out);
     }
 
     public static void reportCompactionTable(List<Map<String,String>> compactions, int compactionThroughput, boolean humanReadable, PrintStream out)
@@ -140,7 +151,7 @@ public class CompactionStats extends NodeToolCmd
         }
     }
 
-    private static void reportAggregateCompactions(NodeProbe probe, PrintStream out)
+    private static void reportAggregateCompactions(NodeProbe probe, Set<String> keyspaces, Set<String> tableNames, PrintStream out)
     {
         List<CompactionStrategyStatistics> statistics = (List<CompactionStrategyStatistics>) probe.getCompactionMetric("AggregateCompactions");
         if (statistics.isEmpty())
@@ -148,10 +159,16 @@ public class CompactionStats extends NodeToolCmd
 
         out.println("Aggregated view:");
         for (CompactionStrategyStatistics stat : statistics)
+        {
+            if (!keyspaces.contains(stat.keyspace()))
+                continue;
+            if (!tableNames.isEmpty() && !tableNames.contains(stat.table()))
+                continue;
             out.println(stat.toString());
+        }
     }
 
-    private static void reportOverlap(Map<String, Map<String, Map<String, String>>> maxOverlap, PrintStream out)
+    private static void reportOverlap(Map<String, Map<String, Map<String, String>>> maxOverlap, Set<String> keyspaces, Set<String> tableNames, PrintStream out)
     {
         if (maxOverlap == null)
         {
@@ -162,9 +179,13 @@ public class CompactionStats extends NodeToolCmd
         for (Map.Entry<String, Map<String, Map<String, String>>> ksEntry : maxOverlap.entrySet())
         {
             String ksName = ksEntry.getKey();
+            if (!keyspaces.contains(ksName))
+                continue;
             for (Map.Entry<String, Map<String, String>> tableEntry : ksEntry.getValue().entrySet())
             {
                 String tableName = tableEntry.getKey();
+                if (!tableNames.isEmpty() && !tableNames.contains(tableName))
+                    continue;
                 out.println("Max overlap map for " + ksName + "." + tableName + ":");
                 for (Map.Entry<String, String> compactionEntry : tableEntry.getValue().entrySet())
                 {
