@@ -144,11 +144,11 @@ public class GuardrailNonPartitionRestrictedQueryTest extends GuardrailTester
 
         assertWarnAborts(0, 0);
 
-        // create 3 more SSTables on each node, this will trigger warn threshold (3 > 2 but < 5)
+        // create 3 more SSTables on each node, this will trigger warn threshold (4 > 2 but < 5)
         valueToQuery = createSSTables(3);
         String valueToQueryString = LongType.instance.toCQLString(LongType.instance.decompose(valueToQuery), true);
         String expectedMessage = tooManyIndexesReadWarnMessage(cluster.size(),
-                                                               3,
+                                                               4,
                                                                String.format("SELECT * FROM %s.%s WHERE v1 = %s ALLOW FILTERING",
                                                                              KEYSPACE, tableName, valueToQueryString));
         assertThat(getOnlyElement(executeSelect(valueToQuery, false))).contains(expectedMessage);
@@ -168,7 +168,7 @@ public class GuardrailNonPartitionRestrictedQueryTest extends GuardrailTester
 
         // notice we expect warnings from 2 nodes
         expectedMessage = tooManyIndexesReadWarnMessage(cluster.size() - 1,
-                                                        3,
+                                                        4,
                                                         String.format("SELECT * FROM %s.%s WHERE v1 = %s ALLOW FILTERING",
                                                                       KEYSPACE, tableName, valueToQueryString));
 
