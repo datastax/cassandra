@@ -44,7 +44,7 @@ public class TrieMemtableFactory implements Memtable.Factory
 {
     final Integer shardCount;
 
-    TrieMemtableFactory(Integer shardCount)
+    public TrieMemtableFactory(Integer shardCount)
     {
         this.shardCount = shardCount;
     }
