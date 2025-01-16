@@ -1036,8 +1036,6 @@ public class NativeIndexDDLTest extends SAITester
             (corruptionType != CorruptionType.REMOVED))
             return;
 
-        logger.info("CORRUPTING: " + component + ", corruption type = " + corruptionType);
-
         int rowCount = 2;
 
         // initial verification

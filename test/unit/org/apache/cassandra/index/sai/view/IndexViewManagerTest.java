@@ -160,7 +160,6 @@ public class IndexViewManagerTest extends SAITester
                                                 .map(desc -> new Descriptor(new File(tmpDir), KEYSPACE, tableName, desc.id))
                                                 .map(desc -> desc.getFormat().getReaderFactory().open(desc))
                                                 .collect(Collectors.toList());
-
         assertThat(sstables).hasSize(4);
 
         List<SSTableReader> none = Collections.emptyList();
@@ -179,19 +178,16 @@ public class IndexViewManagerTest extends SAITester
                 initialIndexes.add(mockSSTableIndex);
             }
 
-            IndexViewManager tracker = new IndexViewManager(columnContext, descriptors, initialIndexes);
+            IndexViewManager tracker = new IndexViewManager(columnContext, initialIndexes);
             View initialView = tracker.getView();
             assertEquals(2, initialView.size());
 
-            List<SSTableReader> compacted = List.of(sstables.get(2));
-            List<SSTableReader> flushed = List.of(sstables.get(3));
-
-            List<SSTableContext> compactedContexts = compacted.stream().map(s -> SSTableContext.create(s, loadDescriptor(s, store).perSSTableComponents())).collect(Collectors.toList());
-            List<SSTableContext> flushedContexts = flushed.stream().map(s -> SSTableContext.create(s, loadDescriptor(s, store).perSSTableComponents())).collect(Collectors.toList());
+            List<SSTableContext> compacted = sstables.stream().skip(2).limit(1).map(s -> SSTableContext.create(s, loadDescriptor(s, store).perSSTableComponents())).collect(Collectors.toList());
+            List<SSTableContext> flushed = sstables.stream().skip(3).limit(1).map(s -> SSTableContext.create(s, loadDescriptor(s, store).perSSTableComponents())).collect(Collectors.toList());
 
             // concurrently update from both flush and compaction
-            Future<?> compaction = executor.submit(() -> tracker.update(initial, compacted, compactedContexts, true));
-            Future<?> flush = executor.submit(() -> tracker.update(none, flushed, flushedContexts, true));
+            Future<?> compaction = executor.submit(() -> tracker.update(initial, compacted, true));
+            Future<?> flush = executor.submit(() -> tracker.update(none, flushed, true));
 
             FBUtilities.waitOnFutures(Arrays.asList(compaction, flush));
 
@@ -210,11 +206,11 @@ public class IndexViewManagerTest extends SAITester
             initialContexts.forEach(group -> assertTrue(group.isCleanedUp()));
 
             // release compacted and flushed SSTableContext original and shared copies
-            compactedContexts.forEach(SSTableContext::close);
-            flushedContexts.forEach(SSTableContext::close);
+            compacted.forEach(SSTableContext::close);
+            flushed.forEach(SSTableContext::close);
             tracker.getView().getIndexes().forEach(SSTableIndex::release);
-            compactedContexts.forEach(group -> assertTrue(group.isCleanedUp()));
-            flushedContexts.forEach(group -> assertTrue(group.isCleanedUp()));
+            compacted.forEach(group -> assertTrue(group.isCleanedUp()));
+            flushed.forEach(group -> assertTrue(group.isCleanedUp()));
         }
         sstables.forEach(sstable -> sstable.selfRef().release());
         executor.shutdown();
