@@ -266,9 +266,14 @@ public class BigTableScanner implements ISSTableScanner
         private BigTableRowIndexEntry nextEntry;
         private DecoratedKey currentKey;
         private BigTableRowIndexEntry currentEntry;
+        LazilyInitializedUnfilteredRowIterator currentRowIterator;
 
         protected UnfilteredRowIterator computeNext()
         {
+            if (currentRowIterator != null && currentRowIterator.initialized() && !currentRowIterator.isClosed() && currentRowIterator.hasNext())
+                throw new IllegalStateException("The UnfilteredRowIterator returned by the last call to next() was initialized: " +
+                                                "it should be either exhausted or closed before calling hasNext() or next() again.");
+
             try
             {
                 if (nextEntry == null)
@@ -323,7 +328,7 @@ public class BigTableScanner implements ISSTableScanner
                  * file unless we're explicitely asked to. This is important
                  * for PartitionRangeReadCommand#checkCacheFilter.
                  */
-                return new LazilyInitializedUnfilteredRowIterator(currentKey)
+                currentRowIterator = new LazilyInitializedUnfilteredRowIterator(currentKey)
                 {
                     protected UnfilteredRowIterator initializeIterator()
                     {
@@ -355,6 +360,7 @@ public class BigTableScanner implements ISSTableScanner
                         }
                     }
                 };
+                return currentRowIterator;
             }
             catch (CorruptSSTableException | IOException e)
             {
