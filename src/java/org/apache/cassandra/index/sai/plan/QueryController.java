@@ -522,7 +522,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
      * @param builder The plan node builder which receives the built index scans
      * @param expressions The expressions to build the plan from
      */
-    public void buildPlanForExpressions(Plan.Builder builder, Collection<Expression> expressions)
+    protected void buildPlanForExpressions(Plan.Builder builder, Collection<Expression> expressions)
     {
         Operation.OperationType op = builder.type;
         assert !expressions.isEmpty() : "expressions should not be empty for " + op + " in " + command.rowFilter().root();
