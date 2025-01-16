@@ -61,7 +61,6 @@ import javax.management.remote.JMXConnectorServer;
 import javax.management.remote.JMXServiceURL;
 import javax.management.remote.rmi.RMIConnectorServer;
 
-import com.datastax.shaded.netty.channel.EventLoopGroup;
 import com.google.common.base.Objects;
 import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableList;
@@ -94,6 +93,7 @@ import com.datastax.driver.core.Session;
 import com.datastax.driver.core.SimpleStatement;
 import com.datastax.driver.core.SocketOptions;
 import com.datastax.driver.core.Statement;
+import com.datastax.shaded.netty.channel.EventLoopGroup;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.ServerTestUtils;
 import org.apache.cassandra.auth.CassandraAuthorizer;
@@ -152,6 +152,7 @@ import org.apache.cassandra.nodes.Nodes;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.KeyspaceMetadata;
+import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
@@ -421,15 +422,13 @@ public abstract class CQLTester
     @Before
     public void beforeTest() throws Throwable
     {
-        schemaChange(String.format("CREATE KEYSPACE IF NOT EXISTS %s WITH replication = {'class': 'SimpleStrategy', 'replication_factor': '1'}", KEYSPACE));
-        schemaChange(String.format("CREATE KEYSPACE IF NOT EXISTS %s WITH replication = {'class': 'SimpleStrategy', 'replication_factor': '1'}", KEYSPACE_PER_TEST));
+        Schema.instance.transform(schema -> schema.withAddedOrUpdated(KeyspaceMetadata.create(KEYSPACE_PER_TEST, KeyspaceParams.simple(1)))
+                                          .withAddedOrUpdated(KeyspaceMetadata.create(KEYSPACE, KeyspaceParams.simple(1))), true);
     }
 
     @After
     public void afterTest() throws Throwable
     {
-        dropPerTestKeyspace();
-
         // Restore standard behavior in case it was changed
         usePrepared = USE_PREPARED_VALUES;
         reusePrepared = REUSE_PREPARED;
@@ -448,51 +447,35 @@ public abstract class CQLTester
         aggregates = null;
         user = null;
 
-        // We want to clean up after the test, but dropping a table is rather long so just do that asynchronously
-        schemaCleanup.execute(() -> {
-            try
-            {
-                logger.debug("Dropping {} materialized view created in previous test", viewsToDrop.size());
-                for (int i = viewsToDrop.size() - 1; i >= 0; i--)
-                    schemaChange(String.format("DROP MATERIALIZED VIEW IF EXISTS %s.%s", KEYSPACE, viewsToDrop.get(i)));
+        try
+        {
+            logger.debug("Dropping {} materialized view created in previous test", viewsToDrop.size());
+            Schema.instance.transform(schema -> schema.withAddedOrUpdated(KeyspaceMetadata.create(KEYSPACE_PER_TEST, KeyspaceParams.simple(1)))
+                                                  .withAddedOrUpdated(KeyspaceMetadata.create(KEYSPACE, KeyspaceParams.simple(1))), true);
 
-                for (int i = tablesToDrop.size() - 1; i >= 0; i--)
-                    schemaChange(String.format("DROP TABLE IF EXISTS %s.%s", KEYSPACE, tablesToDrop.get(i)));
+            for (int i = aggregatesToDrop.size() - 1; i >= 0; i--)
+                schemaChange(String.format("DROP AGGREGATE IF EXISTS %s", aggregatesToDrop.get(i)));
 
-                for (int i = aggregatesToDrop.size() - 1; i >= 0; i--)
-                    schemaChange(String.format("DROP AGGREGATE IF EXISTS %s", aggregatesToDrop.get(i)));
+            for (int i = functionsToDrop.size() - 1; i >= 0; i--)
+                schemaChange(String.format("DROP FUNCTION IF EXISTS %s", functionsToDrop.get(i)));
 
-                for (int i = functionsToDrop.size() - 1; i >= 0; i--)
-                    schemaChange(String.format("DROP FUNCTION IF EXISTS %s", functionsToDrop.get(i)));
+            for (int i = keyspacesToDrop.size() - 1; i >= 0; i--)
+                schemaChange(String.format("DROP KEYSPACE IF EXISTS %s", keyspacesToDrop.get(i)));
 
-                for (int i = typesToDrop.size() - 1; i >= 0; i--)
-                    schemaChange(String.format("DROP TYPE IF EXISTS %s.%s", KEYSPACE, typesToDrop.get(i)));
-
-                for (int i = keyspacesToDrop.size() - 1; i >= 0; i--)
-                    schemaChange(String.format("DROP KEYSPACE IF EXISTS %s", keyspacesToDrop.get(i)));
-
-                // Dropping doesn't delete the sstables. It's not a huge deal but it's cleaner to cleanup after us
-                // Thas said, we shouldn't delete blindly before the TransactionLogs.SSTableTidier for the table we drop
-                // have run or they will be unhappy. Since those taks are scheduled on StorageService.tasks and that's
-                // mono-threaded, just push a task on the queue to find when it's empty. No perfect but good enough.
-
-                final CountDownLatch latch = new CountDownLatch(1);
-                ScheduledExecutors.nonPeriodicTasks.execute(new Runnable()
-                {
-                    public void run()
-                    {
-                        latch.countDown();
-                    }
-                });
-                latch.await(2, TimeUnit.SECONDS);
-
-                removeAllSSTables(KEYSPACE, tablesToDrop);
-            }
-            catch (Exception e)
-            {
-                throw new RuntimeException(e);
-            }
-        });
+            // Dropping doesn't delete the sstables. It's not a huge deal but it's cleaner to cleanup after us
+            // Thas said, we shouldn't delete blindly before the TransactionLogs.SSTableTidier for the table we drop
+            // have run or they will be unhappy. Since those taks are scheduled on StorageService.tasks and that's
+            // mono-threaded, just push a task on the queue to find when it's empty. No perfect but good enough.
+            final CountDownLatch latch = new CountDownLatch(1);
+            ScheduledExecutors.nonPeriodicTasks.execute(latch::countDown);
+            latch.await(2, TimeUnit.SECONDS);
+            removeAllSSTables(KEYSPACE, tablesToDrop);
+            removeAllSSTables(KEYSPACE_PER_TEST, tablesToDrop);
+        }
+        catch (Exception e)
+        {
+            throw new RuntimeException(e);
+        }
     }
 
     /**
@@ -1529,7 +1512,7 @@ public abstract class CQLTester
                .connect(false, false);
     }
 
-    protected String formatQuery(String query)
+    public String formatQuery(String query)
     {
         return formatQuery(KEYSPACE, query);
     }
