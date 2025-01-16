@@ -28,6 +28,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.sensors.memory.MemorySensors;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 
@@ -107,6 +108,7 @@ public class SlabAllocator extends MemtableBufferAllocator
             unslabbedSize.addAndGet(size);
             if (allocateOnHeapOnly)
                 return ByteBuffer.allocate(size);
+            MemorySensors.incrementOffHeapBytes(size);
             Region region = new Region(ByteBuffer.allocateDirect(size));
             offHeapRegions.add(region);
             return region.allocate(size);
@@ -149,7 +151,18 @@ public class SlabAllocator extends MemtableBufferAllocator
             // against other allocators to CAS in a Region, and if we fail we stash the region for re-use
             region = RACE_ALLOCATED.poll();
             if (region == null)
-                region = new Region(allocateOnHeapOnly ? ByteBuffer.allocate(REGION_SIZE) : ByteBuffer.allocateDirect(REGION_SIZE));
+            {
+                if (allocateOnHeapOnly)
+                {
+                    MemorySensors.incrementOnHeapBytes(REGION_SIZE);
+                    region = new Region(ByteBuffer.allocate(REGION_SIZE));
+                }
+                else
+                {
+                    MemorySensors.incrementOffHeapBytes(REGION_SIZE);
+                    region = new Region(ByteBuffer.allocateDirect(REGION_SIZE));
+                }
+            }
             if (currentRegion.compareAndSet(null, region))
             {
                 if (!allocateOnHeapOnly)

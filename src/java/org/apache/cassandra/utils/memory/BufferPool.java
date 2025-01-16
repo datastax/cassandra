@@ -48,6 +48,7 @@ import io.netty.util.concurrent.FastThreadLocal;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.metrics.BufferPoolMetrics;
+import org.apache.cassandra.sensors.memory.MemorySensors;
 import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.utils.concurrent.Ref;
 import org.apache.cassandra.utils.concurrent.Ref.DirectBufferRef;
@@ -228,9 +229,18 @@ public class BufferPool
     private ByteBuffer allocate(int size, BufferType bufferType)
     {
         updateOverflowMemoryUsage(size);
-        return bufferType == BufferType.ON_HEAP
-               ? ByteBuffer.allocate(size)
-               : ByteBuffer.allocateDirect(size);
+        ByteBuffer newBuffer;
+        if (bufferType == BufferType.ON_HEAP)
+        {
+            MemorySensors.incrementOnHeapBytes(size);
+            newBuffer = ByteBuffer.allocate(size);
+        }
+        else
+        {
+            MemorySensors.incrementOffHeapBytes(size);
+            newBuffer = ByteBuffer.allocateDirect(size);
+        }
+        return newBuffer;
     }
 
     public void put(ByteBuffer buffer)
@@ -1083,6 +1093,7 @@ public class BufferPool
         if (Integer.bitCount(align) != 1)
             throw new IllegalArgumentException("Alignment must be a power of 2");
 
+        MemorySensors.incrementOffHeapBytes(capacity + align);
         ByteBuffer buffer = ByteBuffer.allocateDirect(capacity + align);
         long address = MemoryUtil.getAddress(buffer);
         long offset = address & (align -1); // (address % align)

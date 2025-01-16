@@ -28,5 +28,13 @@ public enum Type
     READ_BYTES,
 
     WRITE_BYTES,
-    INDEX_WRITE_BYTES
+    INDEX_WRITE_BYTES,
+
+    /**
+     * Memory types, alternatively, we could use MEMORY_BYTES only type, and have a specialized {@link Context} for
+     * memory with MemoryType (ON_HEAP_BYTES, OFF_HEAP_BYTES, UNSAFE_BYTES) and ExpectedLifetime (SHORT, LONG) etc.
+     */
+    ON_HEAP_BYTES, // for bytes capped at -Xmx
+    OFF_HEAP_BYTES, // for bytes capped at -XX:MaxDirectMemorySize
+    UNSAFE_BYTES // not configured, only capped by the amount of physical memory
 }

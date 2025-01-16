@@ -49,6 +49,7 @@ import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaChangeListener;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.utils.MonotonicClock;
 import org.apache.cassandra.utils.concurrent.Timer;
 
 /**
@@ -80,6 +81,22 @@ import org.apache.cassandra.utils.concurrent.Timer;
  */
 public class SensorsRegistry implements SchemaChangeListener
 {
+    /**
+     * Used to calculate the rate of change for given sensor. This value is utilized by {@link SensorsRegistry#incrementSensor(Context, Type, double)}
+     * to simplify the logic required to calculate sensor rate when calling {@link SensorsRegistry#getSensorRate(Context, Type)}:
+     * <ul>
+     *    <li>
+     *        Spares the need for a background job to snapshot sensor value at each SENSOR_RATE_WINDOW_IN_SECONDS interval
+     *    </li>
+     *    <li>
+     *        Spares the need for storing sensor value history over time.
+     *    </li>
+     * </ul>
+     *  Defaults to 60 seconds.
+     */
+    public static final String SENSORS_RATE_WINDOW_IN_SECONDS_SYSTEM_PROPERTY = "cassandra.sensors.rate_window_in_seconds";
+
+    private final long sensorRateWindowInNanos = TimeUnit.SECONDS.toNanos(Integer.getInteger(SENSORS_RATE_WINDOW_IN_SECONDS_SYSTEM_PROPERTY, 60));
     private static final int LOCK_SRIPES = 1024;
 
     public static final SensorsRegistry instance = new SensorsRegistry();
@@ -102,9 +119,14 @@ public class SensorsRegistry implements SchemaChangeListener
 
     private final CopyOnWriteArrayList<SensorsRegistryListener> listeners = new CopyOnWriteArrayList<>();
 
+    private MonotonicClock clock = MonotonicClock.approxTime;
+
     private SensorsRegistry()
     {
         Schema.instance.registerListener(this);
+        // Boostrap with pseudo values to enable registry sync for node-level senors (e.g. memory sensors)
+        keyspaces.add(Context.all().getKeyspace());
+        tableIds.add(Context.all().getTable());
     }
 
     public void registerListener(SensorsRegistryListener listener)
@@ -133,7 +155,11 @@ public class SensorsRegistry implements SchemaChangeListener
     {
         Sensor sensor = getOrCreateSensorFast(context, type);
         if (sensor != null)
-            sensor.increment(value);
+        {
+            long now = this.clock.now();
+            // instruct the sensor to take a snapshot if sensorRateWindowInNanos has passed since the last snapshot
+            sensor.increment(value,  s -> now - s.getLastSnapshotTime() > this.sensorRateWindowInNanos, now);
+        }
     }
 
     protected Future<Void> incrementSensorAsync(Context context, Type type, double value, long delay, TimeUnit unit)
@@ -247,6 +273,27 @@ public class SensorsRegistry implements SchemaChangeListener
         {
             stripedUpdateLock.getAt(getLockStripe(table.keyspace.hashCode())).writeLock().unlock();
         }
+    }
+
+    /**
+     * @return the delta of the sensor value since the last snapshot. Please note that if the sensor is idle,
+     * the rate will over report until a full SENSOR_AGGREGATION_WINDOW_IN_NANOS has passed since the last snapshot.
+     */
+    @VisibleForTesting
+    public double getSensorRate(Context context, Type type)
+    {
+        Sensor sensor = getSensorFast(context, type);
+        if (sensor == null)
+            return -1;
+        return this.clock.now() - sensor.getLastSnapshotTime() > this.sensorRateWindowInNanos
+               ? 0 // Handles the case where the sensor rate is read but no recent snapshots has been taken due to lack of sensor updates
+               : sensor.getValue() - sensor.getLastSnapshotValue();
+    }
+
+    @VisibleForTesting
+    public void setClock(MonotonicClock clock)
+    {
+        this.clock = clock;
     }
 
     private static int getLockStripe(int hashCode)

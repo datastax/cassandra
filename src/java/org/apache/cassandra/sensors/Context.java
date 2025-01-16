@@ -34,6 +34,7 @@ import org.apache.cassandra.schema.TableMetadata;
  */
 public class Context
 {
+    private static final Context ALL = new Context("all", "all", "all");
     private final String keyspace;
     private final String table;
     private final String tableId;
@@ -101,5 +102,14 @@ public class Context
     public static Context from(IndexContext indexContext)
     {
         return new Context(indexContext.getKeyspace(), indexContext.getTable(), indexContext.getTableId().toString());
+    }
+
+    /**
+     * A context that it is not related to any specific keyspace or table. It is basically a workaround to leverage
+     * existing sensors mechanics (including metrics publishing on CNDB sides)
+     */
+    public static Context all()
+    {
+        return ALL;
     }
 }

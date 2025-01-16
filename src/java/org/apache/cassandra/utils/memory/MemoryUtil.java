@@ -26,6 +26,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import com.sun.jna.Native;
 
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.sensors.memory.MemorySensors;
 import org.apache.cassandra.utils.Architecture;
 
 import sun.misc.Unsafe;
@@ -100,6 +101,7 @@ public abstract class MemoryUtil
     public static long allocate(long size)
     {
         memoryAllocated.addAndGet(size);
+        MemorySensors.incrementUnsafeBytes(size);
         return Native.malloc(size);
     }
 

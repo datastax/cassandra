@@ -19,6 +19,7 @@
 package org.apache.cassandra.sensors;
 
 import java.util.Objects;
+import java.util.function.Predicate;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.util.concurrent.AtomicDouble;
@@ -44,6 +45,13 @@ public class Sensor
 
     private final int hashCode;
 
+    /** mainly used for sensors stored in the registry, it is possible to move the entire logic here (say if we create
+     * the notion of long-lived sensors) or move all the logic to the registry (because it is sensors in the registry
+     * outlive request-response sensors by its very design).
+     */
+    private long lastSnapshotTime;
+    private double lastSnapshotValue;
+
     protected Sensor(Context context, Type type)
     {
         this.context = context;
@@ -55,7 +63,16 @@ public class Sensor
     @VisibleForTesting
     public void increment(double value)
     {
-        this.value.addAndGet(value);
+        this.increment(value, (ignored) -> false, 0L);
+    }
+
+    protected void increment(double value, Predicate<Sensor> snapshotSensorValue, long now)
+    {
+        double oldValue = this.value.getAndAdd(value);
+        if (snapshotSensorValue.test(this)) {
+            this.lastSnapshotValue = oldValue;
+            this.lastSnapshotTime = now;
+        }
     }
 
     public Context getContext()
@@ -71,6 +88,16 @@ public class Sensor
     public double getValue()
     {
         return value.doubleValue();
+    }
+
+    public long getLastSnapshotTime()
+    {
+        return lastSnapshotTime;
+    }
+
+    public double getLastSnapshotValue()
+    {
+        return lastSnapshotValue;
     }
 
     @VisibleForTesting
