@@ -19,15 +19,18 @@ package org.apache.cassandra.index.sai.plan;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.ListIterator;
+import java.util.Set;
 
 import com.google.common.collect.ListMultimap;
 
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Unfiltered;
+import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.ColumnMetadata.Kind;
@@ -129,5 +132,23 @@ public class FilterTree
      */
     private boolean shouldReturnNow(boolean result) {
         return (op == OperationType.AND && !result) || (op == OperationType.OR && result);
+    }
+
+    /**
+     * @return the number of unique SSTable indexes that are referenced by the expressions in this filter tree.
+     */
+    public int numSSTableIndexes()
+    {
+        Set<SSTableIndex> referencedIndexes = new HashSet<>();
+        sstableIndexes(referencedIndexes);
+        return referencedIndexes.size();
+    }
+
+    private void sstableIndexes(Set<SSTableIndex> indexes)
+    {
+        for (Expression expression : expressions.values())
+            indexes.addAll(expression.context.getView().getIndexes());
+        for (FilterTree child : children)
+            child.sstableIndexes(indexes);
     }
 }
