@@ -27,8 +27,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-import javax.annotation.Nullable;
-
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.index.sai.IndexContext;
@@ -41,17 +39,15 @@ import org.apache.cassandra.utils.IntervalTree;
 
 public class View implements Iterable<SSTableIndex>
 {
-    private final Set<Descriptor> sstables;
     private final Map<Descriptor, SSTableIndex> view;
 
     private final TermTree termTree;
     private final AbstractType<?> keyValidator;
     private final IntervalTree<Key, SSTableIndex, Interval<Key, SSTableIndex>> keyIntervalTree;
 
-    public View(IndexContext context, Collection<Descriptor> sstables, Collection<SSTableIndex> indexes)
+    public View(IndexContext context, Collection<SSTableIndex> indexes)
     {
         this.view = new HashMap<>();
-        this.sstables = new HashSet<>(sstables);
         this.keyValidator = context.keyValidator();
 
         AbstractType<?> validator = context.getValidator();
@@ -98,11 +94,6 @@ public class View implements Iterable<SSTableIndex>
         return view.values().iterator();
     }
 
-    public Collection<Descriptor> getSSTables()
-    {
-        return sstables;
-    }
-
     public Collection<SSTableIndex> getIndexes()
     {
         return view.values();
@@ -110,22 +101,12 @@ public class View implements Iterable<SSTableIndex>
 
     public boolean containsSSTable(SSTableReader sstable)
     {
-        return sstables.contains(sstable.descriptor);
+        return view.containsKey(sstable.descriptor);
     }
 
     public int size()
     {
         return view.size();
-    }
-
-    public @Nullable SSTableIndex getSSTableIndex(Descriptor descriptor)
-    {
-        return view.get(descriptor);
-    }
-
-    public boolean hasIndexForSSTable(SSTableReader sstable)
-    {
-        return view.containsKey(sstable.descriptor);
     }
 
     /**
