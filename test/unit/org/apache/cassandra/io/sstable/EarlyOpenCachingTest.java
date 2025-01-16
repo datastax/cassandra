@@ -24,6 +24,7 @@ import java.util.Collection;
 import java.util.concurrent.Phaser;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
 
 import com.google.common.collect.Sets;
 import org.junit.BeforeClass;
@@ -53,7 +54,7 @@ public class EarlyOpenCachingTest extends CQLTester
     @Parameterized.Parameters(name = "format={0}")
     public static Collection<Object> generateParameters()
     {
-        return Arrays.asList(SSTableFormat.Type.values());
+        return Arrays.stream(SSTableFormat.Type.values()).collect(Collectors.toList());
     }
 
     @Parameterized.Parameter
@@ -72,7 +73,7 @@ public class EarlyOpenCachingTest extends CQLTester
         System.setProperty(SSTableFormat.FORMAT_DEFAULT_PROP, format.name);
         createTable("CREATE TABLE %s (pkey text, ckey text, val blob, PRIMARY KEY (pkey, ckey))");
 
-        for (int i = 0; i < 1000; i++)
+        for (int i = 0; i < 800; i++)
         {
             String pkey = getRandom().nextAsciiString(10, 10);
             for (int j = 0; j < 100; j++)
@@ -84,6 +85,7 @@ public class EarlyOpenCachingTest extends CQLTester
         AtomicInteger opened = new AtomicInteger(0);
         AtomicBoolean completed = new AtomicBoolean(false);
         Phaser phaser = new Phaser(1);
+        assertEquals(1, cfs.getLiveSSTables().size());
         SSTableReader source = cfs.getLiveSSTables().iterator().next();
 
         INotificationConsumer consumer = (notification, sender) -> {
