@@ -75,15 +75,16 @@ public class WriteAndReadTest
     static class MockSSTableReader extends SSTableReader
     {
 
-        protected MockSSTableReader(Descriptor desc, Set<Component> components, TableMetadataRef metadata, FileHandle ifile)
+        protected MockSSTableReader(Descriptor desc, Set<Component> components, TableMetadataRef metadata, FileHandle dfile, FileHandle ifile)
         {
-            super(desc, components, metadata, 1000, null, OpenReason.NORMAL, null, null, null, ifile, null);
+            super(desc, components, metadata, 1000, null, OpenReason.NORMAL, null, null, dfile, ifile, null);
         }
 
         public void setup(boolean trackHotness)
         {
             tidy.setup(this, trackHotness);
             tidy.addCloseable(ifile);
+            tidy.addCloseable(dfile);
             super.setup(trackHotness);
         }
 
@@ -141,9 +142,12 @@ public class WriteAndReadTest
 
         File parentDir = new File(System.getProperty("java.io.tmpdir"));
         Descriptor descriptor = new Descriptor(parentDir, "ks", "cf" + length, new SequenceBasedSSTableId(1));
-        try (FileHandle.Builder fhBuilder = new FileHandle.Builder(descriptor.fileFor(Component.PARTITION_INDEX))
-                                            .withChunkCache(ChunkCache.instance)
-                                            .bufferSize(PageAware.PAGE_SIZE))
+        try (FileHandle.Builder indexFhBuilder = new FileHandle.Builder(descriptor.fileFor(Component.PARTITION_INDEX))
+                                                 .withChunkCache(ChunkCache.instance)
+                                                 .bufferSize(PageAware.PAGE_SIZE);
+             FileHandle.Builder dataFhBuilder = new FileHandle.Builder(descriptor.fileFor(Component.DATA))
+                                                 .withChunkCache(ChunkCache.instance)
+                                                 .bufferSize(PageAware.PAGE_SIZE))
         {
             long root = length;
             long keyCount = root * length;
@@ -171,20 +175,41 @@ public class WriteAndReadTest
                 writer.writeLong(root);
             }
 
+            try (SequentialWriter writer = new SequentialWriter(descriptor.fileFor(Component.DATA),
+                    SequentialWriterOption.newBuilder()
+                            .trickleFsync(DatabaseDescriptor.getTrickleFsync())
+                                          .trickleFsyncByteInterval(DatabaseDescriptor.getTrickleFsyncIntervalInKb() * 1024)
+                                          .bufferType(BufferType.OFF_HEAP)
+                                          .finishOnClose(true)
+                                          .build()))
+
+            {
+                writer.writeLong(length);
+            }
+
             SSTableReader reader = null;
             // Now read it like PartitionIndex.load
-            try (FileHandle fh = fhBuilder.complete();
-                 FileDataInput rdr = fh.createReader(fh.dataLength() - 3 * 8))
+            try (FileHandle ifh = indexFhBuilder.complete();
+                 FileHandle dfh = dataFhBuilder.complete())
             {
-                reader = new MockSSTableReader(descriptor, Collections.singleton(Component.PARTITION_INDEX), TableMetadataRef.forOfflineTools(TableMetadata.minimal(descriptor.ksname, descriptor.cfname)), fh);
+                reader = new MockSSTableReader(descriptor, Collections.singleton(Component.PARTITION_INDEX), TableMetadataRef.forOfflineTools(TableMetadata.minimal(descriptor.ksname, descriptor.cfname)), dfh, ifh);
                 reader.setup(false);
-                long firstPosR = rdr.readLong();
-                long keyCountR = rdr.readLong();
-                long rootR = rdr.readLong();
 
-                assertEquals(firstPos, firstPosR);
-                assertEquals(keyCount, keyCountR);
-                assertEquals(rootR, root);
+                try (FileDataInput index = ifh.createReader(ifh.dataLength() - 3 * 8))
+                {
+                    long firstPosR = index.readLong();
+                    long keyCountR = index.readLong();
+                    long rootR = index.readLong();
+
+                    assertEquals(firstPos, firstPosR);
+                    assertEquals(keyCount, keyCountR);
+                    assertEquals(rootR, root);
+                }
+                try (FileDataInput data = dfh.createReader())
+                {
+                    long lengthR = data.readLong();
+                    assertEquals(length, lengthR);
+                }
             }
             finally
             {
@@ -194,6 +219,7 @@ public class WriteAndReadTest
                     CountDownLatch latch = new CountDownLatch(1);
                     ScheduledExecutors.nonPeriodicTasks.execute(latch::countDown);
                     latch.await();  // wait for the release to complete
+                    assertFalse(reader.getDataFile().exists());
                     assertFalse(reader.getIndexFile().channel.getFile().exists());
                 }
             }
@@ -205,7 +231,7 @@ public class WriteAndReadTest
         reader.markObsolete(new AbstractLogTransaction.ReaderTidier() {
             public void commit()
             {
-                for (Component component : reader.components())
+                for (Component component : MockSSTableReader.discoverComponentsFor(reader.descriptor))
                     FileUtils.deleteWithConfirm(reader.descriptor.fileFor(component));
             }
 
