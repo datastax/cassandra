@@ -194,7 +194,10 @@ public class WarningsSnapshot
     @Override
     public String toString()
     {
-        return "(tombstones=" + tombstones + ", localReadSize=" + localReadSize + ", rowIndexTooLarge=" + rowIndexReadSize + ')';
+        return "(tombstones=" + tombstones +
+                ", localReadSize=" + localReadSize +
+                ", rowIndexTooLarge=" + rowIndexReadSize +
+                ", indexReadSSTablesCount=" + indexReadSSTablesCount + ')';
     }
 
     public static final class Warnings
