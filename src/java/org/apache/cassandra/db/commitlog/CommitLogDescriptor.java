@@ -78,7 +78,6 @@ public class CommitLogDescriptor
      * Increment this number if there is a changes in the commit log disc layout or MessagingVersion changes.
      * Note: make sure to handle {@link #getMessagingVersion()}
      */
-    @VisibleForTesting
     public static final int CURRENT_VERSION = MessagingService.current_version;
 
     final int version;

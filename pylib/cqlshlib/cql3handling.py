@@ -215,6 +215,7 @@ JUNK ::= /([ \t\r\f\v]+|(--|[/][/])[^\n\r]*([\n\r]|$)|[/][*].*?[*][/])/ ;
          | <boolean>
          | <blobLiteral>
          | <collectionLiteral>
+         | <vectorLiteral>
          | <functionLiteral> <functionArguments>
          | "NULL"
          ;
@@ -245,6 +246,9 @@ JUNK ::= /([ \t\r\f\v]+|(--|[/][/])[^\n\r]*([\n\r]|$)|[/][*].*?[*][/])/ ;
                ;
 <mapLiteral> ::= "{" <term> ":" <term> ( "," <term> ":" <term> )* "}"
                ;
+               
+<vectorLiteral> ::= "[" ( <float> ( "," <float> )* )? "]"
+                ;
 
 <anyFunctionName> ::= ( ksname=<cfOrKsName> dot="." )? udfname=<cfOrKsName> ;
 
@@ -738,6 +742,7 @@ syntax_rules += r'''
                           ( "PER" "PARTITION" "LIMIT" perPartitionLimit=<wholenumber> )?
                           ( "LIMIT" limit=<wholenumber> ( "OFFSET" offset=<wholenumber> )? )?
                           ( "ALLOW" "FILTERING" )?
+                          ( "WITH" "ann_options" "=" <mapLiteral> )?
                     ;
 <whereClause> ::= <relation> ( "AND" <relation> )*
                 ;
@@ -764,7 +769,7 @@ syntax_rules += r'''
              ;
 <selectionFunctionArguments> ::= "(" ( <selector> ( "," <selector> )* )? ")"
                           ;
-<orderByClause> ::= [ordercol]=<cident> ( "ASC" | "DESC" )?
+<orderByClause> ::= [ordercol]=<cident> ( "ANN" "OF" <vectorLiteral> )? ( "ASC" | "DESC" )?
                   ;
 <groupByClause> ::= [groupcol]=<cident>
                   | <functionName><groupByFunctionArguments>

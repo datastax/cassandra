@@ -45,11 +45,13 @@ import org.apache.cassandra.cql3.VariableSpecifications;
 import org.apache.cassandra.cql3.WhereClause;
 import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.cql3.statements.Bound;
+import org.apache.cassandra.cql3.statements.SelectOptions;
 import org.apache.cassandra.cql3.statements.StatementType;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.ClusteringBound;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.PartitionPosition;
+import org.apache.cassandra.db.filter.ANNOptions;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.guardrails.Guardrails;
 import org.apache.cassandra.db.marshal.AbstractType;
@@ -122,6 +124,7 @@ public class StatementRestrictions
     public static final String VECTOR_INDEX_PRESENT_NOT_SUPPORT_GEO_DISTANCE_MESSAGE =
     "Vector index present, but configuration does not support GEO_DISTANCE queries. GEO_DISTANCE requires similarity_function 'euclidean'";
     public static final String VECTOR_INDEXES_UNSUPPORTED_OP_MESSAGE = "Vector indexes only support ANN and GEO_DISTANCE queries";
+    public static final String ANN_OPTIONS_WITHOUT_ORDER_BY_ANN = "ANN options specified without ORDER BY ... ANN OF ...";
 
     /**
      * The Column Family meta data
@@ -1095,17 +1098,31 @@ public class StatementRestrictions
         return table.clusteringColumns().size() != clusteringColumnsRestrictions.size();
     }
 
-    public RowFilter getRowFilter(IndexRegistry indexManager, QueryOptions options, ClientState state)
+    public RowFilter getRowFilter(IndexRegistry indexManager, QueryOptions options, ClientState state, SelectOptions selectOptions)
     {
+        boolean hasAnnOptions = selectOptions.hasANNOptions();
+
         if (filterRestrictions.isEmpty() && children.isEmpty())
+        {
+            if (hasAnnOptions)
+                throw new InvalidRequestException(ANN_OPTIONS_WITHOUT_ORDER_BY_ANN);
+
             return RowFilter.none();
+        }
 
         // If there is only one replica, we don't need reconciliation at any consistency level.
         boolean needsReconciliation = !table.isVirtual()
                                       && options.getConsistency().needsReconciliation()
                                       && Keyspace.open(table.keyspace).getReplicationStrategy().getReplicationFactor().allReplicas > 1;
 
-        return RowFilter.builder(needsReconciliation, indexManager).buildFromRestrictions(this, table, options, state);
+        ANNOptions annOptions = selectOptions.parseANNOptions();
+        RowFilter rowFilter = RowFilter.builder(needsReconciliation, indexManager)
+                                       .buildFromRestrictions(this, table, options, state, annOptions);
+
+        if (hasAnnOptions && !rowFilter.hasANN())
+            throw new InvalidRequestException(ANN_OPTIONS_WITHOUT_ORDER_BY_ANN);
+
+        return rowFilter;
     }
 
     /**
