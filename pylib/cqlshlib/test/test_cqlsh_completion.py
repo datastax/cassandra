@@ -1083,7 +1083,14 @@ class TestCqlshCompletion(CqlshCompletionCase):
     def test_complete_in_select_limit_clause(self):
         self.trycompletions('SELECT * FROM system.peers LI', immediate='MIT ')
         self.trycompletions('SELECT * FROM system.peers LIMIT ', choices=['<wholenumber>'])
-        self.trycompletions('SELECT * FROM system.peers LIMIT 1 ', choices=[';', 'ALLOW', 'OFFSET'])
+        self.trycompletions('SELECT * FROM system.peers LIMIT 1 ', choices=[';', 'ALLOW', 'OFFSET', 'WITH'])
         self.trycompletions('SELECT * FROM system.peers LIMIT 1 OF', immediate='FSET ')
         self.trycompletions('SELECT * FROM system.peers LIMIT 1 OFFSET ', choices=['<wholenumber>'])
-        self.trycompletions('SELECT * FROM system.peers LIMIT 1 OFFSET 1 ', choices=[';', 'ALLOW'])
+        self.trycompletions('SELECT * FROM system.peers LIMIT 1 OFFSET 1 ', choices=[';', 'ALLOW', 'WITH'])
+
+    def test_complete_in_select_order_by_ann_of(self):
+        self.trycompletions('SELECT * FROM system.peers ORDER BY vectorcol ', choices=[',', ';', 'ALLOW', 'ANN', 'ASC', 'DESC', 'LIMIT', 'PER', 'WITH'])
+        self.trycompletions('SELECT * FROM system.peers ORDER BY vectorcol ANN ', immediate='OF [ ')
+        self.trycompletions('SELECT * FROM system.peers ORDER BY vectorcol ANN OF [ 1.2, ', choices=['<float>'])
+        self.trycompletions('SELECT * FROM system.peers ORDER BY vectorcol ANN OF [ 1.0, 2.0] LIMIT 100 ', choices=[';', 'ALLOW', 'OFFSET', 'WITH'])
+        self.trycompletions('SELECT * FROM system.peers ORDER BY vectorcol ANN OF [ 1.0, 2.0] LIMIT 100 WITH ', immediate='ann_options = { ')
