@@ -22,8 +22,10 @@ import java.nio.channels.ClosedChannelException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -45,6 +47,7 @@ import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.Replica;
 import org.apache.cassandra.metrics.MessagingMetrics;
 import org.apache.cassandra.service.AbstractWriteResponseHandler;
+import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.ExecutorUtils;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.concurrent.AsyncPromise;
@@ -267,7 +270,7 @@ public class MessagingService extends MessagingServiceMBeanImpl implements Messa
     public static final int VERSION_DS_10 = 100; // DS Converged Cassandra 4.0
     // Current DataStax version while we have serialization differences.
     // If differences get merged upstream then we can revert to OS versioning.
-    public static final int VERSION_DS_11 = 101;
+    public static final int VERSION_DS_11 = 101; // adds ann_options (CNDB-12456)
     public static final int VERSION_DS_20 = 110; // DS Converged Cassandra 5.0
     public static final int minimum_version = VERSION_40;
     public static final int maximum_version = VERSION_DS_20;
@@ -757,5 +760,22 @@ public class MessagingService extends MessagingServiceMBeanImpl implements Messa
     public void waitUntilListening() throws InterruptedException
     {
         inboundSockets.open().await();
+    }
+
+    /**
+     * Returns the endpoints that are known to be alive and are using a messaging version older than the given version.
+     *
+     * @param version a messaging version
+     * @return a set of alive endpoints with messaging version below the given version
+     */
+    public Set<InetAddressAndPort> endpointsWithVersionBelow(int version)
+    {
+        Set<InetAddressAndPort> nodes = new HashSet<>();
+        for (InetAddressAndPort node : StorageService.instance.getTokenMetadata().getAllEndpoints())
+        {
+            if (versions.knows(node) && versions.getRaw(node) < version)
+                nodes.add(node);
+        }
+        return nodes;
     }
 }
