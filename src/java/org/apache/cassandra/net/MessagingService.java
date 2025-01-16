@@ -216,7 +216,7 @@ public class MessagingService extends MessagingServiceMBeanImpl
     // Current DataStax version while we have serialization differences.
     // If differences get merged upstream then we can revert to OS versioning.
     public static final int VERSION_DS_10 = 100;
-    public static final int VERSION_DS_11 = 101;
+    public static final int VERSION_DS_11 = 101; // adds ann_options (CNDB-12456)
     public static final int minimum_version = VERSION_30;
     public static final int current_version = currentVersion();
     // DSE 6.8 version for backward compatibility
@@ -642,5 +642,22 @@ public class MessagingService extends MessagingServiceMBeanImpl
     public void waitUntilListening() throws InterruptedException
     {
         inboundSockets.open().await();
+    }
+
+    /**
+     * Returns the endpoints that are known to be alive and are using a messaging version older than the given version.
+     *
+     * @param version a messaging version
+     * @return a set of alive endpoints with messaging version below the given version
+     */
+    public Set<InetAddressAndPort> endpointsWithVersionBelow(int version)
+    {
+        Set<InetAddressAndPort> nodes = new HashSet<>();
+        for (InetAddressAndPort node : StorageService.instance.getTokenMetadata().getAllEndpoints())
+        {
+            if (versions.knows(node) && versions.getRaw(node) < version)
+                nodes.add(node);
+        }
+        return nodes;
     }
 }

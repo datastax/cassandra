@@ -21,6 +21,7 @@ import java.nio.ByteBuffer;
 import java.util.*;
 
 import org.apache.cassandra.guardrails.Guardrails;
+import org.apache.cassandra.db.filter.ANNOptions;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.statements.Bound;
@@ -124,13 +125,14 @@ final class PartitionKeySingleRestrictionSet extends RestrictionSetWrapper imple
     @Override
     public void addToRowFilter(RowFilter.Builder filter,
                                IndexRegistry indexRegistry,
-                               QueryOptions options)
+                               QueryOptions options,
+                               ANNOptions annOptions)
     {
         List<SingleRestriction> restrictions = restrictions();
         for (int i = 0; i < restrictions.size(); i++)
         {
             SingleRestriction r = restrictions.get(i);
-            r.addToRowFilter(filter, indexRegistry, options);
+            r.addToRowFilter(filter, indexRegistry, options, annOptions);
         }
     }
 
