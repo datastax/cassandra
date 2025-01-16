@@ -36,12 +36,17 @@ import javax.annotation.Nullable;
 
 import com.google.common.base.Preconditions;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.MessageParams;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.ReadExecutionController;
+import org.apache.cassandra.db.guardrails.Guardrails;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.AbstractUnfilteredRowIterator;
 import org.apache.cassandra.db.rows.Row;
@@ -60,7 +65,9 @@ import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.net.ParamType;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.Clock;
 import org.apache.cassandra.utils.CloseableIterator;
@@ -68,6 +75,8 @@ import org.apache.cassandra.utils.FBUtilities;
 
 public class StorageAttachedIndexSearcher implements Index.Searcher
 {
+    private static final Logger logger = LoggerFactory.getLogger(StorageAttachedIndexSearcher.class);
+
     private final ReadCommand command;
     private final QueryController controller;
     private final QueryContext queryContext;
@@ -96,32 +105,62 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
     @SuppressWarnings("unchecked")
     public UnfilteredPartitionIterator search(ReadExecutionController executionController) throws RequestTimeoutException
     {
-        try
+        int retries = 0;
+        while (true)
         {
-            FilterTree filterTree = analyzeFilter();
-            Plan plan = controller.buildPlan();
-            Iterator<? extends PrimaryKey> keysIterator = controller.buildIterator(plan);
+            try
+            {
+                FilterTree filterTree = analyzeFilter();
+                maybeTriggerReferencedIndexesGuardrail(filterTree);
 
-            // Can't check for `command.isTopK()` because the planner could optimize sorting out
-            Orderer ordering = plan.ordering();
-            if (ordering != null)
-            {
-                assert !(keysIterator instanceof KeyRangeIterator);
-                var scoredKeysIterator = (CloseableIterator<PrimaryKeyWithSortKey>) keysIterator;
-                var result = new ScoreOrderedResultRetriever(scoredKeysIterator, filterTree, executionController,
-                                                             command.limits().count());
-                return (UnfilteredPartitionIterator) new TopKProcessor(command).filter(result);
+                Plan plan = controller.buildPlan();
+                Iterator<? extends PrimaryKey> keysIterator = controller.buildIterator(plan);
+
+                // Can't check for `command.isTopK()` because the planner could optimize sorting out
+                Orderer ordering = plan.ordering();
+                if (ordering != null)
+                {
+                    assert !(keysIterator instanceof KeyRangeIterator);
+                    var scoredKeysIterator = (CloseableIterator<PrimaryKeyWithSortKey>) keysIterator;
+                    var result = new ScoreOrderedResultRetriever(scoredKeysIterator, filterTree, executionController,
+                                                                 command.limits().count());
+                    return (UnfilteredPartitionIterator) new TopKProcessor(command).filter(result);
+                }
+                else
+                {
+                    assert keysIterator instanceof KeyRangeIterator;
+                    return new ResultRetriever((KeyRangeIterator) keysIterator, filterTree, executionController);
+                }
             }
-            else
+            catch (Throwable t)
             {
-                assert keysIterator instanceof KeyRangeIterator;
-                return new ResultRetriever((KeyRangeIterator) keysIterator, filterTree, executionController);
+                controller.abort();
+                throw t;
             }
         }
-        catch (Throwable t)
+    }
+
+    private void maybeTriggerReferencedIndexesGuardrail(FilterTree filterTree)
+    {
+        if (!Guardrails.saiSSTableIndexesPerQuery.enabled())
+            return;
+
+        int numReferencedIndexes = filterTree.numSSTableIndexes();
+
+        if (Guardrails.saiSSTableIndexesPerQuery.failsOn(numReferencedIndexes, null))
         {
-            controller.abort();
-            throw t;
+            String msg = String.format("Query %s attempted to read from too many indexes (%s) but max allowed is %s; " +
+                                       "query aborted (see sai_sstable_indexes_per_query_fail_threshold)",
+                                       command.toCQLString(),
+                                       numReferencedIndexes,
+                                       Guardrails.CONFIG_PROVIDER.getOrCreate(null).getSaiSSTableIndexesPerQueryFailThreshold());
+            Tracing.trace(msg);
+            MessageParams.add(ParamType.TOO_MANY_REFERENCED_INDEXES_FAIL, numReferencedIndexes);
+            throw new QueryReferencingTooManyIndexesException(msg);
+        }
+        else if (Guardrails.saiSSTableIndexesPerQuery.warnsOn(numReferencedIndexes, null))
+        {
+            MessageParams.add(ParamType.TOO_MANY_REFERENCED_INDEXES_WARN, numReferencedIndexes);
         }
     }
 
