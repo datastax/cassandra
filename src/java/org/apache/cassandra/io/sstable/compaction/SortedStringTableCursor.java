@@ -22,6 +22,9 @@ import java.io.IOException;
 
 import com.google.common.util.concurrent.RateLimiter;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.ClusteringBoundOrBoundary;
 import org.apache.cassandra.db.ClusteringPrefix;
@@ -31,6 +34,7 @@ import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.LivenessInfo;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.UnfilteredValidation;
+import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.marshal.ByteArrayAccessor;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.DeserializationHelper;
@@ -51,6 +55,8 @@ import org.apache.cassandra.utils.ByteBufferUtil;
  */
 public class SortedStringTableCursor implements SSTableCursor
 {
+    private static final Logger logger = LoggerFactory.getLogger(SortedStringTableCursor.class);
+
     private final RandomAccessReader dataFile;
     private final SSTableReader sstable;
     private final DeserializationHelper helper;
@@ -98,6 +104,7 @@ public class SortedStringTableCursor implements SSTableCursor
 
     public SortedStringTableCursor(SSTableReader sstable, RandomAccessReader dataFile, Range<Token> tokenRange)
     {
+        logger.info("Opening cursor for {} with range {}", sstable, tokenRange);
         try
         {
             this.dataFile = dataFile;
@@ -143,6 +150,8 @@ public class SortedStringTableCursor implements SSTableCursor
     {
         if (dataFile.getFilePointer() >= endPosition)
         {
+            if (dataFile.getFilePointer() > endPosition)
+                logger.info("File pointer {} past end position {}", dataFile.getFilePointer(), endPosition);
             currentType = Type.EXHAUSTED;
             return false;
         }

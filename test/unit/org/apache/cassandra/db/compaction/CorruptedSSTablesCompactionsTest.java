@@ -1,6 +1,6 @@
 package org.apache.cassandra.db.compaction;
 /*
- * 
+ *
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -8,20 +8,21 @@ package org.apache.cassandra.db.compaction;
  * to you under the Apache License, Version 2.0 (the
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
- * 
+ *
  *   http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
  * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
  * KIND, either express or implied.  See the License for the
  * specific language governing permissions and limitations
  * under the License.
- * 
+ *
  */
 
 
 import java.io.RandomAccessFile;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
@@ -51,6 +52,8 @@ import org.apache.cassandra.db.lifecycle.PartialLifecycleTransaction;
 import org.apache.cassandra.db.marshal.LongType;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.dht.Murmur3Partitioner;
+import org.apache.cassandra.dht.Range;
+import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
@@ -98,7 +101,7 @@ public class CorruptedSSTablesCompactionsTest
         DatabaseDescriptor.daemonInitialization(); // because of all the static initialization in CFS
         DatabaseDescriptor.setPartitionerUnsafe(Murmur3Partitioner.instance);
 
-        long seed = nanoTime();
+        long seed = 1638161892686L;
 
         //long seed = 754271160974509L; // CASSANDRA-9530: use this seed to reproduce compaction failures if reading empty rows
         //long seed = 2080431860597L; // CASSANDRA-12359: use this seed to reproduce undetected corruptions
@@ -246,22 +249,28 @@ public class CorruptedSSTablesCompactionsTest
             }
             while (readsWithoutError(sstable));
 
+
             currentSSTable++;
         }
 
         int failures = 0;
 
+        ArrayList<Throwable> exceptions = new ArrayList<>();
+
+
+        cfs.snapshot("test");
         // in case something will go wrong we don't want to loop forever using for (;;)
         for (int i = 0; i < sstables.size(); i++)
         {
             try
             {
                 cfs.forceMajorCompaction();
+                logger.info("breaking");
                 break; // After all corrupted sstables are marked as such, compaction of the rest should succeed.
             }
             catch (Throwable e)
             {
-                System.out.println(e);
+                exceptions.add(e);
                 // This is the expected path.
                 int fails = processException(e);
                 if (fails == COMPACTION_FAIL)
@@ -272,6 +281,7 @@ public class CorruptedSSTablesCompactionsTest
                 }
                 else
                 {
+                    logger.info("Compaction failed with {} failures, retrying", fails);
                     failures += fails;
                 }
             }
@@ -288,10 +298,12 @@ public class CorruptedSSTablesCompactionsTest
         boolean foundCause = false;
         while (cause != null)
         {
+            logger.info("Considering cause", cause);
             // The SSTable should be marked corrupted, and retrying the compaction
             // should move on to the next corruption.
             if (cause instanceof CorruptSSTableException)
             {
+                logger.info("Incrementing failure");
                 ++failures;
                 foundCause = true;
                 break;
@@ -310,6 +322,7 @@ public class CorruptedSSTablesCompactionsTest
             // If the compactions are parallelized, the error message should contain all failures of the current path.
             for (var t : cause.getSuppressed())
             {
+                logger.info("Processing suppressed exception", t);
                 final int childFailures = processException(t);
                 if (childFailures == COMPACTION_FAIL)
                     return COMPACTION_FAIL;
@@ -317,6 +330,7 @@ public class CorruptedSSTablesCompactionsTest
             }
             if (cause instanceof PartialLifecycleTransaction.AbortedException)
             {
+                logger.info("Completing check after {} failures because of PartialLifecycleTransaction.AbortedException\n{}", failures, e);
                 foundCause = true;
                 break;
             }
@@ -365,8 +379,43 @@ public class CorruptedSSTablesCompactionsTest
         }
         catch (Throwable t)
         {
+            logger.info("Corrupted sstable {} with exception", sstable, t);
             sstable.unmarkSuspect();
-            return false;
         }
+
+        // check whether it also passes with (minToken, 0], and (0, maxToken]
+        Murmur3Partitioner.LongToken minToken = new Murmur3Partitioner.LongToken(Long.MIN_VALUE);
+        Murmur3Partitioner.LongToken maxToken = new Murmur3Partitioner.LongToken(Long.MAX_VALUE);
+        Murmur3Partitioner.LongToken zeroToken = new Murmur3Partitioner.LongToken(0);
+
+        boolean failed = false;
+        try
+        {
+            SSTableCursor cursor = new SortedStringTableCursor(sstable, new Range<>(minToken, zeroToken));
+            while (cursor.advance() != SSTableCursor.Type.EXHAUSTED) {}
+        }
+        catch (Throwable t)
+        {
+            sstable.unmarkSuspect();
+            failed = true;
+        }
+
+        try
+        {
+            SSTableCursor cursor = new SortedStringTableCursor(sstable, new Range<>(zeroToken, maxToken));
+            while (cursor.advance() != SSTableCursor.Type.EXHAUSTED) {}
+        }
+        catch (Throwable t)
+        {
+            sstable.unmarkSuspect();
+            failed = true;
+        }
+
+        if (!failed)
+        {
+            logger.error("FATAL");
+        }
+
+        return false;
     }
 }

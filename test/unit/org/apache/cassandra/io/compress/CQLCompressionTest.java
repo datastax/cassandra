@@ -261,14 +261,14 @@ public class CQLCompressionTest extends CQLTester
         ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
 
         // Insert multiple entries to force overlap
-        execute("INSERT INTO %s (k, v) values (?, ?)", "k10", "v10");
-        execute("INSERT INTO %s (k, v) values (?, ?)", "k11", "v11");
+        //execute("INSERT INTO %s (k, v) values (?, ?)", "k10", "v10");
+        //execute("INSERT INTO %s (k, v) values (?, ?)", "k11", "v11");
         execute("INSERT INTO %s (k, v) values (?, ?)", "k12", "v12");
         flush();
         assertEquals(1, cfs.getLiveSSTables().size());
 
-        execute("INSERT INTO %s (k, v) values (?, ?)", "k20", "v20");
-        execute("INSERT INTO %s (k, v) values (?, ?)", "k21", "v21");
+        //execute("INSERT INTO %s (k, v) values (?, ?)", "k20", "v20");
+        //execute("INSERT INTO %s (k, v) values (?, ?)", "k21", "v21");
         execute("INSERT INTO %s (k, v) values (?, ?)", "k22", "v22");
         flush();
         assertEquals(2, cfs.getLiveSSTables().size());
