@@ -38,6 +38,7 @@ import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.cql3.restrictions.SingleColumnRestriction.ContainsRestriction;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.db.filter.ANNOptions;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.IndexRegistry;
 import org.apache.cassandra.schema.ColumnMetadata;
@@ -63,8 +64,9 @@ public abstract class RestrictionSet implements Restrictions
         }
 
         @Override
-        public void addToRowFilter(RowFilter.Builder rowFilter, IndexRegistry indexRegistry, QueryOptions options) throws InvalidRequestException
+        public void addToRowFilter(RowFilter.Builder rowFilter, IndexRegistry indexRegistry, QueryOptions options, ANNOptions annOptions)
         {
+            // nothing to do here, since there are no restrictions
         }
 
         @Override
@@ -233,10 +235,11 @@ public abstract class RestrictionSet implements Restrictions
         @Override
         public void addToRowFilter(RowFilter.Builder rowFilter,
                                    IndexRegistry indexRegistry,
-                                   QueryOptions options) throws InvalidRequestException
+                                   QueryOptions options,
+                                   ANNOptions annOptions) throws InvalidRequestException
         {
             for (SingleRestriction restriction : restrictionsMap.values())
-                rowFilter.addAllAsConjunction(b -> restriction.addToRowFilter(b, indexRegistry, options));
+                rowFilter.addAllAsConjunction(b -> restriction.addToRowFilter(b, indexRegistry, options, annOptions));
         }
 
         @Override
