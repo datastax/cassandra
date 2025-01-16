@@ -192,10 +192,10 @@ public class SecondaryIndexManagerTest extends CQLTester
         assertEmpty(execute("SELECT * FROM %s WHERE a=1"));
         assertEmpty(execute("SELECT * FROM %s WHERE c=1"));
 
-        // track sstable again: expect the query that needs the index cannot execute
+        // track sstable again: expect no rows to be read by index
         cfs.getTracker().addInitialSSTables(sstables);
         assertRows(execute("SELECT * FROM %s WHERE a=1"), row(1, 1, 1));
-        assertInvalid("SELECT * FROM %s WHERE c=1");
+        assertEmpty(execute("SELECT * FROM %s WHERE c=1"));
 
         // remote reload should trigger index rebuild
         cfs.getTracker().notifySSTablesChanged(Collections.emptySet(), sstables, OperationType.REMOTE_RELOAD, Optional.empty(), null);

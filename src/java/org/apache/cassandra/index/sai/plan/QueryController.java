@@ -442,7 +442,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
      * Invocations are memorized - multiple calls for the same context return the same view.
      * The views are kept for the lifetime of this {@code QueryController}.
      */
-    QueryView getQueryView(IndexContext context) throws QueryView.Builder.MissingIndexException
+    QueryView getQueryView(IndexContext context)
     {
         return queryViews.computeIfAbsent(context,
                                           c -> new QueryView.Builder(c, mergeRange, queryContext).build());
@@ -586,13 +586,6 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
             sstableResults.addAll(memtableResults);
             return MergeIterator.getNonReducingCloseable(sstableResults, orderer.getComparator());
         }
-        catch (QueryView.Builder.MissingIndexException e)
-        {
-            if (orderer.context.isDropped())
-                throw invalidRequest(TopKProcessor.INDEX_MAY_HAVE_BEEN_DROPPED);
-            else
-                throw new IllegalStateException("Index not found but hasn't been dropped", e);
-        }
         catch (Throwable t)
         {
             FileUtils.closeQuietly(memtableResults);
@@ -655,16 +648,15 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     private CloseableIterator<PrimaryKeyWithSortKey> getTopKRows(List<PrimaryKey> sourceKeys, int softLimit)
     {
         Tracing.logAndTrace(logger, "SAI predicates produced {} keys", sourceKeys.size());
-        List<CloseableIterator<PrimaryKeyWithSortKey>> memtableResults = null;
+        QueryView view = getQueryView(orderer.context);
+        var memtableResults = view.memtableIndexes.stream()
+                                                               .map(index -> index.orderResultsBy(queryContext,
+                                                                                                  sourceKeys,
+                                                                                                  orderer,
+                                                                                                  softLimit))
+                                                               .collect(Collectors.toList());
         try
         {
-            QueryView view = getQueryView(orderer.context);
-            memtableResults = view.memtableIndexes.stream()
-                                                  .map(index -> index.orderResultsBy(queryContext,
-                                                                                     sourceKeys,
-                                                                                     orderer,
-                                                                                     softLimit))
-                                                  .collect(Collectors.toList());
             var totalRows = view.getTotalSStableRows();
             SSTableSearcher ssTableSearcher = index -> index.orderResultsBy(queryContext,
                                                                             sourceKeys,
@@ -675,17 +667,9 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
             sstableScoredPrimaryKeyIterators.addAll(memtableResults);
             return MergeIterator.getNonReducingCloseable(sstableScoredPrimaryKeyIterators, orderer.getComparator());
         }
-        catch (QueryView.Builder.MissingIndexException e)
-        {
-            if (orderer.context.isDropped())
-                throw invalidRequest(TopKProcessor.INDEX_MAY_HAVE_BEEN_DROPPED);
-            else
-                throw new IllegalStateException("Index not found but hasn't been dropped", e);
-        }
         catch (Throwable t)
         {
-            if (memtableResults != null)
-                FileUtils.closeQuietly(memtableResults);
+            FileUtils.closeQuietly(memtableResults);
             throw t;
         }
 
