@@ -19,6 +19,7 @@ package org.apache.cassandra.cql3.restrictions;
 
 import java.util.List;
 
+import org.apache.cassandra.db.filter.ANNOptions;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.cql3.QueryOptions;
@@ -87,8 +88,10 @@ public interface Restriction
      * @param filter the row filter to add expressions to
      * @param indexRegistry the index registry
      * @param options the query options
+     * @param annOptions the query ANN options
      */
     public void addToRowFilter(RowFilter.Builder filter,
                                IndexRegistry indexRegistry,
-                               QueryOptions options);
+                               QueryOptions options,
+                               ANNOptions annOptions);
 }
