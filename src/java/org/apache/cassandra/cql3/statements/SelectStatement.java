@@ -185,6 +185,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
     private final Term limit;
     private final Term perPartitionLimit;
     private final Term offset;
+    private final SelectOptions selectOptions;
 
     private final StatementRestrictions restrictions;
 
@@ -218,7 +219,8 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                            ColumnComparator<List<ByteBuffer>> orderingComparator,
                            Term limit,
                            Term perPartitionLimit,
-                           Term offset)
+                           Term offset,
+                           SelectOptions selectOptions)
     {
         this.rawCQLStatement = queryString;
         this.table = table;
@@ -232,6 +234,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         this.limit = limit;
         this.perPartitionLimit = perPartitionLimit;
         this.offset = offset;
+        this.selectOptions = selectOptions;
     }
 
     @Override
@@ -300,7 +303,8 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                                    null,
                                    null,
                                    null,
-                                   null);
+                                   null,
+                                   SelectOptions.EMPTY);
     }
 
     public ResultSet.ResultMetadata getResultMetadata()
@@ -367,7 +371,8 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                                    orderingComparator,
                                    limit,
                                    perPartitionLimit,
-                                   offset);
+                                   offset,
+                                   selectOptions);
     }
 
     /**
@@ -389,7 +394,8 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                                    orderingComparator,
                                    limit,
                                    perPartitionLimit,
-                                   offset);
+                                   offset,
+                                   selectOptions);
     }
 
     private void validateQueryOptions(QueryState queryState, QueryOptions options)
@@ -414,6 +420,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                topK;
     }
 
+    @Override
     public ResultMessage.Rows execute(QueryState state, QueryOptions options, Dispatcher.RequestTime requestTime)
     {
         ConsistencyLevel cl = options.getConsistency();
@@ -534,6 +541,8 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             // We don't support offset for top-k queries.
             checkFalse(userOffset != NO_OFFSET, String.format(TOPK_OFFSET_ERROR, userOffset));
         }
+
+        selectOptions.validate(userLimit);
 
         return query;
     }
@@ -726,6 +735,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         return new ResultMessage.Rows(rset);
     }
 
+    @Override
     public ResultMessage.Rows executeLocally(QueryState state, QueryOptions options) throws RequestExecutionException, RequestValidationException
     {
         return executeInternal(state, options, options.getNowInSeconds(state), Dispatcher.RequestTime.forImmediateExecution());
@@ -1194,7 +1204,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
     public RowFilter getRowFilter(QueryOptions options, ClientState state) throws InvalidRequestException
     {
         IndexRegistry indexRegistry = IndexRegistry.obtain(table);
-        RowFilter filter = restrictions.getRowFilter(indexRegistry, options, state);
+        RowFilter filter = restrictions.getRowFilter(indexRegistry, options, state, selectOptions);
 
         if (filter.needsReconciliation() && filter.isMutableIntersection() && restrictions.needFiltering(table))
             Guardrails.intersectFilteringQueryEnabled.ensureEnabled(state);
@@ -1408,6 +1418,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         public final Term.Raw limit;
         public final Term.Raw perPartitionLimit;
         public final Term.Raw offset;
+        public final SelectOptions options;
 
         public RawStatement(QualifiedName cfName,
                             Parameters parameters,
@@ -1415,7 +1426,8 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                             WhereClause whereClause,
                             Term.Raw limit,
                             Term.Raw perPartitionLimit,
-                            Term.Raw offset)
+                            Term.Raw offset,
+                            SelectOptions options)
         {
             super(cfName);
             this.parameters = parameters;
@@ -1424,6 +1436,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             this.limit = limit;
             this.perPartitionLimit = perPartitionLimit;
             this.offset = offset;
+            this.options = options;
         }
 
         @Override
@@ -1501,7 +1514,8 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                                        orderingComparator,
                                        prepareLimit(bindVariables, limit, ks, limitReceiver()),
                                        prepareLimit(bindVariables, perPartitionLimit, ks, perPartitionLimitReceiver()),
-                                       prepareLimit(bindVariables, offset, ks, offsetReceiver()));
+                                       prepareLimit(bindVariables, offset, ks, offsetReceiver()),
+                                       options);
         }
 
         private Set<ColumnMetadata> getResultSetOrdering(StatementRestrictions restrictions, Map<ColumnMetadata, Ordering> orderingColumns)

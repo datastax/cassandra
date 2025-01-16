@@ -32,6 +32,7 @@ import org.apache.cassandra.cql3.QualifiedName;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.selection.RawSelector;
 import org.apache.cassandra.cql3.selection.Selectable;
+import org.apache.cassandra.cql3.statements.SelectOptions;
 import org.apache.cassandra.cql3.statements.SelectStatement;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
@@ -180,7 +181,8 @@ public class View
                                                  definition.whereClause,
                                                  null,
                                                  null,
-                                                 null);
+                                                 null,
+                                                 SelectOptions.EMPTY);
 
             rawSelect.setBindVariables(Collections.emptyList());
 
