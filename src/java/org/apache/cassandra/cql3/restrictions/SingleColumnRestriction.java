@@ -25,6 +25,7 @@ import java.util.List;
 import java.util.Map;
 
 import org.apache.cassandra.db.filter.RowFilter;
+import org.apache.cassandra.db.filter.ANNOptions;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.serializers.ListSerializer;
 import org.apache.cassandra.cql3.*;
@@ -166,7 +167,8 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         @Override
         public void addToRowFilter(RowFilter.Builder filter,
                                    IndexRegistry indexRegistry,
-                                   QueryOptions options)
+                                   QueryOptions options,
+                                   ANNOptions annOptions)
         {
             filter.add(columnDef, Operator.EQ, term.bindAndGet(options));
         }
@@ -262,7 +264,8 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         @Override
         public void addToRowFilter(RowFilter.Builder filter,
                                    IndexRegistry indexRegistry,
-                                   QueryOptions options)
+                                   QueryOptions options,
+                                   ANNOptions annOptions)
         {
             List<ByteBuffer> values = this.terms.bindAndGet(options, columnDef.name);
             for (ByteBuffer v : values)
@@ -404,7 +407,7 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         }
 
         @Override
-        public void addToRowFilter(RowFilter.Builder filter, IndexRegistry indexRegistry, QueryOptions options)
+        public void addToRowFilter(RowFilter.Builder filter, IndexRegistry indexRegistry, QueryOptions options, ANNOptions annOptions)
         {
             for (Bound b : Bound.values())
                 if (hasBound(b))
@@ -509,7 +512,7 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         }
 
         @Override
-        public void addToRowFilter(RowFilter.Builder filter, IndexRegistry indexRegistry, QueryOptions options)
+        public void addToRowFilter(RowFilter.Builder filter, IndexRegistry indexRegistry, QueryOptions options, ANNOptions annOptions)
         {
             HashMap<ByteBuffer, TermSlice> map = new HashMap<ByteBuffer, TermSlice>();
             // First, we iterate through to verify that none of the slices create invalid ranges.
@@ -656,7 +659,7 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         }
 
         @Override
-        public void addToRowFilter(RowFilter.Builder filter, IndexRegistry indexRegistry, QueryOptions options)
+        public void addToRowFilter(RowFilter.Builder filter, IndexRegistry indexRegistry, QueryOptions options, ANNOptions annOptions)
         {
             for (ByteBuffer value : bindAndGet(values, options))
                 filter.add(columnDef, Operator.CONTAINS, value);
@@ -854,7 +857,8 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         @Override
         public void addToRowFilter(RowFilter.Builder filter,
                                    IndexRegistry indexRegistry,
-                                   QueryOptions options)
+                                   QueryOptions options,
+                                   ANNOptions annOptions)
         {
             throw new UnsupportedOperationException("Secondary indexes do not support IS NOT NULL restrictions");
         }
@@ -924,7 +928,8 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         @Override
         public void addToRowFilter(RowFilter.Builder filter,
                                    IndexRegistry indexRegistry,
-                                   QueryOptions options)
+                                   QueryOptions options,
+                                   ANNOptions annOptions)
         {
             Pair<Operator, ByteBuffer> operation = makeSpecific(value.bindAndGet(options));
 
@@ -1053,11 +1058,12 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         @Override
         public void addToRowFilter(RowFilter.Builder filter,
                                    IndexRegistry indexRegistry,
-                                   QueryOptions options)
+                                   QueryOptions options,
+                                   ANNOptions annOptions)
         {
             filter.add(columnDef, direction, ByteBufferUtil.EMPTY_BYTE_BUFFER);
             if (otherRestriction != null)
-                otherRestriction.addToRowFilter(filter, indexRegistry, options);
+                otherRestriction.addToRowFilter(filter, indexRegistry, options, annOptions);
         }
 
         @Override
@@ -1141,11 +1147,12 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         @Override
         public void addToRowFilter(RowFilter.Builder filter,
                                    IndexRegistry indexRegistry,
-                                   QueryOptions options)
+                                   QueryOptions options,
+                                   ANNOptions annOptions)
         {
-            filter.add(columnDef, Operator.ANN, value.bindAndGet(options));
+            filter.addANNExpression(columnDef, value.bindAndGet(options), annOptions);
             if (boundedAnnRestriction != null)
-                boundedAnnRestriction.addToRowFilter(filter, indexRegistry, options);
+                boundedAnnRestriction.addToRowFilter(filter, indexRegistry, options, annOptions);
         }
 
         @Override
@@ -1230,7 +1237,8 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         @Override
         public void addToRowFilter(RowFilter.Builder filter,
                                    IndexRegistry indexRegistry,
-                                   QueryOptions options)
+                                   QueryOptions options,
+                                   ANNOptions annOptions)
         {
             filter.addGeoDistanceExpression(columnDef, value.bindAndGet(options), isInclusive ? Operator.LTE : Operator.LT, distance.bindAndGet(options));
         }
@@ -1314,7 +1322,8 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         @Override
         public void addToRowFilter(RowFilter.Builder filter,
                                    IndexRegistry indexRegistry,
-                                   QueryOptions options)
+                                   QueryOptions options,
+                                   ANNOptions annOptions)
         {
             for (Term value : values)
             {

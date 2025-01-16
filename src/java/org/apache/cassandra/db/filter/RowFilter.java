@@ -41,6 +41,7 @@ import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.restrictions.ExternalRestriction;
 import org.apache.cassandra.cql3.restrictions.Restrictions;
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
+import org.apache.cassandra.cql3.statements.SelectOptions;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DeletionPurger;
@@ -105,7 +106,7 @@ public class RowFilter
     public static final Serializer serializer = new Serializer();
     public static final RowFilter NONE = new RowFilter(FilterElement.NONE, false);
 
-    protected final FilterElement root;
+    private final FilterElement root;
 
     private final boolean needsReconciliation;
 
@@ -134,6 +135,33 @@ public class RowFilter
     }
 
     /**
+     * @return {@code true} if this filter contains any expression with an ANN operator, {@code false} otherwise.
+     */
+    public boolean hasANN()
+    {
+        for (Expression expression : root.expressions()) // ANN expressions are always on the first tree level
+        {
+            if (expression.operator == Operator.ANN)
+                return true;
+        }
+        return false;
+    }
+
+    /**
+     * @return the {@link ANNOptions} of the ANN expression in this filter, or {@link ANNOptions#NONE} if there is
+     * no ANN expression.
+     */
+    public ANNOptions annOptions()
+    {
+        for (Expression expression : root.expressions()) // ANN expressions are always on the first tree level
+        {
+            if (expression.operator == Operator.ANN)
+                return expression.annOptions();
+        }
+        return ANNOptions.NONE;
+    }
+
+    /**
      * @return {@code true} if this filter contains any disjunction, {@code false} otherwise.
      */
     public boolean containsDisjunctions()
@@ -143,7 +171,7 @@ public class RowFilter
 
     /**
      * @return true if this filter belongs to a read that requires reconciliation at the coordinator
-     * @see StatementRestrictions#getRowFilter(IndexRegistry, QueryOptions, ClientState)
+     * @see StatementRestrictions#getRowFilter(IndexRegistry, QueryOptions, ClientState, SelectOptions)
      */
     public boolean needsReconciliation()
     {
@@ -436,9 +464,13 @@ public class RowFilter
             return new RowFilter(current.build(), needsReconciliation);
         }
 
-        public RowFilter buildFromRestrictions(StatementRestrictions restrictions, TableMetadata table, QueryOptions options, ClientState state)
+        public RowFilter buildFromRestrictions(StatementRestrictions restrictions,
+                                               TableMetadata table,
+                                               QueryOptions options,
+                                               ClientState state,
+                                               ANNOptions annOptions)
         {
-            FilterElement root = doBuild(restrictions, table, options);
+            FilterElement root = doBuild(restrictions, table, options, annOptions);
 
             if (Guardrails.queryFilters.enabled(state))
                 Guardrails.queryFilters.guard(root.numFilteredValues(), "Select query", false, state);
@@ -446,19 +478,22 @@ public class RowFilter
             return new RowFilter(root, needsReconciliation);
         }
 
-        private FilterElement doBuild(StatementRestrictions restrictions, TableMetadata table, QueryOptions options)
+        private FilterElement doBuild(StatementRestrictions restrictions,
+                                      TableMetadata table,
+                                      QueryOptions options,
+                                      ANNOptions annOptions)
         {
             FilterElement.Builder element = new FilterElement.Builder(restrictions.isDisjunction());
             this.current = element;
 
             for (Restrictions restrictionSet : restrictions.filterRestrictions().getRestrictions())
-                restrictionSet.addToRowFilter(this, indexRegistry, options);
+                restrictionSet.addToRowFilter(this, indexRegistry, options, annOptions);
 
             for (ExternalRestriction expression : restrictions.filterRestrictions().getExternalExpressions())
                 addAllAsConjunction(b -> expression.addToRowFilter(b, table, options));
 
             for (StatementRestrictions child : restrictions.children())
-                element.children.add(doBuild(child, table, options));
+                element.children.add(doBuild(child, table, options, annOptions));
 
             // Optimize out any conjunctions / disjunctions with TRUE.
             // This is not needed for correctness.
@@ -531,11 +566,32 @@ public class RowFilter
             }
         }
 
+        /**
+         * Adds the specified simple filter expression to this builder.
+         *
+         * @param def the filtered column
+         * @param op the filtering operator, shouldn't be {@link Operator#ANN}.
+         * @param value the filtered value
+         * @return the added expression
+         */
         public SimpleExpression add(ColumnMetadata def, Operator op, ByteBuffer value)
         {
-            SimpleExpression expression = new SimpleExpression(def, op, value, analyzer(def, op));
+            assert op != Operator.ANN : "ANN expressions should be added with the addANNExpression method";
+            SimpleExpression expression = new SimpleExpression(def, op, value, analyzer(def, op), null);
             add(expression);
             return expression;
+        }
+
+        /**
+         * Adds the specified ANN expression to this builder.
+         *
+         * @param def the column for ANN ordering
+         * @param value the value for ANN ordering
+         * @param annOptions the ANN options
+         */
+        public void addANNExpression(ColumnMetadata def, ByteBuffer value, ANNOptions annOptions)
+        {
+            add(new SimpleExpression(def, Operator.ANN, value, null, annOptions));
         }
 
         public void addMapComparison(ColumnMetadata def, ByteBuffer key, Operator op, ByteBuffer value)
@@ -930,6 +986,12 @@ public class RowFilter
             return null;
         }
 
+        @Nullable
+        public ANNOptions annOptions()
+        {
+            return null;
+        }
+
         /**
          * Checks if the operator of this <code>IndexExpression</code> is a <code>CONTAINS</code> operator.
          *
@@ -1079,6 +1141,8 @@ public class RowFilter
                 {
                     case SIMPLE:
                         ByteBufferUtil.writeWithShortLength(expression.value, out);
+                        if (expression.operator == Operator.ANN)
+                            ANNOptions.serializer.serialize(expression.annOptions(), out, version);
                         break;
                     case MAP_COMPARISON:
                         MapComparisonExpression mexpr = (MapComparisonExpression)expression;
@@ -1122,11 +1186,13 @@ public class RowFilter
                 switch (kind)
                 {
                     case SIMPLE:
-                        return new SimpleExpression(column, operator, ByteBufferUtil.readWithShortLength(in), analyzer);
+                        ByteBuffer value = ByteBufferUtil.readWithShortLength(in);
+                        ANNOptions annOptions = operator == Operator.ANN ? ANNOptions.serializer.deserialize(in, version) : null;
+                        return new SimpleExpression(column, operator, value, analyzer, annOptions);
                     case MAP_COMPARISON:
                         ByteBuffer key = ByteBufferUtil.readWithShortLength(in);
-                        ByteBuffer value = ByteBufferUtil.readWithShortLength(in);
-                        return new MapComparisonExpression(column, key, operator, value, analyzer);
+                        ByteBuffer val = ByteBufferUtil.readWithShortLength(in);
+                        return new MapComparisonExpression(column, key, operator, val, analyzer);
                     case VECTOR_RADIUS:
                         Operator boundaryOperator = Operator.readFrom(in);
                         ByteBuffer distance = ByteBufferUtil.readWithShortLength(in);
@@ -1150,6 +1216,8 @@ public class RowFilter
                 {
                     case SIMPLE:
                         size += ByteBufferUtil.serializedSizeWithShortLength((expression).value);
+                        if (expression.operator == Operator.ANN)
+                            size += ANNOptions.serializer.serializedSize(expression.annOptions(), version);
                         break;
                     case MAP_COMPARISON:
                         MapComparisonExpression mexpr = (MapComparisonExpression)expression;
@@ -1209,9 +1277,23 @@ public class RowFilter
      */
     public static class SimpleExpression extends AnalyzableExpression
     {
-        public SimpleExpression(ColumnMetadata column, Operator operator, ByteBuffer value, @Nullable Index.Analyzer analyzer)
+        @Nullable
+        private final ANNOptions annOptions;
+
+        public SimpleExpression(ColumnMetadata column,
+                                Operator operator,
+                                ByteBuffer value,
+                                @Nullable Index.Analyzer analyzer,
+                                @Nullable ANNOptions annOptions)
         {
             super(column, operator, value, analyzer);
+            this.annOptions = annOptions;
+        }
+
+        @Nullable
+        public ANNOptions annOptions()
+        {
+            return annOptions;
         }
 
         @Override

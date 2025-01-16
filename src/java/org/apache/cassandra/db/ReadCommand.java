@@ -48,8 +48,23 @@ import org.apache.cassandra.net.MessageFlag;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.ParamType;
 import org.apache.cassandra.net.Verb;
-import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.rows.*;
+import org.apache.cassandra.cql3.statements.SelectOptions;
+import org.apache.cassandra.db.filter.ANNOptions;
+import org.apache.cassandra.db.filter.ClusteringIndexFilter;
+import org.apache.cassandra.db.filter.ColumnFilter;
+import org.apache.cassandra.db.filter.DataLimits;
+import org.apache.cassandra.db.filter.RowFilter;
+import org.apache.cassandra.db.filter.TombstoneOverwhelmingException;
+import org.apache.cassandra.db.partitions.PartitionIterator;
+import org.apache.cassandra.db.partitions.PurgeFunction;
+import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
+import org.apache.cassandra.db.partitions.UnfilteredPartitionIterators;
+import org.apache.cassandra.db.rows.Cell;
+import org.apache.cassandra.db.rows.RangeTombstoneMarker;
+import org.apache.cassandra.db.rows.Row;
+import org.apache.cassandra.db.rows.UnfilteredRowIterator;
+import org.apache.cassandra.db.rows.UnfilteredRowIterators;
 import org.apache.cassandra.db.transform.RTBoundCloser;
 import org.apache.cassandra.db.transform.RTBoundValidator;
 import org.apache.cassandra.db.transform.RTBoundValidator.Stage;
@@ -989,6 +1004,23 @@ public abstract class ReadCommand extends AbstractReadQuery
      * Return the queried token(s) for logging
      */
     public abstract String loggableTokens();
+
+    public String toCQLString()
+    {
+        StringBuilder sb = new StringBuilder();
+        sb.append("SELECT ").append(columnFilter().toCQLString());
+        sb.append(" FROM ").append(metadata().keyspace).append('.').append(metadata().name);
+        appendCQLWhereClause(sb);
+
+        if (limits() != DataLimits.NONE)
+            sb.append(' ').append(limits());
+
+        ANNOptions annOptions = rowFilter().annOptions();
+        if (annOptions != ANNOptions.NONE)
+            sb.append(" WITH ").append(SelectOptions.ANN_OPTIONS).append(" = ").append(annOptions.toCQLString());
+
+        return sb.toString();
+    }
 
     // Monitorable interface
     public String name()

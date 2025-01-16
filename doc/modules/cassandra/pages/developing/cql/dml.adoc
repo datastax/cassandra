@@ -265,6 +265,16 @@ execute:
 include::cassandra:example$CQL/query_nofail_allow_filtering.cql[]
 ----
 
+[[ann-options]]
+=== ANN options
+
+`SELECT` queries using `ANN` ordering can provide a set of options to control the behavior of the ANN search:
+
+[source,cql]
+----
+include::example$CQL/query_with_ann_options.cql[]
+----
+
 [[insert-statement]]
 == INSERT
 
