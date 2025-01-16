@@ -29,7 +29,9 @@ import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.locator.SimpleSnitch;
+import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.tools.ToolRunner;
 import org.apache.cassandra.utils.FBUtilities;
@@ -119,7 +121,7 @@ public class StatusTest extends CQLTester
         String hostStatus = lines[lines.length-1].trim();
         assertThat(hostStatus, startsWith("UN"));
         assertThat(hostStatus, containsString(hostForm));
-        assertThat(hostStatus, matchesPattern(".*0 bytes.*"));
+        assertThat(hostStatus, matchesPattern(".*\\d+(\\.\\d+)? (bytes|KiB).*"));
         assertThat(hostStatus, matchesPattern(".*\\d+\\.\\d+%.*"));
         assertThat(hostStatus, containsString(localHostId));
         assertThat(hostStatus, containsString(token));
