@@ -74,6 +74,7 @@ import org.apache.cassandra.dht.LocalPartitioner;
 import org.apache.cassandra.dht.OrderPreservingPartitioner;
 import org.apache.cassandra.dht.RandomPartitioner;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.db.filter.ANNOptions;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.IndexBuildDecider;
 import org.apache.cassandra.index.IndexRegistry;
@@ -713,6 +714,10 @@ public class StorageAttachedIndex implements Index
         if (command.limits().isUnlimited() || command.limits().count() > MAX_TOP_K)
             throw new InvalidRequestException(String.format("SAI based ORDER BY clause requires a LIMIT that is not greater than %s. LIMIT was %s",
                                                             MAX_TOP_K, command.limits().isUnlimited() ? "NO LIMIT" : command.limits().count()));
+
+        ANNOptions annOptions = command.rowFilter().annOptions();
+        if (annOptions != ANNOptions.NONE)
+            throw new InvalidRequestException("SAI doesn't support ANN options yet.");
 
         indexContext.validate(command.rowFilter());
     }

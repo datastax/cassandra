@@ -28,6 +28,7 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import com.datastax.driver.core.Row;
+import org.apache.cassandra.cql3.statements.SelectOptions;
 import org.apache.cassandra.cql3.statements.SelectStatement;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.Dispatcher;
@@ -93,7 +94,8 @@ public class WhereClauseMutationTest extends CQLTester
                                                                         rawStatement.whereClause.mutateRelations(r -> mutateRelation(r)),
                                                                         rawStatement.limit,
                                                                         rawStatement.perPartitionLimit,
-                                                                        null);
+                                                                        null,
+                                                                        SelectOptions.EMPTY);
 
                         selectStatement = rawStatement.prepare(queryState.getClientState());
                         return selectStatement.execute(queryState, options, requestTime);

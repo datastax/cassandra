@@ -1754,6 +1754,7 @@ FROM
 ( PER PARTITION LIMIT )?
 ( LIMIT ( OFFSET )? )? +
 ( ALLOW FILTERING )?
+( WITH ann_options = )?
 
 ::= DISTINCT?
 
