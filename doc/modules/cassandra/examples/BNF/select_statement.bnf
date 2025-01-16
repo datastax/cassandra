@@ -6,6 +6,7 @@ select_statement::= SELECT [ JSON | DISTINCT ] ( select_clause | '*' )
 	[ PER PARTITION LIMIT (`integer` | `bind_marker`) ]  
 	[ LIMIT (`integer` | `bind_marker`) [ OFFSET (`integer` | `bind_marker`) ] ]
 	[ ALLOW FILTERING ]
+	[ WITH ann_options = map-literal ]
 select_clause::= `selector` [ AS `identifier` ] ( ',' `selector` [ AS `identifier` ] ) 
 selector::== `column_name` 
 	| `term`  
