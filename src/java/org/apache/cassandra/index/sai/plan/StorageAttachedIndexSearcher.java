@@ -42,9 +42,11 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.MessageParams;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.ReadExecutionController;
+import org.apache.cassandra.db.guardrails.Guardrails;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.AbstractUnfilteredRowIterator;
 import org.apache.cassandra.db.rows.Row;
@@ -63,7 +65,9 @@ import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.net.ParamType;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.Clock;
 import org.apache.cassandra.utils.CloseableIterator;
@@ -109,6 +113,8 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             try
             {
                 FilterTree filterTree = analyzeFilter();
+                maybeTriggerReferencedIndexesGuardrail(filterTree);
+
                 Plan plan = controller.buildPlan();
                 Iterator<? extends PrimaryKey> keysIterator = controller.buildIterator(plan);
 
@@ -151,6 +157,30 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                 controller.abort();
                 throw t;
             }
+        }
+    }
+
+    private void maybeTriggerReferencedIndexesGuardrail(FilterTree filterTree)
+    {
+        if (!Guardrails.saiSSTableIndexesPerQuery.enabled())
+            return;
+
+        int numReferencedIndexes = filterTree.numSSTableIndexes();
+
+        if (Guardrails.saiSSTableIndexesPerQuery.failsOn(numReferencedIndexes, null))
+        {
+            String msg = String.format("Query %s attempted to read from too many indexes (%s) but max allowed is %s; " +
+                                       "query aborted (see sai_sstable_indexes_per_query_fail_threshold)",
+                                       command.toCQLString(),
+                                       numReferencedIndexes,
+                                       Guardrails.CONFIG_PROVIDER.getOrCreate(null).getSaiSSTableIndexesPerQueryFailThreshold());
+            Tracing.trace(msg);
+            MessageParams.add(ParamType.TOO_MANY_REFERENCED_INDEXES_FAIL, numReferencedIndexes);
+            throw new QueryReferencingTooManyIndexesException(msg);
+        }
+        else if (Guardrails.saiSSTableIndexesPerQuery.warnsOn(numReferencedIndexes, null))
+        {
+            MessageParams.add(ParamType.TOO_MANY_REFERENCED_INDEXES_WARN, numReferencedIndexes);
         }
     }
 
