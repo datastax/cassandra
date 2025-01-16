@@ -83,7 +83,6 @@ import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.index.sai.view.IndexViewManager;
 import org.apache.cassandra.index.sai.view.View;
-import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.ColumnMetadata;
@@ -158,8 +157,6 @@ public class IndexContext
 
     private final int maxTermSize;
 
-    private volatile boolean dropped = false;
-
     public IndexContext(@Nonnull String keyspace,
                         @Nonnull String table,
                         @Nonnull TableId tableId,
@@ -181,6 +178,7 @@ public class IndexContext
         this.viewManager = new IndexViewManager(this);
         this.validator = TypeUtil.cellValueType(column, indexType);
         this.cfs = cfs;
+
         this.primaryKeyFactory = Version.latest().onDiskFormat().newPrimaryKeyFactory(clusteringComparator);
 
         if (config != null)
@@ -570,12 +568,9 @@ public class IndexContext
     /**
      * @return A set of SSTables which have attached to them invalid index components.
      */
-    public Set<SSTableContext> onSSTableChanged(Collection<SSTableReader> oldSSTables,
-                                                Collection<SSTableReader> newSSTables,
-                                                Collection<SSTableContext> newContexts,
-                                                boolean validate)
+    public Set<SSTableContext> onSSTableChanged(Collection<SSTableReader> oldSSTables, Collection<SSTableContext> newSSTables, boolean validate)
     {
-        return viewManager.update(oldSSTables, newSSTables, newContexts, validate);
+        return viewManager.update(oldSSTables, newSSTables, validate);
     }
 
     public ColumnMetadata getDefinition()
@@ -665,12 +660,7 @@ public class IndexContext
 
     public boolean isIndexed()
     {
-        return config != null && !dropped;
-    }
-
-    public boolean isDropped()
-    {
-        return dropped;
+        return config != null;
     }
 
     /**
@@ -689,7 +679,6 @@ public class IndexContext
      */
     public void invalidate(boolean obsolete)
     {
-        dropped = true;
         liveMemtables.clear();
         viewManager.invalidate(obsolete);
         indexMetrics.release();
@@ -705,16 +694,6 @@ public class IndexContext
     public ConcurrentMap<Memtable, MemtableIndex> getLiveMemtables()
     {
         return liveMemtables;
-    }
-
-    public @Nullable MemtableIndex getMemtableIndex(Memtable memtable)
-    {
-        return liveMemtables.get(memtable);
-    }
-
-    public @Nullable SSTableIndex getSSTableIndex(Descriptor descriptor)
-    {
-        return getView().getSSTableIndex(descriptor);
     }
 
     public boolean supports(Operator op)

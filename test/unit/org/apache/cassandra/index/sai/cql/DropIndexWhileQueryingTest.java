@@ -43,32 +43,12 @@ public class DropIndexWhileQueryingTest extends SAITester
         createIndex("CREATE CUSTOM INDEX ON %s(z) USING 'StorageAttachedIndex'");
         waitForTableIndexesQueryable();
 
-        injectIndexDrop("drop_index", indexName, "buildPlan", true);
+        injectIndexDrop("drop_index", indexName, true);
 
         execute("INSERT INTO %s (k, x, y, z) VALUES (?, ?, ?, ?)", "car", 0, "y0", "z0");
         String query = "SELECT * FROM %s WHERE x IN (0, 1) OR (y IN ('Y0', 'Y1' ) OR z IN ('z1', 'z2'))";
         assertInvalidMessage(QueryController.INDEX_MAY_HAVE_BEEN_DROPPED, query);
         assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE, query);
-    }
-
-    @Test
-    public void testFallbackToAnotherIndex() throws Throwable
-    {
-        createTable("CREATE TABLE %s (k text PRIMARY KEY, x int, y text, z text)");
-
-        createIndex("CREATE CUSTOM INDEX ON %s(y) USING 'StorageAttachedIndex'");
-        String indexName1 = createIndex("CREATE CUSTOM INDEX ON %s(x) USING 'StorageAttachedIndex'");
-        String indexName2 = createIndex("CREATE CUSTOM INDEX ON %s(z) USING 'StorageAttachedIndex'");
-        waitForTableIndexesQueryable();
-
-        injectIndexDrop("drop_index_1", indexName1, "buildIterator", true);
-        injectIndexDrop("drop_index_2", indexName2, "buildIterator", true);
-
-        execute("INSERT INTO %s (k, x, y, z) VALUES (?, ?, ?, ?)", "k1", 0, "y0", "z0"); // match
-        execute("INSERT INTO %s (k, x, y, z) VALUES (?, ?, ?, ?)", "k2", 0, "y1", "z2"); // no match
-        execute("INSERT INTO %s (k, x, y, z) VALUES (?, ?, ?, ?)", "k3", 5, "y2", "z0"); // no match
-        String query = "SELECT * FROM %s WHERE x = 0 AND y = 'y0' AND z = 'z0'";
-        assertRowCount(execute(query), 1);
     }
 
     // See CNDB-10535
@@ -79,7 +59,7 @@ public class DropIndexWhileQueryingTest extends SAITester
         String indexName = createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
         waitForTableIndexesQueryable();
 
-        injectIndexDrop("drop_index2", indexName, "buildPlan", false);
+        injectIndexDrop("drop_index2", indexName, false);
 
         execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', [1.0, 2.0, 3.0])");
 
@@ -88,9 +68,9 @@ public class DropIndexWhileQueryingTest extends SAITester
         assertInvalidMessage(String.format(StatementRestrictions.NON_CLUSTER_ORDERING_REQUIRES_INDEX_MESSAGE, "val"), query);
     }
 
-    private static void injectIndexDrop(String injectionName, String indexName, String methodName, boolean atEntry) throws Throwable
+    private static void injectIndexDrop(String injectionName, String indexName, boolean atEntry) throws Throwable
     {
-        InvokePointBuilder invokePoint = newInvokePoint().onClass(QueryController.class).onMethod(methodName);
+        InvokePointBuilder invokePoint = newInvokePoint().onClass(QueryController.class).onMethod("buildPlan");
         Injection injection = Injections.newCustom(injectionName)
                                         .add(atEntry ? invokePoint.atEntry() : invokePoint.atExit())
                                         .add(ActionBuilder
@@ -108,7 +88,7 @@ public class DropIndexWhileQueryingTest extends SAITester
     @SuppressWarnings("unused")
     public static void dropIndexForBytemanInjections(String indexName)
     {
-        String fullQuery = String.format("DROP INDEX IF EXISTS %s.%s", KEYSPACE, indexName);
+        String fullQuery = String.format("DROP INDEX %s.%s", KEYSPACE, indexName);
         logger.info(fullQuery);
         schemaChange(fullQuery);
     }
