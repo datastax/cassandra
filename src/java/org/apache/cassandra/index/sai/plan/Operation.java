@@ -309,7 +309,8 @@ public class Operation
                                                                                ListSerializer.readValue(expression.getIndexValue(),
                                                                                                         ByteBufferAccessor.instance,
                                                                                                         offset),
-                                                                               expression.analyzer())));
+                                                                               expression.analyzer(),
+                                                                               expression.annOptions())));
                     offset += TypeSizes.INT_SIZE + ByteBufferAccessor.instance.getInt(expression.getIndexValue(), offset);
                 }
                 if (node.children().size() == 1)
