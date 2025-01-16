@@ -1103,6 +1103,7 @@ bc(syntax)..
                   ( PER PARTITION LIMIT <integer> )?
                   ( LIMIT <integer> ( OFFSET <integer> )? )?
                   ( ALLOW FILTERING )?
+                  ( WITH ann_options = <map-literal> )?
 
 <select-clause> ::= DISTINCT? <selection-list>
 
