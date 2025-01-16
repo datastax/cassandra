@@ -385,6 +385,8 @@ public abstract class CQLTester
 
         // Once per-JVM is enough
         prepareServer();
+
+        StorageService.instance.setUpDistributedSystemKeyspaces();
     }
 
     @AfterClass
@@ -436,9 +438,6 @@ public abstract class CQLTester
         final List<String> keyspacesToDrop = copy(keyspaces);
         final List<String> tablesToDrop = copy(tables);
         final List<String> viewsToDrop = copy(views);
-        final List<String> typesToDrop = copy(types);
-        final List<String> functionsToDrop = copy(functions);
-        final List<String> aggregatesToDrop = copy(aggregates);
         keyspaces = null;
         tables = null;
         views = null;
@@ -451,16 +450,8 @@ public abstract class CQLTester
         {
             logger.debug("Dropping {} materialized view created in previous test", viewsToDrop.size());
             Schema.instance.transform(schema -> schema.withAddedOrUpdated(KeyspaceMetadata.create(KEYSPACE_PER_TEST, KeyspaceParams.simple(1)))
-                                                  .withAddedOrUpdated(KeyspaceMetadata.create(KEYSPACE, KeyspaceParams.simple(1))), true);
-
-            for (int i = aggregatesToDrop.size() - 1; i >= 0; i--)
-                schemaChange(String.format("DROP AGGREGATE IF EXISTS %s", aggregatesToDrop.get(i)));
-
-            for (int i = functionsToDrop.size() - 1; i >= 0; i--)
-                schemaChange(String.format("DROP FUNCTION IF EXISTS %s", functionsToDrop.get(i)));
-
-            for (int i = keyspacesToDrop.size() - 1; i >= 0; i--)
-                schemaChange(String.format("DROP KEYSPACE IF EXISTS %s", keyspacesToDrop.get(i)));
+                                                      .withAddedOrUpdated(KeyspaceMetadata.create(KEYSPACE, KeyspaceParams.simple(1)))
+                                                      .without(keyspacesToDrop), true);
 
             // Dropping doesn't delete the sstables. It's not a huge deal but it's cleaner to cleanup after us
             // Thas said, we shouldn't delete blindly before the TransactionLogs.SSTableTidier for the table we drop
