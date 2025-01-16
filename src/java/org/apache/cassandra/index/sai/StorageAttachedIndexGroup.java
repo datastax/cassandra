@@ -34,7 +34,6 @@ import javax.annotation.concurrent.ThreadSafe;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableSet;
-import com.google.common.collect.Lists;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -89,8 +88,6 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
     private final ColumnFamilyStore baseCfs;
 
     private final SSTableContextManager contextManager;
-
-
 
     StorageAttachedIndexGroup(ColumnFamilyStore baseCfs)
     {
@@ -305,7 +302,7 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
             // Avoid validation for index files just written following Memtable flush. ZCS streaming should
             // validate index checksum.
             boolean validate = notice.fromStreaming() || !notice.memtable().isPresent();
-            onSSTableChanged(Collections.emptySet(), Lists.newArrayList(notice.added), indices, validate);
+            onSSTableChanged(Collections.emptySet(), notice.added, indices, validate);
         }
         else if (notification instanceof SSTableListChangedNotification)
         {
@@ -345,7 +342,7 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
      * @return the set of column indexes that were marked as non-queryable as a result of their per-SSTable index
      * files being corrupt or being unable to successfully update their views
      */
-    public synchronized Set<StorageAttachedIndex> onSSTableChanged(Collection<SSTableReader> removed, Collection<SSTableReader> added,
+    public synchronized Set<StorageAttachedIndex> onSSTableChanged(Collection<SSTableReader> removed, Iterable<SSTableReader> added,
                                                             Set<StorageAttachedIndex> indexes, boolean validate)
     {
         Optional<Set<SSTableContext>> optValid = contextManager.update(removed, added, validate, indices);
@@ -360,7 +357,7 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
 
         for (StorageAttachedIndex index : indexes)
         {
-            Set<SSTableContext> invalid = index.getIndexContext().onSSTableChanged(removed, added, optValid.get(), validate);
+            Set<SSTableContext> invalid = index.getIndexContext().onSSTableChanged(removed, optValid.get(), validate);
 
             if (!invalid.isEmpty())
             {
