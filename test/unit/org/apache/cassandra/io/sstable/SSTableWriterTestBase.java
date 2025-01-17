@@ -39,6 +39,7 @@ import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.rows.EncodingStats;
 import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
@@ -172,6 +173,22 @@ public class SSTableWriterTestBase extends SchemaLoader
     public static SSTableWriter getWriter(ColumnFamilyStore cfs, File directory, LifecycleTransaction txn)
     {
         return getWriter(cfs, directory, txn, 0, null, false);
+    }
+
+    public static SSTableWriter getWriter(SSTableFormat<?, ?> format, ColumnFamilyStore cfs, File directory, LifecycleTransaction txn)
+    {
+        Descriptor desc = cfs.newSSTableDescriptor(directory, format);
+        return desc.getFormat().getWriterFactory().builder(desc)
+                   .setTableMetadataRef(cfs.metadata)
+                   .setKeyCount(0)
+                   .setRepairedAt(0)
+                   .setPendingRepair(null)
+                   .setTransientSSTable(false)
+                   .setSerializationHeader(new SerializationHeader(true, cfs.metadata(), cfs.metadata().regularAndStaticColumns(), EncodingStats.NO_STATS))
+                   .setSecondaryIndexGroups(cfs.indexManager.listIndexGroups())
+                   .setMetadataCollector(new MetadataCollector(cfs.metadata().comparator))
+                   .addDefaultComponents(cfs.indexManager.listIndexGroups())
+                   .build(txn, cfs);
     }
 
     public static ByteBuffer random(int i, int size)
