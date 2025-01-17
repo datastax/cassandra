@@ -30,6 +30,10 @@ import com.google.common.collect.ImmutableMap;
 
 import org.apache.commons.lang3.builder.HashCodeBuilder;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import org.apache.cassandra.cache.ChunkCache;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.ParameterizedClass;
 import org.apache.cassandra.db.TypeSizes;
@@ -38,12 +42,15 @@ import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.compress.*;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.io.util.PageAware;
 import org.apache.cassandra.net.MessagingService;
 
 import static java.lang.String.format;
 
 public final class CompressionParams
 {
+    private static final Logger logger = LoggerFactory.getLogger(CompressionParams.class);
+
     public static final int DEFAULT_CHUNK_LENGTH = 1024 * 16;
     public static final double DEFAULT_MIN_COMPRESS_RATIO = 0.0;        // Since pre-4.0 versions do not understand the
                                                                         // new compression parameter we can't use a
@@ -348,6 +355,10 @@ public final class CompressionParams
             int parsed = Integer.parseInt(chLengthKB);
             if (parsed > Integer.MAX_VALUE / 1024)
                 throw new ConfigurationException(format("Value of %s is too large (%s)", CHUNK_LENGTH_IN_KB,parsed));
+            if (parsed * 1024 < PageAware.PAGE_SIZE && ChunkCache.instance.isEnabled())
+                logger.warn("Chunk length {} KiB is smaller than the page size {} KiB. " +
+                            "This is not recommended as it will cause wasted chunk cache space.",
+                            parsed, PageAware.PAGE_SIZE / 1024);
             return 1024 * parsed;
         }
         catch (NumberFormatException e)

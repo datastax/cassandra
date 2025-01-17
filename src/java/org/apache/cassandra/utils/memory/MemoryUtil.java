@@ -234,6 +234,12 @@ public abstract class MemoryUtil
         unsafe.putInt(instance, DIRECT_BYTE_BUFFER_CAPACITY_OFFSET, capacity);
     }
 
+    /**
+     * Transfers the contents of a buffer to Memory
+     *
+     * @param address start offset in the memory
+     * @param buffer the data buffer
+     */
     public static void setBytes(long address, ByteBuffer buffer)
     {
         int start = buffer.position();
