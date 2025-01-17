@@ -379,14 +379,14 @@ public abstract class CQLTester
     @BeforeClass
     public static void setUpClass()
     {
+        DatabaseDescriptor.setAutoSnapshot(false);
+
         if (ROW_CACHE_SIZE_IN_MB > 0)
             DatabaseDescriptor.setRowCacheSizeInMB(ROW_CACHE_SIZE_IN_MB);
         StorageService.instance.setPartitionerUnsafe(Murmur3Partitioner.instance);
 
         // Once per-JVM is enough
         prepareServer();
-
-        StorageService.instance.setUpDistributedSystemKeyspaces();
     }
 
     @AfterClass
@@ -425,7 +425,7 @@ public abstract class CQLTester
     public void beforeTest() throws Throwable
     {
         Schema.instance.transform(schema -> schema.withAddedOrUpdated(KeyspaceMetadata.create(KEYSPACE_PER_TEST, KeyspaceParams.simple(1)))
-                                          .withAddedOrUpdated(KeyspaceMetadata.create(KEYSPACE, KeyspaceParams.simple(1))), true);
+                                                  .withAddedOrUpdated(KeyspaceMetadata.create(KEYSPACE, KeyspaceParams.simple(1))), true);
     }
 
     @After
@@ -448,8 +448,7 @@ public abstract class CQLTester
 
         try
         {
-            logger.debug("Dropping {} materialized view created in previous test", viewsToDrop.size());
-            Schema.instance.transform(schema -> schema.withAddedOrUpdated(KeyspaceMetadata.create(KEYSPACE_PER_TEST, KeyspaceParams.simple(1)))
+            Schema.instance.transform(schema -> schema.without(KEYSPACE_PER_TEST)
                                                       .withAddedOrUpdated(KeyspaceMetadata.create(KEYSPACE, KeyspaceParams.simple(1)))
                                                       .without(keyspacesToDrop), true);
 

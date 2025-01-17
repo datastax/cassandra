@@ -33,12 +33,12 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Sets;
 import com.google.common.util.concurrent.Uninterruptibles;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.cache.AutoSavingCache;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
-import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.view.View;
 import org.apache.cassandra.db.view.ViewBuilderTask;
@@ -50,6 +50,7 @@ import org.apache.cassandra.io.sstable.IndexSummaryRedistribution;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.service.CacheService;
+import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.NonThrowingCloseable;
 
@@ -61,6 +62,12 @@ import static org.junit.Assert.assertTrue;
 
 public class ActiveOperationsTest extends CQLTester
 {
+    @BeforeClass
+    public static void beforeClass()
+    {
+        StorageService.instance.setUpDistributedSystemKeyspaces();
+    }
+
     @Test
     public void testActiveCompactionTrackingRaceWithIndexBuilder() throws Throwable
     {

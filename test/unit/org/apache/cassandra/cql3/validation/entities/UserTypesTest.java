@@ -35,6 +35,7 @@ public class UserTypesTest extends CQLTester
         StorageService.instance.setPartitionerUnsafe(ByteOrderedPartitioner.instance);
 
         prepareServer();
+        StorageService.instance.setUpDistributedSystemKeyspaces();
     }
 
     @Test
