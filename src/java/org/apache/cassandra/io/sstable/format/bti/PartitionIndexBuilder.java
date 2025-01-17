@@ -112,7 +112,14 @@ public class PartitionIndexBuilder implements AutoCloseable
 
         try (FileHandle fh = fhBuilder.withLengthOverride(writer.getLastFlushOffset()).complete())
         {
-            PartitionIndex pi = new PartitionIndexEarly(fh, partialIndexTail.root(), partialIndexTail.count(), firstKey, partialIndexLastKey, partialIndexTail.cutoff(), partialIndexTail.tail(), version);
+            PartitionIndex pi = new PartitionIndexEarly(fh,
+                                                        partialIndexTail.root(),
+                                                        partialIndexTail.count(),
+                                                        firstKey.retainable(),
+                                                        partialIndexLastKey.retainable(),
+                                                        partialIndexTail.cutoff(),
+                                                        partialIndexTail.tail(),
+                                                        version);
             partialIndexConsumer.accept(pi);
             partialIndexConsumer = null;
         }
