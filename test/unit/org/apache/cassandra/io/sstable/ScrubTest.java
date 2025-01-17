@@ -212,8 +212,10 @@ public class ScrubTest
 
         Set<SSTableReader> liveSSTables = cfs.getLiveSSTables();
         assertThat(liveSSTables).hasSize(1);
-        String fileName = liveSSTables.iterator().next().getFilename();
-        Files.write(Paths.get(fileName), new byte[10], StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+        File file = liveSSTables.iterator().next().getDataFile();
+        Files.write(Paths.get(file.path()), new byte[10], StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+        if (ChunkCache.instance != null)
+            ChunkCache.instance.invalidateFile(file);
 
         performScrub(cfs, true, true, false, 2);
 
@@ -685,7 +687,7 @@ public class ScrubTest
             file.write(buff, 0, length);
         }
         if (ChunkCache.instance != null)
-            ChunkCache.instance.invalidateFile(path.toString());
+            ChunkCache.instance.invalidateFile(path);
     }
 
     public static void assertOrderedAll(ColumnFamilyStore cfs, int expectedSize)
