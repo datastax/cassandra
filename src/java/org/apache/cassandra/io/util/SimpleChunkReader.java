@@ -78,6 +78,11 @@ class SimpleChunkReader extends AbstractReaderFileProxy implements ChunkReader
     {
     }
 
+    public ReaderType type()
+    {
+        return ReaderType.SIMPLE;
+    }
+
     @Override
     public String toString()
     {

@@ -108,12 +108,6 @@ public class WrappingRebuffererTest
             return buffer;
         }
 
-        @Override
-        public ByteOrder order()
-        {
-            return buffer.order();
-        }
-
         public long fileLength()
         {
             return buffer.remaining();
@@ -138,16 +132,6 @@ public class WrappingRebuffererTest
         public void release()
         {
             released = true;
-        }
-
-        public long adjustExternal(long position)
-        {
-            return position;
-        }
-
-        public long adjustInternal(long position)
-        {
-            return position;
         }
 
         public void close()

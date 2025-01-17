@@ -103,7 +103,6 @@ public class SSTableWriterTest extends SSTableWriterTestBase
         }
     }
 
-
     @Test
     public void testAbortTxnWithClosedWriterShouldRemoveSSTable() throws InterruptedException
     {
