@@ -114,6 +114,7 @@ public enum CassandraRelevantProperties
     BROADCAST_INTERVAL_MS("cassandra.broadcast_interval_ms", "60000"),
     BTREE_BRANCH_SHIFT("cassandra.btree.branchshift", "5"),
     BTREE_FAN_FACTOR("cassandra.btree.fanfactor"),
+    BUFFERPOOL_DISABLE_COMBINED_ALLOCATION("cassandra.bufferpool.disable_combined_allocation"),
     /** Represents the maximum size (in bytes) of a serialized mutation that can be cached **/
     CACHEABLE_MUTATION_SIZE_LIMIT("cassandra.cacheable_mutation_size_limit_bytes", convertToString(1_000_000)),
     CASSANDRA_ALLOW_SIMPLE_STRATEGY("cassandra.allow_simplestrategy"),
