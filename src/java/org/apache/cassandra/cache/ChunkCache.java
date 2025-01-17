@@ -34,6 +34,7 @@ import javax.annotation.Nullable;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Throwables;
+import com.google.common.collect.Iterables;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -277,6 +278,21 @@ public class ChunkCache
         // Removing the name from the id map suffices -- the next time someone wants to read this file, it will get
         // assigned a fresh id.
         fileIdMap.remove(file);
+    }
+
+    /**
+     * Invalidate all buffers for the given file, including handles that are already opened. This is a very costly
+     * operation and is only intended to be used by tests.
+     */
+    @VisibleForTesting
+    public void invalidateFileNow(File file)
+    {
+        Long fileIdMaybeNull = fileIdMap.get(file);
+        if (fileIdMaybeNull == null)
+            return;
+        long fileId = fileIdMaybeNull << (CHUNK_SIZE_LOG2_BITS + READER_TYPE_BITS);
+        long mask = - (1 << (CHUNK_SIZE_LOG2_BITS + READER_TYPE_BITS));
+        synchronousCache.invalidateAll(Iterables.filter(cache.asMap().keySet(), x -> (x.readerId & mask) == fileId));
     }
 
     static class Key
