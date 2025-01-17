@@ -122,14 +122,16 @@ public class PrimaryKeyWithSource implements PrimaryKey
             var other = (PrimaryKeyWithSource) o;
             if (sourceSstableId.equals(other.sourceSstableId))
                 return Long.compare(sourceRowId, other.sourceRowId);
+            // Compare to the other source sstable's min and max keys to determine if the keys are comparable.
+            // Note that these are already loaded into memory as part of the segment's metadata, so they comparison
+            // is cheaper than loading the actual keys.
+            if (sourceSstableMinKey.compareTo(other.sourceSstableMaxKey) > 0)
+                return 1;
+            if (sourceSstableMaxKey.compareTo(other.sourceSstableMinKey) < 0)
+                return -1;
         }
 
-        if (sourceSstableMinKey.compareTo(o) > 0)
-            return 1;
-        else if (sourceSstableMaxKey.compareTo(o) < 0)
-            return -1;
-        else
-            return primaryKey().compareTo(o);
+        return primaryKey().compareTo(o);
     }
 
     @Override
