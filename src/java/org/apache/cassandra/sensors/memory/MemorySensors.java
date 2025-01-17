@@ -25,6 +25,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.sun.management.HotSpotDiagnosticMXBean;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.sensors.ActiveRequestSensors;
 import org.apache.cassandra.sensors.Context;
@@ -70,7 +71,7 @@ public final class MemorySensors
     /**
      * return -1 on Mac unit test although -XX:MaxDirectMemorySize is set in the test
      */
-    private static final long OFF_HEAP_MAX_MEMORY = ManagementFactory.getMemoryMXBean().getNonHeapMemoryUsage().getMax();
+    private static final long OFF_HEAP_MAX_MEMORY;
     private static final long UNSAFE_MAX_MEMORY = ((com.sun.management.OperatingSystemMXBean)
                                                      java.lang.management.ManagementFactory.getOperatingSystemMXBean()).getTotalPhysicalMemorySize();
 
@@ -79,6 +80,33 @@ public final class MemorySensors
      */
     static
     {
+        long offHeapMaxMemory = -1;
+        HotSpotDiagnosticMXBean hsdiag = ManagementFactory.getPlatformMXBean(HotSpotDiagnosticMXBean.class);
+        if (hsdiag != null)
+        {
+            try
+            {
+                offHeapMaxMemory = Long.parseLong(hsdiag.getVMOption("MaxDirectMemorySize").getValue());
+            }
+            catch (IllegalArgumentException e)
+            {
+                logger.warn("Failed to get MaxDirectMemorySize, falling back to ManagementFactory.getMemoryMXBean().getNonHeapMemoryUsage.getMax()", e);
+            }
+        }
+        else
+        {
+            logger.warn("Failed to get HotSpotDiagnosticMXBean, falling back to ManagementFactory.getMemoryMXBean().getNonHeapMemoryUsage.getMax()");
+        }
+
+        if (offHeapMaxMemory == -1)
+        {
+            logger.warn("Failed to get MaxDirectMemorySize, falling back to non-accurate method");
+            // last resort
+            offHeapMaxMemory = ManagementFactory.getMemoryMXBean().getNonHeapMemoryUsage().getMax();
+        }
+        OFF_HEAP_MAX_MEMORY = offHeapMaxMemory;
+
+
         activeRequestSensors.registerSensor(Context.all(), Type.ON_HEAP_BYTES);
         activeRequestSensors.registerSensor(Context.all(), Type.OFF_HEAP_BYTES);
         activeRequestSensors.registerSensor(Context.all(), Type.UNSAFE_BYTES);
@@ -154,9 +182,9 @@ public final class MemorySensors
         long offHeapUsed = ManagementFactory.getMemoryMXBean().getNonHeapMemoryUsage().getUsed();
         long unsafeUsed = MemoryUtil.allocated();
 
-        boolean onHeapOOM = onHeapUsed + onHeapAllocationRate * W > onHeapMThreshold;
-        boolean offHeapOOM = offHeapUsed + offHeapAllocationRate * W > offHeapMThreshold;
-        boolean unsafeOOM = unsafeUsed + unsafeAllocationRate * W > unsafeHeapMThreshold;
+        OOMPrediction onHeapOOM = predict(onHeapUsed, onHeapAllocationRate,W, onHeapMThreshold);
+        OOMPrediction offHeapOOM = predict(offHeapUsed, offHeapAllocationRate, W, offHeapMThreshold);
+        OOMPrediction unsafeOOM = predict(unsafeUsed, unsafeAllocationRate, W,  unsafeHeapMThreshold);
 
         noSpamLogger.info("OOM prediction report with W={}s and M=0.95% of max available memory\n" +
                           "    prediction: onHeapOOM={}, offHeapOOM={}, unsafeOOM={}\n" +
@@ -170,7 +198,21 @@ public final class MemorySensors
                           FBUtilities.prettyPrintMemory(onHeapUsed), FBUtilities.prettyPrintMemory(offHeapUsed), FBUtilities.prettyPrintMemory(unsafeUsed),
                           FBUtilities.prettyPrintMemory(activeRequestSensors.getSensor(Context.all(), Type.ON_HEAP_BYTES).map(Sensor::getValue).orElse(-1d).longValue()),
                           FBUtilities.prettyPrintMemory(activeRequestSensors.getSensor(Context.all(), Type.OFF_HEAP_BYTES).map(Sensor::getValue).orElse(-1d).longValue()),
-                          FBUtilities.prettyPrintMemory((activeRequestSensors.getSensor(Context.all(), Type.UNSAFE_BYTES).map(Sensor::getValue).orElse(-1d)).longValue()),
+                          FBUtilities.prettyPrintMemory(activeRequestSensors.getSensor(Context.all(), Type.UNSAFE_BYTES).map(Sensor::getValue).orElse(-1d).longValue()),
                           FBUtilities.prettyPrintMemoryPerSecond((long) onHeapAllocationRate), FBUtilities.prettyPrintMemoryPerSecond((long) offHeapAllocationRate), FBUtilities.prettyPrintMemoryPerSecond((long) unsafeAllocationRate));
+    }
+
+    private static OOMPrediction predict(long memoryUsed, double allocationRate, long lookAheadWindow, long threshold)
+    {
+        if (threshold < 1 << 30) // 1GB, disable OOM prediction if the threshold is too low
+            return OOMPrediction.DISABLED;
+        return memoryUsed + allocationRate * lookAheadWindow > threshold ? OOMPrediction.LIKELY : OOMPrediction.UNLIKELY;
+    }
+
+    enum OOMPrediction
+    {
+        LIKELY,
+        UNLIKELY,
+        DISABLED
     }
 }

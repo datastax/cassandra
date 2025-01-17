@@ -107,7 +107,10 @@ public class SlabAllocator extends MemtableBufferAllocator
         {
             unslabbedSize.addAndGet(size);
             if (allocateOnHeapOnly)
+            {
+                MemorySensors.incrementOnHeapBytes(size);
                 return ByteBuffer.allocate(size);
+            }
             MemorySensors.incrementOffHeapBytes(size);
             Region region = new Region(ByteBuffer.allocateDirect(size));
             offHeapRegions.add(region);

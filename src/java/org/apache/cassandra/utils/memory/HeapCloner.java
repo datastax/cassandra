@@ -20,6 +20,8 @@ package org.apache.cassandra.utils.memory;
 
 import java.nio.ByteBuffer;
 
+import org.apache.cassandra.sensors.memory.MemorySensors;
+
 /**
  * Cloner class that can be use to clone partition elements on heap.
  *
@@ -32,6 +34,7 @@ public final class HeapCloner extends ByteBufferCloner
 
     public ByteBuffer allocate(int size)
     {
+        MemorySensors.incrementOnHeapBytes(size);
         return ByteBuffer.allocate(size);
     }
 }
