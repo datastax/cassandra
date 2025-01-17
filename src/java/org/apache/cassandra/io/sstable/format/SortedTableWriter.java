@@ -509,6 +509,14 @@ public abstract class SortedTableWriter<P extends SortedTablePartitionWriter, I 
         }
     }
 
+    protected void invalidateCacheAtPreviousBoundary(FileHandle dfile, long newBoundary)
+    {
+        if (lastEarlyOpenLength != 0 && newBoundary > lastEarlyOpenLength)
+            dfile.rebuffererFactory().invalidateIfCached(lastEarlyOpenLength);
+
+        lastEarlyOpenLength = newBoundary;
+    }
+
     protected static abstract class AbstractIndexWriter extends AbstractTransactional implements Transactional
     {
         protected final Descriptor descriptor;

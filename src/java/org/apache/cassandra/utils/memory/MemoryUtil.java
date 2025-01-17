@@ -401,6 +401,12 @@ public abstract class MemoryUtil
         }
     }
 
+    /**
+     * Transfers the contents of a buffer to Memory
+     *
+     * @param address start offset in the memory
+     * @param buffer the data buffer
+     */
     public static void setBytes(long address, ByteBuffer buffer)
     {
         int start = buffer.position();

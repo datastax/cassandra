@@ -386,7 +386,7 @@ public class VerifyTest
             file.write(ByteBufferUtil.bytes(StringUtils.repeat('z', 2)));
         }
         if (ChunkCache.instance != null)
-            ChunkCache.instance.invalidateFile(sstable.getFilename());
+            ChunkCache.instance.invalidateFileNow(sstable.getDataFile());
 
         // Update the Digest to have the right Checksum
         writeChecksum(simpleFullChecksum(sstable.getFilename()), sstable.descriptor.fileFor(Components.DIGEST));
