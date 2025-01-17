@@ -22,18 +22,17 @@ package org.apache.cassandra.io.util;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.nio.FloatBuffer;
-import java.nio.IntBuffer;
-import java.nio.LongBuffer;
 
 import org.apache.cassandra.utils.memory.BufferPools;
 
-/**
- * Buffer manager used for reading from a ChunkReader when cache is not in use. Instances of this class are
- * reader-specific and thus do not need to be thread-safe since the reader itself isn't.
- *
- * The instances reuse themselves as the BufferHolder to avoid having to return a new object for each rebuffer call.
- */
+/// Buffer manager used for reading from a [ChunkReader] when cache is not in use. They use a buffer produced by the
+/// "networking" buffer pool, which is the one to be used for buffers that are not to be retained for a long time
+/// (the lifetime of this object is contained by the lifetime of a [RandomAccessReader] which is contained in a read
+/// operation's lifetime).
+///
+/// Instances of this class are reader-specific and thus do not need to be thread-safe since the reader itself isn't.
+///
+/// The instances reuse themselves as the BufferHolder to avoid having to return a new object for each rebuffer call.
 public abstract class BufferManagingRebufferer implements Rebufferer, Rebufferer.BufferHolder
 {
     protected final ChunkReader source;
@@ -45,14 +44,20 @@ public abstract class BufferManagingRebufferer implements Rebufferer, Rebufferer
     protected BufferManagingRebufferer(ChunkReader wrapped)
     {
         this.source = wrapped;
-        buffer = BufferPools.forChunkCache().get(wrapped.chunkSize(), wrapped.preferredBufferType()).order(ByteOrder.BIG_ENDIAN);
+        // Note: This class uses the networking buffer pool which makes better sense for short-lifetime buffers.
+        // Because this is meant to be used when the chunk cache is disabled, it also makes sense to use any memory
+        // that may have been allocated for in-flight data by using the chunk-cache pool.
+        // However, if some new functionality decides to use this class in the presence of the chunk cache (e.g.
+        // cache-bypassing compaction), using the chunk-cache pool here will certainly cause hard-to-diagnose issues
+        // that we would prefer to avoid.
+        buffer = BufferPools.forNetworking().get(wrapped.chunkSize(), wrapped.preferredBufferType()).order(ByteOrder.BIG_ENDIAN);
         buffer.limit(0);
     }
 
     @Override
     public void closeReader()
     {
-        BufferPools.forChunkCache().put(buffer);
+        BufferPools.forNetworking().put(buffer);
         source.releaseUnderlyingResources();
         offset = -1;
     }
@@ -102,31 +107,6 @@ public abstract class BufferManagingRebufferer implements Rebufferer, Rebufferer
     {
         return buffer.duplicate();
     }
-
-    @Override
-    public ByteOrder order()
-    {
-        return buffer.order();
-    }
-
-    @Override
-    public FloatBuffer floatBuffer()
-    {
-        return buffer.asFloatBuffer();
-    }
-
-    @Override
-    public IntBuffer intBuffer()
-    {
-        return buffer.asIntBuffer();
-    }
-
-    @Override
-    public LongBuffer longBuffer()
-    {
-        return buffer.asLongBuffer();
-    }
-
 
     public long offset()
     {

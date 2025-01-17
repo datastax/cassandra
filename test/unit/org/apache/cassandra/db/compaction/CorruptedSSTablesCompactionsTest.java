@@ -239,7 +239,7 @@ public class CorruptedSSTablesCompactionsTest
                 FileUtils.closeQuietly(raf);
                 }
                 if (ChunkCache.instance != null)
-                    ChunkCache.instance.invalidateFile(sstable.getFilename());
+                    ChunkCache.instance.invalidateFile(sstable.getDataFile());
             }
             while (readsWithoutError(sstable));
 

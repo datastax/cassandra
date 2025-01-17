@@ -223,17 +223,14 @@ public class FileHandle extends SharedCloseableImpl
         final ChannelProxy channel;
         final RebuffererFactory rebufferer;
         final CompressionMetadata compressionMetadata;
-        final Optional<ChunkCache> chunkCache;
 
         private Cleanup(ChannelProxy channel,
                         RebuffererFactory rebufferer,
-                        CompressionMetadata compressionMetadata,
-                        ChunkCache chunkCache)
+                        CompressionMetadata compressionMetadata)
         {
             this.channel = channel;
             this.rebufferer = rebufferer;
             this.compressionMetadata = compressionMetadata;
-            this.chunkCache = Optional.ofNullable(chunkCache);
         }
 
         public String name()
@@ -243,7 +240,8 @@ public class FileHandle extends SharedCloseableImpl
 
         public void tidy()
         {
-            chunkCache.ifPresent(cache -> cache.invalidateFile(name()));
+            // Note: we cannot release data held by the chunk cache at this point, because this would release data that
+            // is pre-cached by early open. Release is done during SSTableReader cleanup. See EarlyOpenCachingTest.
             try
             {
                 if (compressionMetadata != null)
@@ -471,7 +469,7 @@ public class FileHandle extends SharedCloseableImpl
                         rebuffererFactory = maybeCached(new SimpleChunkReader(channel, sliceDescriptor.dataEndOr(length), bufferType, chunkSize, sliceDescriptor.sliceStart));
                     }
                 }
-                Cleanup cleanup = new Cleanup(channel, rebuffererFactory, compressionMetadata, chunkCache);
+                Cleanup cleanup = new Cleanup(channel, rebuffererFactory, compressionMetadata);
 
                 FileHandle fileHandle = new FileHandle(cleanup, channel, rebuffererFactory, compressionMetadata, order, length, sliceDescriptor);
                 return fileHandle;
