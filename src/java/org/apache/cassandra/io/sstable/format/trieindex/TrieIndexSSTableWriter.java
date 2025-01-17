@@ -183,17 +183,19 @@ public class TrieIndexSSTableWriter extends SortedTableWriter
     @SuppressWarnings("resource")
     public boolean openEarly(Consumer<SSTableReader> callWhenReady)
     {
-        long dataLength = dataFile.position();
+        // Because the partition index writer is one partition behind, we want the file to stop at the start of the
+        // last partition that was written.
+        long dataLength = partitionWriter.partitionStart();
 
         return iwriter.buildPartial(dataLength, partitionIndex ->
         {
             StatsMetadata stats = statsMetadata();
             FileHandle ifile = iwriter.rowIndexFHBuilder.complete(iwriter.rowIndexFile.getLastFlushOffset());
             if (compression)
-                dbuilder.withCompressionMetadata(((CompressedSequentialWriter) dataFile).open(dataFile.getLastFlushOffset()));
+                dbuilder.withCompressionMetadata(((CompressedSequentialWriter) dataFile).open(dataLength));
             int dataBufferSize = optimizationStrategy.bufferSize(stats.estimatedPartitionSize.percentile(DatabaseDescriptor.getDiskOptimizationEstimatePercentile()));
-            FileHandle dfile = dbuilder.bufferSize(dataBufferSize).complete(dataFile.getLastFlushOffset());
-            invalidateCacheAtBoundary(dfile);
+            FileHandle dfile = dbuilder.bufferSize(dataBufferSize).complete(dataLength);
+            invalidateCacheAtPreviousBoundary(dfile, dataLength);
             SSTableReader sstable = TrieIndexSSTableReader.internalOpen(descriptor,
                                                                components(), metadata,
                                                                ifile, dfile, partitionIndex, iwriter.bf.sharedCopy(),
@@ -231,9 +233,9 @@ public class TrieIndexSSTableWriter extends SortedTableWriter
         FileHandle rowIndexFile = iwriter.rowIndexFHBuilder.complete();
         int dataBufferSize = optimizationStrategy.bufferSize(stats.estimatedPartitionSize.percentile(DatabaseDescriptor.getDiskOptimizationEstimatePercentile()));
         if (compression)
-            dbuilder.withCompressionMetadata(((CompressedSequentialWriter) dataFile).open(dataFile.getLastFlushOffset()));
+            dbuilder.withCompressionMetadata(((CompressedSequentialWriter) dataFile).open(0));
         FileHandle dfile = dbuilder.bufferSize(dataBufferSize).complete();
-        invalidateCacheAtBoundary(dfile);
+        invalidateCacheAtPreviousBoundary(dfile, Long.MAX_VALUE);
         SSTableReader sstable = TrieIndexSSTableReader.internalOpen(descriptor,
                                                             components(),
                                                             this.metadata,

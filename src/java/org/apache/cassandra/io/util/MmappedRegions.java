@@ -254,30 +254,6 @@ public class MmappedRegions extends SharedCloseableImpl
             return buffer.duplicate();
         }
 
-        @Override
-        public ByteOrder order()
-        {
-            return buffer.order();
-        }
-
-        public FloatBuffer floatBuffer()
-        {
-            // this does an implicit duplicate(), so we need to expose it directly to avoid doing it twice unnecessarily
-            return buffer.asFloatBuffer();
-        }
-
-        public IntBuffer intBuffer()
-        {
-            // this does an implicit duplicate(), so we need to expose it directly to avoid doing it twice unnecessarily
-            return buffer.asIntBuffer();
-        }
-
-        public LongBuffer longBuffer()
-        {
-            // this does an implicit duplicate(), so we need to expose it directly to avoid doing it twice unnecessarily
-            return buffer.asLongBuffer();
-        }
-
         public long offset()
         {
             return offset;

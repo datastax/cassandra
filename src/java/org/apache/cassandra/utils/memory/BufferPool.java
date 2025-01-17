@@ -23,6 +23,7 @@ import java.lang.ref.ReferenceQueue;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.ArrayDeque;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Queue;
 import java.util.Set;
@@ -130,6 +131,7 @@ public class BufferPool
     private static final Logger logger = LoggerFactory.getLogger(BufferPool.class);
     private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(logger, 15L, TimeUnit.MINUTES);
     private static final ByteBuffer EMPTY_BUFFER = ByteBuffer.allocateDirect(0);
+    private static final boolean DISABLE_COMBINED_ALLOCATION = Boolean.getBoolean("cassandra.bufferpool.disable_combined_allocation");
 
     private volatile Debug debug = Debug.NO_OP;
 
@@ -214,6 +216,44 @@ public class BufferPool
             return localPool.get().getAtLeast(size);
     }
 
+
+    /// Allocate the given amount of memory, where the caller can accept either of:
+    /// - a single buffer that can fit the whole region;
+    /// - multiple buffers of the given `chunkSize`.
+    ///
+    /// The total size must be a multiple of the chunk size.
+    ///
+    /// @param totalSize the total size to be allocated
+    /// @param chunkSize the size of each buffer returned, if the space cannot be allocated as one buffer
+    ///
+    /// @return an array of allocated buffers
+    public ByteBuffer[] getMultiple(int totalSize, int chunkSize, BufferType bufferType)
+    {
+        if (bufferType == BufferType.ON_HEAP)
+            return new ByteBuffer[] { allocate(totalSize, bufferType) };
+
+        // Try to find a buffer to fit the full request. Fragmentation can make this impossible even if we are below
+        // the limits.
+        LocalPool pool = localPool.get();
+        if (!DISABLE_COMBINED_ALLOCATION)
+        {
+            ByteBuffer full = pool.tryGet(totalSize, false);
+            if (full != null)
+                return new ByteBuffer[]{ full };
+        }
+
+        // If we don't get a whole buffer, allocate buffers of the requested chunk size.
+        int numBuffers = totalSize / chunkSize;
+        assert totalSize == chunkSize * numBuffers
+            : "Total size " + totalSize + " is not a multiple of chunk size " + chunkSize;
+        ByteBuffer[] buffers = new ByteBuffer[numBuffers];
+
+        for (int idx = 0; idx < numBuffers; ++idx)
+            buffers[idx] = pool.get(chunkSize);
+
+        return buffers;
+    }
+
     /** Unlike the get methods, this will return null if the pool is exhausted */
     public ByteBuffer tryGet(int size)
     {
@@ -239,6 +279,17 @@ public class BufferPool
             localPool.get().put(buffer);
         else
             updateOverflowMemoryUsage(-buffer.capacity());
+    }
+
+    /**
+     * Bulk release multiple buffers.
+     *
+     * @param buffers The buffers to be released.
+     */
+    public void putMultiple(ByteBuffer[] buffers)
+    {
+        for (ByteBuffer buffer : buffers)
+            put(buffer);
     }
 
     public void putUnusedPortion(ByteBuffer buffer)
