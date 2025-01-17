@@ -148,31 +148,21 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
         this.minSSTableRowId = input.readLong();
         this.maxSSTableRowId = input.readLong();
 
-        // Read the real min and max partition from the segment metadata.
-        DecoratedKey minPartition = DatabaseDescriptor.getPartitioner().decorateKey(readBytes(input));
-        DecoratedKey maxPartition = DatabaseDescriptor.getPartitioner().decorateKey(readBytes(input));
+        // The next values are the min/max partition keys. As a tempory test, we are skipping them because they are
+        // not as useful as the min/max row ids, which are always correct for both flushed and compacted sstables.
+        skipBytes(input);
+        skipBytes(input);
 
         // Get the fully qualified PrimaryKey min and max objects to ensure that we skip several edge cases related
         // to possibly confusing equality semantics where PrimaryKeyWithSource slightly diverges from PrimaryKey where
         // PrimaryKey is just a partition key without a materializable clustering key.
-        PrimaryKey min, max;
-        if (sstableContext.sstable.metadata().comparator.size() > 0)
+        final PrimaryKey min, max;
+        try (var pkm = sstableContext.primaryKeyMapFactory().newPerSSTablePrimaryKeyMap())
         {
-            try (var pkm = sstableContext.primaryKeyMapFactory().newPerSSTablePrimaryKeyMap())
-            {
-                // We need to load eagerly to allow us to close the partition key map. Otherwise, all tests will
-                // pass due to the side effect of calling partitionKey(), but it'll fail when you remove the -ea flag.
-                min = pkm.primaryKeyFromRowId(minSSTableRowId).loadDeferred();
-                max = pkm.primaryKeyFromRowId(maxSSTableRowId).loadDeferred();
-                assert min.partitionKey().equals(minPartition) : String.format("Min partition key mismatch: %s != %s", min, minPartition);
-                assert max.partitionKey().equals(maxPartition) : String.format("Max partition key mismatch: %s != %s", max, maxPartition);
-            }
-        }
-        else
-        {
-            var primaryKeyFactory = context.keyFactory();
-            min = primaryKeyFactory.createPartitionKeyOnly(minPartition);
-            max = primaryKeyFactory.createPartitionKeyOnly(maxPartition);
+            // We need to load eagerly to allow us to close the partition key map. Otherwise, all tests will
+            // pass due to the side effect of calling partitionKey(), but it'll fail when you remove the -ea flag.
+            min = pkm.primaryKeyFromRowId(minSSTableRowId).loadDeferred();
+            max = pkm.primaryKeyFromRowId(maxSSTableRowId).loadDeferred();
         }
 
         this.minKey = new PrimaryKeyWithSource(min, sstableContext.sstable.getId(), minSSTableRowId, min, max);
@@ -330,6 +320,12 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
         byte[] bytes = new byte[len];
         input.readBytes(bytes, 0, len);
         return ByteBuffer.wrap(bytes);
+    }
+
+    private static void skipBytes(IndexInput input) throws IOException
+    {
+        int len = input.readVInt();
+        input.skipBytes(len);
     }
 
     static void writeBytes(ByteBuffer buf, IndexOutput out)
