@@ -160,8 +160,10 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
         {
             try (var pkm = sstableContext.primaryKeyMapFactory().newPerSSTablePrimaryKeyMap())
             {
-                min = pkm.primaryKeyFromRowId(minSSTableRowId);
-                max = pkm.primaryKeyFromRowId(maxSSTableRowId);
+                // We need to load eagerly to allow us to close the partition key map. Otherwise, all tests will
+                // pass due to the side effect of calling partitionKey(), but it'll fail when you remove the -ea flag.
+                min = pkm.primaryKeyFromRowId(minSSTableRowId).loadDeferred();
+                max = pkm.primaryKeyFromRowId(maxSSTableRowId).loadDeferred();
                 assert min.partitionKey().equals(minPartition) : String.format("Min partition key mismatch: %s != %s", min, minPartition);
                 assert max.partitionKey().equals(maxPartition) : String.format("Max partition key mismatch: %s != %s", max, maxPartition);
             }
