@@ -63,27 +63,18 @@ public enum RequestFailureReason
         return code;
     }
 
-    private static final RequestFailureReason[] codeToReasonMap;
+    private static final Map<Integer, RequestFailureReason> codeToReasonMap = new HashMap<>();
     private static final Map<Class<? extends Throwable>, RequestFailureReason> exceptionToReasonMap = new HashMap<>();
 
     static
     {
         RequestFailureReason[] reasons = values();
 
-        int max = -1;
-        for (RequestFailureReason r : reasons)
-            max = max(r.code, max);
-
-        RequestFailureReason[] codeMap = new RequestFailureReason[max + 1];
-
         for (RequestFailureReason reason : reasons)
         {
-            if (codeMap[reason.code] != null)
+            if (codeToReasonMap.put(reason.code, reason) != null)
                 throw new RuntimeException("Two RequestFailureReason-s that map to the same code: " + reason.code);
-            codeMap[reason.code] = reason;
         }
-
-        codeToReasonMap = codeMap;
 
         exceptionToReasonMap.put(TombstoneOverwhelmingException.class, READ_TOO_MANY_TOMBSTONES);
         exceptionToReasonMap.put(IncompatibleSchemaException.class, INCOMPATIBLE_SCHEMA);
@@ -102,7 +93,7 @@ public enum RequestFailureReason
             throw new IllegalArgumentException("RequestFailureReason code must be non-negative (got " + code + ')');
 
         // be forgiving and return UNKNOWN if we aren't aware of the code - for forward compatibility
-        return (code < codeToReasonMap.length && codeToReasonMap[code] != null) ? codeToReasonMap[code] : UNKNOWN;
+        return codeToReasonMap.getOrDefault(code, UNKNOWN);
     }
 
     public static RequestFailureReason forException(Throwable t)
