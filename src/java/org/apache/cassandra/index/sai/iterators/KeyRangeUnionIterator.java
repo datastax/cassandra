@@ -163,8 +163,19 @@ public class KeyRangeUnionIterator extends KeyRangeIterator
                     return rangeIterators.get(0);
 
                 default:
-                    //TODO Need to test whether an initial sort improves things
-                    return new KeyRangeUnionIterator(statistics, rangeIterators);
+                    rangeIterators.sort((a, b) -> a.getMinimum().compareTo(b.getMinimum()));
+                    boolean isDisjoint = true;
+                    for (int i = 0; i < rangeIterators.size() - 1; i++)
+                    {
+                        if (rangeIterators.get(i).getMaximum().compareTo(rangeIterators.get(i + 1).getMinimum()) > 0)
+                        {
+                            isDisjoint = false;
+                            break;
+                        }
+                    }
+                    // If the iterators are not overlapping, then we can use the concat iterator which is more efficient
+                    return isDisjoint ? new KeyRangeConcatIterator(statistics, rangeIterators)
+                                      : new KeyRangeUnionIterator(statistics, rangeIterators);
             }
         }
     }
