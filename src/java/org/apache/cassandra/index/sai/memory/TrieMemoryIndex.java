@@ -35,6 +35,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.SortedSet;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.function.LongConsumer;
 import javax.annotation.Nullable;
@@ -83,6 +84,7 @@ public class TrieMemoryIndex extends MemoryIndex
 
     private final InMemoryTrie<PrimaryKeys> data;
     private final PrimaryKeysReducer primaryKeysReducer;
+    private final Map<PrimaryKeyTerm, Integer> termFrequencies;
 
     private final Memtable memtable;
     private AbstractBounds<PartitionPosition> keyBounds;
@@ -111,6 +113,30 @@ public class TrieMemoryIndex extends MemoryIndex
         this.data = InMemoryTrie.longLived(TypeUtil.BYTE_COMPARABLE_VERSION, TrieMemtable.BUFFER_TYPE, indexContext.columnFamilyStore().readOrdering());
         this.primaryKeysReducer = new PrimaryKeysReducer();
         this.memtable = memtable;
+        termFrequencies = new ConcurrentHashMap<>();
+    }
+
+    public static class PrimaryKeyTerm {
+        public final PrimaryKey primaryKey;
+        public final ByteBuffer term;
+
+        public PrimaryKeyTerm(PrimaryKey primaryKey, ByteBuffer term) {
+            this.primaryKey = primaryKey;
+            this.term = term;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+            PrimaryKeyTerm that = (PrimaryKeyTerm) o;
+            return primaryKey.equals(that.primaryKey) && term.equals(that.term);
+        }
+
+        @Override
+        public int hashCode() {
+            return 31 * primaryKey.hashCode() + term.hashCode();
+        }
     }
 
     public synchronized void add(DecoratedKey key,
@@ -142,7 +168,17 @@ public class TrieMemoryIndex extends MemoryIndex
 
                 try
                 {
-                    data.putSingleton(encodedTerm, primaryKey, primaryKeysReducer, term.limit() <= MAX_RECURSIVE_KEY_LENGTH);
+                    final ByteBuffer termCopy = term.duplicate();
+                    data.putSingleton(encodedTerm, primaryKey, (existing, update) -> {
+                        // First do the normal primary keys reduction
+                        PrimaryKeys result = primaryKeysReducer.apply(existing, update);
+
+                        // Then update term frequency
+                        PrimaryKeyTerm pkt = new PrimaryKeyTerm(update, termCopy);
+                        termFrequencies.merge(pkt, 1, Integer::sum);
+
+                        return result;
+                    }, term.limit() <= MAX_RECURSIVE_KEY_LENGTH);
                 }
                 catch (TrieSpaceExhaustedException e)
                 {
