@@ -425,6 +425,7 @@ public class IndexDescriptor
             boolean isValid = true;
             for (IndexComponentType expected : expectedComponentsForVersion())
             {
+                logger.info("Checking component {} for SSTable {}", expected, descriptor);
                 var component = components.get(expected);
                 if (component == null)
                 {

@@ -334,9 +334,13 @@ public class SAITester extends CQLTester
 
         for (SSTableReader sstable : cfs.getLiveSSTables())
         {
+            logger.info("Verifying checksum for sstable {}", sstable);
             IndexDescriptor indexDescriptor = loadDescriptor(sstable, cfs);
             if (indexDescriptor.isIndexEmpty(context))
+            {
+                logger.info("Skipping empty index");
                 continue;
+            }
             if (!indexDescriptor.perSSTableComponents().validateComponents(sstable, cfs.getTracker(), true)
                 || !indexDescriptor.perIndexComponents(context).validateComponents(sstable, cfs.getTracker(), true))
                 return false;
