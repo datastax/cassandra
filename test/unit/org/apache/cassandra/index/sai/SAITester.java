@@ -333,7 +333,7 @@ public class SAITester extends CQLTester
     {
         ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(currentTable());
 
-        for (SSTableReader sstable : cfs.getSSTables(SSTableSet.CANONICAL))
+        for (SSTableReader sstable : cfs.getCanonicalSSTables())
         {
             IndexDescriptor indexDescriptor = loadDescriptor(sstable, cfs);
             if (indexDescriptor.isIndexEmpty(context))
