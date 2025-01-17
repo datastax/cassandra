@@ -84,7 +84,7 @@ public class TrieMemoryIndex extends MemoryIndex
 
     private final InMemoryTrie<PrimaryKeys> data;
     private final PrimaryKeysReducer primaryKeysReducer;
-    private final Map<PrimaryKeyTerm, Integer> termFrequencies;
+    private final Map<PrimaryKeyWithByteComparable, Integer> termFrequencies;
 
     private final Memtable memtable;
     private AbstractBounds<PartitionPosition> keyBounds;
@@ -114,29 +114,6 @@ public class TrieMemoryIndex extends MemoryIndex
         this.primaryKeysReducer = new PrimaryKeysReducer();
         this.memtable = memtable;
         termFrequencies = new ConcurrentHashMap<>();
-    }
-
-    public static class PrimaryKeyTerm {
-        public final PrimaryKey primaryKey;
-        public final ByteBuffer term;
-
-        public PrimaryKeyTerm(PrimaryKey primaryKey, ByteBuffer term) {
-            this.primaryKey = primaryKey;
-            this.term = term;
-        }
-
-        @Override
-        public boolean equals(Object o) {
-            if (this == o) return true;
-            if (o == null || getClass() != o.getClass()) return false;
-            PrimaryKeyTerm that = (PrimaryKeyTerm) o;
-            return primaryKey.equals(that.primaryKey) && term.equals(that.term);
-        }
-
-        @Override
-        public int hashCode() {
-            return 31 * primaryKey.hashCode() + term.hashCode();
-        }
     }
 
     public synchronized void add(DecoratedKey key,
@@ -174,8 +151,8 @@ public class TrieMemoryIndex extends MemoryIndex
                         PrimaryKeys result = primaryKeysReducer.apply(existing, update);
 
                         // Then update term frequency
-                        PrimaryKeyTerm pkt = new PrimaryKeyTerm(update, termCopy);
-                        termFrequencies.merge(pkt, 1, Integer::sum);
+                        var pkbc = new PrimaryKeyWithByteComparable(indexContext, memtable, update, encodedTerm);
+                        termFrequencies.merge(pkbc, 1, Integer::sum);
 
                         return result;
                     }, term.limit() <= MAX_RECURSIVE_KEY_LENGTH);
@@ -197,10 +174,10 @@ public class TrieMemoryIndex extends MemoryIndex
     }
 
     @Override
-    public Iterator<Pair<ByteComparable, PrimaryKeys>> iterator()
+    public Iterator<Pair<ByteComparable, List<Pair<PrimaryKey, Integer>>>> iterator()
     {
         Iterator<Map.Entry<ByteComparable, PrimaryKeys>> iterator = data.entrySet().iterator();
-        return new Iterator<Pair<ByteComparable, PrimaryKeys>>()
+        return new Iterator<>()
         {
             @Override
             public boolean hasNext()
@@ -209,10 +186,13 @@ public class TrieMemoryIndex extends MemoryIndex
             }
 
             @Override
-            public Pair<ByteComparable, PrimaryKeys> next()
+            public Pair<ByteComparable, List<Pair<PrimaryKey, Integer>>> next()
             {
                 Map.Entry<ByteComparable, PrimaryKeys> entry = iterator.next();
-                return Pair.create(entry.getKey(), entry.getValue());
+                var pairs = new ArrayList<Pair<PrimaryKey, Integer>>(entry.getValue().size());
+                for (PrimaryKey pk : entry.getValue().keys())
+                    pairs.add(Pair.create(pk, termFrequencies.get(new PrimaryKeyWithByteComparable(indexContext, memtable, pk, entry.getKey()))));
+                return Pair.create(entry.getKey(), pairs);
             }
         };
     }
@@ -453,7 +433,6 @@ public class TrieMemoryIndex extends MemoryIndex
     {
         return Version.latest().onDiskFormat().encodeForTrie(input, indexContext.getValidator());
     }
-
 
     class PrimaryKeysReducer implements InMemoryTrie.UpsertTransformer<PrimaryKeys, PrimaryKey>
     {

@@ -50,12 +50,12 @@ import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Bounds;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
-import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.iterators.KeyRangeConcatIterator;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIntersectionIterator;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.iterators.KeyRangeLazyIterator;
+import org.apache.cassandra.index.sai.memory.TrieMemoryIndex.PrimaryKeyTerm;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.plan.Orderer;
 import org.apache.cassandra.index.sai.utils.BM25Utils;
@@ -68,7 +68,6 @@ import org.apache.cassandra.sensors.Context;
 import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.sensors.RequestTracker;
 import org.apache.cassandra.sensors.Type;
-import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.MergeIterator;
 import org.apache.cassandra.utils.Pair;
@@ -397,8 +396,7 @@ public class TrieMemtableIndex implements MemtableIndex
 
     private ByteComparable encode(ByteBuffer input)
     {
-        return indexContext.isLiteral() ? v -> ByteSource.preencoded(input)
-                                        : v -> TypeUtil.asComparableBytes(input, indexContext.getValidator(), v);
+        return Version.latest().onDiskFormat().encodeForTrie(input, indexContext.getValidator());
     }
 
     /**
@@ -413,7 +411,7 @@ public class TrieMemtableIndex implements MemtableIndex
      * @return iterator of indexed term to primary keys mapping in sorted by indexed term and primary key.
      */
     @Override
-    public Iterator<Pair<ByteComparable, Iterator<PrimaryKey>>> iterator(DecoratedKey min, DecoratedKey max)
+    public Iterator<Pair<ByteComparable, Iterator<Pair<PrimaryKey, Integer>>>> iterator(DecoratedKey min, DecoratedKey max)
     {
         int minSubrange = min == null ? 0 : boundaries.getShardForKey(min);
         int maxSubrange = max == null ? rangeIndexes.length - 1 : boundaries.getShardForKey(max);
@@ -422,15 +420,23 @@ public class TrieMemtableIndex implements MemtableIndex
         for (int i = minSubrange; i <= maxSubrange; i++)
             rangeIterators.add(rangeIndexes[i].iterator());
 
-        return MergeIterator.get(rangeIterators, (o1, o2) -> ByteComparable.compare(o1.left, o2.left, TypeUtil.BYTE_COMPARABLE_VERSION),
+        return MergeIterator.get(rangeIterators,
+                                 (o1, o2) -> ByteComparable.compare(o1.left, o2.left, TypeUtil.BYTE_COMPARABLE_VERSION),
                                  new PrimaryKeysMergeReducer(rangeIterators.size()));
     }
 
-    // The PrimaryKeysMergeReducer receives the range iterators from each of the range indexes selected based on the
-    // min and max keys passed to the iterator method. It doesn't strictly do any reduction because the terms in each
-    // range index are unique. It will receive at most one range index entry per selected range index before getReduced
-    // is called.
-    private static class PrimaryKeysMergeReducer extends Reducer<Pair<ByteComparable, PrimaryKeys>, Pair<ByteComparable, Iterator<PrimaryKey>>>
+    /**
+     * Used to merge sorted primary keys from multiple TrieMemoryIndex shards for a given indexed term.
+     * For each term that appears in multiple shards, the reducer:
+     * 1. Receives exactly one call to reduce() per shard containing that term
+     * 2. Merges all the primary keys for that term via getReduced()
+     * 3. Resets state via onKeyChange() before processing the next term
+     * <p>
+     * While this follows the Reducer pattern, its "reduction" operation is a simple merge since each term
+     * appears at most once per shard, and each key will only be found in a given shard, so there are no values to aggregate;
+     * we simply combine and sort the primary keys from each shard that contains the term.
+     */
+    private class PrimaryKeysMergeReducer extends Reducer<Pair<ByteComparable, PrimaryKeys>, Pair<ByteComparable, Iterator<Pair<PrimaryKey, Integer>>>>
     {
         private final Pair<ByteComparable, PrimaryKeys>[] rangeIndexEntriesToMerge;
         private final Comparator<PrimaryKey> comparator;
@@ -459,7 +465,7 @@ public class TrieMemtableIndex implements MemtableIndex
 
         @Override
         // Return a merger of the term keys for the term.
-        public Pair<ByteComparable, Iterator<PrimaryKey>> getReduced()
+        public Pair<ByteComparable, Iterator<Pair<PrimaryKey, Integer>>> getReduced()
         {
             Preconditions.checkArgument(term != null, "The term must exist in the memory index");
 
@@ -468,8 +474,9 @@ public class TrieMemtableIndex implements MemtableIndex
                 if (p != null && p.right != null && !p.right.isEmpty())
                     keyIterators.add(p.right.iterator());
 
-            Iterator<PrimaryKey> primaryKeys = MergeIterator.get(keyIterators, comparator, Reducer.getIdentity());
-            return Pair.create(term, primaryKeys);
+            Iterator<PrimaryKey> mergedKeys = MergeIterator.get(keyIterators, comparator, Reducer.getIdentity());
+            
+            return Pair.create(term, withFrequencies);
         }
 
         @Override
