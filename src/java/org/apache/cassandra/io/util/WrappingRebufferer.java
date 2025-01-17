@@ -18,7 +18,6 @@
 package org.apache.cassandra.io.util;
 
 import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
 import javax.annotation.concurrent.NotThreadSafe;
 
 /**
@@ -99,12 +98,6 @@ public abstract class WrappingRebufferer implements Rebufferer, Rebufferer.Buffe
     {
         assert buffer != null : "Buffer holder has not been acquired";
         return buffer;
-    }
-
-    @Override
-    public ByteOrder order()
-    {
-        return buffer.order();
     }
 
     @Override
