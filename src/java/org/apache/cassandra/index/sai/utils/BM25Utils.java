@@ -65,7 +65,7 @@ public class BM25Utils
         private final Map<ByteBuffer, Integer> frequencies;
         private final int termCount;
 
-        private DocTF(PrimaryKey pk, int termCount, Map<ByteBuffer, Integer> frequencies)
+        public DocTF(PrimaryKey pk, int termCount, Map<ByteBuffer, Integer> frequencies)
         {
             this.pk = pk;
             this.frequencies = frequencies;
@@ -105,33 +105,20 @@ public class BM25Utils
         }
     }
 
-    @FunctionalInterface
-    public interface CellReader
-    {
-        Cell<?> readCell(PrimaryKey pk);
-    }
-
-    public static CloseableIterator<PrimaryKeyWithSortKey> computeScores(Iterator<PrimaryKey> keyIterator,
+    public static CloseableIterator<PrimaryKeyWithSortKey> computeScores(Iterator<DocTF> docIterator,
                                                                          List<ByteBuffer> queryTerms,
                                                                          DocStats docStats,
                                                                          IndexContext indexContext,
-                                                                         Object source,
-                                                                         CellReader cellReader)
+                                                                         Object source)
     {
-        var docAnalyzer = indexContext.getAnalyzerFactory().create();
-
         // data structures for document stats and frequencies
         ArrayList<DocTF> documents = new ArrayList<>();
         double totalTermCount = 0;
 
         // Compute TF within each document
-        while (keyIterator.hasNext())
+        while (docIterator.hasNext())
         {
-            var pk = keyIterator.next();
-            var cell = cellReader.readCell(pk);
-            if (cell == null)
-                continue;
-            var tf = DocTF.createFromDocument(pk, cell, docAnalyzer, queryTerms);
+            var tf = docIterator.next();
 
             // sstable index will only send documents that contain all query terms to this method,
             // but memtable is not indexed and will send all documents, so we have to skip documents

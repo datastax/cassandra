@@ -216,6 +216,7 @@ public class PostingsWriter implements Closeable
         if (!(segmentRowId >= lastSegmentRowId || lastSegmentRowId == 0))
             throw new IllegalArgumentException(String.format(POSTINGS_MUST_BE_SORTED_ERROR_MSG, segmentRowId, lastSegmentRowId));
 
+        assert freq > 0;
         final long delta = segmentRowId - lastSegmentRowId;
         deltaBuffer[bufferUpto] = delta;
         freqBuffer[bufferUpto] = min(freq, 255);

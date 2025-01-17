@@ -31,6 +31,7 @@ import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
+import com.google.common.collect.Iterators;
 import com.google.common.util.concurrent.Runnables;
 
 import org.apache.cassandra.cql3.Operator;
@@ -49,6 +50,7 @@ import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Bounds;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
+import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.iterators.KeyRangeConcatIterator;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIntersectionIterator;
@@ -66,6 +68,7 @@ import org.apache.cassandra.sensors.Context;
 import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.sensors.RequestTracker;
 import org.apache.cassandra.sensors.Type;
+import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.MergeIterator;
 import org.apache.cassandra.utils.Pair;
@@ -265,12 +268,13 @@ public class TrieMemtableIndex implements MemtableIndex
 
         // Compute BM25 scores
         var docStats = computeDocumentFrequencies(queryContext, queryTerms);
-        return List.of(BM25Utils.computeScores(intersectedIterator,
+        var analyzer = indexContext.getAnalyzerFactory().create();
+        var it = Iterators.transform(intersectedIterator, pk -> BM25Utils.DocTF.createFromDocument(pk, getCellForKey(pk), analyzer, queryTerms));
+        return List.of(BM25Utils.computeScores(it,
                                                queryTerms,
                                                docStats,
                                                indexContext,
-                                               memtable,
-                                               this::getCellForKey));
+                                               memtable));
     }
 
     private List<KeyRangeIterator> keyIteratorsPerTerm(QueryContext queryContext, AbstractBounds<PartitionPosition> keyRange, List<ByteBuffer> queryTerms)
@@ -327,14 +331,15 @@ public class TrieMemtableIndex implements MemtableIndex
         }
 
         // BM25
+        var analyzer = indexContext.getAnalyzerFactory().create();
         var queryTerms = orderer.getQueryTerms();
         var docStats = computeDocumentFrequencies(queryContext, queryTerms);
-        return BM25Utils.computeScores(keys.iterator(),
+        var it = keys.stream().map(pk -> BM25Utils.DocTF.createFromDocument(pk, getCellForKey(pk), analyzer, queryTerms)).iterator();
+        return BM25Utils.computeScores(it,
                                        queryTerms,
                                        docStats,
                                        indexContext,
-                                       memtable,
-                                       this::getCellForKey);
+                                       memtable);
     }
 
     /**
