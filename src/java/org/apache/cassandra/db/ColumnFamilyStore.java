@@ -1905,15 +1905,6 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         return data.getLiveSSTables();
     }
 
-    /**
-     * Convenience method for getting the canonical sstables associated with this ColumnFamilyStore.
-     * @return the tracker's current view's {@link SSTableSet#CANONICAL} sstables
-     */
-    public Iterable<SSTableReader> getCanonicalSSTables()
-    {
-        return getSSTables(SSTableSet.CANONICAL);
-    }
-
     public Iterable<SSTableReader> getSSTables(SSTableSet sstableSet)
     {
         return data.getView().select(sstableSet);
