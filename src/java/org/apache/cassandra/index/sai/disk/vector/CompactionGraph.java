@@ -312,9 +312,10 @@ public class CompactionGraph implements Closeable, Accountable
                     trainingVectors.clear(); // don't need these anymore so let GC reclaim if it wants to
 
                     // re-encode the vectors added so far
+                    int encodedVectorCount = compressedVectors.count();
                     compressedVectors = new MutablePQVectors((ProductQuantization) compressor);
                     compactionFjp.submit(() -> {
-                        IntStream.range(0, builder.getGraph().getIdUpperBound())
+                        IntStream.range(0, encodedVectorCount)
                                  // FIXME parallel is disabled until 4.0.0 beta2 (encodeAndSet is not threadsafe before then)
 //                                 .parallel()
                                  .forEach(i -> {
