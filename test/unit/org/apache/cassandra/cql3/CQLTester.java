@@ -448,9 +448,10 @@ public abstract class CQLTester
 
         try
         {
-            Schema.instance.transform(schema -> schema.without(KEYSPACE_PER_TEST)
+            Schema.instance.transform(schema -> schema.without(List.of(KEYSPACE_PER_TEST))
                                                       .withAddedOrUpdated(KeyspaceMetadata.create(KEYSPACE, KeyspaceParams.simple(1)))
                                                       .without(keyspacesToDrop), true);
+
 
             // Dropping doesn't delete the sstables. It's not a huge deal but it's cleaner to cleanup after us
             // Thas said, we shouldn't delete blindly before the TransactionLogs.SSTableTidier for the table we drop
