@@ -142,4 +142,51 @@ public class IndexMetricsTest extends AbstractMetricsTest
 
         waitForVerifyHistogram(objectName("CompactionSegmentCellsPerSecond", keyspace, TABLE, INDEX, "IndexMetrics"), 1);
     }
+
+    private void assertIndexQueryCount(String index, long expectedCount)
+    {
+        assertEquals(expectedCount,
+                     getMetricValue(objectName("QueriesCount", KEYSPACE, currentTable(), index, "IndexMetrics")));
+    }
+
+    @Test
+    public void testQueriesCount()
+    {
+        createTable("CREATE TABLE %s (id1 TEXT PRIMARY KEY, v1 INT, v2 TEXT, v3 VECTOR<FLOAT, 2>)");
+        String indexV1 = createIndex("CREATE CUSTOM INDEX IF NOT EXISTS ON %s (v1) USING 'StorageAttachedIndex'");
+
+        int rowCount = 10;
+        for (int i = 0; i < rowCount; i++)
+            execute("INSERT INTO %s (id1, v1, v2, v3) VALUES (?, ?, '0', [?, 0.0])", Integer.toString(i), i, i);
+
+        assertIndexQueryCount(indexV1, 0L);
+
+        ResultSet rows = executeNet("SELECT id1 FROM %s WHERE v1 >= 0");
+        assertEquals(rowCount, rows.all().size());
+        assertIndexQueryCount(indexV1, 1L);
+
+        executeNet("SELECT id1 FROM %s WHERE (v1 >= 0 OR v1 = 4) AND v2 = '2' ALLOW FILTERING");
+        assertIndexQueryCount(indexV1, 2L);
+
+        String indexV2 = createIndex("CREATE CUSTOM INDEX IF NOT EXISTS ON %s (v2) USING 'StorageAttachedIndex'");
+        executeNet("SELECT id1 FROM %s WHERE (v1 >= 0 OR v1 = 4)");
+        assertIndexQueryCount(indexV1, 3L);
+        assertIndexQueryCount(indexV2, 0L);
+
+        executeNet("SELECT id1 FROM %s WHERE v2 = '2'");
+        assertIndexQueryCount(indexV2, 1L);
+        executeNet("SELECT id1 FROM %s WHERE (v1 >= 0 OR v1 = 4) AND v2 = '2'");
+        assertIndexQueryCount(indexV1, 4L);
+        assertIndexQueryCount(indexV2, 1L);
+        executeNet("SELECT id1 FROM %s WHERE (v1 >= 0 OR v1 = 4) ORDER BY v2 LIMIT 10");
+        assertIndexQueryCount(indexV1, 4L);
+        assertIndexQueryCount(indexV2, 2L);
+
+        String indexV3 = createIndex("CREATE CUSTOM INDEX IF NOT EXISTS ON %s (v3) USING 'StorageAttachedIndex'");
+        assertIndexQueryCount(indexV3, 0L);
+        executeNet("SELECT id1 FROM %s WHERE v2 = '2' ORDER BY v3 ANN OF [5,0] LIMIT 10");
+        assertIndexQueryCount(indexV1, 4L);
+        assertIndexQueryCount(indexV2, 2L);
+        assertIndexQueryCount(indexV3, 1L);
+    }
 }

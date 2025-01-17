@@ -18,12 +18,7 @@
 
 package org.apache.cassandra.index.sai.plan;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Comparator;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Objects;
+import java.util.*;
 import java.util.function.DoubleSupplier;
 import java.util.function.Function;
 import javax.annotation.Nonnull;
@@ -326,6 +321,15 @@ abstract public class Plan
     protected String description()
     {
         return "";
+    }
+
+    /**
+     * Adds an index to the set of indexes used by the plan node.
+     * Needs to be overwritten by nodes that use indexes.
+     */
+    protected void countIndex(HashSet<IndexContext> indexes)
+    {
+        // No index to count by default
     }
 
     /**
@@ -888,6 +892,13 @@ abstract public class Plan
             assert predicate != null || ordering != null;
             return predicate != null ? predicate.getIndexName() : ordering.getIndexName();
         }
+
+        @Override
+        final protected void countIndex(HashSet<IndexContext> indexes)
+        {
+            assert predicate != null || ordering != null;
+            indexes.add(predicate != null ? predicate.context : ordering.context);
+        }
     }
     /**
      * Represents a scan over a numeric storage attached index.
@@ -1348,6 +1359,12 @@ abstract public class Plan
         protected double estimateSelectivity()
         {
             return 1.0;
+        }
+
+        @Override
+        protected void countIndex(HashSet<IndexContext> indexes)
+        {
+            indexes.add(ordering.context);
         }
     }
 

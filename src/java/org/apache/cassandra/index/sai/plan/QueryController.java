@@ -18,13 +18,7 @@
 
 package org.apache.cassandra.index.sai.plan;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.HashMap;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -344,6 +338,15 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
                                                  makeFilter(key));
     }
 
+    private void updateIndexMetricsQueriesCount(Plan plan) {
+        HashSet<IndexContext> queriedIndexes = new HashSet<>();
+        plan.forEach(node -> {
+            node.countIndex(queriedIndexes);
+            return Plan.ControlFlow.Continue;
+        });
+        queriedIndexes.stream().forEach(indexContext -> indexContext.getIndexMetrics().queriesCount.inc());
+    }
+
     Plan buildPlan()
     {
         Plan.KeysIteration keysIterationPlan = buildKeysIterationPlan();
@@ -371,6 +374,8 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
             queryContext.setFilterSortOrder(QueryContext.FilterSortOrder.SCAN_THEN_FILTER);
         if (plan.contains(node -> node instanceof Plan.KeysSort))
             queryContext.setFilterSortOrder(QueryContext.FilterSortOrder.SEARCH_THEN_ORDER);
+
+        updateIndexMetricsQueriesCount(plan);
 
         if (logger.isTraceEnabled())
             logger.trace("Query execution plan:\n" + plan.toStringRecursive());
