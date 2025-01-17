@@ -425,7 +425,7 @@ public abstract class CQLTester
     public void beforeTest() throws Throwable
     {
         Schema.instance.transform(schema -> schema.withAddedOrUpdated(KeyspaceMetadata.create(KEYSPACE_PER_TEST, KeyspaceParams.simple(1)))
-                                                  .withAddedOrUpdated(KeyspaceMetadata.create(KEYSPACE, KeyspaceParams.simple(1))), true);
+                                                  .withAddedOrUpdated(KeyspaceMetadata.create(KEYSPACE, KeyspaceParams.simple(1))), false);
     }
 
     @After
@@ -450,18 +450,7 @@ public abstract class CQLTester
         {
             Schema.instance.transform(schema -> schema.without(List.of(KEYSPACE_PER_TEST))
                                                       .withAddedOrUpdated(KeyspaceMetadata.create(KEYSPACE, KeyspaceParams.simple(1)))
-                                                      .without(keyspacesToDrop), true);
-
-
-            // Dropping doesn't delete the sstables. It's not a huge deal but it's cleaner to cleanup after us
-            // Thas said, we shouldn't delete blindly before the TransactionLogs.SSTableTidier for the table we drop
-            // have run or they will be unhappy. Since those taks are scheduled on StorageService.tasks and that's
-            // mono-threaded, just push a task on the queue to find when it's empty. No perfect but good enough.
-            final CountDownLatch latch = new CountDownLatch(1);
-            ScheduledExecutors.nonPeriodicTasks.execute(latch::countDown);
-            latch.await(2, TimeUnit.SECONDS);
-            removeAllSSTables(KEYSPACE, tablesToDrop);
-            removeAllSSTables(KEYSPACE_PER_TEST, tablesToDrop);
+                                                      .without(keyspacesToDrop), false);
         }
         catch (Exception e)
         {
