@@ -1227,7 +1227,7 @@ abstract public class Plan
         private final KeysIteration source;
         final Orderer ordering;
 
-        protected KeysSort(Factory factory, int id, KeysIteration source, Access access, Orderer ordering)
+        KeysSort(Factory factory, int id, KeysIteration source, Access access, Orderer ordering)
         {
             super(factory, id, access);
             this.source = source;
@@ -1315,7 +1315,7 @@ abstract public class Plan
     {
         final Orderer ordering;
 
-        protected AnnIndexScan(Factory factory, int id, Access access, Orderer ordering)
+        AnnIndexScan(Factory factory, int id, Access access, Orderer ordering)
         {
             super(factory, id, access);
             this.ordering = ordering;
