@@ -56,7 +56,8 @@ import static org.apache.cassandra.net.MessagingService.VERSION_3014;
 import static org.apache.cassandra.net.MessagingService.VERSION_40;
 import static org.apache.cassandra.net.MessagingService.VERSION_41;
 import static org.apache.cassandra.net.MessagingService.VERSION_DSE_68;
-import static org.apache.cassandra.net.MessagingService.VERSION_SG_10;
+import static org.apache.cassandra.net.MessagingService.VERSION_DS_10;
+import static org.apache.cassandra.net.MessagingService.VERSION_DS_11;
 import static org.apache.cassandra.net.MessagingService.instance;
 import static org.apache.cassandra.utils.MonotonicClock.approxTime;
 import static org.apache.cassandra.utils.vint.VIntCoding.computeUnsignedVIntSize;
@@ -1435,7 +1436,8 @@ public class Message<T>
     private int serializedSize3014;
     private int serializedSize40;
     private int serializedSize41;
-    private int serializedSizeSG10;
+    private int serializedSizeDS10;
+    private int serializedSizeDS11;
     private int serializedSizeDSE68;
 
     /**
@@ -1461,13 +1463,17 @@ public class Message<T>
                 if (serializedSize41 == 0)
                     serializedSize41 = serializer.serializedSize(this, VERSION_41);
                 return serializedSize41;
-            case VERSION_SG_10:
-                if (serializedSizeSG10 == 0)
-                    serializedSizeSG10 = (int) serializer.serializedSize(this, VERSION_SG_10);
-                return serializedSizeSG10;
+            case VERSION_DS_10:
+                if (serializedSizeDS10 == 0)
+                    serializedSizeDS10 = serializer.serializedSize(this, VERSION_DS_10);
+                return serializedSizeDS10;
+            case VERSION_DS_11:
+                if (serializedSizeDS11 == 0)
+                    serializedSizeDS11 = serializer.serializedSize(this, VERSION_DS_11);
+                return serializedSizeDS11;
             case VERSION_DSE_68:
                 if (serializedSizeDSE68 == 0)
-                    serializedSizeDSE68 = (int) serializer.serializedSize(this, VERSION_DSE_68);
+                    serializedSizeDSE68 = serializer.serializedSize(this, VERSION_DSE_68);
                 return serializedSizeDSE68;
             default:
                 throw new IllegalStateException();
@@ -1478,7 +1484,8 @@ public class Message<T>
     private int payloadSize3014 = -1;
     private int payloadSize40   = -1;
     private int payloadSize41   = -1;
-    private int payloadSizeSG10 = -1;
+    private int payloadSizeDS10 = -1;
+    private int payloadSizeDS11 = -1;
     private int payloadSizeDSE68 = -1;
 
     public int payloadSize(int version)
@@ -1501,10 +1508,14 @@ public class Message<T>
                 if (payloadSize41 < 0)
                     payloadSize41 = serializer.payloadSize(this, VERSION_41);
                 return payloadSize41;
-            case VERSION_SG_10:
-                if (payloadSizeSG10 < 0)
-                    payloadSizeSG10 = serializer.payloadSize(this, VERSION_SG_10);
-                return payloadSizeSG10;
+            case VERSION_DS_10:
+                if (payloadSizeDS10 < 0)
+                    payloadSizeDS10 = serializer.payloadSize(this, VERSION_DS_10);
+                return payloadSizeDS10;
+            case VERSION_DS_11:
+                if (payloadSizeDS11 < 0)
+                    payloadSizeDS11 = serializer.payloadSize(this, VERSION_DS_11);
+                return payloadSizeDS11;
             case VERSION_DSE_68:
                 if (payloadSizeDSE68 < 0)
                     payloadSizeDSE68 = serializer.payloadSize(this, VERSION_DSE_68);
@@ -1526,8 +1537,8 @@ public class Message<T>
                 payloadSize40 = other.payloadSize40;
             if (other.payloadSize41 > 0)
                 payloadSize41 = other.payloadSize41;
-            if (other.payloadSizeSG10 > 0)
-                payloadSizeSG10 = other.payloadSizeSG10;
+            if (other.payloadSizeDS10 > 0)
+                payloadSizeDS10 = other.payloadSizeDS10;
             if (other.payloadSizeDSE68 > 0)
                 payloadSizeDSE68 = other.payloadSizeDSE68;
         }

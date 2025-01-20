@@ -699,14 +699,14 @@ public class RowFilter
         {
             public void serialize(FilterElement operation, DataOutputPlus out, int version) throws IOException
             {
-                assert (!operation.isDisjunction && operation.children().isEmpty()) || version == MessagingService.VERSION_SG_10 :
+                assert (!operation.isDisjunction && operation.children().isEmpty()) || version >= MessagingService.VERSION_DS_10 :
                 "Attempting to serialize a disjunct row filter to a node that doesn't support disjunction";
 
                 out.writeUnsignedVInt(operation.expressions.size());
                 for (Expression expr : operation.expressions)
                     Expression.serializer.serialize(expr, out, version);
 
-                if (version < MessagingService.VERSION_SG_10)
+                if (version < MessagingService.VERSION_DS_10)
                     return;
 
                 out.writeBoolean(operation.isDisjunction);
@@ -722,7 +722,7 @@ public class RowFilter
                 for (int i = 0; i < size; i++)
                     expressions.add(Expression.serializer.deserialize(in, version, metadata));
 
-                if (version < MessagingService.VERSION_SG_10)
+                if (version < MessagingService.VERSION_DS_10)
                     return new FilterElement(false, expressions, Collections.emptyList());
 
                 boolean isDisjunction = in.readBoolean();
@@ -739,7 +739,7 @@ public class RowFilter
                 for (Expression expr : operation.expressions)
                     size += Expression.serializer.serializedSize(expr, version);
 
-                if (version < MessagingService.VERSION_SG_10)
+                if (version < MessagingService.VERSION_DS_10)
                     return size;
 
                 size++; // isDisjunction boolean

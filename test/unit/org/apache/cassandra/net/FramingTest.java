@@ -40,10 +40,8 @@ import io.netty.buffer.ByteBuf;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.compress.BufferType;
-import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputBuffer;
-import org.apache.cassandra.io.util.DataOutputBufferFixed;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.memory.BufferPools;
@@ -53,9 +51,9 @@ import static java.lang.Math.*;
 import static org.apache.cassandra.net.MessagingService.VERSION_30;
 import static org.apache.cassandra.net.MessagingService.VERSION_3014;
 import static org.apache.cassandra.net.MessagingService.VERSION_40;
-import static org.apache.cassandra.net.MessagingService.VERSION_SG_10;
+import static org.apache.cassandra.net.MessagingService.VERSION_DS_10;
+import static org.apache.cassandra.net.MessagingService.VERSION_DS_11;
 import static org.apache.cassandra.net.MessagingService.current_version;
-import static org.apache.cassandra.net.MessagingService.minimum_version;
 import static org.apache.cassandra.net.OutboundConnections.LARGE_MESSAGE_THRESHOLD;
 import static org.apache.cassandra.net.ShareableBytes.wrap;
 
@@ -253,7 +251,7 @@ public class FramingTest
 
     private void burnRandomLegacy(int count)
     {
-        int[] versions = new int[] { VERSION_30, VERSION_3014, VERSION_40, VERSION_SG_10 };
+        int[] versions = new int[] { VERSION_30, VERSION_3014, VERSION_40, VERSION_DS_10, VERSION_DS_11 };
         SecureRandom seed = new SecureRandom();
         Random random = new Random();
         for (int i = 0 ; i < count ; ++i)
