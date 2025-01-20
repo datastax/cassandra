@@ -37,6 +37,7 @@ import org.slf4j.LoggerFactory;
 import io.netty.util.concurrent.Future; //checkstyle: permit this import
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.concurrent.Stage;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.exceptions.RequestFailureReason;
@@ -213,19 +214,20 @@ public class MessagingService extends MessagingServiceMBeanImpl implements Messa
     {
         /** @deprecated See CASSANDRA-18314 */
         @Deprecated(since = "5.0")
-        VERSION_30(10, false),
+        VERSION_30(MessagingService.VERSION_30, false),
         /** @deprecated See CASSANDRA-18314 */
         @Deprecated(since = "5.0")
-        VERSION_3014(11, false),
-        VERSION_40(12, false),
+        VERSION_3014(MessagingService.VERSION_3014, false),
+        VERSION_40(MessagingService.VERSION_40, false),
         // c14227 TTL overflow, 'uint' timestamps
-        VERSION_50(13, true),
-        VERSION_SG_10(100, false), // DS Converged Cassandra 4.0
-        VERSION_SG_20(110, true), // DS Converged Cassandra 5.0
-        VERSION_DSE_68(168, false), // DSE 6.8
+        VERSION_50(MessagingService.VERSION_50, true),
+        VERSION_DS_10(MessagingService.VERSION_DS_10, false), // DS Converged Cassandra 4.0
+        VERSION_DS_11(MessagingService.VERSION_DS_11, false),
+        VERSION_DS_20(MessagingService.VERSION_DS_20, true), // DS Converged Cassandra 5.0
+        VERSION_DSE_68(MessagingService.VERSION_DSE_68, false), // DSE 6.8
         ;
 
-        public static final Version CURRENT = VERSION_SG_20; // TODO - we should consider what should be there - also there is CASSANDRA-19126 which changes the logic here
+        public static final Version CURRENT = VERSION_DS_20; // TODO - we should consider what should be there - also there is CASSANDRA-19126 which changes the logic here
 
         public final int value;
         public final boolean supportsExtendedDeletionTime;
@@ -262,14 +264,17 @@ public class MessagingService extends MessagingServiceMBeanImpl implements Messa
     public static final int VERSION_3014 = 11;
     public static final int VERSION_40 = 12;
     public static final int VERSION_50 = 13; // c14227 TTL overflow, 'uint' timestamps
-    public static final int VERSION_SG_10 = 100; // DS Converged Cassandra 4.0
-    public static final int VERSION_SG_20 = 110; // DS Converged Cassandra 5.0
+    public static final int VERSION_DS_10 = 100; // DS Converged Cassandra 4.0
+    // Current DataStax version while we have serialization differences.
+    // If differences get merged upstream then we can revert to OS versioning.
+    public static final int VERSION_DS_11 = 101;
+    public static final int VERSION_DS_20 = 110; // DS Converged Cassandra 5.0
     public static final int minimum_version = VERSION_40;
-    public static final int maximum_version = VERSION_SG_20;
+    public static final int maximum_version = VERSION_DS_20;
     // we want to use a modified behavior for the tools and clients - that is, since they are not running a server, they
     // should not need to run in a compatibility mode. They should be able to connect to the server regardless whether
     // it uses messaving version 4 or 5
-    public static final int current_version = DatabaseDescriptor.getStorageCompatibilityMode().isBefore(5) ? VERSION_SG_10 : VERSION_SG_20;
+    public static final int current_version = currentVersion();
     // DSE 6.8 version for backward compatibility
     public static final int VERSION_DSE_68 = 168;
     static AcceptVersions accept_messaging;
@@ -287,7 +292,19 @@ public class MessagingService extends MessagingServiceMBeanImpl implements Messa
             accept_streaming = new AcceptVersions(minimum_version, current_version);
         }
     }
-    static Map<Integer, Integer> versionOrdinalMap = Arrays.stream(Version.values()).collect(Collectors.toMap(v -> v.value, v -> v.ordinal()));
+    static Map<Integer, Integer> versionOrdinalMap = Arrays.stream(Version.values()).collect(Collectors.toMap(v -> v.value, Enum::ordinal));
+
+    private static int currentVersion()
+    {
+        int version = CassandraRelevantProperties.DS_CURRENT_MESSAGING_VERSION.getInt();
+        for (Version v : Version.values())
+        {
+            if (v.value == version)
+                return version;
+        }
+        throw new IllegalArgumentException("Unsupported current messaging version: " + version);
+    }
+
     /**
      * This is an optimisation to speed up the translation of the serialization
      * version to the {@link Version} enum ordinal.
