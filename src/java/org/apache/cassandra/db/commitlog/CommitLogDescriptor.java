@@ -68,8 +68,9 @@ public class CommitLogDescriptor
     public static final int VERSION_40 = 7;
     public static final int VERSION_50 = 8;
     // Stargazer 1.0 messaging
-    public static final int VERSION_SG_10 = 100;
-    public static final int VERSION_SG_20 = 110;
+    static final int VERSION_DS_10 = MessagingService.VERSION_DS_10;
+    static final int VERSION_DS_11 = MessagingService.VERSION_DS_11;
+    static final int VERSION_DS_20 = MessagingService.VERSION_DS_20;
     // For compatibility with CNDB
     public static final int VERSION_DSE_68 = 680;
 
@@ -78,7 +79,7 @@ public class CommitLogDescriptor
      * Note: make sure to handle {@link #getMessagingVersion()}
      */
     @VisibleForTesting
-    public static final int current_version = VERSION_SG_20; // TODO revisit storage compatiblity mode
+    public static final int CURRENT_VERSION = MessagingService.current_version;
 
     final int version;
     public final long id;
@@ -95,7 +96,7 @@ public class CommitLogDescriptor
 
     public CommitLogDescriptor(long id, ParameterizedClass compression, EncryptionContext encryptionContext)
     {
-        this(current_version, id, compression, encryptionContext);
+        this(CURRENT_VERSION, id, compression, encryptionContext);
     }
 
     public static void writeHeader(ByteBuffer out, CommitLogDescriptor descriptor)
@@ -234,10 +235,12 @@ public class CommitLogDescriptor
                 return MessagingService.Version.VERSION_40.value;
             case VERSION_50:
                 return MessagingService.Version.VERSION_50.value;
-            case VERSION_SG_10:
-                return MessagingService.Version.VERSION_SG_10.value;
-            case VERSION_SG_20:
-                return MessagingService.Version.VERSION_SG_20.value;
+            case VERSION_DS_10:
+                return MessagingService.Version.VERSION_DS_10.value;
+            case VERSION_DS_11:
+                return MessagingService.Version.VERSION_DS_11.value;
+            case VERSION_DS_20:
+                return MessagingService.Version.VERSION_DS_20.value;
             case VERSION_DSE_68:
                 return MessagingService.Version.VERSION_DSE_68.value;
             default:
