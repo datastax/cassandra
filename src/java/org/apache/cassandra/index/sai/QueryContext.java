@@ -211,9 +211,14 @@ public class QueryContext
         return filterSortOrder;
     }
 
+    public long approximateRemainingTimeNs()
+    {
+        return executionQuotaNano - totalQueryTimeNs();
+    }
+
     public void checkpoint()
     {
-        if (totalQueryTimeNs() >= executionQuotaNano && !DISABLE_TIMEOUT)
+        if (approximateRemainingTimeNs() < 0 && !DISABLE_TIMEOUT)
         {
             addQueryTimeouts(1);
             throw new AbortedOperationException();

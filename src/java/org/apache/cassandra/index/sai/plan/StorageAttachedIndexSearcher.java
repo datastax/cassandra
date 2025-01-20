@@ -21,12 +21,13 @@ package org.apache.cassandra.index.sai.plan;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Map;
-import java.util.PriorityQueue;
 import java.util.Queue;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
@@ -38,6 +39,10 @@ import com.google.common.base.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.concurrent.ImmediateExecutor;
+import org.apache.cassandra.concurrent.LocalAwareExecutorService;
+import org.apache.cassandra.concurrent.SharedExecutorPool;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.DecoratedKey;
@@ -58,11 +63,13 @@ import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.metrics.TableQueryMetrics;
+import org.apache.cassandra.index.sai.utils.AbortedOperationException;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.FBUtilities;
@@ -462,6 +469,31 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
      */
     public static class ScoreOrderedResultRetriever extends AbstractIterator<UnfilteredRowIterator> implements UnfilteredPartitionIterator
     {
+        private static final LocalAwareExecutorService PARALLEL_EXECUTOR = getExecutor();
+
+        /**
+         * Executor to use for parallel index reads.
+         * Defined by -Dcassandra.index_read.parallele=true/false, true by default.
+         *
+         * INDEX_READ uses 2 * cpus threads by default but can be overridden with -Dcassandra.index_read.parallel_thread_num=<value>
+         *
+         * @return stage to use, default INDEX_READ
+         */
+        private static LocalAwareExecutorService getExecutor()
+        {
+            boolean isParallel = CassandraRelevantProperties.USE_PARALLEL_INDEX_READ.getBoolean();
+
+            if (isParallel)
+            {
+                int numThreads = CassandraRelevantProperties.PARALLEL_INDEX_READ_NUM_THREADS.isPresent()
+                                 ? CassandraRelevantProperties.PARALLEL_INDEX_READ_NUM_THREADS.getInt()
+                                 : FBUtilities.getAvailableProcessors() * 2;
+                return SharedExecutorPool.SHARED.newExecutor(numThreads, maximumPoolSize -> {}, "request", "IndexParallelRead");
+            }
+            else
+                return ImmediateExecutor.INSTANCE;
+        }
+
         private final ColumnFamilyStore.RefViewFragment view;
         private final List<AbstractBounds<PartitionPosition>> keyRanges;
         private final boolean coversFullRing;
@@ -471,7 +503,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         private final ReadExecutionController executionController;
         private final QueryContext queryContext;
 
-        private final HashSet<PrimaryKey> processedKeys;
+        private final ConcurrentHashMap<PrimaryKey, Boolean> processedKeys;
         private final Queue<UnfilteredRowIterator> pendingRows;
 
         // The limit requested by the query. We cannot load more than softLimit rows in bulk because we only want
@@ -499,7 +531,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             this.executionController = executionController;
             this.queryContext = queryContext;
 
-            this.processedKeys = new HashSet<>(limit);
+            this.processedKeys = new ConcurrentHashMap<>(limit);
             this.pendingRows = new ArrayDeque<>(limit);
             this.softLimit = limit;
         }
@@ -516,56 +548,111 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
 
         /**
          * Fills the pendingRows queue to generate a queue of row iterators for the supplied keys by repeatedly calling
-         * {@link #readAndValidatePartition} until it gives enough non-null results.
+         * {@link #fillRowsAsync} until it gives enough results or the source iterator is exhausted.
          */
         private void fillPendingRows()
         {
             // We always want to get at least 1.
             int rowsToRetrieve = Math.max(1, softLimit - returnedRowCount);
-            var keys = new HashMap<PrimaryKey, List<PrimaryKeyWithSortKey>>();
-            // We want to get the first unique `rowsToRetrieve` keys to materialize
-            // Don't pass the priority queue here because it is more efficient to add keys in bulk
-            fillKeys(keys, rowsToRetrieve, null);
-            // Sort the primary keys by PrK order, just in case that helps with cache and disk efficiency
-            var primaryKeyPriorityQueue = new PriorityQueue<>(keys.keySet());
 
-            while (!keys.isEmpty())
+            while (pendingRows.size() < rowsToRetrieve)
             {
-                var primaryKey = primaryKeyPriorityQueue.poll();
-                var primaryKeyWithSortKeys = keys.remove(primaryKey);
-                var partitionIterator = readAndValidatePartition(primaryKey, primaryKeyWithSortKeys);
-                if (partitionIterator != null)
-                    pendingRows.add(partitionIterator);
-                else
-                    // The current primaryKey did not produce a partition iterator. We know the caller will need
-                    // `rowsToRetrieve` rows, so we get the next unique key and add it to the queue.
-                    fillKeys(keys, 1, primaryKeyPriorityQueue);
+                queryContext.checkpoint();
+                // We want to get the first unique `rowsToRetrieve` keys to materialize
+                // Don't pass the priority queue here because it is more efficient to add keys in bulk
+                var isSourceExchausted = fillRowsAsync(rowsToRetrieve - pendingRows.size());
+                if (isSourceExchausted)
+                    return;
             }
         }
 
         /**
-         * Fills the keys map with the next `count` unique primary keys that are in the keys produced by calling
-         * {@link #nextSelectedKeyInRange()}. We map PrimaryKey to List<PrimaryKeyWithSortKey> because the same
-         * primary key can be in the result set multiple times, but with different source tables.
-         * @param keys the map to fill
+         * Consumes the next `count` unique primary keys produced {@link #nextSelectedKeyInRange()}, then materializes
+         * and validates the associated rows for each key using the configured executor. The method updates the
+         * {@link #pendingRows} queue with the materialized rows and the {@link #processedKeys} map with the keys that
+         * have been processed and can safely be skipped if seen again, which is possible because the score ordered
+         * iterator does not deduplicate keys.
+         *
          * @param count the number of unique PrimaryKeys to consume from the iterator
-         * @param primaryKeyPriorityQueue the priority queue to add new keys to. If the queue is null, we do not add
-         *                                keys to the queue.
+         * @return true if the source iterator is exhausted, false otherwise. We pass this information to the caller
+         *         to skip an unnecessary call to {@link Iterator#hasNext()}, which likely triggers a disk read.
          */
-        private void fillKeys(Map<PrimaryKey, List<PrimaryKeyWithSortKey>> keys, int count, PriorityQueue<PrimaryKey> primaryKeyPriorityQueue)
+        private boolean fillRowsAsync(int count)
         {
-            int initialSize = keys.size();
-            while (keys.size() - initialSize < count)
+            // We store a mapping of primary key to the collection of PrimaryKeyWithSortKey objects that will be used
+            // to validate the row.
+            var keysToMaterialize = new HashMap<PrimaryKey, List<PrimaryKeyWithSortKey>>();
+            while (keysToMaterialize.size() < count)
             {
                 var primaryKeyWithSortKey = nextSelectedKeyInRange();
+                // The iterator is exhausted.
                 if (primaryKeyWithSortKey == null)
-                    return;
+                    break;
+                // If we've already processed the key, we can skip it. Because the score ordered iterator does not
+                // deduplicate rows, we could see dupes if a row is in the ordering index multiple times. This happens
+                // in the case of dupes and of overwrites.
+                if (processedKeys.containsKey(primaryKeyWithSortKey.primaryKey()))
+                    continue;
                 var nextPrimaryKey = primaryKeyWithSortKey.primaryKey();
-                var accumulator = keys.computeIfAbsent(nextPrimaryKey, k -> new ArrayList<>());
-                if (primaryKeyPriorityQueue != null && accumulator.isEmpty())
-                    primaryKeyPriorityQueue.add(nextPrimaryKey);
-                accumulator.add(primaryKeyWithSortKey);
+                keysToMaterialize.computeIfAbsent(nextPrimaryKey, k -> new ArrayList<>()).add(primaryKeyWithSortKey);
             }
+
+            if (keysToMaterialize.isEmpty())
+                return true;
+
+            List<CompletableFuture<UnfilteredRowIterator>> rowFutures = new ArrayList<>(keysToMaterialize.size());
+
+            // Iterate through the keys and materialize the partitions using the configured executor.
+            for (var entry : keysToMaterialize.entrySet())
+            {
+                var primaryKey = entry.getKey();
+                var primaryKeyValidators = entry.getValue();
+                CompletableFuture<UnfilteredRowIterator> future = new CompletableFuture<>();
+                rowFutures.add(future);
+                PARALLEL_EXECUTOR.maybeExecuteImmediately(() -> {
+                    // We cancel the future if the query has timed out, so it is worth a quick read to the
+                    // volatile field to possibly avoid getting the partition unnecessarily.
+                    if (future.isDone())
+                        return;
+                    try (var partition = controller.getPartition(primaryKey, view, executionController))
+                    {
+                        // Validates that the parition's row is valid for the query predicates. It returns null
+                        // if the row is not valid. Reasons for invalidity include:
+                        // 1. The row is a range or row tombstone or is expired.
+                        // 2. The row does not satisfy the query predicates
+                        // 3. The row does not satisfy the ORDER BY clause
+                        var partitionIterator = validatePartition(primaryKey, primaryKeyValidators, partition);
+                        future.complete(partitionIterator);
+                    }
+                    catch (Throwable t)
+                    {
+                        future.completeExceptionally(t);
+                    }
+                });
+            }
+
+            var rowsFuturesIterator = rowFutures.iterator();
+            try
+            {
+                while (rowsFuturesIterator.hasNext())
+                {
+                    var nanosRemaining = queryContext.approximateRemainingTimeNs();
+                    UnfilteredRowIterator partitionIterator = rowsFuturesIterator.next().get(nanosRemaining, TimeUnit.NANOSECONDS);
+                    if (partitionIterator != null)
+                        pendingRows.add(partitionIterator);
+                }
+            }
+            catch (Throwable t)
+            {
+                // Instead of cancelling the futures, we complete them with null to avoid extra work associated with
+                // building a stack trace.
+                rowsFuturesIterator.forEachRemaining(f -> f.complete(null));
+                if (t.getCause() instanceof AbortedOperationException)
+                    throw (AbortedOperationException) t.getCause();
+                throw new CompletionException(t);
+            }
+
+            return false;
         }
 
         /**
@@ -601,48 +688,53 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             return null;
         }
 
-        public UnfilteredRowIterator readAndValidatePartition(PrimaryKey key, List<PrimaryKeyWithSortKey> primaryKeys)
+        public UnfilteredRowIterator validatePartition(PrimaryKey key, List<PrimaryKeyWithSortKey> primaryKeys, UnfilteredRowIterator partition)
         {
-            // If we've already processed the key, we can skip it. Because the score ordered iterator does not
-            // deduplicate rows, we could see dupes if a row is in the ordering index multiple times. This happens
-            // in the case of dupes and of overwrites.
-            if (processedKeys.contains(key))
-                return null;
+            queryContext.addPartitionsRead(1);
+            queryContext.checkpoint();
+            var staticRow = partition.staticRow();
+            UnfilteredRowIterator clusters = applyIndexFilter(partition, filterTree, queryContext);
 
-            try (UnfilteredRowIterator partition = controller.getPartition(key, view, executionController))
+            if (clusters == null || !clusters.hasNext())
             {
-                queryContext.addPartitionsRead(1);
-                queryContext.checkpoint();
-                var staticRow = partition.staticRow();
-                UnfilteredRowIterator clusters = applyIndexFilter(partition, filterTree, queryContext);
+                processedKeys.put(key, Boolean.TRUE);
+                return null;
+            }
 
-                if (clusters == null || !clusters.hasNext())
+            var now = FBUtilities.nowInSeconds();
+            boolean isRowValid = false;
+            var row = clusters.next();
+            assert !clusters.hasNext() : "Expected only one row per partition";
+            if (!row.isRangeTombstoneMarker())
+            {
+                for (PrimaryKeyWithSortKey primaryKeyWithSortKey : primaryKeys)
                 {
-                    processedKeys.add(key);
-                    return null;
-                }
-
-                var now = FBUtilities.nowInSeconds();
-                boolean isRowValid = false;
-                var row = clusters.next();
-                assert !clusters.hasNext() : "Expected only one row per partition";
-                if (!row.isRangeTombstoneMarker())
-                {
-                    for (PrimaryKeyWithSortKey primaryKeyWithSortKey : primaryKeys)
+                    // Each of these primary keys are equal, but they have different source tables. Therefore,
+                    // we check to see if the row is valid for any of them, and if it is, we return the row.
+                    if (primaryKeyWithSortKey.isIndexDataValid((Row) row, now))
                     {
-                        // Each of these primary keys are equal, but they have different source tables. Therefore,
-                        // we check to see if the row is valid for any of them, and if it is, we return the row.
-                        if (primaryKeyWithSortKey.isIndexDataValid((Row) row, now))
-                        {
-                            isRowValid = true;
-                            // We can only count the key as processed once we know it was valid for one of the
-                            // primary keys.
-                            processedKeys.add(key);
-                            break;
-                        }
+                        isRowValid = true;
+                        // We can only count the key as processed once we know it was valid for one of the
+                        // primary keys.
+                        processedKeys.put(key, Boolean.TRUE);
+                        break;
                     }
                 }
-                return isRowValid ? new PrimaryKeyIterator(partition, staticRow, row) : null;
+            }
+            return isRowValid ? new PrimaryKeyIterator(partition, staticRow, row) : null;
+        }
+
+        private static class PrimaryKeyResult
+        {
+            final PrimaryKey primaryKey;
+            final List<PrimaryKeyWithSortKey> primaryKeyWithSortKeys;
+            final UnfilteredRowIterator partition;
+
+            PrimaryKeyResult(PrimaryKey primaryKey, List<PrimaryKeyWithSortKey> primaryKeyWithSortKeys, UnfilteredRowIterator partition)
+            {
+                this.primaryKey = primaryKey;
+                this.primaryKeyWithSortKeys = primaryKeyWithSortKeys;
+                this.partition = partition;
             }
         }
 

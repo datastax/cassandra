@@ -50,12 +50,13 @@ import org.apache.cassandra.utils.NoSpamLogger;
 
 public class QueryView implements AutoCloseable
 {
-    final ColumnFamilyStore.RefViewFragment view;
+    // We use a SortedRefViewFragment because it can be safely shared across multiple threads when materializing rows.
+    final ColumnFamilyStore.SortedRefViewFragment view;
     final Set<SSTableIndex> referencedIndexes;
     final Set<MemtableIndex> memtableIndexes;
     final IndexContext indexContext;
 
-    public QueryView(ColumnFamilyStore.RefViewFragment view,
+    public QueryView(ColumnFamilyStore.SortedRefViewFragment view,
                      Set<SSTableIndex> referencedIndexes,
                      Set<MemtableIndex> memtableIndexes,
                      IndexContext indexContext)
@@ -264,7 +265,7 @@ public class QueryView implements AutoCloseable
                     // freeze referencedIndexes and memtableIndexes, so we can safely give access to them
                     // without risking something messes them up
                     // (this was added after KeyRangeTermIterator messed them up which led to a bug)
-                    return new QueryView(refViewFragment,
+                    return new QueryView(ColumnFamilyStore.SortedRefViewFragment.sortThenCreateFrom(refViewFragment),
                                          Collections.unmodifiableSet(referencedIndexes),
                                          Collections.unmodifiableSet(memtableIndexes),
                                          indexContext);
