@@ -143,7 +143,7 @@ public class RowFilter
 
     /**
      * @return true if this filter belongs to a read that requires reconciliation at the coordinator
-     * @see StatementRestrictions#getRowFilter(IndexRegistry, QueryOptions)
+     * @see StatementRestrictions#getRowFilter(IndexRegistry, QueryOptions, ClientState)
      */
     public boolean needsReconciliation()
     {
@@ -812,13 +812,17 @@ public class RowFilter
         {
             public void serialize(FilterElement operation, DataOutputPlus out, int version) throws IOException
             {
-                assert (!operation.isDisjunction && operation.children().isEmpty()) || version >= MessagingService.Version.VERSION_SG_10.value :
+                assert (!operation.isDisjunction && operation.children().isEmpty()) || version >= MessagingService.VERSION_DS_10 :
                 "Attempting to serialize a disjunct row filter to a node that doesn't support disjunction";
 
-                out.writeBoolean(operation.isDisjunction);
                 out.writeUnsignedVInt32(operation.expressions.size());
                 for (Expression expr : operation.expressions)
                     Expression.serializer.serialize(expr, out, version);
+
+                if (version < MessagingService.VERSION_DS_10)
+                    return;
+
+                out.writeBoolean(operation.isDisjunction);
                 out.writeUnsignedVInt32(operation.children.size());
                 for (FilterElement child : operation.children)
                     serialize(child, out, version);
@@ -826,12 +830,16 @@ public class RowFilter
 
             public FilterElement deserialize(DataInputPlus in, int version, TableMetadata metadata) throws IOException
             {
-                boolean isDisjunction = in.readBoolean();
-                int size = (int)in.readUnsignedVInt32();
+                int size = in.readUnsignedVInt32();
                 List<Expression> expressions = new ArrayList<>(size);
                 for (int i = 0; i < size; i++)
                     expressions.add(Expression.serializer.deserialize(in, version, metadata));
-                size = (int)in.readUnsignedVInt32();
+
+                if (version < MessagingService.VERSION_DS_10)
+                    return new FilterElement(false, expressions, Collections.emptyList());
+
+                boolean isDisjunction = in.readBoolean();
+                size = in.readUnsignedVInt32();
                 List<FilterElement> children = new ArrayList<>(size);
                 for (int i  = 0; i < size; i++)
                     children.add(deserialize(in, version, metadata));
@@ -840,9 +848,14 @@ public class RowFilter
 
             public long serializedSize(FilterElement operation, int version)
             {
-                long size = 1 + TypeSizes.sizeofUnsignedVInt(operation.expressions.size());
+                long size = TypeSizes.sizeofUnsignedVInt(operation.expressions.size());
                 for (Expression expr : operation.expressions)
                     size += Expression.serializer.serializedSize(expr, version);
+
+                if (version < MessagingService.VERSION_DS_10)
+                    return size;
+
+                size++; // isDisjunction boolean
                 size += TypeSizes.sizeofUnsignedVInt(operation.children.size());
                 for (FilterElement child : operation.children)
                     size += serializedSize(child, version);
