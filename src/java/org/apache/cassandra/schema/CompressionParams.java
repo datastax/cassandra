@@ -355,7 +355,7 @@ public final class CompressionParams
             int parsed = Integer.parseInt(chLengthKB);
             if (parsed > Integer.MAX_VALUE / 1024)
                 throw new ConfigurationException(format("Value of %s is too large (%s)", CHUNK_LENGTH_IN_KB,parsed));
-            if (parsed * 1024 < PageAware.PAGE_SIZE && ChunkCache.instance.isEnabled())
+            if (parsed * 1024 < PageAware.PAGE_SIZE && ChunkCache.instance != null && ChunkCache.instance.isEnabled())
                 logger.warn("Chunk length {} KiB is smaller than the page size {} KiB. " +
                             "This is not recommended as it will cause wasted chunk cache space.",
                             parsed, PageAware.PAGE_SIZE / 1024);
