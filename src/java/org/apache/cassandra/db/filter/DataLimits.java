@@ -1432,7 +1432,7 @@ public abstract class DataLimits
                     CQLLimits cqlLimits = (CQLLimits)limits;
                     out.writeUnsignedVInt32(cqlLimits.rowLimit);
                     out.writeUnsignedVInt32(cqlLimits.perPartitionLimit);
-                    if (version >= MessagingService.VERSION_SG_10)
+                    if (version >= MessagingService.VERSION_DS_10)
                         out.writeUnsignedVInt32(cqlLimits.bytesLimit);
                     out.writeBoolean(cqlLimits.isDistinct);
                     if (limits.kind() == Kind.CQL_PAGING_LIMIT)
@@ -1448,7 +1448,7 @@ public abstract class DataLimits
                     out.writeUnsignedVInt32(groupByLimits.groupLimit);
                     out.writeUnsignedVInt32(groupByLimits.groupPerPartitionLimit);
                     out.writeUnsignedVInt32(groupByLimits.rowLimit);
-                    if (version >= MessagingService.VERSION_SG_10)
+                    if (version >= MessagingService.VERSION_DS_10)
                         out.writeUnsignedVInt32(groupByLimits.bytesLimit);
 
                     AggregationSpecification groupBySpec = groupByLimits.groupBySpec;
@@ -1482,7 +1482,7 @@ public abstract class DataLimits
                 {
                     int rowLimit = in.readUnsignedVInt32();
                     int perPartitionLimit = in.readUnsignedVInt32();
-                    int bytesLimit = version >= MessagingService.VERSION_SG_10 ? (int) in.readUnsignedVInt() : NO_LIMIT;
+                    int bytesLimit = version >= MessagingService.VERSION_DS_10 ? (int) in.readUnsignedVInt() : NO_LIMIT;
                     boolean isDistinct = in.readBoolean();
                     if (kind == Kind.CQL_LIMIT)
                         return cqlLimits(bytesLimit, rowLimit, perPartitionLimit, isDistinct);
@@ -1496,7 +1496,7 @@ public abstract class DataLimits
                     int groupLimit = in.readUnsignedVInt32();
                     int groupPerPartitionLimit = in.readUnsignedVInt32();
                     int rowLimit = in.readUnsignedVInt32();
-                    int bytesLimit = version >= MessagingService.VERSION_SG_10 ? (int) in.readUnsignedVInt() : NO_LIMIT;
+                    int bytesLimit = version >= MessagingService.VERSION_DS_10 ? (int) in.readUnsignedVInt() : NO_LIMIT;
 
                     AggregationSpecification groupBySpec = AggregationSpecification.serializer.deserialize(in, version, metadata);
 
@@ -1535,7 +1535,7 @@ public abstract class DataLimits
                     CQLLimits cqlLimits = (CQLLimits) limits;
                     size += TypeSizes.sizeofUnsignedVInt(cqlLimits.rowLimit);
                     size += TypeSizes.sizeofUnsignedVInt(cqlLimits.perPartitionLimit);
-                    if (version >= MessagingService.VERSION_SG_10)
+                    if (version >= MessagingService.VERSION_DS_10)
                         size += TypeSizes.sizeofUnsignedVInt(cqlLimits.bytesLimit);
                     size += TypeSizes.sizeof(cqlLimits.isDistinct);
                     if (limits.kind() == Kind.CQL_PAGING_LIMIT)
@@ -1551,7 +1551,7 @@ public abstract class DataLimits
                     size += TypeSizes.sizeofUnsignedVInt(groupByLimits.groupLimit);
                     size += TypeSizes.sizeofUnsignedVInt(groupByLimits.groupPerPartitionLimit);
                     size += TypeSizes.sizeofUnsignedVInt(groupByLimits.rowLimit);
-                    if (version >= MessagingService.VERSION_SG_10)
+                    if (version >= MessagingService.VERSION_DS_10)
                         size += TypeSizes.sizeofUnsignedVInt(groupByLimits.bytesLimit);
 
                     AggregationSpecification groupBySpec = groupByLimits.groupBySpec;
