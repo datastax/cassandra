@@ -30,6 +30,7 @@ import org.apache.cassandra.db.compaction.unified.Reservations;
 import org.apache.cassandra.db.virtual.LogMessagesTable;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.metrics.TableMetrics;
+import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.sensors.SensorsFactory;
 import org.apache.cassandra.service.FileSystemOwnershipCheck;
 import org.apache.cassandra.service.reads.range.EndpointGroupingRangeCommandIterator;
@@ -358,6 +359,11 @@ public enum CassandraRelevantProperties
      */
     DRAIN_EXECUTOR_TIMEOUT_MS("cassandra.drain_executor_timeout_ms", convertToString(TimeUnit.MINUTES.toMillis(5))),
     DROP_OVERSIZED_READ_REPAIR_MUTATIONS("cassandra.drop_oversized_readrepair_mutations"),
+    /**
+     * The current messaging version. This is used when we add new messaging versions without adopting them immediately,
+     * or to force the node to use a specific version for testing purposes.
+     */
+    DS_CURRENT_MESSAGING_VERSION("ds.current_messaging_version", Integer.toString(MessagingService.VERSION_DS_20)),
     DTEST_API_LOG_TOPOLOGY("cassandra.dtest.api.log.topology"),
     /** This property indicates if the code is running under the in-jvm dtest framework */
     DTEST_IS_IN_JVM_DTEST("org.apache.cassandra.dtest.is_in_jvm_dtest"),
