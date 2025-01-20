@@ -55,8 +55,9 @@ import static org.apache.cassandra.db.TypeSizes.sizeofUnsignedVInt;
 import static org.apache.cassandra.net.MessagingService.VERSION_40;
 import static org.apache.cassandra.net.MessagingService.VERSION_50;
 import static org.apache.cassandra.net.MessagingService.VERSION_DSE_68;
-import static org.apache.cassandra.net.MessagingService.VERSION_SG_10;
-import static org.apache.cassandra.net.MessagingService.VERSION_SG_20;
+import static org.apache.cassandra.net.MessagingService.VERSION_DS_10;
+import static org.apache.cassandra.net.MessagingService.VERSION_DS_11;
+import static org.apache.cassandra.net.MessagingService.VERSION_DS_20;
 import static org.apache.cassandra.utils.FBUtilities.getBroadcastAddressAndPort;
 import static org.apache.cassandra.utils.MonotonicClock.Global.approxTime;
 import static org.apache.cassandra.utils.vint.VIntCoding.computeUnsignedVIntSize;
@@ -1162,8 +1163,9 @@ public class Message<T>
 
     private int serializedSize40;
     private int serializedSize50;
-    private int serializedSizeSG10;
-    private int serializedSizeSG20;
+    private int serializedSizeDS10;
+    private int serializedSizeDS11;
+    private int serializedSizeDS20;
     private int serializedSizeDSE68;
 
     /**
@@ -1181,17 +1183,21 @@ public class Message<T>
                 if (serializedSize50 == 0)
                     serializedSize50 = serializer.serializedSize(this, VERSION_50);
                 return serializedSize50;
-            case VERSION_SG_10:
-                if (serializedSizeSG10 == 0)
-                    serializedSizeSG10 = (int) serializer.serializedSize(this, VERSION_SG_10);
-                return serializedSizeSG10;
-            case VERSION_SG_20:
-                if (serializedSizeSG20 == 0)
-                    serializedSizeSG20 = (int) serializer.serializedSize(this, VERSION_SG_20);
-                return serializedSizeSG20;
+            case VERSION_DS_10:
+                if (serializedSizeDS10 == 0)
+                    serializedSizeDS10 = serializer.serializedSize(this, VERSION_DS_10);
+                return serializedSizeDS10;
+            case VERSION_DS_11:
+                if (serializedSizeDS11 == 0)
+                    serializedSizeDS11 = serializer.serializedSize(this, VERSION_DS_11);
+                return serializedSizeDS11;
+            case VERSION_DS_20:
+                if (serializedSizeDS20 == 0)
+                    serializedSizeDS20 = (int) serializer.serializedSize(this, VERSION_DS_20);
+                return serializedSizeDS20;
             case VERSION_DSE_68:
                 if (serializedSizeDSE68 == 0)
-                    serializedSizeDSE68 = (int) serializer.serializedSize(this, VERSION_DSE_68);
+                    serializedSizeDSE68 = serializer.serializedSize(this, VERSION_DSE_68);
                 return serializedSizeDSE68;
             default:
                 throw new IllegalStateException("Unkown serialization version " + version);
@@ -1200,8 +1206,9 @@ public class Message<T>
 
     private int payloadSize40    = -1;
     private int payloadSize50    = -1;
-    private int payloadSizeSG10  = -1;
-    private int payloadSizeSG20  = -1;
+    private int payloadSizeDS10 = -1;
+    private int payloadSizeDS11 = -1;
+    private int payloadSizeDS20 = -1;
     private int payloadSizeDSE68 = -1;
 
     public int payloadSize(int version)
@@ -1216,14 +1223,18 @@ public class Message<T>
                 if (payloadSize50 < 0)
                     payloadSize50 = serializer.payloadSize(this, VERSION_50);
                 return payloadSize50;
-            case VERSION_SG_10:
-                if (payloadSizeSG10 < 0)
-                    payloadSizeSG10 = serializer.payloadSize(this, VERSION_SG_10);
-                return payloadSizeSG10;
-            case VERSION_SG_20:
-                if (payloadSizeSG20 < 0)
-                    payloadSizeSG20 = serializer.payloadSize(this, VERSION_SG_20);
-                return payloadSizeSG20;
+            case VERSION_DS_10:
+                if (payloadSizeDS10 < 0)
+                    payloadSizeDS10 = serializer.payloadSize(this, VERSION_DS_10);
+                return payloadSizeDS10;
+            case VERSION_DS_11:
+                if (payloadSizeDS11 < 0)
+                    payloadSizeDS11 = serializer.payloadSize(this, VERSION_DS_11);
+                return payloadSizeDS11;
+            case VERSION_DS_20:
+                if (payloadSizeDS20 < 0)
+                    payloadSizeDS20 = serializer.payloadSize(this, VERSION_DS_20);
+                return payloadSizeDS20;
             case VERSION_DSE_68:
                 if (payloadSizeDSE68 < 0)
                     payloadSizeDSE68 = serializer.payloadSize(this, VERSION_DSE_68);
@@ -1241,10 +1252,10 @@ public class Message<T>
                 payloadSize40 = other.payloadSize40;
             if (other.payloadSize50 > 0)
                 payloadSize50 = other.payloadSize50;
-            if (other.payloadSizeSG10 > 0)
-                payloadSizeSG10 = other.payloadSizeSG10;
-            if (other.payloadSizeSG20 > 0)
-                payloadSizeSG20 = other.payloadSizeSG20;
+            if (other.payloadSizeDS10 > 0)
+                payloadSizeDS10 = other.payloadSizeDS10;
+            if (other.payloadSizeDS20 > 0)
+                payloadSizeDS20 = other.payloadSizeDS20;
             if (other.payloadSizeDSE68 > 0)
                 payloadSizeDSE68 = other.payloadSizeDSE68;
         }
