@@ -116,7 +116,7 @@ public class DataLimitsTest
                 DataLimits deserializedLimits = DataLimits.serializer.deserialize(in, version.value, metadata);
                 assertThat(deserializedLimits.count()).describedAs(msg).isEqualTo(limits.count());
 
-                if (version.value >= MessagingService.VERSION_SG_10)
+                if (version.value >= MessagingService.VERSION_DS_10)
                     assertThat(deserializedLimits.bytes()).describedAs(msg).isEqualTo(limits.bytes());
                 else
                     assertThat(deserializedLimits.bytes()).describedAs(msg).isEqualTo(NO_LIMIT);
