@@ -23,6 +23,7 @@ import java.util.concurrent.TimeUnit;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.metrics.TableMetrics;
+import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.sensors.SensorsFactory;
 import org.apache.cassandra.service.reads.range.EndpointGroupingRangeCommandIterator;
 
@@ -574,7 +575,13 @@ public enum CassandraRelevantProperties
     /**
      * If true, the coordinator will propagate sensors via the native protocol custom payload bytes map.
      */
-    SENSORS_VIA_NATIVE_PROTOCOL("cassandra.sensors_via_native_protocol", "false");
+    SENSORS_VIA_NATIVE_PROTOCOL("cassandra.sensors_via_native_protocol", "false"),
+
+    /**
+     * The current messaging version. This is used when we add new messaging versions without adopting them immediately,
+     * or to force the node to use a specific version for testing purposes.
+     */
+    DS_CURRENT_MESSAGING_VERSION("ds.current_messaging_version", Integer.toString(MessagingService.VERSION_DS_10));
 
     CassandraRelevantProperties(String key, String defaultVal)
     {
