@@ -2814,6 +2814,11 @@ public class DatabaseDescriptor
         return conf.file_cache_size_in_mb;
     }
 
+    public static void disableChunkCache()
+    {
+        conf.file_cache_enabled = false;
+    }
+
     public static void enableChunkCache(int sizeInMB)
     {
         conf.file_cache_enabled = true;
