@@ -85,7 +85,7 @@ public class CommitLogDescriptorTest
         Assert.assertEquals(1340512736956320000L, CommitLogDescriptor.fromFileName("CommitLog-2-1340512736956320000.log").id);
 
         Assert.assertEquals(MessagingService.current_version, new CommitLogDescriptor(1340512736956320000L, null, neverEnabledEncryption).getMessagingVersion());
-        String newCLName = "CommitLog-" + CommitLogDescriptor.current_version + "-1340512736956320000.log";
+        String newCLName = "CommitLog-" + CommitLogDescriptor.CURRENT_VERSION + "-1340512736956320000.log";
         Assert.assertEquals(MessagingService.current_version, CommitLogDescriptor.fromFileName(newCLName).getMessagingVersion());
     }
 
@@ -124,10 +124,10 @@ public class CommitLogDescriptorTest
     public void testDescriptorPersistence() throws IOException
     {
         testDescriptorPersistence(new CommitLogDescriptor(11, null, neverEnabledEncryption));
-        testDescriptorPersistence(new CommitLogDescriptor(CommitLogDescriptor.current_version, 13, null, neverEnabledEncryption));
-        testDescriptorPersistence(new CommitLogDescriptor(CommitLogDescriptor.current_version, 15, null, neverEnabledEncryption));
-        testDescriptorPersistence(new CommitLogDescriptor(CommitLogDescriptor.current_version, 17, new ParameterizedClass("LZ4Compressor", null), neverEnabledEncryption));
-        testDescriptorPersistence(new CommitLogDescriptor(CommitLogDescriptor.current_version, 19,
+        testDescriptorPersistence(new CommitLogDescriptor(CommitLogDescriptor.CURRENT_VERSION, 13, null, neverEnabledEncryption));
+        testDescriptorPersistence(new CommitLogDescriptor(CommitLogDescriptor.CURRENT_VERSION, 15, null, neverEnabledEncryption));
+        testDescriptorPersistence(new CommitLogDescriptor(CommitLogDescriptor.CURRENT_VERSION, 17, new ParameterizedClass("LZ4Compressor", null), neverEnabledEncryption));
+        testDescriptorPersistence(new CommitLogDescriptor(CommitLogDescriptor.CURRENT_VERSION, 19,
                                                           new ParameterizedClass("StubbyCompressor", ImmutableMap.of("parameter1", "value1", "flag2", "55", "argument3", "null")
                                                           ), neverEnabledEncryption));
     }
@@ -140,7 +140,7 @@ public class CommitLogDescriptorTest
         for (int i=0; i<65535; ++i)
             params.put("key"+i, Integer.toString(i, 16));
         try {
-            CommitLogDescriptor desc = new CommitLogDescriptor(CommitLogDescriptor.current_version,
+            CommitLogDescriptor desc = new CommitLogDescriptor(CommitLogDescriptor.CURRENT_VERSION,
                                                                21,
                                                                new ParameterizedClass("LZ4Compressor", params),
                                                                neverEnabledEncryption);
@@ -177,7 +177,7 @@ public class CommitLogDescriptorTest
     @Test
     public void writeAndReadHeader_NoCompressionOrEncryption() throws IOException
     {
-        CommitLogDescriptor descriptor = new CommitLogDescriptor(CommitLogDescriptor.current_version, 1, null, neverEnabledEncryption);
+        CommitLogDescriptor descriptor = new CommitLogDescriptor(CommitLogDescriptor.CURRENT_VERSION, 1, null, neverEnabledEncryption);
         ByteBuffer buffer = ByteBuffer.allocate(16 * 1024);
         CommitLogDescriptor.writeHeader(buffer, descriptor);
         buffer.flip();
@@ -191,7 +191,7 @@ public class CommitLogDescriptorTest
     @Test
     public void writeAndReadHeader_OnlyCompression() throws IOException
     {
-        CommitLogDescriptor descriptor = new CommitLogDescriptor(CommitLogDescriptor.current_version, 1, compression, neverEnabledEncryption);
+        CommitLogDescriptor descriptor = new CommitLogDescriptor(CommitLogDescriptor.CURRENT_VERSION, 1, compression, neverEnabledEncryption);
         ByteBuffer buffer = ByteBuffer.allocate(16 * 1024);
         CommitLogDescriptor.writeHeader(buffer, descriptor);
         buffer.flip();
@@ -205,7 +205,7 @@ public class CommitLogDescriptorTest
     @Test
     public void writeAndReadHeader_WithEncryptionHeader_EncryptionEnabledInYaml() throws IOException
     {
-        CommitLogDescriptor descriptor = new CommitLogDescriptor(CommitLogDescriptor.current_version, 1, null, enabledEncryption);
+        CommitLogDescriptor descriptor = new CommitLogDescriptor(CommitLogDescriptor.CURRENT_VERSION, 1, null, enabledEncryption);
         ByteBuffer buffer = ByteBuffer.allocate(16 * 1024);
         CommitLogDescriptor.writeHeader(buffer, descriptor);
         buffer.flip();
@@ -223,7 +223,7 @@ public class CommitLogDescriptorTest
     @Test
     public void writeAndReadHeader_WithEncryptionHeader_EncryptionDisabledInYaml() throws IOException
     {
-        CommitLogDescriptor descriptor = new CommitLogDescriptor(CommitLogDescriptor.current_version, 1, null, enabledEncryption);
+        CommitLogDescriptor descriptor = new CommitLogDescriptor(CommitLogDescriptor.CURRENT_VERSION, 1, null, enabledEncryption);
         ByteBuffer buffer = ByteBuffer.allocate(16 * 1024);
         CommitLogDescriptor.writeHeader(buffer, descriptor);
         buffer.flip();
@@ -242,7 +242,7 @@ public class CommitLogDescriptorTest
     @Test
     public void writeAndReadHeader_WithCompressionAndEncryption() throws IOException
     {
-        CommitLogDescriptor descriptor = new CommitLogDescriptor(CommitLogDescriptor.current_version, 1, compression, enabledEncryption);
+        CommitLogDescriptor descriptor = new CommitLogDescriptor(CommitLogDescriptor.CURRENT_VERSION, 1, compression, enabledEncryption);
         ByteBuffer buffer = ByteBuffer.allocate(16 * 1024);
         CommitLogDescriptor.writeHeader(buffer, descriptor);
         buffer.flip();
@@ -258,60 +258,60 @@ public class CommitLogDescriptorTest
     @Test
     public void equals_NoCompressionOrEncryption()
     {
-        CommitLogDescriptor desc1 = new CommitLogDescriptor(CommitLogDescriptor.current_version, 1, null, null);
+        CommitLogDescriptor desc1 = new CommitLogDescriptor(CommitLogDescriptor.CURRENT_VERSION, 1, null, null);
         Assert.assertEquals(desc1, desc1);
 
-        CommitLogDescriptor desc2 = new CommitLogDescriptor(CommitLogDescriptor.current_version, 1, null, null);
+        CommitLogDescriptor desc2 = new CommitLogDescriptor(CommitLogDescriptor.CURRENT_VERSION, 1, null, null);
         Assert.assertEquals(desc1, desc2);
 
-        desc1 = new CommitLogDescriptor(CommitLogDescriptor.current_version, 1, null, neverEnabledEncryption);
+        desc1 = new CommitLogDescriptor(CommitLogDescriptor.CURRENT_VERSION, 1, null, neverEnabledEncryption);
         Assert.assertEquals(desc1, desc1);
-        desc2 = new CommitLogDescriptor(CommitLogDescriptor.current_version, 1, null, neverEnabledEncryption);
+        desc2 = new CommitLogDescriptor(CommitLogDescriptor.CURRENT_VERSION, 1, null, neverEnabledEncryption);
         Assert.assertEquals(desc1, desc2);
 
-        desc1 = new CommitLogDescriptor(CommitLogDescriptor.current_version, 1, null, previouslyEnabledEncryption);
+        desc1 = new CommitLogDescriptor(CommitLogDescriptor.CURRENT_VERSION, 1, null, previouslyEnabledEncryption);
         Assert.assertEquals(desc1, desc1);
-        desc2 = new CommitLogDescriptor(CommitLogDescriptor.current_version, 1, null, previouslyEnabledEncryption);
+        desc2 = new CommitLogDescriptor(CommitLogDescriptor.CURRENT_VERSION, 1, null, previouslyEnabledEncryption);
         Assert.assertEquals(desc1, desc2);
     }
 
     @Test
     public void equals_OnlyCompression()
     {
-        CommitLogDescriptor desc1 = new CommitLogDescriptor(CommitLogDescriptor.current_version, 1, compression, null);
+        CommitLogDescriptor desc1 = new CommitLogDescriptor(CommitLogDescriptor.CURRENT_VERSION, 1, compression, null);
         Assert.assertEquals(desc1, desc1);
 
-        CommitLogDescriptor desc2 = new CommitLogDescriptor(CommitLogDescriptor.current_version, 1, compression, null);
+        CommitLogDescriptor desc2 = new CommitLogDescriptor(CommitLogDescriptor.CURRENT_VERSION, 1, compression, null);
         Assert.assertEquals(desc1, desc2);
 
-        desc1 = new CommitLogDescriptor(CommitLogDescriptor.current_version, 1, compression, neverEnabledEncryption);
+        desc1 = new CommitLogDescriptor(CommitLogDescriptor.CURRENT_VERSION, 1, compression, neverEnabledEncryption);
         Assert.assertEquals(desc1, desc1);
-        desc2 = new CommitLogDescriptor(CommitLogDescriptor.current_version, 1, compression, neverEnabledEncryption);
+        desc2 = new CommitLogDescriptor(CommitLogDescriptor.CURRENT_VERSION, 1, compression, neverEnabledEncryption);
         Assert.assertEquals(desc1, desc2);
 
-        desc1 = new CommitLogDescriptor(CommitLogDescriptor.current_version, 1, compression, previouslyEnabledEncryption);
+        desc1 = new CommitLogDescriptor(CommitLogDescriptor.CURRENT_VERSION, 1, compression, previouslyEnabledEncryption);
         Assert.assertEquals(desc1, desc1);
-        desc2 = new CommitLogDescriptor(CommitLogDescriptor.current_version, 1, compression, previouslyEnabledEncryption);
+        desc2 = new CommitLogDescriptor(CommitLogDescriptor.CURRENT_VERSION, 1, compression, previouslyEnabledEncryption);
         Assert.assertEquals(desc1, desc2);
     }
 
     @Test
     public void equals_OnlyEncryption()
     {
-        CommitLogDescriptor desc1 = new CommitLogDescriptor(CommitLogDescriptor.current_version, 1, null, enabledEncryption);
+        CommitLogDescriptor desc1 = new CommitLogDescriptor(CommitLogDescriptor.CURRENT_VERSION, 1, null, enabledEncryption);
         Assert.assertEquals(desc1, desc1);
 
-        CommitLogDescriptor desc2 = new CommitLogDescriptor(CommitLogDescriptor.current_version, 1, null, enabledEncryption);
+        CommitLogDescriptor desc2 = new CommitLogDescriptor(CommitLogDescriptor.CURRENT_VERSION, 1, null, enabledEncryption);
         Assert.assertEquals(desc1, desc2);
 
-        desc1 = new CommitLogDescriptor(CommitLogDescriptor.current_version, 1, null, neverEnabledEncryption);
+        desc1 = new CommitLogDescriptor(CommitLogDescriptor.CURRENT_VERSION, 1, null, neverEnabledEncryption);
         Assert.assertEquals(desc1, desc1);
-        desc2 = new CommitLogDescriptor(CommitLogDescriptor.current_version, 1, null, neverEnabledEncryption);
+        desc2 = new CommitLogDescriptor(CommitLogDescriptor.CURRENT_VERSION, 1, null, neverEnabledEncryption);
         Assert.assertEquals(desc1, desc2);
 
-        desc1 = new CommitLogDescriptor(CommitLogDescriptor.current_version, 1, null, previouslyEnabledEncryption);
+        desc1 = new CommitLogDescriptor(CommitLogDescriptor.CURRENT_VERSION, 1, null, previouslyEnabledEncryption);
         Assert.assertEquals(desc1, desc1);
-        desc2 = new CommitLogDescriptor(CommitLogDescriptor.current_version, 1, null, previouslyEnabledEncryption);
+        desc2 = new CommitLogDescriptor(CommitLogDescriptor.CURRENT_VERSION, 1, null, previouslyEnabledEncryption);
         Assert.assertEquals(desc1, desc2);
     }
 
@@ -321,10 +321,10 @@ public class CommitLogDescriptorTest
     @Test
     public void equals_BothCompressionAndEncryption()
     {
-        CommitLogDescriptor desc1 = new CommitLogDescriptor(CommitLogDescriptor.current_version, 1, compression, enabledEncryption);
+        CommitLogDescriptor desc1 = new CommitLogDescriptor(CommitLogDescriptor.CURRENT_VERSION, 1, compression, enabledEncryption);
         Assert.assertEquals(desc1, desc1);
 
-        CommitLogDescriptor desc2 = new CommitLogDescriptor(CommitLogDescriptor.current_version, 1, compression, enabledEncryption);
+        CommitLogDescriptor desc2 = new CommitLogDescriptor(CommitLogDescriptor.CURRENT_VERSION, 1, compression, enabledEncryption);
         Assert.assertEquals(desc1, desc2);
     }
 

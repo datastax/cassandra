@@ -59,9 +59,10 @@ import org.apache.cassandra.utils.concurrent.Future;
 import static org.apache.cassandra.net.MessagingService.VERSION_40;
 import static org.apache.cassandra.net.MessagingService.VERSION_50;
 import static org.apache.cassandra.net.MessagingService.VERSION_DSE_68;
-import static org.apache.cassandra.net.MessagingService.VERSION_SG_10;
-import static org.apache.cassandra.net.MessagingService.VERSION_SG_20;
 import static org.apache.cassandra.utils.MonotonicClock.Global.approxTime;
+import static org.apache.cassandra.net.MessagingService.VERSION_DS_10;
+import static org.apache.cassandra.net.MessagingService.VERSION_DS_11;
+import static org.apache.cassandra.net.MessagingService.VERSION_DS_20;
 
 public class Mutation implements IMutation, Supplier<Mutation>
 {
@@ -337,8 +338,9 @@ public class Mutation implements IMutation, Supplier<Mutation>
 
     private int serializedSize40;
     private int serializedSize50;
-    private int serializedSizeSG10;
-    private int serializedSizeSG20;
+    private int serializedSizeDS10;
+    private int serializedSizeDS11;
+    private int serializedSizeDS20;
     private int serializedSizeDSE68;
 
     public int serializedSize(int version)
@@ -353,14 +355,18 @@ public class Mutation implements IMutation, Supplier<Mutation>
                 if (serializedSize50 == 0)
                     serializedSize50 = (int) serializer.serializedSize(this, VERSION_50);
                 return serializedSize50;
-            case VERSION_SG_10:
-                if (serializedSizeSG10 == 0)
-                    serializedSizeSG10 = (int) serializer.serializedSize(this, VERSION_SG_10);
-                return serializedSizeSG10;
-            case VERSION_SG_20:
-                if (serializedSizeSG20 == 0)
-                    serializedSizeSG20 = (int) serializer.serializedSize(this, VERSION_SG_20);
-                return serializedSizeSG20;
+            case VERSION_DS_10:
+                if (serializedSizeDS10 == 0)
+                    serializedSizeDS10 = (int) serializer.serializedSize(this, VERSION_DS_10);
+                return serializedSizeDS10;
+            case VERSION_DS_11:
+                if (serializedSizeDS11 == 0)
+                    serializedSizeDS11 = (int) serializer.serializedSize(this, VERSION_DS_11);
+                return serializedSizeDS11;
+            case VERSION_DS_20:
+                if (serializedSizeDS20 == 0)
+                    serializedSizeDS20 = (int) serializer.serializedSize(this, VERSION_DS_20);
+                return serializedSizeDS20;
             case VERSION_DSE_68:
                 if (serializedSizeDSE68 == 0)
                     serializedSizeDSE68 = (int) serializer.serializedSize(this, VERSION_DSE_68);
