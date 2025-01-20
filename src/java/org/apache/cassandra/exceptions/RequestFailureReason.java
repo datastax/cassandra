@@ -95,7 +95,7 @@ public enum RequestFailureReason
             throw new IllegalArgumentException("RequestFailureReason code must be non-negative (got " + code + ')');
 
         // be forgiving and return UNKNOWN if we aren't aware of the code - for forward compatibility
-        if (version >= MessagingService.VERSION_SG_10)
+        if (version >= MessagingService.VERSION_DS_10)
             return code < ccCodeToReasonMap.length ? ccCodeToReasonMap[code] : UNKNOWN;
         else
             return code < codeToReasonMap.length ? codeToReasonMap[code] : UNKNOWN;
@@ -124,7 +124,7 @@ public enum RequestFailureReason
         public void serialize(RequestFailureReason reason, DataOutputPlus out, int version) throws IOException
         {
             assert version >= VERSION_40;
-            if (version >= MessagingService.VERSION_SG_10)
+            if (version >= MessagingService.VERSION_DS_10)
                 out.writeUnsignedVInt32(reason.ccCode);
             else
                 out.writeUnsignedVInt32(reason.code);
@@ -139,7 +139,7 @@ public enum RequestFailureReason
         public long serializedSize(RequestFailureReason reason, int version)
         {
             assert version >= VERSION_40;
-            if (version >= MessagingService.VERSION_SG_10)
+            if (version >= MessagingService.VERSION_DS_10)
                 return VIntCoding.computeVIntSize(reason.ccCode);
             else
                 return VIntCoding.computeVIntSize(reason.code);
