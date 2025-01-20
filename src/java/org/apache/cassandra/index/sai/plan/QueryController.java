@@ -519,16 +519,15 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
      * @param builder The plan node builder which receives the built index scans
      * @param expressions The expressions to build the plan from
      */
-    public void buildPlanForExpressions(Plan.Builder builder, Collection<Expression> expressions)
+    void buildPlanForExpressions(Plan.Builder builder, Collection<Expression> expressions)
     {
         Operation.OperationType op = builder.type;
         assert !expressions.isEmpty() : "expressions should not be empty for " + op + " in " + command.rowFilter().root();
 
-        // VSTODO move ANN out of expressions and into its own abstraction? That will help get generic ORDER BY support
-        Collection<Expression> exp = expressions.stream().filter(e -> e.operation != Expression.Op.ORDER_BY).collect(Collectors.toList());
+        assert !expressions.stream().anyMatch(e -> e.operation == Expression.Op.ORDER_BY);
 
         // we cannot use indexes with OR if we have a mix of indexed and non-indexed columns (see CNDB-10142)
-        if (op == Operation.OperationType.OR && !exp.stream().allMatch(e -> e.context.isIndexed()))
+        if (op == Operation.OperationType.OR && !expressions.stream().allMatch(e -> e.context.isIndexed()))
         {
             builder.add(planFactory.everything);
             return;
