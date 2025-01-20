@@ -97,6 +97,7 @@ import org.apache.cassandra.utils.UUIDGen;
 import static java.lang.String.format;
 import static java.util.Collections.emptyMap;
 import static java.util.Collections.singletonMap;
+import static org.apache.cassandra.config.CassandraRelevantProperties.UNSAFE_SYSTEM;
 import static org.apache.cassandra.cql3.QueryProcessor.executeInternal;
 import static org.apache.cassandra.cql3.QueryProcessor.executeOnceInternal;
 
@@ -546,7 +547,7 @@ public final class SystemKeyspace
 
     public static void forceBlockingFlush(String ...cfnames)
     {
-        if (!DatabaseDescriptor.isUnsafeSystem())
+        if (!UNSAFE_SYSTEM.getBoolean())
         {
             List<ListenableFuture<CommitLogPosition>> futures = new ArrayList<>();
 

@@ -158,7 +158,6 @@ public class DatabaseDescriptor
     private static final int searchConcurrencyFactor = Integer.parseInt(System.getProperty(Config.PROPERTY_PREFIX + "search_concurrency_factor", "1"));
 
     private static volatile boolean disableSTCSInL0 = Boolean.getBoolean(Config.PROPERTY_PREFIX + "disable_stcs_in_l0");
-    private static final boolean unsafeSystem = Boolean.getBoolean(Config.PROPERTY_PREFIX + "unsafesystem");
 
     // turns some warnings into exceptions for testing
     private static final boolean strictRuntimeChecks = Boolean.getBoolean("cassandra.strict.runtime.checks");
@@ -3327,11 +3326,6 @@ public class DatabaseDescriptor
     public static int searchConcurrencyFactor()
     {
         return searchConcurrencyFactor;
-    }
-
-    public static boolean isUnsafeSystem()
-    {
-        return unsafeSystem;
     }
 
     public static boolean diagnosticEventsEnabled()

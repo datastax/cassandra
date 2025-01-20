@@ -6,6 +6,10 @@
 
 # The script is expected to work on both Linux and MacOS
 
+# Run the script from the root of your project. In most cases it should improve performance of running unit tests.
+# Do not run it using sudo, it will ask for sudo password if needed.
+# The script does not expect any arguments.
+
 (grep "apache-cassandra" build.xml || grep "dse-db" build.xml) 1> /dev/null
 
 os="$(uname | tr '[:upper:]' '[:lower:]')"
