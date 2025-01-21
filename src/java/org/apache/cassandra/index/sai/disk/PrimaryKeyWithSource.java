@@ -143,17 +143,14 @@ public class PrimaryKeyWithSource implements PrimaryKey
             // If they are from the same source sstable, we can compare the row ids directly.
             if (sourceSstableId.equals(other.sourceSstableId))
                 return sourceRowId == other.sourceRowId;
+
+            // If the source sstable does not contain the PrimaryKey, the keys cannot be equal.
+            if (sourceSstableMinKey.compareTo(other.sourceSstableMaxKey) > 0
+                || sourceSstableMaxKey.compareTo(other.sourceSstableMinKey) < 0)
+                return false;
         }
 
-        if (!(o instanceof PrimaryKey))
-            return false;
-
-        var other = (PrimaryKey) o;
-        // If the source sstable does not contain the PrimaryKey, the keys cannot be equal.
-        if (sourceSstableMinKey.compareTo(other) > 0 || sourceSstableMaxKey.compareTo(other) < 0)
-            return false;
-
-        return primaryKey().equals(other);
+        return primaryKey().equals(o);
     }
 
     @Override
