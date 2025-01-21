@@ -58,6 +58,7 @@ import org.apache.cassandra.utils.TimeUUID;
 
 import static java.lang.String.format;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.UNSAFE_SYSTEM;
 import static org.apache.cassandra.utils.ByteBufferUtil.bytes;
 
 public final class SystemDistributedKeyspace
@@ -396,7 +397,7 @@ public final class SystemDistributedKeyspace
 
     public static void forceBlockingFlush(String table, ColumnFamilyStore.FlushReason reason)
     {
-        if (!DatabaseDescriptor.isUnsafeSystem())
+        if (!UNSAFE_SYSTEM.getBoolean())
             FBUtilities.waitOnFuture(Keyspace.open(SchemaConstants.DISTRIBUTED_KEYSPACE_NAME)
                                              .getColumnFamilyStore(table)
                                              .forceFlush(reason));
