@@ -140,7 +140,6 @@ import static org.apache.cassandra.config.CassandraRelevantProperties.TEST_FAIL_
 import static org.apache.cassandra.config.CassandraRelevantProperties.TEST_JVM_DTEST_DISABLE_SSL;
 import static org.apache.cassandra.config.CassandraRelevantProperties.TEST_SKIP_CRYPTO_PROVIDER_INSTALLATION;
 import static org.apache.cassandra.config.CassandraRelevantProperties.TEST_STRICT_RUNTIME_CHECKS;
-import static org.apache.cassandra.config.CassandraRelevantProperties.UNSAFE_SYSTEM;
 import static org.apache.cassandra.config.DataRateSpec.DataRateUnit.BYTES_PER_SECOND;
 import static org.apache.cassandra.config.DataRateSpec.DataRateUnit.MEBIBYTES_PER_SECOND;
 import static org.apache.cassandra.config.DataStorageSpec.DataStorageUnit.MEBIBYTES;
@@ -234,7 +233,6 @@ public class DatabaseDescriptor
     private static DurationSpec.IntSecondsBound autoSnapshoTtl; // TODO rename it
 
     private static volatile boolean disableSTCSInL0 = DISABLE_STCS_IN_L0.getBoolean();
-    private static final boolean unsafeSystem = UNSAFE_SYSTEM.getBoolean();
 
     // turns some warnings into exceptions for testing
     private static final boolean strictRuntimeChecks = TEST_STRICT_RUNTIME_CHECKS.getBoolean();
@@ -4611,11 +4609,6 @@ public class DatabaseDescriptor
     public static int searchConcurrencyFactor()
     {
         return searchConcurrencyFactor;
-    }
-
-    public static boolean isUnsafeSystem()
-    {
-        return unsafeSystem;
     }
 
     public static boolean diagnosticEventsEnabled()

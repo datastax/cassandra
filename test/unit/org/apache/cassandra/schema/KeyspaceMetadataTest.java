@@ -27,6 +27,7 @@ import java.util.stream.Collectors;
 
 import com.google.common.collect.ImmutableCollection;
 import org.apache.commons.lang3.StringUtils;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.cql3.CQLTester;
@@ -37,6 +38,7 @@ import org.apache.cassandra.cql3.functions.UDFunction;
 import org.apache.cassandra.cql3.functions.UserFunction;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.UserType;
+import org.apache.cassandra.service.StorageService;
 
 import static org.junit.Assert.*;
 import static org.psjava.util.AssertStatus.assertTrue;
@@ -44,6 +46,12 @@ import static org.psjava.util.AssertStatus.assertTrue;
 public class KeyspaceMetadataTest extends CQLTester
 {
     private static final String NEW_KEYSPACE = "new_keyspace";
+
+    @BeforeClass
+    public static void beforeClass()
+    {
+        StorageService.instance.setUpDistributedSystemKeyspaces();
+    }
 
     @Test
     public void testRenameWithNestedTypes()

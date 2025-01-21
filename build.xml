@@ -94,9 +94,9 @@
     <property name="testtag.extra" value="" />
     <property name="dist.dir" value="${build.dir}/dist"/>
 
-    <!-- Use build/tmp for temp files if not otherwise specified. Because Ant properties are immutable, this has no effect if
+    <!-- Use build/test/cassandra for temp files if not otherwise specified. Because Ant properties are immutable, this has no effect if
          the user specifies the tmp.dir property -->
-    <property name="tmp.dir" value="${build.dir}/tmp"/>
+    <property name="tmp.dir" value="${build.test.dir}/cassandra"/>
     <property name="test.logback.configurationFile" value="${test.conf}/logback-test.xml"/>
     <property name="doc.dir" value="${basedir}/doc"/>
     <property name="repetition" value=""/>
@@ -136,7 +136,7 @@
     <property name="cassandra.test.processorCount" value="4"/>
 
     <!-- skip flushing schema tables during tests -->
-    <property name="cassandra.test.flush_local_schema_changes" value="true" />
+    <property name="cassandra.unsafesystem" value="true" />
 
     <!-- fast shutdown of messaging service -->
     <property name="cassandra.test.messagingService.nonGracefulShutdown" value="true"/>
@@ -515,8 +515,11 @@
     </target>
 
     <target name="clean" description="Remove all locally created artifacts">
-        <delete dir="${build.test.dir}" />
         <delete dir="${build.dir}/tmp" />
+        <delete includeemptydirs="true" failonerror="false">
+            <fileset dir="${build.test.dir}/cassandra" includes="**/*"/>
+            <fileset dir="${build.test.dir}" includes="**/*" excludes="cassandra"/>
+        </delete>
         <delete dir="${build.classes}" />
         <delete dir="${build.src.gen-java}" />
         <delete dir="${version.properties.dir}" />
@@ -529,7 +532,7 @@
         <delete>
           <fileset dir="${build.lib}" excludes="cassandra-driver-internal-only-*,puresasl-internal-only-*"/>
         </delete>
-        <delete dir="${build.dir}" />
+        <delete includeemptydirs="false" dir="${build.dir}" failonerror="false"/>
         <delete dir="${doc.dir}/build" />
         <delete dir="${doc.dir}/source/tools/nodetool" />
     </target>
@@ -1285,7 +1288,6 @@
         <jvmarg value="-Dcassandra.test.driver.read_timeout_ms=${test.driver.read_timeout_ms}"/>
         <jvmarg value="-Dcassandra.memtable_row_overhead_computation_step=100"/>
         <jvmarg value="-Dcassandra.test.use_prepared=${cassandra.test.use_prepared}"/>
-        <jvmarg value="-Dcassandra.test.flush_local_schema_changes=${cassandra.test.flush_local_schema_changes}"/>
         <jvmarg value="-Dcassandra.test.messagingService.nonGracefulShutdown=${cassandra.test.messagingService.nonGracefulShutdown}"/>
         <jvmarg value="-Dcassandra.cluster_version_provider.min_stable_duration_ms=0"/>
         <jvmarg value="-Dcassandra.test.cluster_version_provider.skip_wait_for_gossip=true"/>
@@ -1298,7 +1300,7 @@
         <jvmarg value="-Dcassandra.keepBriefBrief=${cassandra.keepBriefBrief}" />
         <jvmarg value="-Dcassandra.strict.runtime.checks=true" />
         <jvmarg value="-Dcassandra.reads.thresholds.coordinator.defensive_checks_enabled=true" /> <!-- enable defensive checks -->
-        <jvmarg value="-Dcassandra.test.flush_local_schema_changes=${cassandra.test.flush_local_schema_changes}"/>
+        <jvmarg value="-Dcassandra.unsafesystem=${cassandra.unsafesystem}"/>
         <jvmarg value="-Dcassandra.test.messagingService.nonGracefulShutdown=${cassandra.test.messagingService.nonGracefulShutdown}"/>
         <jvmarg value="-Dcassandra.use_nix_recursive_delete=${cassandra.use_nix_recursive_delete}"/>
         <jvmarg value="-Dio.netty.allocator.useCacheForAllThreads=true"/>
@@ -1311,6 +1313,7 @@
         <jvmarg value="-Dcassandra.test.fail_on_forbidden_log_entries=${cassandra.test.fail_on_forbidden_log_entries}"/>
         <jvmarg line="${_std-test-jvmargs} " />
         <jvmarg line="${test.jvm.args}" />
+        <jvmarg value="-Djava.io.tmpdir=${build.test.dir}/cassandra"/>
         <optjvmargs/>
         <!-- Uncomment to debug unittest, attach debugger to port 1416 -->
         <!--
