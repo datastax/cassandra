@@ -118,6 +118,7 @@ public class CommitLogSegmentReader implements Iterable<CommitLogSegmentReader.S
                 }
                 catch(CommitLogSegmentReader.SegmentReadException e)
                 {
+                    logger.debug("Error reading commit log", e);
                     try
                     {
                         handler.handleUnrecoverableError(new CommitLogReadException(
@@ -132,6 +133,7 @@ public class CommitLogSegmentReader implements Iterable<CommitLogSegmentReader.S
                 }
                 catch (IOException e)
                 {
+                    logger.debug("Error reading commit log", e);
                     try
                     {
                         boolean tolerateErrorsInSection = tolerateTruncation & segmenter.tolerateSegmentErrors(end, reader.length());

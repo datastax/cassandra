@@ -1,0 +1,56 @@
+#!/bin/bash
+# Copyright DataStax, Inc.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# This script simply mounts a tmpfs filesystem at build/test/cassandra
+# If there is already a tmpfs mounted at that location, it will be unmounted first
+# The size of the tmpfs is 1GB
+
+# The script is expected to work on both Linux and MacOS
+
+# Run the script from the root of your project. In most cases it should improve performance of running unit tests.
+# Do not run it using sudo, it will ask for sudo password if needed.
+# The script does not expect any arguments.
+
+(grep "apache-cassandra" build.xml || grep "dse-db" build.xml) 1> /dev/null
+
+os="$(uname | tr '[:upper:]' '[:lower:]')"
+
+if [[ "$os" == "darwin" ]]; then
+	existing="$(diskutil list | grep CassandraBuildTmp || true)"
+	if [[ -n "$existing" ]]; then
+		diskname="$(hdiutil | grep CassandraBuildTmp | cut -f 1)"
+		diskutil unmount CassandraBuildTmp
+		hdiutil detach "$diskname"
+	fi
+
+	rm -rf build/test/cassandra
+	mkdir -p build/test/cassandra
+
+	diskutil erasevolume HFS+ CassandraBuildTmp "$(hdiutil attach -nomount ram://2097152)"
+	diskutil mount -mountPoint "$(pwd)/build/test/cassandra" CassandraBuildTmp
+elif [[ "$os" == "linux" ]]; then
+	mount | grep tmpfs | grep /build/test/cassandra | cut -f 3 -d ' ' | while read -r line;
+	do
+		sudo umount "$line"
+	done
+
+	rm -rf build/test/cassandra
+	mkdir -p build/test/cassandra
+
+	sudo mount -t tmpfs -o size=1024M tmpfs "$(pwd)/build/test/cassandra"
+else
+	echo "Unrecognized OS: $os" 1>&2
+	exit 1
+fi

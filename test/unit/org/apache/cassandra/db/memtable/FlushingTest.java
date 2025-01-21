@@ -63,12 +63,12 @@ public class FlushingTest extends CQLTester
     @Before
     public void setup() throws Throwable
     {
-        createTable("CREATE TABLE %s (pk int PRIMARY KEY, value int)");
+        createTable(KEYSPACE_PER_TEST, "CREATE TABLE %s (pk int PRIMARY KEY, value int)");
 
         for (int i = 0; i < 10000; i++)
-            execute("INSERT INTO %s (pk, value) VALUES (?, ?)", i, i);
+            execute(String.format("INSERT INTO %s.%s (pk, value) VALUES (?, ?)", KEYSPACE_PER_TEST, currentTable()), i, i);
 
-        cfs = getCurrentColumnFamilyStore();
+        cfs = getCurrentColumnFamilyStore(KEYSPACE_PER_TEST);
         memtable = cfs.getTracker().getView().getCurrentMemtable();
 
         OpOrder.Barrier barrier = cfs.keyspace.writeOrder.newBarrier();
