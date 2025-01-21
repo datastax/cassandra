@@ -24,6 +24,8 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.cql3.CQLTester;
+import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.locator.SimpleSnitch;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.service.StorageService;
@@ -53,6 +55,8 @@ public class StatusTest extends CQLTester
     @Test
     public void testStatusOutput()
     {
+        SchemaConstants.LOCAL_SYSTEM_KEYSPACE_NAMES.forEach(k -> Keyspace.open(k).flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
+
         HostStatWithPort host = new HostStatWithPort(null, FBUtilities.getBroadcastAddressAndPort(), false, null);
         validateStatusOutput(host.ipOrDns(false),
                             "status");
@@ -71,6 +75,8 @@ public class StatusTest extends CQLTester
     @Test
     public void testOutputWhileBootstrapping()
     {
+        SchemaConstants.LOCAL_SYSTEM_KEYSPACE_NAMES.forEach(k -> Keyspace.open(k).flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
+
         // Deleting these tables will simulate we're bootstrapping
         schemaChange("DROP KEYSPACE " + SchemaConstants.TRACE_KEYSPACE_NAME);
         schemaChange("DROP KEYSPACE " + CQLTester.KEYSPACE);
@@ -111,6 +117,7 @@ public class StatusTest extends CQLTester
         assertThat(hostStatus).startsWith("UN");
         assertThat(hostStatus).contains(hostForm);
         assertThat(hostStatus).containsPattern("\\d+\\.?\\d+ KiB");
+        assertThat(hostStatus).matches(".*\\d+(\\.\\d+)? (bytes|KiB).*");
         assertThat(hostStatus).containsPattern("\\d+\\.\\d+%");
         assertThat(hostStatus).contains(localHostId);
         assertThat(hostStatus).contains(token);

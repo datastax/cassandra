@@ -53,6 +53,10 @@
     </target>
 
     <target name="resolver-init" depends="init,_resolver_download" unless="resolver-ant-tasks.initialized" description="Initialize Resolver ANT Tasks">
+        <delete>
+            <fileset dir="${build.dir.lib}" includes="**/*"/>
+            <fileset dir="${test.lib}" includes="**/*"/>
+        </delete>
 
         <typedef uri="antlib:org.apache.maven.resolver.ant" resource="org/apache/maven/resolver/ant/antlib.xml" classpathref="resolver-ant-tasks.classpath" />
         <resolver:remoterepos id="all">
