@@ -32,8 +32,8 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.service.StorageService;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.UCS_L0_SHARDS_ENABLED;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
 
 @RunWith(Parameterized.class)
 public class ShardedMultiWriterTest extends CQLTester
@@ -129,14 +129,14 @@ public class ShardedMultiWriterTest extends CQLTester
             // token boundaries, so we don't assert even distribution. We do however konw that the coverage should
             // add up to about 1 without crossing that boundary. The coverage is measured by measuring the distance
             // between the min and the max token in each shard, so we have a large delta in the assertion.
-            assertTrue(tokenSpaceCoverage <= 1.0);
+            assertThat(tokenSpaceCoverage).isLessThanOrEqualTo(1.0);
             assertEquals(1.0, tokenSpaceCoverage, 0.1);
             // If we have more split points than tokens, the sstables must be split along token boundaries
             var numSplitPoints = numShards - 1;
             var expectedSpannedTokens = Math.max(0, tokenMetadata.sortedTokens().size() - numSplitPoints);
             // There is a chance that the sstable bounds don't contain a token boundary due to the random selection
             // of the first token, so we can only assert that we don't have more spanned tokens than expected.
-            assertTrue(expectedSpannedTokens >= spannedTokens);
+            assertThat(spannedTokens).isLessThanOrEqualTo(expectedSpannedTokens);
         }
         else
         {
