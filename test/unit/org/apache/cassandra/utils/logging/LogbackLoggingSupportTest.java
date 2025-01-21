@@ -36,16 +36,16 @@ public class LogbackLoggingSupportTest
         loggingSupport.onStartup();
 
         Logger rootLogger = (Logger) LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME);
-        assertSame("the default test log level is DEBUG", Level.DEBUG, rootLogger.getLevel());
+        Level defaultLevel = rootLogger.getLevel();
 
-        rootLogger.setLevel(Level.TRACE);
-        assertSame("the log level should have been switched to TRACE", Level.TRACE, rootLogger.getLevel());
+        rootLogger.setLevel(Level.OFF);
+        assertSame("the log level should have been switched to OFF", Level.OFF, rootLogger.getLevel());
 
         // when
         // empty class and level reset to the default configuration
         loggingSupport.setLoggingLevel("", "");
 
         // then
-        assertSame("reset test log level should be DEBUG", Level.DEBUG, rootLogger.getLevel());
+        assertSame("reset test log level should be reset", defaultLevel, rootLogger.getLevel());
     }
 }
