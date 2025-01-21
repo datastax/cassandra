@@ -67,12 +67,9 @@ import org.apache.cassandra.cql3.VariableSpecifications;
 import org.apache.cassandra.cql3.WhereClause;
 import org.apache.cassandra.cql3.restrictions.ExternalRestriction;
 import org.apache.cassandra.cql3.restrictions.Restrictions;
-import org.apache.cassandra.cql3.restrictions.SingleColumnRestriction;
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.apache.cassandra.db.guardrails.GuardrailsConfigProvider;
-import org.apache.cassandra.cql3.restrictions.SingleRestriction;
 import org.apache.cassandra.cql3.selection.SortedRowsBuilder;
-import org.apache.cassandra.index.Index;
 import org.apache.cassandra.sensors.SensorsCustomParams;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.Schema;
@@ -1216,7 +1213,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                               ClientState state) throws InvalidRequestException
     {
         GroupMaker groupMaker = aggregationSpec == null ? null : aggregationSpec.newGroupMaker();
-        SortedRowsBuilder rows = sortedRowsBuilder(userLimit, userOffset == NO_OFFSET ? 0 : userOffset, options);
+        SortedRowsBuilder rows = sortedRowsBuilder(userLimit, userOffset == NO_OFFSET ? 0 : userOffset);
         ResultSetBuilder result = new ResultSetBuilder(getResultMetadata(), selectors, unmask, groupMaker, rows);
 
         while (partitions.hasNext())
@@ -1387,32 +1384,15 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
     /**
      * Orders results when multiple keys are selected (using IN)
      */
-    public SortedRowsBuilder sortedRowsBuilder(int limit, int offset, QueryOptions options)
+    public SortedRowsBuilder sortedRowsBuilder(int limit, int offset)
     {
         assert (orderingComparator != null) == needsPostQueryOrdering()
                 : String.format("orderingComparator: %s, needsPostQueryOrdering: %s",
                                 orderingComparator, needsPostQueryOrdering());
 
-        if (orderingComparator == null)
+        if (orderingComparator == null || orderingComparator.indexOrdering())
         {
             return SortedRowsBuilder.create(limit, offset);
-        }
-        else if (orderingComparator instanceof IndexColumnComparator)
-        {
-            SingleRestriction restriction = ((IndexColumnComparator<?>) orderingComparator).restriction;
-            int columnIndex = ((IndexColumnComparator<?>) orderingComparator).columnIndex;
-
-            Index index = restriction.findSupportingIndex(IndexRegistry.obtain(table));
-            assert index != null;
-
-            if (restriction instanceof SingleColumnRestriction.OrderRestriction)
-            {
-                var comparator = index.postQueryComparator(restriction, columnIndex, options);
-                return SortedRowsBuilder.create(limit, offset, comparator);
-            }
-
-            Index.Scorer scorer = index.postQueryScorer(restriction, columnIndex, options);
-            return SortedRowsBuilder.create(limit, offset, scorer);
         }
         else
         {
@@ -1788,7 +1768,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                 if (e.getValue().expression.hasNonClusteredOrdering())
                 {
                     Preconditions.checkState(orderingColumns.size() == 1);
-                    return new IndexColumnComparator<>(e.getValue().expression.toRestriction(), selection.getOrderingIndex(e.getKey()));
+                    return new IndexColumnComparator();
                 }
             }
 
@@ -2002,18 +1982,8 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         }
     }
 
-    private static class IndexColumnComparator<T> extends ColumnComparator<List<ByteBuffer>>
+    private static class IndexColumnComparator extends ColumnComparator<List<ByteBuffer>>
     {
-        private final SingleRestriction restriction;
-        private final int columnIndex;
-
-        // VSTODO maybe cache in prepared statement
-        public IndexColumnComparator(SingleRestriction restriction, int columnIndex)
-        {
-            this.restriction = restriction;
-            this.columnIndex = columnIndex;
-        }
-
         @Override
         public boolean indexOrdering()
         {
