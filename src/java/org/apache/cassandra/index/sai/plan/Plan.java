@@ -324,12 +324,14 @@ abstract public class Plan
     }
 
     /**
-     * Adds an index to the set of indexes used by the plan node.
+     * Adds an index used by the plan node to the given set of indexes.
      * Needs to be overwritten by nodes that use indexes.
+     * @param indexes the set of indexes to update with the index used by this node
      */
     protected void countIndex(HashSet<IndexContext> indexes)
     {
-        // No index to count by default
+        // By default, a node does not contain any indexes.
+        // Thus, no-op.
     }
 
     /**
