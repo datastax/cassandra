@@ -32,14 +32,14 @@ public class LogbackLoggingSupportTest
     public void setLogLevelWithoutOptionsReloadsConfiguration() throws Exception
     {
         // given
+        LogbackLoggingSupport loggingSupport = new LogbackLoggingSupport();
+        loggingSupport.onStartup();
+
         Logger rootLogger = (Logger) LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME);
         assertSame("the default test log level is DEBUG", Level.DEBUG, rootLogger.getLevel());
 
         rootLogger.setLevel(Level.TRACE);
         assertSame("the log level should have been switched to TRACE", Level.TRACE, rootLogger.getLevel());
-
-        LogbackLoggingSupport loggingSupport = new LogbackLoggingSupport();
-        loggingSupport.onStartup();
 
         // when
         // empty class and level reset to the default configuration
