@@ -35,22 +35,18 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.Lists;
-import org.apache.cassandra.cql3.PageSize;
-import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.Term;
 import org.apache.cassandra.cql3.restrictions.SingleColumnRestriction;
 import org.apache.cassandra.cql3.selection.SortedRowsBuilder;
 import org.apache.cassandra.cql3.statements.SelectStatement;
 import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.transport.ProtocolVersion;
 
 import static org.apache.cassandra.cql3.statements.RequestValidations.invalidRequest;
 import static org.junit.Assert.assertEquals;
@@ -134,21 +130,14 @@ public class StorageAttachedIndexTest
     }
 
     @Test
-    public void testOrderResults() {
-        QueryOptions queryOptions = QueryOptions.create(ConsistencyLevel.ONE,
-                                                        byteBufferList,
-                                                        false,
-                                                        PageSize.inRows(1),
-                                                        null,
-                                                        null,
-                                                        ProtocolVersion.CURRENT,
-                                                        KEYSPACE);
+    public void testOrderResults()
+    {
         List<List<ByteBuffer>> rows = new ArrayList<>();
         rows.add(byteBufferList);
 
         SelectStatement selectStatementInstance = (SelectStatement) QueryProcessor.prepareInternal("SELECT key, value FROM " + KEYSPACE + '.' + TABLE).statement;
 
-        SortedRowsBuilder builder = selectStatementInstance.sortedRowsBuilder(Integer.MAX_VALUE, 0, queryOptions);
+        SortedRowsBuilder builder = selectStatementInstance.sortedRowsBuilder(Integer.MAX_VALUE, 0);
         rows.forEach(builder::add);
         List<List<ByteBuffer>> sortedRows = builder.build();
 
@@ -160,7 +149,8 @@ public class StorageAttachedIndexTest
 
         rows.sort(descendingComparator);
 
-        for (int i = 0; i < sortedRows.size(); i++) {
+        for (int i = 0; i < sortedRows.size(); i++)
+        {
             List<ByteBuffer> expectedRow = rows.get(i);
             List<ByteBuffer> actualRow = sortedRows.get(i);
             assertEquals(expectedRow, actualRow);
