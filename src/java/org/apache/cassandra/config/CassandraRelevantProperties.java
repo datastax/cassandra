@@ -785,12 +785,6 @@ public enum CassandraRelevantProperties
     TEST_FAIL_MV_LOCKS_COUNT("cassandra.test.fail_mv_locks_count", "0"),
     TEST_FAIL_ON_FORBIDDEN_LOG_ENTRIES("cassandra.test.fail_on_forbidden_log_entries", "false"),
     TEST_FAIL_WRITES_KS("cassandra.test.fail_writes_ks", ""),
-    /** Flush changes of {@link org.apache.cassandra.schema.SchemaKeyspace} after each schema modification. In production,
-     * we always do that. However, tests which do not restart nodes may disable this functionality in order to run
-     * faster. Note that this is disabled for unit tests but if an individual test requires schema to be flushed, it
-     * can be also done manually for that particular case: {@code flush(SchemaConstants.SCHEMA_KEYSPACE_NAME);}. */
-    TEST_FLUSH_LOCAL_SCHEMA_CHANGES("cassandra.test.flush_local_schema_changes", "true"),
-    TEST_HARRY_SWITCH_AFTER("cassandra.test.harry.progression.switch-after", "1"),
     TEST_IGNORE_SIGAR("cassandra.test.ignore_sigar"),
     TEST_INTERVAL_TREE_EXPENSIVE_CHECKS("cassandra.test.interval_tree_expensive_checks"),
     TEST_INVALID_LEGACY_SSTABLE_ROOT("invalid-legacy-sstable-root"),
@@ -894,7 +888,11 @@ public enum CassandraRelevantProperties
     UCS_VECTOR_SSTABLE_GROWTH("unified_compaction.vector_sstable_growth", "1.0"),
     UCS_VECTOR_TARGET_SSTABLE_SIZE("unified_compaction.vector_target_sstable_size", "5GiB"),
     UDF_EXECUTOR_THREAD_KEEPALIVE_MS("cassandra.udf_executor_thread_keepalive_ms", "30000"),
-    UNSAFE_SYSTEM("cassandra.unsafesystem"),
+    /** Disables flush changes to local and schema keyspaces. Also, disables recycling all segments of commitlog after
+     * dropping a table. Tests which do not restart nodes may enable this option in order to run faster. Note that this
+     * is enabled for unit tests but if an individual test requires schema to be flushed, it can be also done manually
+     * for that particular case: {@code flush(SchemaConstants.SCHEMA_KEYSPACE_NAME);}. */
+    UNSAFE_SYSTEM("cassandra.unsafesystem", "false"),
     /** User's home directory. */
     USER_HOME("user.home"),
     /** Set this property to true in order to use DSE-like histogram bucket boundaries and behaviour */

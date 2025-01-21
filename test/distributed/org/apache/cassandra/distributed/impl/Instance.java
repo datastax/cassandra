@@ -60,6 +60,7 @@ import org.apache.cassandra.concurrent.ExecutorPlus;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.concurrent.SharedExecutorPool;
 import org.apache.cassandra.concurrent.Stage;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.YamlConfigurationLoader;
@@ -163,7 +164,6 @@ import static org.apache.cassandra.config.CassandraRelevantProperties.CONSISTENT
 import static org.apache.cassandra.config.CassandraRelevantProperties.RING_DELAY;
 import static org.apache.cassandra.config.CassandraRelevantProperties.TEST_CASSANDRA_SUITENAME;
 import static org.apache.cassandra.config.CassandraRelevantProperties.TEST_CASSANDRA_TESTTAG;
-import static org.apache.cassandra.config.CassandraRelevantProperties.TEST_FLUSH_LOCAL_SCHEMA_CHANGES;
 import static org.apache.cassandra.distributed.api.Feature.BLANK_GOSSIP;
 import static org.apache.cassandra.distributed.api.Feature.GOSSIP;
 import static org.apache.cassandra.distributed.api.Feature.JMX;
@@ -856,7 +856,7 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
     public Future<Void> shutdown(boolean graceful)
     {
         inInstancelogger.info("Shutting down instance {} / {}", config.num(), config.broadcastAddress().getHostString());
-        if (!TEST_FLUSH_LOCAL_SCHEMA_CHANGES.getBoolean(true))
+        if (!CassandraRelevantProperties.UNSAFE_SYSTEM.getBoolean())
             flush(SchemaKeyspace.metadata().name);
 
         Future<?> future = async((ExecutorService executor) -> {
