@@ -27,9 +27,11 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 
 import org.junit.Assert;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.exceptions.SyntaxException;
+import org.apache.cassandra.service.StorageService;
 
 /**
  * This class tests all keywords which took a long time. Hence it was split into multiple
@@ -57,6 +59,12 @@ public abstract class KeywordTestBase extends CQLTester
     {
         this.keyword = keyword;
         this.isReserved = isReserved;
+    }
+
+    @BeforeClass
+    public static void beforeClass()
+    {
+        StorageService.instance.setUpDistributedSystemKeyspaces();
     }
 
     @Test
