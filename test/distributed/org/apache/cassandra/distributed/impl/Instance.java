@@ -60,6 +60,7 @@ import org.apache.cassandra.concurrent.ExecutorPlus;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.concurrent.SharedExecutorPool;
 import org.apache.cassandra.concurrent.Stage;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.YamlConfigurationLoader;
@@ -164,7 +165,6 @@ import static org.apache.cassandra.config.CassandraRelevantProperties.CONSISTENT
 import static org.apache.cassandra.config.CassandraRelevantProperties.RING_DELAY;
 import static org.apache.cassandra.config.CassandraRelevantProperties.TEST_CASSANDRA_SUITENAME;
 import static org.apache.cassandra.config.CassandraRelevantProperties.TEST_CASSANDRA_TESTTAG;
-import static org.apache.cassandra.config.CassandraRelevantProperties.TEST_FLUSH_LOCAL_SCHEMA_CHANGES;
 import static org.apache.cassandra.distributed.api.Feature.BLANK_GOSSIP;
 import static org.apache.cassandra.distributed.api.Feature.GOSSIP;
 import static org.apache.cassandra.distributed.api.Feature.JMX;
@@ -685,7 +685,7 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
                 // Replay any CommitLogSegments found on disk
                 try
                 {
-                    CommitLog.instance.recoverSegmentsOnDisk(ColumnFamilyStore.FlushReason.STARTUP);
+                    CommitLog.instance.recoverSegmentsOnDiskWithArchive(ColumnFamilyStore.FlushReason.STARTUP);
                 }
                 catch (IOException e)
                 {
@@ -780,6 +780,7 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
             }
             catch (Throwable t)
             {
+                startedAt.set(0);
                 if (t instanceof RuntimeException)
                     throw (RuntimeException) t;
                 throw new RuntimeException(t);
