@@ -19,6 +19,7 @@
 package org.apache.cassandra.distributed;
 
 import java.io.IOException;
+import java.nio.file.Path;
 import java.util.function.Consumer;
 
 import org.apache.cassandra.distributed.api.IInstanceConfig;

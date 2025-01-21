@@ -91,6 +91,7 @@ public class LegacySystemKeyspaceToNodesTest extends CQLTester
     @BeforeClass
     public static void setup() throws Exception
     {
+        DatabaseDescriptor.setAutoSnapshot(true);
         DatabaseDescriptor.daemonInitialization();
 
         localAdr = InetAddress.getByName("127.0.1.1");
