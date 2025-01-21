@@ -86,7 +86,7 @@ public class TopKSelector<T> extends BinaryHeap
     }
 
     @Override
-    protected int size()
+    public int size()
     {
         return size;
     }
@@ -113,6 +113,15 @@ public class TopKSelector<T> extends BinaryHeap
     public <R> List<R> getTransformed(Function<T, R> transformer)
     {
         return getTransformedSliced(transformer, 0);
+    }
+
+    /**
+     * Get a copy of the lowest size-startIndex elements.
+     * The top startIndex elements will remain in the selector.
+     */
+    public List<T> getSliced(int startIndex)
+    {
+        return getTransformedSliced(Function.identity(), startIndex);
     }
 
     /**

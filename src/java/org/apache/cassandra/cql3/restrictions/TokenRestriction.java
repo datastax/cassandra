@@ -124,12 +124,6 @@ public abstract class TokenRestriction implements PartitionKeyRestrictions
     }
 
     @Override
-    public Index findSupportingIndex(IndexRegistry indexRegistry)
-    {
-        return null;
-    }
-
-    @Override
     public void addToRowFilter(RowFilter.Builder filter, IndexRegistry indexRegistry, QueryOptions options)
     {
         throw new UnsupportedOperationException("Index expression cannot be created for token restriction");

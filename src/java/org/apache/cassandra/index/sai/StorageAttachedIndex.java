@@ -39,22 +39,16 @@ import java.util.function.BooleanSupplier;
 import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Preconditions;
 import com.google.common.base.Predicates;
 import com.google.common.collect.ImmutableSet;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
-import io.github.jbellis.jvector.vector.VectorizationProvider;
-import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.Operator;
-import org.apache.cassandra.cql3.QueryOptions;
-import org.apache.cassandra.cql3.restrictions.Restriction;
-import org.apache.cassandra.cql3.restrictions.SingleColumnRestriction;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget;
 import org.apache.cassandra.db.CassandraWriteContext;
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -125,7 +119,6 @@ public class StorageAttachedIndex implements Index
     "In most cases it's better to use a simpler query_analyzer such as the standard one.";
 
     private static final Logger logger = LoggerFactory.getLogger(StorageAttachedIndex.class);
-    private static final VectorTypeSupport vts = VectorizationProvider.getInstance().getVectorTypeSupport();
 
     private static final boolean VALIDATE_TERMS_AT_COORDINATOR = SAI_VALIDATE_TERMS_AT_COORDINATOR.getBoolean();
 
@@ -707,49 +700,6 @@ public class StorageAttachedIndex implements Index
     {
         // it should be executed from the SAI query plan, this is only used by the singleton index query plan
         throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public Comparator<List<ByteBuffer>> postQueryComparator(Restriction restriction, int columnIndex, QueryOptions options)
-    {
-        assert restriction instanceof SingleColumnRestriction.OrderRestriction;
-
-        SingleColumnRestriction.OrderRestriction orderRestriction = (SingleColumnRestriction.OrderRestriction) restriction;
-        var typeComparator = orderRestriction.getDirection() == Operator.ORDER_BY_DESC
-                             ? indexContext.getValidator().reversed()
-                             : indexContext.getValidator();
-        return (a, b) -> typeComparator.compare(a.get(columnIndex), b.get(columnIndex));
-    }
-
-    @Override
-    public Scorer postQueryScorer(Restriction restriction, int columnIndex, QueryOptions options)
-    {
-        // For now, only support ANN
-        assert restriction instanceof SingleColumnRestriction.AnnRestriction;
-
-        Preconditions.checkState(indexContext.isVector());
-
-        SingleColumnRestriction.AnnRestriction annRestriction = (SingleColumnRestriction.AnnRestriction) restriction;
-        VectorSimilarityFunction similarityFunction = indexContext.getIndexWriterConfig().getSimilarityFunction();
-
-        var targetVector = vts.createFloatVector(TypeUtil.decomposeVector(indexContext, annRestriction.value(options).duplicate()));
-
-        return new Scorer()
-        {
-            @Override
-            public float score(List<ByteBuffer> row)
-            {
-                ByteBuffer vectorBuffer = row.get(columnIndex);
-                var vector = vts.createFloatVector(TypeUtil.decomposeVector(indexContext, vectorBuffer.duplicate()));
-                return similarityFunction.compare(vector, targetVector);
-            }
-
-            @Override
-            public boolean reversed()
-            {
-                return true;
-            }
-        };
     }
 
     @Override

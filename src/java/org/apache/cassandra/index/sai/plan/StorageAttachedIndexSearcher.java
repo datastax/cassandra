@@ -124,7 +124,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                     var scoredKeysIterator = (CloseableIterator<PrimaryKeyWithSortKey>) keysIterator;
                     var result = new ScoreOrderedResultRetriever(scoredKeysIterator, filterTree, executionController,
                                                                  command.limits().count());
-                    return (UnfilteredPartitionIterator) new TopKProcessor(command).filter(result);
+                    return new TopKProcessor(command).filter(result);
                 }
                 else
                 {
