@@ -20,13 +20,9 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.function.BiFunction;
-import java.util.function.Function;
-import java.util.function.Supplier;
 
 import com.google.common.math.IntMath;
 
-import org.apache.cassandra.index.Index;
 import org.apache.cassandra.utils.TopKSelector;
 
 import static org.apache.cassandra.db.filter.DataLimits.NO_LIMIT;
@@ -93,20 +89,7 @@ public abstract class SortedRowsBuilder
      */
     public static SortedRowsBuilder create(int limit, int offset, Comparator<List<ByteBuffer>> comparator)
     {
-        return WithHybridSort.create(limit, offset, comparator);
-    }
-
-    /**
-     * Returns a new row builder that orders the added rows based on the specified {@link Index.Scorer}.
-     *
-     * @param limit the query limit
-     * @param offset the query offset
-     * @param scorer the index scorer to use for ordering
-     * {@link SortedRowsBuilder} that orders results based on a secondary index scorer.
-     */
-    public static SortedRowsBuilder create(int limit, int offset, Index.Scorer scorer)
-    {
-        return WithHybridSort.create(limit, offset, scorer);
+        return new WithHybridSort(limit, offset, comparator);
     }
 
     /**
@@ -144,169 +127,65 @@ public abstract class SortedRowsBuilder
      * It simply stores all the rows in a list, and sorts and trims it when {@link #build()} is called. As such, it can
      * consume a bunch of resources if the number of rows is high. However, it has good performance for cases where the
      * number of rows is close to {@code limit + offset}, as it's the case of partition-directed queries.
-     * </p>
-     * The rows can be decorated with any other value used for the comparator, so it doesn't need to recalculate that
-     * value in every comparison.
      */
-    public static class WithListSort<T> extends SortedRowsBuilder
+    public static class WithListSort extends SortedRowsBuilder
     {
-        private final List<T> rows = new ArrayList<>();
-        private final Function<List<ByteBuffer>, T> decorator;
-        private final Function<T, List<ByteBuffer>> undecorator;
-        private final Comparator<T> comparator;
-
-        public static WithListSort<List<ByteBuffer>> create(int limit, int offset, Comparator<List<ByteBuffer>> comparator)
-        {
-            return new WithListSort<>(limit, offset, r -> r, r -> r, comparator);
-        }
-
-        public static WithListSort<RowWithScore> create(int limit, int offset, Index.Scorer scorer)
-        {
-            return new WithListSort<>(limit, offset,
-                                      r -> new RowWithScore(r, scorer.score(r)),
-                                      rs -> rs.row,
-                                      (x, y) -> scorer.reversed()
-                                                ? Float.compare(y.score, x.score)
-                                                : Float.compare(x.score, y.score));
-        }
+        private final List<List<ByteBuffer>> rows = new ArrayList<>();
+        private final Comparator<List<ByteBuffer>> comparator;
 
         private WithListSort(int limit,
                              int offset,
-                             Function<List<ByteBuffer>, T> decorator,
-                             Function<T, List<ByteBuffer>> undecorator,
-                             Comparator<T> comparator)
+                             Comparator<List<ByteBuffer>> comparator)
         {
             super(limit, offset);
             this.comparator = comparator;
-            this.decorator = decorator;
-            this.undecorator = undecorator;
         }
 
         @Override
         public void add(List<ByteBuffer> row)
         {
-            rows.add(decorator.apply(row));
+            rows.add(row);
         }
 
         @Override
         public List<List<ByteBuffer>> build()
         {
             rows.sort(comparator);
-
-            // trim the results and undecorate them
-            List<List<ByteBuffer>> result = new ArrayList<>();
-            for (int i = offset; i < Math.min(fetchLimit, rows.size()); i++)
-            {
-                result.add(undecorator.apply(rows.get(i)));
-            }
-
-            return result;
-        }
-
-        /**
-         * A row decorated with its score assigned by a {@link Index.Scorer},
-         * so we don't need to recalculate that score in every comparison.
-         */
-        private static final class RowWithScore
-        {
-            private final List<ByteBuffer> row;
-            private final float score;
-
-            private RowWithScore(List<ByteBuffer> row, float score)
-            {
-                this.row = row;
-                this.score = score;
-            }
+            return rows.subList(Math.min(offset, rows.size()),
+                                Math.min(fetchLimit, rows.size()));
         }
     }
 
     /**
      * {@link SortedRowsBuilder} that orders rows based on the provided comparator.
      * </p>
-     * It's possible for the comparison to produce ties. To deal with these ties, the rows are decorated with their
-     * position in the sequence of calls to {@link #add(List)}, so we can use that identifying position to solve ties by
-     * favoring the row that was inserted first.
-     * </p>
-     * The rows can be decorated with any other value used for the comparator, so it doesn't need to recalculate that
-     * value in every comparison.
-     * </p>
-     * It keeps at most {@code limit + offset} rows in memory.
+     * It uses a heap to keep at most {@code limit + offset} rows in memory.
      */
-    public static class WithHeapSort<T extends WithHeapSort.RowWithId> extends SortedRowsBuilder
+    public static class WithHeapSort extends SortedRowsBuilder
     {
-        private final BiFunction<List<ByteBuffer>, Integer, T> decorator;
+        private final TopKSelector<List<ByteBuffer>> heap;
 
-        private TopKSelector<T> heap;
-        private int numAddedRows = 0;
-
-        public static WithHeapSort<RowWithId> create(int limit, int offset, Comparator<List<ByteBuffer>> comparator)
-        {
-            return new WithHeapSort<>(limit, offset,
-                                      RowWithId::new,
-                                      (x, y) -> comparator.compare(x.row, y.row));
-        }
-
-        public static WithHeapSort<RowWithIdAndScore> create(int limit, int offset, Index.Scorer scorer)
-        {
-            return new WithHeapSort<>(limit, offset,
-                                      (row, id) -> new RowWithIdAndScore(row, id, scorer.score(row)),
-                                      (x, y) -> scorer.reversed()
-                                                ? Float.compare(y.score, x.score)
-                                                : Float.compare(x.score, y.score));
-        }
-
-        private WithHeapSort(int limit,
-                             int offset,
-                             BiFunction<List<ByteBuffer>, Integer, T> decorator,
-                             Comparator<T> comparator)
+        private WithHeapSort(int limit, int offset, Comparator<List<ByteBuffer>> comparator)
         {
             super(limit, offset);
-            this.decorator = decorator;
             this.heap = new TopKSelector<>(comparator, fetchLimit);
         }
 
         @Override
         public void add(List<ByteBuffer> row)
         {
-            T decoratedRow = decorator.apply(row, numAddedRows++);
-            heap.add(decoratedRow);
+            heap.add(row);
+        }
+
+        public void addAll(Iterable<List<ByteBuffer>> rows)
+        {
+            heap.addAll(rows);
         }
 
         @Override
         public List<List<ByteBuffer>> build()
         {
-            return heap.getTransformedSliced(r -> r.row, offset);
-        }
-
-        /**
-         * A row decorated with its position in the sequence of calls to {@link #add(List)},
-         * so we can use it to solve ties in comparisons.
-         */
-        private static class RowWithId
-        {
-            protected final List<ByteBuffer> row;
-            protected final int id;
-
-            private RowWithId(List<ByteBuffer> row, int id)
-            {
-                this.row = row;
-                this.id = id;
-            }
-        }
-
-        /**
-         * A {@link RowWithId} that is also decorated with a score assigned by a {@link Index.Scorer},
-         * so we don't need to recalculate that score in every comparison.
-         */
-        private static final class RowWithIdAndScore extends RowWithId
-        {
-            private final float score;
-
-            private RowWithIdAndScore(List<ByteBuffer> row, int id, float score)
-            {
-                super(row, id);
-                this.score = score;
-            }
+            return heap.getSliced(offset);
         }
     }
 
@@ -322,39 +201,23 @@ public abstract class SortedRowsBuilder
      * </p>
      * It keeps at most {@link #SWITCH_FACTOR} {@code * (limit + offset)} rows in memory.
      */
-    public static class WithHybridSort<L, Q extends WithHeapSort.RowWithId> extends SortedRowsBuilder
+    public static class WithHybridSort extends SortedRowsBuilder
     {
-        /** Factor of {@code limit + offset} at which we switch from list to heap. */
+        /**
+         * Factor of {@code limit + offset} at which we switch from list to heap.
+         */
         public static final int SWITCH_FACTOR = 4;
 
-        private WithListSort<L> list;
-        private final Supplier<WithHeapSort<Q>> heapSupplier;
         private final int threshold; // at what number of rows we switch from list to heap, -1 means no switch
 
-        private WithHeapSort<Q> heap;
-
-        public static SortedRowsBuilder create(int limit, int offset, Comparator<List<ByteBuffer>> comparator)
-        {
-            return new WithHybridSort<>(limit, offset,
-                                        WithListSort.create(limit, offset, comparator),
-                                        () -> WithHeapSort.create(limit, offset, comparator));
-        }
-
-        public static SortedRowsBuilder create(int limit, int offset, Index.Scorer scorer)
-        {
-            return new WithHybridSort<>(limit, offset,
-                                        WithListSort.create(limit, offset, scorer),
-                                        () -> WithHeapSort.create(limit, offset, scorer));
-        }
+        private WithListSort list;
+        private WithHeapSort heap;
 
         @SuppressWarnings("UnstableApiUsage")
-        private WithHybridSort(int limit, int offset,
-                               WithListSort<L> list,
-                               Supplier<WithHeapSort<Q>> heapSupplier)
+        private WithHybridSort(int limit, int offset, Comparator<List<ByteBuffer>> comparator)
         {
             super(limit, offset);
-            this.list = list;
-            this.heapSupplier = heapSupplier;
+            this.list = new WithListSort(limit, offset, comparator);
 
             // The heap approach is only useful when the limit is smaller than the number of collected rows.
             // If there is no limit we will return all the collected rows, so we can simply use the list approach.
@@ -367,9 +230,8 @@ public abstract class SortedRowsBuilder
             // start using the heap if the list is full
             if (list != null && threshold > 0 && list.rows.size() >= threshold)
             {
-                heap = heapSupplier.get();
-                for (L r : list.rows)
-                    heap.add(list.undecorator.apply(r));
+                heap = new WithHeapSort(limit, offset, list.comparator);
+                heap.addAll(list.rows);
                 list = null;
             }
 
