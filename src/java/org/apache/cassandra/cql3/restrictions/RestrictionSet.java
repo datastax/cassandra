@@ -109,12 +109,6 @@ public abstract class RestrictionSet implements Restrictions
         }
 
         @Override
-        public Index findSupportingIndex(IndexRegistry indexRegistry)
-        {
-            return null;
-        }
-
-        @Override
         public boolean needsFiltering(Index.Group indexGroup)
         {
             return false;
@@ -289,18 +283,6 @@ public abstract class RestrictionSet implements Restrictions
                 if (restriction.hasSupportingIndex(indexRegistry))
                     return true;
             return false;
-        }
-
-        @Override
-        public Index findSupportingIndex(IndexRegistry indexRegistry)
-        {
-            for (SingleRestriction restriction : restrictionsMap.values())
-            {
-                Index index = restriction.findSupportingIndex(indexRegistry);
-                if (index != null)
-                    return index;
-            }
-            return null;
         }
 
         @Override

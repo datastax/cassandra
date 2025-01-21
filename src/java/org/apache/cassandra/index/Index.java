@@ -24,7 +24,6 @@ import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -37,8 +36,6 @@ import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import org.apache.cassandra.cql3.Operator;
-import org.apache.cassandra.cql3.QueryOptions;
-import org.apache.cassandra.cql3.restrictions.Restriction;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DeletionTime;
@@ -69,8 +66,6 @@ import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ClientState;
-
-import org.apache.commons.lang3.NotImplementedException;
 
 /**
  * Consisting of a top level Index interface and two sub-interfaces which handle read and write operations,
@@ -524,55 +519,7 @@ public interface Index
      * @return the (hopefully) reduced filter that would still need to be applied after
      *         the index was used to narrow the initial result set
      */
-    public RowFilter getPostIndexQueryFilter(RowFilter filter);
-
-    /**
-     * Returns a {@link Comparator} of CQL result rows, so they can be ordered by the
-     * coordinator before sending them to client.
-     *
-     * @param restriction restriction that requires current index
-     * @param columnIndex idx of the indexed column in returned row
-     * @param options     query options
-     * @return a comparator of rows
-     */
-    default Comparator<List<ByteBuffer>> postQueryComparator(Restriction restriction, int columnIndex, QueryOptions options)
-    {
-        throw new NotImplementedException();
-    }
-
-    /**
-     * Returns a {@link Scorer} to give a similarity/proximity score to CQL result rows, so they can be ordered by the
-     * coordinator before sending them to client.
-     *
-     * @param restriction restriction that requires current index
-     * @param columnIndex idx of the indexed column in returned row
-     * @param options     query options
-     * @return a scorer to score the rows
-     */
-    default Scorer postQueryScorer(Restriction restriction, int columnIndex, QueryOptions options)
-    {
-        throw new NotImplementedException();
-    }
-
-    /**
-     * Gives a similarity/proximity score to CQL result rows.
-     */
-    interface Scorer
-    {
-        /**
-         * @param row a CQL result row
-         * @return the similarity/proximity score for the row
-         */
-        float score(List<ByteBuffer> row);
-
-        /**
-         * @return {@code true} if higher scores are considered better, {@code false} otherwise
-         */
-        default boolean reversed()
-        {
-            return false;
-        }
-    }
+    RowFilter getPostIndexQueryFilter(RowFilter filter);
 
     /**
      * Return an estimate of the number of results this index is expected to return for any given
@@ -582,7 +529,7 @@ public interface Index
      *
      * @return the estimated average number of results a Searcher may return for any given query
      */
-    public long getEstimatedResultRows();
+    long getEstimatedResultRows();
 
     /**
      * Check if current index is queryable based on the index status.
