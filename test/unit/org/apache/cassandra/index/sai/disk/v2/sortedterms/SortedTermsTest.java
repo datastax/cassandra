@@ -26,6 +26,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.Test;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.marshal.Int32Type;
@@ -52,7 +53,6 @@ import org.apache.lucene.store.IndexInput;
 
 public class SortedTermsTest extends SaiRandomizedTest
 {
-
     public static final ByteComparable.Version VERSION = TypeUtil.BYTE_COMPARABLE_VERSION;
 
     @Test

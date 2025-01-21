@@ -39,6 +39,7 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.lifecycle.Tracker;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
@@ -719,6 +720,9 @@ public class IndexDescriptor
                 // Compress per-index components with the settings from the index metadata.
                 if (context != null)
                     return context.getCompression();
+
+                if (!Keyspace.isInitialized())
+                    return CompressionParams.noCompression();
 
                 var cfs = ColumnFamilyStore.getIfExists(descriptor.ksname, descriptor.cfname);
                 return cfs.metadata().params.indexCompression;

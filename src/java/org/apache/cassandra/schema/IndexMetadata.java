@@ -98,7 +98,7 @@ public final class IndexMetadata
 
     public static IndexMetadata fromSchemaMetadata(String name, Kind kind, Map<String, String> options)
     {
-        return new IndexMetadata(name, options, kind, CompressionParams.NOOP);
+        return new IndexMetadata(name, options, kind, CompressionParams.noCompression());
     }
 
     public static IndexMetadata fromSchemaMetadata(String name, Kind kind, Map<String, String> options, CompressionParams compression)
