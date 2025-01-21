@@ -7,8 +7,16 @@
     <option name="links">
       <list>
         <IssueNavigationLink>
-          <option name="issueRegexp" value="CASSANDRA-(\d+)" />
+          <option name="issueRegexp" value="(?i)CASSANDRA-(\d+)" />
           <option name="linkRegexp" value="https://issues.apache.org/jira/browse/CASSANDRA-$1" />
+        </IssueNavigationLink>
+        <IssueNavigationLink>
+          <option name="issueRegexp" value="(?i)CNDB-(\d+)"/>
+          <option name="linkRegexp" value="https://github.com/riptano/cndb/issues/$1"/>
+        </IssueNavigationLink>
+        <IssueNavigationLink>
+          <option name="issueRegexp" value="(?i)(DSP|STAR|HCD|DB)-\d+"/>
+          <option name="linkRegexp" value="https://datastax.jira.com/browse/$0"/>
         </IssueNavigationLink>
       </list>
     </option>

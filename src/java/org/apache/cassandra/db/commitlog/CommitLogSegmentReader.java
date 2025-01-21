@@ -107,11 +107,13 @@ public class CommitLogSegmentReader implements Iterable<CommitLogSegmentReader.S
                 }
                 catch (CommitLogSegmentReader.SegmentReadException e)
                 {
+                    logger.debug("Error reading commit log", e);
                     handleUnrecoverableError(e, !e.invalidCrc && tolerateTruncation);
                     end = -1; // skip the remaining part of the corrupted log segment
                 }
                 catch (IOException e)
                 {
+                    logger.debug("Error reading commit log", e);
                     boolean tolerateErrorsInSection = tolerateTruncation & segmenter.tolerateSegmentErrors(end, reader.length());
                     handleUnrecoverableError(e, tolerateErrorsInSection);
                     end = -1; // skip the remaining part of the corrupted log segment
@@ -134,11 +136,13 @@ public class CommitLogSegmentReader implements Iterable<CommitLogSegmentReader.S
                 }
                 catch (CommitLogSegmentReader.SegmentReadException e)
                 {
+                    logger.debug("Error reading commit log", e);
                     handleUnrecoverableError(e, !e.invalidCrc && tolerateTruncation);
                     // if no exception is thrown, the while loop will continue
                 }
                 catch (IOException e)
                 {
+                    logger.debug("Error reading commit log", e);
                     boolean tolerateErrorsInSection = tolerateTruncation & segmenter.tolerateSegmentErrors(end, reader.length());
                     handleUnrecoverableError(e, tolerateErrorsInSection);
                     // if no exception is thrown, the while loop will continue
