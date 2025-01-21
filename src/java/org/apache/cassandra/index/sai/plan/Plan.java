@@ -328,7 +328,7 @@ abstract public class Plan
      * Needs to be overwritten by nodes that use indexes.
      * @param indexes the set of indexes to update with the index used by this node
      */
-    protected void countIndex(HashSet<IndexContext> indexes)
+    protected void addIndexToSetIfPresent(HashSet<IndexContext> indexes)
     {
         // By default, a node does not contain any indexes.
         // Thus, no-op.
@@ -896,7 +896,7 @@ abstract public class Plan
         }
 
         @Override
-        final protected void countIndex(HashSet<IndexContext> indexes)
+        final protected void addIndexToSetIfPresent(HashSet<IndexContext> indexes)
         {
             assert predicate != null || ordering != null;
             indexes.add(predicate != null ? predicate.context : ordering.context);
@@ -1364,7 +1364,7 @@ abstract public class Plan
         }
 
         @Override
-        protected void countIndex(HashSet<IndexContext> indexes)
+        protected void addIndexToSetIfPresent(HashSet<IndexContext> indexes)
         {
             indexes.add(ordering.context);
         }
