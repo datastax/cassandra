@@ -42,6 +42,7 @@ import org.apache.cassandra.utils.ExecutorUtils;
 
 import static java.util.Objects.requireNonNull;
 import static org.apache.cassandra.concurrent.ExecutorFactory.Global.executorFactory;
+import static org.apache.cassandra.utils.Clock.Global.currentTimeMillis;
 
 public class PendingRangeCalculatorService
 {
@@ -66,7 +67,7 @@ public class PendingRangeCalculatorService
         // repeat until all keyspaced are consumed
         while (!keyspacesWithPendingRanges.isEmpty())
         {
-            long start = System.currentTimeMillis();
+            long start = currentTimeMillis();
 
             int updated = 0;
             int total = 0;
@@ -97,7 +98,7 @@ public class PendingRangeCalculatorService
             {
                 PendingRangeCalculatorServiceDiagnostics.taskFinished();
                 if (logger.isTraceEnabled())
-                    logger.trace("Finished PendingRangeTask for {} keyspaces out of {} in {}ms", updated, total, System.currentTimeMillis() - start);
+                    logger.trace("Finished PendingRangeTask for {} keyspaces out of {} in {}ms", updated, total, currentTimeMillis() - start);
             }
         }
     }
