@@ -60,7 +60,7 @@ public enum IndexComponentType
      *
      * V1
      */
-    POSTING_LISTS("PostingLists", false),
+    POSTING_LISTS("PostingLists", true),
     /**
      * If present indicates that the column index build completed successfully
      *

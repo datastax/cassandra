@@ -23,6 +23,7 @@ import java.nio.ByteOrder;
 
 import org.apache.cassandra.index.sai.disk.io.IndexInput;
 import org.apache.cassandra.index.sai.disk.io.IndexOutputWriter;
+import org.apache.cassandra.io.compress.CompressionMetadata;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
