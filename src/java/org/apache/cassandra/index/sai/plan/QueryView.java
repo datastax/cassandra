@@ -112,11 +112,29 @@ public class QueryView implements AutoCloseable
         static class MissingIndexException extends RuntimeException
         {
             final IndexContext context;
+            final String dataObjectName;
 
-            public MissingIndexException(IndexContext context, String message)
+            private MissingIndexException(IndexContext context, String dataObjectName)
             {
-                super(message);
+                super();
                 this.context = context;
+                this.dataObjectName = dataObjectName;
+            }
+
+            public static MissingIndexException forSSTable(IndexContext context, Descriptor descriptor)
+            {
+                return new MissingIndexException(context, "sstable " + descriptor);
+            }
+
+            public static MissingIndexException forMemtable(IndexContext context, Memtable memtable)
+            {
+                return new MissingIndexException(context, "memtable " + memtable);
+            }
+
+            @Override
+            public String getMessage()
+            {
+                return "Index " + context.getIndexName() + " not found for " + dataObjectName;
             }
         }
 
@@ -190,8 +208,7 @@ public class QueryView implements AutoCloseable
                         {
                             // Index was dropped deliberately by the user.
                             // We cannot recover here.
-                            throw new MissingIndexException(indexContext, "Index " + indexContext.getIndexName() +
-                                                                          " not found for memtable: " + memtable);
+                            throw MissingIndexException.forMemtable(indexContext, memtable);
                         }
                         else if (!processedMemtables.contains(memtable))
                         {
@@ -239,8 +256,7 @@ public class QueryView implements AutoCloseable
                         // The IndexViewManager got the update about this sstable, but there is no index for the sstable
                         // (e.g. index was dropped or got corrupt, etc.). In this case retrying won't fix it.
                         if (index == null)
-                            throw new MissingIndexException(indexContext, "Index " + indexContext.getIndexName() +
-                                                                          " not found for sstable: " + sstable.descriptor);
+                            throw MissingIndexException.forSSTable(indexContext, sstable.descriptor);
 
                         if (!indexInRange(index))
                             continue;
@@ -271,17 +287,14 @@ public class QueryView implements AutoCloseable
                                          indexContext);
                 }
 
-
                 if (unmatchedMemtable != null)
-                    throw new MissingIndexException(indexContext, "Index " + indexContext.getIndexName() +
-                                                                  " not found for memtable " + unmatchedMemtable);
+                    throw MissingIndexException.forMemtable(indexContext, unmatchedMemtable);
                 if (unmatchedSStable != null)
-                    throw new MissingIndexException(indexContext, "Index " + indexContext.getIndexName() +
-                                                                  " not found for sstable " + unmatchedSStable);
+                    throw MissingIndexException.forSSTable(indexContext, unmatchedSStable);
 
                 // This should be unreachable, because whenever we retry, we always set unmatchedMemtable
                 // or unmatchedSSTable, so we'd log a better message above.
-                throw new MissingIndexException(indexContext, "Failed to build QueryView for index " + indexContext.getIndexName());
+                throw new AssertionError("Failed to build QueryView for index " + indexContext.getIndexName());
             }
             catch (MissingIndexException e)
             {
