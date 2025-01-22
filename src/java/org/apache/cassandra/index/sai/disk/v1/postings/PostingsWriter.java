@@ -192,8 +192,7 @@ public class PostingsWriter implements Closeable
         int size = 0;
         while ((segmentRowId = postings.nextPosting()) != PostingList.END_OF_STREAM)
         {
-            int frequency = postings.includesFrequencies() ? postings.frequency() : Integer.MIN_VALUE;
-            writePosting(segmentRowId, frequency);
+            writePosting(segmentRowId, postings.frequency());
             size++;
             totalPostings++;
         }
