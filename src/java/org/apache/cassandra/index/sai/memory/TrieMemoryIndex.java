@@ -174,7 +174,7 @@ public class TrieMemoryIndex extends MemoryIndex
     }
 
     @Override
-    public Iterator<Pair<ByteComparable, List<Pair<PrimaryKey, Integer>>>> iterator()
+    public Iterator<Pair<ByteComparable, List<PkWithFrequency>>> iterator()
     {
         Iterator<Map.Entry<ByteComparable, PrimaryKeys>> iterator = data.entrySet().iterator();
         return new Iterator<>()
@@ -186,12 +186,15 @@ public class TrieMemoryIndex extends MemoryIndex
             }
 
             @Override
-            public Pair<ByteComparable, List<Pair<PrimaryKey, Integer>>> next()
+            public Pair<ByteComparable, List<PkWithFrequency>> next()
             {
                 Map.Entry<ByteComparable, PrimaryKeys> entry = iterator.next();
-                var pairs = new ArrayList<Pair<PrimaryKey, Integer>>(entry.getValue().size());
+                var pairs = new ArrayList<PkWithFrequency>(entry.getValue().size());
                 for (PrimaryKey pk : entry.getValue().keys())
-                    pairs.add(Pair.create(pk, termFrequencies.get(new PrimaryKeyWithByteComparable(indexContext, memtable, pk, entry.getKey()))));
+                {
+                    int frequency = termFrequencies.get(new PrimaryKeyWithByteComparable(indexContext, memtable, pk, entry.getKey()));
+                    pairs.add(new PkWithFrequency(pk, frequency));
+                }
                 return Pair.create(entry.getKey(), pairs);
             }
         };
