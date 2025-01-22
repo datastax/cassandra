@@ -112,29 +112,28 @@ public class RowMapping
     {
         assert complete : "RowMapping is not built.";
 
-        Iterator<Pair<ByteComparable, Iterator<Pair<PrimaryKey, Integer>>>> iterator = index.iterator(minKey.partitionKey(), maxKey.partitionKey());
+        var it = index.iterator(minKey.partitionKey(), maxKey.partitionKey());
         return new AbstractGuavaIterator<>()
         {
             @Override
             protected Pair<ByteComparable, List<RowIdWithFrequency>> computeNext()
             {
-                while (iterator.hasNext())
+                while (it.hasNext())
                 {
-                    Pair<ByteComparable, Iterator<Pair<PrimaryKey, Integer>>> pair = iterator.next();
+                    var pair = it.next();
 
                     List<RowIdWithFrequency> postings = null;
-                    Iterator<Pair<PrimaryKey, Integer>> primaryKeysWithFreq = pair.right;
+                    var primaryKeysWithFreq = pair.right;
 
-                    while (primaryKeysWithFreq.hasNext())
+                    for (var pkWithFreq : primaryKeysWithFreq)
                     {
-                        Pair<PrimaryKey, Integer> pkWithFreq = primaryKeysWithFreq.next();
-                        ByteComparable byteComparable = v -> pkWithFreq.left.asComparableBytes(v);
+                        ByteComparable byteComparable = pkWithFreq.pk::asComparableBytes;
                         Integer segmentRowId = rowMapping.get(byteComparable);
 
                         if (segmentRowId != null)
                         {
                             postings = postings == null ? new ArrayList<>() : postings;
-                            postings.add(new RowIdWithFrequency(segmentRowId, pkWithFreq.right));
+                            postings.add(new RowIdWithFrequency(segmentRowId, pkWithFreq.frequency));
                         }
                     }
                     if (postings != null && !postings.isEmpty())

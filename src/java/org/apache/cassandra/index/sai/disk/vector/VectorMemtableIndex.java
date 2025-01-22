@@ -54,6 +54,7 @@ import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
+import org.apache.cassandra.index.sai.memory.MemoryIndex;
 import org.apache.cassandra.index.sai.memory.MemtableIndex;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.plan.Orderer;
@@ -422,7 +423,7 @@ public class VectorMemtableIndex implements MemtableIndex
     }
 
     @Override
-    public Iterator<Pair<ByteComparable, Iterator<PrimaryKey>>> iterator(DecoratedKey min, DecoratedKey max)
+    public Iterator<Pair<ByteComparable, List<MemoryIndex.PkWithFrequency>>> iterator(DecoratedKey min, DecoratedKey max)
     {
         // This method is only used when merging an in-memory index with a RowMapping. This is done a different
         // way with the graph using the writeData method below.

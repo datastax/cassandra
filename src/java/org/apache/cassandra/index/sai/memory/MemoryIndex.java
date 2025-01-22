@@ -65,5 +65,17 @@ public abstract class MemoryIndex
     /**
      * Iterate all Term->PrimaryKeys mappings in sorted order
      */
-    public abstract Iterator<Pair<ByteComparable, List<Pair<PrimaryKey, Integer>>>> iterator();
+    public abstract Iterator<Pair<ByteComparable, List<PkWithFrequency>>> iterator();
+
+    public static class PkWithFrequency
+    {
+        public final PrimaryKey pk;
+        public final int frequency;
+
+        public PkWithFrequency(PrimaryKey pk, int frequency)
+        {
+            this.pk = pk;
+            this.frequency = frequency;
+        }
+    }
 }
