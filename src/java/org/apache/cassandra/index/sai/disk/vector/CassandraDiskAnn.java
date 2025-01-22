@@ -19,6 +19,7 @@
 package org.apache.cassandra.index.sai.disk.vector;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
@@ -30,9 +31,11 @@ import org.slf4j.LoggerFactory;
 
 import io.github.jbellis.jvector.graph.GraphIndex;
 import io.github.jbellis.jvector.graph.GraphSearcher;
+import io.github.jbellis.jvector.graph.NodesIterator;
 import io.github.jbellis.jvector.graph.disk.CachingGraphIndex;
 import io.github.jbellis.jvector.graph.disk.FeatureId;
 import io.github.jbellis.jvector.graph.disk.OnDiskGraphIndex;
+import io.github.jbellis.jvector.graph.similarity.ScoreFunction;
 import io.github.jbellis.jvector.graph.similarity.SearchScoreProvider;
 import io.github.jbellis.jvector.pq.BQVectors;
 import io.github.jbellis.jvector.pq.CompressedVectors;
@@ -58,6 +61,7 @@ import org.apache.cassandra.index.sai.utils.RowIdWithScore;
 import org.apache.cassandra.io.sstable.SSTableId;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.CloseableIterator;
 
@@ -101,7 +105,7 @@ public class CassandraDiskAnn
 
         SegmentMetadata.ComponentMetadata termsMetadata = this.componentMetadatas.get(IndexComponentType.TERMS_DATA);
         graphHandle = indexFiles.termsData();
-        var rawGraph = OnDiskGraphIndex.load(graphHandle::createReader, termsMetadata.offset);
+        var rawGraph = OnDiskGraphIndex.load(() -> new TimedRandomAccessReader(graphHandle.createReader()), termsMetadata.offset);
         features = rawGraph.getFeatureSet();
         graph = V3OnDiskFormat.ENABLE_EDGES_CACHE ? cachingGraphFor(rawGraph) : rawGraph;
 
@@ -164,7 +168,8 @@ public class CassandraDiskAnn
         SegmentMetadata.ComponentMetadata postingListsMetadata = this.componentMetadatas.get(IndexComponentType.POSTING_LISTS);
         ordinalsMap = omFactory.create(indexFiles.postingLists(), postingListsMetadata.offset, postingListsMetadata.length);
 
-        searchers = ExplicitThreadLocal.withInitial(() -> new GraphSearcherAccessManager(new GraphSearcher(graph)));
+        final GraphIndex wrappedGraphIndex = new TimedGraphIndex(graph);
+        searchers = ExplicitThreadLocal.withInitial(() -> new GraphSearcherAccessManager(new GraphSearcher(wrappedGraphIndex)));
     }
 
     public Structure getPostingsStructure()
@@ -334,5 +339,207 @@ public class CassandraDiskAnn
     public int maxDegree()
     {
         return graph.maxDegree();
+    }
+
+    private static class TimedRandomAccessReader implements io.github.jbellis.jvector.disk.RandomAccessReader
+    {
+        private final RandomAccessReader randomAccessReader;
+        private static final Timer readFoatsTimer = Timer.builder("sai_ann_disk_read")
+                                                         .tag("method", "readFloats")
+                                                         .publishPercentileHistogram()
+                                                         .register(Metrics.globalRegistry);
+
+        TimedRandomAccessReader(RandomAccessReader randomAccessReader)
+        {
+            this.randomAccessReader = randomAccessReader;
+        }
+
+        @Override
+        public void seek(long l) throws IOException
+        {
+            randomAccessReader.seek(l);
+        }
+
+        @Override
+        public long getPosition() throws IOException
+        {
+            return randomAccessReader.getPosition();
+        }
+
+        @Override
+        public int readInt() throws IOException
+        {
+            return randomAccessReader.readInt();
+        }
+
+        @Override
+        public float readFloat() throws IOException
+        {
+            return randomAccessReader.readFloat();
+        }
+
+        @Override
+        public void readFully(byte[] bytes) throws IOException
+        {
+            randomAccessReader.readFully(bytes);
+        }
+
+        @Override
+        public void readFully(ByteBuffer byteBuffer) throws IOException
+        {
+            randomAccessReader.readFully(byteBuffer);
+        }
+
+        @Override
+        public void readFully(float[] floats) throws IOException
+        {
+            randomAccessReader.readFully(floats);
+        }
+
+        @Override
+        public void readFully(long[] longs) throws IOException
+        {
+            randomAccessReader.readFully(longs);
+        }
+
+        @Override
+        public void read(int[] ints, int i, int i1) throws IOException
+        {
+            // Skipping insturmentation for this method as it is only used by getNeighborsIterator which is already instrumented
+            randomAccessReader.read(ints, i, i1);
+        }
+
+        @Override
+        public void read(float[] floats, int i, int i1) throws IOException
+        {
+            long start = System.nanoTime();
+            randomAccessReader.read(floats, i, i1);
+            readFoatsTimer.record(System.nanoTime() - start, TimeUnit.NANOSECONDS);
+        }
+
+        @Override
+        public void close() throws IOException
+        {
+            randomAccessReader.close();
+        }
+    }
+
+    private static class TimedGraphIndex implements GraphIndex
+    {
+        private final GraphIndex delegate;
+
+        TimedGraphIndex(GraphIndex delegate)
+        {
+            this.delegate = delegate;
+        }
+
+        @Override
+        public int size()
+        {
+            return delegate.size();
+        }
+
+        @Override
+        public NodesIterator getNodes()
+        {
+            return delegate.getNodes();
+        }
+
+        @Override
+        public GraphIndex.View getView()
+        {
+            return new TimedView((ScoringView) delegate.getView());
+        }
+
+        @Override
+        public int maxDegree()
+        {
+            return delegate.maxDegree();
+        }
+
+        @Override
+        public int getIdUpperBound()
+        {
+            return delegate.getIdUpperBound();
+        }
+
+        @Override
+        public boolean containsNode(int nodeId)
+        {
+            return delegate.containsNode(nodeId);
+        }
+
+        @Override
+        public void close() throws IOException
+        {
+            delegate.close();
+        }
+
+        @Override
+        public long ramBytesUsed()
+        {
+            return delegate.ramBytesUsed();
+        }
+    }
+
+    private static class TimedView implements GraphIndex.ScoringView
+    {
+        private final GraphIndex.ScoringView view;
+
+        private static final Timer getNeighborsTimer = Timer.builder("sai_ann_get_neighbors")
+                                                            .publishPercentileHistogram()
+                                                            .register(Metrics.globalRegistry);
+
+        TimedView(GraphIndex.ScoringView view)
+        {
+            this.view = view;
+        }
+
+        @Override
+        public NodesIterator getNeighborsIterator(int var1)
+        {
+            long start = System.nanoTime();
+            NodesIterator result = view.getNeighborsIterator(var1);
+            getNeighborsTimer.record(System.nanoTime() - start, TimeUnit.NANOSECONDS);
+            return result;
+        }
+
+        @Override
+        public int entryNode()
+        {
+            return view.entryNode();
+        }
+
+        @Override
+        public int size()
+        {
+            return view.size();
+        }
+
+        public Bits liveNodes()
+        {
+            return view.liveNodes();
+        }
+
+        public int getIdUpperBound() {
+            return view.getIdUpperBound();
+        }
+
+        public void close() throws IOException
+        {
+            view.close();
+        }
+
+        @Override
+        public ScoreFunction.ExactScoreFunction rerankerFor(VectorFloat<?> vectorFloat, VectorSimilarityFunction vectorSimilarityFunction)
+        {
+            return view.rerankerFor(vectorFloat, vectorSimilarityFunction);
+        }
+
+        @Override
+        public ScoreFunction.ApproximateScoreFunction approximateScoreFunctionFor(VectorFloat<?> vectorFloat, VectorSimilarityFunction vectorSimilarityFunction)
+        {
+            return view.approximateScoreFunctionFor(vectorFloat, vectorSimilarityFunction);
+        }
     }
 }
