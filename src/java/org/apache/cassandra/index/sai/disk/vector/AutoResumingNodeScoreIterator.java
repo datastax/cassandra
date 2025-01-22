@@ -20,10 +20,15 @@ package org.apache.cassandra.index.sai.disk.vector;
 
 import java.util.Arrays;
 import java.util.Iterator;
+import java.util.concurrent.TimeUnit;
 import java.util.function.IntConsumer;
 
 import io.github.jbellis.jvector.graph.GraphSearcher;
 import io.github.jbellis.jvector.graph.SearchResult;
+import io.micrometer.core.instrument.DistributionSummary;
+import io.micrometer.core.instrument.Metrics;
+import io.micrometer.core.instrument.Timer;
+import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.AbstractIterator;
 
@@ -41,9 +46,14 @@ public class AutoResumingNodeScoreIterator extends AbstractIterator<SearchResult
     private final int rerankK;
     private final boolean inMemory;
     private final String source;
+    private final QueryContext context;
     private final IntConsumer nodesVisitedConsumer;
     private Iterator<SearchResult.NodeScore> nodeScores;
     private int cumulativeNodesVisited;
+    private int resumes = 0;
+
+    private final static Timer annResumeSearchNanos = Metrics.timer("sai_ann_search_nanos", "phase", "resume");
+    private final static DistributionSummary annResumeCount = Metrics.summary("sai_ann_per_index_resume_count");
 
     /**
      * Create a new {@link AutoResumingNodeScoreIterator} that iterates over the provided {@link SearchResult}.
@@ -51,6 +61,7 @@ public class AutoResumingNodeScoreIterator extends AbstractIterator<SearchResult
      * no more results.
      * @param searcher the {@link GraphSearcher} to use to resume search.
      * @param result the first {@link SearchResult} to iterate over
+     * @param queryContext the query context to use for the search
      * @param nodesVisitedConsumer a consumer that accepts the total number of nodes visited
      * @param limit the limit to pass to the {@link GraphSearcher} when resuming search
      * @param rerankK the rerankK to pass to the {@link GraphSearcher} when resuming search
@@ -60,6 +71,7 @@ public class AutoResumingNodeScoreIterator extends AbstractIterator<SearchResult
     public AutoResumingNodeScoreIterator(GraphSearcher searcher,
                                          GraphSearcherAccessManager accessManager,
                                          SearchResult result,
+                                         QueryContext queryContext,
                                          IntConsumer nodesVisitedConsumer,
                                          int limit,
                                          int rerankK,
@@ -70,6 +82,7 @@ public class AutoResumingNodeScoreIterator extends AbstractIterator<SearchResult
         this.accessManager = accessManager;
         this.nodeScores = Arrays.stream(result.getNodes()).iterator();
         this.cumulativeNodesVisited = result.getVisitedCount();
+        this.context = queryContext;
         this.nodesVisitedConsumer = nodesVisitedConsumer;
         this.limit = max(1, limit / 2); // we shouldn't need as many results on resume
         this.rerankK = rerankK;
@@ -83,7 +96,13 @@ public class AutoResumingNodeScoreIterator extends AbstractIterator<SearchResult
         if (nodeScores.hasNext())
             return nodeScores.next();
 
+        var start = System.nanoTime();
         var nextResult = searcher.resume(limit, rerankK);
+        var duration = System.nanoTime() - start;
+        annResumeSearchNanos.record(duration, TimeUnit.NANOSECONDS);
+        context.addAnnSearchDuration(duration);
+
+        resumes++;
         maybeLogTrace(nextResult);
         cumulativeNodesVisited += nextResult.getVisitedCount();
         // If the next result is empty, we are done searching.
@@ -102,6 +121,7 @@ public class AutoResumingNodeScoreIterator extends AbstractIterator<SearchResult
     public void close()
     {
         nodesVisitedConsumer.accept(cumulativeNodesVisited);
+        annResumeCount.record(resumes);
         accessManager.release();
     }
 }

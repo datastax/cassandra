@@ -18,6 +18,8 @@
 
 package org.apache.cassandra.index.sai.disk.vector;
 
+import io.micrometer.core.instrument.Metrics;
+import io.micrometer.core.instrument.Timer;
 import org.apache.cassandra.index.sai.utils.RowIdWithMeta;
 import org.apache.cassandra.index.sai.utils.RowIdWithScore;
 import org.apache.cassandra.io.util.FileUtils;
@@ -81,6 +83,8 @@ public class BruteForceRowIdIterator extends AbstractIterator<RowIdWithScore>
     private final int limit;
     private int rerankedCount;
 
+    private final static Timer rerankTimer = Metrics.timer("sai_brute_force_rerank_nanos");
+
     /**
      * @param approximateScoreQueue A priority queue of rows and their ordinal ordered by their approximate similarity scores
      * @param reranker A function that takes a graph ordinal and returns the exact similarity score
@@ -105,6 +109,7 @@ public class BruteForceRowIdIterator extends AbstractIterator<RowIdWithScore>
     protected RowIdWithScore computeNext() {
         int consumed = rerankedCount - exactScoreQueue.size();
         if (consumed >= limit) {
+            var timer = Timer.start();
             // Refill the exactScoreQueue until it reaches topK exact scores, or the approximate score queue is empty
             while (approximateScoreQueue.hasNext() && exactScoreQueue.size() < topK) {
                 RowWithApproximateScore rowOrdinalScore = approximateScoreQueue.next();
@@ -112,6 +117,7 @@ public class BruteForceRowIdIterator extends AbstractIterator<RowIdWithScore>
                 exactScoreQueue.add(new RowIdWithScore(rowOrdinalScore.rowId, score));
             }
             rerankedCount = exactScoreQueue.size();
+            timer.stop(rerankTimer);
         }
         RowIdWithScore top = exactScoreQueue.pop();
         return top == null ? endOfData() : top;

@@ -341,7 +341,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
                 graphAccessManager.release();
                 return CloseableIterator.wrap(Arrays.stream(result.getNodes()).iterator());
             }
-            return new AutoResumingNodeScoreIterator(searcher, graphAccessManager, result, context::addAnnNodesVisited, limit, rerankK, true, source);
+            return new AutoResumingNodeScoreIterator(searcher, graphAccessManager, result, context, context::addAnnNodesVisited, limit, rerankK, true, source);
         }
         catch (Throwable t)
         {

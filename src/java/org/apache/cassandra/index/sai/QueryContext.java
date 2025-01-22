@@ -63,6 +63,9 @@ public class QueryContext
     private final LongAdder annNodesVisited = new LongAdder();
     private float annRerankFloor = 0.0f; // only called from single-threaded setup code
 
+    private long addRowMaterializationDurationNanos = 0;
+    private long annSearchDurationNanos = 0;
+
     private final LongAdder shadowedPrimaryKeyCount = new LongAdder();
 
     // Determines the order of using indexes for filtering and sorting.
@@ -205,6 +208,15 @@ public class QueryContext
     {
         return annNodesVisited.longValue();
     }
+    public long rowMaterializationDuration()
+    {
+        return addRowMaterializationDurationNanos;
+    }
+
+    public long annSearchDuration()
+    {
+        return annSearchDurationNanos;
+    }
 
     public FilterSortOrder filterSortOrder()
     {
@@ -242,6 +254,16 @@ public class QueryContext
     {
         if (observedFloor < Float.POSITIVE_INFINITY)
             annRerankFloor = max(annRerankFloor, observedFloor);
+    }
+
+    public void addRowMaterializationDuration(long nanos)
+    {
+        addRowMaterializationDurationNanos += nanos;
+    }
+
+    public void addAnnSearchDuration(long nanos)
+    {
+        annSearchDurationNanos += nanos;
     }
 
     /**
