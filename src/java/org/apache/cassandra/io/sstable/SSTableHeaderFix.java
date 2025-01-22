@@ -577,8 +577,8 @@ public abstract class SSTableHeaderFix
                 info.accept(String.format("sstable %s: Column '%s' needs to be updated from type '%s' to '%s'",
                                           desc,
                                           logColumnName(name),
-                                          typeInHeader.asCQL3Type(),
-                                          fixedType.asCQL3Type()));
+                                          typeInHeader.asCQL3Type().toSchemaString(),
+                                          fixedType.asCQL3Type().toSchemaString()));
             return fixedType;
         }
 
