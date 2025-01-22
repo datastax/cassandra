@@ -596,6 +596,8 @@
             <exclusion groupId="org.antlr" artifactId="stringtemplate"/>
           </dependency>
           <dependency groupId="org.slf4j" artifactId="slf4j-api" version="2.0.9"/>
+          <dependency groupId="org.slf4j" artifactId="log4j-over-slf4j" version="2.0.9"/>
+          <dependency groupId="org.slf4j" artifactId="jcl-over-slf4j" version="2.0.9" />
           <dependency groupId="ch.qos.logback" artifactId="logback-core" version="1.4.14"/>
           <dependency groupId="ch.qos.logback" artifactId="logback-classic" version="1.4.14"/>
           <dependency groupId="com.fasterxml.jackson.core" artifactId="jackson-core" version="2.13.2"/>
@@ -864,6 +866,8 @@
         <dependency groupId="org.antlr" artifactId="ST4"/>
         <dependency groupId="org.antlr" artifactId="antlr-runtime"/>
         <dependency groupId="org.slf4j" artifactId="slf4j-api"/>
+        <dependency groupId="org.slf4j" artifactId="log4j-over-slf4j"/>
+        <dependency groupId="org.slf4j" artifactId="jcl-over-slf4j"/>
         <dependency groupId="com.fasterxml.jackson.core" artifactId="jackson-core"/>
         <dependency groupId="com.fasterxml.jackson.core" artifactId="jackson-databind"/>
         <dependency groupId="com.fasterxml.jackson.core" artifactId="jackson-annotations"/>
