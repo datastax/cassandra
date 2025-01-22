@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.index.sai.plan;
 
+import java.io.IOError;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -72,8 +73,6 @@ import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.Clock;
 import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.FBUtilities;
-
-import static org.apache.cassandra.cql3.statements.RequestValidations.invalidRequest;
 
 public class StorageAttachedIndexSearcher implements Index.Searcher
 {
@@ -147,8 +146,10 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
 
                 // If we end up here, this is either a bug or a problem with an index (corrupted / missing components?).
                 controller.abort();
-                logger.error("Index not found", e);
-                throw invalidRequest("Index missing or corrupt: " + e.context.getIndexName());
+                // Throwing IOError here because we want the coordinator to handle it as any other serious storage error
+                // and report it up to the user as failed query. It is better to fail than to return an incomplete
+                // result set.
+                throw new IOError(e);
             }
             catch (Throwable t)
             {
