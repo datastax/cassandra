@@ -481,6 +481,8 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         private final int softLimit;
         private int returnedRowCount = 0;
 
+        private long rowMaterializationNanos = 0;
+
         private ScoreOrderedResultRetriever(CloseableIterator<PrimaryKeyWithSortKey> scoredPrimaryKeyIterator,
                                             FilterTree filterTree,
                                             QueryController controller,
@@ -609,6 +611,8 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             if (processedKeys.contains(key))
                 return null;
 
+            long start = System.nanoTime();
+
             try (UnfilteredRowIterator partition = controller.getPartition(key, view, executionController))
             {
                 queryContext.addPartitionsRead(1);
@@ -643,6 +647,8 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                     }
                 }
                 return isRowValid ? new PrimaryKeyIterator(partition, staticRow, row) : null;
+            } finally {
+                rowMaterializationNanos += System.nanoTime() - start;
             }
         }
 
@@ -683,6 +689,8 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         public void close()
         {
             FileUtils.closeQuietly(scoredPrimaryKeyIterator);
+            queryContext.addRowMaterializationDuration(rowMaterializationNanos);
+            // This is the call that finalizes metrics
             controller.finish();
         }
     }

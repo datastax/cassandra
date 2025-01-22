@@ -18,11 +18,11 @@
 package org.apache.cassandra.index.sai.metrics;
 
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.LongAdder;
 
 import com.codahale.metrics.Counter;
 import com.codahale.metrics.Histogram;
 import com.codahale.metrics.Timer;
+import io.micrometer.core.instrument.DistributionSummary;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.tracing.Tracing;
@@ -108,7 +108,11 @@ public class TableQueryMetrics extends AbstractMetrics
         private final Histogram postingsSkips;
         private final Histogram postingsDecodes;
 
-        private final LongAdder annNodesVisited = new LongAdder();
+        // Assumes there is a static mircometer MeterRegistry that will subsequently be scraped
+        private final DistributionSummary annNodesVisited = io.micrometer.core.instrument.Metrics.summary("sai_ann_nodes_visited_per_query");
+        private final io.micrometer.core.instrument.Timer rowMaterializationDuration;
+        private final io.micrometer.core.instrument.Timer annSearchDuration;
+
 
         public PerQueryMetrics(TableMetadata table)
         {
@@ -131,6 +135,9 @@ public class TableQueryMetrics extends AbstractMetrics
             rowsFiltered = Metrics.histogram(createMetricName("RowsFiltered"), false);
 
             shadowedKeysScannedHistogram = Metrics.histogram(createMetricName("ShadowedKeysScannedHistogram"), false);
+
+            rowMaterializationDuration = io.micrometer.core.instrument.Metrics.timer("sai_row_materialization_duration");
+            annSearchDuration = io.micrometer.core.instrument.Metrics.timer("sai_ann_search_duration");
         }
 
         private void recordStringIndexCacheMetrics(QueryContext events)
@@ -149,7 +156,9 @@ public class TableQueryMetrics extends AbstractMetrics
 
         private void recordAnnIndexMetrics(QueryContext queryContext)
         {
-            annNodesVisited.add(queryContext.annNodesVisited());
+            annNodesVisited.record(queryContext.annNodesVisited());
+            rowMaterializationDuration.record(queryContext.rowMaterializationDuration(), TimeUnit.NANOSECONDS);
+            annSearchDuration.record(queryContext.annSearchDuration(), TimeUnit.NANOSECONDS);
         }
 
         public void record(QueryContext queryContext)

@@ -21,6 +21,7 @@ package org.apache.cassandra.index.sai.disk.vector;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 import java.util.function.IntConsumer;
 import javax.annotation.Nullable;
 
@@ -41,6 +42,9 @@ import io.github.jbellis.jvector.util.Bits;
 import io.github.jbellis.jvector.util.ExplicitThreadLocal;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import io.github.jbellis.jvector.vector.types.VectorFloat;
+import io.micrometer.core.instrument.DistributionSummary;
+import io.micrometer.core.instrument.Metrics;
+import io.micrometer.core.instrument.Timer;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SSTableContext;
@@ -81,6 +85,11 @@ public class CassandraDiskAnn
     final boolean pqUnitVectors;
 
     private final ExplicitThreadLocal<GraphSearcherAccessManager> searchers;
+
+    private final static DistributionSummary annRerankFloor = Metrics.summary("sai_ann_rerank_floor");
+    private final static DistributionSummary annRerankK = Metrics.summary("sai_ann_rerank_k");
+    // Note this tag is coordinated with the resume search logic
+    private final static Timer annInitialSearch = Metrics.timer("sai_ann_search", "phase", "initial");
 
     public CassandraDiskAnn(SSTableContext sstableContext, SegmentMetadata.ComponentMetadataMap componentMetadatas, PerIndexFiles indexFiles, IndexContext context, OrdinalsMapFactory omFactory) throws IOException
     {
@@ -254,9 +263,20 @@ public class CassandraDiskAnn
                 var rr = view.rerankerFor(queryVector, similarityFunction);
                 ssp = new SearchScoreProvider(asf, rr);
             }
+
+            var start = System.nanoTime();
             var result = searcher.search(ssp, limit, rerankK, threshold, context.getAnnRerankFloor(), ordinalsMap.ignoringDeleted(acceptBits));
+            var duration = System.nanoTime() - start;
+            annInitialSearch.record(duration, TimeUnit.NANOSECONDS);
+
             if (V3OnDiskFormat.ENABLE_RERANK_FLOOR)
                 context.updateAnnRerankFloor(result.getWorstApproximateScoreInTopK());
+
+            // Record temporary metrics.
+            annRerankFloor.record(context.getAnnRerankFloor());
+            annRerankK.record(rerankK);
+            context.addAnnSearchDuration(duration);
+
             Tracing.trace("DiskANN search for {}/{} visited {} nodes, reranked {} to return {} results from {}",
                           limit, rerankK, result.getVisitedCount(), result.getRerankedCount(), result.getNodes().length, source);
             if (threshold > 0)
@@ -269,7 +289,7 @@ public class CassandraDiskAnn
             }
             else
             {
-                var nodeScores = new AutoResumingNodeScoreIterator(searcher, graphAccessManager, result, nodesVisitedConsumer, limit, rerankK, false, source.toString());
+                var nodeScores = new AutoResumingNodeScoreIterator(searcher, graphAccessManager, result, context, nodesVisitedConsumer, limit, rerankK, false, source.toString());
                 return new NodeScoreToRowIdWithScoreIterator(nodeScores, ordinalsMap.getRowIdsView());
             }
         }
