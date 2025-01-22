@@ -88,7 +88,7 @@ public class SharedCompactionProgressTest
         return mockProgress;
     }
 
-    private void checkProgress(CompactionProgress progress, int count)
+    private void checkProgress(CompactionProgress progress, int count, int countForTotal)
     {
         assertEquals(count, progress.inSSTables().size());
         assertTrue(progress.inSSTables().stream().map(Object::toString).allMatch(s -> s.startsWith("i")));
@@ -103,7 +103,7 @@ public class SharedCompactionProgressTest
         assertEquals(500L * count, progress.partitionsRead());
         assertEquals(600L * count, progress.rowsRead());
         assertEquals(700L * count, progress.completed());
-        assertEquals(800L * count, progress.total());
+        assertEquals(800L * countForTotal, progress.total());
         assertEquals(900L, progress.startTimeNanos());
         assertEquals(1000L * count, progress.inputUncompressedSize());
         assertEquals(1100L * count, progress.adjustedInputDiskSize());
@@ -122,46 +122,46 @@ public class SharedCompactionProgressTest
     public void testCompleteSubtask()
     {
         CompactionProgress mockProgress = getMockProgress();
-        sharedCompactionProgress.registerExpectedSubtask();
+        sharedCompactionProgress.registerExpectedSubtask(800L);
         sharedCompactionProgress.addSubtask(mockProgress);
-        checkProgress(sharedCompactionProgress, 1);
+        checkProgress(sharedCompactionProgress, 1, 1);
         boolean isComplete = sharedCompactionProgress.completeSubtask(mockProgress);
-        checkProgress(sharedCompactionProgress, 1);
+        checkProgress(sharedCompactionProgress, 1, 1);
         assertTrue(isComplete);
     }
 
     @Test
     public void testComplete2Subtasks()
     {
-        sharedCompactionProgress.registerExpectedSubtask();
-        sharedCompactionProgress.registerExpectedSubtask();
+        sharedCompactionProgress.registerExpectedSubtask(800L);
+        sharedCompactionProgress.registerExpectedSubtask(800L);
         CompactionProgress mockProgress1 = getMockProgress();
         CompactionProgress mockProgress2 = getMockProgress();
         sharedCompactionProgress.addSubtask(mockProgress1);
-        checkProgress(sharedCompactionProgress, 1);
+        checkProgress(sharedCompactionProgress, 1, 2);
         sharedCompactionProgress.addSubtask(mockProgress2);
         boolean isComplete = sharedCompactionProgress.completeSubtask(mockProgress2);
         assertFalse(isComplete);
         isComplete = sharedCompactionProgress.completeSubtask(mockProgress1);
         assertTrue(isComplete);
-        checkProgress(sharedCompactionProgress, 2);
+        checkProgress(sharedCompactionProgress, 2, 2);
     }
 
     @Test
     public void testComplete2SubtasksLateStart()
     {
-        sharedCompactionProgress.registerExpectedSubtask();
-        sharedCompactionProgress.registerExpectedSubtask();
+        sharedCompactionProgress.registerExpectedSubtask(800L);
+        sharedCompactionProgress.registerExpectedSubtask(800L);
         CompactionProgress mockProgress = getMockProgress();
         sharedCompactionProgress.addSubtask(mockProgress);
         boolean isComplete = sharedCompactionProgress.completeSubtask(mockProgress);
         assertFalse(isComplete);
-        checkProgress(sharedCompactionProgress, 1);
+        checkProgress(sharedCompactionProgress, 1, 2);
         mockProgress = getMockProgress();
         sharedCompactionProgress.addSubtask(mockProgress);
         isComplete = sharedCompactionProgress.completeSubtask(mockProgress);
         assertTrue(isComplete);
-        checkProgress(sharedCompactionProgress, 2);
+        checkProgress(sharedCompactionProgress, 2, 2);
     }
 
     @Test
@@ -171,7 +171,7 @@ public class SharedCompactionProgressTest
         ExecutorService executor = Executors.newFixedThreadPool(threadCount);
 
         for (int i = 0; i < threadCount; ++i)
-            sharedCompactionProgress.registerExpectedSubtask();
+            sharedCompactionProgress.registerExpectedSubtask(800L);
 
         AtomicInteger completed = new AtomicInteger(0);
         List<Future<?>> futures = new ArrayList<>();
@@ -194,6 +194,6 @@ public class SharedCompactionProgressTest
 
         assertEquals(1, completed.get());
         executor.shutdown();
-        checkProgress(sharedCompactionProgress, threadCount);
+        checkProgress(sharedCompactionProgress, threadCount, threadCount);
     }
 }

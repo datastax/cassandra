@@ -284,6 +284,35 @@ public class CompactionTask extends AbstractCompactionTask
             return new CompactionOperationCursor(controller, actuallyCompact, fullyExpiredSSTables.size());
     }
 
+    public static long getTotalUncompressedBytes(Collection<SSTableReader> actuallyCompact, Range<Token> tokenRange)
+    {
+        long total = 0;
+        if (tokenRange == null)
+        {
+            for (SSTableReader rdr : actuallyCompact)
+                total += rdr.uncompressedLength();
+        }
+        else
+        {
+            var rangeList = ImmutableList.of(tokenRange);
+            for (SSTableReader rdr : actuallyCompact)
+                total += rdr.getPositionsForRanges(rangeList).stream().mapToLong(pp -> pp.upperPosition - pp.lowerPosition).sum();
+        }
+        return total;
+    }
+
+    public static long getTotalOnDiskBytes(Collection<SSTableReader> actuallyCompact, Range<Token> tokenRange)
+    {
+        if (tokenRange == null)
+            return CompactionSSTable.getTotalBytes(actuallyCompact);
+
+        var rangeList = ImmutableList.of(tokenRange);
+        long total = 0;
+        for (SSTableReader rdr : actuallyCompact)
+            total += rdr.onDiskSizeForPartitionPositions(rdr.getPositionsForRanges(rangeList));
+        return total;
+    }
+
     /**
      *  The compaction operation is a special case of an {@link AbstractTableOperation} and takes care of executing the
      *  actual compaction and releasing any resources when the compaction is finished.
@@ -367,18 +396,6 @@ public class CompactionTask extends AbstractCompactionTask
                 close(t);
                 throw new AssertionError(t); // unreachable (close will throw when t is not null). Added for static analysis.
             }
-        }
-
-        private long getTotalOnDiskBytes(Set<SSTableReader> actuallyCompact, Range<Token> tokenRange)
-        {
-            if (tokenRange == null)
-                return CompactionSSTable.getTotalBytes(actuallyCompact);
-
-            var rangeList = ImmutableList.of(tokenRange);
-            long total = 0;
-            for (SSTableReader rdr : actuallyCompact)
-                total += rdr.onDiskSizeForPartitionPositions(rdr.getPositionsForRanges(rangeList));
-            return total;
         }
 
         abstract TableOperation initializeSource(Range<Token> tokenRange) throws Throwable;

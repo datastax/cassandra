@@ -76,7 +76,7 @@ public class UnifiedCompactionTask extends CompactionTask
         this.operationRange = operationRange;
         this.sharedProgress = sharedProgress;
         if (sharedProgress != null)
-            sharedProgress.registerExpectedSubtask();
+            sharedProgress.registerExpectedSubtask(getTotalUncompressedBytes(actuallyCompact, operationRange));
         if (sharedObserver != null)
             sharedObserver.registerExpectedSubtask();
         // To make sure actuallyCompact tracks any removals from txn.originals(), we intersect the given set with it.
