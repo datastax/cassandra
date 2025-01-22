@@ -290,6 +290,29 @@ public class SensorsRegistry implements SchemaChangeListener
                : sensor.getValue() - sensor.getLastSnapshotValue();
     }
 
+    /**
+     * @return get the total rate for a sensor of a given types across all contexts
+     */
+    @VisibleForTesting
+    public double getSensorRate(Type... type)
+    {
+        double totalRate = 0;
+        boolean hasRate = false;
+        // O(context*types), consider optimizing if needed
+        for (Context context : identity.keySet())
+        {
+            for (Type t : type)
+            {
+                double rate = getSensorRate(context, t);
+                if (rate == -1)
+                    continue;
+                hasRate = true;
+                totalRate += rate;
+            }
+        }
+        return hasRate ? totalRate : -1;
+    }
+
     @VisibleForTesting
     public void setClock(MonotonicClock clock)
     {

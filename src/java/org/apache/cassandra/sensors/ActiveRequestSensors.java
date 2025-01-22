@@ -99,6 +99,13 @@ public class ActiveRequestSensors implements RequestSensors
             sensor.increment(value);
     }
 
+    public synchronized void updateSensor(Context context, Type type, double value)
+    {
+        Sensor sensor = getSensorFast(context, type);
+        if (sensor != null)
+            sensor.update(value);
+    }
+
     public synchronized void syncAllSensors()
     {
         sensors.values().forEach(types -> {

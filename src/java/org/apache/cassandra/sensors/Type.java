@@ -36,5 +36,6 @@ public enum Type
      */
     ON_HEAP_BYTES, // for bytes capped at -Xmx
     OFF_HEAP_BYTES, // for bytes capped at -XX:MaxDirectMemorySize
-    UNSAFE_BYTES // not configured, only capped by the amount of physical memory
+    UNSAFE_BYTES, // not configured, only capped by the amount of physical memory
+    OOM_PREDICTION_SECONDS, // time in seconds until OOM is predicted
 }

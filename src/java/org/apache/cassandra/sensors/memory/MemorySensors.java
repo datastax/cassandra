@@ -111,6 +111,8 @@ public final class MemorySensors
         activeRequestSensors.registerSensor(Context.all(), Type.OFF_HEAP_BYTES);
         activeRequestSensors.registerSensor(Context.all(), Type.UNSAFE_BYTES);
 
+        activeRequestSensors.registerSensor(Context.all(), Type.OOM_PREDICTION_SECONDS);
+
         // although memory sensors are effectively monotonic (sense they outlive any request), here we sync them
         // to the registry SensorsMetrics in CNDB register to Sensors Register events
         ScheduledExecutors.scheduledTasks.scheduleAtFixedRate(activeRequestSensors::syncAllSensors,
@@ -174,7 +176,8 @@ public final class MemorySensors
         long unsafeEffectiveMaxMemory = UNSAFE_MAX_MEMORY - ON_HEAP_ALLOCATED_SNAPSHOT.get() - OFF_HEAP_MAX_MEMORY;
         long unsafeHeapMThreshold = (long) (unsafeEffectiveMaxMemory * MPercentage);
 
-        double onHeapAllocationRate = SensorsRegistry.instance.getSensorRate(Context.all(), Type.ON_HEAP_BYTES);
+        //double onHeapAllocationRate = SensorsRegistry.instance.getSensorRate(Context.all(), Type.ON_HEAP_BYTES);
+        double onHeapAllocationRate = SensorsRegistry.instance.getSensorRate(Type.WRITE_BYTES, Type.READ_BYTES); // for now use write bytes as a proxy. if we really end up using UCUs, we can add all *BYTE sensors.
         double offHeapAllocationRate = SensorsRegistry.instance.getSensorRate(Context.all(), Type.OFF_HEAP_BYTES);
         double unsafeAllocationRate = SensorsRegistry.instance.getSensorRate(Context.all(), Type.UNSAFE_BYTES);
 
@@ -183,6 +186,8 @@ public final class MemorySensors
         long unsafeUsed = MemoryUtil.allocated();
 
         OOMPrediction onHeapOOM = predict(onHeapUsed, onHeapAllocationRate,W, onHeapMThreshold);
+        long Wp = Math.round((onHeapMThreshold - onHeapUsed) / onHeapAllocationRate);
+        activeRequestSensors.updateSensor(Context.all(), Type.OOM_PREDICTION_SECONDS, Wp);
         OOMPrediction offHeapOOM = predict(offHeapUsed, offHeapAllocationRate, W, offHeapMThreshold);
         OOMPrediction unsafeOOM = predict(unsafeUsed, unsafeAllocationRate, W,  unsafeHeapMThreshold);
 
@@ -191,7 +196,8 @@ public final class MemorySensors
                           "    variables: onHeapMaxMemory={}, offHeapMaxMemory={}, unsafeMaxMemory={}, unsafeEffectiveMaxMemory={}\n" +
                           "               onHeapUsed={}, offHeapUsed={}, unsafeUsed={}\n" +
                           "               onHeapBytesSensorValue={}, offHeapBytesSensorValue={}, unsafeBytesSensorValue={}\n" +
-                          "               onHeapAllocationRate={}, offHeapAllocationRate={}, unsafeAllocationRate={}\n",
+                          "               onHeapAllocationRate={}, offHeapAllocationRate={}, unsafeAllocationRate={}\n" +
+                          "               Wp={}s",
                           W,
                           onHeapOOM, offHeapOOM, unsafeOOM,
                           FBUtilities.prettyPrintMemory(ON_HEAP_MAX_MEMORY), FBUtilities.prettyPrintMemory(OFF_HEAP_MAX_MEMORY), FBUtilities.prettyPrintMemory(UNSAFE_MAX_MEMORY), FBUtilities.prettyPrintMemory(unsafeEffectiveMaxMemory),
@@ -199,7 +205,8 @@ public final class MemorySensors
                           FBUtilities.prettyPrintMemory(activeRequestSensors.getSensor(Context.all(), Type.ON_HEAP_BYTES).map(Sensor::getValue).orElse(-1d).longValue()),
                           FBUtilities.prettyPrintMemory(activeRequestSensors.getSensor(Context.all(), Type.OFF_HEAP_BYTES).map(Sensor::getValue).orElse(-1d).longValue()),
                           FBUtilities.prettyPrintMemory(activeRequestSensors.getSensor(Context.all(), Type.UNSAFE_BYTES).map(Sensor::getValue).orElse(-1d).longValue()),
-                          FBUtilities.prettyPrintMemoryPerSecond((long) onHeapAllocationRate), FBUtilities.prettyPrintMemoryPerSecond((long) offHeapAllocationRate), FBUtilities.prettyPrintMemoryPerSecond((long) unsafeAllocationRate));
+                          FBUtilities.prettyPrintMemoryPerSecond((long) onHeapAllocationRate), FBUtilities.prettyPrintMemoryPerSecond((long) offHeapAllocationRate), FBUtilities.prettyPrintMemoryPerSecond((long) unsafeAllocationRate),
+                          Wp);
     }
 
     private static OOMPrediction predict(long memoryUsed, double allocationRate, long lookAheadWindow, long threshold)

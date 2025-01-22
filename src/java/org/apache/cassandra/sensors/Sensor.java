@@ -66,6 +66,12 @@ public class Sensor
         this.increment(value, (ignored) -> false, 0L);
     }
 
+    @VisibleForTesting
+    public void update(double value)
+    {
+        this.value.set(value);
+    }
+
     protected void increment(double value, Predicate<Sensor> snapshotSensorValue, long now)
     {
         double oldValue = this.value.getAndAdd(value);
