@@ -65,6 +65,7 @@ public class QueryContext
 
     private long addRowMaterializationDurationNanos = 0;
     private long annSearchDurationNanos = 0;
+    private long resumesPerQuery = 0;
 
     private final LongAdder shadowedPrimaryKeyCount = new LongAdder();
 
@@ -218,6 +219,11 @@ public class QueryContext
         return annSearchDurationNanos;
     }
 
+    public long resumesPerQuery()
+    {
+        return resumesPerQuery;
+    }
+
     public FilterSortOrder filterSortOrder()
     {
         return filterSortOrder;
@@ -264,6 +270,11 @@ public class QueryContext
     public void addAnnSearchDuration(long nanos)
     {
         annSearchDurationNanos += nanos;
+    }
+
+    public void incrementResume()
+    {
+        resumesPerQuery++;
     }
 
     /**

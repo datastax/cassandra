@@ -89,7 +89,7 @@ public class CassandraDiskAnn
     private final static DistributionSummary annRerankFloor = Metrics.summary("sai_ann_rerank_floor");
     private final static DistributionSummary annRerankK = Metrics.summary("sai_ann_rerank_k");
     // Note this tag is coordinated with the resume search logic
-    private final static Timer annInitialSearch = Metrics.timer("sai_ann_search", "phase", "initial");
+    private final static Timer annInitialSearch = Timer.builder("sai_ann_search").tag("phase", "initial").publishPercentileHistogram().register(Metrics.globalRegistry);
 
     public CassandraDiskAnn(SSTableContext sstableContext, SegmentMetadata.ComponentMetadataMap componentMetadatas, PerIndexFiles indexFiles, IndexContext context, OrdinalsMapFactory omFactory) throws IOException
     {

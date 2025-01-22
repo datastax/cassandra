@@ -25,7 +25,6 @@ import java.util.function.IntConsumer;
 
 import io.github.jbellis.jvector.graph.GraphSearcher;
 import io.github.jbellis.jvector.graph.SearchResult;
-import io.micrometer.core.instrument.DistributionSummary;
 import io.micrometer.core.instrument.Metrics;
 import io.micrometer.core.instrument.Timer;
 import org.apache.cassandra.index.sai.QueryContext;
@@ -50,10 +49,8 @@ public class AutoResumingNodeScoreIterator extends AbstractIterator<SearchResult
     private final IntConsumer nodesVisitedConsumer;
     private Iterator<SearchResult.NodeScore> nodeScores;
     private int cumulativeNodesVisited;
-    private int resumes = 0;
 
-    private final static Timer annResumeSearchNanos = Metrics.timer("sai_ann_search_nanos", "phase", "resume");
-    private final static DistributionSummary annResumeCount = Metrics.summary("sai_ann_per_index_resume_count");
+    private final static Timer annResumeSearchNanos = Timer.builder("sai_ann_search").tag("phase", "resume").publishPercentileHistogram().register(Metrics.globalRegistry);
 
     /**
      * Create a new {@link AutoResumingNodeScoreIterator} that iterates over the provided {@link SearchResult}.
@@ -101,8 +98,8 @@ public class AutoResumingNodeScoreIterator extends AbstractIterator<SearchResult
         var duration = System.nanoTime() - start;
         annResumeSearchNanos.record(duration, TimeUnit.NANOSECONDS);
         context.addAnnSearchDuration(duration);
+        context.incrementResume();
 
-        resumes++;
         maybeLogTrace(nextResult);
         cumulativeNodesVisited += nextResult.getVisitedCount();
         // If the next result is empty, we are done searching.
@@ -121,7 +118,6 @@ public class AutoResumingNodeScoreIterator extends AbstractIterator<SearchResult
     public void close()
     {
         nodesVisitedConsumer.accept(cumulativeNodesVisited);
-        annResumeCount.record(resumes);
         accessManager.release();
     }
 }

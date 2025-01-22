@@ -23,6 +23,8 @@ import com.codahale.metrics.Counter;
 import com.codahale.metrics.Histogram;
 import com.codahale.metrics.Timer;
 import io.micrometer.core.instrument.DistributionSummary;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Metrics;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.tracing.Tracing;
@@ -43,6 +45,11 @@ public class TableQueryMetrics extends AbstractMetrics
     private final Counter sortThenFilterQueriesCompleted;
     private final Counter filterThenSortQueriesCompleted;
 
+    // Assumes there is a static mircometer MeterRegistry that will subsequently be scraped
+    private static final DistributionSummary annNodesVisited = io.micrometer.core.instrument.DistributionSummary.builder("sai_ann_nodes_visited_per_query").publishPercentileHistogram().register(io.micrometer.core.instrument.Metrics.globalRegistry);
+    private static final io.micrometer.core.instrument.Timer rowMaterializationDuration = io.micrometer.core.instrument.Timer.builder("sai_row_materialization_duration").publishPercentileHistogram().register(io.micrometer.core.instrument.Metrics.globalRegistry);
+    private static final io.micrometer.core.instrument.Timer annSearchDuration = io.micrometer.core.instrument.Timer.builder("sai_ann_search_per_query").publishPercentileHistogram().register(io.micrometer.core.instrument.Metrics.globalRegistry);;
+    private final static DistributionSummary annResumesPerQuery = DistributionSummary.builder("sai_ann_resumes_per_query").publishPercentileHistogram().register(io.micrometer.core.instrument.Metrics.globalRegistry);
 
     public TableQueryMetrics(TableMetadata table)
     {
@@ -108,12 +115,6 @@ public class TableQueryMetrics extends AbstractMetrics
         private final Histogram postingsSkips;
         private final Histogram postingsDecodes;
 
-        // Assumes there is a static mircometer MeterRegistry that will subsequently be scraped
-        private final DistributionSummary annNodesVisited = io.micrometer.core.instrument.Metrics.summary("sai_ann_nodes_visited_per_query");
-        private final io.micrometer.core.instrument.Timer rowMaterializationDuration;
-        private final io.micrometer.core.instrument.Timer annSearchDuration;
-
-
         public PerQueryMetrics(TableMetadata table)
         {
             super(table.keyspace, table.name, "PerQuery");
@@ -135,9 +136,6 @@ public class TableQueryMetrics extends AbstractMetrics
             rowsFiltered = Metrics.histogram(createMetricName("RowsFiltered"), false);
 
             shadowedKeysScannedHistogram = Metrics.histogram(createMetricName("ShadowedKeysScannedHistogram"), false);
-
-            rowMaterializationDuration = io.micrometer.core.instrument.Metrics.timer("sai_row_materialization_duration");
-            annSearchDuration = io.micrometer.core.instrument.Metrics.timer("sai_ann_search_duration");
         }
 
         private void recordStringIndexCacheMetrics(QueryContext events)
@@ -159,6 +157,7 @@ public class TableQueryMetrics extends AbstractMetrics
             annNodesVisited.record(queryContext.annNodesVisited());
             rowMaterializationDuration.record(queryContext.rowMaterializationDuration(), TimeUnit.NANOSECONDS);
             annSearchDuration.record(queryContext.annSearchDuration(), TimeUnit.NANOSECONDS);
+            annResumesPerQuery.record(queryContext.resumesPerQuery());
         }
 
         public void record(QueryContext queryContext)

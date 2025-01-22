@@ -27,6 +27,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.PriorityQueue;
 import java.util.Queue;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
@@ -38,6 +39,8 @@ import com.google.common.base.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.micrometer.core.instrument.Metrics;
+import io.micrometer.core.instrument.Timer;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.DecoratedKey;
@@ -75,6 +78,10 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
     private final QueryController controller;
     private final QueryContext queryContext;
 
+    private static final Timer durationTimer = Timer.builder("sai_search_duration")
+                                                    .publishPercentileHistogram()
+                                                    .register(Metrics.globalRegistry);
+
     public StorageAttachedIndexSearcher(ColumnFamilyStore cfs,
                                         TableQueryMetrics tableQueryMetrics,
                                         ReadCommand command,
@@ -97,6 +104,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
     @SuppressWarnings("unchecked")
     public UnfilteredPartitionIterator search(ReadExecutionController executionController) throws RequestTimeoutException
     {
+        long startTime = System.nanoTime();
         try
         {
             FilterTree filterTree = analyzeFilter();
@@ -123,6 +131,12 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         {
             controller.abort();
             throw t;
+        }
+        finally
+        {
+            // TODO this wouldn't actually measure the ResultRetriever duration because that produces an iterator
+            // in PrK order that is lazily consumed later.
+            durationTimer.record(System.nanoTime() - startTime, TimeUnit.NANOSECONDS);
         }
     }
 
