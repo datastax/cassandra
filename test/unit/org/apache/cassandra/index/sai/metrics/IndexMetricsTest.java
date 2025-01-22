@@ -151,7 +151,7 @@ public class IndexMetricsTest extends AbstractMetricsTest
     public void testQueriesCount()
     {
         createTable("CREATE TABLE %s (id1 TEXT PRIMARY KEY, v1 INT, v2 TEXT, v3 VECTOR<FLOAT, 2>)");
-        String indexV1 = createIndex("CREATE CUSTOM INDEX IF NOT EXISTS ON %s (v1) USING 'StorageAttachedIndex'");
+        String indexV1 = createIndex("CREATE CUSTOM INDEX ON %s (v1) USING 'StorageAttachedIndex'");
 
         int rowCount = 10;
         for (int i = 0; i < rowCount; i++)
@@ -166,7 +166,7 @@ public class IndexMetricsTest extends AbstractMetricsTest
         executeNet("SELECT id1 FROM %s WHERE (v1 >= 0 OR v1 = 4) AND v2 = '2' ALLOW FILTERING");
         assertIndexQueryCount(indexV1, 2L);
 
-        String indexV2 = createIndex("CREATE CUSTOM INDEX IF NOT EXISTS ON %s (v2) USING 'StorageAttachedIndex'");
+        String indexV2 = createIndex("CREATE CUSTOM INDEX ON %s (v2) USING 'StorageAttachedIndex'");
         executeNet("SELECT id1 FROM %s WHERE (v1 >= 0 OR v1 = 4)");
         assertIndexQueryCount(indexV1, 3L);
         assertIndexQueryCount(indexV2, 0L);
@@ -180,7 +180,7 @@ public class IndexMetricsTest extends AbstractMetricsTest
         assertIndexQueryCount(indexV1, 4L);
         assertIndexQueryCount(indexV2, 2L);
 
-        String indexV3 = createIndex("CREATE CUSTOM INDEX IF NOT EXISTS ON %s (v3) USING 'StorageAttachedIndex'");
+        String indexV3 = createIndex("CREATE CUSTOM INDEX ON %s (v3) USING 'StorageAttachedIndex'");
         assertIndexQueryCount(indexV3, 0L);
         executeNet("SELECT id1 FROM %s WHERE v2 = '2' ORDER BY v3 ANN OF [5,0] LIMIT 10");
         assertIndexQueryCount(indexV1, 4L);
