@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.index.sai.plan;
 
+import java.io.IOError;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -129,6 +130,26 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                     assert keysIterator instanceof KeyRangeIterator;
                     return new ResultRetriever((KeyRangeIterator) keysIterator, filterTree, executionController);
                 }
+            }
+            catch (QueryView.Builder.MissingIndexException e)
+            {
+                // If an index was dropped while we were preparing the plan or between preparing the plan
+                // and creating the result retriever, we can retry without that index,
+                // because there may be other indexes that could be used to run the query.
+                // And if there are no good indexes left, we'd get a good contextual request error message.
+                if (e.context.isDropped() && retries < 8)
+                {
+                    logger.debug("Index " + e.context.getIndexName() + " dropped while preparing the query plan. Retrying.");
+                    retries++;
+                    continue;
+                }
+
+                // If we end up here, this is either a bug or a problem with an index (corrupted / missing components?).
+                controller.abort();
+                // Throwing IOError here because we want the coordinator to handle it as any other serious storage error
+                // and report it up to the user as failed query. It is better to fail than to return an incomplete
+                // result set.
+                throw new IOError(e);
             }
             catch (Throwable t)
             {
