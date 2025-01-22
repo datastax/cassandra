@@ -32,6 +32,7 @@ import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
 import org.apache.cassandra.io.sstable.SSTableId;
+import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.CloseableIterator;
 
 public class BM25Utils
@@ -105,7 +106,7 @@ public class BM25Utils
         }
     }
 
-    public static CloseableIterator<PrimaryKeyWithSortKey> computeScores(Iterator<DocTF> docIterator,
+    public static CloseableIterator<PrimaryKeyWithSortKey> computeScores(CloseableIterator<DocTF> docIterator,
                                                                          List<ByteBuffer> queryTerms,
                                                                          DocStats docStats,
                                                                          IndexContext indexContext,
@@ -164,6 +165,27 @@ public class BM25Utils
         // sort by score (PKWS implements Comparator correctly for us)
         Collections.sort(scoredDocs);
 
-        return (CloseableIterator<PrimaryKeyWithSortKey>) (CloseableIterator) CloseableIterator.wrap(scoredDocs.iterator());
+        return new CloseableIterator<>()
+        {
+            private final Iterator<PrimaryKeyWithScore> iterator = scoredDocs.iterator();
+
+            @Override
+            public boolean hasNext()
+            {
+                return iterator.hasNext();
+            }
+
+            @Override
+            public PrimaryKeyWithSortKey next()
+            {
+                return iterator.next();
+            }
+
+            @Override
+            public void close()
+            {
+                FileUtils.closeQuietly(docIterator);
+            }
+        };
     }
 }
