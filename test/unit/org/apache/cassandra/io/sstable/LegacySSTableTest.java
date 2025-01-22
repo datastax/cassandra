@@ -587,8 +587,17 @@ public class LegacySSTableTest
 
         QueryProcessor.executeInternal(String.format("CREATE TYPE legacy_tables.legacy_%s_tuple_udt (name tuple<text,text>)", legacyVersion));
 
-        QueryProcessor.executeInternal(String.format("CREATE TABLE legacy_tables.legacy_%1$s_tuple (pk text PRIMARY KEY, " +
+        if (legacyVersion.startsWith("m") && legacyVersion.compareTo("me") <= 0)
+        {
+            // sstable formats (we know are) from 3.0.x must have had a schema with all collections frozen
+            QueryProcessor.executeInternal(String.format("CREATE TABLE legacy_tables.legacy_%1$s_tuple (pk text PRIMARY KEY, " +
+                    "val frozen<tuple<set<int>,set<text>>>, val2 frozen<tuple<set<int>,set<text>>>, val3 frozen<legacy_%1$s_tuple_udt>, val4 frozen<legacy_%1$s_tuple_udt>, extra text)", legacyVersion));
+        }
+        else
+        {
+            QueryProcessor.executeInternal(String.format("CREATE TABLE legacy_tables.legacy_%1$s_tuple (pk text PRIMARY KEY, " +
                 "val frozen<tuple<set<int>,set<text>>>, val2 tuple<set<int>,set<text>>, val3 frozen<legacy_%1$s_tuple_udt>, val4 legacy_%1$s_tuple_udt, extra text)", legacyVersion));
+        }
     }
 
     private static void truncateTables(String legacyVersion)
@@ -637,6 +646,14 @@ public class LegacySSTableTest
             {
                 throw new AssertionError(e);
             }
+        }
+
+        // sstables before me are broken, treat this like an offline upgrade where the user ran the scrub's header fix
+        //if (legacyVersion.compareTo("mc") <= 0)
+        if (legacyVersion.startsWith("m") && legacyVersion.compareTo("me") <= 0)
+        {
+            FBUtilities.setPreviousReleaseVersionString("3.0.8");
+            SSTableHeaderFix.fixNonFrozenUDTIfUpgradeFrom30();
         }
 
         int s0 = cfs.getLiveSSTables().size();
