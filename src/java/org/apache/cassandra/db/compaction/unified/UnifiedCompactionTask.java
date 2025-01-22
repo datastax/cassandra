@@ -66,7 +66,17 @@ public class UnifiedCompactionTask extends CompactionTask
                                  SharedCompactionProgress sharedProgress,
                                  SharedCompactionObserver sharedObserver)
     {
-        super(cfs, txn, gcBefore, keepOriginals, strategy, sharedObserver != null ? sharedObserver : strategy);
+        super(cfs,
+              txn,
+              // Set the total operation sizes early to use in shared progress tracking. This assumes that:
+              // - there are no expired sstables in the compaction (UCS processes them separately)
+              // - sstable exclusion for lack of space does not apply (shared progress is only use when an operation
+              //   range applies, which disables this)
+              sharedProgress != null ? getOperationTotals(actuallyCompact, operationRange) : null,
+              gcBefore,
+              keepOriginals,
+              strategy,
+              sharedObserver != null ? sharedObserver : strategy);
         this.shardManager = shardManager;
         this.shardingStats = shardingStats;
 
@@ -76,7 +86,7 @@ public class UnifiedCompactionTask extends CompactionTask
         this.operationRange = operationRange;
         this.sharedProgress = sharedProgress;
         if (sharedProgress != null)
-            sharedProgress.registerExpectedSubtask(getTotalUncompressedBytes(actuallyCompact, operationRange));
+            sharedProgress.registerExpectedSubtask(totals.inputUncompressedSize, totals.inputDiskSize, totals.inputUncompressedSize);
         if (sharedObserver != null)
             sharedObserver.registerExpectedSubtask();
         // To make sure actuallyCompact tracks any removals from txn.originals(), we intersect the given set with it.

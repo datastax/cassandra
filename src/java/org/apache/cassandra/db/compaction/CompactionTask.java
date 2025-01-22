@@ -23,6 +23,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -79,6 +80,7 @@ public class CompactionTask extends AbstractCompactionTask
     // The compaction strategy is not necessarily available for all compaction tasks (e.g. GC or sstable splitting)
     @Nullable
     private final CompactionStrategy strategy;
+    protected OperationTotals totals;
 
     public CompactionTask(CompactionRealm realm,
                           ILifecycleTransaction txn,
@@ -86,11 +88,12 @@ public class CompactionTask extends AbstractCompactionTask
                           boolean keepOriginals,
                           @Nullable CompactionStrategy strategy)
     {
-        this(realm, txn, gcBefore, keepOriginals, strategy, strategy);
+        this(realm, txn, null, gcBefore, keepOriginals, strategy, strategy);
     }
 
     public CompactionTask(CompactionRealm realm,
                           ILifecycleTransaction txn,
+                          OperationTotals totals,
                           int gcBefore,
                           boolean keepOriginals,
                           @Nullable CompactionStrategy strategy,
@@ -100,6 +103,7 @@ public class CompactionTask extends AbstractCompactionTask
         this.gcBefore = gcBefore;
         this.keepOriginals = keepOriginals;
         this.strategy = strategy;
+        this.totals = totals;
 
         if (observer != null)
             addObserver(observer);
@@ -254,6 +258,10 @@ public class CompactionTask extends AbstractCompactionTask
             controller.refreshOverlaps();
         }
 
+        // Calculate the operation total sizes if not already set
+        if (totals == null)
+            totals = getOperationTotals(actuallyCompact, tokenRange());
+
         // sanity check: sstables to compact is a subset of the transaction originals
         assert transaction.originals().containsAll(actuallyCompact);
         // sanity check: all sstables must belong to the same table
@@ -284,33 +292,42 @@ public class CompactionTask extends AbstractCompactionTask
             return new CompactionOperationCursor(controller, actuallyCompact, fullyExpiredSSTables.size());
     }
 
-    public static long getTotalUncompressedBytes(Collection<SSTableReader> actuallyCompact, Range<Token> tokenRange)
+    public static class OperationTotals
     {
-        long total = 0;
+        public final long inputDiskSize;
+        public final long inputUncompressedSize;
+
+        OperationTotals(long inputDiskSize, long inputUncompressedSize)
+        {
+            this.inputDiskSize = inputDiskSize;
+            this.inputUncompressedSize = inputUncompressedSize;
+        }
+    }
+
+    public static OperationTotals getOperationTotals(Collection<SSTableReader> sstables, Range<Token> tokenRange)
+    {
+        long inputDiskSize = 0;
+        long inputUncompressedSize = 0;
         if (tokenRange == null)
         {
-            for (SSTableReader rdr : actuallyCompact)
-                total += rdr.uncompressedLength();
+            for (SSTableReader rdr : sstables)
+            {
+                inputUncompressedSize += rdr.uncompressedLength();
+                inputDiskSize += rdr.onDiskLength();
+            }
         }
         else
         {
             var rangeList = ImmutableList.of(tokenRange);
-            for (SSTableReader rdr : actuallyCompact)
-                total += rdr.getPositionsForRanges(rangeList).stream().mapToLong(pp -> pp.upperPosition - pp.lowerPosition).sum();
+            for (SSTableReader rdr : sstables)
+            {
+                final List<SSTableReader.PartitionPositionBounds> positionsForRanges = rdr.getPositionsForRanges(rangeList);
+                for (SSTableReader.PartitionPositionBounds pp : positionsForRanges)
+                    inputUncompressedSize += pp.upperPosition - pp.lowerPosition;
+                inputDiskSize += rdr.onDiskSizeForPartitionPositions(positionsForRanges);
+            }
         }
-        return total;
-    }
-
-    public static long getTotalOnDiskBytes(Collection<SSTableReader> actuallyCompact, Range<Token> tokenRange)
-    {
-        if (tokenRange == null)
-            return CompactionSSTable.getTotalBytes(actuallyCompact);
-
-        var rangeList = ImmutableList.of(tokenRange);
-        long total = 0;
-        for (SSTableReader rdr : actuallyCompact)
-            total += rdr.onDiskSizeForPartitionPositions(rdr.getPositionsForRanges(rangeList));
-        return total;
+        return new OperationTotals(inputDiskSize, inputUncompressedSize);
     }
 
     /**
@@ -330,6 +347,7 @@ public class CompactionTask extends AbstractCompactionTask
         final Set<SSTableReader> actuallyCompact;
         private final int fullyExpiredSSTablesCount;
         private final long inputDiskSize;
+        private final long inputUncompressedSize;
 
         // resources that are updated and may be read by another thread
         volatile Collection<SSTableReader> newSStables;
@@ -369,6 +387,8 @@ public class CompactionTask extends AbstractCompactionTask
             this.totalKeysWritten = 0;
             this.estimatedKeys = 0;
             this.completed = false;
+            this.inputDiskSize = totals.inputDiskSize;
+            this.inputUncompressedSize = totals.inputUncompressedSize;
 
             Directories dirs = getDirectories();
 
@@ -376,7 +396,6 @@ public class CompactionTask extends AbstractCompactionTask
             {
                 // resources that need closing, must be created last in case of exceptions and released if there is an exception in the c.tor
                 this.sstableRefs = Refs.ref(actuallyCompact);
-                this.inputDiskSize = getTotalOnDiskBytes(actuallyCompact, tokenRange());
                 this.op = initializeSource(tokenRange());
                 this.writer = getCompactionAwareWriter(realm, dirs, actuallyCompact);
                 this.obsCloseable = opObserver.onOperationStart(op);
@@ -607,6 +626,21 @@ public class CompactionTask extends AbstractCompactionTask
             return inputDiskSize;
         }
 
+        /**
+         * @return the initial number of bytes for input sstables. For compressed or encrypted sstables,
+         *         this is the number of bytes after decompression, so this is the uncompressed length of sstable files.
+         */
+        public long total()
+        {
+            return inputUncompressedSize;
+        }
+
+        @Override
+        public long inputUncompressedSize()
+        {
+            return inputUncompressedSize;
+        }
+
         @Override
         public long outputDiskSize()
         {
@@ -697,22 +731,6 @@ public class CompactionTask extends AbstractCompactionTask
         public long completed()
         {
             return compactionIterator.bytesRead();
-        }
-
-        /**
-         * @return the initial number of bytes for input sstables. For compressed or encrypted sstables,
-         *         this is the number of bytes after decompression, so this is the uncompressed length of sstable files.
-         */
-        public long total()
-        {
-            return compactionIterator.totalBytes();
-        }
-
-
-        @Override
-        public long inputUncompressedSize()
-        {
-            return compactionIterator.totalBytes();
         }
 
         @Override
@@ -825,21 +843,6 @@ public class CompactionTask extends AbstractCompactionTask
         public long completed()
         {
             return compactionCursor.bytesRead();
-        }
-
-        /**
-         * @return the initial number of bytes for input sstables. For compressed or encrypted sstables,
-         *         this is the number of bytes after decompression, so this is the uncompressed length of sstable files.
-         */
-        public long total()
-        {
-            return compactionCursor.totalBytes();
-        }
-
-        @Override
-        public long inputUncompressedSize()
-        {
-            return compactionCursor.totalBytes();
         }
 
         @Override
