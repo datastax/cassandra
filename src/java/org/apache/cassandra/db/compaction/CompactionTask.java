@@ -342,8 +342,7 @@ public class CompactionTask extends AbstractCompactionTask
         final UUID taskId;
         final String taskIdString;
         final RateLimiter limiter;
-        private final long startNanos;
-        private final long startTime;
+        private final long startTimeMillis;
         final Set<SSTableReader> actuallyCompact;
         private final int fullyExpiredSSTablesCount;
         private final long inputDiskSize;
@@ -380,8 +379,7 @@ public class CompactionTask extends AbstractCompactionTask
             this.taskIdString = transaction.opIdString();
 
             this.limiter = CompactionManager.instance.getRateLimiter();
-            this.startNanos = System.nanoTime();
-            this.startTime = System.currentTimeMillis();
+            this.startTimeMillis = System.currentTimeMillis();
             this.newSStables = Collections.emptyList();
             this.fullyExpiredSSTablesCount = fullyExpiredSSTablesCount;
             this.totalKeysWritten = 0;
@@ -496,6 +494,7 @@ public class CompactionTask extends AbstractCompactionTask
         public void close(Throwable errorsSoFar)
         {
             Throwable err = Throwables.close(errorsSoFar, obsCloseable, writer, sstableRefs);
+            final long elapsedTimeMillis = System.currentTimeMillis() - startTimeMillis;
 
             if (transaction.isOffline())
             {
@@ -504,7 +503,7 @@ public class CompactionTask extends AbstractCompactionTask
                     // update basic metrics
                     realm.metrics().incBytesCompacted(adjustedInputDiskSize(),
                                                       outputDiskSize(),
-                                                      System.nanoTime() - startNanos);
+                                                      elapsedTimeMillis);
                 }
                 Throwables.maybeFail(err);
                 return;
@@ -530,11 +529,11 @@ public class CompactionTask extends AbstractCompactionTask
                 }
 
                 if (logger.isDebugEnabled())
-                    debugLogCompactionSummaryInfo(taskIdString, System.nanoTime() - startNanos, totalKeysWritten, newSStables, this);
+                    debugLogCompactionSummaryInfo(taskIdString, elapsedTimeMillis, totalKeysWritten, newSStables, this);
                 if (logger.isTraceEnabled())
                     traceLogCompactionSummaryInfo(totalKeysWritten, estimatedKeys, this);
                 if (strategy != null)
-                    strategy.getCompactionLogger().compaction(startTime,
+                    strategy.getCompactionLogger().compaction(startTimeMillis,
                                                               transaction.originals(),
                                                               tokenRange(),
                                                               System.currentTimeMillis(),
@@ -543,7 +542,7 @@ public class CompactionTask extends AbstractCompactionTask
                 // update the metrics
                 realm.metrics().incBytesCompacted(adjustedInputDiskSize(),
                                                   outputDiskSize(),
-                                                  System.nanoTime() - startNanos);
+                                                  elapsedTimeMillis);
             }
 
             Throwables.maybeFail(err);
@@ -654,9 +653,9 @@ public class CompactionTask extends AbstractCompactionTask
         }
 
         @Override
-        public long startTimeNanos()
+        public long startTimeMillis()
         {
-            return startNanos;
+            return startTimeMillis;
         }
     }
 
@@ -1040,14 +1039,12 @@ public class CompactionTask extends AbstractCompactionTask
     }
 
     private void debugLogCompactionSummaryInfo(String taskId,
-                                               long durationInNano,
+                                               long durationInMillis,
                                                long totalKeysWritten,
                                                Collection<SSTableReader> newSStables,
                                                CompactionProgress progress)
     {
         // log a bunch of statistics about the result and save to system table compaction_history
-        long dTime = TimeUnit.NANOSECONDS.toMillis(durationInNano);
-
         long totalMergedPartitions = 0;
         long[] mergedPartitionCounts = progress.partitionsHistogram();
         StringBuilder mergeSummary = new StringBuilder(mergedPartitionCounts.length * 10);
@@ -1066,6 +1063,7 @@ public class CompactionTask extends AbstractCompactionTask
         StringBuilder newSSTableNames = new StringBuilder(newSStables.size() * 100);
         for (SSTableReader reader : newSStables)
             newSSTableNames.append(reader.descriptor.baseFileUri()).append(',');
+        long durationInNano = TimeUnit.MILLISECONDS.toNanos(durationInMillis);
         logger.debug("Compacted ({}{}) {} sstables to [{}] to level={}. {} to {} (~{}% of original) in {}ms. " +
                      "Read Throughput = {}, Write Throughput = {}, Row Throughput = ~{}/s, Partition Throughput = ~{}/s." +
                      " {} total partitions merged to {}. Partition merge counts were {}.",
@@ -1077,11 +1075,11 @@ public class CompactionTask extends AbstractCompactionTask
                      prettyPrintMemory(progress.adjustedInputDiskSize()),
                      prettyPrintMemory(progress.outputDiskSize()),
                      (int) (progress.sizeRatio() * 100),
-                     dTime,
+                     durationInMillis,
                      prettyPrintMemoryPerSecond(progress.adjustedInputDiskSize(), durationInNano),
                      prettyPrintMemoryPerSecond(progress.outputDiskSize(), durationInNano),
-                     progress.rowsRead() / (TimeUnit.NANOSECONDS.toSeconds(durationInNano) + 1),
-                     (int) progress.partitionsRead() / (TimeUnit.NANOSECONDS.toSeconds(progress.durationInNanos()) + 1),
+                     (long) (progress.rowsRead() * 1.0e-3 / durationInMillis),
+                     (long) (progress.partitionsRead() * 1.0e-3 / durationInMillis),
                      totalMergedPartitions,
                      totalKeysWritten,
                      mergeSummary);

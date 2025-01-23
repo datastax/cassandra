@@ -80,7 +80,7 @@ public class SharedCompactionProgressTest
         when(mockProgress.rowsRead()).thenReturn(600L);
         when(mockProgress.completed()).thenReturn(700L);
         when(mockProgress.total()).thenReturn(800L);
-        when(mockProgress.startTimeNanos()).thenReturn(900L);
+        when(mockProgress.startTimeMillis()).thenReturn(900L);
         when(mockProgress.inputUncompressedSize()).thenReturn(1000L);
         when(mockProgress.adjustedInputDiskSize()).thenReturn(1100L);
         when(mockProgress.partitionsHistogram()).thenReturn(new long[]{1, 2, 3});
@@ -104,7 +104,7 @@ public class SharedCompactionProgressTest
         assertEquals(600L * count, progress.rowsRead());
         assertEquals(700L * count, progress.completed());
         assertEquals(800L * countForTotal, progress.total());
-        assertEquals(900L, progress.startTimeNanos());
+        assertEquals(900L, progress.startTimeMillis());
         assertEquals(1000L * countForTotal, progress.inputUncompressedSize());
         assertEquals(1100L * count, progress.adjustedInputDiskSize());
         assertArrayEquals(new long[]{1 * count, 2 * count, 3 * count}, progress.partitionsHistogram());

@@ -270,11 +270,11 @@ public class SharedCompactionProgress implements CompactionProgress
     }
 
     @Override
-    public long startTimeNanos()
+    public long startTimeMillis()
     {
         long min = Long.MAX_VALUE;
         for (CompactionProgress source : sources)
-            min = Math.min(min, source.startTimeNanos());
+            min = Math.min(min, source.startTimeMillis());
 
         return min;
     }
