@@ -18,7 +18,7 @@
  */
 package org.apache.cassandra.utils;
 
-import org.apache.log4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.DecoratedKey;
@@ -133,7 +133,7 @@ public final class OrderCheckingIterator extends AbstractIterator<Unfiltered> im
         //   -- tombstones with DeletionTime.LIVE
         if (next.isRangeTombstoneMarker())
         {
-            Logger.getLogger(getClass()).info("tombstone: " + next.toString(metadata()));
+            LoggerFactory.getLogger(getClass()).info("tombstone: {}", next.toString(metadata()));
             RangeTombstoneMarker marker = (RangeTombstoneMarker) next;
 
             if (marker.isOpen(reversed) && marker.openDeletionTime(reversed).isLive() ||
