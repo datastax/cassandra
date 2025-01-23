@@ -34,6 +34,7 @@ import java.util.Collection;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.SortedSet;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.LongAdder;
@@ -84,7 +85,7 @@ public class TrieMemoryIndex extends MemoryIndex
 
     private final InMemoryTrie<PrimaryKeys> data;
     private final PrimaryKeysReducer primaryKeysReducer;
-    private final Map<PrimaryKeyWithByteComparable, Integer> termFrequencies;
+    private final Map<PkWithTerm, Integer> termFrequencies;
 
     private final Memtable memtable;
     private AbstractBounds<PartitionPosition> keyBounds;
@@ -116,6 +117,33 @@ public class TrieMemoryIndex extends MemoryIndex
         termFrequencies = new ConcurrentHashMap<>();
     }
 
+    private static class PkWithTerm
+    {
+        private final PrimaryKey pk;
+        private final ByteComparable term;
+
+        private PkWithTerm(PrimaryKey pk, ByteComparable term)
+        {
+            this.pk = pk;
+            this.term = term;
+        }
+
+        @Override
+        public int hashCode()
+        {
+            return Objects.hash(pk, ByteComparable.length(term, ByteComparable.Version.OSS41));
+        }
+
+        @Override
+        public boolean equals(Object o)
+        {
+            if (o == null || getClass() != o.getClass()) return false;
+            PkWithTerm that = (PkWithTerm) o;
+            return Objects.equals(pk, that.pk)
+                   && ByteComparable.compare(term, that.term, ByteComparable.Version.OSS41) == 0;
+        }
+    }
+
     public synchronized void add(DecoratedKey key,
                                  Clustering clustering,
                                  ByteBuffer value,
@@ -145,13 +173,12 @@ public class TrieMemoryIndex extends MemoryIndex
 
                 try
                 {
-                    final ByteBuffer termCopy = term.duplicate();
                     data.putSingleton(encodedTerm, primaryKey, (existing, update) -> {
                         // First do the normal primary keys reduction
                         PrimaryKeys result = primaryKeysReducer.apply(existing, update);
 
                         // Then update term frequency
-                        var pkbc = new PrimaryKeyWithByteComparable(indexContext, memtable, update, encodedTerm);
+                        var pkbc = new PkWithTerm(update, encodedTerm);
                         termFrequencies.merge(pkbc, 1, Integer::sum);
 
                         return result;
@@ -192,7 +219,7 @@ public class TrieMemoryIndex extends MemoryIndex
                 var pairs = new ArrayList<PkWithFrequency>(entry.getValue().size());
                 for (PrimaryKey pk : entry.getValue().keys())
                 {
-                    int frequency = termFrequencies.get(new PrimaryKeyWithByteComparable(indexContext, memtable, pk, entry.getKey()));
+                    int frequency = termFrequencies.get(new PkWithTerm(pk, entry.getKey()));
                     pairs.add(new PkWithFrequency(pk, frequency));
                 }
                 return Pair.create(entry.getKey(), pairs);

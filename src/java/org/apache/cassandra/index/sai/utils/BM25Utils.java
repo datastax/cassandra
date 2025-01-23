@@ -124,8 +124,11 @@ public class BM25Utils
             // sstable index will only send documents that contain all query terms to this method,
             // but memtable is not indexed and will send all documents, so we have to skip documents
             // that don't contain all query terms here to preserve consistency with sstable behavior
-            if (tf.frequencies.size() != queryTerms.size())
+            if (!queryTerms.stream().allMatch(tf.frequencies::containsKey))
+            {
+                // TODO I think this is unnecessary now, see TrieMemtableIndex's use of intersectioniterator
                 continue;
+            }
 
             documents.add(tf);
 
