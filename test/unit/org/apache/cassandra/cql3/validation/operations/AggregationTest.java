@@ -28,21 +28,19 @@ import java.util.Collections;
 import java.util.Date;
 import java.util.Locale;
 import java.util.TimeZone;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
 
 import org.apache.commons.lang3.time.DateUtils;
-
 import org.junit.Assert;
 import org.junit.Test;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import ch.qos.logback.classic.LoggerContext;
 import ch.qos.logback.classic.joran.ReconfigureOnChangeTask;
-import ch.qos.logback.classic.spi.TurboFilterList;
-import ch.qos.logback.classic.turbo.ReconfigureOnChangeFilter;
-import ch.qos.logback.classic.turbo.TurboFilter;
 import org.apache.cassandra.cql3.functions.UDAggregate;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.Schema;
@@ -61,7 +59,6 @@ import org.apache.cassandra.transport.Event.SchemaChange.Target;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.transport.messages.ResultMessage;
 
-import static ch.qos.logback.core.CoreConstants.RECONFIGURE_ON_CHANGE_TASK;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
@@ -1896,9 +1893,16 @@ public class AggregationTest extends CQLTester
     public void testLogbackReload() throws Throwable
     {
         // see https://issues.apache.org/jira/browse/CASSANDRA-11033
+        Logger l = LoggerFactory.getLogger(AggregationTest.class);
+        ch.qos.logback.classic.Logger logbackLogger = (ch.qos.logback.classic.Logger) l;
+        LoggerContext ctx = logbackLogger.getLoggerContext();
 
-        // make logback's scan interval 1ms - boilerplate, but necessary for this test
-        configureLogbackScanPeriod(1L);
+        ReconfigureOnChangeTask rocTask = new ReconfigureOnChangeTask();
+        rocTask.setContext(ctx);
+
+        ScheduledExecutorService scheduledExecutorService = ctx.getScheduledExecutorService();
+        ScheduledFuture<?> scheduledFuture = scheduledExecutorService.scheduleAtFixedRate(rocTask, 1, 1,
+                                                                                          TimeUnit.MILLISECONDS);
         try
         {
 
@@ -1947,41 +1951,8 @@ public class AggregationTest extends CQLTester
         }
         finally
         {
-            configureLogbackScanPeriod(60000L);
+            scheduledFuture.cancel(true);
         }
-    }
-
-    private static void configureLogbackScanPeriod(long millis)
-    {
-        Logger l = LoggerFactory.getLogger(AggregationTest.class);
-        ch.qos.logback.classic.Logger logbackLogger = (ch.qos.logback.classic.Logger) l;
-        LoggerContext ctx = logbackLogger.getLoggerContext();
-        TurboFilterList turboFilterList = ctx.getTurboFilterList();
-        boolean done = false;
-        for (TurboFilter turboFilter : turboFilterList)
-        {
-            if (turboFilter instanceof ReconfigureOnChangeFilter)
-            {
-                ReconfigureOnChangeFilter reconfigureFilter = (ReconfigureOnChangeFilter) turboFilter;
-                reconfigureFilter.setContext(ctx);
-                reconfigureFilter.setRefreshPeriod(millis);
-                reconfigureFilter.stop();
-                reconfigureFilter.start(); // start() sets the next check timestammp
-                done = true;
-                break;
-            }
-        }
-
-        ReconfigureOnChangeTask roct = (ReconfigureOnChangeTask) ctx.getObject(RECONFIGURE_ON_CHANGE_TASK);
-        if (roct != null)
-        {
-            // New functionality in logback - they replaced ReconfigureOnChangeFilter (which runs in the logging code)
-            // with an async ReconfigureOnChangeTask - i.e. in a thread that does not become sandboxed.
-            // Let the test run anyway, just we cannot reconfigure it (and it is pointless to reconfigure).
-            return;
-        }
-
-        assertTrue("ReconfigureOnChangeFilter not in logback's turbo-filter list - do that by adding scan=\"true\" to logback-test.xml's configuration element", done);
     }
 
     @Test
