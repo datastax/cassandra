@@ -44,8 +44,8 @@ import ch.qos.logback.classic.turbo.ReconfigureOnChangeFilter;
 import ch.qos.logback.classic.turbo.TurboFilter;
 import ch.qos.logback.classic.util.ContextInitializer;
 import ch.qos.logback.core.Appender;
-import ch.qos.logback.core.hook.DefaultShutdownHook;
 import ch.qos.logback.core.filter.Filter;
+import ch.qos.logback.core.hook.DefaultShutdownHook;
 import ch.qos.logback.core.spi.AppenderAttachable;
 import org.apache.cassandra.security.ThreadAwareSecurityManager;
 
