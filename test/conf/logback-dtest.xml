@@ -22,7 +22,7 @@
   <define name="instance_id" class="org.apache.cassandra.distributed.impl.InstanceIDDefiner" />
 
   <!-- Shutdown hook ensures that async appender flushes -->
-  <shutdownHook class="ch.qos.logback.core.hook.DelayingShutdownHook"/>
+  <shutdownHook class="ch.qos.logback.core.hook.DefaultShutdownHook"/>
 
   <appender name="INSTANCEFILE" class="ch.qos.logback.core.FileAppender">
     <file>./build/test/logs/${cassandra.testtag}/${suitename}/${cluster_id}/${instance_id}/system.log</file>
@@ -34,7 +34,7 @@
 
   <appender name="INSTANCESTDERR" target="System.err" class="ch.qos.logback.core.ConsoleAppender">
     <encoder>
-      <pattern>%-5level %date{HH:mm:ss,SSS} %msg%n</pattern>
+      <pattern>%-5level %date{"HH:mm:ss,SSS"} %msg%n</pattern>
     </encoder>
     <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
       <level>WARN</level>
