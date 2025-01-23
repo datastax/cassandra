@@ -28,11 +28,18 @@ import java.util.Collections;
 import java.util.Date;
 import java.util.Locale;
 import java.util.TimeZone;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
 
+import ch.qos.logback.classic.LoggerContext;
+import ch.qos.logback.classic.joran.ReconfigureOnChangeTask;
 import org.apache.commons.lang3.time.DateUtils;
 import org.junit.Assert;
 import org.junit.Test;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.QueryProcessor;
@@ -42,9 +49,9 @@ import org.apache.cassandra.cql3.functions.UDAggregate;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.TypeParser;
 import org.apache.cassandra.exceptions.FunctionExecutionException;
+import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.Schema;
-import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.transport.Event.SchemaChange.Change;
@@ -1886,48 +1893,65 @@ public class AggregationTest extends CQLTester
     public void testLogbackReload() throws Throwable
     {
         // see https://issues.apache.org/jira/browse/CASSANDRA-11033
+        Logger l = LoggerFactory.getLogger(AggregationTest.class);
+        ch.qos.logback.classic.Logger logbackLogger = (ch.qos.logback.classic.Logger) l;
+        LoggerContext ctx = logbackLogger.getLoggerContext();
 
-        createTable("CREATE TABLE %s (" +
-                    "   year int PRIMARY KEY," +
-                    "   country text," +
-                    "   title text)");
+        ReconfigureOnChangeTask rocTask = new ReconfigureOnChangeTask();
+        rocTask.setContext(ctx);
 
-        String[] countries = Locale.getISOCountries();
-        ThreadLocalRandom rand = ThreadLocalRandom.current();
-        for (int i = 0; i < 10000; i++)
+        ScheduledExecutorService scheduledExecutorService = ctx.getScheduledExecutorService();
+        ScheduledFuture<?> scheduledFuture = scheduledExecutorService.scheduleAtFixedRate(rocTask, 1, 1,
+                                                                                          TimeUnit.MILLISECONDS);
+        try
         {
-            execute("INSERT INTO %s (year, country, title) VALUES (1980,?,?)",
-                    countries[rand.nextInt(countries.length)],
-                    "title-" + i);
+
+            createTable("CREATE TABLE %s (" +
+                        "   year int PRIMARY KEY," +
+                        "   country text," +
+                        "   title text)");
+
+            String[] countries = Locale.getISOCountries();
+            ThreadLocalRandom rand = ThreadLocalRandom.current();
+            for (int i = 0; i < 10000; i++)
+            {
+                execute("INSERT INTO %s (year, country, title) VALUES (1980,?,?)",
+                        countries[rand.nextInt(countries.length)],
+                        "title-" + i);
+            }
+
+            String albumCountByCountry = createFunction(KEYSPACE,
+                                                        "map<text,bigint>,text,text",
+                                                        "CREATE FUNCTION IF NOT EXISTS %s(state map<text,bigint>,country text, album_title text)\n" +
+                                                        " RETURNS NULL ON NULL INPUT\n" +
+                                                        " RETURNS map<text,bigint>\n" +
+                                                        " LANGUAGE java\n" +
+                                                        " AS $$\n" +
+                                                        "   if(state.containsKey(country)) {\n" +
+                                                        "       Long newCount = (Long)state.get(country) + 1;\n" +
+                                                        "       state.put(country, newCount);\n" +
+                                                        "   } else {\n" +
+                                                        "       state.put(country, 1L);\n" +
+                                                        "   }\n" +
+                                                        "   return state;\n" +
+                                                        " $$;");
+
+            String releasesByCountry = createAggregate(KEYSPACE,
+                                                       "text, text",
+                                                       " CREATE AGGREGATE IF NOT EXISTS %s(text, text)\n" +
+                                                       " SFUNC " + shortFunctionName(albumCountByCountry) + '\n' +
+                                                       " STYPE map<text,bigint>\n" +
+                                                       " INITCOND { };");
+
+            long tEnd = System.currentTimeMillis() + 150;
+            while (System.currentTimeMillis() < tEnd)
+            {
+                execute("SELECT " + releasesByCountry + "(country,title) FROM %s WHERE year=1980");
+            }
         }
-
-        String albumCountByCountry = createFunction(KEYSPACE,
-                                                    "map<text,bigint>,text,text",
-                                                    "CREATE FUNCTION IF NOT EXISTS %s(state map<text,bigint>,country text, album_title text)\n" +
-                                                    " RETURNS NULL ON NULL INPUT\n" +
-                                                    " RETURNS map<text,bigint>\n" +
-                                                    " LANGUAGE java\n" +
-                                                    " AS $$\n" +
-                                                    "   if(state.containsKey(country)) {\n" +
-                                                    "       Long newCount = (Long)state.get(country) + 1;\n" +
-                                                    "       state.put(country, newCount);\n" +
-                                                    "   } else {\n" +
-                                                    "       state.put(country, 1L);\n" +
-                                                    "   }\n" +
-                                                    "   return state;\n" +
-                                                    " $$;");
-
-        String releasesByCountry = createAggregate(KEYSPACE,
-                                                   "text, text",
-                                                   " CREATE AGGREGATE IF NOT EXISTS %s(text, text)\n" +
-                                                   " SFUNC " + shortFunctionName(albumCountByCountry) + '\n' +
-                                                   " STYPE map<text,bigint>\n" +
-                                                   " INITCOND { };");
-
-        long tEnd = System.currentTimeMillis() + 150;
-        while (System.currentTimeMillis() < tEnd)
+        finally
         {
-            execute("SELECT " + releasesByCountry + "(country,title) FROM %s WHERE year=1980");
+            scheduledFuture.cancel(true);
         }
     }
 
