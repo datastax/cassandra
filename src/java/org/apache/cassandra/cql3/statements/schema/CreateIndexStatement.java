@@ -162,12 +162,17 @@ public final class CreateIndexStatement extends AlterSchemaStatement
 
         Map<String, String> options = attrs.isCustom ? attrs.getOptions() : Collections.emptyMap();
 
-        Map<String, String> compressionOptions = attrs.getMap("compression");
-        CompressionParams compression = compressionOptions != null
-                                        ? CompressionParams.fromMap(compressionOptions)
+        Map<String, String> keyCompressionOptions = attrs.getMap("key_compression");
+        CompressionParams keyCompression = keyCompressionOptions != null
+                                        ? CompressionParams.fromMap(keyCompressionOptions)
                                         : CompressionParams.noCompression();
 
-        IndexMetadata index = IndexMetadata.fromIndexTargets(indexTargets, name, kind, options, compression);
+        Map<String, String> valueCompressionOptions = attrs.getMap("value_compression");
+        CompressionParams valueCompression = valueCompressionOptions != null
+                                           ? CompressionParams.fromMap(valueCompressionOptions)
+                                           : CompressionParams.noCompression();
+
+        IndexMetadata index = IndexMetadata.fromIndexTargets(indexTargets, name, kind, options, keyCompression, valueCompression);
 
         String className = index.getIndexClassName();
         IndexGuardrails guardRails = IndexGuardrails.forClassName(className);
@@ -200,7 +205,10 @@ public final class CreateIndexStatement extends AlterSchemaStatement
             throw ire("Index %s is a duplicate of existing index %s", index.name, equalIndex.name);
         }
 
-        TableMetadata newTable = table.withSwapped(table.indexes.with(index));
+        // All indexes on one table must use the same key_compression.
+        // The newly created index forces key_compression on the previous indexes.
+        Indexes newIndexes = table.indexes.withKeyCompression(index.keyCompression).with(index);
+        TableMetadata newTable = table.withSwapped(newIndexes);
         newTable.validate();
 
         return schema.withAddedOrUpdated(keyspace.withSwapped(keyspace.tables.withSwapped(newTable)));

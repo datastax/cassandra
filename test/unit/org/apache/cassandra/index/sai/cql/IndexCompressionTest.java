@@ -42,8 +42,8 @@ public class IndexCompressionTest extends SAITester
     @Test
     public void testKeyCompression()
     {
-        createTable("CREATE TABLE %s (pk int, c text, val text, PRIMARY KEY(pk, c)) WITH index_compression = {'class': 'LZ4Compressor'}");
-        String indexName = createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        createTable("CREATE TABLE %s (pk int, c text, val text, PRIMARY KEY(pk, c))");
+        String indexName = createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH key_compression = {'class': 'LZ4Compressor'}");
         for (int i = 0; i < 1000; i++)
             execute("INSERT INTO %s(pk, c, val) VALUES (?, ?, ?)", i, "key", "value" + i);
 
@@ -69,7 +69,7 @@ public class IndexCompressionTest extends SAITester
     public void testLiteralValueCompression()
     {
         createTable("CREATE TABLE %s (pk int, c text, val text, PRIMARY KEY(pk, c))");
-        String indexName = createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH compression = {'class': 'LZ4Compressor'}");
+        String indexName = createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH value_compression = {'class': 'LZ4Compressor'}");
         for (int i = 0; i < 1000; i++)
             execute("INSERT INTO %s(pk, c, val) VALUES (?, ?, ?)", i, "key", "value" + i);
 
@@ -96,7 +96,7 @@ public class IndexCompressionTest extends SAITester
     public void testNumericValueCompression()
     {
         createTable("CREATE TABLE %s (pk int, c text, val int, PRIMARY KEY(pk, c))");
-        String indexName = createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH compression = {'class': 'LZ4Compressor'}");
+        String indexName = createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH value_compression = {'class': 'LZ4Compressor'}");
         for (int i = 0; i < 1000; i++)
             execute("INSERT INTO %s(pk, c, val) VALUES (?, ?, ?)", i, "key", i);
 

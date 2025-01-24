@@ -610,9 +610,14 @@ public class IndexContext
         return this.config == null ? null : config.name;
     }
 
-    public CompressionParams getCompression()
+    public CompressionParams getKeyCompression()
     {
-        return this.config.compression;
+        return this.config.keyCompression;
+    }
+
+    public CompressionParams getValueCompression()
+    {
+        return this.config.valueCompression;
     }
 
     public int getIntOption(String name, int defaultValue)

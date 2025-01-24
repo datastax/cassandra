@@ -27,6 +27,7 @@ import org.apache.cassandra.io.compress.CompressionMetadata;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.schema.CompressionParams;
 import org.apache.lucene.store.ChecksumIndexInput;
 
 public interface IndexComponent
@@ -81,7 +82,18 @@ public interface IndexComponent
             return openOutput(false);
         }
 
-        IndexOutputWriter openOutput(boolean append) throws IOException;
+        default IndexOutputWriter openOutput(boolean append) throws IOException
+        {
+            return openOutput(append, CompressionParams.noCompression());
+        }
+
+        default IndexOutputWriter openOutput(CompressionParams compression) throws IOException
+        {
+            return openOutput(false, compression);
+        }
+
+        IndexOutputWriter openOutput(boolean append, CompressionParams compression) throws IOException;
+
 
         void createEmpty() throws IOException;
     }
