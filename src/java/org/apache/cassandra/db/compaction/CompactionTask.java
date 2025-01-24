@@ -595,6 +595,12 @@ public class CompactionTask extends AbstractCompactionTask
             return transaction.originals();
         }
 
+        @Override
+        public String toString()
+        {
+            return defaultToString();
+        }
+
         //
         // CompactionProgress
         //
@@ -687,7 +693,8 @@ public class CompactionTask extends AbstractCompactionTask
             var rangeList = tokenRange != null ? ImmutableList.of(tokenRange) : null;
             this.scanners = strategy != null ? strategy.getScanners(actuallyCompact, rangeList)
                                              : ScannerList.of(actuallyCompact, rangeList);
-            this.compactionIterator = new CompactionIterator(compactionType, scanners.scanners, controller, FBUtilities.nowInSeconds(), taskId);
+            // We use `this` rather than `sharedProgress()` because the `TableOperation` tracks individual compactions.
+            this.compactionIterator = new CompactionIterator(compactionType, scanners.scanners, controller, FBUtilities.nowInSeconds(), taskId, this);
             return compactionIterator.getOperation();
         }
 
@@ -798,7 +805,8 @@ public class CompactionTask extends AbstractCompactionTask
         TableOperation initializeSource(Range<Token> tokenRange)
         {
             this.compactionCursor = new CompactionCursor(compactionType, actuallyCompact, tokenRange, controller, limiter, FBUtilities.nowInSeconds(), taskId);
-            return compactionCursor.createOperation();
+            // We use `this` rather than `sharedProgress()` because the `TableOperation` tracks individual compactions.
+            return compactionCursor.createOperation(this);
         }
 
         void execute0()

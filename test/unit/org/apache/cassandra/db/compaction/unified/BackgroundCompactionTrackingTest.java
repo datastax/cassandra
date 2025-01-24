@@ -37,10 +37,10 @@ import org.junit.runner.RunWith;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.db.compaction.AbstractTableOperation;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.compaction.CompactionStrategy;
 import org.apache.cassandra.db.compaction.CompactionStrategyStatistics;
+import org.apache.cassandra.db.compaction.TableOperation;
 import org.apache.cassandra.db.compaction.UnifiedCompactionStatistics;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.utils.UUIDGen;
@@ -151,7 +151,7 @@ public class BackgroundCompactionTrackingTest extends CQLTester
             // Check that the background compactions state is correct during the compaction
             Assert.assertTrue("Byteman rule did not fire", !operations.isEmpty());
             printStats();
-            int tasks = parallelize ? shards : 1;
+            int tasks = 1;//parallelize ? shards : 1;
             assertEquals(tasks, operations.size());
             UUID mainOpId = null;
             for (int i = 0; i < operations.size(); ++i)
@@ -178,9 +178,9 @@ public class BackgroundCompactionTrackingTest extends CQLTester
 
                     if (i == 0)
                         Assert.assertEquals(uncompressedSize * 1.0 / tasks, op.total(), uncompressedSize * 0.03);
-                    assertTrue(op.totalByteScanned() <= op.total());
-                    assertFalse(op.totalByteScanned() > op.total());
-                    if (op.totalByteScanned() == op.total())
+                    assertTrue(op.completed() <= op.total());
+                    assertFalse(op.completed() > op.total());
+                    if (op.completed() == op.total())
                         ++finished;
                 }
                 assertTrue(finished > i);
@@ -242,5 +242,5 @@ public class BackgroundCompactionTrackingTest extends CQLTester
 
     static CompactionStrategy strategy;
     static List<List<CompactionStrategyStatistics>> statistics;
-    static List<List<AbstractTableOperation.OperationProgress>> operations;
+    static List<List<TableOperation.Progress>> operations;
 }

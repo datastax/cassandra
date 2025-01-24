@@ -195,19 +195,14 @@ public class CompactionCursor implements SSTableCursorMerger.MergeListener, Auto
      * metrics in the compaction manager. The caller is responsible for registering the operation and checking
      * {@link TableOperation#isStopRequested()}.
      */
-    public TableOperation createOperation()
+    public TableOperation createOperation(TableOperation.Progress progress)
     {
         return new AbstractTableOperation() {
 
             @Override
-            public OperationProgress getProgress()
+            public Progress getProgress()
             {
-                return new OperationProgress(controller.realm.metadata(),
-                                             type,
-                                             bytesRead(),
-                                             totalBytes(),
-                                             compactionId,
-                                             sstables);
+                return progress;
             }
 
             @Override
