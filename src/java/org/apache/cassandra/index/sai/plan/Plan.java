@@ -324,14 +324,14 @@ abstract public class Plan
     }
 
     /**
-     * Adds an index used by the plan node to the given set of indexes.
-     * Needs to be overwritten by nodes that use indexes.
-     * @param indexes the set of indexes to update with the index used by this node
+     * Returns the index context if the plan node uses one.
+     * Need to be overridden by nodes that use an index.
+     * None-recursive. Use {@link #forEach(Function)} to get the index context of all nodes.
      */
-    protected void addIndexToSetIfPresent(HashSet<IndexContext> indexes)
+    protected @Nullable IndexContext getIndexIfPresent()
     {
-        // By default, a node does not contain any indexes.
-        // Thus, no-op.
+        // By default, a node does not contain an index.
+        return null;
     }
 
     /**
@@ -896,10 +896,10 @@ abstract public class Plan
         }
 
         @Override
-        final protected void addIndexToSetIfPresent(HashSet<IndexContext> indexes)
+        final protected IndexContext getIndexIfPresent()
         {
             assert predicate != null || ordering != null;
-            indexes.add(predicate != null ? predicate.context : ordering.context);
+            return predicate != null ? predicate.context : ordering.context;
         }
     }
     /**
@@ -1364,9 +1364,9 @@ abstract public class Plan
         }
 
         @Override
-        protected void addIndexToSetIfPresent(HashSet<IndexContext> indexes)
+        protected IndexContext getIndexIfPresent()
         {
-            indexes.add(ordering.context);
+            return ordering.context;
         }
     }
 
