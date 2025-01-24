@@ -20,8 +20,6 @@ package org.apache.cassandra.db.compaction;
 
 import java.io.Serializable;
 import java.util.Collection;
-import java.util.HashMap;
-import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -229,7 +227,7 @@ public abstract class AbstractTableOperation implements TableOperation
 
         public String toString()
         {
-            return defaultToString();
+            return progressToString();
         }
     }
 }

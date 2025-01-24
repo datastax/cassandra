@@ -216,7 +216,7 @@ public interface TableOperation
          */
         Set<SSTableReader> sstables();
 
-        default String defaultToString()
+        default String progressToString()
         {
             StringBuilder buff = new StringBuilder();
             buff.append(String.format("%s(%s, %s / %s %s)", operationType(), operationId(), completed(), total(), unit()));

@@ -102,26 +102,29 @@ public class ActiveOperations implements TableOperationObserver
             }
         }
         operations.add(op);
-        return () -> {
-            operations.remove(op);
-            TableOperation.Progress progressOnCompleted = op.getProgress();
-            CompactionManager.instance.getMetrics().bytesCompacted.inc(progressOnCompleted.total());
-            CompactionManager.instance.getMetrics().totalCompactionsCompleted.mark();
+        return () -> completeOperation(op);
+    }
 
-            for (CompactionProgressListener listener : listeners)
+    private void completeOperation(TableOperation op)
+    {
+        operations.remove(op);
+        TableOperation.Progress progressOnCompleted = op.getProgress();
+        CompactionManager.instance.getMetrics().bytesCompacted.inc(progressOnCompleted.total());
+        CompactionManager.instance.getMetrics().totalCompactionsCompleted.mark();
+
+        for (CompactionProgressListener listener : listeners)
+        {
+            try
             {
-                try
-                {
-                    listener.onCompleted(progressOnCompleted);
-                }
-                catch (Throwable t)
-                {
-                    String listenerName = listener.getClass().getName();
-                    logger.error("Unable to notify listener {} while trying to complete compaction {} on table {}",
-                                 listenerName, progressOnCompleted.operationType(), progressOnCompleted.metadata(), t);
-                }
+                listener.onCompleted(progressOnCompleted);
             }
-        };
+            catch (Throwable t)
+            {
+                String listenerName = listener.getClass().getName();
+                logger.error("Unable to notify listener {} while trying to complete compaction {} on table {}",
+                             listenerName, progressOnCompleted.operationType(), progressOnCompleted.metadata(), t);
+            }
+        }
     }
 
     /**

@@ -304,4 +304,10 @@ public class SharedCompactionProgress implements CompactionProgress
         }
         return merged;
     }
+
+    @Override
+    public String toString()
+    {
+        return progressToString();
+    }
 }

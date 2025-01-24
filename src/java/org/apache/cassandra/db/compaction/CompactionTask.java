@@ -598,7 +598,7 @@ public class CompactionTask extends AbstractCompactionTask
         @Override
         public String toString()
         {
-            return defaultToString();
+            return progressToString();
         }
 
         //
