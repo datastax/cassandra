@@ -81,6 +81,7 @@ public class CompressionMetadata implements AutoCloseable
      * copy metadata is present), we store offsets of all chunks for the original (compressed) data file.
      */
     private final Memory.LongArray chunkOffsets;
+    private final boolean owningChunkOffsets;
 
     public final File indexFilePath;
 
@@ -176,6 +177,7 @@ public class CompressionMetadata implements AutoCloseable
 
             Pair<Memory.LongArray, Long> offsetsAndLimit = readChunkOffsets(stream, startChunkIndex, endChunkIndex, compressedLength);
             chunkOffsets = offsetsAndLimit.left;
+            owningChunkOffsets = true;
             // We adjust the compressed file length to store the position after the last chunk just to be able to
             // calculate the offset of the chunk next to the last one (in order to calculate the length of the last chunk).
             // Obvously, we could use the compressed file length for that purpose but unfortunately, sometimes there is
@@ -204,6 +206,7 @@ public class CompressionMetadata implements AutoCloseable
         this.compressedFileLength = compressedLength;
         assert offsets != null;
         this.chunkOffsets = offsets;
+        this.owningChunkOffsets = false;
         this.dataLength = dataLength;
         this.startChunkIndex = 0;
     }
@@ -402,7 +405,9 @@ public class CompressionMetadata implements AutoCloseable
 
     public void close()
     {
-        NATIVE_MEMORY_USAGE.addAndGet(-chunkOffsets.memoryUsed());
+        // sometimes chunkOffsets is a sharedCopy, we can decrease the memory usage only if we own it
+        if (owningChunkOffsets)
+            NATIVE_MEMORY_USAGE.addAndGet(-chunkOffsets.memoryUsed());
         chunkOffsets.close();
     }
 
