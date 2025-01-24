@@ -82,7 +82,8 @@ public class V1OnDiskFormat implements OnDiskFormat
     private static final Set<IndexComponentType> LITERAL_COMPONENTS = EnumSet.of(IndexComponentType.COLUMN_COMPLETION_MARKER,
                                                                                  IndexComponentType.META,
                                                                                  IndexComponentType.TERMS_DATA,
-                                                                                 IndexComponentType.POSTING_LISTS);
+                                                                                 IndexComponentType.POSTING_LISTS,
+                                                                                 IndexComponentType.DOC_LENGTHS);
     private static final Set<IndexComponentType> NUMERIC_COMPONENTS = EnumSet.of(IndexComponentType.COLUMN_COMPLETION_MARKER,
                                                                                  IndexComponentType.META,
                                                                                  IndexComponentType.KD_TREE,

@@ -19,6 +19,7 @@ package org.apache.cassandra.index.sai.disk.v1;
 
 import java.io.IOException;
 import java.lang.invoke.MethodHandles;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.concurrent.TimeUnit;
 
@@ -26,6 +27,7 @@ import com.google.common.base.Stopwatch;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.agrona.collections.Int2IntHashMap;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.rows.Row;
@@ -39,6 +41,8 @@ import org.apache.cassandra.index.sai.disk.v1.trie.InvertedIndexWriter;
 import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
 import org.apache.cassandra.index.sai.memory.MemtableIndex;
 import org.apache.cassandra.index.sai.memory.RowMapping;
+import org.apache.cassandra.index.sai.memory.TrieMemoryIndex;
+import org.apache.cassandra.index.sai.memory.TrieMemtableIndex;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -148,7 +152,21 @@ public class MemtableIndexWriter implements PerIndexWriter
         {
             try (InvertedIndexWriter writer = new InvertedIndexWriter(perIndexComponents))
             {
-                indexMetas = writer.writeAll(metadataBuilder.intercept(terms));
+                // Convert PrimaryKey->length map to rowId->length using RowMapping
+                var docLengths = new Int2IntHashMap(Integer.MIN_VALUE);
+                Arrays.stream(((TrieMemtableIndex) memtableIndex).getRangeIndexes())
+                      .map(TrieMemoryIndex.class::cast)
+                      .forEach(trieMemoryIndex -> 
+                          trieMemoryIndex.getDocLengths().forEach((pk, length) -> {
+                              int rowId = rowMapping.get(pk);
+                              if (rowId == -1) {
+                                  throw new IllegalStateException("No row ID mapping found for primary key: " + pk);
+                              }
+                              docLengths.put(rowId, (int) length);
+                          })
+                      );
+                
+                indexMetas = writer.writeAll(metadataBuilder.intercept(terms), docLengths);
                 numRows = writer.getPostingsCount();
             }
         }

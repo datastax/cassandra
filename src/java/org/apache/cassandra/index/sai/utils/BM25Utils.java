@@ -120,23 +120,14 @@ public class BM25Utils
         while (docIterator.hasNext())
         {
             var tf = docIterator.next();
-
-            // sstable index will only send documents that contain all query terms to this method,
-            // but memtable is not indexed and will send all documents, so we have to skip documents
-            // that don't contain all query terms here to preserve consistency with sstable behavior
-            if (!queryTerms.stream().allMatch(tf.frequencies::containsKey))
-            {
-                // TODO I think this is unnecessary now, see TrieMemtableIndex's use of intersectioniterator
-                continue;
-            }
-
             documents.add(tf);
-
             totalTermCount += tf.termCount;
         }
+        if (documents.isEmpty())
+            return CloseableIterator.emptyIterator();
 
         // Calculate average document length
-        double avgDocLength = !documents.isEmpty() ? totalTermCount / documents.size() : 0.0;
+        double avgDocLength = totalTermCount / documents.size();
 
         // Calculate BM25 scores
         var scoredDocs = new ArrayList<PrimaryKeyWithScore>(documents.size());

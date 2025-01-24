@@ -224,7 +224,8 @@ public abstract class SegmentBuilder
             try (InvertedIndexWriter writer = new InvertedIndexWriter(components))
             {
                 TermsIterator termsWithPostings = ramIndexer.getTermsWithPostings(minTerm, maxTerm, byteComparableVersion);
-                var metadataMap = writer.writeAll(metadataBuilder.intercept(termsWithPostings));
+                var docLengths = ramIndexer.getDocLengths();
+                var metadataMap = writer.writeAll(metadataBuilder.intercept(termsWithPostings), docLengths);
                 metadataBuilder.setComponentsMetadata(metadataMap);
             }
         }

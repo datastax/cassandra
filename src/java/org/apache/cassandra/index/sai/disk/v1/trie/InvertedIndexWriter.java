@@ -25,6 +25,7 @@ import javax.annotation.concurrent.NotThreadSafe;
 
 import org.apache.commons.lang3.mutable.MutableLong;
 
+import org.agrona.collections.Int2IntHashMap;
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.TermsIterator;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
@@ -42,12 +43,14 @@ public class InvertedIndexWriter implements Closeable
 {
     private final TrieTermsDictionaryWriter termsDictionaryWriter;
     private final PostingsWriter postingsWriter;
+    private final DocLengthsWriter docLengthsWriter;
     private long postingsAdded;
 
     public InvertedIndexWriter(IndexComponents.ForWrite components) throws IOException
     {
         this.termsDictionaryWriter = new TrieTermsDictionaryWriter(components);
         this.postingsWriter = new PostingsWriter(components);
+        this.docLengthsWriter = new DocLengthsWriter(components);
     }
 
     /**
@@ -58,7 +61,7 @@ public class InvertedIndexWriter implements Closeable
      * @return metadata describing the location of this inverted index in the overall SSTable
      *         terms and postings component files
      */
-    public SegmentMetadata.ComponentMetadataMap writeAll(TermsIterator terms) throws IOException
+    public SegmentMetadata.ComponentMetadataMap writeAll(TermsIterator terms, Int2IntHashMap docLengths) throws IOException
     {
         // Terms and postings writers are opened in append mode with pointers at the end of their respective files.
         long termsOffset = termsDictionaryWriter.getStartOffset();
@@ -91,6 +94,12 @@ public class InvertedIndexWriter implements Closeable
         components.put(IndexComponentType.POSTING_LISTS, -1, postingsOffset, postingsLength);
         components.put(IndexComponentType.TERMS_DATA, termsRoot, termsOffset, termsLength, map);
 
+        // Write doc lengths
+        long docLengthsOffset = docLengthsWriter.getStartOffset();
+        docLengthsWriter.writeDocLengths(docLengths);
+        long docLengthsLength = docLengthsWriter.getFilePointer() - docLengthsOffset;
+        components.put(IndexComponentType.DOC_LENGTHS, -1, docLengthsOffset, docLengthsLength);
+
         return components;
     }
 
@@ -99,6 +108,7 @@ public class InvertedIndexWriter implements Closeable
     {
         postingsWriter.close();
         termsDictionaryWriter.close();
+        docLengthsWriter.close();
     }
 
     /**

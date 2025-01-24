@@ -23,7 +23,6 @@ import java.io.UncheckedIOException;
 import java.lang.invoke.MethodHandles;
 import java.nio.ByteBuffer;
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
@@ -40,6 +39,7 @@ import org.apache.cassandra.db.Slices;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.dht.AbstractBounds;
+import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SSTableContext;
@@ -80,6 +80,7 @@ public class InvertedIndexSearcher extends IndexSearcher
     private final Version version;
     private final boolean filterRangeResults;
     private final SSTableReader sstable;
+    private final DocLengthsReader docLengthsReader;
 
     protected InvertedIndexSearcher(SSTableContext sstableContext,
                                     PerIndexFiles perIndexFiles,
@@ -97,6 +98,8 @@ public class InvertedIndexSearcher extends IndexSearcher
         this.version = version;
         this.filterRangeResults = filterRangeResults;
         perColumnEventListener = (QueryEventListener.TrieIndexEventListener)indexContext.getColumnQueryMetrics();
+        var docLenghtsMeta = segmentMetadata.componentMetadatas.getOptional(IndexComponentType.DOC_LENGTHS);
+        this.docLengthsReader = docLenghtsMeta == null ? null : new DocLengthsReader(indexFiles.docLengths(), docLenghtsMeta);
 
         Map<String,String> map = metadata.componentMetadatas.get(IndexComponentType.TERMS_DATA).attributes;
         String footerPointerString = map.get(SAICodecUtils.FOOTER_POINTER);
@@ -171,6 +174,8 @@ public class InvertedIndexSearcher extends IndexSearcher
             var iter = new RowIdWithTermsIterator(reader.allTerms(orderer.isAscending()));
             return toMetaSortedIterator(iter, queryContext);
         }
+        if (docLengthsReader == null)
+            throw new InvalidRequestException(indexContext.getIndexName() + " does not support BM25 scoring until it is rebuilt");
 
         // find documents that match each term
         var queryTerms = orderer.getQueryTerms();
@@ -200,8 +205,8 @@ public class InvertedIndexSearcher extends IndexSearcher
                     int rowId = merged.nextPosting();
                     if (rowId == PostingList.END_OF_STREAM)
                         return endOfData();
-                    int termCount = 100; // FIXME
-                    return new DocTF(pkm.primaryKeyFromRowId(rowId), termCount, merged.frequencies());
+                    int docLength = docLengthsReader.get(rowId);
+                    return new DocTF(pkm.primaryKeyFromRowId(rowId), docLength, merged.frequencies());
                 }
                 catch (IOException e)
                 {
@@ -242,6 +247,8 @@ public class InvertedIndexSearcher extends IndexSearcher
     {
         if (!orderer.isBM25())
             return super.orderResultsBy(reader, queryContext, keys, orderer, limit);
+        if (docLengthsReader == null)
+            throw new InvalidRequestException(indexContext.getIndexName() + " does not support BM25 scoring until it is rebuilt");
 
         var queryTerms = orderer.getQueryTerms();
         // compute documentFrequencies from either histogram or an index search
@@ -281,7 +288,7 @@ public class InvertedIndexSearcher extends IndexSearcher
     @Override
     public void close()
     {
-        reader.close();
+        FileUtils.closeQuietly(reader, docLengthsReader);
     }
 
     /**
