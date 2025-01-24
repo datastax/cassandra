@@ -245,6 +245,8 @@ public final class SchemaKeyspace
               + "table_name text,"
               + "index_name text,"
               + "kind text,"
+              + "key_compression frozen<map<text, text>>,"
+              + "value_compression frozen<map<text, text>>,"
               + "options frozen<map<text, text>>,"
               + "PRIMARY KEY ((keyspace_name), table_name, index_name))");
 
@@ -815,10 +817,13 @@ public final class SchemaKeyspace
 
     private static void addIndexToSchemaMutation(TableMetadata table, IndexMetadata index, Mutation.SimpleBuilder builder)
     {
-        builder.update(Indexes)
+        var rowBuilder = builder.update(Indexes)
                .row(table.name, index.name)
                .add("kind", index.kind.toString())
                .add("options", index.options);
+
+        rowBuilder.add("key_compression", index.keyCompression.asMap());
+        rowBuilder.add("value_compression", index.valueCompression.asMap());
     }
 
     private static void dropIndexFromSchemaMutation(TableMetadata table, IndexMetadata index, Mutation.SimpleBuilder builder)
@@ -1124,11 +1129,18 @@ public final class SchemaKeyspace
         String name = row.getString("index_name");
         IndexMetadata.Kind type = IndexMetadata.Kind.valueOf(row.getString("kind"));
         Map<String, String> options = row.getFrozenTextMap("options");
-        Map<String, String> compressionOptions = row.getFrozenTextMap("compression");
-        CompressionParams compression = compressionOptions != null
-                                        ? CompressionParams.fromMap(compressionOptions)
+
+        Map<String, String> keyCompressionOptions = row.getFrozenTextMap("key_compression");
+        CompressionParams keyCompression = keyCompressionOptions != null
+                                        ? CompressionParams.fromMap(keyCompressionOptions)
                                         : CompressionParams.noCompression();
-        return IndexMetadata.fromSchemaMetadata(name, type, options, compression);
+
+        Map<String, String> valueCompressionOptions = row.getFrozenTextMap("value_compression");
+        CompressionParams valueCompression =valueCompressionOptions != null
+                                           ? CompressionParams.fromMap(valueCompressionOptions)
+                                           : CompressionParams.noCompression();
+
+        return IndexMetadata.fromSchemaMetadata(name, type, options, keyCompression, valueCompression);
     }
 
     private static Triggers fetchTriggers(String keyspace, String table)

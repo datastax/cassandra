@@ -172,9 +172,6 @@ public final class TableAttributes extends PropertyDefinitions
             builder.compression(CompressionParams.fromMap(getMap(Option.COMPRESSION)));
         }
 
-        if (hasOption(Option.INDEX_COMPRESSION))
-            builder.indexCompression(CompressionParams.fromMap(getMap(Option.INDEX_COMPRESSION)));
-
         if (hasOption(Option.MEMTABLE))
             builder.memtable(MemtableParams.fromMap(getMap(Option.MEMTABLE)));
 

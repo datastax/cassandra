@@ -46,6 +46,7 @@ import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.index.sai.utils.SaiRandomizedTest;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
@@ -67,7 +68,8 @@ public class SortedTermsTest extends SaiRandomizedTest
             try (SortedTermsWriter writer = new SortedTermsWriter(components.addOrGet(IndexComponentType.PRIMARY_KEY_BLOCKS),
                                                                   metadataWriter,
                                                                   blockFPWriter,
-                                                                  components.addOrGet(IndexComponentType.PRIMARY_KEY_TRIE)))
+                                                                  components.addOrGet(IndexComponentType.PRIMARY_KEY_TRIE),
+                                                                  CompressionParams.noCompression()))
             {
                 ByteBuffer buffer = Int32Type.instance.decompose(99999);
                 ByteSource byteSource = Int32Type.instance.asComparableBytes(buffer, VERSION);
@@ -109,7 +111,8 @@ public class SortedTermsTest extends SaiRandomizedTest
             try (SortedTermsWriter writer = new SortedTermsWriter(components.addOrGet(IndexComponentType.PRIMARY_KEY_BLOCKS),
                                                                   metadataWriter,
                                                                   blockFPWriter,
-                                                                  components.addOrGet(IndexComponentType.PRIMARY_KEY_TRIE)))
+                                                                  components.addOrGet(IndexComponentType.PRIMARY_KEY_TRIE),
+                                                                  CompressionParams.noCompression()))
             {
                 primaryKeys.forEach(primaryKey -> {
                     try
@@ -366,7 +369,8 @@ public class SortedTermsTest extends SaiRandomizedTest
             try (SortedTermsWriter writer = new SortedTermsWriter(components.addOrGet(IndexComponentType.PRIMARY_KEY_BLOCKS),
                                                                   metadataWriter,
                                                                   blockFPWriter,
-                                                                  components.addOrGet(IndexComponentType.PRIMARY_KEY_TRIE)))
+                                                                  components.addOrGet(IndexComponentType.PRIMARY_KEY_TRIE),
+                                                                  CompressionParams.noCompression()))
             {
                 for (int x = 0; x < 1000 * 4; x++)
                 {
@@ -392,7 +396,8 @@ public class SortedTermsTest extends SaiRandomizedTest
             try (SortedTermsWriter writer = new SortedTermsWriter(components.addOrGet(IndexComponentType.PRIMARY_KEY_BLOCKS),
                                                                   metadataWriter,
                                                                   blockFPWriter,
-                                                                  components.addOrGet(IndexComponentType.PRIMARY_KEY_TRIE)))
+                                                                  components.addOrGet(IndexComponentType.PRIMARY_KEY_TRIE),
+                                                                  CompressionParams.noCompression()))
             {
                 for (int x = 0; x < 1000 ; x++)
                 {
