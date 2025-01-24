@@ -23,6 +23,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.stream.Collectors;
 
+import org.agrona.collections.Int2IntHashMap;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -189,8 +190,9 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
         try (InvertedIndexWriter writer = new InvertedIndexWriter(components))
         {
             var iter = termsEnum.stream().map(InvertedIndexBuilder::toTermWithFrequency).iterator();
+            Int2IntHashMap docLengths = createMockDocLengths(termsEnum);
             MemtableTermsIterator termsIterator = new MemtableTermsIterator(null, null, iter);
-            SegmentMetadata.ComponentMetadataMap indexMetas = writer.writeAll(metadataBuilder.intercept(termsIterator));
+            SegmentMetadata.ComponentMetadataMap indexMetas = writer.writeAll(metadataBuilder.intercept(termsIterator), docLengths);
             metadataBuilder.setComponentsMetadata(indexMetas);
         }
 
@@ -213,6 +215,17 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
     private List<InvertedIndexBuilder.TermsEnum> buildTermsEnum(Version version, int terms, int postings)
     {
         return InvertedIndexBuilder.buildStringTermsEnum(version, terms, postings, () -> randomSimpleString(3, 5), () -> nextInt(0, Integer.MAX_VALUE));
+    }
+
+    private Int2IntHashMap createMockDocLengths(List<InvertedIndexBuilder.TermsEnum> termsEnum)
+    {
+        Int2IntHashMap docLengths = new Int2IntHashMap(Integer.MIN_VALUE);
+        for (InvertedIndexBuilder.TermsEnum term : termsEnum)
+        {
+            for (var cursor : term.postings)
+                docLengths.put(cursor.value, 1);
+        }
+        return docLengths;
     }
 
     private ByteBuffer wrap(ByteComparable bc)

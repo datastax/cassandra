@@ -18,6 +18,7 @@
 package org.apache.cassandra.index.sai.disk.v1;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
@@ -27,6 +28,7 @@ import java.util.stream.Collectors;
 import org.junit.Test;
 
 import com.carrotsearch.randomizedtesting.annotations.ParametersFactory;
+import org.agrona.collections.Int2IntHashMap;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.index.sai.IndexContext;
@@ -110,7 +112,8 @@ public class TermsReaderTest extends SaiRandomizedTest
             var iter = termsEnum.stream()
                     .map(InvertedIndexBuilder::toTermWithFrequency)
                     .iterator();
-            indexMetas = writer.writeAll(new MemtableTermsIterator(null, null, iter));
+            Int2IntHashMap docLengths = createMockDocLengths(termsEnum);
+            indexMetas = writer.writeAll(new MemtableTermsIterator(null, null, iter), docLengths);
         }
 
         FileHandle termsData = components.get(IndexComponentType.TERMS_DATA).createFileHandle();
@@ -152,7 +155,8 @@ public class TermsReaderTest extends SaiRandomizedTest
             var iter = termsEnum.stream()
                     .map(InvertedIndexBuilder::toTermWithFrequency)
                     .iterator();
-            indexMetas = writer.writeAll(new MemtableTermsIterator(null, null, iter));
+            Int2IntHashMap docLengths = createMockDocLengths(termsEnum);
+            indexMetas = writer.writeAll(new MemtableTermsIterator(null, null, iter), docLengths);
         }
 
         FileHandle termsData = components.get(IndexComponentType.TERMS_DATA).createFileHandle();
@@ -243,7 +247,8 @@ public class TermsReaderTest extends SaiRandomizedTest
             TermsIterator termsIter = indexer.getTermsWithPostings(ByteBufferUtil.bytes("A"),
                                                                    ByteBufferUtil.bytes("B"),
                                                                    TypeUtil.BYTE_COMPARABLE_VERSION);
-            indexMetas = writer.writeAll(termsIter);
+            Int2IntHashMap docLengths = indexer.getDocLengths();
+            indexMetas = writer.writeAll(termsIter, docLengths);
         }
 
         // Open readers
@@ -281,6 +286,17 @@ public class TermsReaderTest extends SaiRandomizedTest
                 assertEquals(2, termCount);
             }
         }
+    }
+
+    private Int2IntHashMap createMockDocLengths(List<InvertedIndexBuilder.TermsEnum> termsEnum)
+    {
+        Int2IntHashMap docLengths = new Int2IntHashMap(Integer.MIN_VALUE);
+        for (InvertedIndexBuilder.TermsEnum term : termsEnum)
+        {
+            for (var cursor : term.postings)
+                docLengths.put(cursor.value, 1);
+        }
+        return docLengths;
     }
 
     private List<InvertedIndexBuilder.TermsEnum> buildTermsEnum(Version version, int terms, int postings)

@@ -111,7 +111,12 @@ public enum IndexComponentType
      *
      * V1 V2
      */
-    GROUP_COMPLETION_MARKER("GroupComplete");
+    GROUP_COMPLETION_MARKER("GroupComplete"),
+    
+    /**
+     * Stores document length information for text scoring
+     */
+    DOC_LENGTHS("DocLengths");
 
     public final String representation;
 

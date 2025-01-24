@@ -134,9 +134,11 @@ public class BM25Utils
 
             totalTermCount += tf.termCount;
         }
+        if (documents.isEmpty())
+            return CloseableIterator.emptyIterator();
 
         // Calculate average document length
-        double avgDocLength = !documents.isEmpty() ? totalTermCount / documents.size() : 0.0;
+        double avgDocLength = totalTermCount / documents.size();
 
         // Calculate BM25 scores
         var scoredDocs = new ArrayList<PrimaryKeyWithScore>(documents.size());

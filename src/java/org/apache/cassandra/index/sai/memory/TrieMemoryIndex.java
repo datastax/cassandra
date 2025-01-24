@@ -28,9 +28,7 @@ import java.io.IOException;
 import java.math.BigDecimal;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
-
 import java.util.Collection;
-
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -86,6 +84,7 @@ public class TrieMemoryIndex extends MemoryIndex
     private final InMemoryTrie<PrimaryKeys> data;
     private final PrimaryKeysReducer primaryKeysReducer;
     private final Map<PkWithTerm, Integer> termFrequencies;
+    public final Map<PrimaryKey, Integer> docLengths = new ConcurrentHashMap<>();
 
     private final Memtable memtable;
     private AbstractBounds<PartitionPosition> keyBounds;
@@ -160,11 +159,14 @@ public class TrieMemoryIndex extends MemoryIndex
             final long initialSizeOffHeap = data.usedSizeOffHeap();
             final long reducerHeapSize = primaryKeysReducer.heapAllocations();
 
+            int tokenCount = 0;
             while (analyzer.hasNext())
             {
                 final ByteBuffer term = analyzer.next();
                 if (!indexContext.validateMaxTermSize(key, term))
                     continue;
+                
+                tokenCount++;
 
                 // Note that this term is already encoded once by the TypeUtil.encode call above.
                 setMinMaxTerm(term.duplicate());
@@ -189,6 +191,8 @@ public class TrieMemoryIndex extends MemoryIndex
                     Throwables.throwAsUncheckedException(e);
                 }
             }
+
+            docLengths.put(primaryKey, tokenCount);
 
             onHeapAllocationsTracker.accept((data.usedSizeOnHeap() - initialSizeOnHeap) +
                                             (primaryKeysReducer.heapAllocations() - reducerHeapSize));

@@ -23,7 +23,6 @@ import java.io.UncheckedIOException;
 import java.lang.invoke.MethodHandles;
 import java.nio.ByteBuffer;
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
@@ -80,6 +79,7 @@ public class InvertedIndexSearcher extends IndexSearcher
     private final Version version;
     private final boolean filterRangeResults;
     private final SSTableReader sstable;
+    private final DocLengthsReader docLengthsReader;
 
     protected InvertedIndexSearcher(SSTableContext sstableContext,
                                     PerIndexFiles perIndexFiles,
@@ -97,6 +97,8 @@ public class InvertedIndexSearcher extends IndexSearcher
         this.version = version;
         this.filterRangeResults = filterRangeResults;
         perColumnEventListener = (QueryEventListener.TrieIndexEventListener)indexContext.getColumnQueryMetrics();
+        this.docLengthsReader = new DocLengthsReader(indexFiles.docLengths(),
+                                                     segmentMetadata.componentMetadatas.get(IndexComponentType.DOC_LENGTHS));
 
         Map<String,String> map = metadata.componentMetadatas.get(IndexComponentType.TERMS_DATA).attributes;
         String footerPointerString = map.get(SAICodecUtils.FOOTER_POINTER);
@@ -200,8 +202,8 @@ public class InvertedIndexSearcher extends IndexSearcher
                     int rowId = merged.nextPosting();
                     if (rowId == PostingList.END_OF_STREAM)
                         return endOfData();
-                    int termCount = 100; // FIXME
-                    return new DocTF(pkm.primaryKeyFromRowId(rowId), termCount, merged.frequencies());
+                    int docLength = docLengthsReader.get(rowId);
+                    return new DocTF(pkm.primaryKeyFromRowId(rowId), docLength, merged.frequencies());
                 }
                 catch (IOException e)
                 {
@@ -281,7 +283,7 @@ public class InvertedIndexSearcher extends IndexSearcher
     @Override
     public void close()
     {
-        reader.close();
+        FileUtils.closeQuietly(reader, docLengthsReader);
     }
 
     /**

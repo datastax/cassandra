@@ -45,10 +45,10 @@ public class RAMStringIndexer
     private final Counter termsBytesUsed;
     private final Counter slicesBytesUsed;
 
-    private int rowCount = 0;
     private int[] lastSegmentRowID = new int[RAMPostingSlices.DEFAULT_TERM_DICT_SIZE];
 
     private final boolean includeFrequencies;
+    private final Int2IntHashMap docLengths = new Int2IntHashMap(Integer.MIN_VALUE);
 
     public RAMStringIndexer(boolean includeFrequencies)
     {
@@ -80,7 +80,12 @@ public class RAMStringIndexer
 
     public boolean isEmpty()
     {
-        return rowCount == 0;
+        return docLengths.isEmpty();
+    }
+
+    public Int2IntHashMap getDocLengths()
+    {
+        return docLengths;
     }
 
     /**
@@ -195,7 +200,7 @@ public class RAMStringIndexer
             slices.writePosting(termID, deltas.get(termID), freq);
         });
 
-        rowCount++;
+        docLengths.put(segmentRowId, terms.size());
 
         return estimatedBytesUsed() - startBytes;
     }
