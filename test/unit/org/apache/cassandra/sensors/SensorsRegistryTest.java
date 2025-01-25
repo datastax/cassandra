@@ -33,9 +33,11 @@ import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.marshal.AsciiType;
 import org.apache.cassandra.schema.KeyspaceParams;
+import org.apache.cassandra.utils.MonotonicClock;
 import org.mockito.Mockito;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.withPrecision;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.never;
@@ -47,15 +49,16 @@ public class SensorsRegistryTest
     public static final String KEYSPACE = "SensorsRegistryTest";
     public static final String CF1 = "Standard1";
     public static final String CF2 = "Standard2";
-
+    private static final int rateWindowInSeconds = 10;
     private Context context1;
     private Type type1;
     private Context context2;
     private Type type2;
 
     @BeforeClass
-    public static void defineSchema() throws Exception
+    public static void beforeClass() throws Exception
     {
+        System.setProperty(SensorsRegistry.SENSORS_RATE_WINDOW_IN_SECONDS_SYSTEM_PROPERTY, "" + rateWindowInSeconds);
         SchemaLoader.prepareServer();
         SchemaLoader.createKeyspace(KEYSPACE,
                                     KeyspaceParams.simple(1),
@@ -275,5 +278,47 @@ public class SensorsRegistryTest
 
         SensorsRegistry.instance.getOrCreateSensor(context1, type1);
         assertThat(SensorsRegistry.instance.getSensor(context1, type1)).isPresent();
+    }
+
+    @Test
+    public void testSensorsRate()
+    {
+        SensorsRegistry.instance.onCreateKeyspace(Keyspace.open(KEYSPACE).getMetadata());
+        SensorsRegistry.instance.onCreateTable(Keyspace.open(KEYSPACE).getColumnFamilyStore(CF1).metadata());
+
+        MonotonicClock clock = Mockito.mock(MonotonicClock.class);
+        SensorsRegistry.instance.setClock(clock);
+        Mockito.when(clock.now()).thenReturn(TimeUnit.SECONDS.toNanos(1));
+
+        // all the following updates should happen withing the same rate window
+        double v1 = 1.0, v2 = 2.0, v3 = 3.0, v4 = 4.0;
+        SensorsRegistry.instance.incrementSensor(context1, type1, v1);
+        SensorsRegistry.instance.incrementSensor(context1, type1, v2);
+        SensorsRegistry.instance.incrementSensor(context1, type1, v3);
+        SensorsRegistry.instance.incrementSensor(context1, type1, v4);
+
+        double rate = SensorsRegistry.instance.getSensorRate(context1, type1);
+        assertThat(rate).isEqualTo(v1 + v2 + v3 + v4);
+
+        // advance the clock to the next rate window
+        Mockito.when(clock.now()).thenReturn(TimeUnit.SECONDS.toNanos(rateWindowInSeconds + 1));
+        double v5 = 5.1;
+        SensorsRegistry.instance.incrementSensor(context1, type1, v5);
+        // advance the clock again, remain in the same rate window
+        Mockito.when(clock.now()).thenReturn(TimeUnit.SECONDS.toNanos(rateWindowInSeconds + 2));
+        double v6 = 6.2;
+        SensorsRegistry.instance.incrementSensor(context1, type1, v6);
+
+        rate = SensorsRegistry.instance.getSensorRate(context1, type1);
+        double epsilon = 0.00000001;
+        assertThat(rate).isEqualTo(v5 + v6, withPrecision(epsilon));
+        // make sure the value is indeed ever increasing
+        Sensor sensor = SensorsRegistry.instance.getSensor(context1, type1).get();
+        assertThat(sensor.getValue()).isEqualTo(v1 + v2 + v3 + v4 + v5 + v6, withPrecision(epsilon));
+
+        // advance the clock to the next rate window without updating the sensor
+        Mockito.when(clock.now()).thenReturn(TimeUnit.SECONDS.toNanos(rateWindowInSeconds * 2 + 2));
+        rate = SensorsRegistry.instance.getSensorRate(context1, type1);
+        assertThat(rate).isEqualTo(0D, withPrecision(epsilon));
     }
 }
