@@ -65,6 +65,8 @@ public class QueryContext
 
     private long addRowMaterializationDurationNanos = 0;
     private long annSearchDurationNanos = 0;
+    private long annCumulativeInitialSearchDurationNanos = 0;
+    private long annCumulativeResumeSearchDurationNanos = 0;
     private long resumesPerQuery = 0;
 
     private final LongAdder shadowedPrimaryKeyCount = new LongAdder();
@@ -219,6 +221,16 @@ public class QueryContext
         return annSearchDurationNanos;
     }
 
+    public long annCumulativeInitialSearchDuration()
+    {
+        return annCumulativeInitialSearchDurationNanos;
+    }
+
+    public long annCumulativeResumeSearchDuration()
+    {
+        return annCumulativeResumeSearchDurationNanos;
+    }
+
     public long resumesPerQuery()
     {
         return resumesPerQuery;
@@ -267,10 +279,18 @@ public class QueryContext
         addRowMaterializationDurationNanos += nanos;
     }
 
-    public void addAnnSearchDuration(long nanos)
+    public void addInitialAnnSearchDuration(long nanos)
     {
         annSearchDurationNanos += nanos;
+        annCumulativeInitialSearchDurationNanos += nanos;
     }
+
+    public void addResumeAnnSearchDuration(long nanos)
+    {
+        annSearchDurationNanos += nanos;
+        annCumulativeResumeSearchDurationNanos += nanos;
+    }
+
 
     public void incrementResume()
     {

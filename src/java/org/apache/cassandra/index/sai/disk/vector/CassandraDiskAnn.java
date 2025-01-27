@@ -280,7 +280,7 @@ public class CassandraDiskAnn
             // Record temporary metrics.
             annRerankFloor.record(context.getAnnRerankFloor());
             annRerankK.record(rerankK);
-            context.addAnnSearchDuration(duration);
+            context.addInitialAnnSearchDuration(duration);
 
             Tracing.trace("DiskANN search for {}/{} visited {} nodes, reranked {} to return {} results from {}",
                           limit, rerankK, result.getVisitedCount(), result.getRerankedCount(), result.getNodes().length, source);

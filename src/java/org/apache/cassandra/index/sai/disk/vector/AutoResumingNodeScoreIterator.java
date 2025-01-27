@@ -97,7 +97,7 @@ public class AutoResumingNodeScoreIterator extends AbstractIterator<SearchResult
         var nextResult = searcher.resume(limit, rerankK);
         var duration = System.nanoTime() - start;
         annResumeSearchNanos.record(duration, TimeUnit.NANOSECONDS);
-        context.addAnnSearchDuration(duration);
+        context.addResumeAnnSearchDuration(duration);
         context.incrementResume();
 
         maybeLogTrace(nextResult);

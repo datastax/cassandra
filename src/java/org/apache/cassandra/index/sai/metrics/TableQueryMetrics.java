@@ -49,6 +49,8 @@ public class TableQueryMetrics extends AbstractMetrics
     private static final DistributionSummary annNodesVisited = io.micrometer.core.instrument.DistributionSummary.builder("sai_ann_nodes_visited_per_query").publishPercentileHistogram().register(io.micrometer.core.instrument.Metrics.globalRegistry);
     private static final io.micrometer.core.instrument.Timer rowMaterializationDuration = io.micrometer.core.instrument.Timer.builder("sai_row_materialization_duration").publishPercentileHistogram().register(io.micrometer.core.instrument.Metrics.globalRegistry);
     private static final io.micrometer.core.instrument.Timer annSearchDuration = io.micrometer.core.instrument.Timer.builder("sai_ann_search_per_query").publishPercentileHistogram().register(io.micrometer.core.instrument.Metrics.globalRegistry);;
+    private static final io.micrometer.core.instrument.Timer annInitSearchDuration = io.micrometer.core.instrument.Timer.builder("sai_ann_initial_search_per_query").publishPercentileHistogram().register(io.micrometer.core.instrument.Metrics.globalRegistry);;
+    private static final io.micrometer.core.instrument.Timer annResumeSearchDuration = io.micrometer.core.instrument.Timer.builder("sai_ann_resume_search_per_query").publishPercentileHistogram().register(io.micrometer.core.instrument.Metrics.globalRegistry);;
     private final static DistributionSummary annResumesPerQuery = DistributionSummary.builder("sai_ann_resumes_per_query").publishPercentileHistogram().register(io.micrometer.core.instrument.Metrics.globalRegistry);
 
     public TableQueryMetrics(TableMetadata table)
@@ -157,6 +159,8 @@ public class TableQueryMetrics extends AbstractMetrics
             annNodesVisited.record(queryContext.annNodesVisited());
             rowMaterializationDuration.record(queryContext.rowMaterializationDuration(), TimeUnit.NANOSECONDS);
             annSearchDuration.record(queryContext.annSearchDuration(), TimeUnit.NANOSECONDS);
+            annInitSearchDuration.record(queryContext.annCumulativeInitialSearchDuration(), TimeUnit.NANOSECONDS);
+            annResumeSearchDuration.record(queryContext.annCumulativeResumeSearchDuration(), TimeUnit.NANOSECONDS);
             annResumesPerQuery.record(queryContext.resumesPerQuery());
         }
 
