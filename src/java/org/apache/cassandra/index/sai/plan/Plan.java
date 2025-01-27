@@ -328,7 +328,7 @@ abstract public class Plan
      * Need to be overridden by nodes that use an index.
      * Non-recursive.
      */
-    protected @Nullable IndexContext getIndex()
+    protected @Nullable IndexContext getIndexContext()
     {
         // By default, a node does not contain an index.
         return null;
@@ -896,7 +896,7 @@ abstract public class Plan
         }
 
         @Override
-        final protected IndexContext getIndex()
+        final protected IndexContext getIndexContext()
         {
             assert predicate != null || ordering != null;
             return predicate != null ? predicate.context : ordering.context;
@@ -1364,7 +1364,7 @@ abstract public class Plan
         }
 
         @Override
-        protected IndexContext getIndex()
+        protected IndexContext getIndexContext()
         {
             return ordering.context;
         }

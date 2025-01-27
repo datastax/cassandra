@@ -340,16 +340,16 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
 
     private void updateIndexMetricsQueriesCount(Plan plan)
     {
-        HashSet<IndexContext> queriedIndexes = new HashSet<>();
+        HashSet<IndexContext> queriedIndexesContexts = new HashSet<>();
         plan.forEach(node -> {
-            IndexContext index = node.getIndex();
-            if (index != null)
-                queriedIndexes.add(index);
+            IndexContext indexContext = node.getIndexContext();
+            if (indexContext != null)
+                queriedIndexesContexts.add(indexContext);
             return Plan.ControlFlow.Continue;
         });
-        queriedIndexes.stream()
-                      .forEach(indexContext ->
-                               indexContext.getIndexMetrics().queriesCount.inc());
+        queriedIndexesContexts.stream()
+                              .forEach(indexContext ->
+                                       indexContext.getIndexMetrics().queriesCount.inc());
     }
 
     Plan buildPlan()
