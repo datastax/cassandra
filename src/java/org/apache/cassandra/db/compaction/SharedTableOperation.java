@@ -22,16 +22,23 @@ import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.apache.cassandra.utils.NonThrowingCloseable;
 
-public class SharedTableOperation extends AbstractTableOperation implements TableOperation
+/// A [TableOperation] tracking the progress and offering stop control of a composite operation.
+/// This class is used for [UnifiedCompactionStrategy]'s parallelized compactions together with
+/// [SharedCompactionProgress] and [SharedCompactionObserver]. It uses a shared progress to present an integrated view
+/// of the composite operation for a [TableOperationObserver] (e.g [org.apache.cassandra.db.compaction.ActiveOperations]).
+public class SharedTableOperation extends AbstractTableOperation implements TableOperation, TableOperationObserver
 {
     private final Progress sharedProgress;
     private NonThrowingCloseable obsCloseable;
     private final List<TableOperation> components = new CopyOnWriteArrayList<>();
     private final AtomicBoolean started = new AtomicBoolean(false);
     private final AtomicInteger toClose = new AtomicInteger(0);
+    private final AtomicReference<TableOperationObserver> observer = new AtomicReference(null);
+    private volatile boolean isGlobal;
 
     public SharedTableOperation(Progress sharedProgress)
     {
@@ -53,30 +60,40 @@ public class SharedTableOperation extends AbstractTableOperation implements Tabl
     public void stop(StopTrigger trigger)
     {
         super.stop(trigger);
+        // Stop all ongoing subtasks
         for (TableOperation component : components)
             component.stop(trigger);
+        // We will also issue a stop immediately after the start of any operation that is still to initiate in
+        // [onOperationStart].
     }
 
     @Override
     public boolean isGlobal()
     {
-        if (components.isEmpty())
-            return false;
-        else
-            return components.get(0).isGlobal();
+        return isGlobal;
     }
 
     public TableOperationObserver wrapObserver(TableOperationObserver observer)
     {
-        // Note: if the observer is Noop, we still want to wrap to complete the shared operation when all subtasks complete
-        return operation -> onOperationStart(observer, operation);
+        if (!this.observer.compareAndSet(null, observer))
+            assert this.observer.get() == observer : "All components must use the same observer";
+        // We will register with the observer when one of the components starts.
+
+        // Note: if the observer is Noop, we still want to wrap to complete the shared operation when all subtasks complete.
+        return this;
     }
 
-    public NonThrowingCloseable onOperationStart(TableOperationObserver observer, TableOperation operation)
+    @Override
+    public NonThrowingCloseable onOperationStart(TableOperation operation)
     {
         if (started.compareAndSet(false, true))
-            obsCloseable = observer.onOperationStart(this);
+        {
+            obsCloseable = observer.get().onOperationStart(this);
+            isGlobal = operation.isGlobal();
+        }
+        // Save the component reference to be able to stop it if needed.
         components.add(operation);
+
         if (isStopRequested())
             operation.stop(trigger());
         return this::closeOne;
@@ -84,7 +101,9 @@ public class SharedTableOperation extends AbstractTableOperation implements Tabl
 
     private void closeOne()
     {
-        if (toClose.decrementAndGet() == 0 && obsCloseable != null)
+        final int stillToClose = toClose.decrementAndGet();
+        if (stillToClose == 0 && obsCloseable != null)
             obsCloseable.close();
+        assert stillToClose >= 0 : "Closed more than expected";
     }
 }

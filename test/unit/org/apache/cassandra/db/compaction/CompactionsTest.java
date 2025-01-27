@@ -657,12 +657,12 @@ public class CompactionsTest
         ActiveOperations.CompactionProgressListener listener = Mockito.mock(ActiveOperations
                                                                             .CompactionProgressListener.class);
         TableOperation.Progress progress = new AbstractTableOperation
-                                                                .OperationProgress(cfs.metadata(),
-                                                                                   OperationType.ANTICOMPACTION,
-                                                                                   0,
-                                                                                   0,
-                                                                                   UUID.randomUUID(),
-                                                                                   cfs.getLiveSSTables());
+                                               .OperationProgress(cfs.metadata(),
+                                                                  OperationType.ANTICOMPACTION,
+                                                                  0,
+                                                                  0,
+                                                                  UUID.randomUUID(),
+                                                                  cfs.getLiveSSTables());
 
         AbstractTableOperation operation = new AbstractTableOperation()
         {
