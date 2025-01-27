@@ -413,13 +413,6 @@ public class Memory implements AutoCloseable, ReadableMemory
         public final Memory memory;
         private final long size;
 
-        public LongArray(Memory memory)
-        {
-            assert (memory.size & 7) == 0;
-            this.memory = memory;
-            this.size = memory.size >> 3;
-        }
-
         public LongArray(long size)
         {
             assert size >= 0;
@@ -449,6 +442,11 @@ public class Memory implements AutoCloseable, ReadableMemory
         public long size()
         {
             return size;
+        }
+
+        public long memoryUsed()
+        {
+            return memory != null ? memory.size() : 0;
         }
 
         @Override
