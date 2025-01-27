@@ -52,13 +52,13 @@ public class IndexMetricsTest extends AbstractMetricsTest
         createTable(String.format(CREATE_TABLE_TEMPLATE, keyspace2));
         createIndex(String.format(CREATE_INDEX_TEMPLATE, keyspace2, "v1"));
 
-        execute("INSERT INTO " + keyspace1 + "." + TABLE + " (id1, v1, v2) VALUES ('0', 0, '0')");
+        execute("INSERT INTO " + keyspace1 + '.' + TABLE + " (id1, v1, v2) VALUES ('0', 0, '0')");
 
         assertEquals(1L, getMetricValue(objectName("LiveMemtableIndexWriteCount", keyspace1, TABLE, INDEX, "IndexMetrics")));
         assertEquals(0L, getMetricValue(objectName("LiveMemtableIndexWriteCount", keyspace2, TABLE, INDEX, "IndexMetrics")));
 
-        execute("INSERT INTO " + keyspace2 + "." + TABLE + " (id1, v1, v2) VALUES ('0', 0, '0')");
-        execute("INSERT INTO " + keyspace2 + "." + TABLE + " (id1, v1, v2) VALUES ('1', 1, '1')");
+        execute("INSERT INTO " + keyspace2 + '.' + TABLE + " (id1, v1, v2) VALUES ('0', 0, '0')");
+        execute("INSERT INTO " + keyspace2 + '.' + TABLE + " (id1, v1, v2) VALUES ('1', 1, '1')");
 
         assertEquals(1L, getMetricValue(objectName("LiveMemtableIndexWriteCount", keyspace1, TABLE, INDEX, "IndexMetrics")));
         assertEquals(2L, getMetricValue(objectName("LiveMemtableIndexWriteCount", keyspace2, TABLE, INDEX, "IndexMetrics")));
@@ -67,37 +67,36 @@ public class IndexMetricsTest extends AbstractMetricsTest
     @Test
     public void testMetricRelease()
     {
-        String keyspace = createKeyspace(CREATE_KEYSPACE_TEMPLATE);
+        String table = createTable("CREATE TABLE %s (ID1 TEXT PRIMARY KEY, v1 INT, v2 TEXT) WITH compaction = " +
+                                   "{'class' : 'SizeTieredCompactionStrategy', 'enabled' : false }");
+        String index = createIndex("CREATE CUSTOM INDEX IF NOT EXISTS ON %s (v1) USING 'StorageAttachedIndex'");
 
-        createTable(String.format(CREATE_TABLE_TEMPLATE, keyspace));
-        createIndex(String.format(CREATE_INDEX_TEMPLATE, keyspace, "v1"));
+        execute("INSERT INTO %s (id1, v1, v2) VALUES ('0', 0, '0')");
+        assertEquals(1L, getMetricValue(objectName("LiveMemtableIndexWriteCount", KEYSPACE, table, index, "IndexMetrics")));
 
-        execute("INSERT INTO " + keyspace + "." + TABLE + " (id1, v1, v2) VALUES ('0', 0, '0')");
-        assertEquals(1L, getMetricValue(objectName("LiveMemtableIndexWriteCount", keyspace, TABLE, INDEX, "IndexMetrics")));
-
-        dropIndex(String.format("DROP INDEX %s." + INDEX, keyspace));
+        dropIndex("DROP INDEX %s." + index);
 
         // once the index is dropped, make sure MBeans are no longer accessible
-        assertThatThrownBy(() -> getMetricValue(objectName("LiveMemtableIndexWriteCount", keyspace, TABLE, INDEX, "IndexMetrics")))
+        assertThatThrownBy(() -> getMetricValue(objectName("LiveMemtableIndexWriteCount", KEYSPACE, table, index, "IndexMetrics")))
                 .hasCauseInstanceOf(javax.management.InstanceNotFoundException.class);
     }
 
     @Test
     public void testMetricsThroughWriteLifecycle()
     {
-        String keyspace = createKeyspace(CREATE_KEYSPACE_TEMPLATE);
-
-        createTable(String.format(CREATE_TABLE_TEMPLATE, keyspace));
-        createIndex(String.format(CREATE_INDEX_TEMPLATE, keyspace, "v1"));
+        String table = createTable("CREATE TABLE %s (ID1 TEXT PRIMARY KEY, v1 INT, v2 TEXT) WITH compaction = " +
+                                   "{'class' : 'SizeTieredCompactionStrategy', 'enabled' : false }");
+        String index = createIndex("CREATE CUSTOM INDEX IF NOT EXISTS ON %s (v1) USING 'StorageAttachedIndex'");
 
         int rowCount = 10;
         for (int i = 0; i < rowCount; i++)
-            execute("INSERT INTO " + keyspace + "." + TABLE + "(id1, v1, v2) VALUES (?, ?, '0')", Integer.toString(i), i);
+            execute("INSERT INTO %s (id1, v1, v2) VALUES (?, ?, '0')", Integer.toString(i), i);
 
-        assertEquals(10L, getMetricValue(objectName("LiveMemtableIndexWriteCount", keyspace, TABLE, INDEX, "IndexMetrics")));
-        assertEquals(0L, getMetricValue(objectName("MemtableIndexFlushCount", keyspace, TABLE, INDEX, "IndexMetrics")));
-        assertTrue((Long) getMetricValue(objectName("MemtableOnHeapIndexBytes", keyspace, TABLE, INDEX, "IndexMetrics")) > 0);
-        long bytes = (long) getMetricValue(objectName("MemtableOffHeapIndexBytes", keyspace, TABLE, INDEX, "IndexMetrics"));
+        assertEquals(10L, getMetricValue(objectName("LiveMemtableIndexWriteCount", KEYSPACE, table, index, "IndexMetrics")));
+        assertTrue((Long)getMetricValue(objectName("MemtableOnHeapIndexBytes", KEYSPACE, table, index, "IndexMetrics")) > 0);
+        assertEquals(0L, getMetricValue(objectName("MemtableIndexFlushCount", KEYSPACE, table, index, "IndexMetrics")));
+
+        long bytes = (long) getMetricValue(objectName("MemtableOffHeapIndexBytes", KEYSPACE, table, index, "IndexMetrics"));
         if (DatabaseDescriptor.getMemtableAllocationType().toBufferType() == BufferType.ON_HEAP)
             Assertions.assertThat(bytes).isZero();
         else
@@ -106,7 +105,7 @@ public class IndexMetricsTest extends AbstractMetricsTest
         waitForAssert(() -> {
             try
             {
-                assertEquals(10L, getMBeanAttribute(objectName("MemtableIndexWriteLatency", keyspace, TABLE, INDEX, "IndexMetrics"), "Count"));
+                assertEquals(10L, getMBeanAttribute(objectName("MemtableIndexWriteLatency", KEYSPACE, table, index, "IndexMetrics"), "Count"));
             }
             catch (Throwable ex)
             {
@@ -114,38 +113,86 @@ public class IndexMetricsTest extends AbstractMetricsTest
             }
         }, 60, TimeUnit.SECONDS);
 
-        assertEquals(0L, getMetricValue(objectName("SSTableCellCount", keyspace, TABLE, INDEX, "IndexMetrics")));
-        assertEquals(0L, getMetricValue(objectName("DiskUsedBytes", keyspace, TABLE, INDEX, "IndexMetrics")));
-        assertEquals(0L, getMetricValue(objectName("CompactionCount", keyspace, TABLE, INDEX, "IndexMetrics")));
+        assertEquals(0L, getMetricValue(objectName("SSTableCellCount", KEYSPACE, table, index, "IndexMetrics")));
+        assertEquals(0L, getMetricValue(objectName("DiskUsedBytes", KEYSPACE, table, index, "IndexMetrics")));
+        assertEquals(0L, getMetricValue(objectName("CompactionCount", KEYSPACE, table, index, "IndexMetrics")));
 
-        waitForVerifyHistogram(objectName("MemtableIndexFlushCellsPerSecond", keyspace, TABLE, INDEX, "IndexMetrics"), 0);
+        waitForVerifyHistogram(objectName("MemtableIndexFlushCellsPerSecond", KEYSPACE, table, index, "IndexMetrics"), 0);
 
-        flush(keyspace, TABLE);
+        flush(KEYSPACE, table);
 
-        assertEquals(0L, getMetricValue(objectName("LiveMemtableIndexWriteCount", keyspace, TABLE, INDEX, "IndexMetrics")));
-        assertEquals(0L, getMetricValue(objectName("MemtableOnHeapIndexBytes", keyspace, TABLE, INDEX, "IndexMetrics")));
-        assertEquals(0L, getMetricValue(objectName("MemtableOffHeapIndexBytes", keyspace, TABLE, INDEX, "IndexMetrics")));
-        assertEquals(1L, getMetricValue(objectName("MemtableIndexFlushCount", keyspace, TABLE, INDEX, "IndexMetrics")));
-        assertEquals(10L, getMetricValue(objectName("SSTableCellCount", keyspace, TABLE, INDEX, "IndexMetrics")));
-        assertTrue((Long)getMetricValue(objectName("DiskUsedBytes", keyspace, TABLE, INDEX, "IndexMetrics")) > 0);
-        assertEquals(0L, getMetricValue(objectName("CompactionCount", keyspace, TABLE, INDEX, "IndexMetrics")));
+        assertEquals(0L, getMetricValue(objectName("LiveMemtableIndexWriteCount", KEYSPACE, table, index, "IndexMetrics")));
+        assertEquals(0L, getMetricValue(objectName("MemtableOnHeapIndexBytes", KEYSPACE, table, index, "IndexMetrics")));
+        assertEquals(0L, getMetricValue(objectName("MemtableOffHeapIndexBytes", KEYSPACE, table, index, "IndexMetrics")));
+        assertEquals(1L, getMetricValue(objectName("MemtableIndexFlushCount", KEYSPACE, table, index, "IndexMetrics")));
+        assertEquals(10L, getMetricValue(objectName("SSTableCellCount", KEYSPACE, table, index, "IndexMetrics")));
+        assertTrue((Long)getMetricValue(objectName("DiskUsedBytes", KEYSPACE, table, index, "IndexMetrics")) > 0);
+        assertEquals(0L, getMetricValue(objectName("CompactionCount", KEYSPACE, table, index, "IndexMetrics")));
 
-        waitForVerifyHistogram(objectName("MemtableIndexFlushCellsPerSecond", keyspace, TABLE, INDEX, "IndexMetrics"), 1);
+        waitForVerifyHistogram(objectName("MemtableIndexFlushCellsPerSecond", KEYSPACE, table, index, "IndexMetrics"), 1);
 
-        compact(keyspace, TABLE);
+        compact(KEYSPACE, table);
 
-        waitForIndexCompaction(keyspace, TABLE, INDEX);
+        waitForIndexCompaction(KEYSPACE, table, index);
 
-        waitForTableIndexesQueryable(keyspace, TABLE);
-        ResultSet rows = executeNet(String.format("SELECT id1 FROM %s.%s WHERE v1 >= 0", keyspace, TABLE));
+        waitForTableIndexesQueryable(KEYSPACE, table);
+
+        ResultSet rows = executeNet("SELECT id1 FROM %s WHERE v1 >= 0");
         assertEquals(rowCount, rows.all().size());
 
-        assertEquals(0L, getMetricValue(objectName("LiveMemtableIndexWriteCount", keyspace, TABLE, INDEX, "IndexMetrics")));
-        assertEquals(1L, getMetricValue(objectName("MemtableIndexFlushCount", keyspace, TABLE, INDEX, "IndexMetrics")));
-        assertEquals(10L, getMetricValue(objectName("SSTableCellCount", keyspace, TABLE, INDEX, "IndexMetrics")));
-        assertTrue((Long)getMetricValue(objectName("DiskUsedBytes", keyspace, TABLE, INDEX, "IndexMetrics")) > 0);
-        assertEquals(1L, getMetricValue(objectName("CompactionCount", keyspace, TABLE, INDEX, "IndexMetrics")));
+        assertEquals(0L, getMetricValue(objectName("LiveMemtableIndexWriteCount", KEYSPACE, table, index, "IndexMetrics")));
+        assertEquals(1L, getMetricValue(objectName("MemtableIndexFlushCount", KEYSPACE, table, index, "IndexMetrics")));
+        assertEquals(10L, getMetricValue(objectName("SSTableCellCount", KEYSPACE, table, index, "IndexMetrics")));
+        assertTrue((Long)getMetricValue(objectName("DiskUsedBytes", KEYSPACE, table, index, "IndexMetrics")) > 0);
+        assertEquals(1L, getMetricValue(objectName("CompactionCount", KEYSPACE, table, index, "IndexMetrics")));
 
-        waitForVerifyHistogram(objectName("CompactionSegmentCellsPerSecond", keyspace, TABLE, INDEX, "IndexMetrics"), 1);
+        waitForVerifyHistogram(objectName("CompactionSegmentCellsPerSecond", KEYSPACE, table, index, "IndexMetrics"), 1);
+    }
+
+    private void assertIndexQueryCount(String index, long expectedCount)
+    {
+        assertEquals(expectedCount,
+                     getMetricValue(objectName("QueriesCount", KEYSPACE, currentTable(), index, "IndexMetrics")));
+    }
+
+    @Test
+    public void testQueriesCount()
+    {
+        createTable("CREATE TABLE %s (id1 TEXT PRIMARY KEY, v1 INT, v2 TEXT, v3 VECTOR<FLOAT, 2>)");
+        String indexV1 = createIndex("CREATE CUSTOM INDEX ON %s (v1) USING 'StorageAttachedIndex'");
+
+        int rowCount = 10;
+        for (int i = 0; i < rowCount; i++)
+            execute("INSERT INTO %s (id1, v1, v2, v3) VALUES (?, ?, '0', [?, 0.0])", Integer.toString(i), i, i);
+
+        assertIndexQueryCount(indexV1, 0L);
+
+        ResultSet rows = executeNet("SELECT id1 FROM %s WHERE v1 >= 0");
+        assertEquals(rowCount, rows.all().size());
+        assertIndexQueryCount(indexV1, 1L);
+
+        executeNet("SELECT id1 FROM %s WHERE (v1 >= 0 OR v1 = 4) AND v2 = '2' ALLOW FILTERING");
+        assertIndexQueryCount(indexV1, 2L);
+
+        String indexV2 = createIndex("CREATE CUSTOM INDEX ON %s (v2) USING 'StorageAttachedIndex'");
+        executeNet("SELECT id1 FROM %s WHERE (v1 >= 0 OR v1 = 4)");
+        assertIndexQueryCount(indexV1, 3L);
+        assertIndexQueryCount(indexV2, 0L);
+
+        executeNet("SELECT id1 FROM %s WHERE v2 = '2'");
+        assertIndexQueryCount(indexV2, 1L);
+        executeNet("SELECT id1 FROM %s WHERE (v1 >= 0 OR v1 = 4) AND v2 = '2'");
+        assertIndexQueryCount(indexV1, 4L);
+        assertIndexQueryCount(indexV2, 1L);
+        executeNet("SELECT id1 FROM %s WHERE (v1 >= 0 OR v1 = 4) ORDER BY v2 LIMIT 10");
+        assertIndexQueryCount(indexV1, 4L);
+        assertIndexQueryCount(indexV2, 2L);
+
+        String indexV3 = createIndex("CREATE CUSTOM INDEX ON %s (v3) USING 'StorageAttachedIndex'");
+        assertIndexQueryCount(indexV3, 0L);
+        executeNet("SELECT id1 FROM %s WHERE v2 = '2' ORDER BY v3 ANN OF [5,0] LIMIT 10");
+        assertIndexQueryCount(indexV1, 4L);
+        assertIndexQueryCount(indexV2, 2L);
+        assertIndexQueryCount(indexV3, 1L);
     }
 }
