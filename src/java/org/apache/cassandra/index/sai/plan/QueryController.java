@@ -338,7 +338,8 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
                                                  makeFilter(key));
     }
 
-    private void updateIndexMetricsQueriesCount(Plan plan) {
+    private void updateIndexMetricsQueriesCount(Plan plan)
+    {
         HashSet<IndexContext> queriedIndexes = new HashSet<>();
         plan.forEach(node -> {
             IndexContext index = node.getIndex();
@@ -346,7 +347,9 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
                 queriedIndexes.add(index);
             return Plan.ControlFlow.Continue;
         });
-        queriedIndexes.stream().forEach(indexContext -> indexContext.getIndexMetrics().queriesCount.inc());
+        queriedIndexes.stream()
+                      .forEach(indexContext ->
+                               indexContext.getIndexMetrics().queriesCount.inc());
     }
 
     Plan buildPlan()
