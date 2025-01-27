@@ -277,7 +277,6 @@ public class PostingsWriter implements Closeable
         long maxValue = 0;
         for (int i = 0; i < entries; i++) {
             maxValue = max(maxValue, deltaBuffer[i]);
-            // TODO do we care that frequency will never be zero?  I think the 0 code path is premature optimization but not sure
             maxValue = max(maxValue, freqBuffer[i]);
         }
         
