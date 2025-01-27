@@ -39,7 +39,11 @@ public class DocLengthsReader implements Closeable
 
     public int get(int rowID) throws IOException
     {
-        input.seek(componentMetadata.offset + (long) rowID * Integer.BYTES);
+        var position = componentMetadata.offset + (long) rowID * Integer.BYTES;
+        if (position >= componentMetadata.offset + componentMetadata.length)
+            return 0;
+
+        input.seek(position);
         return input.readInt();
     }
 

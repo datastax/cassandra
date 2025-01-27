@@ -368,13 +368,10 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
             }
         }
 
-        public ComponentMetadata get(IndexComponentType indexComponentType) 
+        public ComponentMetadata get(IndexComponentType indexComponentType)
         {
-            if (!metas.containsKey(indexComponentType)) {
-                if (indexComponentType == IndexComponentType.DOC_LENGTHS)
-                    throw new IllegalStateException("Missing doc lengths component for BM25 scoring");
+            if (!metas.containsKey(indexComponentType))
                 throw new IllegalArgumentException(indexComponentType + " ComponentMetadata not found");
-            }
 
             return metas.get(indexComponentType);
         }

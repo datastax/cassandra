@@ -114,7 +114,7 @@ public enum IndexComponentType
     GROUP_COMPLETION_MARKER("GroupComplete"),
     
     /**
-     * Stores document length information for text scoring
+     * Stores document length information for BM25 scoring
      */
     DOC_LENGTHS("DocLengths");
 

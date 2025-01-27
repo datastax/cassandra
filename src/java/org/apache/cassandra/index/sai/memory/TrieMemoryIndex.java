@@ -29,6 +29,7 @@ import java.math.BigDecimal;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -84,7 +85,7 @@ public class TrieMemoryIndex extends MemoryIndex
     private final InMemoryTrie<PrimaryKeys> data;
     private final PrimaryKeysReducer primaryKeysReducer;
     private final Map<PkWithTerm, Integer> termFrequencies;
-    public final Map<PrimaryKey, Integer> docLengths = new ConcurrentHashMap<>();
+    private final Map<PrimaryKey, Integer> docLengths = new HashMap<>();
 
     private final Memtable memtable;
     private AbstractBounds<PartitionPosition> keyBounds;
@@ -114,6 +115,11 @@ public class TrieMemoryIndex extends MemoryIndex
         this.primaryKeysReducer = new PrimaryKeysReducer();
         this.memtable = memtable;
         termFrequencies = new ConcurrentHashMap<>();
+    }
+
+    public synchronized Map<PrimaryKey, Integer> getDocLengths()
+    {
+        return docLengths;
     }
 
     private static class PkWithTerm

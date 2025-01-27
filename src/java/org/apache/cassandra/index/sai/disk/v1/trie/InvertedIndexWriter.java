@@ -94,7 +94,7 @@ public class InvertedIndexWriter implements Closeable
         components.put(IndexComponentType.POSTING_LISTS, -1, postingsOffset, postingsLength);
         components.put(IndexComponentType.TERMS_DATA, termsRoot, termsOffset, termsLength, map);
 
-        // Add doc lengths metadata
+        // Write doc lengths
         long docLengthsOffset = docLengthsWriter.getStartOffset();
         docLengthsWriter.writeDocLengths(docLengths);
         long docLengthsLength = docLengthsWriter.getFilePointer() - docLengthsOffset;

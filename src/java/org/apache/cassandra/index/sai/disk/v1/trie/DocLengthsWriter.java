@@ -39,21 +39,16 @@ public class DocLengthsWriter implements Closeable
 
     public void writeDocLengths(Int2IntHashMap lengths) throws IOException
     {
-        if (lengths.isEmpty())
-        {
-            return;
-        }
-
         // Calculate max row ID from doc lengths map
         int maxRowId = -1;
-        var keyIterator = lengths.keySet().iterator();
-        while (keyIterator.hasNext())
+        for (var keyIterator = lengths.keySet().iterator(); keyIterator.hasNext(); )
         {
-            final int key = keyIterator.nextValue();
+            int key = keyIterator.nextValue();
             if (key > maxRowId)
                 maxRowId = key;
         }
 
+        // write out the doc lengths in row order
         for (int rowId = 0; rowId <= maxRowId; rowId++)
         {
             final int length = lengths.get(rowId);

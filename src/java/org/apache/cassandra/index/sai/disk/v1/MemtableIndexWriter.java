@@ -157,7 +157,7 @@ public class MemtableIndexWriter implements PerIndexWriter
                 Arrays.stream(((TrieMemtableIndex) memtableIndex).getRangeIndexes())
                       .map(TrieMemoryIndex.class::cast)
                       .forEach(trieMemoryIndex -> 
-                          trieMemoryIndex.docLengths.forEach((pk, length) -> {
+                          trieMemoryIndex.getDocLengths().forEach((pk, length) -> {
                               int rowId = rowMapping.get(pk);
                               if (rowId == -1) {
                                   throw new IllegalStateException("No row ID mapping found for primary key: " + pk);
