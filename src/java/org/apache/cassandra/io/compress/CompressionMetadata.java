@@ -81,7 +81,6 @@ public class CompressionMetadata implements AutoCloseable
      * copy metadata is present), we store offsets of all chunks for the original (compressed) data file.
      */
     private final Memory.LongArray chunkOffsets;
-    private final boolean owningChunkOffsets;
 
     public final File indexFilePath;
 
@@ -177,7 +176,6 @@ public class CompressionMetadata implements AutoCloseable
 
             Pair<Memory.LongArray, Long> offsetsAndLimit = readChunkOffsets(stream, startChunkIndex, endChunkIndex, compressedLength);
             chunkOffsets = offsetsAndLimit.left;
-            owningChunkOffsets = true;
             // We adjust the compressed file length to store the position after the last chunk just to be able to
             // calculate the offset of the chunk next to the last one (in order to calculate the length of the last chunk).
             // Obvously, we could use the compressed file length for that purpose but unfortunately, sometimes there is
@@ -206,7 +204,6 @@ public class CompressionMetadata implements AutoCloseable
         this.compressedFileLength = compressedLength;
         assert offsets != null;
         this.chunkOffsets = offsets;
-        this.owningChunkOffsets = false;
         this.dataLength = dataLength;
         this.startChunkIndex = 0;
     }
@@ -405,9 +402,7 @@ public class CompressionMetadata implements AutoCloseable
 
     public void close()
     {
-        // sometimes chunkOffsets is a sharedCopy, we can decrease the memory usage only if we own it
-        if (owningChunkOffsets)
-            NATIVE_MEMORY_USAGE.addAndGet(-chunkOffsets.memoryUsed());
+        NATIVE_MEMORY_USAGE.addAndGet(-chunkOffsets.memoryUsed());
         chunkOffsets.close();
     }
 
@@ -492,7 +487,7 @@ public class CompressionMetadata implements AutoCloseable
                 SafeMemory tmp = offsets;
                 offsets = offsets.copy(count * 8L);
                 NATIVE_MEMORY_USAGE.addAndGet(offsets.size() - tmp.size());
-                tmp.close();
+                tmp.free();
             }
 
             // flush the data to disk
@@ -518,7 +513,11 @@ public class CompressionMetadata implements AutoCloseable
         @SuppressWarnings("resource")
         public CompressionMetadata open(long dataLength, long compressedLength)
         {
-            // no need to update NATIVE_MEMORY_USAGE here
+            // we are overcounting for a while, but it's not worth the effort to fix
+            // the problem is that the offsets object is allocated by the Writer and `closed` when
+            // the Writer is closed, but the offsets object is used by the CompressionMetadata object
+            // that will survive for all the time the SSTableReader is open
+            NATIVE_MEMORY_USAGE.addAndGet(offsets.size());
             SafeMemory tOffsets = this.offsets.sharedCopy();
 
             // calculate how many entries we need, if our dataLength is truncated
