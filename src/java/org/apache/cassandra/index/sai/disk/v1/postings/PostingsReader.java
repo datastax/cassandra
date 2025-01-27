@@ -363,11 +363,10 @@ public class PostingsReader implements OrdinalPostingList
 
     private int nextRowDelta()
     {
-        // currentFORValues is null when the all the values in the block are the same
         if (currentFORValues == null)
         {
-            // see TODO in PostingsWriter -- currently this will never be executed
-            currentFrequency = 1;
+            // currentFORValues is null when the all the values in the block are 0
+            currentFrequency = Integer.MIN_VALUE;
             return 0;
         }
         else
