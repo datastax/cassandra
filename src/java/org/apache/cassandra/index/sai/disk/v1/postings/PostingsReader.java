@@ -69,7 +69,8 @@ public class PostingsReader implements OrdinalPostingList
     private long currentPosition;
     private LongValues currentFORValues;
     private int postingsDecoded = 0;
-    private int currentFrequency;
+    private int currentFrequency = Integer.MIN_VALUE;
+    private final boolean readFrequencies;
 
     @VisibleForTesting
     public PostingsReader(IndexInput input, long summaryOffset, QueryEventListener.PostingListEventListener listener) throws IOException
@@ -79,7 +80,7 @@ public class PostingsReader implements OrdinalPostingList
 
     public PostingsReader(IndexInput input, BlocksSummary summary, QueryEventListener.PostingListEventListener listener) throws IOException
     {
-        this(input, summary, listener, () -> {
+        this(input, summary, false, listener, () -> {
             try
             {
                 input.close();
@@ -91,10 +92,25 @@ public class PostingsReader implements OrdinalPostingList
         });
     }
 
-    public PostingsReader(IndexInput input, BlocksSummary summary, QueryEventListener.PostingListEventListener listener, InputCloser runOnClose) throws IOException
+    public PostingsReader(IndexInput input, BlocksSummary summary, boolean readFrequencies, QueryEventListener.PostingListEventListener listener) throws IOException
+    {
+        this(input, summary, readFrequencies, listener, () -> {
+            try
+            {
+                input.close();
+            }
+            finally
+            {
+                summary.close();
+            }
+        });
+    }
+
+    public PostingsReader(IndexInput input, BlocksSummary summary, boolean readFrequencies, QueryEventListener.PostingListEventListener listener, InputCloser runOnClose) throws IOException
     {
         assert input instanceof IndexInputReader;
         logger.trace("Opening postings reader for {}", input);
+        this.readFrequencies = readFrequencies;
         this.input = input;
         this.seekingInput = new SeekingRandomAccessInput(input);
         this.blockOffsets = summary.offsets;
@@ -365,17 +381,16 @@ public class PostingsReader implements OrdinalPostingList
     {
         if (currentFORValues == null)
         {
-            // currentFORValues is null when the all the values in the block are 0
             currentFrequency = Integer.MIN_VALUE;
             return 0;
         }
-        else
-        {
-            long id = currentFORValues.get(2L * blockIdx);
-            currentFrequency = Math.toIntExact(currentFORValues.get(2L * blockIdx + 1));
-            postingsDecoded++;
-            return Math.toIntExact(id);
-        }
+
+        long offset = readFrequencies ? 2L * blockIdx : blockIdx;
+        long id = currentFORValues.get(offset);
+        if (readFrequencies)
+            currentFrequency = Math.toIntExact(currentFORValues.get(offset + 1));
+        postingsDecoded++;
+        return Math.toIntExact(id);
     }
 
     private void advanceOnePosition(int nextRowID)

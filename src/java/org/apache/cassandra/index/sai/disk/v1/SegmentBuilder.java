@@ -43,6 +43,7 @@ import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
 import org.apache.cassandra.index.sai.analyzer.ByteLimitedMaterializer;
+import org.apache.cassandra.index.sai.analyzer.NoOpAnalyzer;
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.RAMStringIndexer;
 import org.apache.cassandra.index.sai.disk.TermsIterator;
@@ -195,10 +196,14 @@ public abstract class SegmentBuilder
         {
             super(components, rowIdOffset, limiter);
             this.byteComparableVersion = components.byteComparableVersionFor(IndexComponentType.TERMS_DATA);
-            ramIndexer = new RAMStringIndexer(analyzer != null);
+            ramIndexer = new RAMStringIndexer(writeFrequencies());
             totalBytesAllocated = ramIndexer.estimatedBytesUsed();
             totalBytesAllocatedConcurrent.add(totalBytesAllocated);
+        }
 
+        private boolean writeFrequencies()
+        {
+            return !(analyzer instanceof NoOpAnalyzer) && Version.latest().onOrAfter(Version.EC);
         }
 
         public boolean isEmpty()
@@ -221,7 +226,7 @@ public abstract class SegmentBuilder
         @Override
         protected void flushInternal(SegmentMetadataBuilder metadataBuilder) throws IOException
         {
-            try (InvertedIndexWriter writer = new InvertedIndexWriter(components))
+            try (InvertedIndexWriter writer = new InvertedIndexWriter(components, writeFrequencies()))
             {
                 TermsIterator termsWithPostings = ramIndexer.getTermsWithPostings(minTerm, maxTerm, byteComparableVersion);
                 var docLengths = ramIndexer.getDocLengths();

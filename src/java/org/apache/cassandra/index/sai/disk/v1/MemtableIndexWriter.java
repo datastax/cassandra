@@ -35,6 +35,7 @@ import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.disk.MemtableTermsIterator;
 import org.apache.cassandra.index.sai.disk.PerIndexWriter;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.ImmutableOneDimPointValues;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.NumericIndexWriter;
 import org.apache.cassandra.index.sai.disk.v1.trie.InvertedIndexWriter;
@@ -150,7 +151,7 @@ public class MemtableIndexWriter implements PerIndexWriter
         SegmentMetadata.ComponentMetadataMap indexMetas;
         if (TypeUtil.isLiteral(termComparator))
         {
-            try (InvertedIndexWriter writer = new InvertedIndexWriter(perIndexComponents))
+            try (InvertedIndexWriter writer = new InvertedIndexWriter(perIndexComponents, writeFrequencies()))
             {
                 // Convert PrimaryKey->length map to rowId->length using RowMapping
                 var docLengths = new Int2IntHashMap(Integer.MIN_VALUE);
@@ -205,6 +206,11 @@ public class MemtableIndexWriter implements PerIndexWriter
         }
 
         return numRows;
+    }
+
+    private boolean writeFrequencies()
+    {
+        return indexContext().isAnalyzed() && Version.latest().onOrAfter(Version.EC);
     }
 
     private void flushVectorIndex(DecoratedKey minKey, DecoratedKey maxKey, long startTime, Stopwatch stopwatch) throws IOException
