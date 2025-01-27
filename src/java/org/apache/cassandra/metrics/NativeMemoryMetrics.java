@@ -23,6 +23,7 @@ import java.lang.management.ManagementFactory;
 
 import io.netty.util.internal.PlatformDependent;
 import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.io.compress.CompressionMetadata;
 import org.apache.cassandra.utils.BloomFilter;
 import org.apache.cassandra.utils.memory.MemoryUtil;
 
@@ -48,6 +49,11 @@ public interface NativeMemoryMetrics
     default long bloomFilterMemory()
     {
         return BloomFilter.memoryLimiter.memoryAllocated();
+    }
+
+    default long compressionMetadataMemory()
+    {
+        return CompressionMetadata.nativeMemoryAllocated();
     }
 
     default long usedNioDirectMemory()

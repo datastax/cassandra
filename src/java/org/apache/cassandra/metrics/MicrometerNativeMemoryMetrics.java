@@ -32,6 +32,7 @@ public class MicrometerNativeMemoryMetrics extends MicrometerMetrics implements 
 
     public static final String RAW_NATIVE_MEMORY = METRICS_PREFIX + "_raw_native_memory";
     public static final String BLOOM_FILTER_MEMORY = METRICS_PREFIX + "_bloom_filter_memory";
+    public static final String COMPRESSION_METADATA_MEMORY = METRICS_PREFIX + "_compression_metadata_memory";
     public static final String NETWORK_DIRECT_MEMORY = METRICS_PREFIX + "_network_direct_memory";
     public static final String USED_NIO_DIRECT_MEMORY = METRICS_PREFIX + "_used_nio_direct_memory";
     public static final String TOTAL_NIO_MEMORY = METRICS_PREFIX + "_total_nio_direct_memory";
@@ -51,6 +52,7 @@ public class MicrometerNativeMemoryMetrics extends MicrometerMetrics implements 
 
         gauge(RAW_NATIVE_MEMORY, this, NativeMemoryMetrics::rawNativeMemory);
         gauge(BLOOM_FILTER_MEMORY, this, NativeMemoryMetrics::bloomFilterMemory);
+        gauge(COMPRESSION_METADATA_MEMORY, this, NativeMemoryMetrics::compressionMetadataMemory);
         gauge(NETWORK_DIRECT_MEMORY, this, NativeMemoryMetrics::networkDirectMemory);
         gauge(USED_NIO_DIRECT_MEMORY, this, NativeMemoryMetrics::usedNioDirectMemory);
         gauge(TOTAL_NIO_MEMORY, this, NativeMemoryMetrics::totalNioDirectMemory);
