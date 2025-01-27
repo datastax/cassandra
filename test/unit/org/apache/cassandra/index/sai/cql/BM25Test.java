@@ -292,15 +292,39 @@ public class BM25Test extends SAITester
         execute("INSERT INTO %s (k, v) VALUES (4, 'Super crispy crispy crust crust, best pizza ever!')");  // Most mentions of both
         execute("INSERT INTO %s (k, v) VALUES (5, 'The toppings were good but the pizza was soggy')"); // Irrelevant review
 
-        beforeAndAfterFlush(() ->
-        {
-            var result = execute("SELECT k FROM %s ORDER BY v BM25 OF 'crispy crust' LIMIT 5");
-            assertRows(result,
-                       row(4), // Highest frequency of both terms
-                       row(2), // High frequency of 'crispy', one 'crust'
-                       row(1)); // One mention of each term
-                                // Rows 4 and 5 do not contain all terms
-        });
+        beforeAndAfterFlush(this::assertIrrelevantRowsCorrect);
+    }
+
+    private void assertIrrelevantRowsCorrect()
+    {
+        var result = execute("SELECT k FROM %s ORDER BY v BM25 OF 'crispy crust' LIMIT 5");
+        assertRows(result,
+                   row(4), // Highest frequency of both terms
+                   row(2), // High frequency of 'crispy', one 'crust'
+                   row(1)); // One mention of each term
+        // Rows 4 and 5 do not contain all terms
+    }
+
+    @Test
+    public void testIrrelevantRosWithCompaction()
+    {
+        // same dataset as testIrrelevantRowsScoring, but split across two sstables
+        createSimpleTable();
+        disableCompaction();
+
+        execute("INSERT INTO %s (k, v) VALUES (1, 'The pizza had a crispy crust and was delicious')"); // Basic mention
+        execute("INSERT INTO %s (k, v) VALUES (2, 'Very crispy crispy crust, perfectly cooked')"); // Emphasized crispy
+        flush();
+
+        execute("INSERT INTO %s (k, v) VALUES (3, 'The crust crust crust was okay, nothing special')"); // Only crust mentions
+        execute("INSERT INTO %s (k, v) VALUES (4, 'Super crispy crispy crust crust, best pizza ever!')");  // Most mentions of both
+        execute("INSERT INTO %s (k, v) VALUES (5, 'The toppings were good but the pizza was soggy')"); // Irrelevant review
+        flush();
+
+        assertIrrelevantRowsCorrect();
+
+        compact();
+        assertIrrelevantRowsCorrect();
     }
 
     private void createSimpleTable()
