@@ -40,6 +40,7 @@ public class IndexMetrics extends AbstractMetrics
     public final Counter compactionCount;
     public final Counter memtableIndexFlushErrors;
     public final Counter segmentFlushErrors;
+    public final Counter queriesCount;
     
     public final Histogram memtableFlushCellsPerSecond;
     public final Histogram segmentsPerCompaction;
@@ -60,6 +61,7 @@ public class IndexMetrics extends AbstractMetrics
         compactionCount = Metrics.counter(createMetricName("CompactionCount"));
         memtableIndexFlushErrors = Metrics.counter(createMetricName("MemtableIndexFlushErrors"));
         segmentFlushErrors = Metrics.counter(createMetricName("CompactionSegmentFlushErrors"));
+        queriesCount = Metrics.counter(createMetricName("QueriesCount"));
         liveMemtableIndexWriteCount = Metrics.register(createMetricName("LiveMemtableIndexWriteCount"), context::liveMemtableWriteCount);
         memtableOnHeapIndexBytes = Metrics.register(createMetricName("MemtableOnHeapIndexBytes"), context::estimatedOnHeapMemIndexMemoryUsed);
         memtableOffHeapIndexBytes = Metrics.register(createMetricName("MemtableOffHeapIndexBytes"), context::estimatedOffHeapMemIndexMemoryUsed);
