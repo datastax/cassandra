@@ -27,6 +27,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.SortedSet;
 import java.util.TreeSet;
+import java.util.concurrent.atomic.AtomicLong;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
@@ -59,6 +60,7 @@ import org.apache.cassandra.utils.concurrent.WrappedSharedCloseable;
  */
 public class CompressionMetadata extends WrappedSharedCloseable
 {
+    private static final AtomicLong NATIVE_MEMORY_USAGE = new AtomicLong(0);
     /**
      * DataLength can represent either the true length of the file
      * or some shorter value, in the case we want to impose a shorter limit on readers
@@ -194,6 +196,11 @@ public class CompressionMetadata extends WrappedSharedCloseable
         this.startChunkIndex = copy.startChunkIndex;
     }
 
+    public static long nativeMemoryAllocated()
+    {
+        return NATIVE_MEMORY_USAGE.get();
+    }
+
     public ICompressor compressor()
     {
         return parameters.getSstableCompressor();
@@ -279,6 +286,7 @@ public class CompressionMetadata extends WrappedSharedCloseable
             }
 
             lastOffset = endIndex < chunkCount ? input.readLong() - offsets.get(0) : compressedFileLength;
+            NATIVE_MEMORY_USAGE.addAndGet(offsets.memoryUsed());
             return Pair.create(offsets, lastOffset);
         }
         catch (EOFException e)
@@ -418,13 +426,18 @@ public class CompressionMetadata extends WrappedSharedCloseable
         return offsets.toArray(new Chunk[offsets.size()]);
     }
 
+    public void close()
+    {
+        NATIVE_MEMORY_USAGE.addAndGet(-chunkOffsets.memoryUsed());
+    }
+
     public static class Writer extends Transactional.AbstractTransactional implements Transactional
     {
         // path to the file
         private final CompressionParams parameters;
         private final File file;
         private int maxCount = 100;
-        private SafeMemory offsets = new SafeMemory(maxCount * 8L);
+        private SafeMemory offsets;
         private int count = 0;
 
         // provided by user when setDescriptor
@@ -434,6 +447,8 @@ public class CompressionMetadata extends WrappedSharedCloseable
         {
             this.parameters = parameters;
             this.file = file;
+            offsets = new SafeMemory(maxCount * 8L);
+            NATIVE_MEMORY_USAGE.addAndGet(offsets.size());
         }
 
         public static Writer open(CompressionParams parameters, File file)
@@ -446,6 +461,7 @@ public class CompressionMetadata extends WrappedSharedCloseable
             if (count == maxCount)
             {
                 SafeMemory newOffsets = offsets.copy((maxCount *= 2L) * 8L);
+                NATIVE_MEMORY_USAGE.addAndGet(newOffsets.size() - offsets.size());
                 offsets.close();
                 offsets = newOffsets;
             }
@@ -496,6 +512,7 @@ public class CompressionMetadata extends WrappedSharedCloseable
             {
                 SafeMemory tmp = offsets;
                 offsets = offsets.copy(count * 8L);
+                NATIVE_MEMORY_USAGE.addAndGet(offsets.size() - tmp.size());
                 tmp.free();
             }
 
@@ -521,6 +538,11 @@ public class CompressionMetadata extends WrappedSharedCloseable
 
         public CompressionMetadata open(long dataLength, long compressedLength)
         {
+            // we are overcounting for a while, but it's not worth the effort to fix
+            // the problem is that the offsets object is allocated by the Writer and `closed` when
+            // the Writer is closed, but the offsets object is used by the CompressionMetadata object
+            // that will survive for all the time the SSTableReader is open
+            NATIVE_MEMORY_USAGE.addAndGet(offsets.size());
             SafeMemory tOffsets = this.offsets.sharedCopy();
 
             // calculate how many entries we need, if our dataLength is truncated
@@ -562,6 +584,7 @@ public class CompressionMetadata extends WrappedSharedCloseable
         @Override
         protected Throwable doPostCleanup(Throwable failed)
         {
+            NATIVE_MEMORY_USAGE.addAndGet(-offsets.size());
             return offsets.close(failed);
         }
 
