@@ -195,10 +195,14 @@ public abstract class SegmentBuilder
         {
             super(components, rowIdOffset, limiter);
             this.byteComparableVersion = components.byteComparableVersionFor(IndexComponentType.TERMS_DATA);
-            ramIndexer = new RAMStringIndexer(analyzer != null);
+            ramIndexer = new RAMStringIndexer(writeFrequencies());
             totalBytesAllocated = ramIndexer.estimatedBytesUsed();
             totalBytesAllocatedConcurrent.add(totalBytesAllocated);
+        }
 
+        private boolean writeFrequencies()
+        {
+            return analyzer != null && Version.latest().onOrAfter(Version.EC);
         }
 
         public boolean isEmpty()
@@ -221,7 +225,7 @@ public abstract class SegmentBuilder
         @Override
         protected void flushInternal(SegmentMetadataBuilder metadataBuilder) throws IOException
         {
-            try (InvertedIndexWriter writer = new InvertedIndexWriter(components))
+            try (InvertedIndexWriter writer = new InvertedIndexWriter(components, writeFrequencies()))
             {
                 TermsIterator termsWithPostings = ramIndexer.getTermsWithPostings(minTerm, maxTerm, byteComparableVersion);
                 var docLengths = ramIndexer.getDocLengths();

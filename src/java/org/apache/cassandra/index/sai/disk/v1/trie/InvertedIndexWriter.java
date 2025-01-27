@@ -30,6 +30,7 @@ import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.TermsIterator;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.v1.postings.PostingsWriter;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
@@ -48,8 +49,13 @@ public class InvertedIndexWriter implements Closeable
 
     public InvertedIndexWriter(IndexComponents.ForWrite components) throws IOException
     {
+        this(components, false);
+    }
+
+    public InvertedIndexWriter(IndexComponents.ForWrite components, boolean writeFrequencies) throws IOException
+    {
         this.termsDictionaryWriter = new TrieTermsDictionaryWriter(components);
-        this.postingsWriter = new PostingsWriter(components);
+        this.postingsWriter = new PostingsWriter(components, writeFrequencies);
         this.docLengthsWriter = new DocLengthsWriter(components);
     }
 
@@ -95,10 +101,13 @@ public class InvertedIndexWriter implements Closeable
         components.put(IndexComponentType.TERMS_DATA, termsRoot, termsOffset, termsLength, map);
 
         // Write doc lengths
-        long docLengthsOffset = docLengthsWriter.getStartOffset();
-        docLengthsWriter.writeDocLengths(docLengths);
-        long docLengthsLength = docLengthsWriter.getFilePointer() - docLengthsOffset;
-        components.put(IndexComponentType.DOC_LENGTHS, -1, docLengthsOffset, docLengthsLength);
+        if (Version.latest().onOrAfter(Version.EC))
+        {
+            long docLengthsOffset = docLengthsWriter.getStartOffset();
+            docLengthsWriter.writeDocLengths(docLengths);
+            long docLengthsLength = docLengthsWriter.getFilePointer() - docLengthsOffset;
+            components.put(IndexComponentType.DOC_LENGTHS, -1, docLengthsOffset, docLengthsLength);
+        }
 
         return components;
     }

@@ -47,12 +47,12 @@ public class RAMStringIndexer
 
     private int[] lastSegmentRowID = new int[RAMPostingSlices.DEFAULT_TERM_DICT_SIZE];
 
-    private final boolean includeFrequencies;
+    private final boolean writeFrequencies;
     private final Int2IntHashMap docLengths = new Int2IntHashMap(Integer.MIN_VALUE);
 
-    public RAMStringIndexer(boolean includeFrequencies)
+    public RAMStringIndexer(boolean writeFrequencies)
     {
-        this.includeFrequencies = includeFrequencies;
+        this.writeFrequencies = writeFrequencies;
         termsBytesUsed = Counter.newCounter();
         slicesBytesUsed = Counter.newCounter();
 
@@ -60,7 +60,7 @@ public class RAMStringIndexer
 
         termsHash = new BytesRefHash(termsPool);
 
-        slices = new RAMPostingSlices(slicesBytesUsed, includeFrequencies);
+        slices = new RAMPostingSlices(slicesBytesUsed, writeFrequencies);
     }
 
     public long estimatedBytesUsed()
@@ -171,7 +171,7 @@ public class RAMStringIndexer
                 // grow the termID -> last segment array if necessary
                 if (termID >= lastSegmentRowID.length - 1)
                     lastSegmentRowID = ArrayUtil.grow(lastSegmentRowID, termID + 1);
-                if (includeFrequencies)
+                if (writeFrequencies)
                     frequencies.put(termID, 1);
             }
             else
@@ -180,7 +180,7 @@ public class RAMStringIndexer
                 // compaction should call this method only with increasing segmentRowIds
                 assert segmentRowId >= lastSegmentRowID[termID];
                 // increment frequency
-                if (includeFrequencies)
+                if (writeFrequencies)
                     frequencies.put(termID, frequencies.getOrDefault(termID, 0) + 1);
                 // Skip computing a delta if we've already seen this term in this row
                 if (segmentRowId == lastSegmentRowID[termID])

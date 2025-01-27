@@ -110,27 +110,35 @@ public class PostingsWriter implements Closeable
     // This number is the count of row ids written to the postings for this segment. Because a segment row id can be in
     // multiple postings list for the segment, this number could exceed Integer.MAX_VALUE, so we use a long.
     private long totalPostings;
+    private final boolean writeFrequencies;
 
     public PostingsWriter(IndexComponents.ForWrite components) throws IOException
     {
         this(components, BLOCK_ENTRIES);
     }
 
+    public PostingsWriter(IndexComponents.ForWrite components, boolean writeFrequencies) throws IOException
+    {
+        this(components.addOrGet(IndexComponentType.POSTING_LISTS).openOutput(true), BLOCK_ENTRIES, writeFrequencies);
+    }
+
+
     public PostingsWriter(IndexOutput dataOutput) throws IOException
     {
-        this(dataOutput, BLOCK_ENTRIES);
+        this(dataOutput, BLOCK_ENTRIES, false);
     }
 
     @VisibleForTesting
     PostingsWriter(IndexComponents.ForWrite components, int blockEntries) throws IOException
     {
-        this(components.addOrGet(IndexComponentType.POSTING_LISTS).openOutput(true), blockEntries);
+        this(components.addOrGet(IndexComponentType.POSTING_LISTS).openOutput(true), blockEntries, false);
     }
 
-    private PostingsWriter(IndexOutput dataOutput, int blockEntries) throws IOException
+    private PostingsWriter(IndexOutput dataOutput, int blockEntries, boolean writeFrequencies) throws IOException
     {
         assert dataOutput instanceof IndexOutputWriter;
         logger.debug("Creating postings writer for output {}", dataOutput);
+        this.writeFrequencies = writeFrequencies;
         this.blockEntries = blockEntries;
         this.dataOutput = dataOutput;
         startOffset = dataOutput.getFilePointer();
@@ -277,7 +285,8 @@ public class PostingsWriter implements Closeable
         long maxValue = 0;
         for (int i = 0; i < entries; i++) {
             maxValue = max(maxValue, deltaBuffer[i]);
-            maxValue = max(maxValue, freqBuffer[i]);
+            if (writeFrequencies)
+                maxValue = max(maxValue, freqBuffer[i]);
         }
         
         // Use the maximum bits needed for either value type
@@ -286,10 +295,14 @@ public class PostingsWriter implements Closeable
         dataOutput.writeByte((byte) bitsPerValue);
         if (bitsPerValue > 0) {
             // Write interleaved [delta][freq] pairs
-            final DirectWriterAdapter writer = LuceneCompat.directWriterGetInstance(dataOutput.order(), dataOutput, entries * 2, bitsPerValue);
+            final DirectWriterAdapter writer = LuceneCompat.directWriterGetInstance(dataOutput.order(),
+                                                                                    dataOutput,
+                                                                                    writeFrequencies ? entries * 2L : entries,
+                                                                                    bitsPerValue);
             for (int i = 0; i < entries; ++i) {
                 writer.add(deltaBuffer[i]);
-                writer.add(freqBuffer[i]);
+                if (writeFrequencies)
+                    writer.add(freqBuffer[i]);
             }
             writer.finish();
         }
@@ -297,9 +310,9 @@ public class PostingsWriter implements Closeable
 
     private void writeSortedFoRBlock(LongArrayList values, IndexOutput output) throws IOException
     {
+        assert !values.isEmpty();
         final long maxValue = values.getLong(values.size() - 1);
 
-        assert values.size() > 0;
         final int bitsPerValue = maxValue == 0 ? 0 : LuceneCompat.directWriterUnsignedBitsRequired(output.order(), maxValue);
         output.writeByte((byte) bitsPerValue);
         if (bitsPerValue > 0)

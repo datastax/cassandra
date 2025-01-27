@@ -977,4 +977,9 @@ public class IndexContext
         getView().getIndexes().stream().map(SSTableIndex::indexFeatureSet).forEach(set -> accumulator.accumulate(set));
         return accumulator.complete();
     }
+
+    public Version getMinimumVersion()
+    {
+        return getView().getIndexes().stream().map(SSTableIndex::getVersion).min(Version::compareTo).orElse(Version.latest());
+    }
 }
