@@ -326,9 +326,9 @@ abstract public class Plan
     /**
      * Returns the index context if the plan node uses one.
      * Need to be overridden by nodes that use an index.
-     * None-recursive. Use {@link #forEach(Function)} to get the index context of all nodes.
+     * Non-recursive.
      */
-    protected @Nullable IndexContext getIndexIfPresent()
+    protected @Nullable IndexContext getIndex()
     {
         // By default, a node does not contain an index.
         return null;
@@ -896,7 +896,7 @@ abstract public class Plan
         }
 
         @Override
-        final protected IndexContext getIndexIfPresent()
+        final protected IndexContext getIndex()
         {
             assert predicate != null || ordering != null;
             return predicate != null ? predicate.context : ordering.context;
@@ -1364,7 +1364,7 @@ abstract public class Plan
         }
 
         @Override
-        protected IndexContext getIndexIfPresent()
+        protected IndexContext getIndex()
         {
             return ordering.context;
         }
