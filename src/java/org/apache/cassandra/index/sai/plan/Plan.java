@@ -18,12 +18,7 @@
 
 package org.apache.cassandra.index.sai.plan;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Comparator;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Objects;
+import java.util.*;
 import java.util.function.DoubleSupplier;
 import java.util.function.Function;
 import javax.annotation.Nonnull;
@@ -326,6 +321,17 @@ abstract public class Plan
     protected String description()
     {
         return "";
+    }
+
+    /**
+     * Returns the index context if the plan node uses one.
+     * Need to be overridden by nodes that use an index.
+     * Non-recursive.
+     */
+    protected @Nullable IndexContext getIndexContext()
+    {
+        // By default, a node does not contain an index.
+        return null;
     }
 
     /**
@@ -888,6 +894,13 @@ abstract public class Plan
             assert predicate != null || ordering != null;
             return predicate != null ? predicate.getIndexName() : ordering.getIndexName();
         }
+
+        @Override
+        final protected IndexContext getIndexContext()
+        {
+            assert predicate != null || ordering != null;
+            return predicate != null ? predicate.context : ordering.context;
+        }
     }
     /**
      * Represents a scan over a numeric storage attached index.
@@ -1216,7 +1229,7 @@ abstract public class Plan
         private final KeysIteration source;
         final Orderer ordering;
 
-        protected KeysSort(Factory factory, int id, KeysIteration source, Access access, Orderer ordering)
+        KeysSort(Factory factory, int id, KeysIteration source, Access access, Orderer ordering)
         {
             super(factory, id, access);
             this.source = source;
@@ -1304,7 +1317,7 @@ abstract public class Plan
     {
         final Orderer ordering;
 
-        protected AnnIndexScan(Factory factory, int id, Access access, Orderer ordering)
+        AnnIndexScan(Factory factory, int id, Access access, Orderer ordering)
         {
             super(factory, id, access);
             this.ordering = ordering;
@@ -1348,6 +1361,12 @@ abstract public class Plan
         protected double estimateSelectivity()
         {
             return 1.0;
+        }
+
+        @Override
+        protected IndexContext getIndexContext()
+        {
+            return ordering.context;
         }
     }
 
