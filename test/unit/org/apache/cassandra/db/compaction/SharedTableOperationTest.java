@@ -16,6 +16,8 @@
  * limitations under the License.
  */
 
+package org.apache.cassandra.db.compaction;
+
 import org.apache.cassandra.db.compaction.SharedTableOperation;
 import org.apache.cassandra.db.compaction.TableOperation;
 import org.apache.cassandra.db.compaction.TableOperationObserver;

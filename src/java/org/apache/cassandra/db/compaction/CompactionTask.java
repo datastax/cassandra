@@ -804,7 +804,7 @@ public class CompactionTask extends AbstractCompactionTask
         @Override
         TableOperation initializeSource(Range<Token> tokenRange)
         {
-            this.compactionCursor = new CompactionCursor(compactionType, actuallyCompact, tokenRange, controller, limiter, FBUtilities.nowInSeconds(), taskId);
+            this.compactionCursor = new CompactionCursor(compactionType, actuallyCompact, tokenRange, controller, limiter, FBUtilities.nowInSeconds());
             // We use `this` rather than `sharedProgress()` because the `TableOperation` tracks individual compactions.
             return compactionCursor.createOperation(this);
         }

@@ -53,8 +53,6 @@ public class CompactionCursor implements SSTableCursorMerger.MergeListener, Auto
 
     private final OperationType type;
     private final CompactionController controller;
-    private final ImmutableSet<SSTableReader> sstables;
-    private final UUID compactionId;
     private final SSTableCursor cursor;
     private final Row.Builder rowBuilder;
 
@@ -71,15 +69,13 @@ public class CompactionCursor implements SSTableCursorMerger.MergeListener, Auto
     private final long[] mergedPartitionsHistogram;
     private final long[] mergedRowsHistogram;
 
-    public CompactionCursor(OperationType type, Collection<SSTableReader> readers, Range<Token> tokenRange, CompactionController controller, RateLimiter limiter, int nowInSec, UUID compactionId)
+    public CompactionCursor(OperationType type, Collection<SSTableReader> readers, Range<Token> tokenRange, CompactionController controller, RateLimiter limiter, int nowInSec)
     {
         this.controller = controller;
         this.type = type;
-        this.compactionId = compactionId;
         this.mergedPartitionsHistogram = new long[readers.size()];
         this.mergedRowsHistogram = new long[readers.size()];
         this.rowBuilder = BTreeRow.sortedBuilder();
-        this.sstables = ImmutableSet.copyOf(readers);
         this.cursor = makeMergedAndPurgedCursor(readers, tokenRange, controller, limiter, nowInSec);
         this.totalBytes = cursor.bytesTotal();
         this.currentBytes = 0;

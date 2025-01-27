@@ -37,7 +37,7 @@ public class SharedTableOperation extends AbstractTableOperation implements Tabl
     private final List<TableOperation> components = new CopyOnWriteArrayList<>();
     private final AtomicBoolean started = new AtomicBoolean(false);
     private final AtomicInteger toClose = new AtomicInteger(0);
-    private final AtomicReference<TableOperationObserver> observer = new AtomicReference(null);
+    private final AtomicReference<TableOperationObserver> observer = new AtomicReference<>(null);
     private volatile boolean isGlobal;
 
     public SharedTableOperation(Progress sharedProgress)

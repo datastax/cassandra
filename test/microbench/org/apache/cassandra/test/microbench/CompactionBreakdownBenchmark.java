@@ -201,8 +201,7 @@ public class CompactionBreakdownBenchmark extends BaseCompactionBenchmark
                                                         null,
                                                         controller,
                                                         RateLimiter.create(Double.MAX_VALUE),
-                                                        FBUtilities.nowInSeconds(),
-                                                        UUID.randomUUID()))
+                                                        FBUtilities.nowInSeconds()))
         {
             totalRows = consumeCompactionCursor(ci, bh, totalRows);
         }
@@ -225,8 +224,7 @@ public class CompactionBreakdownBenchmark extends BaseCompactionBenchmark
                                                         null,
                                                         controller,
                                                         RateLimiter.create(Double.MAX_VALUE),
-                                                        FBUtilities.nowInSeconds(),
-                                                        UUID.randomUUID()))
+                                                        FBUtilities.nowInSeconds()))
         {
             totalRows = consumeCompactionCursor(ci, bh, totalRows);
         }
