@@ -55,7 +55,7 @@ public class CompositeCompactionTask extends AbstractCompactionTask
         Throwable accumulate = null;
         for (AbstractCompactionTask task : tasks)
         {
-            Throwables.perform(accumulate, () -> task.execute(opObserver));
+            accumulate = Throwables.perform(accumulate, () -> task.execute(opObserver));
             // The previous operation may have completed due to a requested stop. We do not stop other tasks in our
             // list if that is the case, because if the tasks are related, the [SharedTableOperation] will have already
             // requested a stop from the other components as well. If we stopped the other tasks here, we may
