@@ -31,6 +31,8 @@ import org.apache.cassandra.db.Digest;
 public final class SchemaConstants
 {
     public static final Pattern PATTERN_WORD_CHARS = Pattern.compile("\\w+");
+    public static final Pattern PATTERN_NON_WORD_CHAR = Pattern.compile("\\W");
+
 
     public static final String SYSTEM_KEYSPACE_NAME = "system";
     public static final String SCHEMA_KEYSPACE_NAME = "system_schema";
@@ -72,7 +74,14 @@ public final class SchemaConstants
 
     public static final List<String> LEGACY_AUTH_TABLES = Arrays.asList("credentials", "users", "permissions");
 
-    public static boolean isValidName(String name)
+    /**
+     * Names such as keyspace, table, index names are used in file paths and file names.
+     * Thus, they need to be safe for use in file paths and file names, i.e., short and
+     * containing only alphanumeric characters and underscore.
+     * @param name the name to check
+     * @return whether the name is safe for use in file paths and file names
+     */
+    public static boolean isNameSafeForFilename(String name)
     {
         return name != null && !name.isEmpty() && name.length() <= NAME_LENGTH && PATTERN_WORD_CHARS.matcher(name).matches();
     }
