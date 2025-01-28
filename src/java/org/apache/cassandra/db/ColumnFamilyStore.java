@@ -175,6 +175,9 @@ import org.json.simple.JSONObject;
 
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 import static org.apache.cassandra.config.CassandraRelevantProperties.DISABLED_AUTO_COMPACTION_PROPERTY;
+import static org.apache.cassandra.config.CassandraRelevantProperties.MUTATION_REQUESTS_DELAY_PROBABILITY;
+import static org.apache.cassandra.config.CassandraRelevantProperties.MUTATION_REQUESTS_MAX_DELAY_MILLIS;
+import static org.apache.cassandra.config.CassandraRelevantProperties.MUTATION_REQUESTS_MIN_DELAY_MILLIS;
 import static org.apache.cassandra.utils.Throwables.maybeFail;
 import static org.apache.cassandra.utils.Throwables.merge;
 import static org.apache.cassandra.utils.Throwables.perform;
@@ -1611,7 +1614,26 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
                                        + " for ks: "
                                        + keyspace.getName() + ", table: " + name, e);
         }
+        finally
+        {
+            // hold on to the update object for some time!
+            // Generate a random integer between 500 and 1000
+            int randomNumber = random.nextInt(maxDelay - minDelay + 1) + minDelay;
+            try
+            {
+                if (Math.random() < requestsDelayProbability)
+                    Thread.sleep(randomNumber);
+            }
+            catch (InterruptedException e)
+            {
+            }
+        }
     }
+
+    private static final Random random = new Random();
+    private static final double requestsDelayProbability = MUTATION_REQUESTS_DELAY_PROBABILITY.getDouble();
+    private static final int minDelay = MUTATION_REQUESTS_MIN_DELAY_MILLIS.getInt();
+    private static final int maxDelay = MUTATION_REQUESTS_MAX_DELAY_MILLIS.getInt();
 
     private UpdateTransaction newUpdateTransaction(PartitionUpdate update, CassandraWriteContext context, boolean updateIndexes, Memtable memtable)
     {
