@@ -112,7 +112,9 @@ public class PendingRangeCalculatorService
         this(executorFactory().withJmxInternal()
                               .configureSequential(executorName)
                               .withRejectedExecutionHandler((r, e) -> {})  // silently handle rejected tasks, this::update takes care of bookkeeping
-                              .build(), TokenMetadataProvider.instance, schema);
+                              .build(),
+             TokenMetadataProvider.instance,
+             schema);
     }
 
     public PendingRangeCalculatorService(SequentialExecutorPlus executor, TokenMetadataProvider tokenMetadataProvider, Schema schema)
