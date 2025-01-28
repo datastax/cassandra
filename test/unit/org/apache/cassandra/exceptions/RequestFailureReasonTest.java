@@ -33,7 +33,8 @@ public class RequestFailureReasonTest
     { 6, "INDEX_NOT_AVAILABLE" },
     { 500, "UNKNOWN_COLUMN" },
     { 501, "UNKNOWN_TABLE" },
-    { 502, "REMOTE_STORAGE_FAILURE" }
+    { 502, "REMOTE_STORAGE_FAILURE" },
+    { 503, "INDEX_BUILD_IN_PROGRESS" }
     };
     @Test
     public void testEnumCodesAndNames()
@@ -61,6 +62,7 @@ public class RequestFailureReasonTest
         assertEquals(RequestFailureReason.UNKNOWN_COLUMN, RequestFailureReason.fromCode(500));
         assertEquals(RequestFailureReason.UNKNOWN_TABLE, RequestFailureReason.fromCode(501));
         assertEquals(RequestFailureReason.REMOTE_STORAGE_FAILURE, RequestFailureReason.fromCode(502));
+        assertEquals(RequestFailureReason.INDEX_BUILD_IN_PROGRESS, RequestFailureReason.fromCode(503));
 
         // Test invalid codes
         assertEquals(RequestFailureReason.UNKNOWN, RequestFailureReason.fromCode(200));
