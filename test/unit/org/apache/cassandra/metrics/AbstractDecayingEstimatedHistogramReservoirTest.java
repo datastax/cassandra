@@ -51,12 +51,7 @@ import org.apache.cassandra.utils.Pair;
 import org.quicktheories.core.Gen;
 
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
-//<<<<<<< HEAD:test/unit/org/apache/cassandra/metrics/DecayingEstimatedHistogramReservoirTest.java
 import static org.apache.cassandra.metrics.DecayingEstimatedHistogramReservoir.LANDMARK_RESET_INTERVAL_IN_NS;
-//=======
-//import static java.util.concurrent.TimeUnit.SECONDS;
-//import static org.apache.cassandra.metrics.AbstractDecayingEstimatedHistogramReservoirTest.ParameterizedTests.*;
-//>>>>>>> e0918a31da (CNDB-12289: Cache USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES to save cpu while updating metrics (#1482)):test/unit/org/apache/cassandra/metrics/AbstractDecayingEstimatedHistogramReservoirTest.java
 import static org.apache.cassandra.utils.Clock.Global.nanoTime;
 import static org.apache.cassandra.metrics.DecayingEstimatedHistogramReservoir.MAX_BUCKET_COUNT;
 import static org.junit.Assert.assertEquals;
@@ -70,25 +65,11 @@ import static org.quicktheories.generators.SourceDSL.longs;
 @RunWith(Enclosed.class)
 public abstract class AbstractDecayingEstimatedHistogramReservoirTest
 {
-//<<<<<<< HEAD:test/unit/org/apache/cassandra/metrics/DecayingEstimatedHistogramReservoirTest.java
-//    public static final Logger logger = LoggerFactory.getLogger(DecayingEstimatedHistogramReservoirTest.class);
-//    @RunWith(Parameterized.class)
-//=======
-//>>>>>>> e0918a31da (CNDB-12289: Cache USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES to save cpu while updating metrics (#1482)):test/unit/org/apache/cassandra/metrics/AbstractDecayingEstimatedHistogramReservoirTest.java
     public static class NonParameterizedTests
     {
         public boolean useDseHistogramBehaviour;
 
-//<<<<<<< HEAD:test/unit/org/apache/cassandra/metrics/DecayingEstimatedHistogramReservoirTest.java
-//        @Parameterized.Parameters(name = "dseHistograms={0}")
-//        public static Iterable<Boolean> useDseHistogramBehaviour()
-//        {
-//            return ImmutableSet.of(false, true);
-//        }
-//
-//=======
         public static final Logger logger = LoggerFactory.getLogger(NonParameterizedTests.class);
-//>>>>>>> e0918a31da (CNDB-12289: Cache USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES to save cpu while updating metrics (#1482)):test/unit/org/apache/cassandra/metrics/AbstractDecayingEstimatedHistogramReservoirTest.java
         public static final int numExamples = 1000000;
 
         public Gen<long[]> offsets;
