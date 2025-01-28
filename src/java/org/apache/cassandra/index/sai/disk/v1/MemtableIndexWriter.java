@@ -160,9 +160,8 @@ public class MemtableIndexWriter implements PerIndexWriter
                       .forEach(trieMemoryIndex -> 
                           trieMemoryIndex.getDocLengths().forEach((pk, length) -> {
                               int rowId = rowMapping.get(pk);
-                              if (rowId == -1)
-                                  throw new IllegalStateException("No row ID mapping found for primary key: " + pk);
-                              docLengths.put(rowId, (int) length);
+                              if (rowId >= 0)
+                                  docLengths.put(rowId, (int) length);
                           })
                       );
                 
