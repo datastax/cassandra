@@ -170,7 +170,7 @@ public class RowFilter
      */
     public boolean isMutableIntersection()
     {
-        return getExpressions().stream().filter(e -> !e.column.isPrimaryKeyColumn()).count() > 1;
+        return expressions().stream().filter(e -> !e.column.isPrimaryKeyColumn()).count() > 1;
     }
 
     /**
