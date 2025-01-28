@@ -113,7 +113,7 @@ public final class IndexMetadata
 
     public static String generateDefaultIndexName(String table)
     {
-        return PATTERN_NON_WORD_CHAR.matcher(table + '_' + "idx").replaceAll("");
+        return PATTERN_NON_WORD_CHAR.matcher(table + "_idx").replaceAll("");
     }
 
     public void validate(TableMetadata table)
