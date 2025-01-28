@@ -107,6 +107,12 @@ public class SSTableIndexWriter implements PerIndexWriter
         if (maybeAbort())
             return;
 
+        // This is to avoid duplicates (and also reduce space taken by indexes on static columns).
+        // An index on a static column indexes static rows only.
+        // An index on a non-static column indexes regular rows only.
+        if (indexContext.getDefinition().isStatic() != row.isStatic())
+            return;
+
         if (indexContext.isNonFrozenCollection())
         {
             Iterator<ByteBuffer> valueIterator = indexContext.getValuesOf(row, nowInSec);
