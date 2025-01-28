@@ -253,23 +253,11 @@ public class InvertedIndexSearcher extends IndexSearcher
         var queryTerms = orderer.getQueryTerms();
         // compute documentFrequencies from either histogram or an index search
         var documentFrequencies = new HashMap<ByteBuffer, Long>();
-        boolean hasHistograms = metadata.version.onDiskFormat().indexFeatureSet().hasTermsHistogram();
+        // any index new enough to support BM25 should also support histograms
+        assert metadata.version.onDiskFormat().indexFeatureSet().hasTermsHistogram();
         for (ByteBuffer term : queryTerms)
         {
-            long matches;
-            if (hasHistograms)
-            {
-                matches = metadata.estimateNumRowsMatching(new Expression(indexContext).add(Operator.ANALYZER_MATCHES, term));
-            }
-            else
-            {
-                // Without histograms, need to do an actual index scan
-                var encodedTerm = version.onDiskFormat().encodeForTrie(term, indexContext.getValidator());
-                var listener = MulticastQueryEventListeners.of(queryContext, perColumnEventListener);
-                var postingList = this.reader.exactMatch(encodedTerm, listener, queryContext);
-                matches = postingList.size();
-                FileUtils.closeQuietly(postingList);
-            }
+            long matches = metadata.estimateNumRowsMatching(new Expression(indexContext).add(Operator.ANALYZER_MATCHES, term));
             documentFrequencies.put(term, matches);
         }
         var analyzer = indexContext.getAnalyzerFactory().create();
