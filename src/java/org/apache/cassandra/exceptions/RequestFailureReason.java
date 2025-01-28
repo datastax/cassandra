@@ -24,6 +24,7 @@ import java.util.Map;
 import com.google.common.primitives.Ints;
 
 import org.apache.cassandra.db.filter.TombstoneOverwhelmingException;
+import org.apache.cassandra.index.IndexBuildInProgressException;
 import org.apache.cassandra.index.IndexNotAvailableException;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
 import org.apache.cassandra.io.IVersionedSerializer;
@@ -45,7 +46,8 @@ public enum RequestFailureReason
     // We should add new codes in HCD (which do not exist in Apache Cassandra) only with big numbers, to avoid conflicts
     UNKNOWN_COLUMN           (500),
     UNKNOWN_TABLE            (501),
-    REMOTE_STORAGE_FAILURE   (502);
+    REMOTE_STORAGE_FAILURE   (502),
+    INDEX_BUILD_IN_PROGRESS  (503);
 
     public static final Serializer serializer = new Serializer();
 
@@ -82,6 +84,7 @@ public enum RequestFailureReason
         exceptionToReasonMap.put(IndexNotAvailableException.class, INDEX_NOT_AVAILABLE);
         exceptionToReasonMap.put(UnknownColumnException.class, UNKNOWN_COLUMN);
         exceptionToReasonMap.put(UnknownTableException.class, UNKNOWN_TABLE);
+        exceptionToReasonMap.put(IndexBuildInProgressException.class, INDEX_BUILD_IN_PROGRESS);
 
         if (exceptionToReasonMap.size() != reasons.length-2)
             throw new RuntimeException("A new RequestFailureReasons was probably added and you may need to update the exceptionToReasonMap");

@@ -17,12 +17,16 @@
  */
 package org.apache.cassandra.index.sai.cql;
 
+import org.apache.cassandra.index.IndexBuildInProgressException;
+import org.apache.cassandra.inject.Injections;
+import org.apache.cassandra.inject.InvokePointBuilder;
 import org.junit.Test;
 
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertNotNull;
 
 /**
@@ -513,5 +517,32 @@ public class AllowFilteringTest extends SAITester
 
         // Show that we're now able to execute the query.
         assertRows(execute("SELECT partition FROM %s WHERE item_cost['apple'] < 3 AND item_cost['apple'] > 1"), row(0));
+    }
+
+    private Injections.Barrier blockIndexBuild = Injections.newBarrier("block_index_build", 2, false)
+            .add(InvokePointBuilder.newInvokePoint().onClass(StorageAttachedIndex.class)
+                    .onMethod("startInitialBuild"))
+            .build();
+
+    @Test
+    public void testAllowFilteringDuringIndexBuild() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v int)");
+        Injections.inject(blockIndexBuild);
+        String idx = createIndexAsync(String.format("CREATE CUSTOM INDEX ON %%s(v) USING '%s'", StorageAttachedIndex.class.getName()));
+
+        assertThatThrownBy(() -> execute("SELECT * FROM %s WHERE v=0"))
+                .hasMessage("The secondary index '" + idx + "' is not yet available as it is building")
+                .isInstanceOf(IndexBuildInProgressException.class);
+
+        assertThatThrownBy(() -> execute("SELECT * FROM %s WHERE v=0 ALLOW FILTERING"))
+                .hasMessage("The secondary index '" + idx + "' is not yet available as it is building")
+                .isInstanceOf(IndexBuildInProgressException.class);
+
+        blockIndexBuild.countDown();
+        blockIndexBuild.disable();
+        waitForIndexQueryable(idx);
+        execute("SELECT * FROM %s WHERE v=0");
+        execute("SELECT * FROM %s WHERE v=0 ALLOW FILTERING");
     }
 }
