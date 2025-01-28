@@ -512,7 +512,6 @@ public class StorageProxy implements StorageProxyMBean
                                         Dispatcher.RequestTime requestTime)
     throws UnavailableException, IsBootstrappingException, RequestFailureException, RequestTimeoutException, InvalidRequestException
     {
-        final long startTimeForMetrics = nanoTime();
         ClientRequestsMetrics metrics = ClientRequestsMetricsProvider.instance.metrics(keyspaceName);
         TableMetadata metadata = Schema.instance.validateTable(keyspaceName, cfName);
         QueryInfoTracker.LWTWriteTracker lwtTracker = queryTracker().onLWTWrite(clientState,
