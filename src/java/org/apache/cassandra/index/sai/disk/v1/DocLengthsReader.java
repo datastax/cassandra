@@ -22,7 +22,10 @@ import java.io.IOException;
 
 import org.apache.cassandra.index.sai.disk.io.IndexInputReader;
 import org.apache.cassandra.index.sai.utils.IndexFileUtils;
+import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.io.util.FileUtils;
+import org.apache.lucene.codecs.CodecUtil;
 
 public class DocLengthsReader implements Closeable
 {
@@ -39,10 +42,10 @@ public class DocLengthsReader implements Closeable
 
     public int get(int rowID) throws IOException
     {
-        var position = componentMetadata.offset + (long) rowID * Integer.BYTES;
+        // Account for header size in offset calculation
+        long position = componentMetadata.offset + (long) rowID * Integer.BYTES;
         if (position >= componentMetadata.offset + componentMetadata.length)
             return 0;
-
         input.seek(position);
         return input.readInt();
     }
@@ -50,7 +53,7 @@ public class DocLengthsReader implements Closeable
     @Override
     public void close() throws IOException
     {
-        input.close();
-        fileHandle.close();
+        FileUtils.close(fileHandle, input);
     }
 }
+

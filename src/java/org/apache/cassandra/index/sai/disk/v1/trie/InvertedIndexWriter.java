@@ -56,7 +56,7 @@ public class InvertedIndexWriter implements Closeable
     {
         this.termsDictionaryWriter = new TrieTermsDictionaryWriter(components);
         this.postingsWriter = new PostingsWriter(components, writeFrequencies);
-        this.docLengthsWriter = new DocLengthsWriter(components);
+        this.docLengthsWriter = Version.latest().onOrAfter(Version.EC) ? new DocLengthsWriter(components) : null;
     }
 
     /**
@@ -101,9 +101,9 @@ public class InvertedIndexWriter implements Closeable
         components.put(IndexComponentType.TERMS_DATA, termsRoot, termsOffset, termsLength, map);
 
         // Write doc lengths
-        if (Version.latest().onOrAfter(Version.EC))
+        if (docLengthsWriter != null)
         {
-            long docLengthsOffset = docLengthsWriter.getStartOffset();
+            long docLengthsOffset = docLengthsWriter.getFilePointer();
             docLengthsWriter.writeDocLengths(docLengths);
             long docLengthsLength = docLengthsWriter.getFilePointer() - docLengthsOffset;
             components.put(IndexComponentType.DOC_LENGTHS, -1, docLengthsOffset, docLengthsLength);
@@ -117,7 +117,8 @@ public class InvertedIndexWriter implements Closeable
     {
         postingsWriter.close();
         termsDictionaryWriter.close();
-        docLengthsWriter.close();
+        if (docLengthsWriter != null)
+            docLengthsWriter.close();
     }
 
     /**

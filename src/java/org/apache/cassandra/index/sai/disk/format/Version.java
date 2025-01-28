@@ -34,6 +34,7 @@ import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.v4.V4OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.v5.V5OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.v6.V6OnDiskFormat;
+import org.apache.cassandra.index.sai.disk.v7.V7OnDiskFormat;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
@@ -59,7 +60,7 @@ public class Version implements Comparable<Version>
     // histograms in index metadata
     public static final Version EB = new Version("eb", V6OnDiskFormat.instance, (c, i, g) -> stargazerFileNameFormat(c, i, g, "eb"));
     // term frequencies index component
-    public static final Version EC = new Version("ec", V6OnDiskFormat.instance, (c, i, g) -> stargazerFileNameFormat(c, i, g, "ec"));
+    public static final Version EC = new Version("ec", V7OnDiskFormat.instance, (c, i, g) -> stargazerFileNameFormat(c, i, g, "ec"));
 
     // These are in reverse-chronological order so that the latest version is first. Version matching tests
     // are more likely to match the latest version so we want to test that one first.

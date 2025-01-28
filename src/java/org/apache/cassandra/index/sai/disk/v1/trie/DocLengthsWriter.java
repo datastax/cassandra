@@ -24,6 +24,7 @@ import org.agrona.collections.Int2IntHashMap;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.io.IndexOutputWriter;
+import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 
 /**
  * Writes document length information to disk for use in text scoring
@@ -34,7 +35,8 @@ public class DocLengthsWriter implements Closeable
 
     public DocLengthsWriter(IndexComponents.ForWrite components) throws IOException
     {
-        this.output = components.addOrGet(IndexComponentType.DOC_LENGTHS).openOutput();
+        this.output = components.addOrGet(IndexComponentType.DOC_LENGTHS).openOutput(true);
+        SAICodecUtils.writeHeader(output);
     }
 
     public void writeDocLengths(Int2IntHashMap lengths) throws IOException
@@ -54,11 +56,8 @@ public class DocLengthsWriter implements Closeable
             final int length = lengths.get(rowId);
             output.writeInt(length == lengths.missingValue() ? 0 : length);
         }
-    }
 
-    public long getStartOffset()
-    {
-        return output.getFilePointer();
+        SAICodecUtils.writeFooter(output);
     }
 
     public long getFilePointer()
