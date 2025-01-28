@@ -170,7 +170,7 @@ public class RowFilter
      */
     public boolean isMutableIntersection()
     {
-        return getExpressions().stream().filter(e -> !e.column.isPrimaryKeyColumn()).count() > 1;
+        return expressions().stream().filter(e -> !e.column.isPrimaryKeyColumn()).count() > 1;
     }
 
     /**
@@ -356,7 +356,7 @@ public class RowFilter
 
     public boolean hasNonKeyExpression()
     {
-        for (Expression e : getExpressions())
+        for (Expression e : expressions())
             if (!e.column().isPrimaryKeyColumn())
                 return true;
 
@@ -365,7 +365,7 @@ public class RowFilter
 
     public boolean hasStaticExpression()
     {
-        for (Expression e : getExpressions())
+        for (Expression e : expressions())
             if (e.column().isStatic())
                 return true;
 
