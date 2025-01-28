@@ -230,7 +230,7 @@ public class SimpleStrategyTest
         {
             strategy = getStrategy(keyspaceName, tmd, new SimpleSnitch());
 
-            PendingRangeCalculatorService.calculatePendingRanges(strategy, keyspaceName);
+            PendingRangeCalculatorService.instance.calculatePendingRanges(strategy, keyspaceName);
 
             int replicationFactor = strategy.getReplicationFactor().allReplicas;
 
