@@ -333,7 +333,7 @@ public class BaseCompactionStrategyTest
         when(progress.inSSTables()).thenReturn(compacting);
         when(progress.uncompressedBytesRead()).thenReturn(compactingLen);
         when(progress.uncompressedBytesWritten()).thenReturn(compactingLen);
-        when(progress.durationInNanos()).thenReturn(TimeUnit.SECONDS.toNanos(30));
+        when(progress.durationInMillis()).thenReturn(TimeUnit.SECONDS.toMillis(30));
 
         return progress;
     }

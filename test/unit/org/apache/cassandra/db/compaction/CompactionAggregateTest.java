@@ -136,7 +136,7 @@ public class CompactionAggregateTest
                 CompactionProgress progress = Mockito.mock(CompactionTask.CompactionOperation.class);
                 when(pickMock.progress()).thenReturn(progress);
                 final int timeInSecs = picksCount - i;
-                when(progress.durationInNanos()).thenReturn(TimeUnit.SECONDS.toNanos(timeInSecs));
+                when(progress.durationInMillis()).thenReturn(TimeUnit.SECONDS.toMillis(timeInSecs));
                 when(progress.readThroughput()).thenCallRealMethod();
                 when(progress.writeThroughput()).thenCallRealMethod();
                 when(progress.uncompressedBytesRead()).thenReturn(timeInSecs * readTput);
