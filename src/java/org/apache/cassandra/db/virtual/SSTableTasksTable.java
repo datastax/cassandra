@@ -17,8 +17,8 @@
  */
 package org.apache.cassandra.db.virtual;
 
-import org.apache.cassandra.db.compaction.AbstractTableOperation;
 import org.apache.cassandra.db.compaction.CompactionManager;
+import org.apache.cassandra.db.compaction.TableOperation;
 import org.apache.cassandra.db.marshal.DoubleType;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.LongType;
@@ -63,7 +63,7 @@ final class SSTableTasksTable extends AbstractVirtualTable
     {
         SimpleDataSet result = new SimpleDataSet(metadata());
 
-        for (AbstractTableOperation.OperationProgress task : CompactionManager.instance.getSSTableTasks())
+        for (TableOperation.Progress task : CompactionManager.instance.getSSTableTasks())
         {
             long completed = task.completed();
             long total = task.total();

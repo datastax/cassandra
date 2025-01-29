@@ -92,16 +92,17 @@ public interface CompactionProgress extends TableOperation.Progress
     long uncompressedBytesWritten();
 
     /**
-     * @return the start time of this operation in nanoTime.
+     * @return the start time of this operation in millis since the epoch, i.e. as {@link System#currentTimeMillis}
+     * would report it.
      */
-    long startTimeNanos();
+    long startTimeMillis();
 
     /**
-     * @return the duration so far in nanoseconds.
+     * @return the duration so far in milliseconds.
      */
-    default long durationInNanos()
+    default long durationInMillis()
     {
-        return Clock.Global.nanoTime() - startTimeNanos();
+        return Clock.Global.currentTimeMillis() - startTimeMillis();
     }
 
     /**
@@ -144,13 +145,13 @@ public interface CompactionProgress extends TableOperation.Progress
 
     default double readThroughput()
     {
-        long durationNanos = durationInNanos();
-        return durationNanos == 0 ? 0 : ((double) uncompressedBytesRead() / durationNanos) * TimeUnit.SECONDS.toNanos(1);
+        long durationMillis = durationInMillis();
+        return durationMillis == 0 ? 0 : ((double) uncompressedBytesRead() / durationMillis) * TimeUnit.SECONDS.toMillis(1);
     }
 
     default double writeThroughput()
     {
-        long durationNanos = durationInNanos();
-        return durationNanos == 0 ? 0 : ((double) uncompressedBytesWritten() / durationNanos) * TimeUnit.SECONDS.toNanos(1);
+        long durationMillis = durationInMillis();
+        return durationMillis == 0 ? 0 : ((double) uncompressedBytesWritten() / durationMillis) * TimeUnit.SECONDS.toMillis(1);
     }
 }
