@@ -52,7 +52,20 @@ public class CompositeCompactionTask extends AbstractCompactionTask
     protected void runMayThrow() throws Exception
     {
         // Run all tasks in sequence, regardless if any of them fail.
-        Throwables.perform(tasks.stream().map(x -> x::execute));
+        Throwable accumulate = null;
+        for (AbstractCompactionTask task : tasks)
+        {
+            accumulate = Throwables.perform(accumulate, () -> task.execute(opObserver));
+            // The previous operation may have completed due to a requested stop. We do not stop other tasks in our
+            // list if that is the case, because if the tasks are related, the [SharedTableOperation] will have already
+            // requested a stop from the other components as well. If we stopped the other tasks here, we may
+            // overrespond to a user's request to stop an individual operation.
+            // On the other hand, [CompactionManager] sometimes requests a stop of all ongoing operations e.g. to
+            // initiate a table drop. Such requests, however, do not affect tasks in the executor queue; as this class
+            // is acting similarly to an executor queue, we do not apply such stop requests to the remaining tasks
+            // either.
+        }
+        Throwables.maybeFail(accumulate);
     }
 
     @Override
@@ -77,14 +90,6 @@ public class CompositeCompactionTask extends AbstractCompactionTask
         for (AbstractCompactionTask task : tasks)
             task.setCompactionType(compactionType);
         return super.setCompactionType(compactionType);
-    }
-
-    @Override
-    public AbstractCompactionTask setOpObserver(TableOperationObserver opObserver)
-    {
-        for (AbstractCompactionTask task : tasks)
-            task.setOpObserver(opObserver);
-        return super.setOpObserver(opObserver);
     }
 
     @Override

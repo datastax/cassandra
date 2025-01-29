@@ -23,7 +23,6 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.stream.Collectors;
 
-import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.common.util.concurrent.RateLimiter;
 
@@ -42,7 +41,6 @@ import org.apache.cassandra.io.sstable.compaction.SkipEmptyDataCursor;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.Clock;
-import org.apache.cassandra.utils.TimeUUID;
 
 /**
  * Counterpart to CompactionIterator. Maintains sstable cursors, applies limiter and produces metrics. In the future it
@@ -54,8 +52,6 @@ public class CompactionCursor implements SSTableCursorMerger.MergeListener, Auto
 
     private final OperationType type;
     private final CompactionController controller;
-    private final ImmutableSet<SSTableReader> sstables;
-    private final TimeUUID compactionId;
     private final SSTableCursor cursor;
     private final Row.Builder rowBuilder;
 
@@ -72,15 +68,13 @@ public class CompactionCursor implements SSTableCursorMerger.MergeListener, Auto
     private final long[] mergedPartitionsHistogram;
     private final long[] mergedRowsHistogram;
 
-    public CompactionCursor(OperationType type, Collection<SSTableReader> readers, Range<Token> tokenRange, CompactionController controller, RateLimiter limiter, long nowInSec, TimeUUID compactionId)
+    public CompactionCursor(OperationType type, Collection<SSTableReader> readers, Range<Token> tokenRange, CompactionController controller, RateLimiter limiter, long nowInSec)
     {
         this.controller = controller;
         this.type = type;
-        this.compactionId = compactionId;
         this.mergedPartitionsHistogram = new long[readers.size()];
         this.mergedRowsHistogram = new long[readers.size()];
         this.rowBuilder = BTreeRow.sortedBuilder();
-        this.sstables = ImmutableSet.copyOf(readers);
         this.cursor = makeMergedAndPurgedCursor(readers, tokenRange, controller, limiter, nowInSec);
         this.totalBytes = cursor.bytesTotal();
         this.currentBytes = 0;
@@ -196,19 +190,14 @@ public class CompactionCursor implements SSTableCursorMerger.MergeListener, Auto
      * metrics in the compaction manager. The caller is responsible for registering the operation and checking
      * {@link TableOperation#isStopRequested()}.
      */
-    public TableOperation createOperation()
+    public TableOperation createOperation(TableOperation.Progress progress)
     {
         return new AbstractTableOperation() {
 
             @Override
-            public OperationProgress getProgress()
+            public Progress getProgress()
             {
-                return new OperationProgress(controller.realm.metadata(),
-                                             type,
-                                             bytesRead(),
-                                             totalBytes(),
-                                             compactionId,
-                                             sstables);
+                return progress;
             }
 
             @Override
