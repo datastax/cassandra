@@ -1895,9 +1895,9 @@ public class CompactionManager implements CompactionManagerMBean, ICompactionMan
     {
         return new CompactionIterator(OperationType.ANTICOMPACTION, scanners, controller, nowInSec, timeUUID) {
             @Override
-            public TableOperation createOperation()
+            public TableOperation createOperation(CompactionProgress progress)
             {
-                return getAntiCompactionOperation(super.createOperation(), isCancelled);
+                return getAntiCompactionOperation(super.createOperation(progress), isCancelled);
             }
         };
     }
@@ -1914,7 +1914,7 @@ public class CompactionManager implements CompactionManagerMBean, ICompactionMan
             }
 
             @Override
-            public OperationProgress getProgress()
+            public Progress getProgress()
             {
                 return compaction.getProgress();
             }
@@ -2458,7 +2458,7 @@ public class CompactionManager implements CompactionManagerMBean, ICompactionMan
         }
     }
 
-    public List<TableOperation> getCompactionsMatching(Iterable<TableMetadata> columnFamilies, Predicate<AbstractTableOperation.OperationProgress> predicate)
+    public List<TableOperation> getCompactionsMatching(Iterable<TableMetadata> columnFamilies, Predicate<TableOperation.Progress> predicate)
     {
         Preconditions.checkArgument(columnFamilies != null, "Attempted to getCompactionsMatching in CompactionManager with no columnFamilies specified.");
 
@@ -2466,7 +2466,7 @@ public class CompactionManager implements CompactionManagerMBean, ICompactionMan
         // consider all in-progress compactions
         for (TableOperation holder : active.getTableOperations())
         {
-            AbstractTableOperation.OperationProgress progress = holder.getProgress();
+            TableOperation.Progress progress = holder.getProgress();
             if (progress.metadata() == null || Iterables.contains(columnFamilies, progress.metadata()))
             {
                 if (predicate.test(progress))
@@ -2498,7 +2498,7 @@ public class CompactionManager implements CompactionManagerMBean, ICompactionMan
         Set<TableOperation> interrupted = new HashSet<>();
         for (TableOperation operationSource : active.getTableOperations())
         {
-            AbstractTableOperation.OperationProgress info = operationSource.getProgress();
+            TableOperation.Progress info = operationSource.getProgress();
 
             if (Iterables.contains(tables, info.metadata()) && opPredicate.test(info.operationType()))
             {
@@ -2548,7 +2548,7 @@ public class CompactionManager implements CompactionManagerMBean, ICompactionMan
         boolean interrupted = false;
         for (TableOperation operationSource : active.getTableOperations())
         {
-            AbstractTableOperation.OperationProgress info = operationSource.getProgress();
+            TableOperation.Progress info = operationSource.getProgress();
             if ((info.operationType() == OperationType.VALIDATION) && !interruptValidation)
                 continue;
 
@@ -2596,7 +2596,7 @@ public class CompactionManager implements CompactionManagerMBean, ICompactionMan
     }
 
 
-    public List<AbstractTableOperation.OperationProgress> getSSTableTasks()
+    public List<TableOperation.Progress> getSSTableTasks()
     {
         return active.getTableOperations()
                      .stream()
