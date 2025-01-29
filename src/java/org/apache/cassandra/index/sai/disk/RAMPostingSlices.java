@@ -73,7 +73,6 @@ class RAMPostingSlices
                 else
                 {
                     lastSegmentRowId.value += reader.readVInt();
-                    // TODO wrong place to write frequencies
                     if (includeFrequencies)
                         frequency = reader.readVInt();
                     return lastSegmentRowId.value;
@@ -164,7 +163,7 @@ class RAMPostingSlices
      * The integer is encoded using a variable-length encoding scheme where each
      * byte uses 7 bits for the value and 1 bit to indicate if more bytes follow.
      */
-    void writeVInt(int termID, int i)
+    private void writeVInt(int termID, int i)
     {
         while ((i & ~0x7F) != 0)
         {
