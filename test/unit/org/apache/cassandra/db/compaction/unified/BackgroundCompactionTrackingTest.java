@@ -35,6 +35,7 @@ import org.junit.runner.RunWith;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.compaction.AbstractTableOperation;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.compaction.CompactionStrategy;
 import org.apache.cassandra.db.compaction.CompactionStrategyStatistics;
@@ -208,8 +209,26 @@ public class BackgroundCompactionTrackingTest extends CQLTester
 
     public static synchronized void getStats()
     {
-        operations.add(CompactionManager.instance.getSSTableTasks());
+        operations.add(CompactionManager.instance.getSSTableTasks()
+                                                 .stream()
+                                                 .map(BackgroundCompactionTrackingTest::snapshot)
+                                                 .collect(Collectors.toList()));
         statistics.add(strategy.getStatistics());
+    }
+
+    private static TableOperation.Progress snapshot(TableOperation.Progress progress)
+    {
+        // Take a snapshot to make sure we are capturing the values at the time ActiveOperations is called.
+        // This is to make sure we report the completed state then, and not end up okay because they were corrected
+        // when some component closed at a later time.
+        return new AbstractTableOperation.OperationProgress(progress.metadata(),
+                                                            progress.operationType(),
+                                                            progress.completed(),
+                                                            progress.total(),
+                                                            progress.unit(),
+                                                            progress.operationId(),
+                                                            progress.sstables(),
+                                                            null);
     }
 
     static CompactionStrategy strategy;
