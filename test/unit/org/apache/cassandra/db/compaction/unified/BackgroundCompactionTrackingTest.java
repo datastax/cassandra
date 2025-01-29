@@ -20,7 +20,6 @@ package org.apache.cassandra.db.compaction.unified;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
-import java.util.BitSet;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Random;
@@ -36,28 +35,25 @@ import org.junit.runner.RunWith;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.db.compaction.AbstractTableOperation;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.compaction.CompactionStrategy;
 import org.apache.cassandra.db.compaction.CompactionStrategyStatistics;
+import org.apache.cassandra.db.compaction.TableOperation;
 import org.apache.cassandra.db.compaction.UnifiedCompactionStatistics;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.utils.TimeUUID;
 import org.jboss.byteman.contrib.bmunit.BMRule;
 import org.jboss.byteman.contrib.bmunit.BMUnitConfig;
 import org.jboss.byteman.contrib.bmunit.BMUnitRunner;
 
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertSame;
-import static org.junit.Assert.assertTrue;
 
 @RunWith(BMUnitRunner.class)
 @BMUnitConfig(debug=true)
 @BMRule(
 name = "Get stats before task completion",
-targetClass = "org.apache.cassandra.db.compaction.CompactionTask$CompactionOperation",
-targetMethod = "close()",
+targetClass = "org.apache.cassandra.db.compaction.ActiveOperations",
+targetMethod = "completeOperation",
 targetLocation = "AT ENTRY",
 action = "org.apache.cassandra.db.compaction.unified.BackgroundCompactionTrackingTest.getStats()"
 )
@@ -150,44 +146,21 @@ public class BackgroundCompactionTrackingTest extends CQLTester
             // Check that the background compactions state is correct during the compaction
             Assert.assertTrue("Byteman rule did not fire", !operations.isEmpty());
             printStats();
-            int tasks = parallelize ? shards : 1;
-            assertEquals(tasks, operations.size());
-            TimeUUID mainOpId = null;
-            for (int i = 0; i < operations.size(); ++i)
+            assertEquals(1, operations.size());
+            var ops = operations.get(0)
+                                .stream()
+                                .filter(op -> op.metadata() == cfs.metadata())
+                                .collect(Collectors.toList());
+            assertEquals(1, ops.size());
+            var op = ops.get(0);
             {
-                BitSet seqs = new BitSet(shards);
-                int expectedSize = tasks - i;
-                var ops = operations.get(i)
-                                    .stream()
-                                    .filter(op -> op.metadata() == cfs.metadata())
-                                    .collect(Collectors.toList());
-                final int size = ops.size();
-                int finished = tasks - size;
-                assertTrue(size >= expectedSize); // some task may have not managed to close
-                for (var op : ops)
-                {
-                    assertSame(cfs.metadata(), op.metadata());
+                assertSame(cfs.metadata(), op.metadata());
 
-                    final TimeUUID opIdSeq0 = TimeUUID.Generator.withSequence(op.operationId(), 0);
-                    if (mainOpId == null)
-                        mainOpId = opIdSeq0;
-                    else
-                        assertEquals(mainOpId, opIdSeq0);
-                    seqs.set(TimeUUID.Generator.sequence(op.operationId()));
-
-                    if (i == 0)
-                        Assert.assertEquals(uncompressedSize * 1.0 / tasks, op.total(), uncompressedSize * 0.03);
-                    assertTrue(op.totalByteScanned() <= op.total());
-                    assertFalse(op.totalByteScanned() > op.total());
-                    if (op.totalByteScanned() == op.total())
-                        ++finished;
-                }
-                assertTrue(finished > i);
-                assertEquals(size, seqs.cardinality());
+                assertEquals(uncompressedSize, op.total());
+                assertEquals(uncompressedSize, op.completed());
             }
 
-            // The last stats should list the right totals
-            var stats = statistics.get(statistics.size() - 1).get(0); // unrepaired
+            var stats = statistics.get(0).get(0); // unrepaired
             if (stats.aggregates().size() > 1)
             {
                 var L1 = (UnifiedCompactionStatistics) stats.aggregates().get(1);
@@ -241,5 +214,5 @@ public class BackgroundCompactionTrackingTest extends CQLTester
 
     static CompactionStrategy strategy;
     static List<List<CompactionStrategyStatistics>> statistics;
-    static List<List<AbstractTableOperation.OperationProgress>> operations;
+    static List<List<TableOperation.Progress>> operations;
 }

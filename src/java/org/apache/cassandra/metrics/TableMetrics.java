@@ -1135,14 +1135,14 @@ public class TableMetrics
         flushTime.inc(TimeUnit.NANOSECONDS.toMicros(totalTimeSpentNanos));
     }
 
-    public void incBytesCompacted(long inputDiskSize, long outputDiskSize, long elapsedNanos)
+    public void incBytesCompacted(long inputDiskSize, long outputDiskSize, long elapsedMillis)
     {
         compactionBytesRead.inc(inputDiskSize);
         compactionBytesWritten.inc(outputDiskSize);
-        compactionTime.inc(TimeUnit.NANOSECONDS.toMicros(elapsedNanos));
+        compactionTime.inc(TimeUnit.MILLISECONDS.toMicros(elapsedMillis));
         // only update compactionTimePerKb when there are non-expired sstables (inputDiskSize > 0)
         if (inputDiskSize > 0)
-            compactionTimePerKb.update(1024.0 * elapsedNanos / inputDiskSize);
+            compactionTimePerKb.update(1024.0 * elapsedMillis / inputDiskSize);
     }
 
     public void updateSSTableIterated(int count, int intersectingCount, long elapsedNanos)

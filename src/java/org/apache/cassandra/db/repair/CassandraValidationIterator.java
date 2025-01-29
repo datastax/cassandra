@@ -106,7 +106,7 @@ public class CassandraValidationIterator extends ValidationPartitionIterator
     {
         public ValidationCompactionIterator(List<ISSTableScanner> scanners, ValidationCompactionController controller, long nowInSec, TopPartitionTracker.Collector topPartitionCollector)
         {
-            super(OperationType.VALIDATION, scanners, controller, nowInSec, nextTimeUUID(), topPartitionCollector);
+            super(OperationType.VALIDATION, scanners, controller, nowInSec, nextTimeUUID(), topPartitionCollector, null);
         }
     }
 

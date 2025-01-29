@@ -85,6 +85,7 @@ public class CompactionTask extends AbstractCompactionTask
     // The compaction strategy is not necessarily available for all compaction tasks (e.g. GC or sstable splitting)
     @Nullable
     private final CompactionStrategy strategy;
+    protected OperationTotals totals;
 
     public CompactionTask(CompactionRealm realm,
                           ILifecycleTransaction txn,
@@ -92,11 +93,12 @@ public class CompactionTask extends AbstractCompactionTask
                           boolean keepOriginals,
                           @Nullable CompactionStrategy strategy)
     {
-        this(realm, txn, gcBefore, keepOriginals, strategy, strategy);
+        this(realm, txn, null, gcBefore, keepOriginals, strategy, strategy);
     }
 
     public CompactionTask(CompactionRealm realm,
                           ILifecycleTransaction txn,
+                          OperationTotals totals,
                           long gcBefore,
                           boolean keepOriginals,
                           @Nullable CompactionStrategy strategy,
@@ -106,6 +108,7 @@ public class CompactionTask extends AbstractCompactionTask
         this.gcBefore = gcBefore;
         this.keepOriginals = keepOriginals;
         this.strategy = strategy;
+        this.totals = totals;
 
         if (observer != null)
             addObserver(observer);
@@ -263,6 +266,10 @@ public class CompactionTask extends AbstractCompactionTask
             controller.refreshOverlaps();
         }
 
+        // Calculate the operation total sizes if not already set
+        if (totals == null)
+            totals = getOperationTotals(actuallyCompact, tokenRange());
+
         // sanity check: sstables to compact is a subset of the transaction originals
         assert transaction.originals().containsAll(actuallyCompact);
         // sanity check: all sstables must belong to the same table
@@ -293,6 +300,44 @@ public class CompactionTask extends AbstractCompactionTask
             return new CompactionOperationCursor(controller, actuallyCompact, fullyExpiredSSTables.size());
     }
 
+    public static class OperationTotals
+    {
+        public final long inputDiskSize;
+        public final long inputUncompressedSize;
+
+        OperationTotals(long inputDiskSize, long inputUncompressedSize)
+        {
+            this.inputDiskSize = inputDiskSize;
+            this.inputUncompressedSize = inputUncompressedSize;
+        }
+    }
+
+    public static OperationTotals getOperationTotals(Collection<SSTableReader> sstables, Range<Token> tokenRange)
+    {
+        long inputDiskSize = 0;
+        long inputUncompressedSize = 0;
+        if (tokenRange == null)
+        {
+            for (SSTableReader rdr : sstables)
+            {
+                inputUncompressedSize += rdr.uncompressedLength();
+                inputDiskSize += rdr.onDiskLength();
+            }
+        }
+        else
+        {
+            var rangeList = ImmutableList.of(tokenRange);
+            for (SSTableReader rdr : sstables)
+            {
+                final List<SSTableReader.PartitionPositionBounds> positionsForRanges = rdr.getPositionsForRanges(rangeList);
+                for (SSTableReader.PartitionPositionBounds pp : positionsForRanges)
+                    inputUncompressedSize += pp.upperPosition - pp.lowerPosition;
+                inputDiskSize += rdr.onDiskSizeForPartitionPositions(positionsForRanges);
+            }
+        }
+        return new OperationTotals(inputDiskSize, inputUncompressedSize);
+    }
+
     /**
      *  The compaction operation is a special case of an {@link AbstractTableOperation} and takes care of executing the
      *  actual compaction and releasing any resources when the compaction is finished.
@@ -305,11 +350,11 @@ public class CompactionTask extends AbstractCompactionTask
         final TimeUUID taskId;
         final String taskIdString;
         final RateLimiter limiter;
-        private final long startNanos;
-        private final long startTime;
+        private final long startTimeMillis;
         final Set<SSTableReader> actuallyCompact;
         private final int fullyExpiredSSTablesCount;
         private final long inputDiskSize;
+        private final long inputUncompressedSize;
 
         // resources that are updated and may be read by another thread
         volatile Collection<SSTableReader> newSStables;
@@ -342,13 +387,14 @@ public class CompactionTask extends AbstractCompactionTask
             this.taskIdString = transaction.opIdString();
 
             this.limiter = CompactionManager.instance.getRateLimiter();
-            this.startNanos = Clock.Global.nanoTime();
-            this.startTime = Clock.Global.currentTimeMillis();
+            this.startTimeMillis = Clock.Global.currentTimeMillis();
             this.newSStables = Collections.emptyList();
             this.fullyExpiredSSTablesCount = fullyExpiredSSTablesCount;
             this.totalKeysWritten = 0;
             this.estimatedKeys = 0;
             this.completed = false;
+            this.inputDiskSize = totals.inputDiskSize;
+            this.inputUncompressedSize = totals.inputUncompressedSize;
 
             Directories dirs = getDirectories();
 
@@ -356,10 +402,8 @@ public class CompactionTask extends AbstractCompactionTask
             {
                 // resources that need closing, must be created last in case of exceptions and released if there is an exception in the c.tor
                 this.sstableRefs = Refs.ref(actuallyCompact);
-                this.inputDiskSize = getTotalOnDiskBytes(actuallyCompact, tokenRange());
                 this.op = initializeSource(tokenRange());
                 this.writer = getCompactionAwareWriter(realm, dirs, actuallyCompact);
-                this.obsCloseable = opObserver.onOperationStart(op);
                 CompactionProgress progress = this;
                 var sharedProgress = sharedProgress();
                 if (sharedProgress != null)
@@ -368,6 +412,7 @@ public class CompactionTask extends AbstractCompactionTask
                     progress = sharedProgress;
                 }
 
+                this.obsCloseable = opObserver.onOperationStart(op);
                 for (var obs : getCompObservers())
                     obs.onInProgress(progress);
             }
@@ -376,18 +421,6 @@ public class CompactionTask extends AbstractCompactionTask
                 close(t);
                 throw new AssertionError(t); // unreachable (close will throw when t is not null). Added for static analysis.
             }
-        }
-
-        private long getTotalOnDiskBytes(Set<SSTableReader> actuallyCompact, Range<Token> tokenRange)
-        {
-            if (tokenRange == null)
-                return CompactionSSTable.getTotalBytes(actuallyCompact);
-
-            var rangeList = ImmutableList.of(tokenRange);
-            long total = 0;
-            for (SSTableReader rdr : actuallyCompact)
-                total += rdr.onDiskSizeForPartitionPositions(rdr.getPositionsForRanges(rangeList));
-            return total;
         }
 
         abstract TableOperation initializeSource(Range<Token> tokenRange) throws Throwable;
@@ -469,6 +502,7 @@ public class CompactionTask extends AbstractCompactionTask
         public void close(Throwable errorsSoFar)
         {
             Throwable err = Throwables.close(errorsSoFar, obsCloseable, writer, sstableRefs);
+            final long elapsedTimeMillis = Clock.Global.currentTimeMillis() - startTimeMillis;
 
             if (transaction.isOffline())
             {
@@ -477,7 +511,7 @@ public class CompactionTask extends AbstractCompactionTask
                     // update basic metrics
                     realm.metrics().incBytesCompacted(adjustedInputDiskSize(),
                                                       outputDiskSize(),
-                                                      Clock.Global.nanoTime() - startNanos);
+                                                      elapsedTimeMillis);
                 }
                 Throwables.maybeFail(err);
                 return;
@@ -503,11 +537,11 @@ public class CompactionTask extends AbstractCompactionTask
                 }
 
                 if (logger.isDebugEnabled())
-                    debugLogCompactionSummaryInfo(taskIdString, Clock.Global.nanoTime() - startNanos, totalKeysWritten, newSStables, this);
+                    debugLogCompactionSummaryInfo(taskIdString, elapsedTimeMillis, totalKeysWritten, newSStables, this);
                 if (logger.isTraceEnabled())
                     traceLogCompactionSummaryInfo(totalKeysWritten, estimatedKeys, this);
                 if (strategy != null)
-                    strategy.getCompactionLogger().compaction(startTime,
+                    strategy.getCompactionLogger().compaction(startTimeMillis,
                                                               transaction.originals(),
                                                               tokenRange(),
                                                               Clock.Global.currentTimeMillis(),
@@ -516,7 +550,7 @@ public class CompactionTask extends AbstractCompactionTask
                 // update the metrics
                 realm.metrics().incBytesCompacted(adjustedInputDiskSize(),
                                                   outputDiskSize(),
-                                                  Clock.Global.nanoTime() - startNanos);
+                                                  elapsedTimeMillis);
             }
 
             Throwables.maybeFail(err);
@@ -569,6 +603,12 @@ public class CompactionTask extends AbstractCompactionTask
             return transaction.originals();
         }
 
+        @Override
+        public String toString()
+        {
+            return progressToString();
+        }
+
         //
         // CompactionProgress
         //
@@ -599,6 +639,21 @@ public class CompactionTask extends AbstractCompactionTask
             return inputDiskSize;
         }
 
+        /**
+         * @return the initial number of bytes for input sstables. For compressed or encrypted sstables,
+         *         this is the number of bytes after decompression, so this is the uncompressed length of sstable files.
+         */
+        public long total()
+        {
+            return inputUncompressedSize;
+        }
+
+        @Override
+        public long inputUncompressedSize()
+        {
+            return inputUncompressedSize;
+        }
+
         @Override
         public long outputDiskSize()
         {
@@ -612,9 +667,9 @@ public class CompactionTask extends AbstractCompactionTask
         }
 
         @Override
-        public long startTimeNanos()
+        public long startTimeMillis()
         {
-            return startNanos;
+            return startTimeMillis;
         }
     }
 
@@ -646,7 +701,8 @@ public class CompactionTask extends AbstractCompactionTask
             var rangeList = tokenRange != null ? ImmutableList.of(tokenRange) : null;
             this.scanners = strategy != null ? strategy.getScanners(actuallyCompact, rangeList)
                                              : ScannerList.of(actuallyCompact, rangeList);
-            this.compactionIterator = new CompactionIterator(compactionType, scanners.scanners, controller, FBUtilities.nowInSeconds(), taskId);
+            // We use `this` rather than `sharedProgress()` because the `TableOperation` tracks individual compactions.
+            this.compactionIterator = new CompactionIterator(compactionType, scanners.scanners, controller, FBUtilities.nowInSeconds(), taskId, null, this);
             return compactionIterator.getOperation();
         }
 
@@ -689,22 +745,6 @@ public class CompactionTask extends AbstractCompactionTask
         public long completed()
         {
             return compactionIterator.bytesRead();
-        }
-
-        /**
-         * @return the initial number of bytes for input sstables. For compressed or encrypted sstables,
-         *         this is the number of bytes after decompression, so this is the uncompressed length of sstable files.
-         */
-        public long total()
-        {
-            return compactionIterator.totalBytes();
-        }
-
-
-        @Override
-        public long inputUncompressedSize()
-        {
-            return compactionIterator.totalBytes();
         }
 
         @Override
@@ -772,8 +812,9 @@ public class CompactionTask extends AbstractCompactionTask
         @Override
         TableOperation initializeSource(Range<Token> tokenRange)
         {
-            this.compactionCursor = new CompactionCursor(compactionType, actuallyCompact, tokenRange, controller, limiter, FBUtilities.nowInSeconds(), taskId);
-            return compactionCursor.createOperation();
+            this.compactionCursor = new CompactionCursor(compactionType, actuallyCompact, tokenRange, controller, limiter, FBUtilities.nowInSeconds());
+            // We use `this` rather than `sharedProgress()` because the `TableOperation` tracks individual compactions.
+            return compactionCursor.createOperation(this);
         }
 
         void execute0()
@@ -817,21 +858,6 @@ public class CompactionTask extends AbstractCompactionTask
         public long completed()
         {
             return compactionCursor.bytesRead();
-        }
-
-        /**
-         * @return the initial number of bytes for input sstables. For compressed or encrypted sstables,
-         *         this is the number of bytes after decompression, so this is the uncompressed length of sstable files.
-         */
-        public long total()
-        {
-            return compactionCursor.totalBytes();
-        }
-
-        @Override
-        public long inputUncompressedSize()
-        {
-            return compactionCursor.totalBytes();
         }
 
         @Override
@@ -1048,14 +1074,12 @@ public class CompactionTask extends AbstractCompactionTask
     }
 
     private void debugLogCompactionSummaryInfo(String taskId,
-                                               long durationInNano,
+                                               long durationInMillis,
                                                long totalKeysWritten,
                                                Collection<SSTableReader> newSStables,
                                                CompactionProgress progress)
     {
         // log a bunch of statistics about the result and save to system table compaction_history
-        long dTime = TimeUnit.NANOSECONDS.toMillis(durationInNano);
-
         long totalMergedPartitions = 0;
         long[] mergedPartitionCounts = progress.partitionsHistogram();
         StringBuilder mergeSummary = new StringBuilder(mergedPartitionCounts.length * 10);
@@ -1074,6 +1098,7 @@ public class CompactionTask extends AbstractCompactionTask
         StringBuilder newSSTableNames = new StringBuilder(newSStables.size() * 100);
         for (SSTableReader reader : newSStables)
             newSSTableNames.append(reader.descriptor.baseFileUri()).append(',');
+        long durationInNano = TimeUnit.MILLISECONDS.toNanos(durationInMillis);
         logger.debug("Compacted ({}{}) {} sstables to [{}] to level={}. {} to {} (~{}% of original) in {}ms. " +
                      "Read Throughput = {}, Write Throughput = {}, Row Throughput = ~{}/s, Partition Throughput = ~{}/s." +
                      " {} total partitions merged to {}. Partition merge counts were {}.",
@@ -1085,11 +1110,11 @@ public class CompactionTask extends AbstractCompactionTask
                      prettyPrintMemory(progress.adjustedInputDiskSize()),
                      prettyPrintMemory(progress.outputDiskSize()),
                      (int) (progress.sizeRatio() * 100),
-                     dTime,
+                     durationInMillis,
                      prettyPrintMemoryPerSecond(progress.adjustedInputDiskSize(), durationInNano),
                      prettyPrintMemoryPerSecond(progress.outputDiskSize(), durationInNano),
-                     progress.rowsRead() / (TimeUnit.NANOSECONDS.toSeconds(durationInNano) + 1),
-                     (int) progress.partitionsRead() / (TimeUnit.NANOSECONDS.toSeconds(progress.durationInNanos()) + 1),
+                     (long) (progress.rowsRead() * 1.0e-3 / durationInMillis),
+                     (long) (progress.partitionsRead() * 1.0e-3 / durationInMillis),
                      totalMergedPartitions,
                      totalKeysWritten,
                      mergeSummary);

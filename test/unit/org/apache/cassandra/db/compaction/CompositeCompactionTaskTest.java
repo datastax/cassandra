@@ -45,6 +45,7 @@ public class CompositeCompactionTaskTest
     private CompositeCompactionTask compositeCompactionTask;
     private AbstractCompactionTask mockTask1;
     private AbstractCompactionTask mockTask2;
+    private TableOperationObserver mockOpObserver;
 
     @Before
     public void setUp() {
@@ -56,15 +57,17 @@ public class CompositeCompactionTaskTest
 
         mockTask1 = Mockito.mock(AbstractCompactionTask.class, Mockito.withSettings().useConstructor(mockRealm, mockTransaction));
         mockTask2 = Mockito.mock(AbstractCompactionTask.class, Mockito.withSettings().useConstructor(mockRealm, mockTransaction));
+        mockOpObserver = Mockito.mock(TableOperationObserver.class);
         compositeCompactionTask = CompositeCompactionTask.combineTasks(mockTask1, mockTask2);
+        compositeCompactionTask.setOpObserver(mockOpObserver);
     }
 
     @Test
     public void testExecute() {
         // Testing executeInternal() instead of execute() because we cannot mock transaction.close()
         compositeCompactionTask.executeInternal();
-        verify(mockTask1, times(1)).execute();
-        verify(mockTask2, times(1)).execute();
+        verify(mockTask1, times(1)).execute(mockOpObserver);
+        verify(mockTask2, times(1)).execute(mockOpObserver);
     }
 
     @Test
@@ -90,14 +93,6 @@ public class CompositeCompactionTaskTest
     }
 
     @Test
-    public void testSetOpObserver() {
-        TableOperationObserver opObserver = Mockito.mock(TableOperationObserver.class);
-        compositeCompactionTask.setOpObserver(opObserver);
-        verify(mockTask1, times(1)).setOpObserver(opObserver);
-        verify(mockTask2, times(1)).setOpObserver(opObserver);
-    }
-
-    @Test
     public void testAddObserver() {
         CompactionObserver compObserver = Mockito.mock(CompactionObserver.class);
         compositeCompactionTask.addObserver(compObserver);
@@ -107,10 +102,10 @@ public class CompositeCompactionTaskTest
 
     @Test
     public void testExecuteWithException() {
-        doThrow(new RuntimeException("Test Exception")).when(mockTask1).execute();
+        doThrow(new RuntimeException("Test Exception")).when(mockTask1).execute(Mockito.any());
         assertThrows(RuntimeException.class, () -> compositeCompactionTask.executeInternal());
-        verify(mockTask1, times(1)).execute();
-        verify(mockTask2, times(1)).execute();
+        verify(mockTask1, times(1)).execute(mockOpObserver);
+        verify(mockTask2, times(1)).execute(mockOpObserver);
     }
 
     @Test
@@ -141,12 +136,15 @@ public class CompositeCompactionTaskTest
 
         for (AbstractCompactionTask task : result) {
             if (task instanceof CompositeCompactionTask)
+            {
+                task.setOpObserver(mockOpObserver);
                 task.executeInternal(); // can't call execute() because it will call transaction.close()
+            }
             else
-                task.execute();
+                task.execute(mockOpObserver);
         }
         for (AbstractCompactionTask task : tasks) {
-            verify(task, times(1)).execute();
+            verify(task, times(1)).execute(mockOpObserver);
         }
     }
 

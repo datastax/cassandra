@@ -30,7 +30,6 @@ import java.util.concurrent.TimeUnit;
 import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableList;
 import org.apache.cassandra.utils.TimeUUID;
-import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Ignore;
 import org.junit.Test;
@@ -659,23 +658,21 @@ public class CompactionsTest
     @Test
     public void testCompactionListener()
     {
-        final long totalByteScanned = 100;
         ColumnFamilyStore cfs = MockSchema.newCFS();
         cfs.addSSTable(MockSchema.sstable(1, true, cfs));
         ActiveOperations.CompactionProgressListener listener = Mockito.mock(ActiveOperations
                                                                             .CompactionProgressListener.class);
-        AbstractTableOperation.OperationProgress progress = new AbstractTableOperation
-                                                                .OperationProgress(cfs.metadata(),
-                                                                                   OperationType.ANTICOMPACTION,
-                                                                                   0,
-                                                                                   0,
-                                                                                   totalByteScanned,
-                                                                                   TimeUUID.Generator.nextTimeUUID(),
-                                                                                   cfs.getLiveSSTables());
+        TableOperation.Progress progress = new AbstractTableOperation
+                                               .OperationProgress(cfs.metadata(),
+                                                                  OperationType.ANTICOMPACTION,
+                                                                  0,
+                                                                  0,
+                                                                  TimeUUID.Generator.nextTimeUUID(),
+                                                                  cfs.getLiveSSTables());
 
         AbstractTableOperation operation = new AbstractTableOperation()
         {
-            public OperationProgress getProgress()
+            public Progress getProgress()
             {
                 return progress;
             }
@@ -687,7 +684,6 @@ public class CompactionsTest
         };
         CompactionManager.instance.active.registerListener(listener);
 
-        Assert.assertEquals(totalByteScanned, operation.getProgress().totalByteScanned());
         try (NonThrowingCloseable cls = CompactionManager.instance.active.onOperationStart(operation))
         {
             verify(listener).onStarted(progress);
