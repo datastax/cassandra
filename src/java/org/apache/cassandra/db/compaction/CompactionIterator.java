@@ -156,8 +156,11 @@ public class CompactionIterator implements UnfilteredPartitionIterator
 
     long bytesRead()
     {
-        long[] bytesReadByLevel = this.bytesReadByLevel;
-        return Arrays.stream(bytesReadByLevel).reduce(Long::sum).orElse(0L);
+        long bytesScanned = 0L;
+        for (ISSTableScanner scanner : scanners)
+            bytesScanned += scanner.getBytesScanned();
+
+        return bytesScanned;
     }
 
     long bytesRead(int level)
@@ -178,15 +181,6 @@ public class CompactionIterator implements UnfilteredPartitionIterator
     long totalSourceRows()
     {
         return Arrays.stream(mergedRowsHistogram).reduce(0L, Long::sum);
-    }
-
-    public long getTotalBytesScanned()
-    {
-        long bytesScanned = 0L;
-        for (ISSTableScanner scanner : scanners)
-            bytesScanned += scanner.getBytesScanned();
-
-        return bytesScanned;
     }
 
     public long getTotalCompressedSize()
