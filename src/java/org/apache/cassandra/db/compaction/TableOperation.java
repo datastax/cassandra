@@ -18,13 +18,19 @@
 
 package org.apache.cassandra.db.compaction;
 
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Predicate;
 
 import javax.annotation.Nullable;
 
+import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.Shared;
 import org.apache.cassandra.utils.TimeUUID;
@@ -45,7 +51,7 @@ public interface TableOperation
     /**
      * @return the progress of the operation, see {@link Progress}.
      */
-    AbstractTableOperation.OperationProgress getProgress();
+    TableOperation.Progress getProgress();
 
     /**
      * Interrupt the current operation if possible.
@@ -217,5 +223,76 @@ public interface TableOperation
          * @return a set of SSTables participating in this operation
          */
         Set<SSTableReader> sstables();
+
+        /**
+         * Note that this estimate is based on the amount of data we have left to read - it assumes input
+         * size == output size for a compaction, which is not really true, but should most often provide a worst case
+         * remaining write size.
+         */
+        default long estimatedRemainingWriteBytes()
+        {
+            if (unit() == Unit.BYTES && operationType().writesData)
+                return total() - completed();
+            return 0;
+        }
+
+        /**
+         * Get the directories this compaction could possibly write to.
+         *
+         * @return the directories that we might write to, or empty list if we don't know the metadata
+         * (like for index summary redistribution), or null if we don't have any disk boundaries
+         */
+        default List<File> getTargetDirectories()
+        {
+            if (metadata() != null && !metadata().isIndex())
+            {
+                ColumnFamilyStore cfs = ColumnFamilyStore.getIfExists(metadata().id);
+                if (cfs != null)
+                    return cfs.getDirectoriesForFiles(sstables());
+            }
+            return Collections.emptyList();
+        }
+
+        default String targetDirectory()
+        {
+            if (targetDirectory() == null)
+                return "";
+
+            try
+            {
+                return new File(targetDirectory()).canonicalPath();
+            }
+            catch (Throwable t)
+            {
+                throw new RuntimeException("Unable to resolve canonical path for " + targetDirectory());
+            }
+        }
+
+        default String progressToString()
+        {
+            StringBuilder buff = new StringBuilder();
+            buff.append(String.format("%s(%s, %s / %s %s)", operationType(), operationId(), completed(), total(), unit()));
+            TableMetadata metadata = metadata();
+            if (metadata != null)
+            {
+                buff.append(String.format("@%s(%s, %s)", metadata.id, metadata.keyspace, metadata.name));
+            }
+            return buff.toString();
+        }
+
+        default Map<String, String> asMap()
+        {
+            Map<String, String> ret = new HashMap<>(8);
+            TableMetadata metadata = metadata();
+            ret.put(ID, metadata != null ? metadata.id.toString() : "");
+            ret.put(KEYSPACE, keyspace().orElse(null));
+            ret.put(COLUMNFAMILY, table().orElse(null));
+            ret.put(COMPLETED, Long.toString(completed()));
+            ret.put(TOTAL, Long.toString(total()));
+            ret.put(OPERATION_TYPE, operationType().toString());
+            ret.put(UNIT, unit().toString());
+            ret.put(OPERATION_ID, operationId() == null ? "" : operationId().toString());
+            return ret;
+        }
     }
 }

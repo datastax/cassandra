@@ -37,6 +37,7 @@ import org.apache.cassandra.db.compaction.ShardManager;
 import org.apache.cassandra.db.compaction.ShardManagerNoDisks;
 import org.apache.cassandra.db.compaction.SharedCompactionObserver;
 import org.apache.cassandra.db.compaction.SharedCompactionProgress;
+import org.apache.cassandra.db.compaction.SharedTableOperation;
 import org.apache.cassandra.db.compaction.TableOperation;
 import org.apache.cassandra.db.compaction.UnifiedCompactionStrategy;
 import org.apache.cassandra.db.lifecycle.CompositeLifecycleTransaction;
@@ -103,6 +104,7 @@ public class ParallelizedTasksTest extends ShardingTestBase
         strategy.getCompactionLogger().enable();
         SharedCompactionProgress sharedProgress = new SharedCompactionProgress(transaction.opId(), transaction.opType(), TableOperation.Unit.BYTES);
         SharedCompactionObserver sharedObserver = new SharedCompactionObserver(strategy);
+        SharedTableOperation sharedOperation = new SharedTableOperation(sharedProgress);
 
         List<AbstractCompactionTask> tasks = shardManager.splitSSTablesInShards(
             sstables,
@@ -118,7 +120,8 @@ public class ParallelizedTasksTest extends ShardingTestBase
                                       range,
                                       rangeSSTables,
                                       sharedProgress,
-                                      sharedObserver)
+                                      sharedObserver,
+                                      sharedOperation)
         );
         compositeTransaction.completeInitialization();
         assertEquals(numOutputSSTables, tasks.size());

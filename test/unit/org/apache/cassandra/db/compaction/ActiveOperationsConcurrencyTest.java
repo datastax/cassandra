@@ -102,7 +102,7 @@ public class ActiveOperationsConcurrencyTest
             private void onOperationStartTest()
             {
                 LockSupport.parkNanos(ThreadLocalRandom.current().nextInt(1000000));
-                AbstractTableOperation.OperationProgress progress = mock(AbstractTableOperation.OperationProgress.class);
+                TableOperation.Progress progress = mock(TableOperation.Progress.class);
                 when(progress.total()).thenReturn(ThreadLocalRandom.current().nextLong());
                 TableOperation operation = mock(TableOperation.class);
                 when(operation.getProgress()).thenReturn(progress);
