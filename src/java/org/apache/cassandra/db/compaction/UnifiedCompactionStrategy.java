@@ -847,13 +847,12 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                                                        perLevel,
                                                        levelCount,
                                                        spaceAvailable,
-                                                       rateLimitLog,
                                                        remainingAdaptiveCompactions);
         logger.trace("Selecting up to {} new compactions of up to {}, concurrency limit {}{}",
                      Math.max(0, limits.maxCompactions - limits.runningCompactions),
                      FBUtilities.prettyPrintMemory(limits.spaceAvailable),
                      limits.maxConcurrentCompactions,
-                     limits.rateLimitLog);
+                     rateLimitLog);
         return limits;
     }
 
@@ -1564,7 +1563,9 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         ///
         /// @param controller The compaction controller.
         /// @param spaceAvailable The amount of space available for compaction, limits the maximum number of sstables
-        ///                       that can be selected.
+        ///                       that can be selected. This only applies after the first fanout-many overlapping
+        ///                       sstables have been selected, to ensure that the compaction strategy can honor its
+        ///                       write amplification expectations.
         /// @return A compaction pick to execute next.
         CompactionAggregate.UnifiedAggregate constructAggregate(Controller controller, long spaceAvailable, Arena arena)
         {
@@ -1577,11 +1578,12 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
             assert count >= threshold;
             if (count <= fanout)
             {
-
                 // Happy path. We are not late or (for levelled) we are only so late that a compaction now will
                 // have the same effect as doing levelled compactions one by one. Compact all. We do not cap
-                // this pick at maxSSTablesToCompact due to an assumption that maxSSTablesToCompact is much
-                // greater than F. See {@link Controller#MAX_SSTABLES_TO_COMPACT_OPTION} for more details.
+                // this pick at maxSSTablesToCompact, or reduce the size of the compaction to the available disk
+                // space because that would violate the strategy's write amplification promises.
+                // If a compaction is too big to fit the available space, protections in [getSelection] will
+                // prevent if from being selected; space may be available on a later compaction round.
                 return CompactionAggregate.createUnified(allSSTablesSorted,
                                                          maxOverlap,
                                                          CompactionPick.create(nextTimeUUID(), index, allSSTablesSorted),
@@ -1777,7 +1779,6 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         final int[] perLevel;
         int levelCount;
         final long spaceAvailable;
-        final String rateLimitLog;
         final int remainingAdaptiveCompactions;
 
         public CompactionLimits(int runningCompactions,
@@ -1786,7 +1787,6 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                                 int[] perLevel,
                                 int levelCount,
                                 long spaceAvailable,
-                                String rateLimitLog,
                                 int remainingAdaptiveCompactions)
         {
             this.runningCompactions = runningCompactions;
@@ -1795,16 +1795,15 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
             this.perLevel = perLevel;
             this.levelCount = levelCount;
             this.spaceAvailable = spaceAvailable;
-            this.rateLimitLog = rateLimitLog;
             this.remainingAdaptiveCompactions = remainingAdaptiveCompactions;
         }
 
         @Override
         public String toString()
         {
-            return String.format("Current limits: running=%d, max=%d, maxConcurrent=%d, perLevel=%s, levelCount=%d, spaceAvailable=%s, rateLimitLog=%s, remainingAdaptiveCompactions=%d",
+            return String.format("Current limits: running=%d, max=%d, maxConcurrent=%d, perLevel=%s, levelCount=%d, spaceAvailable=%s, remainingAdaptiveCompactions=%d",
                                  runningCompactions, maxCompactions, maxConcurrentCompactions, Arrays.toString(perLevel), levelCount,
-                                 FBUtilities.prettyPrintMemory(spaceAvailable), rateLimitLog, remainingAdaptiveCompactions);
+                                 FBUtilities.prettyPrintMemory(spaceAvailable), remainingAdaptiveCompactions);
         }
     }
 
