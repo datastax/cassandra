@@ -650,7 +650,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
     /// @return a sharded compaction task that in turn will create a sharded compaction writer.
     private UnifiedCompactionTask createCompactionTask(LifecycleTransaction transaction, Range<Token> operationRange, boolean keepOriginals, ShardingStats shardingStats, long gcBefore)
     {
-        return new UnifiedCompactionTask(realm, this, transaction, gcBefore, keepOriginals, getShardManager(), shardingStats, operationRange, transaction.originals(), null, null);
+        return new UnifiedCompactionTask(realm, this, transaction, gcBefore, keepOriginals, getShardManager(), shardingStats, operationRange, transaction.originals(), null, null, null);
     }
 
     @Override
@@ -681,6 +681,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         CompositeLifecycleTransaction compositeTransaction = new CompositeLifecycleTransaction(transaction);
         SharedCompactionProgress sharedProgress = new SharedCompactionProgress(transaction.opId(), transaction.opType(), TableOperation.Unit.BYTES);
         SharedCompactionObserver sharedObserver = new SharedCompactionObserver(this);
+        SharedTableOperation sharedOperation = new SharedTableOperation(sharedProgress);
         List<UnifiedCompactionTask> tasks = shardManager.splitSSTablesInShardsLimited(
             sstables,
             operationRange,
@@ -697,7 +698,8 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                                                                 range,
                                                                 rangeSSTables,
                                                                 sharedProgress,
-                                                                sharedObserver)
+                                                                sharedObserver,
+                                                                sharedOperation)
         );
         compositeTransaction.completeInitialization();
         assert tasks.size() <= parallelism;

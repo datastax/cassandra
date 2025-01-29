@@ -203,8 +203,7 @@ public class CompactionBreakdownBench extends BaseCompactionBench
                                                         null,
                                                         controller,
                                                         RateLimiter.create(Double.MAX_VALUE),
-                                                        FBUtilities.nowInSeconds(),
-                                                        TimeUUID.Generator.nextTimeUUID()))
+                                                        FBUtilities.nowInSeconds()))
         {
             totalRows = consumeCompactionCursor(ci, bh, totalRows);
         }
@@ -227,8 +226,7 @@ public class CompactionBreakdownBench extends BaseCompactionBench
                                                         null,
                                                         controller,
                                                         RateLimiter.create(Double.MAX_VALUE),
-                                                        FBUtilities.nowInSeconds(),
-                                                        TimeUUID.Generator.nextTimeUUID()))
+                                                        FBUtilities.nowInSeconds()))
         {
             totalRows = consumeCompactionCursor(ci, bh, totalRows);
         }
