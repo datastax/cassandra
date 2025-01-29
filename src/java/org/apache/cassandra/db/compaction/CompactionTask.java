@@ -731,7 +731,7 @@ public class CompactionTask extends AbstractCompactionTask
                 if (writer.append(partition) != null)
                     totalKeysWritten++;
 
-                long bytesScanned = compactionIterator.getTotalBytesScanned();
+                long bytesScanned = compactionIterator.bytesRead();
 
                 // Rate limit the scanners, and account for compression
                 if (compactionRateLimiterAcquire(limiter, bytesScanned, lastBytesScanned, compressionRatio))
