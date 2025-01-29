@@ -83,8 +83,13 @@ public class CompactionIterator implements UnfilteredPartitionIterator
     private final UnfilteredPartitionIterator compacted;
     private final TableOperation op;
 
-    @SuppressWarnings("resource") // We make sure to close mergedIterator in close() and CompactionIterator is itself an AutoCloseable
     public CompactionIterator(OperationType type, List<ISSTableScanner> scanners, AbstractCompactionController controller, int nowInSec, UUID compactionId)
+    {
+        this(type, scanners, controller, nowInSec, compactionId, null);
+    }
+
+    @SuppressWarnings("resource") // We make sure to close mergedIterator in close() and CompactionIterator is itself an AutoCloseable
+    public CompactionIterator(OperationType type, List<ISSTableScanner> scanners, AbstractCompactionController controller, int nowInSec, UUID compactionId, CompactionProgress progress)
     {
         this.controller = controller;
         this.type = type;
@@ -102,7 +107,7 @@ public class CompactionIterator implements UnfilteredPartitionIterator
         // note that we leak `this` from the constructor when calling beginCompaction below, this means we have to get the sstables before
         // calling that to avoid a NPE.
         sstables = scanners.stream().map(ISSTableScanner::getBackingSSTables).flatMap(Collection::stream).collect(ImmutableSet.toImmutableSet());
-        op = createOperation();
+        op = createOperation(progress);
 
         UnfilteredPartitionIterator merged = scanners.isEmpty()
                                            ? EmptyIterators.unfilteredPartition(controller.realm.metadata())
@@ -113,14 +118,16 @@ public class CompactionIterator implements UnfilteredPartitionIterator
         compacted = Transformation.apply(merged, new AbortableUnfilteredPartitionTransformation(op));
     }
 
-    protected TableOperation createOperation()
+    protected TableOperation createOperation(CompactionProgress progress)
     {
         return new AbstractTableOperation() {
 
             @Override
-            public OperationProgress getProgress()
+            public Progress getProgress()
             {
-                return new AbstractTableOperation.OperationProgress(controller.realm.metadata(), type, bytesRead(), totalBytes, getTotalBytesScanned(), compactionId, sstables);
+                return progress != null
+                       ? progress
+                       : new AbstractTableOperation.OperationProgress(controller.realm.metadata(), type, bytesRead(), totalBytes, compactionId, sstables);
             }
 
             @Override

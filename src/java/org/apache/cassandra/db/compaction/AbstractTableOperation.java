@@ -20,8 +20,6 @@ package org.apache.cassandra.db.compaction;
 
 import java.io.Serializable;
 import java.util.Collection;
-import java.util.HashMap;
-import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -74,12 +72,12 @@ public abstract class AbstractTableOperation implements TableOperation
     @Override
     public boolean shouldStop(Predicate<SSTableReader> predicate)
     {
-        OperationProgress progress = getProgress();
-        if (progress.sstables.isEmpty())
-        {
+        Progress progress = getProgress();
+        final Set<SSTableReader> sstables = progress.sstables();
+        if (sstables.isEmpty())
             return true;
-        }
-        return progress.sstables.stream().anyMatch(predicate);
+
+        return sstables.stream().anyMatch(predicate);
     }
 
     /**
@@ -119,10 +117,6 @@ public abstract class AbstractTableOperation implements TableOperation
          */
         private final Unit unit;
         /**
-         * The total bytes that have been scanned. For single file operation, it's the same as "completed"
-         */
-        private final long totalBytesScanned;
-        /**
          * A unique ID for this operation
          */
         private final UUID operationId;
@@ -143,25 +137,6 @@ public abstract class AbstractTableOperation implements TableOperation
                  bytesComplete,
                  totalBytes,
                  Unit.BYTES,
-                 bytesComplete,
-                 operationId,
-                 sstables);
-        }
-
-        public OperationProgress(TableMetadata metadata,
-                                 OperationType operationType,
-                                 long bytesComplete,
-                                 long totalBytes,
-                                 long totalBytesScanned,
-                                 UUID operationId,
-                                 Collection<SSTableReader> sstables)
-        {
-            this(metadata,
-                 operationType,
-                 bytesComplete,
-                 totalBytes,
-                 Unit.BYTES,
-                 totalBytesScanned,
                  operationId,
                  sstables);
         }
@@ -171,18 +146,6 @@ public abstract class AbstractTableOperation implements TableOperation
                                  long completed,
                                  long total,
                                  Unit unit,
-                                 UUID operationId,
-                                 Collection<? extends SSTableReader> sstables)
-        {
-            this(metadata, operationType, completed, total, unit, completed, operationId, sstables);
-        }
-
-        public OperationProgress(TableMetadata metadata,
-                                 OperationType operationType,
-                                 long completed,
-                                 long total,
-                                 Unit unit,
-                                 long totalBytesScanned,
                                  UUID operationId,
                                  Collection<? extends SSTableReader> sstables)
         {
@@ -191,7 +154,6 @@ public abstract class AbstractTableOperation implements TableOperation
             this.total = total;
             this.metadata = metadata;
             this.unit = unit;
-            this.totalBytesScanned = totalBytesScanned;
             this.operationId = operationId;
             this.sstables = ImmutableSet.copyOf(sstables);
         }
@@ -201,7 +163,7 @@ public abstract class AbstractTableOperation implements TableOperation
          */
         public OperationProgress forProgress(long complete, long total)
         {
-            return new OperationProgress(metadata, operationType, complete, total, unit, complete, operationId, sstables);
+            return new OperationProgress(metadata, operationType, complete, total, unit, operationId, sstables);
         }
 
         public static OperationProgress withoutSSTables(TableMetadata metadata, OperationType tasktype, long completed, long total, AbstractTableOperation.Unit unit, UUID compactionId)
@@ -263,37 +225,9 @@ public abstract class AbstractTableOperation implements TableOperation
             return sstables;
         }
 
-        /**
-         * @return the total number of units that has been scanned by the operation
-         */
-        public long totalByteScanned()
-        {
-            return totalBytesScanned;
-        }
-
         public String toString()
         {
-            StringBuilder buff = new StringBuilder();
-            buff.append(String.format("%s(%s, %s / %s %s)", operationType, operationId, completed, total, unit));
-            if (metadata != null)
-            {
-                buff.append(String.format("@%s(%s, %s)", metadata.id, metadata.keyspace, metadata.name));
-            }
-            return buff.toString();
-        }
-
-        public Map<String, String> asMap()
-        {
-            Map<String, String> ret = new HashMap<>(8);
-            ret.put(ID, metadata != null ? metadata.id.toString() : "");
-            ret.put(KEYSPACE, keyspace().orElse(null));
-            ret.put(COLUMNFAMILY, table().orElse(null));
-            ret.put(COMPLETED, Long.toString(completed));
-            ret.put(TOTAL, Long.toString(total));
-            ret.put(OPERATION_TYPE, operationType.toString());
-            ret.put(UNIT, unit.toString());
-            ret.put(OPERATION_ID, operationId == null ? "" : operationId.toString());
-            return ret;
+            return progressToString();
         }
     }
 }

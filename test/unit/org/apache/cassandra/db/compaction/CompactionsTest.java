@@ -652,23 +652,21 @@ public class CompactionsTest
     @Test
     public void testCompactionListener()
     {
-        final long totalByteScanned = 100;
         ColumnFamilyStore cfs = MockSchema.newCFS();
         cfs.addSSTable(MockSchema.sstable(1, true, cfs));
         ActiveOperations.CompactionProgressListener listener = Mockito.mock(ActiveOperations
                                                                             .CompactionProgressListener.class);
-        AbstractTableOperation.OperationProgress progress = new AbstractTableOperation
-                                                                .OperationProgress(cfs.metadata(),
-                                                                                   OperationType.ANTICOMPACTION,
-                                                                                   0,
-                                                                                   0,
-                                                                                   totalByteScanned,
-                                                                                   UUID.randomUUID(),
-                                                                                   cfs.getLiveSSTables());
+        TableOperation.Progress progress = new AbstractTableOperation
+                                               .OperationProgress(cfs.metadata(),
+                                                                  OperationType.ANTICOMPACTION,
+                                                                  0,
+                                                                  0,
+                                                                  UUID.randomUUID(),
+                                                                  cfs.getLiveSSTables());
 
         AbstractTableOperation operation = new AbstractTableOperation()
         {
-            public OperationProgress getProgress()
+            public Progress getProgress()
             {
                 return progress;
             }
@@ -680,7 +678,6 @@ public class CompactionsTest
         };
         CompactionManager.instance.active.registerListener(listener);
 
-        Assert.assertEquals(totalByteScanned, operation.getProgress().totalByteScanned());
         try (NonThrowingCloseable cls = CompactionManager.instance.active.onOperationStart(operation))
         {
             verify(listener).onStarted(progress);

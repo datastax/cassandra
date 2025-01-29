@@ -934,7 +934,7 @@ public class SecondaryIndexManagerTest extends CQLTester
                             }
 
                             @Override
-                            public OperationProgress getProgress()
+                            public Progress getProgress()
                             {
                                 return builder.getProgress();
                             }

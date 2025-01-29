@@ -26,6 +26,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
 import javax.annotation.Nullable;
 
@@ -45,6 +46,9 @@ public class SharedCompactionProgress implements CompactionProgress
 {
     private final List<CompactionProgress> sources = new CopyOnWriteArrayList<>();
     private final AtomicInteger toComplete = new AtomicInteger(0);
+    private final AtomicLong totalSize = new AtomicLong(0);
+    private final AtomicLong totalCompressedSize = new AtomicLong(0);
+    private final AtomicLong totalUncompressedSize = new AtomicLong(0);
     private final UUID operationId;
     private final OperationType operationType;
     private final TableOperation.Unit unit;
@@ -56,9 +60,15 @@ public class SharedCompactionProgress implements CompactionProgress
         this.unit = unit;
     }
 
-    public void registerExpectedSubtask()
+    /// Register a subtask to be expected to run. This must be called once per subtask before any of them start.
+    ///
+    /// @param taskSize The size of the task that its [CompactionProgress#total] will report.
+    public void registerExpectedSubtask(long taskSize, long taskCompressedSize, long taskUncompressedSize)
     {
         toComplete.incrementAndGet();
+        totalSize.addAndGet(taskSize);
+        totalCompressedSize.addAndGet(taskCompressedSize);
+        totalUncompressedSize.addAndGet(taskUncompressedSize);
     }
 
     public void addSubtask(CompactionProgress progress)
@@ -164,21 +174,13 @@ public class SharedCompactionProgress implements CompactionProgress
     @Override
     public long inputDiskSize()
     {
-        long sum = 0L;
-        for (CompactionProgress source : sources)
-            sum += source.inputDiskSize();
-
-        return sum;
+        return totalCompressedSize.get();
     }
 
     @Override
     public long inputUncompressedSize()
     {
-        long sum = 0L;
-        for (CompactionProgress source : sources)
-            sum += source.inputUncompressedSize();
-
-        return sum;
+        return totalUncompressedSize.get();
     }
 
     @Override
@@ -264,19 +266,15 @@ public class SharedCompactionProgress implements CompactionProgress
     @Override
     public long total()
     {
-        long sum = 0L;
-        for (CompactionProgress source : sources)
-            sum += source.total();
-
-        return sum;
+        return totalSize.get();
     }
 
     @Override
-    public long startTimeNanos()
+    public long startTimeMillis()
     {
         long min = Long.MAX_VALUE;
         for (CompactionProgress source : sources)
-            min = Math.min(min, source.startTimeNanos());
+            min = Math.min(min, source.startTimeMillis());
 
         return min;
     }
@@ -305,5 +303,11 @@ public class SharedCompactionProgress implements CompactionProgress
                 merged[i] += histogram[i];
         }
         return merged;
+    }
+
+    @Override
+    public String toString()
+    {
+        return progressToString();
     }
 }
