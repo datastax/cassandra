@@ -25,10 +25,15 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.apache.cassandra.Util;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.compaction.ActiveOperations;
+import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.compaction.CompactionsTest;
+import org.apache.cassandra.db.compaction.OperationType;
+import org.apache.cassandra.db.compaction.TableOperation;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.junit.After;
 import org.junit.Before;
@@ -207,6 +212,17 @@ public class ValidatorTest
                                                                    Collections.singletonList(cfs), desc.ranges, false, ActiveRepairService.UNREPAIRED_SSTABLE,
                                                                    false, PreviewKind.NONE);
 
+        AtomicReference<TableOperation.Progress> progressOnCompletion = new AtomicReference<>();
+        CompactionManager.instance.active.registerListener(new ActiveOperations.CompactionProgressListener()
+        {
+            @Override
+            public void onCompleted(TableOperation.Progress progressOnCompleted)
+            {
+                if (progressOnCompleted.metadata() == cfs.metadata())
+                    progressOnCompletion.set(progressOnCompleted);
+            }
+        });
+
         final CompletableFuture<Message> outgoingMessageSink = registerOutgoingMessageSink();
         Validator validator = new Validator(SharedContext.Global.instance, new ValidationState(Clock.Global.clock(), desc, host), 0, true, false, PreviewKind.NONE);
         ValidationManager.instance.submitValidation(cfs, validator);
@@ -223,6 +239,11 @@ public class ValidatorTest
             assertEquals(Math.pow(2, Math.ceil(Math.log(n) / Math.log(2))), iterator.next().getValue().size(), 0.0);
         }
         assertEquals(m.trees.rowCount(), n);
+
+        assertNotNull(progressOnCompletion.get());
+        assertEquals(OperationType.VALIDATION, progressOnCompletion.get().operationType());
+        assertTrue(progressOnCompletion.get().completed() > 0);
+        assertEquals(progressOnCompletion.get().total(), progressOnCompletion.get().completed());
     }
 
     /*
