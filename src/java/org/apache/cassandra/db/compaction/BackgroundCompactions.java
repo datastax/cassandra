@@ -275,8 +275,13 @@ public class BackgroundCompactions
 
     private void updateCompactionRate(CompactionProgress progress)
     {
-        if (progress != null && progress.durationInNanos() > 0 && progress.outputDiskSize() > 0)
-            compactionRate.update(progress.outputDiskSize() * 1.e9 / progress.durationInNanos());
+        if (progress != null)
+        {
+            final long durationInMillis = progress.durationInMillis();
+            final long outputDiskSize = progress.outputDiskSize();
+            if (durationInMillis > 0 && outputDiskSize > 0)
+                compactionRate.update(outputDiskSize * 1.e3 / durationInMillis);
+        }
     }
 
     public Collection<CompactionAggregate> getAggregates()

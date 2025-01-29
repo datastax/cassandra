@@ -44,7 +44,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.db.compaction.AbstractTableOperation;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.compaction.TableOperation;
@@ -148,7 +147,7 @@ public class PendingAntiCompaction
                 }
                 return false;
             }
-            Collection<AbstractTableOperation.OperationProgress> ops = CompactionManager.instance.active.getOperationsForSSTable(sstable, OperationType.ANTICOMPACTION);
+            Collection<TableOperation.Progress> ops = CompactionManager.instance.active.getOperationsForSSTable(sstable, OperationType.ANTICOMPACTION);
             if (ops != null && !ops.isEmpty())
             {
                 // todo: start tracking the parent repair session id that created the anticompaction to be able to give a better error messsage here:
@@ -158,7 +157,7 @@ public class PendingAntiCompaction
                 sb.append(" has failed because it encountered intersecting sstables belonging to another incremental repair session. ");
                 sb.append("This is caused by starting multiple conflicting incremental repairs at the same time. ");
                 sb.append("Conflicting anticompactions: ");
-                for (AbstractTableOperation.OperationProgress op : ops)
+                for (TableOperation.Progress op : ops)
                 {
                     sb.append(op.operationId() == null ? "no compaction id" : op.operationId()).append(':').append(op.sstables()).append(',');
                 }
