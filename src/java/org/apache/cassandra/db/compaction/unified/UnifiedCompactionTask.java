@@ -23,11 +23,14 @@ import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
 
 import org.apache.cassandra.db.Directories;
+import org.apache.cassandra.db.compaction.AbstractCompactionTask;
 import org.apache.cassandra.db.compaction.CompactionRealm;
 import org.apache.cassandra.db.compaction.CompactionTask;
 import org.apache.cassandra.db.compaction.ShardManager;
 import org.apache.cassandra.db.compaction.SharedCompactionObserver;
 import org.apache.cassandra.db.compaction.SharedCompactionProgress;
+import org.apache.cassandra.db.compaction.SharedTableOperation;
+import org.apache.cassandra.db.compaction.TableOperationObserver;
 import org.apache.cassandra.db.compaction.UnifiedCompactionStrategy;
 import org.apache.cassandra.db.compaction.writers.CompactionAwareWriter;
 import org.apache.cassandra.db.lifecycle.ILifecycleTransaction;
@@ -41,6 +44,7 @@ public class UnifiedCompactionTask extends CompactionTask
     private final Range<Token> operationRange;
     private final Set<SSTableReader> actuallyCompact;
     private final SharedCompactionProgress sharedProgress;
+    private final SharedTableOperation sharedOperation;
     private final UnifiedCompactionStrategy.ShardingStats shardingStats;
 
     public UnifiedCompactionTask(CompactionRealm cfs,
@@ -50,7 +54,7 @@ public class UnifiedCompactionTask extends CompactionTask
                                  ShardManager shardManager,
                                  UnifiedCompactionStrategy.ShardingStats shardingStats)
     {
-        this(cfs, strategy, txn, gcBefore, false, shardManager, shardingStats, null, null, null, null);
+        this(cfs, strategy, txn, gcBefore, false, shardManager, shardingStats, null, null, null, null, null);
     }
 
 
@@ -64,9 +68,20 @@ public class UnifiedCompactionTask extends CompactionTask
                                  Range<Token> operationRange,
                                  Collection<SSTableReader> actuallyCompact,
                                  SharedCompactionProgress sharedProgress,
-                                 SharedCompactionObserver sharedObserver)
+                                 SharedCompactionObserver sharedObserver,
+                                 SharedTableOperation sharedOperation)
     {
-        super(cfs, txn, gcBefore, keepOriginals, strategy, sharedObserver != null ? sharedObserver : strategy);
+        super(cfs,
+              txn,
+              // Set the total operation sizes early to use in shared progress tracking. This assumes that:
+              // - there are no expired sstables in the compaction (UCS processes them separately)
+              // - sstable exclusion for lack of space does not apply (shared progress is only use when an operation
+              //   range applies, which disables this)
+              sharedProgress != null ? getOperationTotals(actuallyCompact, operationRange) : null,
+              gcBefore,
+              keepOriginals,
+              strategy,
+              sharedObserver != null ? sharedObserver : strategy);
         this.shardManager = shardManager;
         this.shardingStats = shardingStats;
 
@@ -75,10 +90,13 @@ public class UnifiedCompactionTask extends CompactionTask
 
         this.operationRange = operationRange;
         this.sharedProgress = sharedProgress;
+        this.sharedOperation = sharedOperation;
         if (sharedProgress != null)
-            sharedProgress.registerExpectedSubtask();
+            sharedProgress.registerExpectedSubtask(totals.inputUncompressedSize, totals.inputDiskSize, totals.inputUncompressedSize);
         if (sharedObserver != null)
             sharedObserver.registerExpectedSubtask();
+        if (sharedOperation != null)
+            sharedOperation.registerExpectedSubtask();
         // To make sure actuallyCompact tracks any removals from txn.originals(), we intersect the given set with it.
         // This should not be entirely necessary (as shouldReduceScopeForSpace() is false for ranged tasks), but it
         // is cleaner to enforce inputSSTables()'s requirements.
@@ -129,5 +147,13 @@ public class UnifiedCompactionTask extends CompactionTask
     public Set<SSTableReader> inputSSTables()
     {
         return actuallyCompact;
+    }
+
+    @Override
+    public AbstractCompactionTask setOpObserver(TableOperationObserver opObserver)
+    {
+        if (sharedOperation != null)
+            opObserver = sharedOperation.wrapObserver(opObserver);
+        return super.setOpObserver(opObserver);
     }
 }
