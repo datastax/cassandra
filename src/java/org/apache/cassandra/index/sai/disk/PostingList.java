@@ -43,14 +43,6 @@ public interface PostingList extends Closeable
     int nextPosting() throws IOException;
 
     /**
-     * @return true if this PostingList includes per-term frequencies.  If not, frequency() will always return 1.
-     */
-    default boolean includesFrequencies()
-    {
-        return false;
-    }
-
-    /**
      * @return the number of occurrences of the term in the current row (the one most recently returned by nextPosting).
      */
     default int frequency()
