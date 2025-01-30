@@ -136,7 +136,7 @@ public class TrieMemoryIndex extends MemoryIndex
         @Override
         public int hashCode()
         {
-            return Objects.hash(pk, ByteComparable.length(term, ByteComparable.Version.OSS41));
+            return Objects.hash(pk, ByteComparable.length(term, TypeUtil.BYTE_COMPARABLE_VERSION));
         }
 
         @Override
@@ -145,7 +145,7 @@ public class TrieMemoryIndex extends MemoryIndex
             if (o == null || getClass() != o.getClass()) return false;
             PkWithTerm that = (PkWithTerm) o;
             return Objects.equals(pk, that.pk)
-                   && ByteComparable.compare(term, that.term, ByteComparable.Version.OSS41) == 0;
+                   && ByteComparable.compare(term, that.term, TypeUtil.BYTE_COMPARABLE_VERSION) == 0;
         }
     }
 
