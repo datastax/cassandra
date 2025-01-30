@@ -28,6 +28,7 @@ import org.junit.Test;
 import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.distributed.api.ConsistencyLevel;
 import org.apache.cassandra.distributed.test.TestBaseImpl;
+import org.apache.cassandra.index.sai.disk.format.Version;
 
 import static org.apache.cassandra.distributed.api.Feature.GOSSIP;
 import static org.apache.cassandra.distributed.api.Feature.NETWORK;
@@ -59,6 +60,7 @@ public class BM25DistributedTest extends TestBaseImpl
                         .start();
 
         cluster.schemaChange(withKeyspace(String.format(CREATE_KEYSPACE, RF)));
+        cluster.forEach(i -> i.runOnInstance(() -> org.apache.cassandra.index.sai.SAIUtil.setLatestVersion(Version.EC)));
     }
 
     @AfterClass
