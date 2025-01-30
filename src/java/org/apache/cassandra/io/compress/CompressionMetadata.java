@@ -428,7 +428,6 @@ public class CompressionMetadata extends WrappedSharedCloseable
 
     public void close()
     {
-        super.close();
         NATIVE_MEMORY_USAGE.addAndGet(-chunkOffsets.memoryUsed());
     }
 
