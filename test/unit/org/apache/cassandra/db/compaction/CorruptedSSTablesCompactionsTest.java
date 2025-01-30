@@ -317,7 +317,7 @@ public class CorruptedSSTablesCompactionsTest
             // If the compactions are parallelized, the error message should contain all failures of the current path.
             for (var t : cause.getSuppressed())
             {
-                final int childFailures = processException(t);
+                final int childFailures = processException(t, countedFiles);
                 if (childFailures == COMPACTION_FAIL)
                     return COMPACTION_FAIL;
                 failures += childFailures;
