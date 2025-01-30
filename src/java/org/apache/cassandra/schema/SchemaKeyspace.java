@@ -822,8 +822,11 @@ public final class SchemaKeyspace
                .add("kind", index.kind.toString())
                .add("options", index.options);
 
-        rowBuilder.add("key_compression", index.keyCompression.asMap());
-        rowBuilder.add("value_compression", index.valueCompression.asMap());
+        if (CassandraRelevantProperties.INDEX_COMPRESSION.getBoolean())
+        {
+            rowBuilder.add("key_compression", index.keyCompression.asMap());
+            rowBuilder.add("value_compression", index.valueCompression.asMap());
+        }
     }
 
     private static void dropIndexFromSchemaMutation(TableMetadata table, IndexMetadata index, Mutation.SimpleBuilder builder)
