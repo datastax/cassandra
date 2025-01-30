@@ -64,17 +64,23 @@ public class MemtableCleanerThread<P extends MemtablePool> extends InfiniteLoopE
         @Override
         public void run() throws InterruptedException
         {
+            logger.debug("Memtable cleaner thread running");
             if (!pool.needsCleaning())
             {
+                logger.debug("pool does not need cleaning");
                 final WaitQueue.Signal signal = wait.register();
                 if (!pool.needsCleaning())
+                {
+                    logger.debug("pool still does not need cleaning; awaiting signal");
                     signal.await();
+                }
                 else
                     signal.cancel();
             }
             else
             {
                 int numPendingTasks = this.numPendingTasks.incrementAndGet();
+                logger.debug("pool needs cleaning; num pending tasks {}", numPendingTasks);
 
                 if (logger.isTraceEnabled())
                     logger.trace("Invoking cleaner with {} tasks pending", numPendingTasks);
@@ -85,16 +91,19 @@ public class MemtableCleanerThread<P extends MemtablePool> extends InfiniteLoopE
 
         private Boolean apply(Boolean res, Throwable err)
         {
+            logger.debug("finalizing memtable cleaner");
             final int tasks = numPendingTasks.decrementAndGet();
 
             // if the cleaning job was scheduled (res == true) or had an error, trigger again after decrementing the tasks
-            if ((res || err != null) && pool.needsCleaning())
+            if ((res || err != null) && pool.needsCleaning()) {
+                logger.debug("pool needs cleaning and {} tasks pending; signaling", tasks);
                 wait.signal();
+            }
 
             if (err != null)
                 logger.error("Memtable cleaning tasks failed with an exception and {} pending tasks ", tasks, err);
-            else if (logger.isTraceEnabled())
-                logger.trace("Memtable cleaning task completed ({}), currently pending: {}", res, tasks);
+            else
+                logger.debug("Memtable cleaning task completed ({}), currently pending: {}", res, tasks);
 
             return res;
         }
@@ -118,6 +127,7 @@ public class MemtableCleanerThread<P extends MemtablePool> extends InfiniteLoopE
     // should ONLY be called when we really think it already needs cleaning
     public void trigger()
     {
+        logger.debug("Triggering memtable cleaner", new Exception("trigger stack trace"));
         trigger.run();
     }
 

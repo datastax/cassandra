@@ -3121,7 +3121,8 @@ public class DatabaseDescriptor
 
     public static Float getMemtableCleanupThreshold()
     {
-        return conf.memtable_cleanup_threshold;
+        return 0.001f;
+        //return conf.memtable_cleanup_threshold;
     }
 
     public static Map<String, String> getMemtableOptions()

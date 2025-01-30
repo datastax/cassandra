@@ -47,6 +47,7 @@ public class InfiniteLoopExecutor
 
     private void loop()
     {
+        logger.debug("Starting infinite loop executor in thread {}", thread.getName());
         while (!isShutdown)
         {
             try

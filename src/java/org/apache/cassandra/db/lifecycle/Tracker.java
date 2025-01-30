@@ -98,6 +98,7 @@ public class Tracker
     public final TableMetadataRef metadata;
     final AtomicReference<View> view;
     public final boolean loadsstables;
+    public static volatile boolean exceptionHappened = false;
 
     /**
      * @param columnFamilyStore column family store for the table
@@ -472,7 +473,7 @@ public class Tracker
         apply(View.markFlushing(memtable));
     }
 
-    public void replaceFlushed(Memtable memtable, Iterable<SSTableReader> sstables, Optional<UUID> operationId)
+    public void replaceFlushed(Memtable memtable, Iterable<SSTableReader> sstables, Optional<UUID> operationId, ColumnFamilyStore.FlushReason reason)
     {
         assert !isDummy();
         if (Iterables.isEmpty(sstables))
@@ -487,8 +488,16 @@ public class Tracker
         // back up before creating a new Snapshot (which makes the new one eligible for compaction)
         maybeIncrementallyBackup(sstables);
 
+
         Throwable fail;
         fail = notifyAdding(sstables, memtable, null, OperationType.FLUSH, operationId);
+
+        if (memtable.metadata().name.equals("failedflushtest") && reason != ColumnFamilyStore.FlushReason.UNIT_TESTS)
+        {
+            logger.info("DUPA ACHTUNG MINEN HAPPENS!!!");
+            fail = merge(fail, new RuntimeException("achtung minen"));
+            exceptionHappened = true;
+        }
 
         apply(View.replaceFlushed(memtable, sstables));
 
@@ -505,6 +514,10 @@ public class Tracker
         maybeFail(fail);
     }
 
+    private void fakeException()
+    {
+
+    }
 
 
     // MISCELLANEOUS public utility calls

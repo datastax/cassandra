@@ -1,3 +1,4 @@
+
 /*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
@@ -20,6 +21,7 @@ package org.apache.cassandra.utils.memory;
 
 import java.util.concurrent.atomic.AtomicLongFieldUpdater;
 
+import org.apache.cassandra.db.lifecycle.Tracker;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -177,8 +179,16 @@ public abstract class MemtableAllocator
 
             while (true)
             {
+//                if (Tracker.exceptionHappened)
+//                {
+//                    logger.info("DUPA in allocate...");
+//                }
                 if (parent.tryAllocate(size))
                 {
+//                    if (Tracker.exceptionHappened)
+//                    {
+//                        logger.info("DUPA try allocated sucessfull");
+//                    }
                     acquired(size);
                     return;
                 }
@@ -199,7 +209,12 @@ public abstract class MemtableAllocator
                     return;
                 }
                 else
+                {
+                    logger.info("DUPA not enought memory; blocking");
                     signal.awaitUninterruptibly();
+                    logger.info("DUPA enough memory; unblocked");
+                }
+
             }
         }
 

@@ -32,6 +32,8 @@ import org.apache.cassandra.metrics.DefaultNameFactory;
 import org.apache.cassandra.utils.concurrent.WaitQueue;
 import org.apache.cassandra.utils.ExecutorUtils;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Represents an amount of memory used for a given purpose, that can be allocated to specific tasks through
@@ -39,6 +41,7 @@ import org.apache.cassandra.utils.ExecutorUtils;
  */
 public abstract class MemtablePool
 {
+    private static final Logger logger = LoggerFactory.getLogger(MemtablePool.class);
     final MemtableCleanerThread<?> cleaner;
 
     // the total memory used by this pool
@@ -117,6 +120,7 @@ public abstract class MemtablePool
         {
             this.limit = limit;
             this.cleanThreshold = cleanThreshold;
+            logger.info("DUPA limit={}, cleanThreashold={}", limit, cleanThreshold);
         }
 
         /** Methods for tracking and triggering a clean **/
@@ -124,13 +128,16 @@ public abstract class MemtablePool
         boolean needsCleaning()
         {
             // use strictly-greater-than so we don't clean when limit is 0
+            logger.info("DUPA pool={} used={}, nextClean={}", this, used(), nextClean);
             return used() > nextClean && updateNextClean();
         }
 
         void maybeClean()
         {
-            if (needsCleaning() && cleaner != null)
+            if (needsCleaning() && cleaner != null) {
+                logger.info("DUPA triggering clean!!!!");
                 cleaner.trigger();
+            }
         }
 
         private boolean updateNextClean()
@@ -179,6 +186,7 @@ public abstract class MemtablePool
             if (size == 0)
                 return;
 
+            logger.debug("DUPA pool {}, allocated {} bytes", this, size);
             adjustAllocated(size);
             maybeClean();
         }
@@ -191,6 +199,7 @@ public abstract class MemtablePool
         void released(long size)
         {
             assert size >= 0 : "Negative released: " + size;
+            logger.debug("DUPA pool {}, released {} bytes", this, size);
             adjustAllocated(-size);
             hasRoom.signalAll();
         }
@@ -200,6 +209,7 @@ public abstract class MemtablePool
             if (size == 0)
                 return;
             reclaimingUpdater.addAndGet(this, size);
+            logger.debug("pool {} reclaiming {} bytes increased", this, reclaiming, new Exception("reclaiming"));
         }
 
         void reclaimed(long size)
@@ -208,6 +218,8 @@ public abstract class MemtablePool
                 return;
 
             reclaimingUpdater.addAndGet(this, -size);
+            logger.debug("pool {} reclaiming {} bytes decreased", this, reclaiming, new Exception("reclaimed"));
+
             if (updateNextClean() && cleaner != null)
                 cleaner.trigger();
         }

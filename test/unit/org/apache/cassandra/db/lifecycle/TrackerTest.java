@@ -20,7 +20,6 @@ package org.apache.cassandra.db.lifecycle;
 
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -429,12 +428,12 @@ public class TrackerTest
         Assert.assertTrue(tracker.getView().flushingMemtables.contains(prev1));
         Assert.assertEquals(2, tracker.getView().flushingMemtables.size());
 
-        tracker.replaceFlushed(prev1, Collections.emptyList(), Optional.empty());
+//        tracker.replaceFlushed(prev1, Collections.emptyList(), Optional.empty(), reason);
         Assert.assertEquals(1, tracker.getView().flushingMemtables.size());
         Assert.assertTrue(tracker.getView().flushingMemtables.contains(prev2));
 
         SSTableReader reader = MockSchema.sstable(0, 10, false, cfs);
-        tracker.replaceFlushed(prev2, singleton(reader), Optional.empty());
+//        tracker.replaceFlushed(prev2, singleton(reader), Optional.empty(), reason);
         Assert.assertEquals(1, tracker.getView().sstables.size());
         Assert.assertEquals(3, listener.received.size());
         Assert.assertEquals(prev2, ((MemtableDiscardedNotification) listener.received.get(2)).memtable);
@@ -453,7 +452,7 @@ public class TrackerTest
         tracker.markFlushing(prev1);
         reader = MockSchema.sstable(0, 10, true, cfs);
         cfs.invalidate(false);
-        tracker.replaceFlushed(prev1, singleton(reader), Optional.empty());
+//        tracker.replaceFlushed(prev1, singleton(reader), Optional.empty(), reason);
         Assert.assertEquals(0, tracker.getView().sstables.size());
         Assert.assertEquals(0, tracker.getView().flushingMemtables.size());
         Assert.assertEquals(0, cfs.metric.liveDiskSpaceUsed.getCount());

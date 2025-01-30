@@ -27,6 +27,7 @@ import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Predicate;
 
 import com.google.common.annotations.VisibleForTesting;
+import org.apache.cassandra.db.lifecycle.Tracker;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -685,6 +686,7 @@ public class TrieMemtable extends AbstractAllocatorMemtable
                         // This should never really happen as a flush would be triggered long before this limit is reached.
                         throw new AssertionError(e);
                     }
+                    //logger.info("DUPA exception happened? {}", Tracker.exceptionHappened);
                     allocator.offHeap().adjust(data.usedSizeOffHeap() - offHeap, opGroup);
                     allocator.onHeap().adjust((data.usedSizeOnHeap() - onHeap) + updater.heapSize, opGroup);
                     partitionCount += updater.partitionsAdded;

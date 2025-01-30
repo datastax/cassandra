@@ -102,7 +102,6 @@ import org.apache.cassandra.db.memtable.ShardBoundaries;
 import org.apache.cassandra.db.partitions.CachedPartition;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.repair.CassandraTableRepairManager;
-import org.apache.cassandra.db.rows.CellPath;
 import org.apache.cassandra.db.streaming.CassandraStreamManager;
 import org.apache.cassandra.db.view.TableViews;
 import org.apache.cassandra.dht.AbstractBounds;
@@ -140,7 +139,6 @@ import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.nodes.Nodes;
 import org.apache.cassandra.repair.TableRepairManager;
 import org.apache.cassandra.repair.consistent.admin.PendingStat;
-import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.CompactionParams;
 import org.apache.cassandra.schema.CompactionParams.TombstoneOption;
 import org.apache.cassandra.schema.CompressionParams;
@@ -1100,7 +1098,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         synchronized (data)
         {
             logFlush(reason);
-            Flush flush = new Flush(false);
+            Flush flush = new Flush(false, reason);
             flushExecutor.execute(flush);
             postFlushExecutor.execute(flush.postFlushTask);
             return flush.postFlushTask;
@@ -1253,9 +1251,11 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         final ListenableFutureTask<CommitLogPosition> postFlushTask;
         final PostFlush postFlush;
         final boolean truncate;
+        final FlushReason reason;
 
-        private Flush(boolean truncate)
+        private Flush(boolean truncate, FlushReason reason)
         {
+            this.reason = reason;
             if (logger.isTraceEnabled())
                 logger.trace("Creating flush task {}@{}", hashCode(), name);
             // if true, we won't flush, we'll just wait for any outstanding writes, switch the memtable, and discard
@@ -1354,7 +1354,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
 
             if (memtable.isClean() || truncate)
             {
-                cfs.replaceFlushed(memtable, Collections.emptyList(), Optional.empty());
+                cfs.replaceFlushed(memtable, Collections.emptyList(), Optional.empty(), reason);
                 reclaim(memtable);
                 return Collections.emptyList();
             }
@@ -1471,7 +1471,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
                 }
                 metric.memTableFlushCompleted(System.nanoTime() - start);
 
-                cfs.replaceFlushed(memtable, sstables, Optional.of(txn.opId()));
+                cfs.replaceFlushed(memtable, sstables, Optional.of(txn.opId()), reason);
             }
             reclaim(memtable);
             cfs.strategyFactory.getCompactionLogger().flush(sstables);
@@ -1866,9 +1866,9 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         maybeFail(data.dropSSTables(Predicates.in(sstables), compactionType, null));
     }
 
-    void replaceFlushed(Memtable memtable, Collection<SSTableReader> sstables, Optional<UUID> operationId)
+    void replaceFlushed(Memtable memtable, Collection<SSTableReader> sstables, Optional<UUID> operationId, FlushReason reason)
     {
-        data.replaceFlushed(memtable, sstables, operationId);
+        data.replaceFlushed(memtable, sstables, operationId, reason);
         if (sstables != null && !sstables.isEmpty())
             CompactionManager.instance.submitBackground(this);
     }
@@ -2752,7 +2752,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     {
         synchronized (data)
         {
-            final Flush flush = new Flush(true);
+            final Flush flush = new Flush(true, reason);
             flushExecutor.execute(flush);
             postFlushExecutor.execute(flush.postFlushTask);
             return flush.postFlushTask;

@@ -72,10 +72,10 @@ public abstract class AbstractAllocatorMemtable extends AbstractMemtableWithComm
     @VisibleForTesting
     static MemtablePool createMemtableAllocatorPool()
     {
-        Config.MemtableAllocationType allocationType = DatabaseDescriptor.getMemtableAllocationType();
-        long heapLimit = DatabaseDescriptor.getMemtableHeapSpaceInMb() << 20;
-        long offHeapLimit = DatabaseDescriptor.getMemtableOffheapSpaceInMb() << 20;
-        float memtableCleanupThreshold = DatabaseDescriptor.getMemtableCleanupThreshold();
+        Config.MemtableAllocationType allocationType = Config.MemtableAllocationType.offheap_buffers;DatabaseDescriptor.getMemtableAllocationType();
+        long heapLimit = 2_000_000; // DatabaseDescriptor.getMemtableHeapSpaceInMb() << 20;
+        long offHeapLimit = 2_000_000; // DatabaseDescriptor.getMemtableOffheapSpaceInMb() << 20;
+        float memtableCleanupThreshold = 0.15f; // DatabaseDescriptor.getMemtableCleanupThreshold();
         MemtableCleaner cleaner = AbstractAllocatorMemtable::flushLargestMemtable;
         return createMemtableAllocatorPool(allocationType, heapLimit, offHeapLimit, memtableCleanupThreshold, cleaner);
     }
@@ -268,6 +268,7 @@ public abstract class AbstractAllocatorMemtable extends AbstractMemtableWithComm
                     indexMemtable.addMemoryUsageTo(usage);
 
             float ratio = Math.max(usage.ownershipRatioOnHeap, usage.ownershipRatioOffHeap);
+            logger.debug("Memtable {} has ratio {}", current.owner, ratio(usage.ownershipRatioOnHeap, usage.ownershipRatioOffHeap));
             if (ratio > largestRatio)
             {
                 largestMemtable = current;
