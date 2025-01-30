@@ -240,10 +240,10 @@ public class CorruptedSSTablesCompactionsTest
                 }
                 finally
                 {
-                FileUtils.closeQuietly(raf);
+                    FileUtils.closeQuietly(raf);
                 }
                 if (ChunkCache.instance != null)
-                    ChunkCache.instance.invalidateFile(sstable.getDataFile());
+                    ChunkCache.instance.invalidateFileNow(sstable.getDataFile());
             }
             while (readsWithoutError(sstable));
 
