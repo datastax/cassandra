@@ -24,6 +24,7 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Objects;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Maps;
@@ -40,11 +41,14 @@ import org.apache.cassandra.exceptions.UnknownIndexException;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.internal.CassandraIndex;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
+import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
+import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.UUIDSerializer;
 
+import static org.apache.cassandra.index.sai.disk.format.Version.SAI_DESCRIPTOR;
 import static org.apache.cassandra.schema.SchemaConstants.PATTERN_NON_WORD_CHAR;
 import static org.apache.cassandra.schema.SchemaConstants.isValidName;
 
@@ -106,9 +110,34 @@ public final class IndexMetadata
         return new IndexMetadata(name, newOptions, kind);
     }
 
+    private static int calculateAllowedLength(int keyspaceNameLength, int tableNameLength)
+    {
+        // Prefixes and suffixes from IndexContext.getFullName
+        int addedLength1 = keyspaceNameLength + tableNameLength + 2 + 4;
+        // Prefixes and suffixes constructed by Version.stargazerFileNameFormat
+        int addedLength2 = SAI_DESCRIPTOR.length() + 4 + IndexComponentType.KD_TREE_POSTING_LISTS.representation.length() + 3;
+        // Prefixes from Descriptor constructor
+        addedLength2 += 2 + 2 + SSTableFormat.Type.BTI.name().length() + 16;
+        return SchemaConstants.NAME_LENGTH - Math.max(addedLength1, addedLength2);
+    }
+
+    public static String generateDefaultIndexName(int keyspaceNameLength, String table, ColumnIdentifier column)
+    {
+        String indexPostfix = "_idx";
+
+        String indexNameUntruncated = PATTERN_NON_WORD_CHAR.matcher(table + '_' + column.toString()).replaceAll("");
+
+        String indexNameTrimmed = indexNameUntruncated
+                                  .substring(0,
+                                             Math.min(calculateAllowedLength(keyspaceNameLength, table.length()) - indexPostfix.length(),
+                                                      indexNameUntruncated.length()));
+        return indexNameTrimmed + indexPostfix;
+    }
+
+    @VisibleForTesting
     public static String generateDefaultIndexName(String table, ColumnIdentifier column)
     {
-        return PATTERN_NON_WORD_CHAR.matcher(table + '_' + column.toString() + "_idx").replaceAll("");
+        return generateDefaultIndexName(0, table, column);
     }
 
     public static String generateDefaultIndexName(String table)

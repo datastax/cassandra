@@ -224,10 +224,6 @@ public final class CreateIndexStatement extends AlterSchemaStatement
         if (null == column)
             throw ire("Column '%s' doesn't exist", target.column);
 
-        if ((kind == IndexMetadata.Kind.CUSTOM) && !SchemaConstants.isValidName(target.column.toString()))
-            throw ire("Column '%s' is longer than the permissible name length of %d characters or" +
-                      " contains non-alphanumeric-underscore characters", target.column, SchemaConstants.NAME_LENGTH);
-
         if (column.type.referencesDuration())
         {
             if (column.type.isCollection())
@@ -274,7 +270,7 @@ public final class CreateIndexStatement extends AlterSchemaStatement
     private String generateIndexName(KeyspaceMetadata keyspace, List<IndexTarget> targets)
     {
         String baseName = targets.size() == 1
-                        ? IndexMetadata.generateDefaultIndexName(tableName, targets.get(0).column)
+                        ? IndexMetadata.generateDefaultIndexName(keyspace.name.length(), tableName, targets.get(0).column)
                         : IndexMetadata.generateDefaultIndexName(tableName);
         return keyspace.findAvailableIndexName(baseName);
     }
