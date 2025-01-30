@@ -20,8 +20,10 @@ package org.apache.cassandra.index.sai.cql;
 
 import java.util.Set;
 
+import org.junit.BeforeClass;
 import org.junit.Test;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SAITester;
@@ -38,6 +40,11 @@ import static org.junit.Assert.assertTrue;
 
 public class IndexCompressionTest extends SAITester
 {
+    @BeforeClass
+    public static void setup()
+    {
+        CassandraRelevantProperties.INDEX_COMPRESSION.setBoolean(true);
+    }
 
     @Test
     public void testKeyCompression()
