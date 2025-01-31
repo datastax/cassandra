@@ -28,7 +28,6 @@ import org.junit.Test;
 
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.File;
-import org.apache.cassandra.io.util.Memory;
 import org.apache.cassandra.io.util.SliceDescriptor;
 import org.apache.cassandra.schema.CompressionParams;
 
@@ -43,7 +42,7 @@ public class CompressionMetadataTest
     long dataLength = 1000;
     long compressedFileLength = 100;
 
-    private CompressionMetadata newCompressionMetadata(Memory.LongArray memory)
+    private CompressionMetadata newCompressionMetadata(CompressionMetadata.ChunkOffsetMemory memory)
     {
         return new CompressionMetadata(chunksIndexFile,
                                        params,
@@ -57,7 +56,7 @@ public class CompressionMetadataTest
     @Test
     public void testMemoryIsFreed()
     {
-        Memory.LongArray memory = new Memory.LongArray(10);
+        CompressionMetadata.ChunkOffsetMemory memory = new CompressionMetadata.ChunkOffsetMemory(10);
         CompressionMetadata cm = newCompressionMetadata(memory);
 
         cm.close();
@@ -68,7 +67,7 @@ public class CompressionMetadataTest
     @Test
     public void testMemoryIsShared()
     {
-        Memory.LongArray memory = new Memory.LongArray(10);
+        CompressionMetadata.ChunkOffsetMemory memory = new CompressionMetadata.ChunkOffsetMemory(10);
         CompressionMetadata cm = newCompressionMetadata(memory);
 
         CompressionMetadata copy = cm.sharedCopy();

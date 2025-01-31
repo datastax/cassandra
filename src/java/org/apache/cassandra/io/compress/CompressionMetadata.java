@@ -60,6 +60,30 @@ import org.apache.cassandra.utils.concurrent.WrappedSharedCloseable;
  */
 public class CompressionMetadata extends WrappedSharedCloseable
 {
+    /**
+     * This class extends Memory.LongArray in order to record the memory usage.
+     */
+    public static class ChunkOffsetMemory extends Memory.LongArray
+    {
+
+        public ChunkOffsetMemory(long size)
+        {
+            super(size);
+        }
+
+        public ChunkOffsetMemory(SafeMemory memory, long cnt)
+        {
+            super(memory, cnt);
+        }
+
+        @Override
+        public void close()
+        {
+            NATIVE_MEMORY_USAGE.addAndGet(-memoryUsed());
+            super.close();
+        }
+    }
+
     private static final AtomicLong NATIVE_MEMORY_USAGE = new AtomicLong(0);
     /**
      * DataLength can represent either the true length of the file
@@ -79,7 +103,7 @@ public class CompressionMetadata extends WrappedSharedCloseable
      * chunks. Each item is of Long type, thus 8 bytes long. Note that even if we deal with a partial data file (zero
      * copy metadata is present), we store offsets of all chunks for the original (compressed) data file.
      */
-    private final Memory.LongArray chunkOffsets;
+    private final ChunkOffsetMemory chunkOffsets;
     public final File chunksIndexFile;
     public final CompressionParams parameters;
 
@@ -108,7 +132,7 @@ public class CompressionMetadata extends WrappedSharedCloseable
 
         CompressionParams parameters;
         long dataLength;
-        Memory.LongArray chunkOffsets;
+        ChunkOffsetMemory chunkOffsets;
 
         try (FileInputStreamPlus stream = chunksIndexFile.newInputStream())
         {
@@ -144,7 +168,7 @@ public class CompressionMetadata extends WrappedSharedCloseable
 
             int endChunkIndex = Math.toIntExact((uncompressedOffset + dataLength - 1) >> chunkLengthBits) + 1;
 
-            Pair<Memory.LongArray, Long> offsetsAndLimit = readChunkOffsets(stream, startChunkIndex, endChunkIndex, compressedLength);
+            Pair<ChunkOffsetMemory, Long> offsetsAndLimit = readChunkOffsets(stream, startChunkIndex, endChunkIndex, compressedLength);
             chunkOffsets = offsetsAndLimit.left;
             // We adjust the compressed file length to store the position after the last chunk just to be able to
             // calculate the offset of the chunk next to the last one (in order to calculate the length of the last chunk).
@@ -168,7 +192,7 @@ public class CompressionMetadata extends WrappedSharedCloseable
     @VisibleForTesting
     public CompressionMetadata(File chunksIndexFile,
                                CompressionParams parameters,
-                               Memory.LongArray chunkOffsets,
+                               ChunkOffsetMemory chunkOffsets,
                                long dataLength,
                                long compressedFileLength,
                                int chunkLengthBits,
@@ -249,9 +273,9 @@ public class CompressionMetadata extends WrappedSharedCloseable
      *
      * @return A pair of chunk offsets array and the offset next to the last read chunk
      */
-    private static Pair<Memory.LongArray, Long> readChunkOffsets(FileInputStreamPlus input, int startIndex, int endIndex, long compressedFileLength)
+    private static Pair<ChunkOffsetMemory, Long> readChunkOffsets(FileInputStreamPlus input, int startIndex, int endIndex, long compressedFileLength)
     {
-        final Memory.LongArray offsets;
+        final ChunkOffsetMemory offsets;
         final int chunkCount;
         try
         {
@@ -271,9 +295,9 @@ public class CompressionMetadata extends WrappedSharedCloseable
         int chunksToRead = endIndex - startIndex;
 
         if (chunksToRead == 0)
-            return Pair.create(new Memory.LongArray(0), 0L);
+            return Pair.create(new ChunkOffsetMemory(0), 0L);
 
-        offsets = new Memory.LongArray(chunksToRead);
+        offsets = new ChunkOffsetMemory(chunksToRead);
         long i = 0;
         try
         {
@@ -426,11 +450,6 @@ public class CompressionMetadata extends WrappedSharedCloseable
         return offsets.toArray(new Chunk[offsets.size()]);
     }
 
-    public void close()
-    {
-        NATIVE_MEMORY_USAGE.addAndGet(-chunkOffsets.memoryUsed());
-    }
-
     public static class Writer extends Transactional.AbstractTransactional implements Transactional
     {
         // path to the file
@@ -555,7 +574,7 @@ public class CompressionMetadata extends WrappedSharedCloseable
             if (tCount < this.count)
                 compressedLength = tOffsets.getLong(tCount * 8L);
 
-            return new CompressionMetadata(file, parameters, new Memory.LongArray(tOffsets, tCount), dataLength, compressedLength, Integer.numberOfTrailingZeros(parameters.chunkLength()), 0);
+            return new CompressionMetadata(file, parameters, new ChunkOffsetMemory(tOffsets, tCount), dataLength, compressedLength, Integer.numberOfTrailingZeros(parameters.chunkLength()), 0);
         }
 
         /**
