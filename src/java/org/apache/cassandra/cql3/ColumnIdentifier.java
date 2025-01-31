@@ -33,8 +33,6 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.ObjectSizes;
 import org.apache.cassandra.utils.memory.ByteBufferCloner;
 
-import static org.apache.cassandra.schema.SchemaConstants.PATTERN_WORD_CHARS;
-
 /**
  * Represents an identifer for a CQL column definition.
  * TODO : should support light-weight mode without text representation for when not interned
@@ -52,6 +50,8 @@ public class ColumnIdentifier implements IMeasurableMemory, Comparable<ColumnIde
      */
     public final long prefixComparison;
     private final boolean interned;
+
+    private static final Pattern UNQUOTED_IDENTIFIER = Pattern.compile("[a-z][a-z0-9_]*");
 
     private static final long EMPTY_SIZE = ObjectSizes.measure(new ColumnIdentifier(ByteBufferUtil.EMPTY_BYTE_BUFFER, "", false));
 
@@ -242,7 +242,7 @@ public class ColumnIdentifier implements IMeasurableMemory, Comparable<ColumnIde
 
     public static String maybeQuote(String text)
     {
-        if (PATTERN_WORD_CHARS.matcher(text).matches() && !ReservedKeywords.isReserved(text))
+        if (UNQUOTED_IDENTIFIER.matcher(text).matches() && !ReservedKeywords.isReserved(text))
             return text;
         return quote(text);
     }
