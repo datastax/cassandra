@@ -475,7 +475,7 @@ public abstract class SegmentBuilder
         if (TypeUtil.isLiteral(type))
         {
             var terms = ByteLimitedMaterializer.materializeTokens(analyzer, rawTerm, components.context(), key);
-            add(terms, key, sstableRowId);
+            totalSize += add(terms, key, sstableRowId);
         }
         else
         {
