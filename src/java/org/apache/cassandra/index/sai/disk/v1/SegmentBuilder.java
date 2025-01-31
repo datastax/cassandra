@@ -384,6 +384,7 @@ public abstract class SegmentBuilder
         @Override
         protected long addInternal(List<ByteBuffer> terms, int segmentRowId)
         {
+            assert terms.size() == 1;
             return graphIndex.add(terms.get(0), segmentRowId);
         }
 
