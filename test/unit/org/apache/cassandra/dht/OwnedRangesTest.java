@@ -23,13 +23,22 @@ import java.util.Collections;
 import java.util.List;
 
 import org.apache.commons.collections.CollectionUtils;
+import org.junit.BeforeClass;
 import org.junit.Test;
+
+import org.apache.cassandra.config.DatabaseDescriptor;
 
 import static org.junit.Assert.assertTrue;
 import static org.apache.cassandra.utils.TokenRangeTestUtil.generateRanges;
 
 public class OwnedRangesTest
 {
+    @BeforeClass
+    public static void setup()
+    {
+        DatabaseDescriptor.daemonInitialization();
+    }
+
     @Test
     public void testFilterRangesWithEmptySuperset()
     {
