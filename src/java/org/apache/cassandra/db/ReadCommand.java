@@ -18,12 +18,7 @@
 package org.apache.cassandra.db;
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-import java.util.Objects;
-import java.util.Set;
-import java.util.UUID;
+import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiFunction;
 import java.util.function.Function;
@@ -34,6 +29,10 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Sets;
+import org.apache.cassandra.index.SecondaryIndexManager;
+import org.apache.cassandra.index.sai.StorageAttachedIndex;
+import org.apache.cassandra.index.sai.plan.StorageAttachedIndexQueryPlan;
+import org.apache.cassandra.locator.InetAddressAndPort;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -87,6 +86,7 @@ import org.apache.cassandra.utils.FBUtilities;
 import static com.google.common.collect.Iterables.any;
 import static com.google.common.collect.Iterables.filter;
 import static org.apache.cassandra.db.partitions.UnfilteredPartitionIterators.MergeListener.NOOP;
+import static org.apache.cassandra.index.SecondaryIndexManager.getIndexStatus;
 import static org.apache.cassandra.utils.MonotonicClock.approxTime;
 
 /**
@@ -406,10 +406,13 @@ public abstract class ReadCommand extends AbstractReadQuery
         Index.Searcher searcher = null;
         if (indexQueryPlan != null)
         {
-            cfs.indexManager.checkQueryability(indexQueryPlan);
-            searcher = indexSearcher();
-            Index index = indexQueryPlan.getFirst();
-            Tracing.trace("Executing read on {}.{} using index {}", cfs.metadata.keyspace, cfs.metadata.name, index.getIndexMetadata().name);
+            if (cfs.indexManager.isQueryableThroughIndex(indexQueryPlan, rowFilter().allowFitlering))
+            {
+                searcher = indexSearcher();
+                Index index = indexQueryPlan.getFirst();
+                // KATE why only the first index? What if we use more than one? Misleading? Check it later
+                Tracing.trace("Executing read on {}.{} using index {}", cfs.metadata.keyspace, cfs.metadata.name, index.getIndexMetadata().name);
+            }
         }
 
         Context context = Context.from(this);
@@ -1053,11 +1056,30 @@ public abstract class ReadCommand extends AbstractReadQuery
             if (hasIndex)
             {
                 IndexMetadata index = deserializeIndexMetadata(in, version, metadata);
+
                 if (index != null)
                 {
                     Index.Group indexGroup = Keyspace.openAndGetStore(metadata).indexManager.getIndexGroup(index);
                     if (indexGroup != null)
+                    {
                         indexQueryPlan = indexGroup.queryPlanFor(rowFilter);
+                        if (indexQueryPlan != null)
+                        {
+                            Set<Index> allIndexes = indexQueryPlan.getIndexes();
+                            Set<Index> filteredIndexes = new HashSet<>();
+                            for (Index plannedIndex : allIndexes)
+                            {
+                                Index.Status status = getIndexStatus(FBUtilities.getBroadcastAddressAndPort(), metadata.keyspace, plannedIndex.getIndexMetadata().name);
+                                if (status != Index.Status.FULL_REBUILD_STARTED)
+                                    filteredIndexes.add(plannedIndex);
+                            }
+
+                            if (filteredIndexes.isEmpty())
+                                indexQueryPlan = null;
+                            else if(filteredIndexes.size() < allIndexes.size())
+                                indexQueryPlan = indexGroup.queryPlanForIndices(rowFilter, filteredIndexes);
+                        }
+                    }
                 }
             }
 

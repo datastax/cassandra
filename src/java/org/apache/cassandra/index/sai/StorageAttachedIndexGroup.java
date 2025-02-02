@@ -241,6 +241,12 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
     }
 
     @Override
+    public StorageAttachedIndexQueryPlan queryPlanForIndices(RowFilter rowFilter, Set<Index> indexes)
+    {
+        return StorageAttachedIndexQueryPlan.create(baseCfs, queryMetrics, indices, rowFilter);
+    }
+
+    @Override
     public SSTableFlushObserver getFlushObserver(Descriptor descriptor, LifecycleNewTracker tracker, TableMetadata tableMetadata, long keyCount)
     {
         IndexDescriptor indexDescriptor = IndexDescriptor.empty(descriptor);

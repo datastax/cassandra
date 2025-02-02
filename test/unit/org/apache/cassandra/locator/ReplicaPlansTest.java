@@ -122,11 +122,11 @@ public class ReplicaPlansTest
         Token token = new Murmur3Partitioner.LongToken(0);
 
         Keyspace keyspace1 = keyspaceWithSnitch(KEYSPACE1, filterByKeyspaceAffinitySnitch);
-        ReplicaPlan.ForTokenRead plan1 = ReplicaPlans.forRead(keyspace1, token, null, ANY, NeverSpeculativeRetryPolicy.INSTANCE);
+        ReplicaPlan.ForTokenRead plan1 = ReplicaPlans.forRead(keyspace1, token, null, ANY, NeverSpeculativeRetryPolicy.INSTANCE, false);
         assertEndpointsMatchKeyspaceAffinity(KEYSPACE1, plan1.contacts());
 
         Keyspace keyspace2 = keyspaceWithSnitch(KEYSPACE2, filterByKeyspaceAffinitySnitch);
-        ReplicaPlan.ForTokenRead plan2 = ReplicaPlans.forRead(keyspace2, token, null, ANY, NeverSpeculativeRetryPolicy.INSTANCE);
+        ReplicaPlan.ForTokenRead plan2 = ReplicaPlans.forRead(keyspace2, token, null, ANY, NeverSpeculativeRetryPolicy.INSTANCE, false);
         assertEndpointsMatchKeyspaceAffinity(KEYSPACE2, plan2.contacts());
     }
 

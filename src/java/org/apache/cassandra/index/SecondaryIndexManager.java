@@ -362,13 +362,22 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
      * @param queryPlan a query plan
      * @throws IndexNotAvailableException if the query plan has any index that is not queryable
      */
-    public void checkQueryability(Index.QueryPlan queryPlan)
+    public boolean isQueryableThroughIndex(Index.QueryPlan queryPlan, boolean allowsFiltering)
     {
+        boolean canUseIndex = false;
         for (Index index : queryPlan.getIndexes())
         {
+            if (isIndexBuilding(index))
+                if (allowsFiltering)
+                    continue;
+
             if (!isIndexQueryable(index))
                 throw new IndexNotAvailableException(index);
+
+            canUseIndex = true;
         }
+
+        return canUseIndex;
     }
 
     /**
@@ -380,6 +389,17 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
     public boolean isIndexQueryable(Index index)
     {
         return isIndexQueryable(index.getIndexMetadata().name);
+    }
+
+    /**
+     +     * Checks if the specified index is building.
+     +     *
+     +     * @param index the index
+     +     * @return <code>true</code> if the specified index is building, <code>false</code> otherwise
+     +     */
+    public boolean isIndexBuilding(Index index)
+    {
+            return isIndexBuilding(index.getIndexMetadata().name);
     }
 
     /**
@@ -1168,7 +1188,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
     /**
      * Called at query time to choose which (if any) of the registered index implementations to use for a given query.
      * <p>
-     * This is a two step processes, firstly compiling the set of searchable indexes then choosing the one which reduces
+     * This is a two-step processes, firstly compiling the set of searchable indexes then choosing the one which reduces
      * the search space the most.
      * <p>
      * In the first phase, if the command's RowFilter contains any custom index expressions, the indexes that they
@@ -1814,13 +1834,17 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
      * @param indexQueryPlan index query plan used in the read command
      * @param level consistency level of read command
      */
-    public static <E extends Endpoints<E>> E filterForQuery(E liveEndpoints, Keyspace keyspace, Index.QueryPlan indexQueryPlan, ConsistencyLevel level)
+    public static <E extends Endpoints<E>> E filterForQuery(E liveEndpoints, Keyspace keyspace, Index.QueryPlan indexQueryPlan, ConsistencyLevel level, boolean allowsFiltering)
     {
         E queryableEndpoints = liveEndpoints.filter(replica -> {
 
             for (Index index : indexQueryPlan.getIndexes())
             {
                 Index.Status status = getIndexStatus(replica.endpoint(), keyspace.getName(), index.getIndexMetadata().name);
+                // if the status of the index is building and there is allow filtering - that is ok too
+                if (status == Index.Status.FULL_REBUILD_STARTED && allowsFiltering)
+                    continue;
+
                 if (!index.isQueryable(status))
                     return false;
             }

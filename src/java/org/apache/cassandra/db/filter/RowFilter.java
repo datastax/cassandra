@@ -79,13 +79,16 @@ public class RowFilter
     private static final Logger logger = LoggerFactory.getLogger(RowFilter.class);
 
     public static final Serializer serializer = new Serializer();
-    public static final RowFilter NONE = new RowFilter(FilterElement.NONE);
+    public static final RowFilter NONE = new RowFilter(FilterElement.NONE, Boolean.TRUE);
 
     protected final FilterElement root;
 
-    protected RowFilter(FilterElement root)
+    public final boolean allowFitlering;
+
+    protected RowFilter(FilterElement root, Boolean allowFitlering)
     {
         this.root = root;
+        this.allowFitlering = allowFitlering;
     }
 
     public FilterElement root()
@@ -267,7 +270,7 @@ public class RowFilter
         if (root.size() == 1)
             return RowFilter.NONE;
 
-        return new RowFilter(root.filter(e -> !e.equals(expression)));
+        return new RowFilter(root.filter(e -> !e.equals(expression)), allowFitlering);
     }
 
     public RowFilter withoutExpressions()
@@ -280,12 +283,12 @@ public class RowFilter
      */
     public RowFilter withoutDisjunctions()
     {
-        return new RowFilter(root.withoutDisjunctions());
+        return new RowFilter(root.withoutDisjunctions(), allowFitlering);
     }
 
     public RowFilter restrict(Predicate<Expression> filter)
     {
-        return new RowFilter(root.filter(filter));
+        return new RowFilter(root.filter(filter), allowFitlering);
     }
 
     public boolean isEmpty()
@@ -301,12 +304,12 @@ public class RowFilter
 
     public static Builder builder()
     {
-        return new Builder(null);
+        return new Builder(null, builder().allowFiltering);
     }
 
-    public static Builder builder(IndexRegistry indexRegistry)
+    public static Builder builder(IndexRegistry indexRegistry, boolean allowFitlering)
     {
-        return new Builder(indexRegistry);
+        return new Builder(indexRegistry, allowFitlering);
     }
 
     public static class Builder
@@ -314,15 +317,17 @@ public class RowFilter
         private FilterElement.Builder current = new FilterElement.Builder(false);
 
         private final IndexRegistry indexRegistry;
+        private final Boolean allowFiltering;
 
-        public Builder(IndexRegistry indexRegistry)
+        public Builder(IndexRegistry indexRegistry, boolean allowFiltering)
         {
             this.indexRegistry = indexRegistry;
+            this.allowFiltering = allowFiltering;
         }
 
         public RowFilter build()
         {
-            return new RowFilter(current.build());
+            return new RowFilter(current.build(), allowFiltering);
         }
 
         public RowFilter buildFromRestrictions(StatementRestrictions restrictions, TableMetadata table, QueryOptions options, QueryState queryState)
@@ -332,7 +337,7 @@ public class RowFilter
             if (Guardrails.queryFilters.enabled(queryState))
                 Guardrails.queryFilters.guard(root.numFilteredValues(), "Select query", false, queryState);
 
-            return new RowFilter(root);
+            return new RowFilter(root, allowFiltering);
         }
 
         private FilterElement doBuild(StatementRestrictions restrictions, TableMetadata table, QueryOptions options)
@@ -386,7 +391,7 @@ public class RowFilter
             {
                 // If we're in disjunction mode, we must not pass the current builder to addToRowFilter.
                 // We create a new conjunction sub-builder instead and add all expressions there.
-                var builder = new Builder(indexRegistry);
+                var builder = new Builder(indexRegistry, allowFiltering);
                 addToRowFilterDelegate.accept(builder);
 
                 if (builder.current.expressions.size() == 1 && builder.current.children.isEmpty())
@@ -1731,7 +1736,9 @@ public class RowFilter
         {
             in.readBoolean(); // Unused
             FilterElement operation = FilterElement.serializer.deserialize(in, version, metadata);
-            return new RowFilter(operation);
+            // We still do not serialize the allowFiltering info but for simplicity sake, we just set it to false and keep
+            // on not using it on the replicas TO DO: serialize the allowFiltering info
+            return new RowFilter(operation, false);
         }
 
         public long serializedSize(RowFilter filter, int version)
