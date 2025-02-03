@@ -264,16 +264,13 @@ public class NativeIndexDDLTest extends SAITester
     }
 
     @Test
-    public void shouldFailCreateWithInvalidCharactersInColumnName()
+    public void shouldNotFailCreateWithValidColumnName()
     {
-        String invalidColumn = "/invalid";
+        String invalidColumn = "/NOT_invalid";
         createTable(String.format("CREATE TABLE %%s (id text PRIMARY KEY, \"%s\" text)", invalidColumn));
 
-        assertThatThrownBy(() -> executeNet(String.format("CREATE CUSTOM INDEX ON %%s(\"%s\")" +
-                                                          " USING 'StorageAttachedIndex'", invalidColumn)))
-                .isInstanceOf(InvalidQueryException.class)
-                .hasMessage(String.format("Column '%s' is longer than the permissible name length of %d characters or" +
-                                          " contains non-alphanumeric-underscore characters", invalidColumn, SchemaConstants.NAME_LENGTH));
+        executeNet(String.format("CREATE CUSTOM INDEX ON %%s(\"%s\")" +
+                                                          " USING 'StorageAttachedIndex'", invalidColumn));
     }
 
     @Test
