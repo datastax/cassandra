@@ -112,6 +112,8 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             try
             {
                 FilterTree filterTree = analyzeFilter();
+                maybeTriggerReferencedIndexesGuardrail(filterTree);
+
                 Plan plan = controller.buildPlan();
                 Iterator<? extends PrimaryKey> keysIterator = controller.buildIterator(plan);
 
