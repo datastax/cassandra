@@ -75,7 +75,6 @@ import org.apache.cassandra.inject.Injections;
 import org.apache.cassandra.inject.InvokePointBuilder;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.IndexMetadata;
-import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Throwables;
@@ -243,7 +242,7 @@ public class NativeIndexDDLTest extends SAITester
     public void shouldFailCreateWithUserType()
     {
         String typeName = createType("CREATE TYPE %s (a text, b int, c double)");
-        createTable("CREATE TABLE %s (id text PRIMARY KEY, val " + typeName + ")");
+        createTable("CREATE TABLE %s (id text PRIMARY KEY, val " + typeName + ')');
 
         assertThatThrownBy(() -> executeNet("CREATE CUSTOM INDEX ON %s(val) " +
                                             "USING 'StorageAttachedIndex'")).isInstanceOf(InvalidQueryException.class);
@@ -949,7 +948,7 @@ public class NativeIndexDDLTest extends SAITester
             truncate(true);
         }
 
-        waitForAssert(() -> verifyNoIndexFiles());
+        waitForAssert(this::verifyNoIndexFiles);
 
         // verify index-view-manager has been cleaned up
         verifySSTableIndexes(IndexMetadata.generateDefaultIndexName(currentTable(), V1_COLUMN_IDENTIFIER), 0);
@@ -1184,7 +1183,7 @@ public class NativeIndexDDLTest extends SAITester
 
 
     @Test
-    public void verifyCanRebuildAndReloadInPlaceToNewerVersion() throws Throwable
+    public void verifyCanRebuildAndReloadInPlaceToNewerVersion()
     {
         Version current = Version.latest();
         try
