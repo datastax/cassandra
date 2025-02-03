@@ -502,7 +502,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         ReadQuery query;
         if (isPartitionRangeQuery)
         {
-            if (restrictions.usesSecondaryIndexing() && !SchemaConstants.isLocalSystemKeyspace(table.keyspace))
+            if (restrictions.isKeyRange() && restrictions.usesSecondaryIndexing() && !SchemaConstants.isLocalSystemKeyspace(table.keyspace))
                 Guardrails.nonPartitionRestrictedIndexQueryEnabled.ensureEnabled(state);
 
             query = getRangeCommand(options, state, columnFilter, rowFilter, limit, nowInSec);
