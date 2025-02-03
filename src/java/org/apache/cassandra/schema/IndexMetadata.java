@@ -61,9 +61,11 @@ import static org.apache.cassandra.schema.SchemaConstants.isValidName;
  */
 public final class IndexMetadata
 {
-    public static final Serializer serializer = new Serializer();
-    static final String INDEX_POSTFIX = "_idx";
     private static final Logger logger = LoggerFactory.getLogger(IndexMetadata.class);
+
+    public static final Serializer serializer = new Serializer();
+
+    static final String INDEX_POSTFIX = "_idx";
     /**
      * A mapping of user-friendly index names to their fully qualified index class names.
      */
@@ -85,6 +87,7 @@ public final class IndexMetadata
     public final String name;
     public final Kind kind;
     public final Map<String, String> options;
+
     private IndexMetadata(String name,
                           Map<String, String> options,
                           Kind kind)
