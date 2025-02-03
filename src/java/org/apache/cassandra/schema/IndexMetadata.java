@@ -20,7 +20,10 @@ package org.apache.cassandra.schema;
 
 import java.io.IOException;
 import java.lang.reflect.InvocationTargetException;
-import java.util.*;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
@@ -42,6 +45,7 @@ import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.internal.CassandraIndex;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
@@ -57,10 +61,9 @@ import static org.apache.cassandra.schema.SchemaConstants.isValidName;
  */
 public final class IndexMetadata
 {
-    private static final Logger logger = LoggerFactory.getLogger(IndexMetadata.class);
-
     public static final Serializer serializer = new Serializer();
-
+    static final String INDEX_POSTFIX = "_idx";
+    private static final Logger logger = LoggerFactory.getLogger(IndexMetadata.class);
     /**
      * A mapping of user-friendly index names to their fully qualified index class names.
      */
@@ -82,7 +85,6 @@ public final class IndexMetadata
     public final String name;
     public final Kind kind;
     public final Map<String, String> options;
-
     private IndexMetadata(String name,
                           Map<String, String> options,
                           Kind kind)
@@ -110,28 +112,75 @@ public final class IndexMetadata
         return new IndexMetadata(name, newOptions, kind);
     }
 
-    private static int calculateAllowedLength(int keyspaceNameLength, int tableNameLength)
-    {
-        // Prefixes and suffixes from IndexContext.getFullName
-        int addedLength1 = keyspaceNameLength + tableNameLength + 2 + 4;
-        // Prefixes and suffixes constructed by Version.stargazerFileNameFormat
-        int addedLength2 = SAI_DESCRIPTOR.length() + 4 + IndexComponentType.KD_TREE_POSTING_LISTS.representation.length() + 3;
-        // Prefixes from Descriptor constructor
-        addedLength2 += 2 + 2 + SSTableFormat.Type.BTI.name().length() + 16;
-        return SchemaConstants.NAME_LENGTH - Math.max(addedLength1, addedLength2);
-    }
-
     public static String generateDefaultIndexName(int keyspaceNameLength, String table, ColumnIdentifier column)
     {
-        String indexPostfix = "_idx";
 
         String indexNameUntruncated = PATTERN_NON_WORD_CHAR.matcher(table + '_' + column.toString()).replaceAll("");
 
         String indexNameTrimmed = indexNameUntruncated
                                   .substring(0,
-                                             Math.min(calculateAllowedLength(keyspaceNameLength, table.length()) - indexPostfix.length(),
+                                             Math.min(calculateAllowedLength(keyspaceNameLength, table.length()),
                                                       indexNameUntruncated.length()));
-        return indexNameTrimmed + indexPostfix;
+        return indexNameTrimmed + INDEX_POSTFIX;
+    }
+
+    private static int calculateAllowedLength(int keyspaceNameLength, int tableNameLength)
+    {
+        int addedLength1 = getAddedLengthFromIndexContextFullName(keyspaceNameLength, tableNameLength);
+        int addedLength2 = getAddedLengthFromDescriptorAndVersion();
+
+        int maxAddedLength = Math.max(addedLength1, addedLength2);
+        int uniquenessSuffixLength = 3;
+        int finalAddedLength = maxAddedLength + INDEX_POSTFIX.length() + uniquenessSuffixLength;
+        int tryMinimumLength = 1;
+        return Math.max(SchemaConstants.NAME_LENGTH - finalAddedLength, tryMinimumLength);
+    }
+
+    /**
+     * Calculates the length of the added prefixes and suffixes from Descriptor constructor
+     * and Version.stargazerFileNameFormat.
+     *
+     * @return the length of the added prefixes and suffixes
+     */
+    private static int getAddedLengthFromDescriptorAndVersion()
+    {
+        int separatorLength = 1;
+        // Prefixes and suffixes constructed by Version.stargazerFileNameFormat
+        int versionNameLength = Version.latest().toString().length();
+        int generationLength = 1;
+        int fileExtensionLength = 3;
+        int addedLength2 = SAI_DESCRIPTOR.length()
+                           + versionNameLength
+                           + generationLength
+                           + fileExtensionLength
+                           + IndexComponentType.KD_TREE_POSTING_LISTS.representation.length()
+                           + separatorLength * 4;
+        // Prefixes from Descriptor constructor
+        int indexVersionLength = 2;
+        int tableIdLength = 32;
+        addedLength2 += indexVersionLength
+                        + SSTableFormat.Type.BTI.name().length()
+                        + tableIdLength
+                        + separatorLength * 2;
+        return addedLength2;
+    }
+
+    /**
+     * Lengths of prefixes and suffixes from IndexContext.getFullName
+     *
+     * @param keyspaceNameLength the length of the keyspace name
+     * @param tableNameLength    the length of the table name
+     * @return the length of the added prefixes and suffixes
+     */
+    private static int getAddedLengthFromIndexContextFullName(int keyspaceNameLength, int tableNameLength)
+    {
+        int separatorLength = 1;
+        int addedLength1 = keyspaceNameLength + tableNameLength + separatorLength * 2;
+        if (addedLength1 > SchemaConstants.NAME_LENGTH)
+            throw new ConfigurationException(String.format("Prefix of keyspace and table names together are too long for an index file name: %s. Max lenght is %s",
+                                                           addedLength1,
+                                                           SchemaConstants.NAME_LENGTH));
+        return addedLength1;
     }
 
     @VisibleForTesting
