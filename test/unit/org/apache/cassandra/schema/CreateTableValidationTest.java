@@ -121,6 +121,29 @@ public class CreateTableValidationTest extends CQLTester
         assertThat(result.size()).isEqualTo(1);
     }
 
+    @Test
+    public void testLongTableNames()
+    {
+
+        String longName = "very_very_very_very_very_very_very_very_very_" +
+                          "very_very_very_very_very_very_very_very_very_very_very_very_" +
+                          "very_very_very_very_very_very_very_very_very_very_very_" +
+                          "very_very_very_very_very_very_very_very_long_keyspace_name";
+
+        assertInvalidMessage("Expected compaction params for legacy strategy: CompactionStrategyOptions{class=org.apache.cassandra.db.compaction.UnifiedCompactionStrategy, options={base_shard_count=1}}",
+                             String.format("CREATE TABLE %s.%s (" +
+                                           "key int PRIMARY KEY," +
+                                           "\"a very very very very very very very very long field\" int)", KEYSPACE, longName));
+
+        execute(String.format("CREATE KEYSPACE %s with replication = " +
+                              "{ 'class' : 'SimpleStrategy', 'replication_factor' : 1 }",
+                              longName));
+        assertInvalidMessage("Expected compaction params for legacy strategy: CompactionStrategyOptions{class=org.apache.cassandra.db.compaction.UnifiedCompactionStrategy, options={base_shard_count=1}}",
+                             String.format("CREATE TABLE %s.%s (" +
+                                           "key int PRIMARY KEY," +
+                                           "\"a very very very very very very very very long field\" int)", longName, "rather_longer_table_name"));
+    }
+
     private void expectedFailure(String statement, String errorMsg)
     {
 
