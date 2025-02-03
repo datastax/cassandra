@@ -93,7 +93,7 @@ public final class SSLFactory
     {
         if (Boolean.getBoolean(Config.PROPERTY_PREFIX + "disable_tcactive_openssl"))
         {
-            openSslIsAvailable = false;
+            openSslIsAvailable = OpenSsl.isAvailable();
         }
         else
         {
