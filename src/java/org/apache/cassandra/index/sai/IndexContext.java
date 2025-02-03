@@ -36,6 +36,7 @@ import javax.annotation.Nullable;
 import com.google.common.base.MoreObjects;
 import com.google.common.collect.ImmutableSet;
 
+import com.datastax.driver.core.exceptions.InvalidQueryException;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -224,8 +225,7 @@ public class IndexContext
         String fullIndexName = String.format("%s.%s.%s", this.keyspace, this.table, this.config.name);
         if (fullIndexName.length() > SchemaConstants.NAME_LENGTH)
         {
-            throw new InvalidRequestException(
-            String.format("The prepared index name %s of length %s is too long for use in file paths and file names. Max length is %s.", fullIndexName, fullIndexName.length(), SchemaConstants.NAME_LENGTH));
+            throw new InvalidQueryException(String.format("The prepared index name %s of length %s is too long for use in file paths and file names. Max length is %s.", fullIndexName, fullIndexName.length(), SchemaConstants.NAME_LENGTH));
         }
         return fullIndexName;
     }
