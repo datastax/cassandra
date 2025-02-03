@@ -1895,6 +1895,12 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         return data;
     }
 
+
+    /**
+     * Convenience method for getting the set of live sstables associated with this ColumnFamilyStore. Note that this
+     * will also contain any early-opened sstables.
+     * @return the tracker's current view's {@link SSTableSet#LIVE} sstables
+     */
     public Set<SSTableReader> getLiveSSTables()
     {
         return data.getLiveSSTables();
