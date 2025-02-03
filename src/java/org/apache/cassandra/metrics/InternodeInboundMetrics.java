@@ -20,27 +20,29 @@ package org.apache.cassandra.metrics;
 import com.codahale.metrics.Gauge;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.InboundMessageHandlers;
-import org.apache.cassandra.metrics.CassandraMetricsRegistry.MetricName;
+import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
 
 /**
  * Metrics for internode connections.
  */
 public class InternodeInboundMetrics
 {
-    private final MetricName corruptFramesRecovered;
-    private final MetricName corruptFramesUnrecovered;
-    private final MetricName errorBytes;
-    private final MetricName errorCount;
-    private final MetricName expiredBytes;
-    private final MetricName expiredCount;
-    private final MetricName pendingBytes;
-    private final MetricName pendingCount;
-    private final MetricName processedBytes;
-    private final MetricName processedCount;
-    private final MetricName receivedBytes;
-    private final MetricName receivedCount;
-    private final MetricName throttledCount;
-    private final MetricName throttledNanos;
+    public final Gauge<Long> corruptFramesRecovered;
+    public final Gauge<Long> corruptFramesUnrecovered;
+    public final Gauge<Long> errorBytes;
+    public final Gauge<Long> errorCount;
+    public final Gauge<Long> expiredBytes;
+    public final Gauge<Long> expiredCount;
+    public final Gauge<Long> pendingBytes;
+    public final Gauge<Long> pendingCount;
+    public final Gauge<Long> processedBytes;
+    public final Gauge<Long> processedCount;
+    public final Gauge<Long> receivedBytes;
+    public final Gauge<Long> receivedCount;
+    public final Gauge<Long> throttledCount;
+    public final Gauge<Long> throttledNanos;
+
+    private final MetricNameFactory factory;
 
     /**
      * Create metrics for given inbound message handlers.
@@ -50,49 +52,40 @@ public class InternodeInboundMetrics
     public InternodeInboundMetrics(InetAddressAndPort peer, InboundMessageHandlers handlers)
     {
         // ipv6 addresses will contain colons, which are invalid in a JMX ObjectName
-        MetricNameFactory factory = new DefaultNameFactory("InboundConnection", peer.getHostAddressAndPortForJMX());
+        factory = new DefaultNameFactory("InboundConnection", peer.getHostAddressAndPortForJMX());
 
-        register(corruptFramesRecovered = factory.createMetricName("CorruptFramesRecovered"), handlers::corruptFramesRecovered);
-        register(corruptFramesUnrecovered = factory.createMetricName("CorruptFramesUnrecovered"), handlers::corruptFramesUnrecovered);
-        register(errorBytes = factory.createMetricName("ErrorBytes"), handlers::errorBytes);
-        register(errorCount = factory.createMetricName("ErrorCount"), handlers::errorCount);
-        register(expiredBytes = factory.createMetricName("ExpiredBytes"), handlers::expiredBytes);
-        register(expiredCount = factory.createMetricName("ExpiredCount"), handlers::expiredCount);
-        register(pendingBytes = factory.createMetricName("ScheduledBytes"), handlers::scheduledBytes);
-        register(pendingCount = factory.createMetricName("ScheduledCount"), handlers::scheduledCount);
-        register(processedBytes = factory.createMetricName("ProcessedBytes"), handlers::processedBytes);
-        register(processedCount = factory.createMetricName("ProcessedCount"), handlers::processedCount);
-        register(receivedBytes = factory.createMetricName("ReceivedBytes"), handlers::receivedBytes);
-        register(receivedCount = factory.createMetricName("ReceivedCount"), handlers::receivedCount);
-        register(throttledCount = factory.createMetricName("ThrottledCount"), handlers::throttledCount);
-        register(throttledNanos = factory.createMetricName("ThrottledNanos"), handlers::throttledNanos);
+        corruptFramesRecovered = Metrics.register(factory.createMetricName("CorruptFramesRecovered"), handlers::corruptFramesRecovered);
+        corruptFramesUnrecovered = Metrics.register(factory.createMetricName("CorruptFramesUnrecovered"), handlers::corruptFramesUnrecovered);
+        errorBytes = Metrics.register(factory.createMetricName("ErrorBytes"), handlers::errorBytes);
+        errorCount = Metrics.register(factory.createMetricName("ErrorCount"), handlers::errorCount);
+        expiredBytes = Metrics.register(factory.createMetricName("ExpiredBytes"), handlers::expiredBytes);
+        expiredCount = Metrics.register(factory.createMetricName("ExpiredCount"), handlers::expiredCount);
+        pendingBytes = Metrics.register(factory.createMetricName("ScheduledBytes"), handlers::scheduledBytes);
+        pendingCount = Metrics.register(factory.createMetricName("ScheduledCount"), handlers::scheduledCount);
+        processedBytes = Metrics.register(factory.createMetricName("ProcessedBytes"), handlers::processedBytes);
+        processedCount = Metrics.register(factory.createMetricName("ProcessedCount"), handlers::processedCount);
+        receivedBytes = Metrics.register(factory.createMetricName("ReceivedBytes"), handlers::receivedBytes);
+        receivedCount = Metrics.register(factory.createMetricName("ReceivedCount"), handlers::receivedCount);
+        throttledCount = Metrics.register(factory.createMetricName("ThrottledCount"), handlers::throttledCount);
+        throttledNanos = Metrics.register(factory.createMetricName("ThrottledNanos"), handlers::throttledNanos);
     }
 
     public void release()
     {
-        remove(corruptFramesRecovered);
-        remove(corruptFramesUnrecovered);
-        remove(errorBytes);
-        remove(errorCount);
-        remove(expiredBytes);
-        remove(expiredCount);
-        remove(pendingBytes);
-        remove(pendingCount);
-        remove(processedBytes);
-        remove(processedCount);
-        remove(receivedBytes);
-        remove(receivedCount);
-        remove(throttledCount);
-        remove(throttledNanos);
+        Metrics.remove(factory.createMetricName("CorruptFramesRecovered"));
+        Metrics.remove(factory.createMetricName("CorruptFramesUnrecovered"));
+        Metrics.remove(factory.createMetricName("ErrorBytes"));
+        Metrics.remove(factory.createMetricName("ErrorCount"));
+        Metrics.remove(factory.createMetricName("ExpiredBytes"));
+        Metrics.remove(factory.createMetricName("ExpiredCount"));
+        Metrics.remove(factory.createMetricName("PendingBytes"));
+        Metrics.remove(factory.createMetricName("PendingCount"));
+        Metrics.remove(factory.createMetricName("ProcessedBytes"));
+        Metrics.remove(factory.createMetricName("ProcessedCount"));
+        Metrics.remove(factory.createMetricName("ReceivedBytes"));
+        Metrics.remove(factory.createMetricName("ReceivedCount"));
+        Metrics.remove(factory.createMetricName("ThrottledCount"));
+        Metrics.remove(factory.createMetricName("ThrottledNanos"));
     }
 
-    private static void register(MetricName name, Gauge gauge)
-    {
-        CassandraMetricsRegistry.Metrics.register(name, gauge);
-    }
-
-    private static void remove(MetricName name)
-    {
-        CassandraMetricsRegistry.Metrics.remove(name);
-    }
 }
