@@ -35,6 +35,7 @@ import org.apache.commons.lang3.builder.ToStringBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.datastax.driver.core.exceptions.InvalidQueryException;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.CqlBuilder;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget;
@@ -129,14 +130,18 @@ public final class IndexMetadata
 
     private static int calculateAllowedLength(int keyspaceNameLength, int tableNameLength)
     {
-        int addedLength1 = getAddedLengthFromIndexContextFullName(keyspaceNameLength, tableNameLength);
+        int uniquenessSuffixLength = 3;
+        int minIndexNameAddition = uniquenessSuffixLength + INDEX_POSTFIX.length();
+
+        int addedLength1 = getAddedLengthFromIndexContextFullName(keyspaceNameLength, tableNameLength, minIndexNameAddition);
         int addedLength2 = getAddedLengthFromDescriptorAndVersion();
 
         int maxAddedLength = Math.max(addedLength1, addedLength2);
-        int uniquenessSuffixLength = 3;
-        int finalAddedLength = maxAddedLength + INDEX_POSTFIX.length() + uniquenessSuffixLength;
-        int tryMinimumLength = 1;
-        return Math.max(SchemaConstants.NAME_LENGTH - finalAddedLength, tryMinimumLength);
+        int finalAddedLength = maxAddedLength + minIndexNameAddition;
+
+        assert finalAddedLength < SchemaConstants.NAME_LENGTH : "Index name additions are too long";
+
+        return SchemaConstants.NAME_LENGTH - finalAddedLength;
     }
 
     /**
@@ -175,14 +180,14 @@ public final class IndexMetadata
      * @param tableNameLength    the length of the table name
      * @return the length of the added prefixes and suffixes
      */
-    private static int getAddedLengthFromIndexContextFullName(int keyspaceNameLength, int tableNameLength)
+    private static int getAddedLengthFromIndexContextFullName(int keyspaceNameLength, int tableNameLength, int minIndexNameAddition)
     {
         int separatorLength = 1;
         int addedLength1 = keyspaceNameLength + tableNameLength + separatorLength * 2;
-        if (addedLength1 > SchemaConstants.NAME_LENGTH)
-            throw new ConfigurationException(String.format("Prefix of keyspace and table names together are too long for an index file name: %s. Max lenght is %s",
-                                                           addedLength1,
-                                                           SchemaConstants.NAME_LENGTH));
+        if (addedLength1 + minIndexNameAddition > SchemaConstants.NAME_LENGTH)
+            throw new InvalidQueryException(String.format("Prefix of keyspace and table names together are too long for an index file name: %s. Max lenght is %s",
+                                                          addedLength1,
+                                                          SchemaConstants.NAME_LENGTH));
         return addedLength1;
     }
 
