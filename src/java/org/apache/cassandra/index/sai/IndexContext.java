@@ -225,12 +225,7 @@ public class IndexContext
         if (fullIndexName.length() > SchemaConstants.NAME_LENGTH)
         {
             throw new InvalidRequestException(
-            String.format("The prepared index name %s of length %s " +
-                          "is too long for use in file paths and file names. " +
-                          "Max length is %s.",
-                          fullIndexName,
-                          fullIndexName.length(),
-                          SchemaConstants.NAME_LENGTH));
+            String.format("The prepared index name %s of length %s is too long for use in file paths and file names. Max length is %s.", fullIndexName, fullIndexName.length(), SchemaConstants.NAME_LENGTH));
         }
         return fullIndexName;
     }
