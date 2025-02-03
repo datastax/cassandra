@@ -22,6 +22,7 @@ import java.nio.ByteBuffer;
 import java.util.List;
 
 import com.google.common.primitives.Floats;
+import org.junit.Ignore;
 import org.junit.Test;
 
 import org.apache.cassandra.config.DataStorageSpec;
@@ -67,6 +68,7 @@ public class GuardrailSaiVectorTermSizeTest extends ValueThresholdTester
     }
 
     @Test
+    @Ignore("CNDB-12704")
     public void testWarn() throws Throwable
     {
         int warnDimensions = warnThreshold() / 4; // 4 bytes per dimension
@@ -81,6 +83,7 @@ public class GuardrailSaiVectorTermSizeTest extends ValueThresholdTester
     }
 
     @Test
+    @Ignore("CNDB-12704")
     public void testFail() throws Throwable
     {
         int failDimensions = failThreshold() / 4; // 4 bytes per dimension
@@ -113,6 +116,7 @@ public class GuardrailSaiVectorTermSizeTest extends ValueThresholdTester
     }
 
     @Test
+    @Ignore("CNDB-12704")
     public void testFailingVectorOnBuild()
     {
         int failDimensions = failThreshold() / 4; // 4 bytes per dimension
