@@ -264,13 +264,86 @@ public class NativeIndexDDLTest extends SAITester
     }
 
     @Test
-    public void shouldNotFailCreateWithValidColumnName()
+    public void testSimpleQuotedIdentifierColumn()
     {
-        String invalidColumn = "/NOT_invalid";
-        createTable(String.format("CREATE TABLE %%s (id text PRIMARY KEY, \"%s\" text)", invalidColumn));
+        createTable("CREATE TABLE %s (\"key\" int PRIMARY KEY, \"value\" text)");
+        createIndex("CREATE CUSTOM INDEX ON %s(\"value\") USING 'StorageAttachedIndex'");
 
-        executeNet(String.format("CREATE CUSTOM INDEX ON %%s(\"%s\")" +
-                                                          " USING 'StorageAttachedIndex'", invalidColumn));
+        execute("INSERT INTO %s (\"key\", \"value\") VALUES (1, 'value1')");
+        execute("INSERT INTO %s (\"key\", \"value\") VALUES (2, 'value2')");
+
+        assertRows(execute("SELECT * FROM %s WHERE \"value\" = 'value1'"), row(1, "value1"));
+        assertRows(execute("SELECT * FROM %s WHERE \"value\" = 'value2'"), row(2, "value2"));
+    }
+
+    private String intoColumnDefs(String[] columnNames)
+    {
+        StringBuilder sb = new StringBuilder();
+        for (String columnName : columnNames)
+        {
+            sb.append(columnName).append(" int,");
+        }
+        return sb.toString();
+    }
+
+    @Test
+    public void testQuotedIdentifierWithSpecialCharsAndLong()
+    {
+        String[] columnNames
+        = new String[]{ "\"user name\"",
+                        "\"userCountry\"",
+                        "\"user-age\"",
+                        "\"/user/age\"",
+                        "\"userage\"",
+                        "\"a very very very very very very very very long field\"",
+                        "\"   a_very_very_very_very_very_very_very_very_"
+                        + "very_very_very_very_very_very_very_very_very_"
+                        + "very_very_very_very(very)very_very "
+                        + "_very_very_very_very_very_very_very_"
+                        + "very_very_very_very_very_very_very_very_"
+                        + "very_very_very_very_very_very_very_very_very \""
+        };
+
+        createTable("CREATE TABLE %s (key int,"
+                    + intoColumnDefs(columnNames)
+                    + "PRIMARY KEY (key))");
+        for (String columnName : columnNames)
+            execute("CREATE CUSTOM INDEX ON %s (" + columnName + ") USING 'StorageAttachedIndex'");
+        for (int i = 0; i < columnNames.length; i++)
+            execute("INSERT INTO %s (key, " + columnNames[i] + ") VALUES (" + i + ", " + i + ')');
+        for (int i = 0; i < columnNames.length; i++)
+            assertRows(execute("SELECT key, " + columnNames[i] + " FROM %s WHERE " + columnNames[i] + " = " + i), row(i, i));
+
+        flush();
+
+        for (int i = 0; i < columnNames.length; i++)
+            assertRows(execute("SELECT key, " + columnNames[i] + " FROM %s WHERE " + columnNames[i] + " = " + i), row(i, i));
+    }
+
+    @Test
+    public void shouldFailOnLongKeyspaceOrTableName()
+    {
+        String longName = "very_very_very_very_very_very_very_very_very_" +
+                          "very_very_very_very_very_very_very_very_very_very_very_" +
+                          "very_very_very_very_very_very_very_very_very_very_very_" +
+                          "very_very_very_very_very_very_very_very_long_table_name";
+        String shortTableName = "table_name";
+        String qualifiedColumnName = "\"qualified column name\"";
+
+        createTable(String.format("CREATE TABLE %s.%s (" +
+                                  "  key int PRIMARY KEY," +
+                                  "  %s int)",
+                                  KEYSPACE, longName, qualifiedColumnName));
+        assertInvalid(String.format("CREATE CUSTOM INDEX ON %s.%s (%s) USING 'StorageAttachedIndex'",
+                                    KEYSPACE, longName, qualifiedColumnName));
+
+        execute(String.format("CREATE KEYSPACE %s with replication = " +
+                              "{ 'class' : 'SimpleStrategy', 'replication_factor' : 1 }",
+                              longName));
+        createTable(String.format("CREATE TABLE %s.%s (" +
+                                  "key int PRIMARY KEY," +
+                                  "%s int)", longName, shortTableName, qualifiedColumnName));
+        assertInvalid(String.format("CREATE CUSTOM INDEX ON %s.%s (%s) USING 'StorageAttachedIndex'", longName, shortTableName, qualifiedColumnName));
     }
 
     @Test
