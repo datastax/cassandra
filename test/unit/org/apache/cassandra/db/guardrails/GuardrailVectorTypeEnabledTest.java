@@ -21,11 +21,13 @@ package org.apache.cassandra.db.guardrails;
 import java.util.List;
 import java.util.function.Supplier;
 
+import org.junit.BeforeClass;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
 import static java.lang.String.format;
+import static org.apache.cassandra.config.CassandraRelevantProperties.VECTOR_FLOAT_ONLY;
 
 /**
  * Tests the guardrail for the usage of the vector type, {@link Guardrails#vectorTypeEnabled}.
@@ -42,6 +44,12 @@ public class GuardrailVectorTypeEnabledTest extends GuardrailTester
             new Object[]{true},
             new Object[]{false}
         );
+    }
+
+    @BeforeClass
+    public static void setupClass()
+    {
+        VECTOR_FLOAT_ONLY.setBoolean(false);
     }
 
     public GuardrailVectorTypeEnabledTest(boolean enabled)
