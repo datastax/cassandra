@@ -80,4 +80,41 @@ public class QuotedIdentifierColumnTest extends SAITester
         for (int i = 0; i < columnNames.length; i++)
             assertRows(execute("SELECT key, " + columnNames[i] + " FROM %s WHERE " + columnNames[i] + " = " + i), row(i, i));
     }
+
+    @Test
+    public void testLongName()
+    {
+        String longTableName = "very_very_very_very_very_very_very_very_very_" +
+                               "very_very_very_very_very_very_very_very_very_very_very_" +
+                               "very_very_very_very_very_very_very_very_very_very_very_" +
+                               "very_very_very_very_very_very_very_very_long_table_name";
+
+        createTable(String.format("CREATE TABLE %s.%s (" +
+                                  "key int PRIMARY KEY," +
+                                  "\"a very very very very very very very very long field\" int)", KEYSPACE, longTableName));
+        assertInvalid(String.format("CREATE CUSTOM INDEX ON %s.%s (\"a very very very very very very very very long field\") USING 'StorageAttachedIndex'", KEYSPACE, longTableName));
+    }
+
+    @Test
+    public void testLongTableNames()
+    {
+
+        String longName = "very_very_very_very_very_very_very_very_very_" +
+                          "very_very_very_very_very_very_very_very_very_very_very_very_" +
+                          "very_very_very_very_very_very_very_very_very_very_very_" +
+                          "very_very_very_very_very_very_very_very_long_keyspace_name";
+
+        assertInvalidMessage("Expected compaction params for legacy strategy: CompactionStrategyOptions{class=org.apache.cassandra.db.compaction.UnifiedCompactionStrategy, options={base_shard_count=1}}",
+                             String.format("CREATE TABLE %s.%s (" +
+                                           "key int PRIMARY KEY," +
+                                           "\"a very very very very very very very very long field\" int)", KEYSPACE, longName));
+
+        execute(String.format("CREATE KEYSPACE %s with replication = " +
+                              "{ 'class' : 'SimpleStrategy', 'replication_factor' : 1 }",
+                              longName));
+        assertInvalidMessage("Expected compaction params for legacy strategy: CompactionStrategyOptions{class=org.apache.cassandra.db.compaction.UnifiedCompactionStrategy, options={base_shard_count=1}}",
+                             String.format("CREATE TABLE %s.%s (" +
+                                           "key int PRIMARY KEY," +
+                                           "\"a very very very very very very very very long field\" int)", longName, "rather_longer_table_name"));
+    }
 }
