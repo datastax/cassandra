@@ -140,10 +140,15 @@ public class SortedStringTableCursor implements SSTableCursor
 
     private boolean consumePartitionHeader() throws IOException
     {
-        if (dataFile.getFilePointer() >= endPosition)
+        if (dataFile.getFilePointer() == endPosition)
         {
             currentType = Type.EXHAUSTED;
             return false;
+        }
+        else if (dataFile.getFilePointer() > endPosition)
+        {
+            throw new IOException(String.format("Consuming partition header at %s, but end position is %s",
+                                                dataFile.getFilePointer(), endPosition));
         }
 
         currentType = Type.PARTITION;
