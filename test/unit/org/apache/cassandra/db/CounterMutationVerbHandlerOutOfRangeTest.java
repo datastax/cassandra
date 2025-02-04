@@ -111,7 +111,7 @@ public class CounterMutationVerbHandlerOutOfRangeTest
         int value = randomInt();
         int key = 30;
         CounterMutation mutation = mutation(key, value);
-        handler.doVerb(Message.builder(Verb.MUTATION_REQ, mutation).from(node1).withId(messageId).build());
+        handler.doVerb(Message.builder(Verb.COUNTER_MUTATION_REQ, mutation).from(node1).withId(messageId).build());
 
         // unlike non-counter mutations, we can't verify the response message for a successful write.
         // acting as the leader for the mutation, we'll try to forward the writes to the other replicas
@@ -138,7 +138,7 @@ public class CounterMutationVerbHandlerOutOfRangeTest
         int value = randomInt();
         int key = 50;
         CounterMutation mutation = mutation(key, value);
-        handler.doVerb(Message.builder(Verb.MUTATION_REQ, mutation).from(node1).withId(messageId).build());
+        handler.doVerb(Message.builder(Verb.COUNTER_MUTATION_REQ, mutation).from(node1).withId(messageId).build());
         verifyWrite(key, value);
         assertEquals(startingTotalMetricCount, StorageMetrics.totalOpsForInvalidToken.getCount());
         assertEquals(startingKeyspaceMetricCount, keyspaceMetricValue());
@@ -170,7 +170,7 @@ public class CounterMutationVerbHandlerOutOfRangeTest
         // the node which is the actual natural endpoint for this mutation is not a real
         // node, but if we write at CL.ANY we'll generate a hint for it and StorageProxy's
         // counterWriterPerformer will blindly apply the mutation so we can verify it locally
-        handler.doVerb(Message.builder(Verb.MUTATION_REQ, mutation).from(node1).withId(messageId).build());
+        handler.doVerb(Message.builder(Verb.COUNTER_MUTATION_REQ, mutation).from(node1).withId(messageId).build());
 
         verifyWrite(key, value);
         assertEquals(startingTotalMetricCount + 1, StorageMetrics.totalOpsForInvalidToken.getCount());
