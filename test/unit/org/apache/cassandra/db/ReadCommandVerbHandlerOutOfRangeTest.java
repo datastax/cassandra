@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.db;
 
+import java.util.TreeSet;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -29,6 +30,7 @@ import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.filter.ClusteringIndexNamesFilter;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.filter.RowFilter;
@@ -208,7 +210,7 @@ public class ReadCommandVerbHandlerOutOfRangeTest
                   RowFilter.none(),
                   DataLimits.NONE,
                   key(tmd, key),
-                  null,
+                  new ClusteringIndexNamesFilter(new TreeSet<>(tmd.comparator), false),
                   null,
                   false,
                   null);
