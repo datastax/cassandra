@@ -20,6 +20,7 @@ package org.apache.cassandra.index.sai.utils;
 
 import java.nio.ByteBuffer;
 
+import io.github.jbellis.jvector.util.RamUsageEstimator;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.memtable.Memtable;
@@ -144,6 +145,15 @@ public abstract class PrimaryKeyWithSortKey implements PrimaryKey
     public ByteSource asComparableBytesMaxPrefix(ByteComparable.Version version)
     {
         return primaryKey.asComparableBytesMaxPrefix(version);
+    }
+
+    @Override
+    public long ramBytesUsed()
+    {
+        // Object header + 3 references (context, primaryKey, sourceTable)
+        return RamUsageEstimator.NUM_BYTES_OBJECT_HEADER +
+               3L * RamUsageEstimator.NUM_BYTES_OBJECT_REF +
+               primaryKey.ramBytesUsed();
     }
 
 }

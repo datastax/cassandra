@@ -21,6 +21,7 @@ package org.apache.cassandra.index.sai.utils;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 
+import io.github.jbellis.jvector.util.RamUsageEstimator;
 import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.io.sstable.SSTableId;
@@ -72,5 +73,11 @@ public class PrimaryKeyWithByteComparable extends PrimaryKeyWithSortKey
             throw new IllegalArgumentException("Cannot compare PrimaryKeyWithByteComparable with " + o.getClass().getSimpleName());
 
         return ByteComparable.compare(byteComparable, ((PrimaryKeyWithByteComparable) o).byteComparable, TypeUtil.BYTE_COMPARABLE_VERSION);
+    }
+
+    @Override
+    public long ramBytesUsed()
+    {
+        return super.ramBytesUsed() + RamUsageEstimator.NUM_BYTES_OBJECT_REF;
     }
 }

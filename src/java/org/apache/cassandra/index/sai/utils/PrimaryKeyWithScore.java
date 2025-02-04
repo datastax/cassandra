@@ -61,4 +61,11 @@ public class PrimaryKeyWithScore extends PrimaryKeyWithSortKey
         // Descending order
         return Float.compare(((PrimaryKeyWithScore) o).indexScore, indexScore);
     }
+
+    @Override
+    public long ramBytesUsed()
+    {
+        // Include super class fields plus float value
+        return super.ramBytesUsed() + Float.BYTES;
+    }
 }

@@ -44,6 +44,7 @@ import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.github.jbellis.jvector.util.RamUsageEstimator;
 import io.netty.util.concurrent.FastThreadLocal;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.DecoratedKey;
@@ -58,6 +59,7 @@ import org.apache.cassandra.db.tries.TrieSpaceExhaustedException;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
+import org.apache.cassandra.index.sai.analyzer.NoOpAnalyzer;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v6.TermsDistribution;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
@@ -184,7 +186,6 @@ public class TrieMemoryIndex extends MemoryIndex
                     data.putSingleton(encodedTerm, primaryKey, (existing, update) -> {
                         // First do the normal primary keys reduction
                         PrimaryKeys result = primaryKeysReducer.apply(existing, update);
-
                         // Then update term frequency
                         var pkbc = new PkWithTerm(update, encodedTerm);
                         termFrequencies.merge(pkbc, 1, Integer::sum);
@@ -198,7 +199,14 @@ public class TrieMemoryIndex extends MemoryIndex
                 }
             }
 
-            docLengths.put(primaryKey, tokenCount);
+            if (!(analyzer instanceof NoOpAnalyzer))
+            {
+                docLengths.put(primaryKey, tokenCount);
+                long heapUsed = RamUsageEstimator.HASHTABLE_RAM_BYTES_PER_ENTRY
+                                + primaryKey.ramBytesUsed()
+                                + Integer.BYTES;
+                onHeapAllocationsTracker.accept(heapUsed);
+            }
 
             onHeapAllocationsTracker.accept((data.usedSizeOnHeap() - initialSizeOnHeap) +
                                             (primaryKeysReducer.heapAllocations() - reducerHeapSize));
