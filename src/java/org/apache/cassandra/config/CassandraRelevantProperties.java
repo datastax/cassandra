@@ -226,6 +226,11 @@ public enum CassandraRelevantProperties
     TRUNCATE_STATEMENT_PROVIDER("cassandra.truncate_statement_provider"),
 
     /**
+     * whether to persist prepared statements in the system table
+     */
+    PERSIST_PREPARED_STATEMENTS("cassandra.persist_prepared_statements", "true"),
+
+    /**
      * custom native library for os access
      */
     CUSTOM_NATIVE_LIBRARY("cassandra.custom_native_library"),
