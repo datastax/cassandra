@@ -26,6 +26,7 @@ import javax.net.ssl.TrustManagerFactory;
 
 import org.apache.commons.io.FileUtils;
 import org.junit.Assert;
+import org.junit.Assume;
 import org.junit.Before;
 import org.junit.Test;
 import org.slf4j.Logger;
@@ -79,11 +80,7 @@ public class SSLFactoryTest
     public void getSslContext_OpenSSL() throws IOException
     {
         // only try this test if OpenSsl is available
-        if (!OpenSsl.isAvailable())
-        {
-            logger.warn("OpenSSL not available in this application, so not testing the netty-openssl code paths");
-            return;
-        }
+        Assume.assumeTrue("OpenSSL not available in this application, so not testing the netty-openssl code paths", OpenSsl.isAvailable());
 
         EncryptionOptions options = addKeystoreOptions(encryptionOptions);
         SslContext sslContext = SSLFactory.getOrCreateSslContext(options, true, SSLFactory.SocketType.CLIENT, true);
