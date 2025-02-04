@@ -160,10 +160,10 @@ public class RowFilter
      *
      * @see <a href="https://issues.apache.org/jira/browse/CASSANDRA-19018">CASSANDRA-19018</a>
      */
-//    public boolean isStrict()
-//    {
-//        return !needsReconciliation || !isMutableIntersection();
-//    }
+    public boolean isStrict()
+    {
+        return !needsReconciliation || !isMutableIntersection();
+    }
 
     /**
      * @return true if this filter contains an intersection on either any static column or two regular mutable columns
@@ -172,14 +172,6 @@ public class RowFilter
     {
         return expressions().stream().filter(e -> !e.column.isPrimaryKeyColumn()).count() > 1;
     }
-
-    /**
-     * @return *all* the expressions from the RowFilter tree in pre-order.
-     */
-//    public Stream<Expression> getExpressionsPreOrder()
-//    {
-//        return root.getExpressionsPreOrder();
-//    }
 
     /**
      * Checks if some of the expressions apply to clustering or regular columns.
