@@ -21,7 +21,9 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -160,26 +162,35 @@ public class RowFilter
      *
      * @see <a href="https://issues.apache.org/jira/browse/CASSANDRA-19018">CASSANDRA-19018</a>
      */
-//    public boolean isStrict()
-//    {
-//        return !needsReconciliation || !isMutableIntersection();
-//    }
+    public boolean isStrict()
+    {
+        return !needsReconciliation || !isMutableIntersection();
+    }
 
     /**
      * @return true if this filter contains an intersection on either any static column or two regular mutable columns
      */
     public boolean isMutableIntersection()
     {
-        return expressions().stream().filter(e -> !e.column.isPrimaryKeyColumn()).count() > 1;
-    }
+        List<Expression> exprs = expressions();
+        Set<ColumnMetadata> columns = null;
+        for (Expression e : exprs)
+        {
+            if (e.column.isStatic() && exprs.size() > 1)
+                return true;
 
-    /**
-     * @return *all* the expressions from the RowFilter tree in pre-order.
-     */
-//    public Stream<Expression> getExpressionsPreOrder()
-//    {
-//        return root.getExpressionsPreOrder();
-//    }
+            if (!e.column.isPrimaryKeyColumn())
+            {
+                if (columns == null)
+                    columns = new HashSet<>(exprs.size());
+
+                columns.add(e.column);
+                if (columns.size() > 1)
+                    return true;
+            }
+        }
+        return false;
+    }
 
     /**
      * Checks if some of the expressions apply to clustering or regular columns.
