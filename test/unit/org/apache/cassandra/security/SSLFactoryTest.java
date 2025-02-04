@@ -20,15 +20,19 @@ package org.apache.cassandra.security;
 
 import java.io.IOException;
 import java.security.cert.CertificateException;
+import java.util.Arrays;
+import javax.net.ssl.SSLEngine;
 import javax.net.ssl.TrustManagerFactory;
 
 import org.apache.commons.io.FileUtils;
 import org.junit.Assert;
+import org.junit.Assume;
 import org.junit.Before;
 import org.junit.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.netty.buffer.ByteBufAllocator;
 import io.netty.handler.ssl.JdkSslContext;
 import io.netty.handler.ssl.OpenSsl;
 import io.netty.handler.ssl.OpenSslContext;
@@ -66,7 +70,8 @@ public class SSLFactoryTest
                             .withTrustStore("test/conf/cassandra_ssl_test.truststore")
                             .withTrustStorePassword("cassandra")
                             .withRequireClientAuth(false)
-                            .withCipherSuites("TLS_RSA_WITH_AES_128_CBC_SHA");
+                            .withProtocol("TLSv1.3")
+                            .withCipherSuites("TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256");
 
         SSLFactory.checkedExpiry = false;
     }
@@ -75,16 +80,16 @@ public class SSLFactoryTest
     public void getSslContext_OpenSSL() throws IOException
     {
         // only try this test if OpenSsl is available
-        if (!OpenSsl.isAvailable())
-        {
-            logger.warn("OpenSSL not available in this application, so not testing the netty-openssl code paths");
-            return;
-        }
+        Assume.assumeTrue("OpenSSL not available in this application, so not testing the netty-openssl code paths", OpenSsl.isAvailable());
 
         EncryptionOptions options = addKeystoreOptions(encryptionOptions);
         SslContext sslContext = SSLFactory.getOrCreateSslContext(options, true, SSLFactory.SocketType.CLIENT, true);
         Assert.assertNotNull(sslContext);
         Assert.assertTrue(sslContext instanceof OpenSslContext);
+        Assert.assertEquals(encryptionOptions.cipher_suites, sslContext.cipherSuites());
+
+        SSLEngine engine = sslContext.newEngine(ByteBufAllocator.DEFAULT);
+        Assert.assertEquals(encryptionOptions.cipher_suites, Arrays.asList(engine.getEnabledCipherSuites()));
     }
 
     @Test
@@ -95,6 +100,9 @@ public class SSLFactoryTest
         Assert.assertNotNull(sslContext);
         Assert.assertTrue(sslContext instanceof JdkSslContext);
         Assert.assertEquals(encryptionOptions.cipher_suites, sslContext.cipherSuites());
+
+        SSLEngine engine = sslContext.newEngine(ByteBufAllocator.DEFAULT);
+        Assert.assertEquals(encryptionOptions.cipher_suites, Arrays.asList(engine.getEnabledCipherSuites()));
     }
 
     private ServerEncryptionOptions addKeystoreOptions(ServerEncryptionOptions options)
