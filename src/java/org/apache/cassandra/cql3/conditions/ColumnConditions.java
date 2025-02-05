@@ -93,7 +93,7 @@ public final class ColumnConditions extends AbstractConditions implements Iterab
 
         for (ColumnCondition condition : this)
         {
-            if (indexRegistry.getAnalyzerFor(condition.column, condition.operator).isPresent())
+            if (indexRegistry.getIndexAnalyzerFor(condition.column, condition.operator).isPresent())
             {
                 analyzedColumns.add(condition.column);
             }
