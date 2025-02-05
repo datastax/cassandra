@@ -234,11 +234,12 @@ public abstract class CQLTester
     public static final List<ProtocolVersion> PROTOCOL_VERSIONS = new ArrayList<>(ProtocolVersion.SUPPORTED.size());
 
     private static final String CREATE_INDEX_NAME_REGEX = "(\\s*(\\w*|\"\\w*\")\\s*)";
+    private static final String CREATE_INDEX_NAME_QUOTED_REGEX = "(\\s*(\\w*|\"[^\"]*\")\\s*)";
     private static final String CREATE_INDEX_REGEX = String.format("\\A\\s*CREATE(?:\\s+CUSTOM)?\\s+INDEX" +
                                                                    "(?:\\s+IF\\s+NOT\\s+EXISTS)?\\s*" +
                                                                    "%s?\\s*ON\\s+(%<s\\.)?%<s\\s*" +
-                                                                   "(\\((?:\\s*\\w+\\s*\\()?%<s\\))?",
-                                                                   CREATE_INDEX_NAME_REGEX);
+                                                                   "(\\((?:\\s*\\w+\\s*\\()?%s\\))?",
+                                                                   CREATE_INDEX_NAME_REGEX, CREATE_INDEX_NAME_QUOTED_REGEX);
     private static final Pattern CREATE_INDEX_PATTERN = Pattern.compile(CREATE_INDEX_REGEX, Pattern.CASE_INSENSITIVE);
 
     public static final NettyOptions IMMEDIATE_CONNECTION_SHUTDOWN_NETTY_OPTIONS = new NettyOptions()
@@ -1071,16 +1072,16 @@ public abstract class CQLTester
 
             String baseName = Strings.isNullOrEmpty(column)
                               ? IndexMetadata.generateDefaultIndexName(table)
-                              : IndexMetadata.generateDefaultIndexName(table, new ColumnIdentifier(column, true));
+                              : IndexMetadata.generateDefaultIndexName(keyspace.length(), table, new ColumnIdentifier(column, true));
 
             KeyspaceMetadata ks = Schema.instance.getKeyspaceMetadata(keyspace);
             assertNotNull(ks);
             index = ks.findAvailableIndexName(baseName);
         }
-
-        index = ParseUtils.isQuoted(index, '\"')
-                ? ParseUtils.unDoubleQuote(index)
-                : index.toLowerCase();
+        else
+            index = ParseUtils.isQuoted(index, '\"')
+                    ? ParseUtils.unDoubleQuote(index)
+                    : index.toLowerCase();
 
         return Pair.create(keyspace, index);
     }
