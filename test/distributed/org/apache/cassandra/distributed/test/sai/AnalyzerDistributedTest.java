@@ -163,7 +163,7 @@ public class AnalyzerDistributedTest extends TestBaseImpl
 
         execute("INSERT INTO %s (id, val) VALUES ('1', 'MAL0133AU')");
         execute("INSERT INTO %s (id, val) VALUES ('2', 'WFS2684AU')");
-        execute("INSERT INTO %s (id, val) VALUES ('3', 'FPWMCR005 Mercer High Growth Managed')");
+        execute("INSERT INTO %s (id, val) VALUES ('3', 'FPWMCR005 some other word')");
         execute("INSERT INTO %s (id, val) VALUES ('4', 'WFS7093AU')");
         execute("INSERT INTO %s (id, val) VALUES ('5', 'WFS0565AU')");
 
@@ -210,7 +210,7 @@ public class AnalyzerDistributedTest extends TestBaseImpl
 
         execute("INSERT INTO %s (id, val) VALUES ('1', 'MAL0133AU')");
         execute("INSERT INTO %s (id, val) VALUES ('2', 'WFS2684AU')");
-        execute("INSERT INTO %s (id, val) VALUES ('3', 'FPWMCR005 Mercer High Growth Managed')");
+        execute("INSERT INTO %s (id, val) VALUES ('3', 'FPWMCR005 some other words')");
         execute("INSERT INTO %s (id, val) VALUES ('4', 'WFS7093AU')");
         execute("INSERT INTO %s (id, val) VALUES ('5', 'WFS0565AU')");
 
