@@ -87,6 +87,7 @@ import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.utils.CloseableIterator;
@@ -607,6 +608,16 @@ public class IndexContext
     public String getIndexName()
     {
         return this.config == null ? null : config.name;
+    }
+
+    public CompressionParams getKeyCompression()
+    {
+        return this.config.keyCompression;
+    }
+
+    public CompressionParams getValueCompression()
+    {
+        return this.config.valueCompression;
     }
 
     public int getIntOption(String name, int defaultValue)
