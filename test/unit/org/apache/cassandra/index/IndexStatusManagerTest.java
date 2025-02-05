@@ -26,9 +26,12 @@ import java.util.Set;
 import java.util.TreeSet;
 import java.util.stream.Collectors;
 
+import org.junit.BeforeClass;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
+
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.mockito.Mockito;
 
 import org.apache.cassandra.db.ConsistencyLevel;
@@ -140,6 +143,12 @@ public class IndexStatusManagerTest
             return "DC";
         }
     };
+
+    @BeforeClass
+    public static void setup()
+    {
+        DatabaseDescriptor.daemonInitialization();
+    }
 
     @Test
     public void shouldPrioritizeSuccessfulEndpoints() throws UnknownHostException
@@ -347,8 +356,8 @@ public class IndexStatusManagerTest
                         .build()))
                 .isInstanceOf(ReadFailureException.class)
                 .hasMessageStartingWith("Operation failed")
-                .hasMessageContaining("INDEX_NOT_AVAILABLE from /127.0.0.252:7000")
-                .hasMessageContaining("INDEX_NOT_AVAILABLE from /127.0.0.254:7000");
+                .hasMessageContaining("INDEX_NOT_AVAILABLE from /127.0.0.252:7012")
+                .hasMessageContaining("INDEX_NOT_AVAILABLE from /127.0.0.254:7012");
     }
 
     @Test
@@ -384,9 +393,9 @@ public class IndexStatusManagerTest
                         .build()))
                 .isInstanceOf(ReadFailureException.class)
                 .hasMessageStartingWith("Operation failed")
-                .hasMessageContaining("INDEX_NOT_AVAILABLE from /127.0.0.253:7000")
-                .hasMessageContaining("INDEX_NOT_AVAILABLE from /127.0.0.254:7000")
-                .hasMessageContaining("INDEX_NOT_AVAILABLE from /127.0.0.255:7000");
+                .hasMessageContaining("INDEX_NOT_AVAILABLE from /127.0.0.253:7012")
+                .hasMessageContaining("INDEX_NOT_AVAILABLE from /127.0.0.254:7012")
+                .hasMessageContaining("INDEX_NOT_AVAILABLE from /127.0.0.255:7012");
     }
 
     void runTest(Testcase testcase)
