@@ -681,7 +681,7 @@ public class StorageAttachedIndex implements Index
         AbstractAnalyzer analyzer = factory.create();
         try
         {
-            analyzer.reset(value);
+            analyzer.reset(value.duplicate());
             while (analyzer.hasNext())
                 tokens.add(analyzer.next());
         }
