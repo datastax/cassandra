@@ -20,11 +20,14 @@ package org.apache.cassandra.schema;
 
 import java.io.IOException;
 import java.lang.reflect.InvocationTargetException;
-import java.util.*;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Objects;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Maps;
@@ -32,6 +35,7 @@ import org.apache.commons.lang3.builder.ToStringBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.datastax.driver.core.exceptions.InvalidQueryException;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.CqlBuilder;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget;
@@ -41,10 +45,17 @@ import org.apache.cassandra.exceptions.UnknownIndexException;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.internal.CassandraIndex;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
+import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
+import org.apache.cassandra.index.sai.disk.format.Version;
+import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.UUIDSerializer;
+
+import static org.apache.cassandra.index.sai.disk.format.Version.SAI_DESCRIPTOR;
+import static org.apache.cassandra.schema.SchemaConstants.PATTERN_NON_WORD_CHAR;
+import static org.apache.cassandra.schema.SchemaConstants.isNameSafeForFilename;
 
 /**
  * An immutable representation of secondary index metadata.
@@ -53,12 +64,9 @@ public final class IndexMetadata
 {
     private static final Logger logger = LoggerFactory.getLogger(IndexMetadata.class);
 
-    private static final Pattern PATTERN_NON_WORD_CHAR = Pattern.compile("\\W");
-    private static final Pattern PATTERN_WORD_CHARS = Pattern.compile("\\w+");
-
-
     public static final Serializer serializer = new Serializer();
 
+    static final String INDEX_POSTFIX = "_idx";
     /**
      * A mapping of user-friendly index names to their fully qualified index class names.
      */
@@ -103,29 +111,100 @@ public final class IndexMetadata
     {
         Map<String, String> newOptions = new HashMap<>(options);
         newOptions.put(IndexTarget.TARGET_OPTION_NAME, targets.stream()
-                                                              .map(target -> target.asCqlString())
+                                                              .map(IndexTarget::asCqlString)
                                                               .collect(Collectors.joining(", ")));
         return new IndexMetadata(name, newOptions, kind);
     }
 
-    public static boolean isNameValid(String name)
+    public static String generateDefaultIndexName(int keyspaceNameLength, String table, ColumnIdentifier column)
     {
-        return name != null && !name.isEmpty() && PATTERN_WORD_CHARS.matcher(name).matches();
+
+        String indexNameUntruncated = PATTERN_NON_WORD_CHAR.matcher(table + '_' + column.toString()).replaceAll("");
+
+        String indexNameTrimmed = indexNameUntruncated
+                                  .substring(0,
+                                             Math.min(calculateAllowedLength(keyspaceNameLength, table.length()),
+                                                      indexNameUntruncated.length()));
+        return indexNameTrimmed + INDEX_POSTFIX;
     }
 
+    private static int calculateAllowedLength(int keyspaceNameLength, int tableNameLength)
+    {
+        int uniquenessSuffixLength = 3;
+        int minIndexNameAddition = uniquenessSuffixLength + INDEX_POSTFIX.length();
+
+        int addedLength1 = getAddedLengthFromIndexContextFullName(keyspaceNameLength, tableNameLength, minIndexNameAddition);
+        int addedLength2 = getAddedLengthFromDescriptorAndVersion();
+
+        int maxAddedLength = Math.max(addedLength1, addedLength2);
+        int finalAddedLength = maxAddedLength + minIndexNameAddition;
+
+        assert finalAddedLength < SchemaConstants.NAME_LENGTH : "Index name additions are too long";
+
+        return SchemaConstants.NAME_LENGTH - finalAddedLength;
+    }
+
+    /**
+     * Calculates the length of the added prefixes and suffixes from Descriptor constructor
+     * and Version.stargazerFileNameFormat.
+     *
+     * @return the length of the added prefixes and suffixes
+     */
+    private static int getAddedLengthFromDescriptorAndVersion()
+    {
+        int separatorLength = 1;
+        // Prefixes and suffixes constructed by Version.stargazerFileNameFormat
+        int versionNameLength = Version.latest().toString().length();
+        int generationLength = 1;
+        int fileExtensionLength = 3;
+        int addedLength2 = SAI_DESCRIPTOR.length()
+                           + versionNameLength
+                           + generationLength
+                           + fileExtensionLength
+                           + IndexComponentType.KD_TREE_POSTING_LISTS.representation.length()
+                           + separatorLength * 4;
+        // Prefixes from Descriptor constructor
+        int indexVersionLength = 2;
+        int tableIdLength = 32;
+        addedLength2 += indexVersionLength
+                        + SSTableFormat.Type.BTI.name().length()
+                        + tableIdLength
+                        + separatorLength * 2;
+        return addedLength2;
+    }
+
+    /**
+     * Lengths of prefixes and suffixes from IndexContext.getFullName
+     *
+     * @param keyspaceNameLength the length of the keyspace name
+     * @param tableNameLength    the length of the table name
+     * @return the length of the added prefixes and suffixes
+     */
+    private static int getAddedLengthFromIndexContextFullName(int keyspaceNameLength, int tableNameLength, int minIndexNameAddition)
+    {
+        int separatorLength = 1;
+        int addedLength1 = keyspaceNameLength + tableNameLength + separatorLength * 2;
+        if (addedLength1 + minIndexNameAddition > SchemaConstants.NAME_LENGTH)
+            throw new InvalidQueryException(String.format("Prefix of keyspace and table names together are too long for an index file name: %s. Max lenght is %s",
+                                                          addedLength1,
+                                                          SchemaConstants.NAME_LENGTH));
+        return addedLength1;
+    }
+
+    @VisibleForTesting
     public static String generateDefaultIndexName(String table, ColumnIdentifier column)
     {
-        return PATTERN_NON_WORD_CHAR.matcher(table + "_" + column.toString() + "_idx").replaceAll("");
+        return generateDefaultIndexName(0, table, column);
     }
 
     public static String generateDefaultIndexName(String table)
     {
-        return PATTERN_NON_WORD_CHAR.matcher(table + "_" + "idx").replaceAll("");
+        return PATTERN_NON_WORD_CHAR.matcher(table + "_idx").replaceAll("");
     }
 
     public void validate(TableMetadata table)
     {
-        if (!isNameValid(name))
+        if (!isNameSafeForFilename(name))
             throw new ConfigurationException("Illegal index name " + name);
 
         if (kind == null)
