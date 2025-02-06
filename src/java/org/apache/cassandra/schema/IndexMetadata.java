@@ -185,8 +185,8 @@ public final class IndexMetadata
         int separatorLength = 1;
         int addedLength1 = keyspaceNameLength + tableNameLength + separatorLength * 2;
         if (addedLength1 + minIndexNameAddition > SchemaConstants.NAME_LENGTH)
-            throw new InvalidQueryException(String.format("Prefix of keyspace and table names together are too long for an index file name: %s. Max lenght is %s",
-                                                          addedLength1,
+            throw new InvalidQueryException(String.format("Prefix of keyspace and table names together are too long for an index file name: %s. Max length is %s",
+                                                          addedLength1 + minIndexNameAddition,
                                                           SchemaConstants.NAME_LENGTH));
         return addedLength1;
     }
@@ -211,7 +211,7 @@ public final class IndexMetadata
                                                            name));
 
         if (name.length() > calculateAllowedLength(table.keyspace.length(), table.name.length()))
-            throw new ConfigurationException(String.format("Index name %s is too long to be part of constructed file names. It must fit %d characters)",
+            throw new ConfigurationException(String.format("Index name %s is too long to be part of constructed file names. It must fit %d characters.",
                                                            name,
                                                            calculateAllowedLength(table.keyspace.length(), table.name.length())));
 
