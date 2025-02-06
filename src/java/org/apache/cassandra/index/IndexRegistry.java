@@ -25,6 +25,7 @@ import java.util.Collections;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.Callable;
+import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 
@@ -326,13 +327,25 @@ public interface IndexRegistry
     Index getIndex(IndexMetadata indexMetadata);
     Collection<Index> listIndexes();
 
-    default Optional<Index.Analyzer> getAnalyzerFor(ColumnMetadata column, Operator operator)
+    default Optional<Index.Analyzer> getIndexAnalyzerFor(ColumnMetadata column, Operator operator)
+    {
+        return getAnalyzerFor(column, operator, Index::getIndexAnalyzer);
+    }
+
+    default Optional<Index.Analyzer> getQueryAnalyzerFor(ColumnMetadata column, Operator operator)
+    {
+        return getAnalyzerFor(column, operator, Index::getQueryAnalyzer);
+    }
+
+    default Optional<Index.Analyzer> getAnalyzerFor(ColumnMetadata column,
+                                                    Operator operator,
+                                                    Function<Index, Optional<Index.Analyzer>> analyzerGetter)
     {
         for (Index index : listIndexes())
         {
             if (index.supportsExpression(column, operator))
             {
-                Optional<Index.Analyzer> analyzer = index.getAnalyzer();
+                Optional<Index.Analyzer> analyzer = analyzerGetter.apply(index);
                 if (analyzer.isPresent())
                     return analyzer;
             }
