@@ -27,6 +27,7 @@ import java.util.function.Predicate;
 import com.google.common.collect.ImmutableSet;
 
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.TimeUUID;
 
@@ -231,6 +232,22 @@ public abstract class AbstractTableOperation implements TableOperation
         public Set<SSTableReader> sstables()
         {
             return sstables;
+        }
+
+        @Override
+        public String targetDirectory()
+        {
+            if (targetDirectory == null)
+                return "";
+
+            try
+            {
+                return new File(targetDirectory).canonicalPath();
+            }
+            catch (Throwable t)
+            {
+                throw new RuntimeException("Unable to resolve canonical path for " + targetDirectory);
+            }
         }
 
         public String toString()

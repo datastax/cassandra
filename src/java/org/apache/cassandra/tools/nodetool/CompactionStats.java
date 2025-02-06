@@ -28,6 +28,7 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
 
+import com.codahale.metrics.Counter;
 import com.codahale.metrics.Meter;
 import io.airlift.airline.Arguments;
 import io.airlift.airline.Command;
@@ -46,6 +47,8 @@ import static java.lang.String.format;
 @Command(name = "compactionstats", description = "Print statistics on compactions")
 public class CompactionStats extends NodeToolCmd
 {
+    private static final String TOTAL_COMPRESSED = "totalCompressed";
+
     @Option(title = "human_readable",
             name = {"-H", "--human-readable"},
             description = "Display bytes in human readable form, i.e. KiB, MiB, GiB, TiB")
@@ -130,35 +133,102 @@ public class CompactionStats extends NodeToolCmd
 
     private void compactionsStats(NodeProbe probe, TableBuilder tableBuilder)
     {
-        Meter totalCompactionsCompletedMetrics =
-        (Meter) probe.getCompactionMetric("TotalCompactionsCompleted");
-        tableBuilder.add("compactions completed", String.valueOf(totalCompactionsCompletedMetrics.getCount()));
-
-        CassandraMetricsRegistry.JmxCounterMBean bytesCompacted = (CassandraMetricsRegistry.JmxCounterMBean) probe.getCompactionMetric("BytesCompacted");
-        CassandraMetricsRegistry.JmxCounterMBean compressedBytesCompacted = (CassandraMetricsRegistry.JmxCounterMBean) probe.getCompactionMetric("CompressedBytesCompacted");
-        if (humanReadable)
+        // FIXME this is a hack to get the compaction metrics for NodeToolTest using InternalNodeProbe without JMX
+        Object totalCompactionsCompleted = probe.getCompactionMetric("TotalCompactionsCompleted");
+        double totalCompactionsCompletedFifteenMinuteRate;
+        double totalCompactionsCompletedMeanRate;
+        if (totalCompactionsCompleted instanceof Meter)
         {
-            tableBuilder.add("data compacted", FileUtils.stringifyFileSize(Double.parseDouble(Long.toString(bytesCompacted.getCount()))));
-            tableBuilder.add("compressed data compacted", FileUtils.stringifyFileSize(Double.parseDouble(Long.toString(compressedBytesCompacted.getCount()))));
+            Meter totalCompactionsCompletedMeter = (Meter) totalCompactionsCompleted;
+            tableBuilder.add("compactions completed", String.valueOf(totalCompactionsCompletedMeter.getCount()));
+            totalCompactionsCompletedFifteenMinuteRate = totalCompactionsCompletedMeter.getFifteenMinuteRate();
+            totalCompactionsCompletedMeanRate = totalCompactionsCompletedMeter.getMeanRate();
         }
         else
         {
-            tableBuilder.add("data compacted", Long.toString(bytesCompacted.getCount()));
-            tableBuilder.add("compressed data compacted", Long.toString(compressedBytesCompacted.getCount()));
+            CassandraMetricsRegistry.JmxMeterMBean totalCompactionsCompletedJmxMeterMBean = (CassandraMetricsRegistry.JmxMeterMBean) totalCompactionsCompleted;
+            tableBuilder.add("compactions completed", String.valueOf(totalCompactionsCompletedJmxMeterMBean.getCount()));
+            totalCompactionsCompletedFifteenMinuteRate = totalCompactionsCompletedJmxMeterMBean.getFifteenMinuteRate();
+            totalCompactionsCompletedMeanRate = totalCompactionsCompletedJmxMeterMBean.getMeanRate();
         }
-        CassandraMetricsRegistry.JmxCounterMBean compactionsAborted = (CassandraMetricsRegistry.JmxCounterMBean) probe.getCompactionMetric("CompactionsAborted");
-        tableBuilder.add("compactions aborted", Long.toString(compactionsAborted.getCount()));
 
-        CassandraMetricsRegistry.JmxCounterMBean compactionsReduced = (CassandraMetricsRegistry.JmxCounterMBean) probe.getCompactionMetric("CompactionsReduced");
-        tableBuilder.add("compactions reduced", Long.toString(compactionsReduced.getCount()));
+        Object bytesCompacted = probe.getCompactionMetric("BytesCompacted");
+        long bytesCompactedCount;
+        if (bytesCompacted instanceof Counter)
+        {
+            Counter bytesCompactedCounter = (Counter) bytesCompacted;
+            bytesCompactedCount = bytesCompactedCounter.getCount();
+        }
+        else
+        {
+            CassandraMetricsRegistry.JmxCounterMBean bytesCompactedJmxCounterMBean = (CassandraMetricsRegistry.JmxCounterMBean) bytesCompacted;
+            bytesCompactedCount = bytesCompactedJmxCounterMBean.getCount();
+        }
 
-        CassandraMetricsRegistry.JmxCounterMBean sstablesDroppedFromCompaction = (CassandraMetricsRegistry.JmxCounterMBean) probe.getCompactionMetric("SSTablesDroppedFromCompaction");
-        tableBuilder.add("sstables dropped from compaction", Long.toString(sstablesDroppedFromCompaction.getCount()));
+        Object compressedBytesCompacted = probe.getCompactionMetric("CompressedBytesCompacted");
+        long compressedBytesCompactedCount;
+        if (compressedBytesCompacted instanceof Counter)
+        {
+            Counter compressedBytesCompactedCounter = (Counter) compressedBytesCompacted;
+            compressedBytesCompactedCount = compressedBytesCompactedCounter.getCount();
+        }
+        else
+        {
+            CassandraMetricsRegistry.JmxCounterMBean compressedBytesCompactedJmxCounterMBean = (CassandraMetricsRegistry.JmxCounterMBean) compressedBytesCompacted;
+            compressedBytesCompactedCount = compressedBytesCompactedJmxCounterMBean.getCount();
+        }
+
+        if (humanReadable)
+        {
+            tableBuilder.add("data compacted", FileUtils.stringifyFileSize(Double.parseDouble(Long.toString(bytesCompactedCount))));
+            tableBuilder.add("compressed data compacted", FileUtils.stringifyFileSize(Double.parseDouble(Long.toString(compressedBytesCompactedCount))));
+        }
+        else
+        {
+            tableBuilder.add("data compacted", Long.toString(bytesCompactedCount));
+            tableBuilder.add("compressed data compacted", Long.toString(compressedBytesCompactedCount));
+        }
+
+        Object compactionsAborted = probe.getCompactionMetric("CompactionsAborted");
+        if (compactionsAborted instanceof Counter)
+        {
+            Counter compactionsAbortedCounter = (Counter) compactionsAborted;
+            tableBuilder.add("compactions aborted", Long.toString(compactionsAbortedCounter.getCount()));
+        }
+        else
+        {
+            CassandraMetricsRegistry.JmxCounterMBean compactionsAbortedJmxCounterMBean = (CassandraMetricsRegistry.JmxCounterMBean) compactionsAborted;
+            tableBuilder.add("compactions aborted", Long.toString(compactionsAbortedJmxCounterMBean.getCount()));
+        }
+
+        Object compactionsReduced = probe.getCompactionMetric("CompactionsReduced");
+        if (compactionsReduced instanceof Counter)
+        {
+            Counter compactionsReducedCounter = (Counter) compactionsReduced;
+            tableBuilder.add("compactions reduced", Long.toString(compactionsReducedCounter.getCount()));
+        }
+        else
+        {
+            CassandraMetricsRegistry.JmxCounterMBean compactionsReducedJmxCounterMBean = (CassandraMetricsRegistry.JmxCounterMBean) compactionsReduced;
+            tableBuilder.add("compactions reduced", Long.toString(compactionsReducedJmxCounterMBean.getCount()));
+        }
+
+        Object sstablesDroppedFromCompaction = probe.getCompactionMetric("SSTablesDroppedFromCompaction");
+        if (sstablesDroppedFromCompaction instanceof Counter)
+        {
+            Counter sstablesDroppedFromCompactionCounter = (Counter) sstablesDroppedFromCompaction;
+            tableBuilder.add("sstables dropped from compaction", Long.toString(sstablesDroppedFromCompactionCounter.getCount()));
+        }
+        else
+        {
+            CassandraMetricsRegistry.JmxCounterMBean sstablesDroppedFromCompactionJmxCounterMBean = (CassandraMetricsRegistry.JmxCounterMBean) sstablesDroppedFromCompaction;
+            tableBuilder.add("sstables dropped from compaction", Long.toString(sstablesDroppedFromCompactionJmxCounterMBean.getCount()));
+        }
 
         NumberFormat formatter = new DecimalFormat("0.00");
 
-        tableBuilder.add("15 minute rate", String.format("%s/minute", formatter.format(totalCompactionsCompletedMetrics.getFifteenMinuteRate() * 60)));
-        tableBuilder.add("mean rate", String.format("%s/hour", formatter.format(totalCompactionsCompletedMetrics.getMeanRate() * 60 * 60)));
+        tableBuilder.add("15 minute rate", String.format("%s/minute", formatter.format(totalCompactionsCompletedFifteenMinuteRate * 60)));
+        tableBuilder.add("mean rate", String.format("%s/hour", formatter.format(totalCompactionsCompletedMeanRate * 60 * 60)));
 
         double configured = probe.getStorageService().getCompactionThroughtputMibPerSecAsDouble();
         tableBuilder.add("compaction throughput (MiB/s)", configured == 0 ? "throttling disabled (0)" : Double.toString(configured));
@@ -187,7 +257,7 @@ public class CompactionStats extends NodeToolCmd
         for (Map<String, String> c : compactions)
         {
             long total = Long.parseLong(c.get(TableOperation.Progress.TOTAL));
-            String totalCompressedValue = c.get(TableOperation.Progress.TOTAL_COMPRESSED);
+            String totalCompressedValue = c.get(TOTAL_COMPRESSED);
             long completed = Long.parseLong(c.get(TableOperation.Progress.COMPLETED));
             String taskType = c.get(TableOperation.Progress.OPERATION_TYPE);
             String keyspace = c.get(TableOperation.Progress.KEYSPACE);
@@ -240,7 +310,7 @@ public class CompactionStats extends NodeToolCmd
         out.println("Aggregated view:");
         for (CompactionStrategyStatistics stat : statistics)
         {
-            if (!keyspaces.contains(stat.keyspace()))
+            if (!keyspaces.isEmpty() && !keyspaces.contains(stat.keyspace()))
                 continue;
             if (!tableNames.isEmpty() && !tableNames.contains(stat.table()))
                 continue;
@@ -259,7 +329,7 @@ public class CompactionStats extends NodeToolCmd
         for (Map.Entry<String, Map<String, Map<String, String>>> ksEntry : maxOverlap.entrySet())
         {
             String ksName = ksEntry.getKey();
-            if (!keyspaces.contains(ksName))
+            if (!keyspaces.isEmpty() && !keyspaces.contains(ksName))
                 continue;
             for (Map.Entry<String, Map<String, String>> tableEntry : ksEntry.getValue().entrySet())
             {
