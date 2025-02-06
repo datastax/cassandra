@@ -122,15 +122,28 @@ public class CreateTableValidationTest extends CQLTester
     }
 
     @Test
+    public void reproCndb12451()
+    {
+        String keyspaceName = "a6326636663663342d363939312d343261362d613137302d386431653238643836626234_default_keyspace";
+        String tableName = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab";
+
+        execute(String.format("CREATE KEYSPACE %s WITH replication = " +
+                              "{ 'class' : 'SimpleStrategy', 'replication_factor' : 1 }",
+                              keyspaceName));
+        assertInvalidMessage(String.format("%s.%s: Table name must not be empty, more than 222 characters long, or contain non-alphanumeric-underscore characters (got \"%<s\")", keyspaceName, tableName),String.format("CREATE TABLE %s.%s (" +
+                              "key int PRIMARY KEY," +
+                              "value int)", keyspaceName, tableName));
+    }
+
+    @Test
     public void testLongTableNames()
     {
-
         String longName = "very_very_very_very_very_very_very_very_very_" +
                           "very_very_very_very_very_very_very_very_very_very_very_very_" +
                           "very_very_very_very_very_very_very_very_very_very_very_" +
-                          "very_very_very_very_very_very_very_very_long_keyspace_name";
+                          "very_very_very_very_very_very_very_very_very_very_long_name";
 
-        assertInvalidMessage("Expected compaction params for legacy strategy: CompactionStrategyOptions{class=org.apache.cassandra.db.compaction.UnifiedCompactionStrategy, options={base_shard_count=1}}",
+        assertInvalidMessage(String.format("%1$s.%2$s: Keyspace and table names combined must fit 222 characters to be safe for filenames. Got 237 chars for %1$s.%2$s", KEYSPACE, longName),
                              String.format("CREATE TABLE %s.%s (" +
                                            "key int PRIMARY KEY," +
                                            "\"a very very very very very very very very long field\" int)", KEYSPACE, longName));
@@ -138,7 +151,7 @@ public class CreateTableValidationTest extends CQLTester
         execute(String.format("CREATE KEYSPACE %s with replication = " +
                               "{ 'class' : 'SimpleStrategy', 'replication_factor' : 1 }",
                               longName));
-        assertInvalidMessage("Expected compaction params for legacy strategy: CompactionStrategyOptions{class=org.apache.cassandra.db.compaction.UnifiedCompactionStrategy, options={base_shard_count=1}}",
+        assertInvalidMessage(String.format("%1$s.%2$s: Keyspace and table names combined must fit 222 characters to be safe for filenames. Got 244 chars for %1$s.%2$s", longName, "rather_longer_table_name"),
                              String.format("CREATE TABLE %s.%s (" +
                                            "key int PRIMARY KEY," +
                                            "\"a very very very very very very very very long field\" int)", longName, "rather_longer_table_name"));

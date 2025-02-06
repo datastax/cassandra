@@ -51,7 +51,8 @@ import static com.google.common.collect.Maps.transformValues;
 import static java.lang.String.format;
 import static java.util.stream.Collectors.toList;
 import static java.util.stream.Collectors.toSet;
-import static org.apache.cassandra.schema.IndexMetadata.isNameValid;
+import static org.apache.cassandra.schema.SchemaConstants.isSafeLengthForFilename;
+import static org.apache.cassandra.schema.SchemaConstants.isValidName;
 
 @Unmetered
 public class TableMetadata implements SchemaElement
@@ -439,11 +440,14 @@ public class TableMetadata implements SchemaElement
 
     public void validate(boolean durationLegacyMode)
     {
-        if (!isNameValid(keyspace))
-            except("Keyspace name must not be empty, more than %s characters long, or contain non-alphanumeric-underscore characters (got \"%s\")", SchemaConstants.NAME_LENGTH, keyspace);
-
-        if (!isNameValid(name))
+        if (!isValidName(name))
             except("Table name must not be empty, more than %s characters long, or contain non-alphanumeric-underscore characters (got \"%s\")", SchemaConstants.NAME_LENGTH, name);
+
+        if (!isSafeLengthForFilename(keyspace + '.' + name))
+        {
+            String combinedName = keyspace + '.' + name;
+            except("Keyspace and table names combined must fit %s characters to be safe for filenames. Got %s chars for %s", SchemaConstants.NAME_LENGTH, combinedName.length(), combinedName);
+        }
 
         params.validate();
 
