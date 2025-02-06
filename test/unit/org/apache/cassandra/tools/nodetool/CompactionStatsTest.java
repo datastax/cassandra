@@ -66,7 +66,8 @@ public class CompactionStatsTest extends CQLTester
                       "                [(-pp | --print-port)] [(-pw <password> | --password <password>)]\n" +
                       "                [(-pwf <passwordFilePath> | --password-file <passwordFilePath>)]\n" +
                       "                [(-u <username> | --username <username>)] compactionstats\n" +
-                      "                [(-A | --aggregate)] [(-H | --human-readable)] [(-V | --vtable)]\n" +
+                      "                [(-A | --aggregate)] [(-H | --human-readable)] [(-O | --overlap)]\n" +
+                      "                [(-V | --vtable)] [--] [<keyspace> <tables>...]\n" +
                       "\n" +
                       "OPTIONS\n" +
                       "        -A, --aggregate\n" +
@@ -78,6 +79,13 @@ public class CompactionStatsTest extends CQLTester
                       "\n" +
                       "        -H, --human-readable\n" +
                       "            Display bytes in human readable form, i.e. KiB, MiB, GiB, TiB\n" +
+                      "\n" +
+                      "        -O, --overlap\n" +
+                      "            Show a map of the maximum sstable overlap per compaction region.\n" +
+                      "            Note: This map includes all sstables in the system, including ones\n" +
+                      "            that are currently being compacted, and also takes into account\n" +
+                      "            early opened sstables. Overlaps per level may be greater than the\n" +
+                      "            values the --aggregate option reports.\n" +
                       "\n" +
                       "        -p <port>, --port <port>\n" +
                       "            Remote jmx agent port number\n" +
@@ -96,6 +104,15 @@ public class CompactionStatsTest extends CQLTester
                       "\n" +
                       "        -V, --vtable\n" +
                       "            Display fields matching vtable output\n" +
+                      "\n" +
+                      "        --\n" +
+                      "            This option can be used to separate command-line options from the\n" +
+                      "            list of argument, (useful when arguments might be mistaken for\n" +
+                      "            command-line options\n" +
+                      "\n" +
+                      "        [<keyspace> <tables>...]\n" +
+                      "            With --aggregate or --overlap, optionally list only the data for the\n" +
+                      "            specified keyspace and tables.\n" +
                       "\n" +
                       "\n";
         assertThat(tool.getStdout()).isEqualTo(help);
