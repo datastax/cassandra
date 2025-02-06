@@ -36,7 +36,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.SortedSet;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.function.LongConsumer;
 import javax.annotation.Nullable;
@@ -45,6 +45,7 @@ import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.github.jbellis.jvector.util.Accountable;
 import io.github.jbellis.jvector.util.RamUsageEstimator;
 import io.netty.util.concurrent.FastThreadLocal;
 import org.apache.cassandra.db.Clustering;
@@ -60,7 +61,6 @@ import org.apache.cassandra.db.tries.TrieSpaceExhaustedException;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
-import org.apache.cassandra.index.sai.analyzer.NoOpAnalyzer;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v6.TermsDistribution;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
@@ -125,7 +125,7 @@ public class TrieMemoryIndex extends MemoryIndex
         return docLengths;
     }
 
-    private static class PkWithTerm
+    private static class PkWithTerm implements Accountable
     {
         private final PrimaryKey pk;
         private final ByteComparable term;
@@ -134,6 +134,15 @@ public class TrieMemoryIndex extends MemoryIndex
         {
             this.pk = pk;
             this.term = term;
+        }
+
+        @Override
+        public long ramBytesUsed()
+        {
+            return RamUsageEstimator.NUM_BYTES_OBJECT_HEADER + 
+                   2L * RamUsageEstimator.NUM_BYTES_OBJECT_REF + 
+                   pk.ramBytesUsed() +
+                   ByteComparable.length(term, TypeUtil.BYTE_COMPARABLE_VERSION);
         }
 
         @Override
@@ -170,13 +179,18 @@ public class TrieMemoryIndex extends MemoryIndex
 
             if (docLengths.containsKey(primaryKey))
             {
+                AtomicLong heapReclaimed = new AtomicLong();
                 // we're overwriting an existing cell, clear out the old term counts
                 for (Map.Entry<ByteComparable, PrimaryKeys> entry : data.entrySet())
                 {
                     var termInTrie = entry.getKey();
                     entry.getValue().forEach(pkInTrie -> {
                         if (pkInTrie.equals(primaryKey))
-                            termFrequencies.remove(new PkWithTerm(pkInTrie, termInTrie));
+                        {
+                            var t = new PkWithTerm(pkInTrie, termInTrie);
+                            termFrequencies.remove(t);
+                            heapReclaimed.addAndGet(RamUsageEstimator.HASHTABLE_RAM_BYTES_PER_ENTRY + t.ramBytesUsed() + Integer.BYTES);
+                        }
                     });
                 }
             }
@@ -202,7 +216,14 @@ public class TrieMemoryIndex extends MemoryIndex
                         PrimaryKeys result = primaryKeysReducer.apply(existing, update);
                         // Then update term frequency
                         var pkbc = new PkWithTerm(update, encodedTerm);
-                        termFrequencies.merge(pkbc, 1, Integer::sum);
+                        termFrequencies.compute(pkbc, (k, oldValue) -> {
+                            if (oldValue == null) {
+                                // New key added, track heap allocation 
+                                onHeapAllocationsTracker.accept(RamUsageEstimator.HASHTABLE_RAM_BYTES_PER_ENTRY + k.ramBytesUsed() + Integer.BYTES);
+                                return 1;
+                            }
+                            return oldValue + 1;
+                        });
 
                         return result;
                     }, term.limit() <= MAX_RECURSIVE_KEY_LENGTH);
