@@ -36,6 +36,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.SortedSet;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.function.LongConsumer;
 import javax.annotation.Nullable;
@@ -167,13 +168,26 @@ public class TrieMemoryIndex extends MemoryIndex
             final long initialSizeOffHeap = data.usedSizeOffHeap();
             final long reducerHeapSize = primaryKeysReducer.heapAllocations();
 
+            if (docLengths.containsKey(primaryKey))
+            {
+                // we're overwriting an existing cell, clear out the old term counts
+                for (Map.Entry<ByteComparable, PrimaryKeys> entry : data.entrySet())
+                {
+                    var termInTrie = entry.getKey();
+                    entry.getValue().forEach(pkInTrie -> {
+                        if (pkInTrie.equals(primaryKey))
+                            termFrequencies.remove(new PkWithTerm(pkInTrie, termInTrie));
+                    });
+                }
+            }
+
             int tokenCount = 0;
             while (analyzer.hasNext())
             {
                 final ByteBuffer term = analyzer.next();
                 if (!indexContext.validateMaxTermSize(key, term))
                     continue;
-                
+
                 tokenCount++;
 
                 // Note that this term is already encoded once by the TypeUtil.encode call above.
@@ -199,15 +213,14 @@ public class TrieMemoryIndex extends MemoryIndex
                 }
             }
 
-            if (!(analyzer instanceof NoOpAnalyzer))
-            {
-                docLengths.put(primaryKey, tokenCount);
-                long heapUsed = RamUsageEstimator.HASHTABLE_RAM_BYTES_PER_ENTRY
-                                + primaryKey.ramBytesUsed()
-                                + Integer.BYTES;
-                onHeapAllocationsTracker.accept(heapUsed);
-            }
+            docLengths.put(primaryKey, tokenCount);
+            // heap used for term frequencies and doc lengths
+            long heapUsed = RamUsageEstimator.HASHTABLE_RAM_BYTES_PER_ENTRY
+                            + primaryKey.ramBytesUsed()
+                            + Integer.BYTES;
+            onHeapAllocationsTracker.accept(heapUsed);
 
+            // memory used by the trie
             onHeapAllocationsTracker.accept((data.usedSizeOnHeap() - initialSizeOnHeap) +
                                             (primaryKeysReducer.heapAllocations() - reducerHeapSize));
             offHeapAllocationsTracker.accept(data.usedSizeOffHeap() - initialSizeOffHeap);

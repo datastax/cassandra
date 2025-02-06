@@ -240,6 +240,31 @@ public class BM25Test extends SAITester
     }
 
     @Test
+    public void testTermFrequenciesWithOverwrites() throws Throwable
+    {
+        createSimpleTable();
+
+        // Insert documents with varying frequencies of the term "apple", but overwrite the first term
+        // This exercises the code that is supposed to reset frequency counts for overwrites
+        execute("INSERT INTO %s (k, v) VALUES (1, 'apple')");
+        execute("INSERT INTO %s (k, v) VALUES (1, 'apple')");
+        execute("INSERT INTO %s (k, v) VALUES (1, 'apple')");
+        execute("INSERT INTO %s (k, v) VALUES (1, 'apple')");
+        execute("INSERT INTO %s (k, v) VALUES (2, 'apple apple')");
+        execute("INSERT INTO %s (k, v) VALUES (3, 'apple apple apple')");
+
+        beforeAndAfterFlush(() ->
+                            {
+                                // Results should be ordered by term frequency (highest to lowest)
+                                var result = execute("SELECT k FROM %s ORDER BY v BM25 OF 'apple' LIMIT 3");
+                                assertRows(result,
+                                           row(3),  // 3 occurrences
+                                           row(2),  // 2 occurrences
+                                           row(1)); // 1 occurrence
+                            });
+    }
+
+    @Test
     public void testDocumentLength() throws Throwable
     {
         createSimpleTable();
