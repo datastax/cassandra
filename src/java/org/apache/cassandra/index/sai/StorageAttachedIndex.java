@@ -674,26 +674,36 @@ public class StorageAttachedIndex implements Index
     }
 
     @Override
-    public Optional<Analyzer> getAnalyzer()
+    public Optional<Analyzer> getIndexAnalyzer()
     {
-        if (!indexContext.isAnalyzed())
-            return Optional.empty();
+        return indexContext.isAnalyzed()
+               ? Optional.of(value -> analyze(indexContext.getAnalyzerFactory(), value))
+               : Optional.empty();
+    }
 
-        return Optional.of(value -> {
-            List<ByteBuffer> tokens = new ArrayList<>();
-            AbstractAnalyzer analyzer = indexContext.getQueryAnalyzerFactory().create();
-            try
-            {
-                analyzer.reset(value);
-                while (analyzer.hasNext())
-                    tokens.add(analyzer.next());
-            }
-            finally
-            {
-                analyzer.end();
-            }
-            return tokens;
-        });
+    @Override
+    public Optional<Analyzer> getQueryAnalyzer()
+    {
+        return indexContext.isAnalyzed()
+               ? Optional.of(value -> analyze(indexContext.getQueryAnalyzerFactory(), value))
+               : Optional.empty();
+    }
+
+    private static List<ByteBuffer> analyze(AbstractAnalyzer.AnalyzerFactory factory, ByteBuffer value)
+    {
+        List<ByteBuffer> tokens = new ArrayList<>();
+        AbstractAnalyzer analyzer = factory.create();
+        try
+        {
+            analyzer.reset(value.duplicate());
+            while (analyzer.hasNext())
+                tokens.add(analyzer.next());
+        }
+        finally
+        {
+            analyzer.end();
+        }
+        return tokens;
     }
 
     @Override
