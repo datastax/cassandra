@@ -212,6 +212,16 @@ public class View
         return String.format("View(pending_count=%d, sstables=%s, compacting=%s)", liveMemtables.size() + flushingMemtables.size() - 1, sstables, compacting);
     }
 
+    public String toDebugString()
+    {
+        return "View{" +
+               "liveMemtables=" + liveMemtables +
+               ", flushingMemtables=" + flushingMemtables +
+               ", compacting=" + compacting +
+               ", sstables=" + sstables +
+               '}';
+    }
+
     /**
      * Returns the sstables that have any partition between {@code left} and {@code right}, when both bounds are taken inclusively.
      * The interval formed by {@code left} and {@code right} shouldn't wrap.

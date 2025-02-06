@@ -92,6 +92,7 @@ public class Flushing
         {
             for (int i = 0; i < boundaries.size(); i++)
             {
+                logger.info("DUPA creating flush runnable {}/{}", i, boundaries.size());
                 PartitionPosition t = boundaries.get(i).maxKeyBound();
                 FlushRunnable runnable = flushRunnable(cfs, memtable, rangeStart, t, txn, locations.get(i));
 

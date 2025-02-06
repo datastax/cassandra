@@ -1277,6 +1277,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
             memtables = new LinkedHashMap<>();
 
             // submit flushes for the memtable for any indexed sub-cfses, and our own
+            logger.debug("Switching memtables for {}", name);
             AtomicReference<CommitLogPosition> commitLogUpperBound = new AtomicReference<>();
             for (ColumnFamilyStore cfs : concatWithIndexes())
             {
@@ -1285,12 +1286,16 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
                 // are no longer possible to be modified
                 Memtable newMemtable = cfs.createMemtable(commitLogUpperBound);
                 Memtable oldMemtable = cfs.data.switchMemtable(truncate, newMemtable);
+                logger.debug("Switched memtable for {}@{}: {} -> {}", hashCode(), name, oldMemtable, newMemtable);
                 oldMemtable.switchOut(writeBarrier, commitLogUpperBound);
                 memtables.put(cfs, oldMemtable);
+                logger.debug("view for {}: {}", cfs.name, cfs.data.getView().toDebugString());
             }
+
 
             // we then ensure an atomic decision is made about the upper bound of the continuous range of commit log
             // records owned by this memtable
+            logger.debug("Setting commit log upper bound to {} for {}", commitLogUpperBound, name);
             setCommitLogUpperBound(commitLogUpperBound);
 
             // we then issue the barrier; this lets us wait for all operations started prior to the barrier to complete;
@@ -1318,17 +1323,25 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
 
             // mark all memtables as flushing, removing them from the live memtable list
             for (Map.Entry<ColumnFamilyStore, Memtable> entry : memtables.entrySet())
+            {
                 entry.getKey().data.markFlushing(entry.getValue());
+                ColumnFamilyStore cfs = entry.getKey();
+                logger.debug("marking view for {}: {}", cfs.name, cfs.data.getView().toDebugString());
+            }
 
             metric.memtableSwitchCount.inc();
 
+            ColumnFamilyStore cfs = null;
             try
             {
                 boolean first = true;
                 // Flush "data" memtable with non-cf 2i first;
                 for (Map.Entry<ColumnFamilyStore, Memtable> entry : memtables.entrySet())
                 {
+                    cfs = entry.getKey();
+                    logger.debug("Flushing memtable {}@{}: {}", hashCode(), name, entry.getValue());
                     flushMemtable(entry.getKey(), entry.getValue(), first);
+                    logger.debug("flushed view for {}: {}", cfs.name, cfs.data.getView().toDebugString());
                     first = false;
                 }
             }
@@ -1336,6 +1349,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
             {
                 JVMStabilityInspector.inspectThrowable(t);
                 postFlush.flushFailure = t;
+                logger.debug("flushed view for {}: {}", cfs.name, cfs.data.getView().toDebugString());
             }
 
             if (logger.isTraceEnabled())

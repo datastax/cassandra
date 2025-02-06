@@ -25,6 +25,8 @@ import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.UnaryOperator;
 import java.util.zip.CRC32;
 
@@ -47,6 +49,7 @@ import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileOutputStreamPlus;
 import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.concurrent.LoadingMap;
 
 import static org.apache.cassandra.utils.FBUtilities.updateChecksumInt;
 
@@ -65,6 +68,8 @@ public class MetadataSerializer implements IMetadataSerializer
     private static final Logger logger = LoggerFactory.getLogger(MetadataSerializer.class);
 
     private static final int CHECKSUM_LENGTH = 4; // CRC32
+    private static final Map<Descriptor, AtomicInteger> loads = new ConcurrentHashMap<>();
+    private static final AtomicInteger totalLoads = new AtomicInteger(0);
 
     public void serialize(Map<MetadataType, MetadataComponent> components, DataOutputPlus out, Version version) throws IOException
     {
@@ -122,7 +127,9 @@ public class MetadataSerializer implements IMetadataSerializer
     public Map<MetadataType, MetadataComponent> deserialize(Descriptor descriptor, EnumSet<MetadataType> types) throws IOException
     {
         Map<MetadataType, MetadataComponent> components;
-        logger.trace("Load metadata for {}", descriptor);
+//        logger.trace("Load metadata for {}; loads so far {}; total {}", descriptor, loads.getOrDefault(descriptor, new AtomicInteger(0)).get(), totalLoads.get());
+        if ((totalLoads.get() % 10000) == 0)
+            logger.warn("DUPA: Loading metadata for {} more than 1000 times", descriptor, new Exception("lots of loads"));
         File statsFile = descriptor.fileFor(Component.STATS);
         if (!statsFile.exists())
         {
@@ -135,6 +142,8 @@ public class MetadataSerializer implements IMetadataSerializer
             try (RandomAccessReader r = RandomAccessReader.open(statsFile))
             {
                 components = deserialize(descriptor, r, types);
+                loads.computeIfAbsent(descriptor, d -> new AtomicInteger(0)).incrementAndGet();
+                totalLoads.incrementAndGet();
             }
         }
         return components;
