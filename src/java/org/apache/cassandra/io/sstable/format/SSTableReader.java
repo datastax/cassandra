@@ -343,6 +343,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
 
             try
             {
+                logger.debug("Deserializaing compaction metadata for sstable {}", sstable.descriptor);
                 CompactionMetadata metadata = (CompactionMetadata) sstable.descriptor.getMetadataSerializer().deserialize(sstable.descriptor, MetadataType.COMPACTION);
                 // If we can't load the CompactionMetadata, we are forced to estimate the keys using the index
                 // summary. (CASSANDRA-10676)
