@@ -336,6 +336,9 @@ public class NativeIndexDDLTest extends SAITester
         assertInvalid(String.format("CREATE CUSTOM INDEX ON %s.%s (%s) USING 'StorageAttachedIndex'",
                                     KEYSPACE, longName, qualifiedColumnName));
 
+        assertInvalid(String.format("CREATE CUSTOM INDEX %s ON %s.%s (%s) USING 'StorageAttachedIndex'",
+                                    "thisIsLongerIndexName", KEYSPACE, longName, qualifiedColumnName));
+
         execute(String.format("CREATE KEYSPACE %s with replication = " +
                               "{ 'class' : 'SimpleStrategy', 'replication_factor' : 1 }",
                               longName));
@@ -343,6 +346,25 @@ public class NativeIndexDDLTest extends SAITester
                                   "key int PRIMARY KEY," +
                                   "%s int)", longName, shortTableName, qualifiedColumnName));
         assertInvalid(String.format("CREATE CUSTOM INDEX ON %s.%s (%s) USING 'StorageAttachedIndex'", longName, shortTableName, qualifiedColumnName));
+        assertInvalid(String.format("CREATE CUSTOM INDEX %s ON %s.%s (%s) USING 'StorageAttachedIndex'",
+                                    "thisIsLongerIndexName", longName, shortTableName, qualifiedColumnName));
+    }
+
+    @Test
+    public void shouldFailOnLongIndexName()
+    {
+        String longIndexName = "very_very_very_very_very_very_very_very_very_" +
+                               "very_very_very_very_very_very_very_very_very_very_very_" +
+                               "very_very_very_very_very_very_very_very_very_very_very_" +
+                               "very_very_very_very_very_very_very_very_long_index_name";
+        String longerIndexName = "extremely_very_very_very_very_very_very_very_very_very_" +
+                                 "very_very_very_very_very_very_very_very_very_very_very_" +
+                                 "very_very_very_very_very_very_very_very_very_very_very_" +
+                                 "very_very_very_very_very_very_very_very_very_very_very_" +
+                                 "very_very_very_very_very_very_very_very_long_index_name";
+        createTable("CREATE TABLE %s (key int PRIMARY KEY, value int)");
+        assertInvalid(String.format("CREATE CUSTOM INDEX %s ON %%s(value) USING 'StorageAttachedIndex'", longIndexName));
+        assertInvalid(String.format("CREATE CUSTOM INDEX %s ON %%s(value) USING 'StorageAttachedIndex'", longerIndexName));
     }
 
     @Test
