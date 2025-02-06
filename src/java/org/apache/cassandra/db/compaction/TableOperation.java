@@ -28,6 +28,8 @@ import java.util.function.Predicate;
 
 import javax.annotation.Nullable;
 
+import com.google.common.base.Joiner;
+
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.File;
@@ -224,6 +226,11 @@ public interface TableOperation
          */
         Set<SSTableReader> sstables();
 
+        default String targetDirectory()
+        {
+            return "";
+        }
+
         /**
          * Note that this estimate is based on the amount of data we have left to read - it assumes input
          * size == output size for a compaction, which is not really true, but should most often provide a worst case
@@ -253,21 +260,6 @@ public interface TableOperation
             return Collections.emptyList();
         }
 
-        default String targetDirectory()
-        {
-            if (targetDirectory() == null)
-                return "";
-
-            try
-            {
-                return new File(targetDirectory()).canonicalPath();
-            }
-            catch (Throwable t)
-            {
-                throw new RuntimeException("Unable to resolve canonical path for " + targetDirectory());
-            }
-        }
-
         default String progressToString()
         {
             StringBuilder buff = new StringBuilder();
@@ -292,6 +284,8 @@ public interface TableOperation
             ret.put(OPERATION_TYPE, operationType().toString());
             ret.put(UNIT, unit().toString());
             ret.put(OPERATION_ID, operationId() == null ? "" : operationId().toString());
+            ret.put(SSTABLES, Joiner.on(',').join(sstables()));
+            ret.put(TARGET_DIRECTORY, targetDirectory());
             return ret;
         }
     }
