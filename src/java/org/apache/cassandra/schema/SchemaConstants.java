@@ -72,9 +72,14 @@ public final class SchemaConstants
 
     public static final List<String> LEGACY_AUTH_TABLES = Arrays.asList("credentials", "users", "permissions");
 
+    public static boolean isSafeLengthForFilename(String name)
+    {
+        return name.length() <= NAME_LENGTH;
+    }
+
     public static boolean isValidName(String name)
     {
-        return name != null && !name.isEmpty() && name.length() <= NAME_LENGTH && PATTERN_WORD_CHARS.matcher(name).matches();
+        return name != null && !name.isEmpty() && isSafeLengthForFilename(name) && PATTERN_WORD_CHARS.matcher(name).matches();
     }
 
     static
