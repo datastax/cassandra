@@ -333,21 +333,28 @@ public class NativeIndexDDLTest extends SAITester
                                   "  key int PRIMARY KEY," +
                                   "  %s int)",
                                   KEYSPACE, longName, qualifiedColumnName));
-        assertInvalid(String.format("CREATE CUSTOM INDEX ON %s.%s (%s) USING 'StorageAttachedIndex'",
-                                    KEYSPACE, longName, qualifiedColumnName));
+        assertInvalidMessage("Prefix of keyspace and table names together are too long for an index file name: 236. Max length is 222",
+                             String.format("CREATE CUSTOM INDEX ON %s.%s (%s) USING 'StorageAttachedIndex'",
+                                           KEYSPACE, longName, qualifiedColumnName));
 
-        assertInvalid(String.format("CREATE CUSTOM INDEX %s ON %s.%s (%s) USING 'StorageAttachedIndex'",
-                                    "thisIsLongerIndexName", KEYSPACE, longName, qualifiedColumnName));
+        assertInvalidMessage("Prefix of keyspace and table names together are too long for an index file name: 236. Max length is 222",
+                             String.format("CREATE CUSTOM INDEX %s ON %s.%s (%s) USING 'StorageAttachedIndex'",
+                                           "thisIsLongerIndexName", KEYSPACE, longName, qualifiedColumnName));
 
         execute(String.format("CREATE KEYSPACE %s with replication = " +
                               "{ 'class' : 'SimpleStrategy', 'replication_factor' : 1 }",
                               longName));
         createTable(String.format("CREATE TABLE %s.%s (" +
                                   "key int PRIMARY KEY," +
-                                  "%s int)", longName, shortTableName, qualifiedColumnName));
-        assertInvalid(String.format("CREATE CUSTOM INDEX ON %s.%s (%s) USING 'StorageAttachedIndex'", longName, shortTableName, qualifiedColumnName));
-        assertInvalid(String.format("CREATE CUSTOM INDEX %s ON %s.%s (%s) USING 'StorageAttachedIndex'",
-                                    "thisIsLongerIndexName", longName, shortTableName, qualifiedColumnName));
+                                  "%s int)",
+                                  longName, shortTableName, qualifiedColumnName));
+        assertInvalidMessage("Prefix of keyspace and table names together are too long for an index file name: 229. Max length is 222",
+                             String.format("CREATE CUSTOM INDEX ON %s.%s (%s) USING 'StorageAttachedIndex'",
+                                           longName, shortTableName, qualifiedColumnName));
+        assertInvalidMessage("Prefix of keyspace and table names together are too long for an index file name: 229. Max length is 222",
+                             String.format("CREATE CUSTOM INDEX %s ON %s.%s (%s) USING 'StorageAttachedIndex'",
+                                           "thisIsLongerIndexName",
+                                           longName, shortTableName, qualifiedColumnName));
     }
 
     @Test
@@ -363,8 +370,11 @@ public class NativeIndexDDLTest extends SAITester
                                  "very_very_very_very_very_very_very_very_very_very_very_" +
                                  "very_very_very_very_very_very_very_very_long_index_name";
         createTable("CREATE TABLE %s (key int PRIMARY KEY, value int)");
-        assertInvalid(String.format("CREATE CUSTOM INDEX %s ON %%s(value) USING 'StorageAttachedIndex'", longIndexName));
-        assertInvalid(String.format("CREATE CUSTOM INDEX %s ON %%s(value) USING 'StorageAttachedIndex'", longerIndexName));
+        assertInvalidMessage(String.format("Index name %s is too long to be part of constructed file names. It must fit 145 characters", longIndexName),
+                             String.format("CREATE CUSTOM INDEX %s ON %%s(value) USING 'StorageAttachedIndex'", longIndexName));
+
+        assertInvalidMessage(String.format("Keyspace name must not be empty, more than 222 characters long, or contain non-alphanumeric-underscore characters (got \"%s\")", longerIndexName),
+                             String.format("CREATE CUSTOM INDEX %s ON %%s(value) USING 'StorageAttachedIndex'", longerIndexName));
     }
 
     @Test
