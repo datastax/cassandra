@@ -204,8 +204,16 @@ public final class IndexMetadata
 
     public void validate(TableMetadata table)
     {
-        if (!isValidName(name, true))
-            throw new ConfigurationException("Illegal index name " + name);
+        if (!isValidName(name))
+            throw new ConfigurationException(String.format("Keyspace name must not be empty, more than %s characters long, "
+                                                           + "or contain non-alphanumeric-underscore characters (got \"%s\")",
+                                                           SchemaConstants.NAME_LENGTH,
+                                                           name));
+
+        if (name.length() > calculateAllowedLength(table.keyspace.length(), table.name.length()))
+            throw new ConfigurationException(String.format("Index name %s is too long to be part of constructed file names. It must fit %d characters)",
+                                                           name,
+                                                           calculateAllowedLength(table.keyspace.length(), table.name.length())));
 
         if (kind == null)
             throw new ConfigurationException("Index kind is null for index " + name);
