@@ -440,6 +440,9 @@ public class TableMetadata implements SchemaElement
 
     public void validate(boolean durationLegacyMode)
     {
+        if (!isValidName(keyspace))
+            except("Keyspace name must not be empty, more than %s characters long, or contain non-alphanumeric-underscore characters (got \"%s\")", SchemaConstants.NAME_LENGTH, keyspace);
+
         if (!isValidName(name))
             except("Table name must not be empty, more than %s characters long, or contain non-alphanumeric-underscore characters (got \"%s\")", SchemaConstants.NAME_LENGTH, name);
 
