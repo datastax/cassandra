@@ -71,14 +71,14 @@ public class OperatorTest
     {
         // test that EQ and ANALYZER_MATCHES are satisfied by the same value with an analyzer
         for (Operator operator : Arrays.asList(Operator.EQ, Operator.ANALYZER_MATCHES))
-            Assertions.assertThat(operator.isSatisfiedBy(type, left, right, analyzer)).isEqualTo(shouldBeSatisfied);
+            Assertions.assertThat(operator.isSatisfiedBy(type, left, right, analyzer, analyzer)).isEqualTo(shouldBeSatisfied);
 
         // test that EQ without an analyzer behaves as type-based identity
-        Assertions.assertThat(Operator.EQ.isSatisfiedBy(type, left, right, null))
+        Assertions.assertThat(Operator.EQ.isSatisfiedBy(type, left, right, null, null))
                   .isEqualTo(type.compareForCQL(left, right) == 0);
 
         // test that ANALYZER_MATCHES throws an exception when no analyzer is provided
-        Assertions.assertThatThrownBy(() -> Operator.ANALYZER_MATCHES.isSatisfiedBy(type, left, right, null))
+        Assertions.assertThatThrownBy(() -> Operator.ANALYZER_MATCHES.isSatisfiedBy(type, left, right, null, null))
                   .isInstanceOf(AssertionError.class)
                   .hasMessageContaining(": operation can only be computed by an indexed column with a configured analyzer");
 
@@ -91,19 +91,19 @@ public class OperatorTest
             boolean supported = false;
             try
             {
-                shouldBeSatisfied = operator.isSatisfiedBy(type, left, right, null);
+                shouldBeSatisfied = operator.isSatisfiedBy(type, left, right, null, null);
                 supported = true;
             }
             catch (Exception e)
             {
-                Assertions.assertThatThrownBy(() -> operator.isSatisfiedBy(type, left, right, analyzer))
+                Assertions.assertThatThrownBy(() -> operator.isSatisfiedBy(type, left, right, analyzer, analyzer))
                           .isInstanceOf(e.getClass())
                           .hasMessage(e.getMessage());
             }
 
             if (supported)
             {
-                Assertions.assertThat(operator.isSatisfiedBy(type, left, right, analyzer))
+                Assertions.assertThat(operator.isSatisfiedBy(type, left, right, analyzer, analyzer))
                           .isEqualTo(shouldBeSatisfied);
             }
         }
