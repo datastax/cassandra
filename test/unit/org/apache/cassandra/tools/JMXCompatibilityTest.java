@@ -31,7 +31,10 @@ import com.datastax.driver.core.SimpleStatement;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
+import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.io.sstable.format.bti.BtiFormat;
+import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.service.CassandraDaemon;
 import org.apache.cassandra.service.GCInspector;
@@ -89,6 +92,9 @@ public class JMXCompatibilityTest extends CQLTester
         // force loading mbean which CassandraDaemon creates
         GCInspector.register();
         CassandraDaemon.registerNativeAccess();
+
+        // CC5 fix needed after CNDB-10289
+        SchemaConstants.LOCAL_SYSTEM_KEYSPACE_NAMES.forEach(k -> Keyspace.open(k).flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
 
         String name = KEYSPACE + '.' + createTable("CREATE TABLE %s (pk int PRIMARY KEY)");
 
