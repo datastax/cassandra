@@ -95,7 +95,7 @@ public class SSTableTasksTableTest extends CQLTester
             UntypedResultSet result = execute("SELECT * FROM vts.sstable_tasks");
             assertRows(result, row(CQLTester.KEYSPACE, currentTable(), compactionId, 1.0 * bytesCompacted / bytesTotal,
                                    OperationType.COMPACTION.toString().toLowerCase(), bytesCompacted, sstables.size(),
-                                   directory, bytesTotal, AbstractTableOperation.Unit.BYTES.toString()));
+                                   directory, bytesTotal, 0L, AbstractTableOperation.Unit.BYTES.toString()));
         }
         UntypedResultSet result = execute("SELECT * FROM vts.sstable_tasks");
         assertEmpty(result);
