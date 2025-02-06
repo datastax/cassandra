@@ -486,12 +486,23 @@ public interface Index
     }
 
     /**
-     * Returns the {@link Analyzer} for this index, if any. If the index doesn't transform the column values, this
-     * method will return an empty optional.
+     * Returns the write-time {@link Analyzer} for this index, if any. If the index doesn't transform the column values,
+     * this method will return an empty optional.
      *
-     * @return the transforming column value analyzer for the index, if any
+     * @return the write-time transforming column value analyzer for the index, if any
      */
-    default Optional<Analyzer> getAnalyzer()
+    default Optional<Analyzer> getIndexAnalyzer()
+    {
+        return Optional.empty();
+    }
+
+    /**
+     * Returns the query-time {@link Analyzer} for this index, if any. If the index doesn't transform the column values,
+     * this method will return an empty optional.
+     *
+     * @return the query-time transforming column value analyzer for the index, if any
+     */
+    default Optional<Analyzer> getQueryAnalyzer()
     {
         return Optional.empty();
     }
