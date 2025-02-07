@@ -465,7 +465,7 @@ orderByClause[List<Ordering.Raw> orderings]
     @init{
         Ordering.Direction direction = Ordering.Direction.ASC;
     }
-    : c=cident (K_ANN_OF t=term)? (K_ASC | K_DESC { direction = Ordering.Direction.DESC; })?
+    : c=cident (K_ANN K_OF t=term)? (K_ASC | K_DESC { direction = Ordering.Direction.DESC; })?
     {
         Ordering.Raw.Expression expr = (t == null)
             ? new Ordering.Raw.SingleColumn(c)
@@ -2087,7 +2087,7 @@ basic_unreserved_keyword returns [String str]
         | K_DROPPED
         | K_COLUMN
         | K_RECORD
-        | K_ANN_OF
+        | K_ANN
         | K_OFFSET
         | K_DETERMINISTIC
         | K_MONOTONIC
