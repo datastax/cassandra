@@ -32,6 +32,7 @@ import org.junit.Test;
 
 import org.apache.cassandra.exceptions.SyntaxException;
 import org.apache.cassandra.service.StorageService;
+import org.assertj.core.api.Assertions;
 
 /**
  * This class tests all keywords which took a long time. Hence it was split into multiple
@@ -47,6 +48,12 @@ public abstract class KeywordTestBase extends CQLTester
                                                   })
                                                   .collect(Collectors.toList());
 
+    static
+    {
+        // ensure that ANN is a separate keyword, so it's included on this tests (see CNDB-12733)
+        Assertions.assertThat(keywords).contains(new Object[]{"ANN", false});
+    }
+    
     public static Collection<Object[]> getKeywordsForSplit(int split, int totalSplits)
     {
         return Sets.newHashSet(Lists.partition(KeywordTestBase.keywords, KeywordTestBase.keywords.size() / totalSplits)
