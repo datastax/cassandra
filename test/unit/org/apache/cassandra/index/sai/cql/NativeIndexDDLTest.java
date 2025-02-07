@@ -307,7 +307,7 @@ public class NativeIndexDDLTest extends SAITester
                     + intoColumnDefs(columnNames)
                     + "PRIMARY KEY (key))");
         for (String columnName : columnNames)
-            createIndex("CREATE CUSTOM INDEX ON %s (" + columnName + ") USING 'StorageAttachedIndex'");
+            execute("CREATE CUSTOM INDEX ON %s (" + columnName + ") USING 'StorageAttachedIndex'");
         for (int i = 0; i < columnNames.length; i++)
             execute("INSERT INTO %s (key, " + columnNames[i] + ") VALUES (" + i + ", " + i + ')');
         for (int i = 0; i < columnNames.length; i++)

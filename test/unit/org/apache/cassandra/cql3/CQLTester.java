@@ -1061,10 +1061,9 @@ public abstract class CQLTester
             assertNotNull(ks);
             index = ks.findAvailableIndexName(baseName);
         }
-        else
-            index = ParseUtils.isQuoted(index, '\"')
-                    ? ParseUtils.unDoubleQuote(index)
-                    : index.toLowerCase();
+        index = ParseUtils.isQuoted(index, '\"')
+                ? ParseUtils.unDoubleQuote(index)
+                : index.toLowerCase();
 
         return Pair.create(keyspace, index);
     }
