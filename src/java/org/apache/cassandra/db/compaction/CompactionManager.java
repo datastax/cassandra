@@ -1578,7 +1578,7 @@ public class CompactionManager implements CompactionManagerMBean
                                   BooleanSupplier isCancelled)
     {
         int originalCount = txn.originals().size();
-        logger.info("Performing anticompaction on {} sstables for {}", originalCount, pendingRepair);
+        logger.info("Performing anticompaction on {} sstables for {} ks {} cf {}", originalCount, pendingRepair, cfs.getKeyspaceName(), cfs.getTableName());
 
         //Group SSTables
         Set<SSTableReader> sstables = txn.originals();
@@ -1601,8 +1601,8 @@ public class CompactionManager implements CompactionManagerMBean
                 antiCompactedSSTableCount += antiCompacted;
             }
         }
-        String format = "Anticompaction completed successfully, anticompacted from {} to {} sstable(s) for {}.";
-        logger.info(format, originalCount, antiCompactedSSTableCount, pendingRepair);
+        String format = "Anticompaction completed successfully, anticompacted from {} to {} sstable(s) for {} ks {} cf {}.";
+        logger.info(format, originalCount, antiCompactedSSTableCount, pendingRepair, cfs.getKeyspaceName(), cfs.getTableName());
     }
 
     @VisibleForTesting
