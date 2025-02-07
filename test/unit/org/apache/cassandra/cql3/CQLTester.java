@@ -1062,6 +1062,7 @@ public abstract class CQLTester
             keyspace = parsedKeyspace;
 
         String index = matcher.group(2);
+        boolean isQuotedGeneratedIndexName = false;
         if (Strings.isNullOrEmpty(index))
         {
             String table = matcher.group(7);
@@ -1069,6 +1070,7 @@ public abstract class CQLTester
                 throw new IllegalArgumentException("Table name should be specified: " + formattedQuery);
 
             String column = matcher.group(9);
+            isQuotedGeneratedIndexName = ParseUtils.isQuoted(column, '\"');
 
             String baseName = Strings.isNullOrEmpty(column)
                               ? IndexMetadata.generateDefaultIndexName(table)
@@ -1080,7 +1082,7 @@ public abstract class CQLTester
         }
         index = ParseUtils.isQuoted(index, '\"')
                 ? ParseUtils.unDoubleQuote(index)
-                : index.toLowerCase();
+                : isQuotedGeneratedIndexName ? index : index.toLowerCase();
 
         return Pair.create(keyspace, index);
     }
