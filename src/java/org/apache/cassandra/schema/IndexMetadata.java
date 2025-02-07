@@ -123,25 +123,32 @@ public final class IndexMetadata
 
         String indexNameTrimmed = indexNameUntruncated
                                   .substring(0,
-                                             Math.min(calculateAllowedLength(keyspaceNameLength, table.length()),
+                                             Math.min(calculateMaxGeneratedIndexNameLength(keyspaceNameLength, table.length()),
                                                       indexNameUntruncated.length()));
         return indexNameTrimmed + INDEX_POSTFIX;
     }
 
-    private static int calculateAllowedLength(int keyspaceNameLength, int tableNameLength)
+    private static int calculateIndexAllowedLength(int keyspaceNameLength, int tableNameLength)
     {
-        int uniquenessSuffixLength = 3;
-        int minIndexNameAddition = uniquenessSuffixLength + INDEX_POSTFIX.length();
 
-        int addedLength1 = getAddedLengthFromIndexContextFullName(keyspaceNameLength, tableNameLength, minIndexNameAddition);
+        int addedLength1 = getAddedLengthFromIndexContextFullName(keyspaceNameLength, tableNameLength);
         int addedLength2 = getAddedLengthFromDescriptorAndVersion();
 
         int maxAddedLength = Math.max(addedLength1, addedLength2);
-        int finalAddedLength = maxAddedLength + minIndexNameAddition;
 
-        assert finalAddedLength < SchemaConstants.NAME_LENGTH : "Index name additions are too long";
+        assert maxAddedLength <= SchemaConstants.NAME_LENGTH : "Index name additions are too long";
 
-        return SchemaConstants.NAME_LENGTH - finalAddedLength;
+        return SchemaConstants.NAME_LENGTH - maxAddedLength;
+    }
+
+    private static int calculateMaxGeneratedIndexNameLength(int keyspaceNameLength, int tableNameLength)
+    {
+        int uniquenessSuffixLength = 3;
+        int indexNameAddition = uniquenessSuffixLength + INDEX_POSTFIX.length();
+        int allowedIndexNameLength = calculateIndexAllowedLength(keyspaceNameLength, tableNameLength);
+        if (allowedIndexNameLength < indexNameAddition)
+            throw new InvalidQueryException(String.format("Cannot generate index name to fit file names, since the addition take the allowed length %s.", SchemaConstants.NAME_LENGTH));
+        return allowedIndexNameLength - indexNameAddition;
     }
 
     /**
@@ -180,13 +187,13 @@ public final class IndexMetadata
      * @param tableNameLength    the length of the table name
      * @return the length of the added prefixes and suffixes
      */
-    private static int getAddedLengthFromIndexContextFullName(int keyspaceNameLength, int tableNameLength, int minIndexNameAddition)
+    private static int getAddedLengthFromIndexContextFullName(int keyspaceNameLength, int tableNameLength)
     {
         int separatorLength = 1;
         int addedLength1 = keyspaceNameLength + tableNameLength + separatorLength * 2;
-        if (addedLength1 + minIndexNameAddition > SchemaConstants.NAME_LENGTH)
+        if (addedLength1 > SchemaConstants.NAME_LENGTH)
             throw new InvalidQueryException(String.format("Prefix of keyspace and table names together are too long for an index file name: %s. Max length is %s",
-                                                          addedLength1 + minIndexNameAddition,
+                                                          addedLength1,
                                                           SchemaConstants.NAME_LENGTH));
         return addedLength1;
     }
@@ -210,10 +217,10 @@ public final class IndexMetadata
                                                            SchemaConstants.NAME_LENGTH,
                                                            name));
 
-        if (name.length() > calculateAllowedLength(table.keyspace.length(), table.name.length()))
-            throw new ConfigurationException(String.format("Index name %s is too long to be part of constructed file names. It must fit %d characters.",
+        if (name.length() > calculateIndexAllowedLength(table.keyspace.length(), table.name.length()))
+            throw new ConfigurationException(String.format("Index name %s is too long to be part of constructed file names. Together with added prefixes and suffixes it must fit %s characters.",
                                                            name,
-                                                           calculateAllowedLength(table.keyspace.length(), table.name.length())));
+                                                           SchemaConstants.NAME_LENGTH));
 
         if (kind == null)
             throw new ConfigurationException("Index kind is null for index " + name);

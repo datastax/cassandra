@@ -328,18 +328,19 @@ public class NativeIndexDDLTest extends SAITester
                           "very_very_very_very_very_very_very_very_long_table_name";
         String shortTableName = "table_name";
         String qualifiedColumnName = "\"qualified column name\"";
+        String explicitIndexName = "thisIsLongerIndexName";
 
         createTable(String.format("CREATE TABLE %s.%s (" +
                                   "  key int PRIMARY KEY," +
                                   "  %s int)",
                                   KEYSPACE, longName, qualifiedColumnName));
-        assertInvalidMessage("Prefix of keyspace and table names together are too long for an index file name: 236. Max length is 222",
+        assertInvalidMessage("Prefix of keyspace and table names together are too long for an index file name: 229. Max length is 222",
                              String.format("CREATE CUSTOM INDEX ON %s.%s (%s) USING 'StorageAttachedIndex'",
                                            KEYSPACE, longName, qualifiedColumnName));
 
-        assertInvalidMessage("Prefix of keyspace and table names together are too long for an index file name: 236. Max length is 222",
+        assertInvalidMessage("Prefix of keyspace and table names together are too long for an index file name: 229. Max length is 222",
                              String.format("CREATE CUSTOM INDEX %s ON %s.%s (%s) USING 'StorageAttachedIndex'",
-                                           "thisIsLongerIndexName", KEYSPACE, longName, qualifiedColumnName));
+                                           explicitIndexName, KEYSPACE, longName, qualifiedColumnName));
 
         execute(String.format("CREATE KEYSPACE %s with replication = " +
                               "{ 'class' : 'SimpleStrategy', 'replication_factor' : 1 }",
@@ -348,12 +349,13 @@ public class NativeIndexDDLTest extends SAITester
                                   "key int PRIMARY KEY," +
                                   "%s int)",
                                   longName, shortTableName, qualifiedColumnName));
-        assertInvalidMessage("Prefix of keyspace and table names together are too long for an index file name: 229. Max length is 222",
+        assertInvalidMessage("Cannot generate index name to fit file names, since the addition take the allowed length 222.",
                              String.format("CREATE CUSTOM INDEX ON %s.%s (%s) USING 'StorageAttachedIndex'",
                                            longName, shortTableName, qualifiedColumnName));
-        assertInvalidMessage("Prefix of keyspace and table names together are too long for an index file name: 229. Max length is 222",
+        assertInvalidMessage(String.format("Index name %s is too long to be part of constructed file names. Together with added prefixes and suffixes it must fit 222 characters.",
+                                           explicitIndexName.toLowerCase()),
                              String.format("CREATE CUSTOM INDEX %s ON %s.%s (%s) USING 'StorageAttachedIndex'",
-                                           "thisIsLongerIndexName",
+                                           explicitIndexName,
                                            longName, shortTableName, qualifiedColumnName));
     }
 
