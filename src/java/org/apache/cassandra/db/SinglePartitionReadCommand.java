@@ -20,6 +20,7 @@ package org.apache.cassandra.db;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 
@@ -61,6 +62,11 @@ import org.apache.cassandra.utils.btree.BTreeSet;
 public class SinglePartitionReadCommand extends ReadCommand implements SinglePartitionReadQuery
 {
     protected static final SelectionDeserializer selectionDeserializer = new Deserializer();
+    private static final int MIN_ITERATOR_TO_PARALLELIZE_READS = Integer.getInteger("cassandra.read_min_ssatable_to_parallelize_reads", 2);
+    static
+    {
+        logger.debug("Setting cassandra.read_min_ssatable_to_parallelize_reads to {}", MIN_ITERATOR_TO_PARALLELIZE_READS);
+    }
 
     private final DecoratedKey partitionKey;
     private final ClusteringIndexFilter clusteringIndexFilter;
@@ -746,6 +752,26 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
             StorageHook.instance.reportRead(cfs.metadata().id, partitionKey());
 
             List<UnfilteredRowIterator> iterators = inputCollector.finalizeIterators(cfs, nowInSec(), controller.oldestUnrepairedTombstone());
+            if (MIN_ITERATOR_TO_PARALLELIZE_READS > 0 && iterators.size() > MIN_ITERATOR_TO_PARALLELIZE_READS)
+            {
+                try
+                {
+                    // hasNext triggers the read from storage, we can parallelize this with the Storage Service
+                    List<CompletableFuture<?>> handles = new ArrayList<>();
+                    for (UnfilteredRowIterator it : iterators)
+                    {
+                        handles.add(CompletableFuture.runAsync(it::hasNext));
+                    }
+                    for (CompletableFuture<?> h : handles)
+                    {
+                        h.get(1, TimeUnit.MINUTES);
+                    }
+                } catch (Throwable error)
+                {
+                    logger.error("Failed to parallelize read for partition {}", partitionKey, error);
+                    // we can ignore this error, it will be caught later in the pipeline
+                }
+            }
             return withSSTablesIterated(iterators, controller, view.sstables.size(), cfs.metric, metricsCollector, startTimeNanos);
         }
         catch (RuntimeException | Error e)
