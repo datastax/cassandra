@@ -251,6 +251,8 @@ public class IndexAvailabilityTest extends TestBaseImpl
             String index1 = "tbl_idx1";
             String index2 = "tbl_idx2";
             String vectorIndex = "tbl_vec_idx";
+            keyspaces = List.of(ks2);
+            indexesPerKs = Arrays.asList(index1, index2, vectorIndex);
 
             cluster.schemaChange(String.format(CREATE_KEYSPACE, ks2, 2));
             cluster.schemaChange("CREATE TABLE " + ks2 + '.' + table +
@@ -331,6 +333,7 @@ public class IndexAvailabilityTest extends TestBaseImpl
                                      "SELECT pk FROM " + ks2 + '.' + table + " WHERE v1=0 AND v2=0 ALLOW FILTERING",
                                      ConsistencyLevel.LOCAL_QUORUM,
                                      2);
+
             // Verify actual results using a direct query
             results = cluster.coordinator(1)
                                         .execute("SELECT pk FROM " + ks2 + '.' + table + " WHERE v1=0 AND v2=0 ALLOW FILTERING",
@@ -352,6 +355,11 @@ public class IndexAvailabilityTest extends TestBaseImpl
             waitForIndexingStatus(cluster.get(2), ks2, index2, cluster.get(2), Index.Status.FULL_REBUILD_STARTED);
             waitForIndexingStatus(cluster.get(3), ks2, index2, cluster.get(2), Index.Status.FULL_REBUILD_STARTED);
             waitForIndexingStatus(cluster.get(1), ks2, index2, cluster.get(2), Index.Status.FULL_REBUILD_STARTED);
+            markIndexBuilding(cluster.get(3), ks2, table, index2);
+            waitForIndexingStatus(cluster.get(2), ks2, index2, cluster.get(3), Index.Status.FULL_REBUILD_STARTED);
+            waitForIndexingStatus(cluster.get(3), ks2, index2, cluster.get(3), Index.Status.FULL_REBUILD_STARTED);
+            waitForIndexingStatus(cluster.get(1), ks2, index2, cluster.get(3), Index.Status.FULL_REBUILD_STARTED);
+            assertIndexingStatus(cluster);
 
             assertThatThrownBy(() ->
                                executeOnAllCoordinators(cluster,
@@ -381,6 +389,7 @@ public class IndexAvailabilityTest extends TestBaseImpl
             waitForIndexingStatus(cluster.get(2), ks2, vectorIndex, cluster.get(2), Index.Status.FULL_REBUILD_STARTED);
             waitForIndexingStatus(cluster.get(3), ks2, vectorIndex, cluster.get(2), Index.Status.FULL_REBUILD_STARTED);
             waitForIndexingStatus(cluster.get(1), ks2, vectorIndex, cluster.get(2), Index.Status.FULL_REBUILD_STARTED);
+            assertIndexingStatus(cluster);
 
             assertThatThrownBy(() ->
                                executeOnAllCoordinators(cluster,
@@ -405,15 +414,28 @@ public class IndexAvailabilityTest extends TestBaseImpl
 
             // drop the index that does not support GEO DISTANCE
             cluster.schemaChange("DROP INDEX IF EXISTS " + ks2 + '.' + vectorIndex);
+            expectedNodeIndexQueryability.keySet().forEach(k -> {
+                if (k.keyspace.equals(ks2) && k.index.equals(vectorIndex))
+                    expectedNodeIndexQueryability.put(k, Index.Status.UNKNOWN);
+            });
+            assertIndexingStatus(cluster);
 
             // create a new index that supports GEO DISTANCE
             cluster.schemaChange(String.format("CREATE CUSTOM INDEX %s ON %s.%s(vec) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}",
                                                vectorIndex, ks2, table));
-            markIndexQueryable(cluster.get(1), ks2, table, index2);
-            markIndexQueryable(cluster.get(2), ks2, table, index2);
-            cluster.forEach(node -> expectedNodeIndexQueryability.put(NodeIndex.create(ks2, index2, node), Index.Status.BUILD_SUCCEEDED));
             cluster.forEach(node -> expectedNodeIndexQueryability.put(NodeIndex.create(ks2, vectorIndex, node), Index.Status.BUILD_SUCCEEDED));
-            waitForIndexQueryable(cluster, ks2);
+            waitForIndexingStatus(cluster.get(2), ks2, vectorIndex, cluster.get(1), Index.Status.BUILD_SUCCEEDED);
+            waitForIndexingStatus(cluster.get(3), ks2, vectorIndex, cluster.get(1), Index.Status.BUILD_SUCCEEDED);
+            waitForIndexingStatus(cluster.get(1), ks2, vectorIndex, cluster.get(1), Index.Status.BUILD_SUCCEEDED);
+            waitForIndexingStatus(cluster.get(2), ks2, vectorIndex, cluster.get(2), Index.Status.BUILD_SUCCEEDED);
+            waitForIndexingStatus(cluster.get(3), ks2, vectorIndex, cluster.get(2), Index.Status.BUILD_SUCCEEDED);
+            waitForIndexingStatus(cluster.get(1), ks2, vectorIndex, cluster.get(2), Index.Status.BUILD_SUCCEEDED);
+            waitForIndexingStatus(cluster.get(2), ks2, vectorIndex, cluster.get(3), Index.Status.BUILD_SUCCEEDED);
+            waitForIndexingStatus(cluster.get(3), ks2, vectorIndex, cluster.get(3), Index.Status.BUILD_SUCCEEDED);
+            waitForIndexingStatus(cluster.get(1), ks2, vectorIndex, cluster.get(3), Index.Status.BUILD_SUCCEEDED);
+
+            // other indexes or keyspaces should not be affected
+            assertIndexingStatus(cluster);
 
             executeOnAllCoordinators(cluster,
                                      "SELECT pk FROM " + ks2 + '.' + table + " WHERE GEO_DISTANCE(vec, [1, 1]) < 1000",
