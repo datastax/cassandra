@@ -404,14 +404,11 @@ public abstract class ReadCommand extends AbstractReadQuery
         ColumnFamilyStore cfs = Keyspace.openAndGetStore(metadata());
 
         Index.Searcher searcher = null;
-        if (indexQueryPlan != null)
+        if (indexQueryPlan != null && cfs.indexManager.isQueryableThroughIndex(indexQueryPlan, rowFilter().allowFiltering))
         {
-            if (cfs.indexManager.isQueryableThroughIndex(indexQueryPlan, rowFilter().allowFiltering))
-            {
                 searcher = indexSearcher();
                 Index index = indexQueryPlan.getFirst();
                 Tracing.trace("Executing read on {}.{} using index {}", cfs.metadata.keyspace, cfs.metadata.name, index.getIndexMetadata().name);
-            }
         }
 
         Context context = Context.from(this);

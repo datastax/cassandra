@@ -76,7 +76,7 @@ public class RangeCommandsTest extends CQLTester
         // verify that a low concurrency factor is not capped by the max concurrency factor
         PartitionRangeReadCommand command = command(cfs, 50, 50);
         try (RangeCommandIterator partitions = RangeCommands.rangeCommandIterator(command, ONE, System.nanoTime(), ReadTracker.NOOP);
-             ReplicaPlanIterator ranges = new ReplicaPlanIterator(command.dataRange().keyRange(), command.indexQueryPlan(), keyspace, ONE, false))
+             ReplicaPlanIterator ranges = new ReplicaPlanIterator(command.dataRange().keyRange(), command.indexQueryPlan(), keyspace, ONE, command.rowFilter().allowFiltering))
         {
             assertEquals(2, partitions.concurrencyFactor());
             assertEquals(MAX_CONCURRENCY_FACTOR, partitions.maxConcurrencyFactor());

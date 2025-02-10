@@ -365,17 +365,16 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
      * @param queryPlan a query plan
      * @throws IndexNotAvailableException if the query plan has any index that is not queryable
      */
-    public boolean isQueryableThroughIndex(Index.QueryPlan queryPlan, boolean allowsFiltering)
+    public boolean isQueryableThroughIndex(Index.QueryPlan queryPlan, boolean allowFiltering)
     {
         for (Index index : queryPlan.getIndexes())
         {
-            if (isIndexBuilding(index))
-              if (allowsFiltering)
-              {
-                  ClientWarn.instance.warn(format(SecondaryIndexManager.FELL_BACK_TO_ALLOW_FILTERING, index.getIndexMetadata().name));
-                  logger.warn(format(SecondaryIndexManager.FELL_BACK_TO_ALLOW_FILTERING, index.getIndexMetadata().name));
-                  return false;
-              }
+            if (isIndexBuilding(index) && allowFiltering)
+            {
+                ClientWarn.instance.warn(format(SecondaryIndexManager.FELL_BACK_TO_ALLOW_FILTERING, index.getIndexMetadata().name));
+                logger.warn(format(SecondaryIndexManager.FELL_BACK_TO_ALLOW_FILTERING, index.getIndexMetadata().name));
+                return false;
+            }
 
             // We will reject the query here if the index is building and ALLOW FILTERING is not allowed
             if (!isIndexQueryable(index))
@@ -397,14 +396,14 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
     }
 
     /**
-     +     * Checks if the specified index is building.
-     +     *
-     +     * @param index the index
-     +     * @return <code>true</code> if the specified index is building, <code>false</code> otherwise
-     +     */
+     * Checks if the specified index is building.
+     *
+     * @param index the index
+     * @return <code>true</code> if the specified index is building, <code>false</code> otherwise
+     */
     public boolean isIndexBuilding(Index index)
     {
-            return isIndexBuilding(index.getIndexMetadata().name);
+        return isIndexBuilding(index.getIndexMetadata().name);
     }
 
     /**
@@ -1833,14 +1832,18 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
      * @param indexQueryPlan index query plan used in the read command
      * @param level consistency level of read command
      */
-    public static <E extends Endpoints<E>> E filterForQuery(E liveEndpoints, Keyspace keyspace, Index.QueryPlan indexQueryPlan, ConsistencyLevel level, boolean allowsFiltering)
+    public static <E extends Endpoints<E>> E filterForQuery(E liveEndpoints,
+                                                            Keyspace keyspace,
+                                                            Index.QueryPlan indexQueryPlan,
+                                                            ConsistencyLevel level,
+                                                            boolean allowFiltering)
     {
         E queryableEndpoints = liveEndpoints.filter(replica -> {
             for (Index index : indexQueryPlan.getIndexes())
             {
                 Index.Status status = getIndexStatus(replica.endpoint(), keyspace.getName(), index.getIndexMetadata().name);
                 // if the status of the index is building and there is allow filtering - that is ok too
-                if (status == Index.Status.FULL_REBUILD_STARTED && allowsFiltering)
+                if (status == Index.Status.FULL_REBUILD_STARTED && allowFiltering)
                     continue;
 
                 if (!index.isQueryable(status))

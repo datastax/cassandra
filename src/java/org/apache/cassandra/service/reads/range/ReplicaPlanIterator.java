@@ -44,7 +44,7 @@ class ReplicaPlanIterator extends AbstractIterator<ReplicaPlan.ForRangeRead>
     private final Keyspace keyspace;
     private final ConsistencyLevel consistency;
     private final Index.QueryPlan indexQueryPlan;
-    private final boolean allowsFiltering;
+    private final boolean allowFiltering;
     @VisibleForTesting
     final Iterator<? extends AbstractBounds<PartitionPosition>> ranges;
     private final int rangeCount;
@@ -53,12 +53,12 @@ class ReplicaPlanIterator extends AbstractIterator<ReplicaPlan.ForRangeRead>
                         Index.QueryPlan indexQueryPlan,
                         Keyspace keyspace,
                         ConsistencyLevel consistency,
-                        boolean allowsFiltering)
+                        boolean allowFiltering)
     {
         this.indexQueryPlan = indexQueryPlan;
         this.keyspace = keyspace;
         this.consistency = consistency;
-        this.allowsFiltering = allowsFiltering;
+        this.allowFiltering = allowFiltering;
 
 
         List<? extends AbstractBounds<PartitionPosition>> l = keyspace.getReplicationStrategy() instanceof LocalStrategy
@@ -82,7 +82,7 @@ class ReplicaPlanIterator extends AbstractIterator<ReplicaPlan.ForRangeRead>
         if (!ranges.hasNext())
             return endOfData();
 
-        return ReplicaPlans.forRangeRead(keyspace, indexQueryPlan, consistency, ranges.next(), 1, allowsFiltering);
+        return ReplicaPlans.forRangeRead(keyspace, indexQueryPlan, consistency, ranges.next(), 1, allowFiltering);
     }
 
     /**
