@@ -999,7 +999,7 @@ public class StatementRestrictions
         return table.clusteringColumns().size() != clusteringColumnsRestrictions.size();
     }
 
-    public RowFilter getRowFilter(IndexRegistry indexManager, QueryOptions options, QueryState queryState, SelectOptions selectOptions, boolean allowsFiltering)
+    public RowFilter getRowFilter(IndexRegistry indexManager, QueryOptions options, QueryState queryState, SelectOptions selectOptions, boolean allowFiltering)
     {
         boolean hasAnnOptions = selectOptions.hasANNOptions();
 
@@ -1013,10 +1013,10 @@ public class StatementRestrictions
 
         ANNOptions annOptions = selectOptions.parseANNOptions();
 
-        if (allowsFiltering && (hasIndxBasedOrdering() || hasIndxBasedBoundedAnn()))
-            allowsFiltering = false;
+        if (allowFiltering && (hasIndxBasedOrdering() || hasIndxBasedBoundedAnn()))
+            allowFiltering = false;
 
-        RowFilter rowFilter = RowFilter.builder(indexManager, allowsFiltering)
+        RowFilter rowFilter = RowFilter.builder(indexManager, allowFiltering)
                                        .buildFromRestrictions(this, table, options, queryState, annOptions);
 
         if (hasAnnOptions && !rowFilter.hasANN())

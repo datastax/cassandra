@@ -813,7 +813,7 @@ public interface Index
          *
          * @param rowFilter a row filter
          * @param indexes a set of indexes
-         * @return a new query plan for the specified {@link RowFilter} and {@link Index}, {@code null} otherwise
+         * @return a new query plan for the specified {@link RowFilter} and {@link Set<Index>}, {@code null} otherwise
          */
         @Nullable
         QueryPlan queryPlanForIndices(RowFilter rowFilter, Set<Index> indexes);

@@ -83,12 +83,40 @@ public class RowFilter
 
     private final FilterElement root;
 
+    /**
+     * Indicates whether ALLOW FILTERING was specified in the CQL query and whether the respective type of query allows
+     * the query to be executed when using ALLOW FILTERING.
+     * <p>
+     * By default, CQL only allows queries that can be executed efficiently by:
+     * - Using the primary key
+     * - Using a secondary index
+     * - Scanning all data when no WHERE clause is present
+     * <p>
+     * When a query requires filtering data that cannot be handled efficiently (e.g., filtering on a non-indexed column),
+     * CQL will reject it unless ALLOW FILTERING is specified. This is because such queries may need to scan large amounts
+     * of data to return a small result set, leading to unpredictable performance.
+     * <p>
+     * For example, given a table:
+     * CREATE TABLE users (username text PRIMARY KEY, birth_year int, country text);
+     * CREATE INDEX ON users(birth_year);
+     * <p>
+     * These queries are allowed by default:
+     * - SELECT * FROM users WHERE username = 'joe'          // Uses primary key
+     * - SELECT * FROM users WHERE birth_year = 1981        // Uses secondary index
+     * - SELECT * FROM users                               // Full scan is explicit
+     * <p>
+     * This query requires ALLOW FILTERING:
+     * - SELECT * FROM users WHERE birth_year = 1981 AND country = 'FR' ALLOW FILTERING
+     * <p>
+     * When true, this field indicates the query is allowed to perform potentially expensive filtering operations
+     * that may scan large portions of the table to satisfy the query conditions.
+     */
     public final boolean allowFiltering;
 
-    protected RowFilter(FilterElement root, boolean allowFitlering)
+    protected RowFilter(FilterElement root, boolean allowFiltering)
     {
         this.root = root;
-        this.allowFiltering = allowFitlering;
+        this.allowFiltering = allowFiltering;
     }
 
     public FilterElement root()
@@ -1861,7 +1889,7 @@ public class RowFilter
         {
             return 1 // unused boolean
                    + FilterElement.serializer.serializedSize(filter.root, version)
-                   + 1; // for allowFiltering
+                   + TypeSizes.BOOL_SIZE; // for allowFiltering
         }
     }
 }
