@@ -35,7 +35,6 @@ import org.apache.commons.lang3.builder.ToStringBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.datastax.driver.core.exceptions.InvalidQueryException;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.CqlBuilder;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget;
@@ -170,7 +169,7 @@ public final class IndexMetadata
         int indexNameAddition = uniquenessSuffixLength + INDEX_POSTFIX.length();
         int allowedIndexNameLength = calculateIndexAllowedLength(keyspaceNameLength, tableNameLength);
         if (allowedIndexNameLength < indexNameAddition)
-            throw new InvalidQueryException(String.format("Cannot generate index name to fit file names, since the addition take the allowed length %s.", SchemaConstants.NAME_LENGTH));
+            throw new ConfigurationException(String.format("Cannot generate index name to fit file names, since the addition take the allowed length %s.", SchemaConstants.NAME_LENGTH));
         return allowedIndexNameLength - indexNameAddition;
     }
 
@@ -215,7 +214,7 @@ public final class IndexMetadata
         int separatorLength = 1;
         int addedLength = keyspaceNameLength + tableNameLength + separatorLength * 2;
         if (addedLength > SchemaConstants.NAME_LENGTH)
-            throw new InvalidQueryException(String.format("Prefix of keyspace and table names together are too long for an index file name: %s. Max length is %s",
+            throw new ConfigurationException(String.format("Prefix of keyspace and table names together are too long for an index file name: %s. Max length is %s",
                                                           addedLength,
                                                           SchemaConstants.NAME_LENGTH));
         return addedLength;
