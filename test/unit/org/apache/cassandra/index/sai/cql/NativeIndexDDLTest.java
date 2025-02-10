@@ -372,7 +372,7 @@ public class NativeIndexDDLTest extends SAITester
                                  "very_very_very_very_very_very_very_very_very_very_very_" +
                                  "very_very_very_very_very_very_very_very_long_index_name";
         createTable("CREATE TABLE %s (key int PRIMARY KEY, value int)");
-        assertInvalidMessage(String.format("Index name %s is too long to be part of constructed file names. It must fit 145 characters", longIndexName),
+        assertInvalidMessage(String.format("Index name %s is too long to be part of constructed file names. Together with added prefixes and suffixes it must fit 222 characters.", longIndexName),
                              String.format("CREATE CUSTOM INDEX %s ON %%s(value) USING 'StorageAttachedIndex'", longIndexName));
 
         assertInvalidMessage(String.format("Keyspace name must not be empty, more than 222 characters long, or contain non-alphanumeric-underscore characters (got \"%s\")", longerIndexName),
