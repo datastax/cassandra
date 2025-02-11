@@ -19,6 +19,7 @@
 package org.apache.cassandra.metrics;
 
 import java.io.IOException;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -37,6 +38,7 @@ import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.service.EmbeddedCassandraService;
+import org.awaitility.Awaitility;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
@@ -384,6 +386,8 @@ public class TableMetricsTest
         long estimatedPartitionCountInSSTables = cfs.metric.estimatedPartitionCountInSSTablesCached.getValue().longValue();
         long elapsedTime = System.currentTimeMillis() - startTime;
         // the caching time is one second; avoid flakiness by only checking if a long time has not passed
+        // (Because we take the time after calling the method, elapsedTime < 1000 should also be stable, but let's also
+        // accommodate the possibility that the cache uses a different timer with different tick times.)
         if (elapsedTime < 980)
             assertEquals(0, estimatedPartitionCountInSSTables);
 
@@ -405,11 +409,9 @@ public class TableMetricsTest
 
         // The cached estimatedPartitionCountInSSTables lags one second, check that.
         // Assert that the metric will return a correct value after at least a second passes
-        await().atMost(2, TimeUnit.SECONDS)
-                .untilAsserted(() -> {
-                    long value = cfs.metric.estimatedPartitionCountInSSTablesCached.getValue();
-                    assertEquals(partitionCount, value);            
-                });
+        Awaitility.await()
+                  .atMost(2, TimeUnit.SECONDS)
+                  .untilAsserted(() -> assertEquals(partitionCount, (long) cfs.metric.estimatedPartitionCountInSSTablesCached.getValue()));
     }
 
 
