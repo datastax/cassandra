@@ -57,102 +57,94 @@ public class GossipInfoTableTest extends CQLTester
     @Test
     public void testSelectAllWithStateTransitions() throws Throwable
     {
-        try
-        {
-            requireNetwork(); // triggers gossiper
+        requireNetwork(); // triggers gossiper
 
-            ConcurrentMap<InetAddressAndPort, EndpointState> states = Gossiper.instance.endpointStateMap;
-            Awaitility.await().until(() -> !states.isEmpty());
-            Map.Entry<InetAddressAndPort, EndpointState> entry = states.entrySet().stream().findFirst()
-                    .orElseThrow(AssertionError::new);
-            InetAddressAndPort endpoint = entry.getKey();
-            EndpointState localState = new EndpointState(entry.getValue());
+        ConcurrentMap<InetAddressAndPort, EndpointState> states = Gossiper.instance.endpointStateMap;
+        Awaitility.await().until(() -> !states.isEmpty());
+        Map.Entry<InetAddressAndPort, EndpointState> entry = states.entrySet().stream().findFirst()
+                .orElseThrow(AssertionError::new);
+        InetAddressAndPort endpoint = entry.getKey();
+        EndpointState localState = new EndpointState(entry.getValue());
 
-            Supplier<Map<InetAddressAndPort, EndpointState>> endpointStateMapSupplier = () -> new HashMap<InetAddressAndPort, EndpointState>() {{put(endpoint, localState);}};
+        Supplier<Map<InetAddressAndPort, EndpointState>> endpointStateMapSupplier = () -> new HashMap<InetAddressAndPort, EndpointState>() {{put(endpoint, localState);}};
 
-            VirtualKeyspaceRegistry.instance.register(new VirtualKeyspace("vts_2",
-                                                                          of(new GossipInfoTable("vts_2", endpointStateMapSupplier))));
+        VirtualKeyspaceRegistry.instance.register(new VirtualKeyspace("vts_2",
+                                                                      of(new GossipInfoTable("vts_2", endpointStateMapSupplier))));
 
-            UntypedResultSet resultSet = execute("SELECT * FROM vts_2.gossip_info");
+        UntypedResultSet resultSet = execute("SELECT * FROM vts_2.gossip_info");
 
-            assertThat(resultSet.size()).isEqualTo(1);
-            UntypedResultSet.Row row = resultSet.one();
-            assertThat(row.getColumns().size()).isEqualTo(66);
+        assertThat(resultSet.size()).isEqualTo(1);
+        UntypedResultSet.Row row = resultSet.one();
+        assertThat(row.getColumns().size()).isEqualTo(66);
 
-            assertThat(endpoint).isNotNull();
-            assertThat(localState).isNotNull();
-            assertThat(row.getInetAddress("address")).isEqualTo(endpoint.getAddress());
-            assertThat(row.getInt("port")).isEqualTo(endpoint.getPort());
-            assertThat(row.getString("hostname")).isEqualTo(endpoint.getHostName());
-            assertThat(row.getInt("generation")).isEqualTo(localState.getHeartBeatState().getGeneration());
-            assertThat(row.getInt("heartbeat")).isNotNull();
+        assertThat(endpoint).isNotNull();
+        assertThat(localState).isNotNull();
+        assertThat(row.getInetAddress("address")).isEqualTo(endpoint.getAddress());
+        assertThat(row.getInt("port")).isEqualTo(endpoint.getPort());
+        assertThat(row.getString("hostname")).isEqualTo(endpoint.getHostName());
+        assertThat(row.getInt("generation")).isEqualTo(localState.getHeartBeatState().getGeneration());
+        assertThat(row.getInt("heartbeat")).isNotNull();
 
-            assertValue(row, "status", localState, ApplicationState.STATUS);
-            assertValue(row, "load", localState, ApplicationState.LOAD);
-            assertValue(row, "schema", localState, ApplicationState.SCHEMA);
-            assertValue(row, "dc", localState, ApplicationState.DC);
-            assertValue(row, "rack", localState, ApplicationState.RACK);
-            assertValue(row, "release_version", localState, ApplicationState.RELEASE_VERSION);
-            assertValue(row, "removal_coordinator", localState, ApplicationState.REMOVAL_COORDINATOR);
-            assertValue(row, "internal_ip", localState, ApplicationState.INTERNAL_IP);
-            assertValue(row, "rpc_address", localState, ApplicationState.RPC_ADDRESS);
-            assertValue(row, "severity", localState, ApplicationState.SEVERITY);
-            assertValue(row, "net_version", localState, ApplicationState.NET_VERSION);
-            assertValue(row, "host_id", localState, ApplicationState.HOST_ID);
-            assertValue(row, "rpc_ready", localState, ApplicationState.RPC_READY);
-            assertValue(row, "internal_address_and_port", localState, ApplicationState.INTERNAL_ADDRESS_AND_PORT);
-            assertValue(row, "native_address_and_port", localState, ApplicationState.NATIVE_ADDRESS_AND_PORT);
-            assertValue(row, "status_with_port", localState, ApplicationState.STATUS_WITH_PORT);
-            assertValue(row, "sstable_versions", localState, ApplicationState.SSTABLE_VERSIONS);
-            assertValue(row, "disk_usage", localState, ApplicationState.DISK_USAGE);
-            assertValue(row, "x_11_padding", localState, ApplicationState.X_11_PADDING);
-            assertValue(row, "x1", localState, ApplicationState.X1);
-            assertValue(row, "x2", localState, ApplicationState.X2);
-            assertValue(row, "x3", localState, ApplicationState.X3);
-            assertValue(row, "x4", localState, ApplicationState.X4);
-            assertValue(row, "x5", localState, ApplicationState.X5);
-            assertValue(row, "x6", localState, ApplicationState.X6);
-            assertValue(row, "x7", localState, ApplicationState.X7);
-            assertValue(row, "x8", localState, ApplicationState.X8);
-            assertValue(row, "x9", localState, ApplicationState.X9);
-            assertValue(row, "x10", localState, ApplicationState.X10);
+        assertValue(row, "status", localState, ApplicationState.STATUS);
+        assertValue(row, "load", localState, ApplicationState.LOAD);
+        assertValue(row, "schema", localState, ApplicationState.SCHEMA);
+        assertValue(row, "dc", localState, ApplicationState.DC);
+        assertValue(row, "rack", localState, ApplicationState.RACK);
+        assertValue(row, "release_version", localState, ApplicationState.RELEASE_VERSION);
+        assertValue(row, "removal_coordinator", localState, ApplicationState.REMOVAL_COORDINATOR);
+        assertValue(row, "internal_ip", localState, ApplicationState.INTERNAL_IP);
+        assertValue(row, "rpc_address", localState, ApplicationState.RPC_ADDRESS);
+        assertValue(row, "severity", localState, ApplicationState.SEVERITY);
+        assertValue(row, "net_version", localState, ApplicationState.NET_VERSION);
+        assertValue(row, "host_id", localState, ApplicationState.HOST_ID);
+        assertValue(row, "rpc_ready", localState, ApplicationState.RPC_READY);
+        assertValue(row, "internal_address_and_port", localState, ApplicationState.INTERNAL_ADDRESS_AND_PORT);
+        assertValue(row, "native_address_and_port", localState, ApplicationState.NATIVE_ADDRESS_AND_PORT);
+        assertValue(row, "status_with_port", localState, ApplicationState.STATUS_WITH_PORT);
+        assertValue(row, "sstable_versions", localState, ApplicationState.SSTABLE_VERSIONS);
+        assertValue(row, "disk_usage", localState, ApplicationState.DISK_USAGE);
+        assertValue(row, "x_11_padding", localState, ApplicationState.X_11_PADDING);
+        assertValue(row, "x1", localState, ApplicationState.X1);
+        assertValue(row, "x2", localState, ApplicationState.X2);
+        assertValue(row, "x3", localState, ApplicationState.X3);
+        assertValue(row, "x4", localState, ApplicationState.X4);
+        assertValue(row, "x5", localState, ApplicationState.X5);
+        assertValue(row, "x6", localState, ApplicationState.X6);
+        assertValue(row, "x7", localState, ApplicationState.X7);
+        assertValue(row, "x8", localState, ApplicationState.X8);
+        assertValue(row, "x9", localState, ApplicationState.X9);
+        assertValue(row, "x10", localState, ApplicationState.X10);
 
-            assertVersion(row, "status_version", localState, ApplicationState.STATUS);
-            assertVersion(row, "load_version", localState, ApplicationState.LOAD);
-            assertVersion(row, "schema_version", localState, ApplicationState.SCHEMA);
-            assertVersion(row, "dc_version", localState, ApplicationState.DC);
-            assertVersion(row, "rack_version", localState, ApplicationState.RACK);
-            assertVersion(row, "release_version_version", localState, ApplicationState.RELEASE_VERSION);
-            assertVersion(row, "removal_coordinator_version", localState, ApplicationState.REMOVAL_COORDINATOR);
-            assertVersion(row, "internal_ip_version", localState, ApplicationState.INTERNAL_IP);
-            assertVersion(row, "rpc_address_version", localState, ApplicationState.RPC_ADDRESS);
-            assertVersion(row, "severity_version", localState, ApplicationState.SEVERITY);
-            assertVersion(row, "net_version_version", localState, ApplicationState.NET_VERSION);
-            assertVersion(row, "host_id_version", localState, ApplicationState.HOST_ID);
-            assertVersion(row, "tokens_version", localState, ApplicationState.TOKENS);
-            assertVersion(row, "rpc_ready_version", localState, ApplicationState.RPC_READY);
-            assertVersion(row, "internal_address_and_port_version", localState, ApplicationState.INTERNAL_ADDRESS_AND_PORT);
-            assertVersion(row, "native_address_and_port_version", localState, ApplicationState.NATIVE_ADDRESS_AND_PORT);
-            assertVersion(row, "status_with_port_version", localState, ApplicationState.STATUS_WITH_PORT);
-            assertVersion(row, "sstable_versions_version", localState, ApplicationState.SSTABLE_VERSIONS);
-            assertVersion(row, "disk_usage_version", localState, ApplicationState.DISK_USAGE);
-            assertVersion(row, "x_11_padding", localState, ApplicationState.X_11_PADDING);
-            assertVersion(row, "x1", localState, ApplicationState.X1);
-            assertVersion(row, "x2", localState, ApplicationState.X2);
-            assertVersion(row, "x3", localState, ApplicationState.X3);
-            assertVersion(row, "x4", localState, ApplicationState.X4);
-            assertVersion(row, "x5", localState, ApplicationState.X5);
-            assertVersion(row, "x6", localState, ApplicationState.X6);
-            assertVersion(row, "x7", localState, ApplicationState.X7);
-            assertVersion(row, "x8", localState, ApplicationState.X8);
-            assertVersion(row, "x9", localState, ApplicationState.X9);
-            assertVersion(row, "x10", localState, ApplicationState.X10);
-        }
-        finally
-        {
-            // clean up the gossip states
-            Gossiper.instance.clearUnsafe();
-        }
+        assertVersion(row, "status_version", localState, ApplicationState.STATUS);
+        assertVersion(row, "load_version", localState, ApplicationState.LOAD);
+        assertVersion(row, "schema_version", localState, ApplicationState.SCHEMA);
+        assertVersion(row, "dc_version", localState, ApplicationState.DC);
+        assertVersion(row, "rack_version", localState, ApplicationState.RACK);
+        assertVersion(row, "release_version_version", localState, ApplicationState.RELEASE_VERSION);
+        assertVersion(row, "removal_coordinator_version", localState, ApplicationState.REMOVAL_COORDINATOR);
+        assertVersion(row, "internal_ip_version", localState, ApplicationState.INTERNAL_IP);
+        assertVersion(row, "rpc_address_version", localState, ApplicationState.RPC_ADDRESS);
+        assertVersion(row, "severity_version", localState, ApplicationState.SEVERITY);
+        assertVersion(row, "net_version_version", localState, ApplicationState.NET_VERSION);
+        assertVersion(row, "host_id_version", localState, ApplicationState.HOST_ID);
+        assertVersion(row, "tokens_version", localState, ApplicationState.TOKENS);
+        assertVersion(row, "rpc_ready_version", localState, ApplicationState.RPC_READY);
+        assertVersion(row, "internal_address_and_port_version", localState, ApplicationState.INTERNAL_ADDRESS_AND_PORT);
+        assertVersion(row, "native_address_and_port_version", localState, ApplicationState.NATIVE_ADDRESS_AND_PORT);
+        assertVersion(row, "status_with_port_version", localState, ApplicationState.STATUS_WITH_PORT);
+        assertVersion(row, "sstable_versions_version", localState, ApplicationState.SSTABLE_VERSIONS);
+        assertVersion(row, "disk_usage_version", localState, ApplicationState.DISK_USAGE);
+        assertVersion(row, "x_11_padding", localState, ApplicationState.X_11_PADDING);
+        assertVersion(row, "x1", localState, ApplicationState.X1);
+        assertVersion(row, "x2", localState, ApplicationState.X2);
+        assertVersion(row, "x3", localState, ApplicationState.X3);
+        assertVersion(row, "x4", localState, ApplicationState.X4);
+        assertVersion(row, "x5", localState, ApplicationState.X5);
+        assertVersion(row, "x6", localState, ApplicationState.X6);
+        assertVersion(row, "x7", localState, ApplicationState.X7);
+        assertVersion(row, "x8", localState, ApplicationState.X8);
+        assertVersion(row, "x9", localState, ApplicationState.X9);
+        assertVersion(row, "x10", localState, ApplicationState.X10);
     }
 
     private void assertValue(UntypedResultSet.Row row, String column, EndpointState localState, ApplicationState key)
