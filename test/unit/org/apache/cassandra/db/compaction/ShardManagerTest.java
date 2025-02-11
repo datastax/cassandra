@@ -27,7 +27,6 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import org.junit.Assert;
-import org.junit.Assume;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -69,7 +68,7 @@ public class ShardManagerTest
         localRanges = Mockito.mock(SortedLocalRanges.class, Mockito.withSettings().defaultAnswer(Mockito.CALLS_REAL_METHODS));
         Mockito.when(localRanges.getRanges()).thenAnswer(invocation -> weightedRanges);
         Mockito.when(localRanges.getRealm()).thenReturn(realm);
-        Mockito.when(realm.estimatedPartitionCount()).thenReturn(10000L);
+        Mockito.when(realm.estimatedPartitionCountInSSTables()).thenReturn(10000L);
     }
 
     @Test

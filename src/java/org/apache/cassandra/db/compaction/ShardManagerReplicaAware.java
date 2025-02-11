@@ -20,21 +20,15 @@ package org.apache.cassandra.db.compaction;
 
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-
-import javax.annotation.Nullable;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.dht.tokenallocator.IsolatedTokenAllocator;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.io.sstable.format.SSTableWriter;
 import org.apache.cassandra.locator.AbstractReplicationStrategy;
 import org.apache.cassandra.locator.TokenMetadata;
 
@@ -94,7 +88,7 @@ public class ShardManagerReplicaAware implements ShardManager
     @Override
     public double minimumPerPartitionSpan()
     {
-        return localSpaceCoverage() / Math.max(1, realm.estimatedPartitionCount());
+        return localSpaceCoverage() / Math.max(1, realm.estimatedPartitionCountInSSTables());
     }
 
     @Override
