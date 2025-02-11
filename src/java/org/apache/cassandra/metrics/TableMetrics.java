@@ -628,7 +628,7 @@ public class TableMetrics
                 final Pair<WeakReference<View>, Long> currentCollected = collected.get();
                 if (currentView != currentCollected.left.get())
                 {
-                    Refs refs = Refs.tryRef(currentView.select(SSTableSet.CANONICAL));
+                    Refs<SSTableReader> refs = Refs.tryRef(currentView.select(SSTableSet.CANONICAL));
                     if (refs != null)
                     {
                         try (refs)
