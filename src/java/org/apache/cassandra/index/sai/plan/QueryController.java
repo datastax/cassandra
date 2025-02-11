@@ -64,6 +64,7 @@ import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
 import org.apache.cassandra.index.sai.disk.v1.Segment;
+import org.apache.cassandra.index.sai.disk.vector.VectorCompression;
 import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIntersectionIterator;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
@@ -945,12 +946,13 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         Collection<MemtableIndex> memtables = context.getLiveMemtables().values();
         View queryView = context.getView();
 
+        int memoryRerankK = orderer.rerankKFor(limit, VectorCompression.NO_COMPRESSION);
         double cost = 0;
         for (MemtableIndex index : memtables)
         {
             // FIXME convert nodes visited to search cost
             int memtableCandidates = (int) Math.min(Integer.MAX_VALUE, candidates);
-            cost += ((VectorMemtableIndex) index).estimateAnnNodesVisited(limit, memtableCandidates);
+            cost += ((VectorMemtableIndex) index).estimateAnnNodesVisited(memoryRerankK, memtableCandidates);
         }
 
         long totalRows = 0;

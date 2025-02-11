@@ -610,9 +610,9 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         return Math.log(number) / Math.log(2);
     }
 
-    private int getRawExpectedNodes(int limit, int nPermittedOrdinals)
+    private int getRawExpectedNodes(int rerankK, int nPermittedOrdinals)
     {
-        return VectorMemtableIndex.expectedNodesVisited(limit, nPermittedOrdinals, graph.size());
+        return VectorMemtableIndex.expectedNodesVisited(rerankK, nPermittedOrdinals, graph.size());
     }
 
     @Override
