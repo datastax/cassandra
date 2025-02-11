@@ -168,7 +168,7 @@ public class TrieMemtableIndex implements MemtableIndex
     @Override
     public void index(DecoratedKey key, Clustering clustering, ByteBuffer value, Memtable memtable, OpOrder.Group opGroup)
     {
-        if (value == null || (value.remaining() == 0 && !validator.allowsEmpty()))
+        if (value == null || (value.remaining() == 0 && TypeUtil.skipsEmptyValue(validator)))
             return;
 
         RequestSensors sensors = requestTracker.get();
