@@ -711,10 +711,6 @@ public class StorageAttachedIndex implements Index
             throw new InvalidRequestException(String.format("SAI based ORDER BY clause requires a LIMIT that is not greater than %s. LIMIT was %s",
                                                             MAX_TOP_K, command.limits().isUnlimited() ? "NO LIMIT" : command.limits().count()));
 
-        ANNOptions annOptions = command.rowFilter().annOptions();
-        if (annOptions != ANNOptions.NONE)
-            throw new InvalidRequestException("SAI doesn't support ANN options yet.");
-
         indexContext.validate(command.rowFilter());
     }
 

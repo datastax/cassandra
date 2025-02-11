@@ -193,7 +193,7 @@ public class VectorMemtableIndex implements MemtableIndex
         float threshold = expr.getEuclideanSearchThreshold();
 
         SortingIterator.Builder<PrimaryKey> keyQueue;
-        try (var pkIterator = searchInternal(context, qv, keyRange, graph.size(), threshold))
+        try (var pkIterator = searchInternal(context, qv, keyRange, graph.size(), graph.size(), threshold))
         {
             keyQueue = new SortingIterator.Builder<>();
             while (pkIterator.hasNext())
@@ -223,14 +223,16 @@ public class VectorMemtableIndex implements MemtableIndex
         assert orderer.isANN() : "Only ANN is supported for vector search, received " + orderer.operator;
 
         var qv = vts.createFloatVector(orderer.vector);
+        var rerankK = orderer.rerankKFor(limit, VectorCompression.NO_COMPRESSION);
 
-        return List.of(searchInternal(context, qv, keyRange, limit, 0));
+        return List.of(searchInternal(context, qv, keyRange, limit, rerankK, 0));
     }
 
     private CloseableIterator<PrimaryKeyWithSortKey> searchInternal(QueryContext context,
                                                                   VectorFloat<?> queryVector,
                                                                   AbstractBounds<PartitionPosition> keyRange,
                                                                   int limit,
+                                                                  int rerankK,
                                                                   float threshold)
     {
         Bits bits;
@@ -272,7 +274,7 @@ public class VectorMemtableIndex implements MemtableIndex
                 bits = new KeyRangeFilteringBits(keyRange);
         }
 
-        var nodeScoreIterator = graph.search(context, queryVector, limit, threshold, bits);
+        var nodeScoreIterator = graph.search(context, queryVector, limit, rerankK, threshold, bits);
         return new NodeScoreToScoredPrimaryKeyIterator(nodeScoreIterator);
     }
 
@@ -305,6 +307,7 @@ public class VectorMemtableIndex implements MemtableIndex
             relevantOrdinals.add(i);
         });
 
+        int rerankK = orderer.rerankKFor(limit, VectorCompression.NO_COMPRESSION);
         int maxBruteForceRows = maxBruteForceRows(limit, relevantOrdinals.size(), graph.size());
         Tracing.logAndTrace(logger, "{} rows relevant to current memtable out of {} materialized by SAI; max brute force rows is {} for memtable index with {} nodes, LIMIT {}",
                             relevantOrdinals.size(), keys.size(), maxBruteForceRows, graph.size(), limit);
@@ -319,7 +322,7 @@ public class VectorMemtableIndex implements MemtableIndex
             return orderByBruteForce(qv, keysInGraph);
         }
         // indexed path
-        var nodeScoreIterator = graph.search(context, qv, limit, 0, relevantOrdinals::contains);
+        var nodeScoreIterator = graph.search(context, qv, limit, rerankK, 0, relevantOrdinals::contains);
         return new NodeScoreToScoredPrimaryKeyIterator(nodeScoreIterator);
     }
 
