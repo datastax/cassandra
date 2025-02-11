@@ -87,7 +87,7 @@ public class ShardManagerNoDisks implements ShardManager
 
     public double minimumPerPartitionSpan()
     {
-        return localSpaceCoverage() / Math.max(1, localRanges.getRealm().estimatedPartitionCount());
+        return localSpaceCoverage() / Math.max(1, localRanges.getRealm().estimatedPartitionCountInSSTables());
     }
 
     @Override
