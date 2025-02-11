@@ -270,8 +270,8 @@ public class TypeUtil
      */
     public static ByteBuffer encode(ByteBuffer value, AbstractType<?> type)
     {
-        if (value == null)
-            return null;
+        if (value == null || value.remaining() == 0)
+            return value;
 
         if (isInetAddress(type))
             return encodeInetAddress(value);
@@ -630,6 +630,14 @@ public class TypeUtil
     {
         type = baseType(type);
         return type instanceof CompositeType;
+    }
+
+    /**
+     * @return {@code true} if the empty values of the given type should be excluded from indexing, {@code false} otherwise.
+     */
+    public static boolean skipsEmptyValue(AbstractType<?> type)
+    {
+        return !type.allowsEmpty() || !isLiteral(type);
     }
 
     /**
