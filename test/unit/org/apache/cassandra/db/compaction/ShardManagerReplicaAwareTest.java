@@ -49,7 +49,7 @@ public class ShardManagerReplicaAwareTest
     public void testRangeEndsForShardCountEqualtToNumTokensPlusOne() throws UnknownHostException
     {
         var mockCompationRealm = mock(CompactionRealm.class);
-        when(mockCompationRealm.estimatedPartitionCount()).thenReturn(1L<<16);
+        when(mockCompationRealm.estimatedPartitionCountInSSTables()).thenReturn(1L<<16);
 
         for (int numTokens = 1; numTokens < 32; numTokens++)
         {
@@ -75,7 +75,7 @@ public class ShardManagerReplicaAwareTest
     public void testRangeEndsAreFromTokenListAndContainLowerRangeEnds() throws UnknownHostException
     {
         var mockCompationRealm = mock(CompactionRealm.class);
-        when(mockCompationRealm.estimatedPartitionCount()).thenReturn(1L<<16);
+        when(mockCompationRealm.estimatedPartitionCountInSSTables()).thenReturn(1L<<16);
 
         for (int nodeCount = 1; nodeCount <= 6; nodeCount++)
         {

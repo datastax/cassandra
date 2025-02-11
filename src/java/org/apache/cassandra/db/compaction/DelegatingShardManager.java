@@ -60,7 +60,7 @@ public class DelegatingShardManager implements ShardManager
     @Override
     public double minimumPerPartitionSpan()
     {
-        return localSpaceCoverage() / Math.max(1, realm.estimatedPartitionCount());
+        return localSpaceCoverage() / Math.max(1, realm.estimatedPartitionCountInSSTables());
     }
 
     @Override
