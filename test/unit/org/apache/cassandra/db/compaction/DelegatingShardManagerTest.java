@@ -42,7 +42,7 @@ public class DelegatingShardManagerTest
     {
         CompactionRealm realm = Mockito.mock(CompactionRealm.class);
         when(realm.getPartitioner()).thenReturn(partitioner);
-        when(realm.estimatedPartitionCount()).thenReturn(1L << 16);
+        when(realm.estimatedPartitionCountInSSTables()).thenReturn(1L << 16);
         SortedLocalRanges localRanges = SortedLocalRanges.forTestingFull(realm);
         ShardManager delegate = new ShardManagerNoDisks(localRanges);
 
