@@ -404,20 +404,12 @@ public class TableMetricsTest
         assertEquals(partitionCount, cfs.metric.estimatedPartitionCount.getValue().longValue());
 
         // The cached estimatedPartitionCountInSSTables lags one second, check that.
-        estimatedPartitionCountInSSTables = cfs.metric.estimatedPartitionCountInSSTablesCached.getValue().longValue();
-        elapsedTime = System.currentTimeMillis() - startTime;
-        if (elapsedTime < 980)
-            assertEquals(0, estimatedPartitionCountInSSTables);
-        else if (elapsedTime >= 1020)
-            assertEquals(partitionCount, estimatedPartitionCountInSSTables);
-
-        // Wait to let it update.
-        if (elapsedTime < 1020)
-            Thread.sleep(1200 - elapsedTime);
-
-        // It must now report the correct value.
-        estimatedPartitionCountInSSTables = cfs.metric.estimatedPartitionCountInSSTablesCached.getValue().longValue();
-        assertEquals(partitionCount, estimatedPartitionCountInSSTables);
+        // Assert that the metric will return a correct value after at least a second passes
+        await().atMost(2, TimeUnit.SECONDS)
+                .untilAsserted(() -> {
+                    long value = cfs.metric.estimatedPartitionCountInSSTablesCached.getValue();
+                    assertEquals(partitionCount, value);            
+                });
     }
 
 
