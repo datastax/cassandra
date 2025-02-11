@@ -121,16 +121,16 @@ public final class IndexMetadata
      *
      * @param keyspaceNameLength the length of the keyspace name to calculate the allowed index name length
      * @param table              the table name
-     * @param column             the column name
+     * @param column             the column identifier
      * @return the generated index name
      */
     public static String generateDefaultIndexName(int keyspaceNameLength, String table, ColumnIdentifier column)
     {
-        String indexNameUntruncated = PATTERN_NON_WORD_CHAR.matcher(table + '_' + column.toString()).replaceAll("");
-        String indexNameTrimmed = indexNameUntruncated
+        String indexNameUntrimmed = PATTERN_NON_WORD_CHAR.matcher(table + '_' + column.toString()).replaceAll("");
+        String indexNameTrimmed = indexNameUntrimmed
                                   .substring(0,
-                                             Math.min(calculateGeneratedIndexNameLength(keyspaceNameLength, table.length()),
-                                                      indexNameUntruncated.length()));
+                                             Math.min(calculateGeneratedIndexNameMaxLength(keyspaceNameLength, table.length()),
+                                                      indexNameUntrimmed.length()));
         return indexNameTrimmed + INDEX_POSTFIX;
     }
 
@@ -163,7 +163,7 @@ public final class IndexMetadata
      * @param tableNameLength    the length of the table name
      * @return the allowed length of the generated index name
      */
-    private static int calculateGeneratedIndexNameLength(int keyspaceNameLength, int tableNameLength)
+    private static int calculateGeneratedIndexNameMaxLength(int keyspaceNameLength, int tableNameLength)
     {
         int uniquenessSuffixLength = 3;
         int indexNameAddition = uniquenessSuffixLength + INDEX_POSTFIX.length();
