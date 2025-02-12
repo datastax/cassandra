@@ -516,19 +516,28 @@ public class QueryProcessor implements QueryHandler
     public static UntypedResultSet execute(String query, ConsistencyLevel cl, QueryState state, Object... values)
     throws RequestExecutionException
     {
-        try
-        {
-            Prepared prepared = prepareInternal(query);
-            ResultMessage result = prepared.statement.execute(state, makeInternalOptions(prepared.statement, values, cl), System.nanoTime());
-            if (result instanceof ResultMessage.Rows)
-                return UntypedResultSet.create(((ResultMessage.Rows)result).result);
-            else
-                return null;
-        }
-        catch (RequestValidationException e)
-        {
-            throw new RuntimeException("Error validating " + query, e);
-        }
+        Prepared prepared = prepareInternal(query);
+        ResultMessage<?> result = prepared.statement.execute(state, makeInternalOptions(prepared.statement, values, cl), System.nanoTime());
+        if (result instanceof ResultMessage.Rows)
+            return UntypedResultSet.create(((ResultMessage.Rows)result).result);
+        else
+            return null;
+    }
+
+    public static UntypedResultSet executeOnce(String query, ConsistencyLevel cl, Object... values)
+    {
+        return executeOnce(query, cl, internalQueryState(), values);
+    }
+
+    public static UntypedResultSet executeOnce(String query, ConsistencyLevel cl, QueryState queryState, Object... values)
+    {
+        CQLStatement statement = parseStatement(query, queryState.getClientState());
+        statement.validate(queryState);
+        ResultMessage<?> result = statement.execute(queryState, makeInternalOptions(statement, values, cl), System.nanoTime());
+        if (result instanceof ResultMessage.Rows)
+            return UntypedResultSet.create(((ResultMessage.Rows)result).result);
+        else
+            return null;
     }
 
     public static UntypedResultSet executeInternalWithPaging(String query, PageSize pageSize, Object... values)
