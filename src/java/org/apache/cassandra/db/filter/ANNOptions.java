@@ -70,7 +70,7 @@ public class ANNOptions
         if (rerankK < limit)
             throw new InvalidRequestException(String.format("Invalid rerank_k value %d lesser than limit %d", rerankK, limit));
 
-        Guardrails.annRerankKMaxValue.guard(rerankK, "ANN Option rerank_k", false, state);
+        Guardrails.annRerankKMaxValue.guard(rerankK, "ANN options", false, state);
     }
 
     /**

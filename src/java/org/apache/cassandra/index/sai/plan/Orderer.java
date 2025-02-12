@@ -59,7 +59,7 @@ public class Orderer
      * @param term the term to order by (not always relevant)
      * @param rerankK optional rerank K parameter for ANN queries
      */
-    public Orderer(IndexContext context, Operator operator, ByteBuffer term, Integer rerankK)
+    public Orderer(IndexContext context, Operator operator, ByteBuffer term, @Nullable Integer rerankK)
     {
         this.context = context;
         assert ORDER_BY_OPERATORS.contains(operator) : "Invalid operator for order by clause " + operator;
@@ -98,6 +98,7 @@ public class Orderer
     /**
      * Provide rerankK for ANN queries. Use the user provided rerankK if available, otherwise use the model's default
      * based on the limit and compression type.
+     *
      * @param limit the query limit or the proportional segment limit to use when calculating a reasonable rerankK
      *              default value
      * @param vc the compression type of the vectors in the index
@@ -117,13 +118,13 @@ public class Orderer
         var expressions = filter.root().expressions().stream().filter(Orderer::isFilterExpressionOrderer).collect(Collectors.toList());
         if (expressions.isEmpty())
             return null;
-        var orderRowFilter = expressions.get(0);
-        var index = indexManager.getBestIndexFor(orderRowFilter, StorageAttachedIndex.class)
+        var orderExpression = expressions.get(0);
+        var index = indexManager.getBestIndexFor(orderExpression, StorageAttachedIndex.class)
                                 .orElseThrow(() -> new IllegalStateException("No index found for order by clause"));
 
         // Null if not specified explicitly in the CQL query.
         Integer rerankK = filter.annOptions().rerankK;
-        return new Orderer(index.getIndexContext(), orderRowFilter.operator(), orderRowFilter.getIndexValue(), rerankK);
+        return new Orderer(index.getIndexContext(), orderExpression.operator(), orderExpression.getIndexValue(), rerankK);
     }
 
     public static boolean isFilterExpressionOrderer(RowFilter.Expression expression)

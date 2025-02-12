@@ -98,10 +98,10 @@ public class ANNOptionsTest extends CQLTester
         execute("SELECT * FROM %s ORDER BY v ANN OF [1, 1] LIMIT 10 WITH ann_options = {'rerank_k': '-1'}");
         execute("SELECT * FROM %s ORDER BY v ANN OF [1, 1] LIMIT 10 WITH ann_options = {'rerank_k': '-1000'}");
 
-        // Queries that exeed the failure threshold for the guardrail. Specifies a protocol version to trigger
+        // Queries that exceed the failure threshold for the guardrail. Specifies a protocol version to trigger
         // validation in the coordinator.
         assertInvalidThrowMessage(Optional.of(ProtocolVersion.V5),
-                                  "ANN Option rerank_k specifies rerank_k=5000, this exceeds the failure threshold of 4000.",
+                                  "ANN options specifies rerank_k=5000, this exceeds the failure threshold of 4000.",
                                   InvalidQueryException.class,
                                   "SELECT * FROM %s ORDER BY v ANN OF [1, 1] LIMIT 10 WITH ann_options = {'rerank_k': 5000}");
 
