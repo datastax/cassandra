@@ -16,6 +16,9 @@
 
 package org.apache.cassandra.distributed.test.sai;
 
+import java.lang.reflect.Field;
+import java.lang.reflect.Modifier;
+
 import org.junit.Test;
 
 import net.bytebuddy.ByteBuddy;
@@ -28,6 +31,7 @@ import org.apache.cassandra.distributed.api.ConsistencyLevel;
 import org.apache.cassandra.distributed.api.ICoordinator;
 import org.apache.cassandra.distributed.test.TestBaseImpl;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.utils.ReflectionUtils;
 import org.assertj.core.api.Assertions;
 
 import static net.bytebuddy.matcher.ElementMatchers.named;

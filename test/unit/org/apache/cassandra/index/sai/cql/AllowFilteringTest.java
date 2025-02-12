@@ -80,7 +80,7 @@ public class AllowFilteringTest extends SAITester
                                   IndexNotAvailableException.class,
                                   "SELECT * FROM %s WHERE k=0");
 
-        assertInvalidThrowMessage(ANNOptions.REQUIRES_HIGHER_MESSAGING_VERSION,
+        assertInvalidThrowMessage("SAI based ORDER BY clause requires a LIMIT that is not greater than 1000. LIMIT was NO LIMIT",
                                   InvalidRequestException.class,
                                   "SELECT * FROM %s ORDER BY vec ANN OF [1, 1] ALLOW FILTERING WITH ann_options = {}");
 
@@ -104,7 +104,7 @@ public class AllowFilteringTest extends SAITester
 
         execute("SELECT * FROM %s WHERE k=0");
         execute("SELECT * FROM %s WHERE k=0 ALLOW FILTERING");
-        assertInvalidThrowMessage(ANNOptions.REQUIRES_HIGHER_MESSAGING_VERSION,
+        assertInvalidThrowMessage("SAI based ORDER BY clause requires a LIMIT that is not greater than 1000. LIMIT was NO LIMIT",
                                   InvalidRequestException.class,
                                   "SELECT * FROM %s ORDER BY vec ANN OF [1, 1] ALLOW FILTERING WITH ann_options = {}");
         execute("SELECT * FROM %s ORDER BY vec ANN OF [1, 1] LIMIT 10 ALLOW FILTERING");
