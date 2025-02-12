@@ -75,6 +75,13 @@ final class SEPWorker extends AtomicReference<SEPWorker.Work> implements Runnabl
 
         if (task instanceof FutureTask)
             return ((FutureTask<?>) task).debuggableTask();
+
+        if (task != null)
+        {
+            Class<?> clazz = task.getClass();
+            if (clazz.isAssignableFrom(DebuggableTask.class))
+                return (DebuggableTask) task;
+        }
             
         return null;
     }
