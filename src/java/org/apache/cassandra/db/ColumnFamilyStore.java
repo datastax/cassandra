@@ -175,6 +175,7 @@ import org.json.simple.JSONObject;
 
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 import static org.apache.cassandra.config.CassandraRelevantProperties.DISABLED_AUTO_COMPACTION_PROPERTY;
+import static org.apache.cassandra.config.CassandraRelevantProperties.MUTATION_REQUESTS_DELAY_ENABLED;
 import static org.apache.cassandra.config.CassandraRelevantProperties.MUTATION_REQUESTS_DELAY_PROBABILITY;
 import static org.apache.cassandra.config.CassandraRelevantProperties.MUTATION_REQUESTS_MAX_DELAY_MILLIS;
 import static org.apache.cassandra.config.CassandraRelevantProperties.MUTATION_REQUESTS_MIN_DELAY_MILLIS;
@@ -1616,21 +1617,27 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         }
         finally
         {
-            // hold on to the update object for some time!
-            // Generate a random integer between 500 and 1000
-            int randomNumber = random.nextInt(maxDelay - minDelay + 1) + minDelay;
-            try
+            if (requestsDelayEnabled)
             {
                 if (Math.random() < requestsDelayProbability)
-                    Thread.sleep(randomNumber);
-            }
-            catch (InterruptedException e)
-            {
+                {
+                    // hold on to the update object for some time!
+                    // Generate a random integer between 500 and 1000
+                    int randomNumber = random.nextInt(maxDelay - minDelay + 1) + minDelay;
+                    try
+                    {
+                        Thread.sleep(randomNumber);
+                    }
+                    catch (InterruptedException e)
+                    {
+                    }
+                }
             }
         }
     }
 
     private static final Random random = new Random();
+    private static final boolean requestsDelayEnabled = MUTATION_REQUESTS_DELAY_ENABLED.getBoolean();
     private static final double requestsDelayProbability = MUTATION_REQUESTS_DELAY_PROBABILITY.getDouble();
     private static final int minDelay = MUTATION_REQUESTS_MIN_DELAY_MILLIS.getInt();
     private static final int maxDelay = MUTATION_REQUESTS_MAX_DELAY_MILLIS.getInt();

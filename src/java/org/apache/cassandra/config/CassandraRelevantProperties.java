@@ -575,6 +575,7 @@ public enum CassandraRelevantProperties
      * If true, the coordinator will propagate sensors via the native protocol custom payload bytes map.
      */
     SENSORS_VIA_NATIVE_PROTOCOL("cassandra.sensors_via_native_protocol", "false"),
+    MUTATION_REQUESTS_DELAY_ENABLED("cassandra.mutation_requests_delay_enabled", "false"),
 
     MUTATION_REQUESTS_DELAY_PROBABILITY("cassandra.mutation_requests_delay_probability", "1.0"),
 
