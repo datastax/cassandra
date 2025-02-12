@@ -126,7 +126,7 @@ public abstract class Guardrails
     public static final Threshold annRerankKMaxValue =
             factory.threshold("sai_ann_rerank_k_max_value",
                     () -> config.sai_ann_rerank_k_warn_threshold,
-                    () -> config.sai_ann_rerank_k_failure_threshold,
+                    () -> config.sai_ann_rerank_k_fail_threshold,
                     (isWarning, what, value, threshold) ->
                     format("%s specifies rerank_k=%s, this exceeds the %s threshold of %s.",
                           what, value, isWarning ? "warning" : "failure", threshold));

@@ -83,7 +83,7 @@ public class GuardrailsConfig
     public volatile Integer vector_dimensions_warn_threshold;
     public volatile Integer vector_dimensions_failure_threshold;
     public volatile Integer sai_ann_rerank_k_warn_threshold;
-    public volatile Integer sai_ann_rerank_k_failure_threshold;
+    public volatile Integer sai_ann_rerank_k_fail_threshold;
 
     // Legacy 2i guardrail
     public volatile Integer secondary_index_per_table_failure_threshold;
@@ -171,7 +171,7 @@ public class GuardrailsConfig
         // Default to no warning and failure at 4 times the maxTopK value
         int maxTopK = CassandraRelevantProperties.SAI_VECTOR_SEARCH_MAX_TOP_K.getInt();
         enforceDefault(sai_ann_rerank_k_warn_threshold, v -> sai_ann_rerank_k_warn_threshold = v, -1, -1);
-        enforceDefault(sai_ann_rerank_k_failure_threshold, v -> sai_ann_rerank_k_failure_threshold = v, 4 * maxTopK, 4 * maxTopK);
+        enforceDefault(sai_ann_rerank_k_fail_threshold, v -> sai_ann_rerank_k_fail_threshold = v, 4 * maxTopK, 4 * maxTopK);
 
         // for write requests
         enforceDefault(logged_batch_enabled, v -> logged_batch_enabled = v, true, true);
@@ -278,8 +278,8 @@ public class GuardrailsConfig
         validateWarnLowerThanFail(vector_dimensions_warn_threshold, vector_dimensions_failure_threshold, "vector_dimensions");
 
         validateStrictlyPositiveInteger(sai_ann_rerank_k_warn_threshold, "sai_ann_rerank_k_warn_threshold");
-        validateStrictlyPositiveInteger(sai_ann_rerank_k_failure_threshold, "sai_ann_rerank_k_failure_threshold");
-        validateWarnLowerThanFail(sai_ann_rerank_k_warn_threshold, sai_ann_rerank_k_failure_threshold, "sai_ann_rerank_k");
+        validateStrictlyPositiveInteger(sai_ann_rerank_k_fail_threshold, "sai_ann_rerank_k_fail_threshold");
+        validateWarnLowerThanFail(sai_ann_rerank_k_warn_threshold, sai_ann_rerank_k_fail_threshold, "sai_ann_rerank_k");
 
         validateStrictlyPositiveInteger(tables_warn_threshold, "tables_warn_threshold");
         validateStrictlyPositiveInteger(tables_failure_threshold, "tables_failure_threshold");

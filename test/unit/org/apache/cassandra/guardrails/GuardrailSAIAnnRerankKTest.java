@@ -40,31 +40,31 @@ public class GuardrailSAIAnnRerankKTest extends GuardrailTester
     public void before()
     {
         defaultWarnThreshold = DatabaseDescriptor.getGuardrailsConfig().sai_ann_rerank_k_warn_threshold;
-        defaultFailThreshold = DatabaseDescriptor.getGuardrailsConfig().sai_ann_rerank_k_failure_threshold;
+        defaultFailThreshold = DatabaseDescriptor.getGuardrailsConfig().sai_ann_rerank_k_fail_threshold;
         defaultMaxTopK = CassandraRelevantProperties.SAI_VECTOR_SEARCH_MAX_TOP_K.getInt();
 
         DatabaseDescriptor.getGuardrailsConfig().sai_ann_rerank_k_warn_threshold = WARN_THRESHOLD;
-        DatabaseDescriptor.getGuardrailsConfig().sai_ann_rerank_k_failure_threshold = FAIL_THRESHOLD;
+        DatabaseDescriptor.getGuardrailsConfig().sai_ann_rerank_k_fail_threshold = FAIL_THRESHOLD;
     }
 
     @After
     public void after()
     {
         DatabaseDescriptor.getGuardrailsConfig().sai_ann_rerank_k_warn_threshold = defaultWarnThreshold;
-        DatabaseDescriptor.getGuardrailsConfig().sai_ann_rerank_k_failure_threshold = defaultFailThreshold;
+        DatabaseDescriptor.getGuardrailsConfig().sai_ann_rerank_k_fail_threshold = defaultFailThreshold;
         CassandraRelevantProperties.SAI_VECTOR_SEARCH_MAX_TOP_K.setInt(defaultMaxTopK);
     }
 
     @Test
     public void testConfigValidation()
     {
-        DatabaseDescriptor.getGuardrailsConfig().sai_ann_rerank_k_failure_threshold = -1;
+        DatabaseDescriptor.getGuardrailsConfig().sai_ann_rerank_k_fail_threshold = -1;
         testValidationOfStrictlyPositiveProperty((c, v) -> c.sai_ann_rerank_k_warn_threshold = v.intValue(),
                                                "sai_ann_rerank_k_warn_threshold");
 
         DatabaseDescriptor.getGuardrailsConfig().sai_ann_rerank_k_warn_threshold = -1;
-        testValidationOfStrictlyPositiveProperty((c, v) -> c.sai_ann_rerank_k_failure_threshold = v.intValue(),
-                                               "sai_ann_rerank_k_failure_threshold");
+        testValidationOfStrictlyPositiveProperty((c, v) -> c.sai_ann_rerank_k_fail_threshold = v.intValue(),
+                                               "sai_ann_rerank_k_fail_threshold");
     }
 
     @Test
@@ -72,12 +72,12 @@ public class GuardrailSAIAnnRerankKTest extends GuardrailTester
     {
         // Reset to defaults
         DatabaseDescriptor.getGuardrailsConfig().sai_ann_rerank_k_warn_threshold = defaultWarnThreshold;
-        DatabaseDescriptor.getGuardrailsConfig().sai_ann_rerank_k_failure_threshold = defaultFailThreshold;
+        DatabaseDescriptor.getGuardrailsConfig().sai_ann_rerank_k_fail_threshold = defaultFailThreshold;
 
         // Test that default failure threshold is 4 times the max top K
         int maxTopK = CassandraRelevantProperties.SAI_VECTOR_SEARCH_MAX_TOP_K.getInt();
         assertEquals(-1, (int) DatabaseDescriptor.getGuardrailsConfig().sai_ann_rerank_k_warn_threshold);
-        assertEquals(4 * maxTopK, (int) DatabaseDescriptor.getGuardrailsConfig().sai_ann_rerank_k_failure_threshold);
+        assertEquals(4 * maxTopK, (int) DatabaseDescriptor.getGuardrailsConfig().sai_ann_rerank_k_fail_threshold);
     }
 
     @Test
@@ -118,7 +118,7 @@ public class GuardrailSAIAnnRerankKTest extends GuardrailTester
         assertValid("SELECT * FROM %s ORDER BY v ANN OF [1.0, 1.0, 1.0] LIMIT 10 WITH ann_options = {'rerank_k': " + (WARN_THRESHOLD + 1) + '}');
 
         // Test with failure threshold disabled
-        DatabaseDescriptor.getGuardrailsConfig().sai_ann_rerank_k_failure_threshold = -1;
+        DatabaseDescriptor.getGuardrailsConfig().sai_ann_rerank_k_fail_threshold = -1;
         assertValid("SELECT * FROM %s ORDER BY v ANN OF [1.0, 1.0, 1.0] LIMIT 10 WITH ann_options = {'rerank_k': " + (FAIL_THRESHOLD + 1) + '}');
     }
 
