@@ -38,4 +38,5 @@ public enum Type
     OFF_HEAP_BYTES, // for bytes capped at -XX:MaxDirectMemorySize
     UNSAFE_BYTES, // not configured, only capped by the amount of physical memory
     OOM_PREDICTION_SECONDS, // time in seconds until OOM is predicted
+    CPU_UTILIZATION, // CPU utilization percentage, reflective of load
 }

@@ -64,7 +64,7 @@ public final class MemorySensors
     private final AtomicLong OFF_HEAP_ALLOCATED_SNAPSHOT = new AtomicLong();
     private final AtomicLong UNSAFE_ALLOCATED_SNAPSHOT = new AtomicLong();
 
-    private final AtomicDouble CPU_USAGE = new AtomicDouble();
+    private final AtomicDouble CPU_UTILIZATION = new AtomicDouble();
 
     /**
      * Presumably, those don't change without a restart, so we can keep them as final statics.
@@ -130,6 +130,7 @@ public final class MemorySensors
         activeRequestSensors.registerSensor(Context.all(), Type.UNSAFE_BYTES);
 
         activeRequestSensors.registerSensor(Context.all(), Type.OOM_PREDICTION_SECONDS);
+        activeRequestSensors.registerSensor(Context.all(), Type.CPU_UTILIZATION);
 
         // although memory sensors are effectively monotonic (sense they outlive any request), here we sync them
         // to the registry SensorsMetrics in CNDB register to Sensors Register events
@@ -153,7 +154,7 @@ public final class MemorySensors
                                                               MEMORY_SNAPSHOT_INTERVAL_SECONDS,
                                                               TimeUnit.SECONDS);
 
-        ScheduledExecutors.scheduledTasks.scheduleAtFixedRate(() -> CPU_USAGE.set(ManagementFactory.getOperatingSystemMXBean().getSystemLoadAverage() / Runtime.getRuntime().availableProcessors()),
+        ScheduledExecutors.scheduledTasks.scheduleAtFixedRate(() -> CPU_UTILIZATION.set(ManagementFactory.getOperatingSystemMXBean().getSystemLoadAverage() / Runtime.getRuntime().availableProcessors()),
                                                               MEMORY_SNAPSHOT_INTERVAL_SECONDS,
                                                               MEMORY_SNAPSHOT_INTERVAL_SECONDS,
                                                               TimeUnit.SECONDS);
@@ -234,6 +235,9 @@ public final class MemorySensors
                           FBUtilities.prettyPrintMemory(activeRequestSensors.getSensor(Context.all(), Type.UNSAFE_BYTES).map(Sensor::getValue).orElse(-1d).longValue()),
                           FBUtilities.prettyPrintMemoryPerSecond((long) onHeapAllocationRate), FBUtilities.prettyPrintMemoryPerSecond((long) offHeapAllocationRate), FBUtilities.prettyPrintMemoryPerSecond((long) unsafeAllocationRate),
                           Wp);
+
+        activeRequestSensors.updateSensor(Context.all(), Type.CPU_UTILIZATION, CPU_UTILIZATION.get());
+        noSpamLogger.info("CPU utilization: {}%", CPU_UTILIZATION.get());
     }
 
     private static OOMPrediction predict(long memoryUsed, double allocationRate, long lookAheadWindow, long threshold)
