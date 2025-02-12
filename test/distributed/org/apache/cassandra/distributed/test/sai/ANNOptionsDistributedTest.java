@@ -30,6 +30,7 @@ import org.apache.cassandra.distributed.api.ConsistencyLevel;
 import org.apache.cassandra.distributed.api.ICoordinator;
 import org.apache.cassandra.distributed.test.TestBaseImpl;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.utils.ReflectionUtils;
 import org.assertj.core.api.Assertions;
 
 import static net.bytebuddy.matcher.ElementMatchers.named;

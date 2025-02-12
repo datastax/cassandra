@@ -1873,23 +1873,37 @@ public class RowFilter
         public void serialize(RowFilter filter, DataOutputPlus out, int version) throws IOException
         {
             out.writeBoolean(false); // Old "is for thrift" boolean
+
             FilterElement.serializer.serialize(filter.root, out, version);
-            out.writeBoolean(filter.allowFiltering);
+
+            // CNDB-12425 - allowFiltering is only serialized in DS 11 and above
+            if (version >= MessagingService.VERSION_DS_11)
+                out.writeBoolean(filter.allowFiltering);
         }
 
         public RowFilter deserialize(DataInputPlus in, int version, TableMetadata metadata) throws IOException
         {
-            in.readBoolean(); // Unused
+            // Skip unused "isForThrift" boolean from legacy versions
+            in.readBoolean();
+
             FilterElement operation = FilterElement.serializer.deserialize(in, version, metadata);
-            boolean allowFiltering = in.readBoolean();
+
+            // CNDB-12425 - allowFiltering was added in DS 11
+            boolean allowFiltering = version >= MessagingService.VERSION_DS_11 && in.readBoolean();
+
             return new RowFilter(operation, allowFiltering);
         }
 
         public long serializedSize(RowFilter filter, int version)
         {
-            return 1 // unused boolean
-                   + FilterElement.serializer.serializedSize(filter.root, version)
-                   + TypeSizes.BOOL_SIZE; // for allowFiltering
+            long size = 1; // unused boolean
+            size += FilterElement.serializer.serializedSize(filter.root, version);
+
+            // CNDB-12425 - We allow filtering during index build in DS 11 and above
+            if (version >= MessagingService.VERSION_DS_11)
+                size += TypeSizes.BOOL_SIZE; // for allowFiltering
+
+            return size;
         }
     }
 }

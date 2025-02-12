@@ -118,6 +118,7 @@ import org.apache.cassandra.index.transactions.UpdateTransaction;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.locator.Endpoints;
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.notifications.INotification;
 import org.apache.cassandra.notifications.INotificationConsumer;
 import org.apache.cassandra.notifications.SSTableAddedNotification;
@@ -188,6 +189,8 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
 {
     private static final Logger logger = LoggerFactory.getLogger(SecondaryIndexManager.class);
     public static final String FELL_BACK_TO_ALLOW_FILTERING = "Query fell back to ALLOW FILTERING because index %s is still building.";
+    public static final String REQUIRES_HIGHER_MESSAGING_VERSION =
+    "ALLOW FILTERING queries during building an index are not supported in clusters below DS 11.";
 
     // default page size (in rows) when rebuilding the index for a whole partition
     public static final int DEFAULT_PAGE_SIZE = 10000;
@@ -367,9 +370,14 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
      */
     public boolean isQueryableThroughIndex(Index.QueryPlan queryPlan, boolean allowFiltering)
     {
+        Set<InetAddressAndPort> badNodes = MessagingService.instance().endpointsWithVersionBelow(MessagingService.VERSION_DS_11);
+        if (MessagingService.current_version < MessagingService.VERSION_DS_11)
+            badNodes.add(FBUtilities.getBroadcastAddressAndPort());
+
         for (Index index : queryPlan.getIndexes())
         {
-            if (isIndexBuilding(index) && allowFiltering)
+            // CNDB-12425: support for ALLOW FILTERING while building an index
+            if (badNodes.isEmpty() && isIndexBuilding(index) && allowFiltering)
             {
                 ClientWarn.instance.warn(format(SecondaryIndexManager.FELL_BACK_TO_ALLOW_FILTERING, index.getIndexMetadata().name));
                 logger.warn(format(SecondaryIndexManager.FELL_BACK_TO_ALLOW_FILTERING, index.getIndexMetadata().name));
@@ -1838,12 +1846,30 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
                                                             ConsistencyLevel level,
                                                             boolean allowFiltering)
     {
+        int initial = liveEndpoints.size();
+        Set<InetAddressAndPort> badNodes = MessagingService.instance().endpointsWithVersionBelow(MessagingService.VERSION_DS_11);
+        if (MessagingService.current_version < MessagingService.VERSION_DS_11)
+            badNodes.add(FBUtilities.getBroadcastAddressAndPort());
+
+        assert liveEndpoints.endpoints().containsAll(badNodes);
+
+        boolean considerAllowFiltering;
+        if (initial == badNodes.size())
+            considerAllowFiltering = false;
+        else
+        {
+            considerAllowFiltering = true;
+            if (badNodes.size() < initial && !badNodes.isEmpty())
+                throw new InvalidRequestException(REQUIRES_HIGHER_MESSAGING_VERSION);
+        }
+
         E queryableEndpoints = liveEndpoints.filter(replica -> {
             for (Index index : indexQueryPlan.getIndexes())
             {
                 Index.Status status = getIndexStatus(replica.endpoint(), keyspace.getName(), index.getIndexMetadata().name);
+
                 // if the status of the index is building and there is allow filtering - that is ok too
-                if (status == Index.Status.FULL_REBUILD_STARTED && allowFiltering)
+                if (considerAllowFiltering && status == Index.Status.FULL_REBUILD_STARTED && allowFiltering)
                     continue;
 
                 if (!index.isQueryable(status))
@@ -1853,7 +1879,6 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
             return true;
         });
 
-        int initial = liveEndpoints.size();
         int filtered = queryableEndpoints.size();
 
         // Throw ReadFailureException if read request cannot satisfy Consistency Level due to non-queryable indexes.
