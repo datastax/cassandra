@@ -155,6 +155,7 @@ class ProcRunner:
             env = {}
         self.env = env
         self.readbuf = ''
+        self._partial_bytes = b''
 
         self.start_proc()
 
@@ -174,6 +175,7 @@ class ProcRunner:
             self.childpty = masterfd
             self.send = self.send_tty
             self.read = self.read_tty
+            self._partial_bytes = b''
         else:
             stdin = stdout = subprocess.PIPE
             stderr = subprocess.STDOUT
@@ -188,6 +190,7 @@ class ProcRunner:
                 self.read = self.read_pipe
 
     def close(self):
+        self._partial_bytes = b''
         cqlshlog.info("Closing %r subprocess." % (self.exe_path,))
         if self.realtty:
             os.close(self.childpty)
