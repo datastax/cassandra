@@ -101,7 +101,7 @@ public abstract class MemoryUtil
     public static long allocate(long size)
     {
         memoryAllocated.addAndGet(size);
-        MemorySensors.incrementUnsafeBytes(size);
+        MemorySensors.instance.incrementUnsafeBytes(size);
         return Native.malloc(size);
     }
 

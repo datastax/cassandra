@@ -232,12 +232,12 @@ public class BufferPool
         ByteBuffer newBuffer;
         if (bufferType == BufferType.ON_HEAP)
         {
-            MemorySensors.incrementOnHeapBytes(size);
+            MemorySensors.instance.incrementOnHeapBytes(size);
             newBuffer = ByteBuffer.allocate(size);
         }
         else
         {
-            MemorySensors.incrementOffHeapBytes(size);
+            MemorySensors.instance.incrementOffHeapBytes(size);
             newBuffer = ByteBuffer.allocateDirect(size);
         }
         return newBuffer;
@@ -1093,7 +1093,7 @@ public class BufferPool
         if (Integer.bitCount(align) != 1)
             throw new IllegalArgumentException("Alignment must be a power of 2");
 
-        MemorySensors.incrementOffHeapBytes(capacity + align);
+        MemorySensors.instance.incrementOffHeapBytes(capacity + align);
         ByteBuffer buffer = ByteBuffer.allocateDirect(capacity + align);
         long address = MemoryUtil.getAddress(buffer);
         long offset = address & (align -1); // (address % align)

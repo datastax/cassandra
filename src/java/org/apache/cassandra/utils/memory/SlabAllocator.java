@@ -108,10 +108,10 @@ public class SlabAllocator extends MemtableBufferAllocator
             unslabbedSize.addAndGet(size);
             if (allocateOnHeapOnly)
             {
-                MemorySensors.incrementOnHeapBytes(size);
+                MemorySensors.instance.incrementOnHeapBytes(size);
                 return ByteBuffer.allocate(size);
             }
-            MemorySensors.incrementOffHeapBytes(size);
+            MemorySensors.instance.incrementOffHeapBytes(size);
             Region region = new Region(ByteBuffer.allocateDirect(size));
             offHeapRegions.add(region);
             return region.allocate(size);
@@ -157,12 +157,12 @@ public class SlabAllocator extends MemtableBufferAllocator
             {
                 if (allocateOnHeapOnly)
                 {
-                    MemorySensors.incrementOnHeapBytes(REGION_SIZE);
+                    MemorySensors.instance.incrementOnHeapBytes(REGION_SIZE);
                     region = new Region(ByteBuffer.allocate(REGION_SIZE));
                 }
                 else
                 {
-                    MemorySensors.incrementOffHeapBytes(REGION_SIZE);
+                    MemorySensors.instance.incrementOffHeapBytes(REGION_SIZE);
                     region = new Region(ByteBuffer.allocateDirect(REGION_SIZE));
                 }
             }

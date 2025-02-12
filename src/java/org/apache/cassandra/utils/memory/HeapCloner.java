@@ -34,7 +34,7 @@ public final class HeapCloner extends ByteBufferCloner
 
     public ByteBuffer allocate(int size)
     {
-        MemorySensors.incrementOnHeapBytes(size);
+        MemorySensors.instance.incrementOnHeapBytes(size);
         return ByteBuffer.allocate(size);
     }
 }
