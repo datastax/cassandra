@@ -61,6 +61,7 @@ import org.apache.cassandra.db.tries.TrieSpaceExhaustedException;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
+import org.apache.cassandra.index.sai.analyzer.NoOpAnalyzer;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v6.TermsDistribution;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
@@ -177,7 +178,7 @@ public class TrieMemoryIndex extends MemoryIndex
             final long initialSizeOffHeap = data.usedSizeOffHeap();
             final long reducerHeapSize = primaryKeysReducer.heapAllocations();
 
-            if (docLengths.containsKey(primaryKey))
+            if (docLengths.containsKey(primaryKey) && !(analyzer instanceof NoOpAnalyzer))
             {
                 AtomicLong heapReclaimed = new AtomicLong();
                 // we're overwriting an existing cell, clear out the old term counts
@@ -214,6 +215,9 @@ public class TrieMemoryIndex extends MemoryIndex
                     data.putSingleton(encodedTerm, primaryKey, (existing, update) -> {
                         // First do the normal primary keys reduction
                         PrimaryKeys result = primaryKeysReducer.apply(existing, update);
+                        if (analyzer instanceof NoOpAnalyzer)
+                            return result;
+
                         // Then update term frequency
                         var pkbc = new PkWithTerm(update, encodedTerm);
                         termFrequencies.compute(pkbc, (k, oldValue) -> {
