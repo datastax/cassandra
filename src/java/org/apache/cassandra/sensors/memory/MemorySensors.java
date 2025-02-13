@@ -27,13 +27,16 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.sun.management.HotSpotDiagnosticMXBean;
+import com.sun.management.OperatingSystemMXBean;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.sensors.ActiveRequestSensors;
 import org.apache.cassandra.sensors.Context;
 import org.apache.cassandra.sensors.Sensor;
 import org.apache.cassandra.sensors.SensorsRegistry;
 import org.apache.cassandra.sensors.Type;
+import org.apache.cassandra.utils.ExpMovingAverage;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.MovingAverage;
 import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.utils.memory.MemoryUtil;
 
@@ -81,6 +84,8 @@ public final class MemorySensors
                                                      java.lang.management.ManagementFactory.getOperatingSystemMXBean()).getTotalPhysicalMemorySize();
     private volatile boolean started;
 
+    private static OperatingSystemMXBean OS;
+
     /**
      * Perhaps add a start/stop methods to control fom CNDB and tests
      */
@@ -111,6 +116,19 @@ public final class MemorySensors
             offHeapMaxMemory = ManagementFactory.getMemoryMXBean().getNonHeapMemoryUsage().getMax();
         }
         OFF_HEAP_MAX_MEMORY = offHeapMaxMemory;
+
+        OS = ManagementFactory.getPlatformMXBean(OperatingSystemMXBean.class);
+        if (OS == null || OS.getProcessCpuTime() < 0)
+        {
+            logger.error("OperatingSystemMXBean.getProcessCpuTime() is not available, {} is disabled.", Type.CPU_UTILIZATION.name());
+            OS = null;
+        }
+
+        if (OS != null)
+        {
+            prevProcessCpuTimeNanos = OS.getProcessCpuTime();
+            prevInvocationNanos = System.nanoTime();
+        }
     }
 
     private MemorySensors()
@@ -154,7 +172,7 @@ public final class MemorySensors
                                                               MEMORY_SNAPSHOT_INTERVAL_SECONDS,
                                                               TimeUnit.SECONDS);
 
-        ScheduledExecutors.scheduledTasks.scheduleAtFixedRate(() -> CPU_UTILIZATION.set(ManagementFactory.getOperatingSystemMXBean().getSystemLoadAverage() / Runtime.getRuntime().availableProcessors()),
+        ScheduledExecutors.scheduledTasks.scheduleAtFixedRate(this::getCpuUsage,
                                                               MEMORY_SNAPSHOT_INTERVAL_SECONDS,
                                                               MEMORY_SNAPSHOT_INTERVAL_SECONDS,
                                                               TimeUnit.SECONDS);
@@ -238,6 +256,46 @@ public final class MemorySensors
 
         activeRequestSensors.updateSensor(Context.all(), Type.CPU_UTILIZATION, CPU_UTILIZATION.get());
         noSpamLogger.info("CPU utilization: {}%", CPU_UTILIZATION.get());
+    }
+
+    private static volatile long prevProcessCpuTimeNanos = 0;
+    private static volatile long prevInvocationNanos = 0;
+
+    private static final MovingAverage processCpuPercentage = ExpMovingAverage.decayBy100();
+
+    /**
+     * Borrowed from CNDB
+     */
+    private double processCpuUsage()
+    {
+        if (OS == null)
+            return -1;
+        long currProcessCpuTimeNanos = OS.getProcessCpuTime();
+        long currInvocationNanos = System.nanoTime();
+        if (currProcessCpuTimeNanos < 0)
+            return -1;
+
+        // process cpu time since last invocation
+        long processCpuTimeUsageNanos = currProcessCpuTimeNanos - prevProcessCpuTimeNanos;
+        long timeElapsedNanos = currInvocationNanos - prevInvocationNanos;
+
+        int cpuCores = ManagementFactory.getOperatingSystemMXBean().getAvailableProcessors();
+
+        // process cpu usage percentage against container cpu quota
+        double processCpuUsage = (double) processCpuTimeUsageNanos / timeElapsedNanos / cpuCores;
+        prevProcessCpuTimeNanos = currProcessCpuTimeNanos;
+        prevInvocationNanos = currInvocationNanos;
+
+        return processCpuUsage;
+    }
+
+    private double getCpuUsage()
+    {
+        if (OS == null)
+            return -1;
+        processCpuPercentage.update(processCpuUsage());
+        double percentage = processCpuPercentage.get();
+        return Double.isNaN(percentage) ? -1 : percentage;
     }
 
     private static OOMPrediction predict(long memoryUsed, double allocationRate, long lookAheadWindow, long threshold)
