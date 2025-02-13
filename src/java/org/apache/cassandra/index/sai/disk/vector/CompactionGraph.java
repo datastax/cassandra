@@ -23,6 +23,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
@@ -202,7 +203,7 @@ public class CompactionGraph implements Closeable, Accountable
         }
         builder = new GraphIndexBuilder(bsp,
                                         dimension,
-                                        indexConfig.getAnnMaxDegree(),
+                                        List.of(32, 64),
                                         indexConfig.getConstructionBeamWidth(),
                                         1.2f,
                                         dimension > 3 ? 1.2f : 1.4f,
