@@ -24,6 +24,7 @@ import org.junit.Test;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.SAIUtil;
 import org.apache.cassandra.index.sai.disk.format.Version;
+import org.apache.cassandra.index.sai.disk.v1.SegmentBuilder;
 import org.apache.cassandra.index.sai.plan.QueryController;
 
 import static org.apache.cassandra.index.sai.analyzer.AnalyzerEqOperatorSupport.EQ_AMBIGUOUS_ERROR;
@@ -331,7 +332,7 @@ public class BM25Test extends SAITester
     }
 
     @Test
-    public void testIrrelevantRosWithCompaction()
+    public void testIrrelevantRowsWithCompaction()
     {
         // same dataset as testIrrelevantRowsScoring, but split across two sstables
         createSimpleTable();
@@ -348,6 +349,11 @@ public class BM25Test extends SAITester
 
         assertIrrelevantRowsCorrect();
 
+        compact();
+        assertIrrelevantRowsCorrect();
+
+        // Force segmentation and requery
+        SegmentBuilder.updateLastValidSegmentRowId(2);
         compact();
         assertIrrelevantRowsCorrect();
     }

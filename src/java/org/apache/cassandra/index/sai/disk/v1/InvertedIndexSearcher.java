@@ -81,6 +81,7 @@ public class InvertedIndexSearcher extends IndexSearcher
     private final boolean filterRangeResults;
     private final SSTableReader sstable;
     private final DocLengthsReader docLengthsReader;
+    private final long segmentRowIdOffset;
 
     protected InvertedIndexSearcher(SSTableContext sstableContext,
                                     PerIndexFiles perIndexFiles,
@@ -98,8 +99,9 @@ public class InvertedIndexSearcher extends IndexSearcher
         this.version = version;
         this.filterRangeResults = filterRangeResults;
         perColumnEventListener = (QueryEventListener.TrieIndexEventListener)indexContext.getColumnQueryMetrics();
-        var docLenghtsMeta = segmentMetadata.componentMetadatas.getOptional(IndexComponentType.DOC_LENGTHS);
-        this.docLengthsReader = docLenghtsMeta == null ? null : new DocLengthsReader(indexFiles.docLengths(), docLenghtsMeta);
+        var docLengthsMeta = segmentMetadata.componentMetadatas.getOptional(IndexComponentType.DOC_LENGTHS);
+        this.segmentRowIdOffset = segmentMetadata.segmentRowIdOffset;
+        this.docLengthsReader = docLengthsMeta == null ? null : new DocLengthsReader(indexFiles.docLengths(), docLengthsMeta);
 
         Map<String,String> map = metadata.componentMetadatas.get(IndexComponentType.TERMS_DATA).attributes;
         String footerPointerString = map.get(SAICodecUtils.FOOTER_POINTER);
@@ -205,8 +207,9 @@ public class InvertedIndexSearcher extends IndexSearcher
                     int rowId = merged.nextPosting();
                     if (rowId == PostingList.END_OF_STREAM)
                         return endOfData();
-                    int docLength = docLengthsReader.get(rowId);
-                    return new DocTF(pkm.primaryKeyFromRowId(rowId), docLength, merged.frequencies());
+                    int docLength = docLengthsReader.get(rowId); // segment-local rowid
+                    var pk = pkm.primaryKeyFromRowId(segmentRowIdOffset + rowId); // sstable-global rowid
+                    return new DocTF(pk, docLength, merged.frequencies());
                 }
                 catch (IOException e)
                 {
