@@ -295,6 +295,7 @@
         <string>--add-opens java.base/java.util=ALL-UNNAMED</string>
         <string>--add-opens java.base/java.nio=ALL-UNNAMED</string>
         <string>--add-opens java.base/java.nio.file.attribute=ALL-UNNAMED</string>
+        <string>--add-opens java.base/java.util.concurrent.atomic=ALL-UNNAMED</string>
 
         <string>--add-opens java.rmi/sun.rmi.transport.tcp=ALL-UNNAMED</string>
     </resources>
@@ -369,7 +370,6 @@
         <!-- below 2 were added to support jamm and fix BatchCommitLogTest -->
         <string>--add-opens java.base/java.util.concurrent=ALL-UNNAMED</string>
         <string>--add-opens java.base/java.util.concurrent.atomic=ALL-UNNAMED</string>
-        <string>--add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED</string>
     </resources>
     <pathconvert property="_jvm22_args_concat" refid="_jvm22_arg_items" pathsep=" "/>
     <condition property="java-jvmargs" value="${_jvm22_args_concat}">
@@ -483,11 +483,17 @@
         <mkdir dir="${jacoco.partials.dir}"/>
 
         <!-- Set up jdk specific properties -->
-        <javac includes="**/JdkProperties.java" srcdir="test/anttasks" destdir="${test.classes}" includeantruntime="true" source="${java.default}" target="${java.default}">
-          <compilerarg value="-Xlint:-options"/>
+        <javac includes="**/JdkProperties.java,**/SetSystemProperty.java" srcdir="test/anttasks" destdir="${test.classes}" includeantruntime="true" source="${java.default}" target="${java.default}">
+            <compilerarg value="-Xlint:-options"/>
         </javac>
         <taskdef name="JdkProperties" classname="org.apache.cassandra.anttasks.JdkProperties" classpath="${test.classes}"/>
+        <taskdef name="SetSystemProperty" classname="org.apache.cassandra.anttasks.SetSystemProperty" classpath="${test.classes}"/>
         <JdkProperties/>
+
+        <!-- https://issues.apache.org/jira/browse/CASSANDRA-16391?focusedCommentId=17310803&page=com.atlassian.jira.plugin.system.issuetabpanels%3Acomment-tabpanel#comment-17310803 -->
+        <SetSystemProperty name="jmc5.path" value="/tmp"/>
+        <SetSystemProperty name="jmc6.path" value="/tmp"/>
+        <SetSystemProperty name="visualvm.path" value="/tmp"/>
     </target>
 
     <target name="clean" description="Remove all locally created artifacts">
