@@ -29,6 +29,7 @@ import org.apache.cassandra.db.compaction.UnifiedCompactionStrategy;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.locator.ReplicationFactor;
 import org.apache.cassandra.schema.SchemaConstants;
+import org.apache.cassandra.utils.Overlaps;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
@@ -181,11 +182,7 @@ public class StaticControllerTest extends ControllerTest
                                                            Controller.DEFAULT_RESERVED_THREADS,
                                                            Controller.DEFAULT_RESERVED_THREADS_TYPE,
                                                            Controller.DEFAULT_OVERLAP_INCLUSION_METHOD,
-<<<<<<< HEAD
                                                            true,
-                                                           false,
-=======
->>>>>>> parent of 8305834899... CNDB-10455: Automatically tune compaction for vector tables (#1265)
                                                            keyspaceName,
                                                            tableName);
         super.testStartShutdown(controller);
@@ -212,11 +209,7 @@ public class StaticControllerTest extends ControllerTest
                                                            Controller.DEFAULT_RESERVED_THREADS,
                                                            Controller.DEFAULT_RESERVED_THREADS_TYPE,
                                                            Controller.DEFAULT_OVERLAP_INCLUSION_METHOD,
-<<<<<<< HEAD
                                                            true,
-                                                           false,
-=======
->>>>>>> parent of 8305834899... CNDB-10455: Automatically tune compaction for vector tables (#1265)
                                                            keyspaceName,
                                                            tableName);
         super.testShutdownNotStarted(controller);
@@ -243,11 +236,7 @@ public class StaticControllerTest extends ControllerTest
                                                            Controller.DEFAULT_RESERVED_THREADS,
                                                            Controller.DEFAULT_RESERVED_THREADS_TYPE,
                                                            Controller.DEFAULT_OVERLAP_INCLUSION_METHOD,
-<<<<<<< HEAD
                                                            true,
-                                                           false,
-=======
->>>>>>> parent of 8305834899... CNDB-10455: Automatically tune compaction for vector tables (#1265)
                                                            keyspaceName,
                                                            tableName);
         super.testStartAlreadyStarted(controller);
