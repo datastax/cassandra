@@ -58,17 +58,19 @@ public class Version
     public static final Version DC = new Version("dc", V5OnDiskFormat.instance, (c, i, g) -> stargazerFileNameFormat(c, i, g, "dc"));
     // histograms in index metadata
     public static final Version EB = new Version("eb", V6OnDiskFormat.instance, (c, i, g) -> stargazerFileNameFormat(c, i, g, "eb"));
+    // hnsw one-off
+    public static final Version ZZ = new Version("zz", V6OnDiskFormat.instance, (c, i, g) -> stargazerFileNameFormat(c, i, g, "zz"));
 
     // These are in reverse-chronological order so that the latest version is first. Version matching tests
     // are more likely to match the latest version so we want to test that one first.
-    public static final List<Version> ALL = Lists.newArrayList(EB, DC, DB, CA, BA, AA);
+    public static final List<Version> ALL = Lists.newArrayList(ZZ, EB, DC, DB, CA, BA, AA);
 
     public static final Version EARLIEST = AA;
     public static final Version VECTOR_EARLIEST = BA;
     // The latest version can be configured to be an earlier version to support partial upgrades that don't
     // write newer versions of the on-disk formats. This is volatile rather than final so that tests may
     // use reflection to change it and safely publish across threads.
-    private static volatile Version LATEST = parse(System.getProperty("cassandra.sai.latest.version", DC.version));
+    private static volatile Version LATEST = parse(System.getProperty("cassandra.sai.latest.version", ZZ.version));
 
     private static final Pattern GENERATION_PATTERN = Pattern.compile("\\d+");
 

@@ -73,7 +73,7 @@ public class VectorTypeTest extends VectorTester
     @Parameterized.Parameters(name = "{0}")
     public static Collection<Object[]> data()
     {
-        return Stream.of(Version.CA, Version.DC).map(v -> new Object[]{ v}).collect(Collectors.toList());
+        return Stream.of(Version.ZZ, Version.CA, Version.DC).map(v -> new Object[]{ v}).collect(Collectors.toList());
     }
 
     private static final IPartitioner partitioner = Murmur3Partitioner.instance;
