@@ -39,10 +39,10 @@ import org.slf4j.LoggerFactory;
 
 import io.github.jbellis.jvector.graph.GraphIndexBuilder;
 import io.github.jbellis.jvector.graph.ListRandomAccessVectorValues;
-import io.github.jbellis.jvector.graph.disk.Feature;
-import io.github.jbellis.jvector.graph.disk.FeatureId;
-import io.github.jbellis.jvector.graph.disk.FusedADC;
-import io.github.jbellis.jvector.graph.disk.InlineVectors;
+import io.github.jbellis.jvector.graph.disk.feature.Feature;
+import io.github.jbellis.jvector.graph.disk.feature.FeatureId;
+import io.github.jbellis.jvector.graph.disk.feature.FusedADC;
+import io.github.jbellis.jvector.graph.disk.feature.InlineVectors;
 import io.github.jbellis.jvector.graph.disk.OnDiskGraphIndex;
 import io.github.jbellis.jvector.graph.disk.OnDiskGraphIndexWriter;
 import io.github.jbellis.jvector.graph.disk.OrdinalMapper;

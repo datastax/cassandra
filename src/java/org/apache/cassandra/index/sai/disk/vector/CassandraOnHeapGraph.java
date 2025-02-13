@@ -25,9 +25,11 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Comparator;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ConcurrentSkipListMap;
+import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.function.IntUnaryOperator;
@@ -43,11 +45,12 @@ import io.github.jbellis.jvector.graph.GraphIndexBuilder;
 import io.github.jbellis.jvector.graph.GraphSearcher;
 import io.github.jbellis.jvector.graph.RandomAccessVectorValues;
 import io.github.jbellis.jvector.graph.SearchResult;
-import io.github.jbellis.jvector.graph.disk.Feature;
-import io.github.jbellis.jvector.graph.disk.FeatureId;
-import io.github.jbellis.jvector.graph.disk.InlineVectors;
+import io.github.jbellis.jvector.graph.disk.feature.Feature;
+import io.github.jbellis.jvector.graph.disk.feature.FeatureId;
+import io.github.jbellis.jvector.graph.disk.feature.InlineVectors;
 import io.github.jbellis.jvector.graph.disk.OnDiskGraphIndexWriter;
 import io.github.jbellis.jvector.graph.disk.OrdinalMapper;
+import io.github.jbellis.jvector.graph.similarity.BuildScoreProvider;
 import io.github.jbellis.jvector.graph.similarity.SearchScoreProvider;
 import io.github.jbellis.jvector.quantization.BinaryQuantization;
 import io.github.jbellis.jvector.quantization.CompressedVectors;
@@ -56,6 +59,7 @@ import io.github.jbellis.jvector.quantization.VectorCompressor;
 import io.github.jbellis.jvector.util.Accountable;
 import io.github.jbellis.jvector.util.Bits;
 import io.github.jbellis.jvector.util.DenseIntMap;
+import io.github.jbellis.jvector.util.PhysicalCoreExecutor;
 import io.github.jbellis.jvector.util.RamUsageEstimator;
 import io.github.jbellis.jvector.vector.ArrayVectorFloat;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
@@ -153,12 +157,14 @@ public class CassandraOnHeapGraph<T> implements Accountable
         vectorsByKey = forSearching ? new NonBlockingHashMap<>() : null;
         invalidVectorBehavior = forSearching ? InvalidVectorBehavior.FAIL : InvalidVectorBehavior.IGNORE;
 
-        builder = new GraphIndexBuilder(vectorValues,
-                                        similarityFunction,
-                                        indexConfig.getAnnMaxDegree(),
+        builder = new GraphIndexBuilder(BuildScoreProvider.randomAccessScoreProvider(vectorValues, similarityFunction),
+                                        dimension,
+                                        List.of(32, 64),
                                         indexConfig.getConstructionBeamWidth(),
                                         1.0f, // no overflow means add will be a bit slower but flush will be faster
-                                        dimension > 3 ? 1.2f : 2.0f);
+                                        dimension > 3 ? 1.2f : 2.0f,
+                                        PhysicalCoreExecutor.pool(),
+                                        ForkJoinPool.commonPool());
         searchers = ThreadLocal.withInitial(() -> new GraphSearcherAccessManager(new GraphSearcher(builder.getGraph())));
     }
 
@@ -421,7 +427,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
         try (var pqOutput = perIndexComponents.addOrGet(IndexComponentType.PQ).openOutput(true);
              var postingsOutput = perIndexComponents.addOrGet(IndexComponentType.POSTING_LISTS).openOutput(true);
              var indexWriter = new OnDiskGraphIndexWriter.Builder(builder.getGraph(), indexFile.toPath())
-                               .withVersion(JVECTOR_2_VERSION) // always write old-version format since we're not using the new features
+                               .withVersion(4) // always write old-version format since we're not using the new features
                                .withMapper(ordinalMapper)
                                .with(new InlineVectors(vectorValues.dimension()))
                                .withStartOffset(termsOffset)
