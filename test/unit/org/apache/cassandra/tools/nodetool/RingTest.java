@@ -20,6 +20,9 @@ package org.apache.cassandra.tools.nodetool;
 
 import java.util.Arrays;
 
+import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.schema.SchemaConstants;
 import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -50,6 +53,7 @@ public class RingTest extends CQLTester
     @Test
     public void testRingOutput()
     {
+        SchemaConstants.LOCAL_SYSTEM_KEYSPACE_NAMES.forEach(k -> Keyspace.open(k).flush(ColumnFamilyStore.FlushReason.UNIT_TESTS));
         final HostStatWithPort host = new HostStatWithPort(null, FBUtilities.getBroadcastAddressAndPort(),
                                                            false, null);
         validateRingOutput(host.ipOrDns(false), "ring");
