@@ -89,7 +89,8 @@ public class SSLFactoryTest
                             .withTrustStore("test/conf/cassandra_ssl_test.truststore")
                             .withTrustStorePassword("cassandra")
                             .withRequireClientAuth(false)
-                            .withCipherSuites("TLS_RSA_WITH_AES_128_CBC_SHA")
+                            .withProtocol("TLSv1.3")
+                            .withCipherSuites("TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256")
                             .withSslContextFactory(new ParameterizedClass(TestFileBasedSSLContextFactory.class.getName(),
                                                                           new HashMap<>()));
     }
