@@ -409,8 +409,11 @@ public class CompactionSimulationTest extends BaseCompactionStrategyTest
                                                          0,
                                                          Reservations.Type.PER_LEVEL,
                                                          overlapInclusionMethod,
+<<<<<<< HEAD
                                                          true,
                                                          false,
+=======
+>>>>>>> parent of 8305834899... CNDB-10455: Automatically tune compaction for vector tables (#1265)
                                                          updateTimeSec,
                                                          minW,
                                                          maxW,
@@ -437,8 +440,11 @@ public class CompactionSimulationTest extends BaseCompactionStrategyTest
                                                        0,
                                                        Reservations.Type.PER_LEVEL,
                                                        overlapInclusionMethod,
+<<<<<<< HEAD
                                                        true,
                                                        false,
+=======
+>>>>>>> parent of 8305834899... CNDB-10455: Automatically tune compaction for vector tables (#1265)
                                                        "ks",
                                                        "tbl");
 
