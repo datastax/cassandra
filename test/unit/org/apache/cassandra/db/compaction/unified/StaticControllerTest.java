@@ -159,22 +159,22 @@ public class StaticControllerTest extends ControllerTest
     {
         Map<String, String> options = new HashMap<>();
         options.put(Controller.VECTOR_BASE_SHARD_COUNT_OPTION, "-1");
-        assertThrows(ConfigurationException.class, () -> Controller.validateOptions(options));
+        assertThrows(ConfigurationException.class, () -> Controller.validateOptions(options, false));
         options.clear();
         options.put(Controller.VECTOR_SSTABLE_GROWTH_OPTION, "-1");
-        assertThrows(ConfigurationException.class, () -> Controller.validateOptions(options));
+        assertThrows(ConfigurationException.class, () -> Controller.validateOptions(options, false));
         options.clear();
         options.put(Controller.VECTOR_RESERVED_THREADS_OPTION, "-1");
-        assertThrows(ConfigurationException.class, () -> Controller.validateOptions(options));
+        assertThrows(ConfigurationException.class, () -> Controller.validateOptions(options, false));
         options.clear();
         options.put(Controller.VECTOR_MIN_SSTABLE_SIZE_OPTION, "10GiB");
-        assertThrows(ConfigurationException.class, () -> Controller.validateOptions(options));
+        assertThrows(ConfigurationException.class, () -> Controller.validateOptions(options, false));
         options.clear();
         options.put(Controller.VECTOR_TARGET_SSTABLE_SIZE_OPTION, "-1MiB");
-        assertThrows(ConfigurationException.class, () -> Controller.validateOptions(options));
+        assertThrows(ConfigurationException.class, () -> Controller.validateOptions(options, false));
         options.clear();
         options.put(Controller.OVERRIDE_UCS_CONFIG_FOR_VECTOR_TABLES_OPTION, "not true");
-        assertThrows(ConfigurationException.class, () -> Controller.validateOptions(options));
+        assertThrows(ConfigurationException.class, () -> Controller.validateOptions(options, false));
     }
 
     @Test

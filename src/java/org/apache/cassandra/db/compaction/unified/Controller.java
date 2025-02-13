@@ -934,6 +934,7 @@ public abstract class Controller
                 ? Boolean.parseBoolean(options.get(ALLOW_UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION_OPTION))
                 : DEFAULT_ALLOW_UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION;
 
+        int defaultBaseShardCount = useVectorOptions ? VECTOR_DEFAULT_BASE_SHARD_COUNT : DEFAULT_BASE_SHARD_COUNT;
         int baseShardCount;
         if (options.containsKey(BASE_SHARD_COUNT_OPTION))
         {
@@ -941,46 +942,29 @@ public abstract class Controller
         }
         else
         {
-            baseShardCount = DEFAULT_BASE_SHARD_COUNT;
-        }
-        int vectorBaseShardCount;
-        if (options.containsKey(VECTOR_BASE_SHARD_COUNT_OPTION))
-        {
-            vectorBaseShardCount = Integer.parseInt(options.get(VECTOR_BASE_SHARD_COUNT_OPTION));
-        }
-        else
-        {
-            vectorBaseShardCount = VECTOR_DEFAULT_BASE_SHARD_COUNT;
+            baseShardCount = defaultBaseShardCount;
         }
 
         boolean isReplicaAware = options.containsKey(IS_REPLICA_AWARE_OPTION)
                                  ? Boolean.parseBoolean(options.get(IS_REPLICA_AWARE_OPTION))
                                  : DEFAULT_IS_REPLICA_AWARE;
 
+        long defaultTargetSStableSize = useVectorOptions ? VECTOR_DEFAULT_TARGET_SSTABLE_SIZE : DEFAULT_TARGET_SSTABLE_SIZE;
         long targetSStableSize = options.containsKey(TARGET_SSTABLE_SIZE_OPTION)
                                  ? FBUtilities.parseHumanReadableBytes(options.get(TARGET_SSTABLE_SIZE_OPTION))
-                                 : DEFAULT_TARGET_SSTABLE_SIZE;
-        long vectorTargetSStableSize = options.containsKey(VECTOR_TARGET_SSTABLE_SIZE_OPTION)
-                                 ? FBUtilities.parseHumanReadableBytes(options.get(VECTOR_TARGET_SSTABLE_SIZE_OPTION))
-                                 : VECTOR_DEFAULT_TARGET_SSTABLE_SIZE;
-        long minSSTableSize = getSizeWithAltAndSpecial(options, MIN_SSTABLE_SIZE_OPTION, MIN_SSTABLE_SIZE_OPTION_MB, 20, MIN_SSTABLE_SIZE_OPTION_AUTO, MIN_SSTABLE_SIZE_AUTO, DEFAULT_MIN_SSTABLE_SIZE);
-        long vectorMinSSTableSize = getSizeWithSpecial(options, VECTOR_MIN_SSTABLE_SIZE_OPTION, MIN_SSTABLE_SIZE_OPTION_AUTO, MIN_SSTABLE_SIZE_AUTO, VECTOR_DEFAULT_MIN_SSTABLE_SIZE);
+                                 : defaultTargetSStableSize;
+        long defaultMinSSTableSize = useVectorOptions ? VECTOR_DEFAULT_MIN_SSTABLE_SIZE : DEFAULT_MIN_SSTABLE_SIZE;
+        long minSSTableSize = getSizeWithAltAndSpecial(options, MIN_SSTABLE_SIZE_OPTION, MIN_SSTABLE_SIZE_OPTION_MB, 20, MIN_SSTABLE_SIZE_OPTION_AUTO, MIN_SSTABLE_SIZE_AUTO, defaultMinSSTableSize);
 
-        double sstableGrowthModifier = DEFAULT_SSTABLE_GROWTH;
+        double sstableGrowthModifier = useVectorOptions ? VECTOR_DEFAULT_SSTABLE_GROWTH: DEFAULT_SSTABLE_GROWTH;
         if (options.containsKey(SSTABLE_GROWTH_OPTION))
             sstableGrowthModifier = FBUtilities.parsePercent(options.get(SSTABLE_GROWTH_OPTION));
 
-        double vectorSSTableGrowthModifier = VECTOR_DEFAULT_SSTABLE_GROWTH;
-        if (options.containsKey(VECTOR_SSTABLE_GROWTH_OPTION))
-            vectorSSTableGrowthModifier = FBUtilities.parsePercent(options.get(VECTOR_SSTABLE_GROWTH_OPTION));
-
+        int defaultReservedThreadsPerLevel = useVectorOptions ? VECTOR_DEFAULT_RESERVED_THREADS : DEFAULT_RESERVED_THREADS;
         int reservedThreadsPerLevel = options.containsKey(RESERVED_THREADS_OPTION)
                                       ? FBUtilities.parseIntAllowingMax(options.get(RESERVED_THREADS_OPTION))
-                                      : DEFAULT_RESERVED_THREADS;
+                                      : defaultReservedThreadsPerLevel;
 
-        int vectorReservedThreadsPerLevel = options.containsKey(VECTOR_RESERVED_THREADS_OPTION)
-                                      ? FBUtilities.parseIntAllowingMax(options.get(VECTOR_RESERVED_THREADS_OPTION))
-                                      : VECTOR_DEFAULT_RESERVED_THREADS;
         Reservations.Type reservationsType = options.containsKey(RESERVATIONS_TYPE_OPTION)
                                                   ? Reservations.Type.valueOf(options.get(RESERVATIONS_TYPE_OPTION).toUpperCase())
                                                   : DEFAULT_RESERVED_THREADS_TYPE;
@@ -1037,17 +1021,17 @@ public abstract class Controller
                ? AdaptiveController.fromOptions(env,
                                                 survivalFactors,
                                                 dataSetSize,
-                                                useVectorOptions ? vectorMinSSTableSize : minSSTableSize,
+                                                minSSTableSize,
                                                 flushSizeOverride,
                                                 maxSpaceOverhead,
                                                 maxSSTablesToCompact,
                                                 expiredSSTableCheckFrequency,
                                                 ignoreOverlapsInExpirationCheck,
-                                                useVectorOptions ? vectorBaseShardCount : baseShardCount,
+                                                baseShardCount,
                                                 isReplicaAware,
-                                                useVectorOptions ? vectorTargetSStableSize : targetSStableSize,
-                                                useVectorOptions ? vectorSSTableGrowthModifier : sstableGrowthModifier,
-                                                useVectorOptions ? vectorReservedThreadsPerLevel : reservedThreadsPerLevel,
+                                                targetSStableSize,
+                                                sstableGrowthModifier,
+                                                reservedThreadsPerLevel,
                                                 reservationsType,
                                                 overlapInclusionMethod,
                                                 parallelizeOutputShards,
@@ -1058,17 +1042,17 @@ public abstract class Controller
                : StaticController.fromOptions(env,
                                               survivalFactors,
                                               dataSetSize,
-                                              useVectorOptions ? vectorMinSSTableSize : minSSTableSize,
+                                              minSSTableSize,
                                               flushSizeOverride,
                                               maxSpaceOverhead,
                                               maxSSTablesToCompact,
                                               expiredSSTableCheckFrequency,
                                               ignoreOverlapsInExpirationCheck,
-                                              useVectorOptions ? vectorBaseShardCount : baseShardCount,
+                                              baseShardCount,
                                               isReplicaAware,
-                                              useVectorOptions ? vectorTargetSStableSize : targetSStableSize,
-                                              useVectorOptions ? vectorSSTableGrowthModifier : sstableGrowthModifier,
-                                              useVectorOptions ? vectorReservedThreadsPerLevel : reservedThreadsPerLevel,
+                                              targetSStableSize,
+                                              sstableGrowthModifier,
+                                              reservedThreadsPerLevel,
                                               reservationsType,
                                               overlapInclusionMethod,
                                               parallelizeOutputShards,
@@ -1079,8 +1063,12 @@ public abstract class Controller
                                               useVectorOptions);
     }
 
-    public static Map<String, String> validateOptions(Map<String, String> options) throws ConfigurationException
+    public static Map<String, String> validateOptions(Map<String, String> options, boolean hasVectorType) throws ConfigurationException
     {
+        boolean vectorOverride = options.containsKey(OVERRIDE_UCS_CONFIG_FOR_VECTOR_TABLES_OPTION)
+                                 ? Boolean.parseBoolean(options.get(OVERRIDE_UCS_CONFIG_FOR_VECTOR_TABLES_OPTION))
+                                 : DEFAULT_OVERRIDE_UCS_CONFIG_FOR_VECTOR_TABLES;
+        boolean useVectorOptions = hasVectorType && vectorOverride;
         String nonPositiveErr = "Invalid configuration, %s should be positive: %d";
         String booleanParseErr = "%s should either be 'true' or 'false', not %s";
         String intParseErr = "%s is not a parsable int (base10) for %s";
@@ -1090,9 +1078,7 @@ public abstract class Controller
         String s;
         boolean adaptive = DEFAULT_ADAPTIVE;
         long minSSTableSize = -1;
-        long vectorMinSSTableSize = -1;
-        long targetSSTableSize = DEFAULT_TARGET_SSTABLE_SIZE;
-        long vectorTargetSSTableSize = VECTOR_DEFAULT_TARGET_SSTABLE_SIZE;
+        long targetSSTableSize = useVectorOptions ? VECTOR_DEFAULT_TARGET_SSTABLE_SIZE :  DEFAULT_TARGET_SSTABLE_SIZE;
 
         s = options.remove(NUM_SHARDS_OPTION);
         if (s != null)
@@ -1126,8 +1112,8 @@ public abstract class Controller
         validateBoolean(options, IS_REPLICA_AWARE_OPTION, DEFAULT_IS_REPLICA_AWARE);
         validateBoolean(options, PARALLELIZE_OUTPUT_SHARDS_OPTION, DEFAULT_PARALLELIZE_OUTPUT_SHARDS);
 
-        minSSTableSize = validateSizeWithAlt(options, MIN_SSTABLE_SIZE_OPTION, MIN_SSTABLE_SIZE_OPTION_MB, 20, MIN_SSTABLE_SIZE_OPTION_AUTO, -1, DEFAULT_MIN_SSTABLE_SIZE);
-        vectorMinSSTableSize = validateSizeWithSpecial(options, VECTOR_MIN_SSTABLE_SIZE_OPTION, MIN_SSTABLE_SIZE_OPTION_AUTO, -1, VECTOR_DEFAULT_MIN_SSTABLE_SIZE);
+        long defaultMinSSTableSize = useVectorOptions ? VECTOR_DEFAULT_MIN_SSTABLE_SIZE : DEFAULT_MIN_SSTABLE_SIZE;
+        minSSTableSize = validateSizeWithAlt(options, MIN_SSTABLE_SIZE_OPTION, MIN_SSTABLE_SIZE_OPTION_MB, 20, MIN_SSTABLE_SIZE_OPTION_AUTO, -1, defaultMinSSTableSize);
         validateSizeWithAlt(options, FLUSH_SIZE_OVERRIDE_OPTION, FLUSH_SIZE_OVERRIDE_OPTION_MB, 20);
         validateSizeWithAlt(options, DATASET_SIZE_OPTION, DATASET_SIZE_OPTION_GB, 30);
 
@@ -1214,23 +1200,6 @@ public abstract class Controller
             }
         }
 
-        s = options.remove(VECTOR_BASE_SHARD_COUNT_OPTION);
-        if (s != null)
-        {
-            try
-            {
-                int numShards = Integer.parseInt(s);
-                if (numShards <= 0)
-                    throw new ConfigurationException(String.format(nonPositiveErr,
-                                                                   VECTOR_BASE_SHARD_COUNT_OPTION,
-                                                                   numShards));
-            }
-            catch (NumberFormatException e)
-            {
-                throw new ConfigurationException(String.format(intParseErr, s, VECTOR_BASE_SHARD_COUNT_OPTION), e);
-            }
-        }
-
         s = options.remove(TARGET_SSTABLE_SIZE_OPTION);
         if (s != null)
         {
@@ -1247,27 +1216,6 @@ public abstract class Controller
             {
                 throw new ConfigurationException(String.format("%s is not a valid size in bytes: %s",
                                                                TARGET_SSTABLE_SIZE_OPTION,
-                                                               e.getMessage()),
-                                                 e);
-            }
-        }
-
-        s = options.remove(VECTOR_TARGET_SSTABLE_SIZE_OPTION);
-        if (s != null)
-        {
-            try
-            {
-                vectorTargetSSTableSize = FBUtilities.parseHumanReadableBytes(s);
-                if (vectorTargetSSTableSize < MIN_TARGET_SSTABLE_SIZE)
-                    throw new ConfigurationException(String.format("%s %s is not acceptable, size must be at least %s",
-                                                                   VECTOR_TARGET_SSTABLE_SIZE_OPTION,
-                                                                   s,
-                                                                   FBUtilities.prettyPrintMemory(MIN_TARGET_SSTABLE_SIZE)));
-            }
-            catch (NumberFormatException e)
-            {
-                throw new ConfigurationException(String.format("%s is not a valid size in bytes: %s",
-                                                               VECTOR_TARGET_SSTABLE_SIZE_OPTION,
                                                                e.getMessage()),
                                                  e);
             }
@@ -1293,26 +1241,6 @@ public abstract class Controller
             }
         }
 
-        s = options.remove(VECTOR_SSTABLE_GROWTH_OPTION);
-        if (s != null)
-        {
-            try
-            {
-                double targetSSTableGrowth = FBUtilities.parsePercent(s);
-                if (targetSSTableGrowth < 0 || targetSSTableGrowth > 1)
-                    throw new ConfigurationException(String.format("%s %s must be between 0 and 1",
-                                                                   VECTOR_SSTABLE_GROWTH_OPTION,
-                                                                   s));
-            }
-            catch (NumberFormatException e)
-            {
-                throw new ConfigurationException(String.format("%s is not a valid number between 0 and 1: %s",
-                                                               VECTOR_SSTABLE_GROWTH_OPTION,
-                                                               e.getMessage()),
-                                                 e);
-            }
-        }
-
         s = options.remove(RESERVED_THREADS_OPTION);
         if (s != null)
         {
@@ -1328,26 +1256,6 @@ public abstract class Controller
             {
                 throw new ConfigurationException(String.format("%s is not a valid integer >= 0 or \"max\": %s",
                                                                RESERVED_THREADS_OPTION,
-                                                               e.getMessage()),
-                                                 e);
-            }
-        }
-
-        s = options.remove(VECTOR_RESERVED_THREADS_OPTION);
-        if (s != null)
-        {
-            try
-            {
-                int reservedThreads = FBUtilities.parseIntAllowingMax(s);
-                if (reservedThreads < 0)
-                    throw new ConfigurationException(String.format("%s %s must be an integer >= 0 or \"max\"",
-                                                                   VECTOR_RESERVED_THREADS_OPTION,
-                                                                   s));
-            }
-            catch (NumberFormatException e)
-            {
-                throw new ConfigurationException(String.format("%s is not a valid integer >= 0 or \"max\": %s",
-                                                               VECTOR_RESERVED_THREADS_OPTION,
                                                                e.getMessage()),
                                                  e);
             }
@@ -1387,10 +1295,6 @@ public abstract class Controller
             throw new ConfigurationException(String.format("The minimum sstable size %s cannot be larger than the target size's lower bound %s.",
                                                            FBUtilities.prettyPrintMemory(minSSTableSize),
                                                            FBUtilities.prettyPrintMemory((long) (targetSSTableSize * INVERSE_SQRT_2))));
-        if (vectorMinSSTableSize > vectorTargetSSTableSize * INVERSE_SQRT_2)
-            throw new ConfigurationException(String.format("The vector minimum sstable size %s cannot be larger than the target size's lower bound %s.",
-                                                           FBUtilities.prettyPrintMemory(vectorMinSSTableSize),
-                                                           FBUtilities.prettyPrintMemory((long) (vectorTargetSSTableSize * INVERSE_SQRT_2))));
 
         return adaptive ? AdaptiveController.validateOptions(options) : StaticController.validateOptions(options);
     }
@@ -1423,16 +1327,6 @@ public abstract class Controller
             return Boolean.parseBoolean(s);
         }
         return defaultValue;
-    }
-
-    private static long getSizeWithSpecial(Map<String, String> options, String optionHumanReadable, String specialText, long specialValue, long defaultValue)
-    {
-        if (specialText.equalsIgnoreCase(options.get(optionHumanReadable)))
-            return specialValue;
-        else if (options.containsKey(optionHumanReadable))
-            return FBUtilities.parseHumanReadableBytes(options.get(optionHumanReadable));
-        else
-            return defaultValue;
     }
 
     private static void validateSizeWithAlt(Map<String, String> options, String optionHumanReadable, String optionAlt, int altShift)
@@ -1484,47 +1378,6 @@ public abstract class Controller
         if (sizeInBytes < 0)
             throw new ConfigurationException(String.format("Invalid configuration, %s should be positive: %s",
                                                            opt,
-                                                           s));
-        return sizeInBytes;
-    }
-
-    private static long validateSizeWithSpecial(Map<String, String> options, String optionHumanReadable, String specialText, long specialValue, long defaultValue)
-    {
-        long sizeInBytes;
-        String s = null;
-        try
-        {
-            s = options.remove(optionHumanReadable);
-            if (s != null)
-            {
-                if (s.equalsIgnoreCase(specialText))
-                    return specialValue; // all good
-                sizeInBytes = FBUtilities.parseHumanReadableBytes(s);
-            }
-            else
-            {
-                return defaultValue;
-            }
-
-        }
-        catch (NumberFormatException e)
-        {
-            if (specialText != null)
-                throw new ConfigurationException(String.format("%s must be a valid size in bytes or %s for %s",
-                                                               s,
-                                                               specialText,
-                                                               optionHumanReadable),
-                                                 e);
-            else
-                throw new ConfigurationException(String.format("%s is not a valid size in bytes for %s",
-                                                               s,
-                                                               optionHumanReadable),
-                                                 e);
-        }
-
-        if (sizeInBytes < 0)
-            throw new ConfigurationException(String.format("Invalid configuration, %s should be positive: %s",
-                                                           optionHumanReadable,
                                                            s));
         return sizeInBytes;
     }

@@ -66,12 +66,12 @@ public final class AlterViewStatement extends AlterSchemaStatement
         if (null == view)
             throw ire("Materialized view '%s.%s' doesn't exist", keyspaceName, viewName);
 
-        attrs.validate();
+        attrs.validate(view.metadata.hasVectorType());
 
         Guardrails.disallowedTableProperties.ensureAllowed(attrs.updatedProperties(), state);
         Guardrails.ignoredTableProperties.maybeIgnoreAndWarn(attrs.updatedProperties(), attrs::removeProperty, state);
 
-        TableParams params = attrs.asAlteredTableParams(view.metadata.params);
+        TableParams params = attrs.asAlteredTableParams(view.metadata.params, view.metadata.hasVectorType());
 
         if (params.gcGraceSeconds == 0)
         {

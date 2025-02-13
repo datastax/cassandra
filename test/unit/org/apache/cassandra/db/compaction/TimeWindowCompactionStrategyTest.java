@@ -83,13 +83,13 @@ public class TimeWindowCompactionStrategyTest extends SchemaLoader
         Map<String, String> options = new HashMap<>();
         options.put(TimeWindowCompactionStrategyOptions.COMPACTION_WINDOW_SIZE_KEY, "30");
         options.put(TimeWindowCompactionStrategyOptions.COMPACTION_WINDOW_UNIT_KEY, "MINUTES");
-        Map<String, String> unvalidated = validateOptions(options);
+        Map<String, String> unvalidated = validateOptions(options, false);
         assertTrue(unvalidated.isEmpty());
 
         try
         {
             options.put(TimeWindowCompactionStrategyOptions.COMPACTION_WINDOW_SIZE_KEY, "0");
-            validateOptions(options);
+            validateOptions(options, false);
             fail(String.format("%s == 0 should be rejected", TimeWindowCompactionStrategyOptions.COMPACTION_WINDOW_SIZE_KEY));
         }
         catch (ConfigurationException e)
@@ -100,7 +100,7 @@ public class TimeWindowCompactionStrategyTest extends SchemaLoader
         try
         {
             options.put(TimeWindowCompactionStrategyOptions.COMPACTION_WINDOW_SIZE_KEY, "-1337");
-            validateOptions(options);
+            validateOptions(options, false);
             fail(String.format("Negative %s should be rejected", TimeWindowCompactionStrategyOptions.COMPACTION_WINDOW_SIZE_KEY));
         }
         catch (ConfigurationException e)
@@ -111,7 +111,7 @@ public class TimeWindowCompactionStrategyTest extends SchemaLoader
         try
         {
             options.put(TimeWindowCompactionStrategyOptions.COMPACTION_WINDOW_UNIT_KEY, "MONTHS");
-            validateOptions(options);
+            validateOptions(options, false);
             fail(String.format("Invalid %s should be rejected", TimeWindowCompactionStrategyOptions.COMPACTION_WINDOW_UNIT_KEY));
         }
         catch (ConfigurationException e)
@@ -122,7 +122,7 @@ public class TimeWindowCompactionStrategyTest extends SchemaLoader
         try
         {
             options.put(TimeWindowCompactionStrategyOptions.UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION_KEY, "not-a-boolean");
-            validateOptions(options);
+            validateOptions(options, false);
             fail(String.format("Invalid %s should be rejected", TimeWindowCompactionStrategyOptions.UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION_KEY));
         }
         catch (ConfigurationException e)
@@ -140,7 +140,7 @@ public class TimeWindowCompactionStrategyTest extends SchemaLoader
         assertTrue(twcs.options.isDisableTombstoneCompactions());
 
         options.put("bad_option", "1.0");
-        unvalidated = validateOptions(options);
+        unvalidated = validateOptions(options, false);
         assertTrue(unvalidated.containsKey("bad_option"));
     }
 

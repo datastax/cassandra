@@ -308,7 +308,8 @@ public final class CreateViewStatement extends AlterSchemaStatement
          * Validate WITH params
          */
 
-        attrs.validate();
+        boolean hasVectorTye = false;
+        attrs.validate(hasVectorTye);
 
         if (attrs.hasOption(TableParams.Option.DEFAULT_TIME_TO_LIVE)
             && attrs.getInt(TableParams.Option.DEFAULT_TIME_TO_LIVE.toString(), 0) != 0)
@@ -327,7 +328,8 @@ public final class CreateViewStatement extends AlterSchemaStatement
         if (attrs.hasProperty(TableAttributes.ID))
             builder.id(attrs.getId());
 
-        builder.params(attrs.asNewTableParams())
+        boolean hasVectorType = false; // don't care about VIEWs and Vector
+        builder.params(attrs.asNewTableParams(hasVectorType))
                .kind(TableMetadata.Kind.VIEW);
 
         partitionKeyColumns.forEach(name -> builder.addPartitionKeyColumn(name, getType(table, name)));

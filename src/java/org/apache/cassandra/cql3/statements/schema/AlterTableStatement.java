@@ -414,9 +414,9 @@ public abstract class AlterTableStatement extends AlterSchemaStatement
 
         public KeyspaceMetadata apply(KeyspaceMetadata keyspace, TableMetadata table)
         {
-            attrs.validate();
+            attrs.validate(table.hasVectorType());
 
-            TableParams params = attrs.asAlteredTableParams(table.params);
+            TableParams params = attrs.asAlteredTableParams(table.params, table.hasVectorType());
 
             if (table.isCounter() && params.defaultTimeToLive > 0)
                 throw ire("Cannot set default_time_to_live on a table with counters");

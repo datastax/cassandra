@@ -121,9 +121,12 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         this(factory, new BackgroundCompactions(factory.getRealm()), new HashMap<>(), controller);
     }
 
-    public static Map<String, String> validateOptions(Map<String, String> options) throws ConfigurationException
+    /**
+     * This method is called using reflection.
+     */
+    public static Map<String, String> validateOptions(Map<String, String> options, boolean hasVectorType) throws ConfigurationException
     {
-        return Controller.validateOptions(CompactionStrategyOptions.validateOptions(options));
+        return Controller.validateOptions(CompactionStrategyOptions.validateOptions(options), hasVectorType);
     }
 
     public void storeControllerConfig()

@@ -63,9 +63,9 @@ public class LegacyAbstractCompactionStrategyTest
                                     SchemaLoader.standardCFMD(KEYSPACE1, STCS_TABLE)
                                                 .compaction(CompactionParams.stcs(Collections.emptyMap())),
                                     SchemaLoader.standardCFMD(KEYSPACE1, DTCS_TABLE)
-                                                .compaction(CompactionParams.create(DateTieredCompactionStrategy.class, Collections.emptyMap())),
+                                                .compaction(CompactionParams.create(DateTieredCompactionStrategy.class, Collections.emptyMap(), false)),
                                     SchemaLoader.standardCFMD(KEYSPACE1, TWCS_TABLE)
-                                                .compaction(CompactionParams.create(TimeWindowCompactionStrategy.class, Collections.emptyMap())));
+                                                .compaction(CompactionParams.create(TimeWindowCompactionStrategy.class, Collections.emptyMap(), false)));
         Keyspace.open(KEYSPACE1).getColumnFamilyStore(LCS_TABLE).disableAutoCompaction();
         Keyspace.open(KEYSPACE1).getColumnFamilyStore(STCS_TABLE).disableAutoCompaction();
         Keyspace.open(KEYSPACE1).getColumnFamilyStore(DTCS_TABLE).disableAutoCompaction();

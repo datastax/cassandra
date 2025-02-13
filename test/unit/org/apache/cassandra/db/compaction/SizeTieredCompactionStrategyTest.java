@@ -83,13 +83,13 @@ public class SizeTieredCompactionStrategyTest
         options.put(SizeTieredCompactionStrategyOptions.BUCKET_LOW_KEY, "0.5");
         options.put(SizeTieredCompactionStrategyOptions.BUCKET_HIGH_KEY, "1.5");
         options.put(SizeTieredCompactionStrategyOptions.MIN_SSTABLE_SIZE_KEY, "10000");
-        Map<String, String> unvalidated = validateOptions(options);
+        Map<String, String> unvalidated = validateOptions(options, false);
         assertTrue(unvalidated.isEmpty());
 
         try
         {
             options.put(SizeTieredCompactionStrategyOptions.BUCKET_LOW_KEY, "1000.0");
-            validateOptions(options);
+            validateOptions(options, false);
             fail("bucket_low greater than bucket_high should be rejected");
         }
         catch (ConfigurationException e)
@@ -98,7 +98,7 @@ public class SizeTieredCompactionStrategyTest
         }
 
         options.put("bad_option", "1.0");
-        unvalidated = validateOptions(options);
+        unvalidated = validateOptions(options, false);
         assertTrue(unvalidated.containsKey("bad_option"));
     }
 

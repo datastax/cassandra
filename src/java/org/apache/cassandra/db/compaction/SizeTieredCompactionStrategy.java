@@ -342,7 +342,10 @@ public class SizeTieredCompactionStrategy extends LegacyAbstractCompactionStrate
         return Long.MAX_VALUE;
     }
 
-    public static Map<String, String> validateOptions(Map<String, String> options) throws ConfigurationException
+    /**
+     * This method is called using reflection.
+     */
+    public static Map<String, String> validateOptions(Map<String, String> options, boolean hasVectorType) throws ConfigurationException
     {
         Map<String, String> uncheckedOptions = CompactionStrategyOptions.validateOptions(options);
         uncheckedOptions = SizeTieredCompactionStrategyOptions.validateOptions(options, uncheckedOptions);

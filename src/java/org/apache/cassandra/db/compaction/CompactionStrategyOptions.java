@@ -90,7 +90,7 @@ public class CompactionStrategyOptions
     private final double readMultiplier;
     private final double writeMultiplier;
 
-    public CompactionStrategyOptions(Class<? extends CompactionStrategy> klass, Map<String, String> options, boolean throwOnInvalidOption)
+    public CompactionStrategyOptions(Class<? extends CompactionStrategy> klass, Map<String, String> options, boolean throwOnInvalidOption, boolean hasVectorType)
     {
         this.klass = klass;
         this.options = copyOptions(klass, options);
@@ -98,7 +98,7 @@ public class CompactionStrategyOptions
         boolean useDefault = false;
         try
         {
-            validate(); // will throw ConfigurationException if the options are invalid
+            validate(hasVectorType); // will throw ConfigurationException if the options are invalid
         }
         catch (ConfigurationException e)
         {
@@ -157,8 +157,8 @@ public class CompactionStrategyOptions
         try
         {
             Map<String, String> unrecognizedOptions =
-            (Map<String, String>) klass.getMethod("validateOptions", Map.class)
-                                       .invoke(null, DEFAULT_THRESHOLDS);
+            (Map<String, String>) klass.getMethod("validateOptions", Map.class, Boolean.TYPE)
+                                       .invoke(null, DEFAULT_THRESHOLDS, false);
 
             return unrecognizedOptions.isEmpty();
         }
@@ -209,14 +209,14 @@ public class CompactionStrategyOptions
         return Objects.hash(klass, options);
     }
 
-    private Map<String, String> validate()
+    private Map<String, String> validate(boolean hasVectorType)
     {
         try
         {
             // Each strategy currently implements a static validateOptions() method for custom validation, the default behavior
             // is to simply call validateOptions() below, through AbstractCompactionStrategy.validateOptions(), we could simplify
             // all this assuming we don't need to support any user-defined compaction strategy
-            Map<String, String> unknownOptions = (Map<String, String>) klass.getMethod("validateOptions", Map.class).invoke(null, options);
+            Map<String, String> unknownOptions = (Map<String, String>) klass.getMethod("validateOptions", Map.class, Boolean.TYPE).invoke(null, options, hasVectorType);
             if (!unknownOptions.isEmpty())
             {
                 throw new ConfigurationException(format("Properties specified %s are not understood by %s",

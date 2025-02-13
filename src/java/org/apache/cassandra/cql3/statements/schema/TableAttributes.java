@@ -74,10 +74,10 @@ public final class TableAttributes extends PropertyDefinitions
 
     private final Map<ColumnIdentifier, DroppedColumn.Raw> droppedColumnRecords = new HashMap<>();
 
-    public void validate()
+    public void validate(boolean hasVectorType)
     {
         validate(validKeywords, obsoleteKeywords);
-        build(TableParams.builder()).validate();
+        build(TableParams.builder(), hasVectorType).validate();
     }
 
     public void addDroppedColumnRecord(ColumnIdentifier name, CQL3Type.Raw type, boolean isStatic, long timestamp)
@@ -92,16 +92,16 @@ public final class TableAttributes extends PropertyDefinitions
         return droppedColumnRecords.values();
     }
 
-    TableParams asNewTableParams()
+    TableParams asNewTableParams(boolean hasVectorType)
     {
-        return build(TableParams.builder());
+        return build(TableParams.builder(), hasVectorType);
     }
 
-    TableParams asAlteredTableParams(TableParams previous)
+    TableParams asAlteredTableParams(TableParams previous, boolean hasVectorType)
     {
         if (getId() != null)
             throw new ConfigurationException("Cannot alter table id.");
-        return build(previous.unbuild());
+        return build(previous.unbuild(), hasVectorType);
     }
 
     public TableId getId() throws ConfigurationException
@@ -140,7 +140,7 @@ public final class TableAttributes extends PropertyDefinitions
         return Sets.union(validKeywords, obsoleteKeywords);
     }
 
-    private TableParams build(TableParams.Builder builder)
+    private TableParams build(TableParams.Builder builder, boolean hasVectorType)
     {
         if (hasOption(Option.BLOOM_FILTER_FP_CHANCE))
             builder.bloomFilterFpChance(getDouble(Option.BLOOM_FILTER_FP_CHANCE));
@@ -156,7 +156,7 @@ public final class TableAttributes extends PropertyDefinitions
             if (hasUnsupportedDseCompaction())
                 builder.compaction(CompactionParams.DEFAULT);
             else
-                builder.compaction(CompactionParams.fromMap(getMap(Option.COMPACTION)));
+                builder.compaction(CompactionParams.fromMap(getMap(Option.COMPACTION), hasVectorType));
         }
 
         if (hasOption(Option.COMPRESSION))

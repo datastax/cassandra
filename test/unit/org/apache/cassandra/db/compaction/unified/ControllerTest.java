@@ -143,7 +143,8 @@ public abstract class ControllerTest
     Controller testFromOptions(boolean adaptive, Map<String, String> options)
     {
         addOptions(adaptive, options);
-        Controller.validateOptions(options);
+        boolean hasVectorType = false;
+        Controller.validateOptions(options, hasVectorType);
 
         Controller controller = Controller.fromOptions(cfs, options);
         assertNotNull(controller);
@@ -176,7 +177,8 @@ public abstract class ControllerTest
     {
         useVector = true;
         addOptions(adaptive, options);
-        Controller.validateOptions(options);
+        boolean hasVectorType = true;
+        Controller.validateOptions(options, hasVectorType);
 
         Controller controller = Controller.fromOptions(cfs, options);
         assertNotNull(controller);
@@ -194,7 +196,7 @@ public abstract class ControllerTest
     void testValidateOptions(Map<String, String> options, boolean adaptive)
     {
         addOptions(adaptive, options);
-        options = Controller.validateOptions(options);
+        options = Controller.validateOptions(options, useVector);
         assertTrue(options.toString(), options.isEmpty());
     }
 
@@ -462,21 +464,21 @@ public abstract class ControllerTest
     {
         Map<String, String> options = new HashMap<>();
         options.put(Controller.NUM_SHARDS_OPTION, Integer.toString(-1));
-        Map<String, String> validatedOptions = Controller.validateOptions(options);
+        Map<String, String> validatedOptions = Controller.validateOptions(options, useVector);
         assertTrue("-1 should be a valid option: " + validatedOptions, validatedOptions.isEmpty());
 
         options = new HashMap<>();
         options.put(Controller.NUM_SHARDS_OPTION, Integer.toString(-1));
         options.put(Controller.TARGET_SSTABLE_SIZE_OPTION, "128MB");
         options.put(Controller.MIN_SSTABLE_SIZE_OPTION, "0B");
-        validatedOptions = Controller.validateOptions(options);
+        validatedOptions = Controller.validateOptions(options, useVector);
         assertTrue("-1 num of shards should be acceptable with V2 params: " + validatedOptions, validatedOptions.isEmpty());
 
         Map<String, String> invalidOptions = new HashMap<>();
         invalidOptions.put(Controller.NUM_SHARDS_OPTION, Integer.toString(32));
         invalidOptions.put(Controller.TARGET_SSTABLE_SIZE_OPTION, "128MB");
         assertThrows("Positive num of shards should not be acceptable with V2 params",
-                     ConfigurationException.class, () -> Controller.validateOptions(invalidOptions));
+                     ConfigurationException.class, () -> Controller.validateOptions(invalidOptions, useVector));
     }
 
     @Test
@@ -654,7 +656,7 @@ public abstract class ControllerTest
         options.put(CompactionStrategyOptions.READ_MULTIPLIER_OPTION, Double.toString(readMultiplier));
         options.put(CompactionStrategyOptions.WRITE_MULTIPLIER_OPTION, Double.toString(writeMultiplier));
 
-        CompactionStrategyOptions compactionStrategyOptions = new CompactionStrategyOptions(UnifiedCompactionStrategy.class, options, true);
+        CompactionStrategyOptions compactionStrategyOptions = new CompactionStrategyOptions(UnifiedCompactionStrategy.class, options, true, useVector);
         assertNotNull(compactionStrategyOptions);
         assertNotNull(compactionStrategyOptions.toString());
         assertEquals(tombstoneThresholdOption, compactionStrategyOptions.getTombstoneThreshold(), epsilon);

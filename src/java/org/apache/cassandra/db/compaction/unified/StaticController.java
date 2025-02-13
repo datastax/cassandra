@@ -122,12 +122,18 @@ public class StaticController extends Controller
                                   boolean useVectorOptions)
     {
         int[] scalingParameters;
-        if (options.containsKey(STATIC_SCALING_FACTORS_OPTION))
-            scalingParameters = parseScalingParameters(options.get(STATIC_SCALING_FACTORS_OPTION));
-        else
-            scalingParameters = parseScalingParameters(options.getOrDefault(SCALING_PARAMETERS_OPTION, DEFAULT_STATIC_SCALING_PARAMETERS));
 
-        int[] vectorScalingParameters = parseScalingParameters(options.getOrDefault(VECTOR_SCALING_PARAMETERS_OPTION, VECTOR_DEFAULT_STATIC_SCALING_PARAMETERS));
+        if (useVectorOptions)
+        {
+            scalingParameters = parseScalingParameters(options.getOrDefault(VECTOR_SCALING_PARAMETERS_OPTION, VECTOR_DEFAULT_STATIC_SCALING_PARAMETERS));
+        } else
+        {
+            if (options.containsKey(STATIC_SCALING_FACTORS_OPTION))
+                scalingParameters = parseScalingParameters(options.get(STATIC_SCALING_FACTORS_OPTION));
+            else
+                scalingParameters = parseScalingParameters(options.getOrDefault(SCALING_PARAMETERS_OPTION, DEFAULT_STATIC_SCALING_PARAMETERS));
+
+        }
 
         long currentFlushSize = flushSizeOverride;
 
@@ -151,7 +157,7 @@ public class StaticController extends Controller
             logger.warn("Unable to parse saved flush size. Using starting value instead:", e);
         }
         return new StaticController(env,
-                                    useVectorOptions ? vectorScalingParameters : scalingParameters,
+                                    scalingParameters,
                                     survivalFactors,
                                     dataSetSize,
                                     minSSTableSize,

@@ -993,9 +993,10 @@ public final class SchemaKeyspace
 
         Set<TableMetadata.Flag> flags = TableMetadata.Flag.fromStringSet(row.getFrozenSet("flags", UTF8Type.instance));
         boolean isCounter = flags.contains(TableMetadata.Flag.COUNTER);
+        boolean hasVectorType = false; // this affects the default values
         return TableMetadata.builder(keyspaceName, tableName, TableId.fromUUID(row.getUUID("id")))
                             .flags(flags)
-                            .params(createTableParamsFromRow(row))
+                            .params(createTableParamsFromRow(row, hasVectorType))
                             .addColumns(fetchColumns(keyspaceName, tableName, types, isCounter))
                             .droppedColumns(fetchDroppedColumns(keyspaceName, tableName, isCounter))
                             .indexes(fetchIndexes(keyspaceName, tableName))
@@ -1004,13 +1005,13 @@ public final class SchemaKeyspace
     }
 
     @VisibleForTesting
-    static TableParams createTableParamsFromRow(UntypedResultSet.Row row)
+    static TableParams createTableParamsFromRow(UntypedResultSet.Row row, boolean hasVectorType)
     {
         return TableParams.builder()
                           .bloomFilterFpChance(row.getDouble("bloom_filter_fp_chance"))
                           .caching(CachingParams.fromMap(row.getFrozenTextMap("caching")))
                           .comment(row.getString("comment"))
-                          .compaction(CompactionParams.fromMap(row.getFrozenTextMap("compaction")))
+                          .compaction(CompactionParams.fromMap(row.getFrozenTextMap("compaction"), hasVectorType))
                           .compression(CompressionParams.fromMap(row.getFrozenTextMap("compression")))
                           .memtable(MemtableParams.fromMap(row.getFrozenTextMap("memtable")))
                           .defaultTimeToLive(row.getInt("default_time_to_live"))
@@ -1167,12 +1168,13 @@ public final class SchemaKeyspace
 
         List<ColumnMetadata> columns = fetchColumns(keyspaceName, viewName, types, false);
 
+        boolean hasVectorType = false;
         TableMetadata metadata =
             TableMetadata.builder(keyspaceName, viewName, TableId.fromUUID(row.getUUID("id")))
                          .kind(TableMetadata.Kind.VIEW)
                          .addColumns(columns)
                          .droppedColumns(fetchDroppedColumns(keyspaceName, viewName, false))
-                         .params(createTableParamsFromRow(row))
+                         .params(createTableParamsFromRow(row, hasVectorType))
                          .build();
 
         WhereClause whereClause;

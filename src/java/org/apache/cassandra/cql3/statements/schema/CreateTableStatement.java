@@ -195,8 +195,6 @@ public final class CreateTableStatement extends AlterSchemaStatement
 
     public TableMetadata.Builder builder(Types types)
     {
-        attrs.validate();
-        TableParams params = attrs.asNewTableParams();
 
         // use a TreeMap to preserve ordering across JDK versions (see CASSANDRA-9492) - important for stable unit tests
         Map<ColumnIdentifier, CQL3Type> columns = new TreeMap<>(comparing(o -> o.bytes));
@@ -269,6 +267,11 @@ public final class CreateTableStatement extends AlterSchemaStatement
             if (clusteringColumns.isEmpty() && !staticColumns.isEmpty())
                 throw ire("Static columns are only useful (and thus allowed) if the table has at least one clustering column");
         }
+
+        boolean hasVectorType = rawColumns.values().stream().anyMatch(CQL3Type.Raw::isVector);
+
+        attrs.validate(hasVectorType);
+        TableParams params = attrs.asNewTableParams(hasVectorType);
 
         /*
          * Counter table validation

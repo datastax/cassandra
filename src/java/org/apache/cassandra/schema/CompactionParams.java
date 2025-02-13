@@ -83,27 +83,30 @@ public final class CompactionParams
             DEFAULT = new CompactionParams(UnifiedCompactionStrategy.class,
                                            Collections.emptyMap(),
                                            DEFAULT_ENABLED,
-                                           DEFAULT_PROVIDE_OVERLAPPING_TOMBSTONES);
+                                           DEFAULT_PROVIDE_OVERLAPPING_TOMBSTONES,
+                                           false);
         }
         else
         {
             DEFAULT = create(classFromName(defaultCompaction.class_name),
-                             defaultCompaction.parameters);
+                             defaultCompaction.parameters, false);
         }
     }
 
     private final CompactionStrategyOptions strategyOptions;
     private final boolean isEnabled;
     private final TombstoneOption tombstoneOption;
+    private final boolean hasVectorType;
 
-    private CompactionParams(Class<? extends CompactionStrategy> klass, Map<String, String> options, boolean isEnabled, TombstoneOption tombstoneOption)
+    private CompactionParams(Class<? extends CompactionStrategy> klass, Map<String, String> options, boolean isEnabled, TombstoneOption tombstoneOption, boolean hasVectorType)
     {
-        this.strategyOptions = new CompactionStrategyOptions(klass, options, true);
+        this.strategyOptions = new CompactionStrategyOptions(klass, options, true, hasVectorType);
         this.isEnabled = isEnabled;
         this.tombstoneOption = tombstoneOption;
+        this.hasVectorType = hasVectorType;
     }
 
-    public static CompactionParams create(Class<? extends CompactionStrategy> klass, Map<String, String> options)
+    public static CompactionParams create(Class<? extends CompactionStrategy> klass, Map<String, String> options, boolean hasVectorType)
     {
         boolean isEnabled = options.containsKey(Option.ENABLED.toString())
                           ? Boolean.parseBoolean(options.get(Option.ENABLED.toString()))
@@ -119,27 +122,27 @@ public final class CompactionParams
         }
         TombstoneOption tombstoneOption = tombstoneOptional.get();
 
-        return new CompactionParams(klass, new HashMap<>(options), isEnabled, tombstoneOption);
+        return new CompactionParams(klass, new HashMap<>(options), isEnabled, tombstoneOption, hasVectorType);
     }
 
     public static CompactionParams stcs(Map<String, String> options)
     {
-        return create(SizeTieredCompactionStrategy.class, options);
+        return create(SizeTieredCompactionStrategy.class, options, false);
     }
 
     public static CompactionParams lcs(Map<String, String> options)
     {
-        return create(LeveledCompactionStrategy.class, options);
+        return create(LeveledCompactionStrategy.class, options, false);
     }
 
     public static CompactionParams twcs(Map<String, String> options)
     {
-        return create(TimeWindowCompactionStrategy.class, options);
+        return create(TimeWindowCompactionStrategy.class, options, false);
     }
 
     public static CompactionParams ucs(Map<String, String> options)
     {
-        return create(UnifiedCompactionStrategy.class, options);
+        return create(UnifiedCompactionStrategy.class, options, false);
     }
 
     public int minCompactionThreshold()
@@ -180,7 +183,7 @@ public final class CompactionParams
         return isEnabled;
     }
 
-    public static CompactionParams fromMap(Map<String, String> map)
+    public static CompactionParams fromMap(Map<String, String> map, boolean hasVectorType)
     {
         Map<String, String> options = new HashMap<>(map);
 
@@ -192,7 +195,7 @@ public final class CompactionParams
                                                     TableParams.Option.COMPACTION));
         }
 
-        return create(classFromName(className), options);
+        return create(classFromName(className), options, hasVectorType);
     }
 
     public static Class<? extends CompactionStrategy> classFromName(String name)

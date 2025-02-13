@@ -474,7 +474,8 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     {
         try
         {
-            reloadCompactionStrategy(CompactionParams.fromMap(options), CompactionStrategyContainer.ReloadReason.JMX_REQUEST);
+            boolean hasVectorType = metadata.getLocal().hasVectorType();
+            reloadCompactionStrategy(CompactionParams.fromMap(options, hasVectorType), CompactionStrategyContainer.ReloadReason.JMX_REQUEST);
         }
         catch (Throwable t)
         {

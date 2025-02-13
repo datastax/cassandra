@@ -91,7 +91,7 @@ abstract class AbstractCompactionStrategy implements CompactionStrategy
 
         this.realm = Objects.requireNonNull(factory.getRealm());
         this.compactionLogger = Objects.requireNonNull(factory.getCompactionLogger());
-        this.options = new CompactionStrategyOptions(getClass(), options, false);
+        this.options = new CompactionStrategyOptions(getClass(), options, false, factory.getRealm().metadata().hasVectorType());
         this.directories = Objects.requireNonNull(realm.getDirectories());
         this.backgroundCompactions = backgroundCompactions;
     }
@@ -317,7 +317,10 @@ abstract class AbstractCompactionStrategy implements CompactionStrategy
         return backgroundCompactions;
     }
 
-    public static Map<String, String> validateOptions(Map<String, String> options) throws ConfigurationException
+    /**
+     * This method is called using reflection.
+     */
+    public static Map<String, String> validateOptions(Map<String, String> options, boolean hasVectorType) throws ConfigurationException
     {
         return CompactionStrategyOptions.validateOptions(options);
     }

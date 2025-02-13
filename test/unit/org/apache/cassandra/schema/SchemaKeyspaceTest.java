@@ -248,7 +248,8 @@ public class SchemaKeyspaceTest
         UntypedResultSet.Row tableRow = QueryProcessor.resultify(String.format("SELECT * FROM %s.%s", SchemaConstants.SCHEMA_KEYSPACE_NAME, SchemaKeyspaceTables.TABLES),
                                                                  UnfilteredRowIterators.filter(serializedCf.unfilteredIterator(), FBUtilities.nowInSeconds()))
                                                       .one();
-        TableParams params = SchemaKeyspace.createTableParamsFromRow(tableRow);
+        boolean hasVectorType = false;
+        TableParams params = SchemaKeyspace.createTableParamsFromRow(tableRow, hasVectorType);
 
         UntypedResultSet columnsRows = QueryProcessor.resultify(String.format("SELECT * FROM %s.%s", SchemaConstants.SCHEMA_KEYSPACE_NAME, SchemaKeyspaceTables.COLUMNS),
                                                                 UnfilteredRowIterators.filter(serializedCD.unfilteredIterator(), FBUtilities.nowInSeconds()));
