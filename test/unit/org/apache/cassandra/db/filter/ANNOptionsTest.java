@@ -17,12 +17,14 @@ package org.apache.cassandra.db.filter;
 
 import java.io.IOException;
 import java.util.Objects;
+import java.util.Optional;
 
 import javax.annotation.Nullable;
 
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import com.datastax.driver.core.exceptions.InvalidQueryException;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.Operator;
@@ -43,6 +45,7 @@ import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
+import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.Pair;
 import org.assertj.core.api.Assertions;
 import org.quicktheories.QuickTheory;
@@ -94,6 +97,13 @@ public class ANNOptionsTest extends CQLTester
         execute("SELECT * FROM %s ORDER BY v ANN OF [1, 1] LIMIT 10 WITH ann_options = {'rerank_k': '1000'}");
         execute("SELECT * FROM %s ORDER BY v ANN OF [1, 1] LIMIT 10 WITH ann_options = {'rerank_k': '-1'}");
         execute("SELECT * FROM %s ORDER BY v ANN OF [1, 1] LIMIT 10 WITH ann_options = {'rerank_k': '-1000'}");
+
+        // Queries that exceed the failure threshold for the guardrail. Specifies a protocol version to trigger
+        // validation in the coordinator.
+        assertInvalidThrowMessage(Optional.of(ProtocolVersion.V5),
+                                  "ANN options specifies rerank_k=5000, this exceeds the failure threshold of 4000.",
+                                  InvalidQueryException.class,
+                                  "SELECT * FROM %s ORDER BY v ANN OF [1, 1] LIMIT 10 WITH ann_options = {'rerank_k': 5000}");
 
         String baseQuery = "SELECT * FROM %s ORDER BY v ANN OF [1, 1]";
 

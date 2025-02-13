@@ -24,10 +24,12 @@ import javax.annotation.Nullable;
 
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.guardrails.Guardrails;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.utils.FBUtilities;
 
 /**
@@ -60,10 +62,15 @@ public class ANNOptions
         return rerankK == null ? NONE : new ANNOptions(rerankK);
     }
 
-    public void validate(int limit)
+    public void validate(QueryState state, int limit)
     {
-        if (rerankK != null && rerankK > 0 && rerankK < limit)
+        if (rerankK == null || rerankK <= 0)
+            return;
+
+        if (rerankK < limit)
             throw new InvalidRequestException(String.format("Invalid rerank_k value %d lesser than limit %d", rerankK, limit));
+
+        Guardrails.annRerankKMaxValue.guard(rerankK, "ANN options", false, state);
     }
 
     /**
