@@ -1,7 +1,7 @@
 ###########################################################################
-#                         jvm17-clients.options                           #
+#                         jvm21-clients.options                           #
 #                                                                         #
-# See jvm-clients.options. This file is specific for Java 17 and newer.   #
+# See jvm-clients.options. This file is specific for Java 21 and newer.   #
 ###########################################################################
 
 ###################
@@ -16,23 +16,17 @@
 --add-exports java.rmi/sun.rmi.registry=ALL-UNNAMED
 --add-exports java.rmi/sun.rmi.server=ALL-UNNAMED
 --add-exports java.sql/java.sql=ALL-UNNAMED
---add-exports jdk.unsupported/sun.misc=ALL-UNNAMED
+--add-exports jdk.attach/sun.tools.attach=ALL-UNNAMED
 
+--add-opens java.base/java.io=ALL-UNNAMED
 --add-opens java.base/java.lang.module=ALL-UNNAMED
+--add-opens java.base/java.lang.reflect=ALL-UNNAMED
 --add-opens java.base/jdk.internal.loader=ALL-UNNAMED
---add-opens java.base/jdk.internal.ref=ALL-UNNAMED
---add-opens java.base/jdk.internal.reflect=ALL-UNNAMED
 --add-opens java.base/jdk.internal.math=ALL-UNNAMED
 --add-opens java.base/jdk.internal.module=ALL-UNNAMED
---add-opens java.base/jdk.internal.util.jar=ALL-UNNAMED
---add-opens jdk.management/com.sun.management.internal=ALL-UNNAMED
+--add-opens java.base/jdk.internal.ref=ALL-UNNAMED
+--add-opens java.base/jdk.internal.reflect=ALL-UNNAMED
 --add-opens java.base/sun.nio.ch=ALL-UNNAMED
---add-opens java.base/java.io=ALL-UNNAMED
---add-opens java.base/java.lang=ALL-UNNAMED
---add-opens java.base/java.lang.ref=ALL-UNNAMED
---add-opens java.base/java.lang.reflect=ALL-UNNAMED
---add-opens java.base/java.util=ALL-UNNAMED
---add-opens java.base/java.nio=ALL-UNNAMED
-
+--add-opens jdk.management/com.sun.management.internal=ALL-UNNAMED
 
 # The newline in the end of file is intentional

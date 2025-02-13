@@ -1,7 +1,7 @@
 ###########################################################################
-#                         jvm11-server.options                            #
+#                         jvm17-server.options                            #
 #                                                                         #
-# See jvm-server.options. This file is specific for Java 11 and newer.    #
+# See jvm-server.options. This file is specific for Java 17 and newer.    #
 ###########################################################################
 
 -XX:ThreadPriorityPolicy=1
@@ -13,25 +13,12 @@
 
 
 
-### CMS Settings
-#-XX:+UseConcMarkSweepGC
-#-XX:+CMSParallelRemarkEnabled
-#-XX:SurvivorRatio=8
-#-XX:MaxTenuringThreshold=1
-#-XX:CMSInitiatingOccupancyFraction=75
-#-XX:+UseCMSInitiatingOccupancyOnly
-#-XX:CMSWaitDuration=10000
-#-XX:+CMSParallelInitialMarkEnabled
-#-XX:+CMSEdenChunksRecordAlways
-## some JVMs will fill up their heap when accessed via JMX, see CASSANDRA-6541
-#-XX:+CMSClassUnloadingEnabled
-
-
-
 ### G1 Settings
 ## Use the Hotspot garbage-first collector.
 -XX:+UseG1GC
 -XX:+ParallelRefProcEnabled
+-XX:MaxTenuringThreshold=1
+-XX:G1HeapRegionSize=16m
 
 #
 ## Have the JVM do less remembered set work during STW, instead
@@ -46,7 +33,7 @@
 ## Optional G1 Settings
 # Save CPU time on large (>= 16GB) heaps by delaying region scanning
 # until the heap is 70% full. The default in Hotspot 8u40 is 40%.
-#-XX:InitiatingHeapOccupancyPercent=70
+-XX:InitiatingHeapOccupancyPercent=70
 
 # For systems with > 8 cores, the default ParallelGCThreads is 5/8 the number of logical cores.
 # Otherwise equal to the number of cores when 8 or less.
@@ -62,14 +49,16 @@
 -Djdk.attach.allowAttachSelf=true
 --add-exports java.base/jdk.internal.misc=ALL-UNNAMED
 --add-exports java.base/jdk.internal.ref=ALL-UNNAMED
+--add-exports java.base/jdk.internal.perf=ALL-UNNAMED
 --add-exports java.base/sun.nio.ch=ALL-UNNAMED
 --add-exports java.management.rmi/com.sun.jmx.remote.internal.rmi=ALL-UNNAMED
+--add-exports java.management/com.sun.jmx.remote.security=ALL-UNNAMED
 --add-exports java.rmi/sun.rmi.registry=ALL-UNNAMED
 --add-exports java.rmi/sun.rmi.server=ALL-UNNAMED
 --add-exports java.sql/java.sql=ALL-UNNAMED
---add-exports=java.base/jdk.internal.ref=ALL-UNNAMED
---add-exports=jdk.unsupported/sun.misc=ALL-UNNAMED
---add-exports=jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED
+--add-exports jdk.unsupported/sun.misc=ALL-UNNAMED
+--add-exports jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED
+--add-exports jdk.naming.dns/com.sun.jndi.dns=java.naming
 
 --add-opens java.base/jdk.internal.loader=ALL-UNNAMED
 --add-opens java.base/jdk.internal.ref=ALL-UNNAMED
@@ -78,12 +67,26 @@
 --add-opens java.base/jdk.internal.module=ALL-UNNAMED
 --add-opens java.base/jdk.internal.util.jar=ALL-UNNAMED
 --add-opens jdk.management/com.sun.management.internal=ALL-UNNAMED
---add-opens=jdk.compiler/com.sun.tools.javac=ALL-UNNAMED
---add-opens=java.base/java.lang=ALL-UNNAMED
+--add-opens java.base/sun.nio.ch=ALL-UNNAMED
+--add-opens java.base/sun.security.util=ALL-UNNAMED
+--add-opens java.base/java.io=ALL-UNNAMED
+--add-opens java.base/java.lang.module=ALL-UNNAMED
+--add-opens java.base/java.lang.reflect=ALL-UNNAMED
+--add-opens java.base/java.lang.ref=ALL-UNNAMED
+--add-opens java.base/java.lang=ALL-UNNAMED
+--add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED
+--add-opens java.base/java.util.concurrent=ALL-UNNAMED
+--add-opens java.base/java.util.concurrent.locks=ALL-UNNAMED
+--add-opens java.base/java.util=ALL-UNNAMED
+--add-opens java.base/java.net=ALL-UNNAMED
 --add-opens=java.base/java.nio.charset=ALL-UNNAMED
---add-opens=java.base/java.lang.reflect=ALL-UNNAMED
---add-opens=java.base/java.io=ALL-UNNAMED
---add-opens=java.base/java.util=ALL-UNNAMED
+--add-opens java.base/java.nio=ALL-UNNAMED
+--add-opens java.base/java.security=ALL-UNNAMED
+--add-opens jdk.compiler/com.sun.tools.javac=ALL-UNNAMED
+--add-opens jdk.naming.dns/com.sun.jndi.dns=ALL-UNNAMED
+
+# required for org.apache.cassandra.Util.getSupportedMTimeGranularity
+--add-opens java.base/java.nio.file.attribute=ALL-UNNAMED
 
 ### GC logging options -- uncomment to enable
 
@@ -109,6 +112,10 @@
 # creation of direct buffers using Unsafe. Without it, this falls back to ByteBuffer.allocateDirect which has
 # inferior performance and risks exceeding MaxDirectMemory
 -Dio.netty.tryReflectionSetAccessible=true
+
+# Revert changes in defaults introduced in https://netty.io/news/2022/03/10/4-1-75-Final.html
+-Dio.netty.allocator.useCacheForAllThreads=true
+-Dio.netty.allocator.maxOrder=11
 
 ### Enable vector incubator feature (simd support)
 
