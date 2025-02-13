@@ -125,8 +125,8 @@ public abstract class Controller
     static final String MIN_SSTABLE_SIZE_OPTION_MB = "min_sstable_size_in_mb";
     static final String MIN_SSTABLE_SIZE_OPTION_AUTO = "auto";
 
-    static final long DEFAULT_MIN_SSTABLE_SIZE = FBUtilities.parseHumanReadableBytes(getSystemProperty(MIN_SSTABLE_SIZE_OPTION, "100MiB"));
-    static final long VECTOR_DEFAULT_MIN_SSTABLE_SIZE = FBUtilities.parseHumanReadableBytes(System.getProperty(PREFIX + VECTOR_MIN_SSTABLE_SIZE_OPTION, "1024MiB"));
+    public static final long DEFAULT_MIN_SSTABLE_SIZE = FBUtilities.parseHumanReadableBytes(getSystemProperty(MIN_SSTABLE_SIZE_OPTION, "100MiB"));
+    public static final long VECTOR_DEFAULT_MIN_SSTABLE_SIZE = FBUtilities.parseHumanReadableBytes(System.getProperty(PREFIX + VECTOR_MIN_SSTABLE_SIZE_OPTION, "1024MiB"));
     /**
      * Value to use to set the min sstable size from the flush size.
      */

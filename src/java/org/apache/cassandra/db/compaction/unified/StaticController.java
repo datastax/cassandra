@@ -126,13 +126,13 @@ public class StaticController extends Controller
         if (useVectorOptions)
         {
             scalingParameters = parseScalingParameters(options.getOrDefault(VECTOR_SCALING_PARAMETERS_OPTION, VECTOR_DEFAULT_STATIC_SCALING_PARAMETERS));
-        } else
+        }
+        else
         {
             if (options.containsKey(STATIC_SCALING_FACTORS_OPTION))
                 scalingParameters = parseScalingParameters(options.get(STATIC_SCALING_FACTORS_OPTION));
             else
                 scalingParameters = parseScalingParameters(options.getOrDefault(SCALING_PARAMETERS_OPTION, DEFAULT_STATIC_SCALING_PARAMETERS));
-
         }
 
         long currentFlushSize = flushSizeOverride;

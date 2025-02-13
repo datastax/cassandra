@@ -32,6 +32,7 @@ import com.google.common.collect.ImmutableSet;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.datastax.driver.core.schemabuilder.TableOptions;
 import org.apache.cassandra.audit.AuditLogContext;
 import org.apache.cassandra.audit.AuditLogEntryType;
 import org.apache.cassandra.auth.Permission;
@@ -50,6 +51,7 @@ import org.apache.cassandra.guardrails.Guardrails;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.schema.CompactionParams;
 import org.apache.cassandra.schema.DroppedColumn;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.KeyspaceMetadata;
@@ -195,6 +197,10 @@ public abstract class AlterTableStatement extends AlterSchemaStatement
             TableMetadata tableMetadata = tableBuilder.build();
             tableMetadata.validate();
 
+            // adding a column may make a non-vector table become a vector table
+            // validate new compaction defaults (that depend on having the vector type)
+            CompactionParams.fromMap(table.params.compaction.asMap(), tableMetadata.hasVectorType());
+
             Guardrails.columnsPerTable.guard(tableBuilder.numColumns(), tableName, false, queryState);
             newColumns.forEach(c -> c.type.validate(queryState, "Column " + c.name));
 
@@ -287,7 +293,11 @@ public abstract class AlterTableStatement extends AlterSchemaStatement
         {
             TableMetadata.Builder builder = table.unbuild();
             removedColumns.forEach(c -> dropColumn(keyspace, table, c, builder));
-            return keyspace.withSwapped(keyspace.tables.withSwapped(builder.build()));
+            TableMetadata newTableMetadata = builder.build();
+            // dropping a column may make a vector table become a non-vector table
+            // validate new compaction defaults (that depend on having the vector type)
+            CompactionParams.fromMap(table.params.compaction.asMap(), newTableMetadata.hasVectorType());
+            return keyspace.withSwapped(keyspace.tables.withSwapped(newTableMetadata));
         }
 
         private void dropColumn(KeyspaceMetadata keyspace, TableMetadata table, ColumnIdentifier column, TableMetadata.Builder builder)
