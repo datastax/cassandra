@@ -86,6 +86,9 @@ public final class MemorySensors
 
     private static OperatingSystemMXBean OS;
 
+    private static volatile long prevProcessCpuTimeNanos = 0;
+    private static volatile long prevInvocationNanos = 0;
+
     /**
      * Perhaps add a start/stop methods to control fom CNDB and tests
      */
@@ -172,7 +175,7 @@ public final class MemorySensors
                                                               MEMORY_SNAPSHOT_INTERVAL_SECONDS,
                                                               TimeUnit.SECONDS);
 
-        ScheduledExecutors.scheduledTasks.scheduleAtFixedRate(this::getCpuUsage,
+        ScheduledExecutors.scheduledTasks.scheduleAtFixedRate(() -> CPU_UTILIZATION.set(getCpuUsage()),
                                                               MEMORY_SNAPSHOT_INTERVAL_SECONDS,
                                                               MEMORY_SNAPSHOT_INTERVAL_SECONDS,
                                                               TimeUnit.SECONDS);
@@ -257,9 +260,6 @@ public final class MemorySensors
         activeRequestSensors.updateSensor(Context.all(), Type.CPU_UTILIZATION, CPU_UTILIZATION.get());
         noSpamLogger.info("CPU utilization: {}%", CPU_UTILIZATION.get());
     }
-
-    private static volatile long prevProcessCpuTimeNanos = 0;
-    private static volatile long prevInvocationNanos = 0;
 
     private static final MovingAverage processCpuPercentage = ExpMovingAverage.decayBy100();
 
