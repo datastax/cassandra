@@ -89,6 +89,10 @@ if [ "$JVM_VERSION" \< "11" ] ; then
     exit 1;
 elif [ "$short" = "11" ] ; then
      JAVA_VERSION=11
+elif [ "$JVM_VERSION" \< "17" ] ; then
+     echo "Cassandra 4.0 requires Java 11 or Java 17(or newer)."
+elif [ "$short" = "17" ] ; then
+     JAVA_VERSION=17
 elif [ "$JVM_VERSION" \< "22" ] ; then
     echo "Cassandra requires Java 11 or Java 22(or newer)."
 fi
@@ -120,11 +124,17 @@ elif [ $JAVA_VERSION -ge 17 ] ; then
     JVM_DEP_OPTS_FILE=$CASSANDRA_CONF/jvm17${jvmoptions_variant:--clients}.options
 elif [ $JAVA_VERSION -ge 11 ] ; then
     JVM_DEP_OPTS_FILE=$CASSANDRA_CONF/jvm11${jvmoptions_variant:--clients}.options
-else
-    JVM_DEP_OPTS_FILE=$CASSANDRA_CONF/jvm8${jvmoptions_variant:--clients}.options
 fi
 
 for opt in `grep "^-" $JVM_OPTS_FILE` `grep "^-" $JVM_DEP_OPTS_FILE`
 do
   JVM_OPTS="$JVM_OPTS $opt"
 done
+
+# Append additional options when using JDK17+ (CASSANDRA-19001)
+USING_JDK=$(command -v javac || command -v "${JAVA_HOME:-/usr}/bin/javac")
+if [ -n "$USING_JDK" ] && [ "$JAVA_VERSION" -ge 17 ]; then
+  JVM_OPTS="$JVM_OPTS --add-exports jdk.attach/sun.tools.attach=ALL-UNNAMED"
+  JVM_OPTS="$JVM_OPTS --add-exports jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED"
+  JVM_OPTS="$JVM_OPTS --add-opens jdk.compiler/com.sun.tools.javac=ALL-UNNAMED"
+fi
