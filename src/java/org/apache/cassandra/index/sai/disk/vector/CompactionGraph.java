@@ -229,7 +229,7 @@ public class CompactionGraph implements Closeable, Accountable
         }
         else
         {
-            writerBuilder = writerBuilder.withVersion(JVECTOR_2_VERSION);
+            writerBuilder = writerBuilder.withVersion(4);
         }
         return writerBuilder;
     }
