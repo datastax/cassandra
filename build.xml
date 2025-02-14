@@ -285,6 +285,7 @@
         <string>--add-exports jdk.attach/sun.tools.attach=ALL-UNNAMED</string>
 
         <string>--add-opens java.base/jdk.internal.loader=ALL-UNNAMED</string>
+        <string>--add-opens java.base/jdk.internal.ref=ALL-UNNAMED</string>
         <string>--add-opens java.base/jdk.internal.reflect=ALL-UNNAMED</string>
         <string>--add-opens java.base/jdk.internal.math=ALL-UNNAMED</string>
         <string>--add-opens java.base/jdk.internal.module=ALL-UNNAMED</string>
