@@ -443,13 +443,12 @@ public class BatchGraph implements Closeable, Accountable
                                                                                 dimension,
                                                                                 List.of(32, 64),
                                                                                 context.getIndexWriterConfig().getConstructionBeamWidth(),
-                                                                                1.0f, // no overflow means add will be a bit slower but flush will be faster
+                                                                                1.2f, // no overflow means add will be a bit slower but flush will be faster
                                                                                 dimension > 3 ? 1.2f : 2.0f,
                                                                                 PhysicalCoreExecutor.pool(),
                                                                                 ForkJoinPool.commonPool());
 
             builder.build(view);
-            builder.cleanup();
 
             postingsLength = postingsEnd - postingsOffset;
 
