@@ -165,6 +165,9 @@ public final class IndexMetadata
      */
     private static int calculateGeneratedIndexNameMaxLength(int keyspaceNameLength, int tableNameLength)
     {
+        // Speculative assumption that uniqueness breaker will fit into 99.
+        // The value is used for trimming the index name if needed.
+        // There is a hard control for the total size of a full index name in IndexContext.
         int uniquenessSuffixLength = 3;
         int indexNameAddition = uniquenessSuffixLength + INDEX_POSTFIX.length();
         int allowedIndexNameLength = calculateIndexAllowedLength(keyspaceNameLength, tableNameLength);
