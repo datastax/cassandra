@@ -77,9 +77,26 @@ public final class SchemaConstants
         return name.length() <= NAME_LENGTH;
     }
 
-    public static boolean isValidName(String name)
+    /**
+     * Names such as keyspace, table, index names are used in file paths and file names,
+     * so, they need to be safe for the use there, i.e., short enough and
+     * containing only alphanumeric characters and underscores.
+     * @param name the name to check
+     * @return whether the name is safe for use in file paths and file names
+     */
+    public static boolean isNameSafeForFilename(String name)
     {
         return name != null && !name.isEmpty() && isSafeLengthForFilename(name) && PATTERN_WORD_CHARS.matcher(name).matches();
+    }
+
+    /**
+     * Checks if the name contains only alphanumeric characters and underscores and is not empty.
+     * @param name the name to check
+     * @return true if the name is valid, false otherwise
+     */
+    public static boolean isValidCharsName(String name)
+    {
+        return name != null && !name.isEmpty() && PATTERN_WORD_CHARS.matcher(name).matches();
     }
 
     static

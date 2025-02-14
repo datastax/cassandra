@@ -32,19 +32,19 @@ public class ValidationTest
     @Test
     public void testIsNameValidPositive()
     {
-         assertTrue(SchemaConstants.isValidName("abcdefghijklmnopqrstuvwxyz"));
-         assertTrue(SchemaConstants.isValidName("ABCDEFGHIJKLMNOPQRSTUVWXYZ"));
-         assertTrue(SchemaConstants.isValidName("_01234567890"));
+         assertTrue(SchemaConstants.isNameSafeForFilename("abcdefghijklmnopqrstuvwxyz"));
+         assertTrue(SchemaConstants.isNameSafeForFilename("ABCDEFGHIJKLMNOPQRSTUVWXYZ"));
+         assertTrue(SchemaConstants.isNameSafeForFilename("_01234567890"));
     }
     
     @Test
     public void testIsNameValidNegative()
     {
-        assertFalse(SchemaConstants.isValidName(null));
-        assertFalse(SchemaConstants.isValidName(""));
-        assertFalse(SchemaConstants.isValidName(" "));
-        assertFalse(SchemaConstants.isValidName("@"));
-        assertFalse(SchemaConstants.isValidName("!"));
+        assertFalse(SchemaConstants.isNameSafeForFilename(null));
+        assertFalse(SchemaConstants.isNameSafeForFilename(""));
+        assertFalse(SchemaConstants.isNameSafeForFilename(" "));
+        assertFalse(SchemaConstants.isNameSafeForFilename("@"));
+        assertFalse(SchemaConstants.isNameSafeForFilename("!"));
     }
 
     private static Set<String> primitiveTypes =
