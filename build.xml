@@ -737,6 +737,10 @@
           <dependency groupId="io.netty" artifactId="netty-bom" version="4.1.117.Final" type="pom" scope="provided"/>
           <dependency groupId="io.netty" artifactId="netty-all" version="4.1.117.Final" />
           <dependency groupId="io.netty" artifactId="netty-tcnative-boringssl-static" version="2.0.69.Final"/>
+          <dependency groupId="io.netty" artifactId="netty-transport-native-epoll" version="4.1.117.Final"/>
+          <dependency groupId="io.netty" artifactId="netty-transport-native-epoll" version="4.1.117.Final" classifier="linux-x86_64"/>
+          <dependency groupId="io.netty" artifactId="netty-transport-native-epoll" version="4.1.117.Final" classifier="linux-aarch_64"/>
+          <dependency groupId="org.bouncycastle" artifactId="bcpkix-jdk18on" version="1.80"/>
           <dependency groupId="net.openhft" artifactId="chronicle-queue" version="${chronicle-queue.version}">
             <exclusion groupId="com.sun" artifactId="tools" />
           </dependency>
@@ -973,6 +977,9 @@
         <dependency groupId="de.huxhorn.sulky" artifactId="de.huxhorn.sulky.ulid"/>
         <dependency groupId="io.netty" artifactId="netty-bom"  type="pom"  />
         <dependency groupId="io.netty" artifactId="netty-all"/>
+        <dependency groupId="io.netty" artifactId="netty-tcnative-boringssl-static"/>
+        <dependency groupId="io.netty" artifactId="netty-transport-native-epoll"/>
+        <dependency groupId="org.bouncycastle" artifactId="bcpkix-jdk18on"/>
         <dependency groupId="net.openhft" artifactId="chronicle-queue"/>
         <dependency groupId="net.openhft" artifactId="chronicle-core"/>
         <dependency groupId="net.openhft" artifactId="chronicle-bytes"/>
@@ -996,7 +1003,6 @@
         <dependency groupId="org.gridkit.jvmtool" artifactId="sjk-json"/>
         <dependency groupId="com.github.luben" artifactId="zstd-jni"/>
         <dependency groupId="org.psjava" artifactId="psjava"/>
-        <dependency groupId="io.netty" artifactId="netty-tcnative-boringssl-static"/>
         <dependency groupId="javax.inject" artifactId="javax.inject"/>
         <dependency groupId="com.google.j2objc" artifactId="j2objc-annotations"/>
         <dependency groupId="org.hdrhistogram" artifactId="HdrHistogram"/>
@@ -1602,6 +1608,8 @@
         <jvmarg value="-Dcassandra.unsafesystem=${cassandra.unsafesystem}"/>
         <jvmarg value="-Dcassandra.test.messagingService.nonGracefulShutdown=${cassandra.test.messagingService.nonGracefulShutdown}"/>
         <jvmarg value="-Dcassandra.use_nix_recursive_delete=${cassandra.use_nix_recursive_delete}"/>
+        <jvmarg value="-Dio.netty.allocator.useCacheForAllThreads=true"/>
+        <jvmarg value="-Dio.netty.allocator.maxOrder=11"/>
         <jvmarg line="${java-jvmargs}"/>
         <!-- disable shrinks in quicktheories CASSANDRA-15554 -->
         <jvmarg value="-DQT_SHRINKS=0"/>
