@@ -275,7 +275,8 @@ public class TrieMemoryIndex extends MemoryIndex
                 var pairs = new ArrayList<PkWithFrequency>(entry.getValue().size());
                 for (PrimaryKey pk : entry.getValue().keys())
                 {
-                    int frequency = termFrequencies.get(new PkWithTerm(pk, entry.getKey()));
+                    var frequencyRaw = termFrequencies.get(new PkWithTerm(pk, entry.getKey()));
+                    int frequency = frequencyRaw == null ? 1 : frequencyRaw;
                     pairs.add(new PkWithFrequency(pk, frequency));
                 }
                 return Pair.create(entry.getKey(), pairs);
