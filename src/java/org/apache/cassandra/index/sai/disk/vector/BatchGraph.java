@@ -40,6 +40,7 @@ import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.github.jbellis.jvector.disk.BufferedRandomAccessWriter;
 import io.github.jbellis.jvector.graph.GraphIndexBuilder;
 import io.github.jbellis.jvector.graph.ListRandomAccessVectorValues;
 import io.github.jbellis.jvector.graph.RandomAccessVectorValues;
@@ -54,6 +55,7 @@ import io.github.jbellis.jvector.graph.similarity.BuildScoreProvider;
 import io.github.jbellis.jvector.graph.similarity.ScoreFunction;
 import io.github.jbellis.jvector.quantization.BQVectors;
 import io.github.jbellis.jvector.quantization.BinaryQuantization;
+import io.github.jbellis.jvector.quantization.CompressedVectors;
 import io.github.jbellis.jvector.quantization.MutableBQVectors;
 import io.github.jbellis.jvector.quantization.MutableCompressedVectors;
 import io.github.jbellis.jvector.quantization.MutablePQVectors;
@@ -61,8 +63,10 @@ import io.github.jbellis.jvector.quantization.PQVectors;
 import io.github.jbellis.jvector.quantization.ProductQuantization;
 import io.github.jbellis.jvector.quantization.VectorCompressor;
 import io.github.jbellis.jvector.util.Accountable;
+import io.github.jbellis.jvector.util.PhysicalCoreExecutor;
 import io.github.jbellis.jvector.util.RamUsageEstimator;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
+import io.github.jbellis.jvector.vector.VectorUtil;
 import io.github.jbellis.jvector.vector.VectorizationProvider;
 import io.github.jbellis.jvector.vector.types.VectorFloat;
 import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
@@ -92,11 +96,14 @@ import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.io.util.SequentialWriter;
 import org.apache.cassandra.service.StorageService;
 
 import static java.lang.Math.max;
 import static java.lang.Math.min;
 import static org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat.JVECTOR_2_VERSION;
+import static org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph.MIN_PQ_ROWS;
+import static org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph.getPqIfPresent;
 
 public class BatchGraph implements Closeable, Accountable
 {
@@ -129,7 +136,6 @@ public class BatchGraph implements Closeable, Accountable
     private final File termsFile;
     private final int dimension;
     private Structure postingsStructure;
-    private OnDiskGraphIndexWriter writer;
     private final long termsOffset;
     private int lastRowId = -1;
     // if `useSyntheticOrdinals` is true then we use `nextOrdinal` to avoid holes, otherwise use rowId as source of ordinals
@@ -140,12 +146,8 @@ public class BatchGraph implements Closeable, Accountable
     // (and creates happens-before events so we don't need to mark the other fields volatile)
     private final ReadWriteLock trainingLock = new ReentrantReadWriteLock();
     private boolean pqFinetuned = false;
-    // not final; will be updated to different objects after fine-tuning
-    private VectorCompressor<?> compressor;
-    private MutableCompressedVectors compressedVectors;
-    private GraphIndexBuilder builder;
 
-    public BatchGraph(IndexComponents.ForWrite perIndexComponents, VectorCompressor<?> compressor, boolean unitVectors, long keyCount, boolean allRowsHaveVectors) throws IOException
+    public BatchGraph(IndexComponents.ForWrite perIndexComponents, boolean unitVectors, long keyCount, boolean allRowsHaveVectors) throws IOException
     {
         this.perIndexComponents = perIndexComponents;
         this.context = perIndexComponents.context();
@@ -170,7 +172,6 @@ public class BatchGraph implements Closeable, Accountable
         serializer = (VectorType.VectorSerializer) termComparator.getSerializer();
         similarityFunction = indexConfig.getSimilarityFunction();
         postingsStructure = Structure.ONE_TO_ONE; // until proven otherwise
-        this.compressor = compressor;
         // `allRowsHaveVectors` only tells us about data for which we have already built indexes; if we
         // are adding previously unindexed data then we could still encounter rows with null vectors,
         // so this is just a best guess.  If the guess is wrong then the penalty is that we end up
@@ -198,43 +199,19 @@ public class BatchGraph implements Closeable, Accountable
                                         .entries(postingsEntriesAllocated)
                                         .createPersistedTo(ravvFile.toJavaIOFile());
 
-        // VSTODO add LVQ
-        BuildScoreProvider bsp;
-        if (compressor instanceof ProductQuantization)
-        {
-            compressedVectors = new MutablePQVectors((ProductQuantization) compressor);
-            bsp = BuildScoreProvider.pqBuildScoreProvider(similarityFunction, (PQVectors) compressedVectors);
-        }
-        else if (compressor instanceof BinaryQuantization)
-        {
-            var bq = new BinaryQuantization(dimension);
-            compressedVectors = new MutableBQVectors(bq);
-            bsp = BuildScoreProvider.bqBuildScoreProvider((BQVectors) compressedVectors);
-        }
-        else
-        {
-            throw new IllegalArgumentException("Unsupported compressor: " + compressor);
-        }
-        builder = new GraphIndexBuilder(bsp,
-                                        dimension,
-                                        List.of(32, 64),
-                                        indexConfig.getConstructionBeamWidth(),
-                                        1.2f,
-                                        dimension > 3 ? 1.2f : 1.4f,
-                                        compactionSimdPool, compactionFjp);
 
         termsFile = perIndexComponents.addOrGet(IndexComponentType.TERMS_DATA).file();
         termsOffset = (termsFile.exists() ? termsFile.length() : 0)
                       + SAICodecUtils.headerSize();
         // placeholder writer, will be replaced at flush time when we finalize the index contents
-        writer = createTermsWriterBuilder().withMapper(new OrdinalMapper.IdentityMapper(maxRowsInGraph)).build();
-        writer.getOutput().seek(termsFile.length()); // position at the end of the previous segment before writing our own header
-        SAICodecUtils.writeHeader(SAICodecUtils.toLuceneOutput(writer.getOutput()));
+        BufferedRandomAccessWriter termsOutput = new BufferedRandomAccessWriter(termsFile.toPath());
+        termsOutput.seek(termsFile.length()); // position at the end of the previous segment before writing our own header
+        SAICodecUtils.writeHeader(SAICodecUtils.toLuceneOutput(termsOutput));
+        termsOutput.close();
     }
 
-    private OnDiskGraphIndexWriter.Builder createTermsWriterBuilder() throws IOException
+    private OnDiskGraphIndexWriter.Builder createTermsWriterBuilder(GraphIndexBuilder builder) throws IOException
     {
-        var indexConfig = context.getIndexWriterConfig();
         var writerBuilder = new OnDiskGraphIndexWriter.Builder(builder.getGraph(), termsFile.toPath())
                             .withStartOffset(termsOffset)
                             .with(new InlineVectors(dimension));
@@ -247,7 +224,6 @@ public class BatchGraph implements Closeable, Accountable
     public void close() throws IOException
     {
         // this gets called in `finally` blocks, so use closeQuietly to avoid generating additional exceptions
-        FileUtils.closeQuietly(writer);
         FileUtils.closeQuietly(postingsMap);
         FileUtils.closeQuietly(ravvMap);
         Files.delete(postingsFile.toJavaIOFile().toPath());
@@ -256,7 +232,7 @@ public class BatchGraph implements Closeable, Accountable
 
     public int size()
     {
-        return builder.getGraph().size();
+        return ravvMap.size();
     }
 
     public boolean isEmpty()
@@ -301,46 +277,7 @@ public class BatchGraph implements Closeable, Accountable
             postings = new CompactionVectorPostings(ordinal, segmentRowId);
             postingsMap.put(vector, postings);
 
-            // fine-tune the PQ if we've collected enough vectors
-            if (compressor instanceof ProductQuantization && !pqFinetuned && postingsMap.size() >= PQ_TRAINING_SIZE)
-            {
-                // walk the on-disk Postings once to build (1) a dense list of vectors with no missing entries or zeros
-                // and (2) a map of vectors keyed by ordinal
-                var trainingVectors = new ArrayList<VectorFloat<?>>(postingsMap.size());
-                var vectorsByOrdinal = new Int2ObjectHashMap<VectorFloat<?>>();
-                postingsMap.forEach((v, p) -> {
-                    trainingVectors.add(v);
-                    vectorsByOrdinal.put(p.getOrdinal(), v);
-                });
-
-                // Fine tune the pq codebook
-                compressor = ((ProductQuantization) compressor).refine(new ListRandomAccessVectorValues(trainingVectors, dimension));
-                trainingVectors.clear(); // don't need these anymore so let GC reclaim if it wants to
-
-                // re-encode the vectors added so far
-                int encodedVectorCount = compressedVectors.count();
-                compressedVectors = new MutablePQVectors((ProductQuantization) compressor);
-                compactionFjp.submit(() -> {
-                    IntStream.range(0, encodedVectorCount)
-                             // FIXME parallel is disabled until 4.0.0 beta2 (encodeAndSet is not threadsafe before then)
-//                                 .parallel()
-                             .forEach(i -> {
-                                 var v = vectorsByOrdinal.get(i);
-                                 if (v == null)
-                                     compressedVectors.setZero(i);
-                                 else
-                                     compressedVectors.encodeAndSet(i, v);
-                             });
-                }).join();
-
-                pqFinetuned = true;
-            }
-
             ravvMap.put(ordinal, vector);
-            // Fill in any holes in the pqVectors (setZero has the side effect of increasing the count)
-            while (compressedVectors.count() < ordinal)
-                compressedVectors.setZero(compressedVectors.count());
-            compressedVectors.encodeAndSet(ordinal, vector);
 
             bytesUsed += postings.ramBytesUsed();
             return new InsertionResult(bytesUsed, ordinal, vector);
@@ -357,13 +294,73 @@ public class BatchGraph implements Closeable, Accountable
         return new InsertionResult(bytesUsed);
     }
 
+    private long writePQ(SequentialWriter writer, IndexContext indexContext, RandomAccessVectorValues vectorValues) throws IOException
+    {
+        var preferredCompression = indexContext.getIndexWriterConfig().getSourceModel().compressionProvider.apply(dimension);
+
+        // Build encoder and compress vectors
+        VectorCompressor<?> compressor; // will be null if we can't compress
+        CompressedVectors cv = null;
+        boolean containsUnitVectors;
+        // limit the PQ computation and encoding to one index at a time -- goal during flush is to
+        // evict from memory ASAP so better to do the PQ build (in parallel) one at a time
+        synchronized (BatchGraph.class)
+        {
+            // build encoder (expensive for PQ, cheaper for BQ)
+            if (preferredCompression.type == VectorCompression.CompressionType.PRODUCT_QUANTIZATION)
+            {
+                var pqi = getPqIfPresent(indexContext, preferredCompression::equals);
+                compressor = computeOrRefineFrom(pqi, preferredCompression, vectorValues);
+            }
+            else
+            {
+                assert preferredCompression.type == VectorCompression.CompressionType.BINARY_QUANTIZATION : preferredCompression.type;
+                compressor = BinaryQuantization.compute(vectorValues);
+            }
+            assert !vectorValues.isValueShared();
+            // encode (compress) the vectors to save
+            if (compressor != null)
+                cv = compressor.encodeAll(vectorValues);
+
+            containsUnitVectors = IntStream.range(0, vectorValues.size())
+                                           .parallel()
+                                           .mapToObj(vectorValues::getVector)
+                                           .allMatch(v -> Math.abs(VectorUtil.dotProduct(v, v) - 1.0f) < 0.01);
+        }
+
+        var actualType = compressor == null ? VectorCompression.CompressionType.NONE : preferredCompression.type;
+        CassandraOnHeapGraph.writePqHeader(writer, containsUnitVectors, actualType);
+        if (actualType == VectorCompression.CompressionType.NONE)
+            return writer.position();
+
+        // save (outside the synchronized block, this is io-bound not CPU)
+        cv.write(writer, JVECTOR_2_VERSION);
+        return writer.position();
+    }
+
+    private ProductQuantization computeOrRefineFrom(CassandraOnHeapGraph.PqInfo existingInfo, VectorCompression preferredCompression, RandomAccessVectorValues vectorValues)
+    {
+        if (existingInfo == null)
+        {
+            // no previous PQ, compute a new one if we have enough rows to do it
+            if (vectorValues.size() < MIN_PQ_ROWS)
+                return null;
+            else
+                return ProductQuantization.compute(vectorValues, preferredCompression.getCompressedSize(), 256, false);
+        }
+
+        // use the existing one unmodified if we either don't have enough rows to fine-tune, or
+        // the existing one was built with a large enough set
+        var existingPQ = existingInfo.pq;
+        if (vectorValues.size() < MIN_PQ_ROWS || existingInfo.rowCount >= ProductQuantization.MAX_PQ_TRAINING_SET_SIZE)
+            return existingPQ;
+
+        // refine the existing one
+        return existingPQ.refine(vectorValues);
+    }
+
     public SegmentMetadata.ComponentMetadataMap flush() throws IOException
     {
-        // header is required to write the postings, but we need to recreate the writer after that with an accurate OrdinalMapper
-        writer.close();
-
-        int nInProgress = builder.insertsInProgress();
-        assert nInProgress == 0 : String.format("Attempting to write graph while %d inserts are in progress", nInProgress);
         /*assert !useSyntheticOrdinals || nextOrdinal == builder.getGraph().size() : String.format("nextOrdinal %d != graph size %d -- ordinals should be sequential",
                                                                                                  nextOrdinal, builder.getGraph().size());
         assert compressedVectors.count() == builder.getGraph().getIdUpperBound() : String.format("Largest vector id %d != largest graph id %d",
@@ -373,43 +370,12 @@ public class BatchGraph implements Closeable, Accountable
         if (logger.isDebugEnabled())
         {
             logger.debug("Writing graph with {} rows and {} distinct vectors",
-                         postingsMap.values().stream().mapToInt(VectorPostings::size).sum(), builder.getGraph().size());
-            logger.debug("Estimated size is {} + {}", compressedVectors.ramBytesUsed(), builder.getGraph().ramBytesUsed());
+                         postingsMap.values().stream().mapToInt(VectorPostings::size).sum(), ravvMap.size());
         }
 
         try (var postingsOutput = perIndexComponents.addOrGet(IndexComponentType.POSTING_LISTS).openOutput(true);
              var pqOutput = perIndexComponents.addOrGet(IndexComponentType.PQ).openOutput(true))
         {
-            SAICodecUtils.writeHeader(postingsOutput);
-            SAICodecUtils.writeHeader(pqOutput);
-
-            // write PQ (time to do this is negligible, don't bother doing it async)
-            long pqOffset = pqOutput.getFilePointer();
-            CassandraOnHeapGraph.writePqHeader(pqOutput.asSequentialWriter(), unitVectors, VectorCompression.CompressionType.PRODUCT_QUANTIZATION);
-            compressedVectors.write(pqOutput.asSequentialWriter(), JVECTOR_2_VERSION); // VSTODO old version until we add APQ
-            long pqLength = pqOutput.getFilePointer() - pqOffset;
-
-            var ordinalMapper = new AtomicReference<OrdinalMapper>();
-            long postingsOffset = postingsOutput.getFilePointer();
-            long postingsLength;
-            long postingsEnd;
-
-            // V2 doesn't support ONE_TO_MANY so force it to ZERO_OR_ONE_TO_MANY if necessary;
-            // similarly, if we've been using synthetic ordinals then we can't map to ONE_TO_MANY
-            // (ending up at ONE_TO_MANY when the source sstables were not is unusual, but possible,
-            // if a row with null vector in sstable A gets updated with a vector in sstable B)
-            if (postingsStructure == Structure.ONE_TO_MANY
-                && (!V5OnDiskFormat.writeV5VectorPostings() || useSyntheticOrdinals))
-            {
-                postingsStructure = Structure.ZERO_OR_ONE_TO_MANY;
-            }
-            var rp = V5VectorPostingsWriter.describeForCompaction(postingsStructure,
-                                                                  ravvMap.size(),
-                                                                  postingsMap);
-            ordinalMapper.set(rp.ordinalMapper);
-
-            // anonymous class implementing RandomAccessVectorValues using ravvMap
-
             RandomAccessVectorValues view = new RandomAccessVectorValues()
             {
 
@@ -439,6 +405,36 @@ public class BatchGraph implements Closeable, Accountable
                 }
             };
 
+
+            SAICodecUtils.writeHeader(postingsOutput);
+            SAICodecUtils.writeHeader(pqOutput);
+
+            // write PQ (time to do this is negligible, don't bother doing it async)
+            long pqOffset = pqOutput.getFilePointer();
+            //CassandraOnHeapGraph.writePqHeader(pqOutput.asSequentialWriter(), unitVectors, VectorCompression.CompressionType.PRODUCT_QUANTIZATION);
+            //compressedVectors.write(pqOutput.asSequentialWriter(), JVECTOR_2_VERSION); // VSTODO old version until we add APQ
+            writePQ(pqOutput.asSequentialWriter(), context, view);
+            long pqLength = pqOutput.getFilePointer() - pqOffset;
+
+            var ordinalMapper = new AtomicReference<OrdinalMapper>();
+            long postingsOffset = postingsOutput.getFilePointer();
+            long postingsLength;
+            long postingsEnd;
+
+            // V2 doesn't support ONE_TO_MANY so force it to ZERO_OR_ONE_TO_MANY if necessary;
+            // similarly, if we've been using synthetic ordinals then we can't map to ONE_TO_MANY
+            // (ending up at ONE_TO_MANY when the source sstables were not is unusual, but possible,
+            // if a row with null vector in sstable A gets updated with a vector in sstable B)
+            if (postingsStructure == Structure.ONE_TO_MANY
+                && (!V5OnDiskFormat.writeV5VectorPostings() || useSyntheticOrdinals))
+            {
+                postingsStructure = Structure.ZERO_OR_ONE_TO_MANY;
+            }
+            var rp = V5VectorPostingsWriter.describeForCompaction(postingsStructure,
+                                                                  ravvMap.size(),
+                                                                  postingsMap);
+            ordinalMapper.set(rp.ordinalMapper);
+
             if (V5OnDiskFormat.writeV5VectorPostings())
             {
                 postingsEnd = new V5VectorPostingsWriter<Integer>(rp).writePostings(postingsOutput.asSequentialWriter(), view, postingsMap);
@@ -446,9 +442,18 @@ public class BatchGraph implements Closeable, Accountable
             else
             {
                 assert postingsStructure == Structure.ONE_TO_ONE || postingsStructure == Structure.ZERO_OR_ONE_TO_MANY;
-                postingsEnd = new V2VectorPostingsWriter<Integer>(postingsStructure == Structure.ONE_TO_ONE, builder.getGraph().size(), rp.ordinalMapper::newToOld)
+                postingsEnd = new V2VectorPostingsWriter<Integer>(postingsStructure == Structure.ONE_TO_ONE, ravvMap.size(), rp.ordinalMapper::newToOld)
                        .writePostings(postingsOutput.asSequentialWriter(), view, postingsMap, Set.of());
             }
+
+            GraphIndexBuilder builder = new GraphIndexBuilder(BuildScoreProvider.randomAccessScoreProvider(view, similarityFunction),
+                                                                                dimension,
+                                                                                List.of(32, 64),
+                                                                                context.getIndexWriterConfig().getConstructionBeamWidth(),
+                                                                                1.0f, // no overflow means add will be a bit slower but flush will be faster
+                                                                                dimension > 3 ? 1.2f : 2.0f,
+                                                                                PhysicalCoreExecutor.pool(),
+                                                                                ForkJoinPool.commonPool());
 
             builder.build(view);
             builder.cleanup();
@@ -456,33 +461,34 @@ public class BatchGraph implements Closeable, Accountable
             postingsLength = postingsEnd - postingsOffset;
 
             // Recreate the writer with the final ordinalMapper
-            writer = createTermsWriterBuilder().withMapper(ordinalMapper.get()).build();
+            try (OnDiskGraphIndexWriter writer = createTermsWriterBuilder(builder).withMapper(ordinalMapper.get()).build())
+            {
+                // write the graph edge lists and optionally fused adc features
+                var start = System.nanoTime();
+                var supplier = Feature.singleStateFactory(FeatureId.INLINE_VECTORS, ordinal -> new InlineVectors.State(ravvMap.get(ordinal)));
+                writer.write(supplier);
+                SAICodecUtils.writeFooter(writer.getOutput(), writer.checksum());
+                logger.info("Writing graph took {}ms", (System.nanoTime() - start) / 1_000_000);
+                long termsLength = writer.getOutput().position() - termsOffset;
 
-            // write the graph edge lists and optionally fused adc features
-            var start = System.nanoTime();
-            var supplier = Feature.singleStateFactory(FeatureId.INLINE_VECTORS, ordinal -> new InlineVectors.State(ravvMap.get(ordinal)));
-            writer.write(supplier);
-            SAICodecUtils.writeFooter(writer.getOutput(), writer.checksum());
-            logger.info("Writing graph took {}ms", (System.nanoTime() - start) / 1_000_000);
-            long termsLength = writer.getOutput().position() - termsOffset;
+                // write remaining footers/checksums
+                SAICodecUtils.writeFooter(pqOutput);
+                SAICodecUtils.writeFooter(postingsOutput);
 
-            // write remaining footers/checksums
-            SAICodecUtils.writeFooter(pqOutput);
-            SAICodecUtils.writeFooter(postingsOutput);
-
-            // add components to the metadata map
-            return CassandraOnHeapGraph.createMetadataMap(termsOffset, termsLength, postingsOffset, postingsLength, pqOffset, pqLength);
+                // add components to the metadata map
+                return CassandraOnHeapGraph.createMetadataMap(termsOffset, termsLength, postingsOffset, postingsLength, pqOffset, pqLength);
+            }
         }
     }
 
     public long ramBytesUsed()
     {
-        return compressedVectors.ramBytesUsed() + builder.getGraph().ramBytesUsed();
+        return 0;
     }
 
     public boolean requiresFlush()
     {
-        return builder.getGraph().size() >= postingsEntriesAllocated;
+        return ravvMap.size() >= postingsEntriesAllocated;
     }
 
     private static class VectorFloatMarshaller implements BytesReader<VectorFloat<?>>, BytesWriter<VectorFloat<?>> {

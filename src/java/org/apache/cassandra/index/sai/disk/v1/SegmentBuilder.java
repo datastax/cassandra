@@ -237,15 +237,13 @@ public abstract class SegmentBuilder
         public VectorBatchSegmentBuilder(IndexComponents.ForWrite components,
                                          long rowIdOffset,
                                          long keyCount,
-                                         VectorCompressor<?> compressor,
                                          boolean unitVectors,
-                                         boolean allRowsHaveVectors,
                                          NamedMemoryLimiter limiter)
         {
             super(components, rowIdOffset, limiter);
             try
             {
-                graphIndex = new BatchGraph(components, compressor, unitVectors, keyCount, allRowsHaveVectors);
+                graphIndex = new BatchGraph(components, unitVectors, keyCount, false);
             }
             catch (IOException e)
             {

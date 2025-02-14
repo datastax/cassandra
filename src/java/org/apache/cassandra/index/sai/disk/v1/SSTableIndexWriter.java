@@ -355,16 +355,19 @@ public class SSTableIndexWriter implements PerIndexWriter
             if (pqi == null && !segments.isEmpty())
                 pqi = maybeReadPqFromLastSegment();
 
-            if ((bqPreferred || pqi != null) && V3OnDiskFormat.ENABLE_LTM_CONSTRUCTION)
+            if (V3OnDiskFormat.ENABLE_BATCH_CONSTRUCTION)
+            {
+                var allRowsHaveVectors = allRowsHaveVectorsInWrittenSegments(indexContext);
+
+                builder = new SegmentBuilder.VectorBatchSegmentBuilder(perIndexComponents, rowIdOffset, keyCount, allRowsHaveVectors, limiter);
+            }
+            else if ((bqPreferred || pqi != null) && V3OnDiskFormat.ENABLE_LTM_CONSTRUCTION)
             {
                 var compressor = bqPreferred ? new BinaryQuantization(dimension) : pqi.pq;
                 var unitVectors = bqPreferred ? false : pqi.unitVectors;
                 var allRowsHaveVectors = allRowsHaveVectorsInWrittenSegments(indexContext);
 
-                if (V3OnDiskFormat.ENABLE_BATCH_CONSTRUCTION)
-                    builder = new SegmentBuilder.VectorBatchSegmentBuilder(perIndexComponents, rowIdOffset, keyCount, compressor, unitVectors, allRowsHaveVectors, limiter);
-                else
-                    builder = new SegmentBuilder.VectorOffHeapSegmentBuilder(perIndexComponents, rowIdOffset, keyCount, compressor, unitVectors, allRowsHaveVectors, limiter);
+                builder = new SegmentBuilder.VectorOffHeapSegmentBuilder(perIndexComponents, rowIdOffset, keyCount, compressor, unitVectors, allRowsHaveVectors, limiter);
             }
             else
             {
