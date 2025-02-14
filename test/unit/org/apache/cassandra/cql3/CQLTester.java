@@ -1539,6 +1539,15 @@ public abstract class CQLTester
     }
 
     /**
+     * Disables distributed execution in {@link #execute(String, Object...)}, so queries won't get full validation nor
+     * go through reconciliation.
+     */
+    protected static void disableDistributedExecution()
+    {
+        distributedExecution = false;
+    }
+
+    /**
      * Execute the specified query as either an internal query or a distributed query depending on the value of
      * {@link #distributedExecution}.
      * </p>
