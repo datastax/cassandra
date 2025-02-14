@@ -38,6 +38,7 @@ import org.apache.cassandra.cql3.statements.RawKeyspaceAwareStatement;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.marshal.*;
 import org.apache.cassandra.exceptions.AlreadyExistsException;
+import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.guardrails.Guardrails;
 import org.apache.cassandra.guardrails.UserKeyspaceFilter;
 import org.apache.cassandra.guardrails.UserKeyspaceFilterProvider;
@@ -52,6 +53,7 @@ import org.apache.cassandra.transport.Event.SchemaChange.Target;
 
 import static com.google.common.collect.Iterables.concat;
 import static java.util.Comparator.comparing;
+import static org.apache.cassandra.schema.SchemaConstants.isSafeLengthForFilename;
 
 public final class CreateTableStatement extends AlterSchemaStatement
 {
@@ -152,6 +154,12 @@ public final class CreateTableStatement extends AlterSchemaStatement
                 return schema;
 
             throw new AlreadyExistsException(keyspaceName, tableName);
+        }
+
+        if (!isSafeLengthForFilename(keyspaceName + '.' + tableName))
+        {
+            String combinedName = keyspaceName + '.' + tableName;
+            throw new ConfigurationException(String.format("Keyspace and table names combined must fit %s characters to be safe for filenames. Got %s chars for %s", SchemaConstants.NAME_LENGTH, combinedName.length(), combinedName));
         }
 
         TableMetadata table = builder(keyspace.types).build();
