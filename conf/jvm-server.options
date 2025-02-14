@@ -7,8 +7,8 @@
 # - only static flags are accepted (no variables or parameters)           #
 # - dynamic flags will be appended to these on cassandra-env              #
 #                                                                         #
-# See jvm11-server.options and jvm17-server.options for Java version       #
-# specific options.                                                       #
+# See jvm11-server.options, jvm17-server.options, and                     #
+# jvm21-server.options for Java version specific options.                 #
 ###########################################################################
 
 ######################

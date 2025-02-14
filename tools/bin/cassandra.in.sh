@@ -120,6 +120,8 @@ esac
 JVM_OPTS_FILE=$CASSANDRA_CONF/jvm${jvmoptions_variant:--clients}.options
 if [ $JAVA_VERSION -ge 22 ] ; then
     JVM_DEP_OPTS_FILE=$CASSANDRA_CONF/jvm22${jvmoptions_variant:--clients}.options
+elif [ $JAVA_VERSION -ge 21 ] ; then
+    JVM_DEP_OPTS_FILE=$CASSANDRA_CONF/jvm21${jvmoptions_variant:--clients}.options
 elif [ $JAVA_VERSION -ge 17 ] ; then
     JVM_DEP_OPTS_FILE=$CASSANDRA_CONF/jvm17${jvmoptions_variant:--clients}.options
 elif [ $JAVA_VERSION -ge 11 ] ; then

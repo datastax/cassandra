@@ -1,8 +1,8 @@
 ###########################################################################
 #                         jvm-clients.options                             #
 #                                                                         #
-# See jvm11-clients.options and jvm17-clients.options for Java version     #
-# specific options.                                                       #
+# See jvm11-clients.options, jvm17-clients.options, and                   #
+# jvm21-clients.options for Java version specific options.                #
 ###########################################################################
 
 # intentionally left empty
