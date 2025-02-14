@@ -360,7 +360,11 @@ public class SSTableIndexWriter implements PerIndexWriter
                 var compressor = bqPreferred ? new BinaryQuantization(dimension) : pqi.pq;
                 var unitVectors = bqPreferred ? false : pqi.unitVectors;
                 var allRowsHaveVectors = allRowsHaveVectorsInWrittenSegments(indexContext);
-                builder = new SegmentBuilder.VectorOffHeapSegmentBuilder(perIndexComponents, rowIdOffset, keyCount, compressor, unitVectors, allRowsHaveVectors, limiter);
+
+                if (V3OnDiskFormat.ENABLE_BATCH_CONSTRUCTION)
+                    builder = new SegmentBuilder.VectorBatchSegmentBuilder(perIndexComponents, rowIdOffset, keyCount, compressor, unitVectors, allRowsHaveVectors, limiter);
+                else
+                    builder = new SegmentBuilder.VectorOffHeapSegmentBuilder(perIndexComponents, rowIdOffset, keyCount, compressor, unitVectors, allRowsHaveVectors, limiter);
             }
             else
             {

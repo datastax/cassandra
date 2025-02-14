@@ -49,6 +49,8 @@ public class V3OnDiskFormat extends V2OnDiskFormat
 
     public static volatile boolean WRITE_JVECTOR3_FORMAT = Boolean.parseBoolean(System.getProperty("cassandra.sai.write_jv3_format", "false"));
     public static final boolean ENABLE_LTM_CONSTRUCTION = Boolean.parseBoolean(System.getProperty("cassandra.sai.ltm_construction", "true"));
+    public static final boolean ENABLE_BATCH_CONSTRUCTION = Boolean.parseBoolean(System.getProperty("cassandra.sai.batch_construction", "true"));
+
 
     public static final int JVECTOR_2_VERSION = 2;
 

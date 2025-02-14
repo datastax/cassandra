@@ -52,6 +52,7 @@ import org.apache.cassandra.index.sai.disk.v1.kdtree.BKDTreeRamBuffer;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.MutableOneDimPointValues;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.NumericIndexWriter;
 import org.apache.cassandra.index.sai.disk.v1.trie.InvertedIndexWriter;
+import org.apache.cassandra.index.sai.disk.vector.BatchGraph;
 import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
 import org.apache.cassandra.index.sai.disk.vector.CompactionGraph;
 import org.apache.cassandra.index.sai.utils.NamedMemoryLimiter;
@@ -226,6 +227,86 @@ public abstract class SegmentBuilder
         public boolean requiresFlush()
         {
             return ramIndexer.requiresFlush();
+        }
+    }
+
+    public static class VectorBatchSegmentBuilder extends SegmentBuilder
+    {
+        private final BatchGraph graphIndex;
+
+        public VectorBatchSegmentBuilder(IndexComponents.ForWrite components,
+                                         long rowIdOffset,
+                                         long keyCount,
+                                         VectorCompressor<?> compressor,
+                                         boolean unitVectors,
+                                         boolean allRowsHaveVectors,
+                                         NamedMemoryLimiter limiter)
+        {
+            super(components, rowIdOffset, limiter);
+            try
+            {
+                graphIndex = new BatchGraph(components, compressor, unitVectors, keyCount, allRowsHaveVectors);
+            }
+            catch (IOException e)
+            {
+                throw new UncheckedIOException(e);
+            }
+            totalBytesAllocated = graphIndex.ramBytesUsed();
+            totalBytesAllocatedConcurrent.add(totalBytesAllocated);
+        }
+
+        @Override
+        public boolean isEmpty()
+        {
+            return graphIndex.isEmpty();
+        }
+
+        @Override
+        protected long addInternal(ByteBuffer term, int segmentRowId)
+        {
+            try
+            {
+                return graphIndex.maybeAddVector(term, segmentRowId).bytesUsed;
+            }
+            catch (IOException e)
+            {
+                throw new UncheckedIOException(e);
+            }
+        }
+
+        @Override
+        protected void flushInternal(SegmentMetadataBuilder metadataBuilder) throws IOException
+        {
+            if (graphIndex.isEmpty())
+                return;
+            var componentsMetadata = graphIndex.flush();
+            metadataBuilder.setComponentsMetadata(componentsMetadata);
+        }
+
+        @Override
+        public boolean supportsAsyncAdd()
+        {
+            return false;
+        }
+
+        @Override
+        public boolean requiresFlush()
+        {
+            return graphIndex.requiresFlush();
+        }
+
+        @Override
+        long release(IndexContext indexContext)
+        {
+            try
+            {
+                graphIndex.close();
+            }
+            catch (IOException e)
+            {
+                throw new UncheckedIOException(e);
+            }
+            return super.release(indexContext);
         }
     }
 
