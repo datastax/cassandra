@@ -1536,6 +1536,7 @@ public abstract class CQLTester
      */
     protected static void enableExternalExecution()
     {
+        requireNetworkWithoutDriver();
         externalExecution = true;
     }
 
