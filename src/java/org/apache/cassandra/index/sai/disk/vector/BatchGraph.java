@@ -195,7 +195,7 @@ public class BatchGraph implements Closeable, Accountable
         ravvFile = dd.fileFor(tmpRavvComponent);
         ravvMap = ChronicleMapBuilder.of(Integer.class, (Class<VectorFloat<?>>) (Class<?>) VectorFloat.class)
                                         .averageValueSize(dimension * Float.BYTES)
-                                        .valueMarshaller(new VectorFloatMarshaller())  // Ensure this correctly handles VectorFloat<?> serialization
+                                        .valueMarshaller(new NonReusingVectorFloatMarshaller())  // Ensure this correctly handles VectorFloat<?> serialization
                                         .entries(postingsEntriesAllocated)
                                         .createPersistedTo(ravvFile.toJavaIOFile());
 
@@ -515,6 +515,26 @@ public class BatchGraph implements Closeable, Accountable
                 using.set(i, in.readFloat());
             }
             return using;
+        }
+    }
+
+    private static class NonReusingVectorFloatMarshaller implements BytesReader<VectorFloat<?>>, BytesWriter<VectorFloat<?>> {
+        @Override
+        public void write(Bytes out, VectorFloat<?> vector) {
+            out.writeInt(vector.length());
+            for (int i = 0; i < vector.length(); i++) {
+                out.writeFloat(vector.get(i));
+            }
+        }
+
+        @Override
+        public VectorFloat<?> read(Bytes in, VectorFloat<?> using) {
+            int length = in.readInt();
+            float[] data = new float[length];
+            for (int i = 0; i < length; i++) {
+                data[i] = in.readFloat();
+            }
+            return vts.createFloatVector(data);
         }
     }
 
