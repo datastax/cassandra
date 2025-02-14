@@ -18,6 +18,7 @@
 package org.apache.cassandra.index;
 
 import java.io.FileNotFoundException;
+import java.io.IOError;
 import java.net.SocketException;
 import java.util.Collection;
 import java.util.Collections;
@@ -55,6 +56,7 @@ import org.mockito.Mockito;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -192,10 +194,10 @@ public class SecondaryIndexManagerTest extends CQLTester
         assertEmpty(execute("SELECT * FROM %s WHERE a=1"));
         assertEmpty(execute("SELECT * FROM %s WHERE c=1"));
 
-        // track sstable again: expect no rows to be read by index
+        // track sstable again: expect the query that needs the index cannot execute
         cfs.getTracker().addInitialSSTables(sstables);
         assertRows(execute("SELECT * FROM %s WHERE a=1"), row(1, 1, 1));
-        assertEmpty(execute("SELECT * FROM %s WHERE c=1"));
+        assertThrows(IOError.class, () -> execute("SELECT * FROM %s WHERE c=1"));
 
         // remote reload should trigger index rebuild
         cfs.getTracker().notifySSTablesChanged(Collections.emptySet(), sstables, OperationType.REMOTE_RELOAD, Optional.empty(), null);
@@ -932,7 +934,7 @@ public class SecondaryIndexManagerTest extends CQLTester
                             }
 
                             @Override
-                            public OperationProgress getProgress()
+                            public Progress getProgress()
                             {
                                 return builder.getProgress();
                             }

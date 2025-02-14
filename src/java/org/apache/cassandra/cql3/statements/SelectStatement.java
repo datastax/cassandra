@@ -25,6 +25,7 @@ import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.MoreObjects;
+import com.google.common.base.Preconditions;
 import com.google.common.math.IntMath;
 
 import org.apache.cassandra.cql3.Ordering;
@@ -41,7 +42,6 @@ import org.apache.cassandra.cql3.restrictions.Restrictions;
 import org.apache.cassandra.cql3.selection.SortedRowsBuilder;
 import org.apache.cassandra.db.marshal.FloatType;
 import org.apache.cassandra.guardrails.Guardrails;
-import org.apache.cassandra.index.Index;
 import org.apache.cassandra.sensors.SensorsCustomParams;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.Schema;
@@ -130,6 +130,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
     private final Term limit;
     private final Term perPartitionLimit;
     private final Term offset;
+    private final SelectOptions selectOptions;
 
     private final StatementRestrictions restrictions;
 
@@ -163,7 +164,8 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                            ColumnComparator<List<ByteBuffer>> orderingComparator,
                            Term limit,
                            Term perPartitionLimit,
-                           Term offset)
+                           Term offset,
+                           SelectOptions selectOptions)
     {
         this.rawCQLStatement = queryString;
         this.table = table;
@@ -177,6 +179,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         this.limit = limit;
         this.perPartitionLimit = perPartitionLimit;
         this.offset = offset;
+        this.selectOptions = selectOptions;
     }
 
     @Override
@@ -242,7 +245,8 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                                    null,
                                    null,
                                    null,
-                                   null);
+                                   null,
+                                   SelectOptions.EMPTY);
     }
 
     public ResultSet.ResultMetadata getResultMetadata()
@@ -293,7 +297,8 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                                    orderingComparator,
                                    limit,
                                    perPartitionLimit,
-                                   offset);
+                                   offset,
+                                   selectOptions);
     }
 
     /**
@@ -315,7 +320,8 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                                    orderingComparator,
                                    limit,
                                    perPartitionLimit,
-                                   offset);
+                                   offset,
+                                   selectOptions);
     }
 
     private void validateQueryOptions(QueryState queryState, QueryOptions options)
@@ -340,6 +346,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                topK;
     }
 
+    @Override
     public ResultMessage.Rows execute(QueryState queryState, QueryOptions options, long queryStartNanoTime)
     {
         ConsistencyLevel cl = options.getConsistency();
@@ -425,6 +432,8 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             // We don't support offset for top-k queries.
             checkFalse(userOffset != NO_OFFSET, String.format(TOPK_OFFSET_ERROR, userOffset));
         }
+
+        selectOptions.validate(userLimit);
 
         return query;
     }
@@ -607,6 +616,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         return new ResultMessage.Rows(rset);
     }
 
+    @Override
     public ResultMessage.Rows executeLocally(QueryState state, QueryOptions options) throws RequestExecutionException, RequestValidationException
     {
         return executeInternal(state, options, options.getNowInSeconds(state), System.nanoTime());
@@ -998,7 +1008,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
     public RowFilter getRowFilter(QueryOptions options, QueryState state) throws InvalidRequestException
     {
         IndexRegistry indexRegistry = IndexRegistry.obtain(table);
-        return restrictions.getRowFilter(indexRegistry, options, state);
+        return restrictions.getRowFilter(indexRegistry, options, state, selectOptions);
     }
 
     private ResultSet process(PartitionIterator partitions,
@@ -1010,7 +1020,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
     {
         ProtocolVersion protocolVersion = options.getProtocolVersion();
         GroupMaker groupMaker = aggregationSpec == null ? null : aggregationSpec.newGroupMaker();
-        SortedRowsBuilder rows = sortedRowsBuilder(userLimit, userOffset == NO_OFFSET ? 0 : userOffset, options);
+        SortedRowsBuilder rows = sortedRowsBuilder(userLimit, userOffset == NO_OFFSET ? 0 : userOffset);
         ResultSetBuilder result = new ResultSetBuilder(protocolVersion, getResultMetadata(), selectors, groupMaker, rows);
 
         while (partitions.hasNext())
@@ -1114,40 +1124,38 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
 
     private boolean needsToSkipUserLimit()
     {
-        // if we're querying by `pk IN (...)` and ordering by clustered columns, replicas don't sort
-        // before applying LIMIT
-        return needsPostQueryOrdering() && (orderingComparator != null && orderingComparator.isClustered());
+        // if post query ordering is required, and it's not ordered by an index
+        return needsPostQueryOrdering() && !needIndexOrdering();
     }
 
     private boolean needsPostQueryOrdering()
     {
         // We need post-query ordering only for queries with IN on the partition key and an ORDER BY or index restriction reordering
-        return (restrictions.keyIsInRelation() && !parameters.orderings.isEmpty())
-               || orderingComparator != null;
+        return restrictions.keyIsInRelation() && !parameters.orderings.isEmpty() || needIndexOrdering();
+    }
+
+    private boolean needIndexOrdering()
+    {
+        return orderingComparator != null && orderingComparator.indexOrdering();
     }
 
     /**
      * Orders results when multiple keys are selected (using IN)
      */
-    public SortedRowsBuilder sortedRowsBuilder(int limit, int offset, QueryOptions options)
+    public SortedRowsBuilder sortedRowsBuilder(int limit, int offset)
     {
-        if (orderingComparator == null)
-            return SortedRowsBuilder.create(limit, offset);
+        assert (orderingComparator != null) == needsPostQueryOrdering()
+                : String.format("orderingComparator: %s, needsPostQueryOrdering: %s",
+                                orderingComparator, needsPostQueryOrdering());
 
-        if (orderingComparator instanceof VectorColumnComparator)
+        if (orderingComparator == null || orderingComparator.indexOrdering())
         {
-            SingleRestriction restriction = ((VectorColumnComparator) orderingComparator).restriction;
-            int columnIndex = ((VectorColumnComparator) orderingComparator).columnIndex;
-
-            Index index = restriction.findSupportingIndex(IndexRegistry.obtain(table));
-            assert index != null;
-
-            Index.Scorer scorer = index.postQueryScorer(restriction, columnIndex, options);
-            return SortedRowsBuilder.create(limit, offset, scorer);
+            return SortedRowsBuilder.create(limit, offset);
         }
-
-        // else
-        return SortedRowsBuilder.create(limit, offset, orderingComparator);
+        else
+        {
+            return SortedRowsBuilder.create(limit, offset, orderingComparator);
+        }
     }
 
     public static class RawStatement extends QualifiedStatement<SelectStatement>
@@ -1158,6 +1166,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         public final Term.Raw limit;
         public final Term.Raw perPartitionLimit;
         public final Term.Raw offset;
+        public final SelectOptions options;
 
         public RawStatement(QualifiedName cfName,
                             Parameters parameters,
@@ -1165,7 +1174,8 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                             WhereClause whereClause,
                             Term.Raw limit,
                             Term.Raw perPartitionLimit,
-                            Term.Raw offset)
+                            Term.Raw offset,
+                            SelectOptions options)
         {
             super(cfName);
             this.parameters = parameters;
@@ -1174,6 +1184,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             this.limit = limit;
             this.perPartitionLimit = perPartitionLimit;
             this.offset = offset;
+            this.options = options;
         }
 
         @Override
@@ -1256,7 +1267,8 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                                        orderingComparator,
                                        prepareLimit(bindVariables, limit, ks, limitReceiver()),
                                        prepareLimit(bindVariables, perPartitionLimit, ks, perPartitionLimitReceiver()),
-                                       prepareLimit(bindVariables, offset, ks, offsetReceiver()));
+                                       prepareLimit(bindVariables, offset, ks, offsetReceiver()),
+                                       options);
         }
 
         private Map<ColumnMetadata, Ordering> getScoreOrdering(List<Ordering> orderings)
@@ -1499,16 +1511,13 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                                                                          Map<ColumnMetadata, Ordering> orderingColumns)
                                                                    throws InvalidRequestException
         {
-            if (orderingColumns.values().stream().anyMatch(o -> o.expression.hasNonClusteredOrdering()))
+            for (Map.Entry<ColumnMetadata, Ordering> e : orderingColumns.entrySet())
             {
-                assert orderingColumns.size() == 1 : orderingColumns.keySet();
-                var e = orderingColumns.entrySet().iterator().next();
-                var column = e.getKey();
-                var ordering = e.getValue();
-                if (ordering.expression instanceof Ordering.Ann && !ANN_USE_SYNTHETIC_SCORE)
-                    return new VectorColumnComparator(ordering.expression.toRestriction(), selection.getOrderingIndex(column));
-                else
-                    return new SingleColumnComparator(selection.getOrderingIndex(column), column.type, false);
+                if (e.getValue().expression.hasNonClusteredOrdering())
+                {
+                    Preconditions.checkState(orderingColumns.size() == 1);
+                    return new IndexColumnComparator();
+                }
             }
 
             if (!restrictions.keyIsInRelation())
@@ -1669,11 +1678,11 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         }
 
         /**
-         * @return true if ordering is performed by classic collation columns
+         * @return true if ordering is performed by index
          */
-        public boolean isClustered()
+        public boolean indexOrdering()
         {
-            return true;
+            return false;
         }
     }
 
@@ -1693,11 +1702,12 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         }
 
         @Override
-        public boolean isClustered()
+        public boolean indexOrdering()
         {
-            return wrapped.isClustered();
+            return wrapped.indexOrdering();
         }
     }
+
     /**
      * Used in orderResults(...) method when single 'ORDER BY' condition where given
      */
@@ -1705,48 +1715,25 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
     {
         private final int index;
         private final Comparator<ByteBuffer> comparator;
-        private final boolean clustered;
-
-        public SingleColumnComparator(int columnIndex, Comparator<ByteBuffer> orderer, boolean clustered)
-        {
-            index = columnIndex;
-            comparator = orderer;
-            this.clustered = clustered;
-        }
 
         public SingleColumnComparator(int columnIndex, Comparator<ByteBuffer> orderer)
         {
-            this(columnIndex, orderer, true);
+            index = columnIndex;
+            comparator = orderer;
         }
 
         public int compare(List<ByteBuffer> a, List<ByteBuffer> b)
         {
             return compare(comparator, a.get(index), b.get(index));
         }
-
-        @Override
-        public boolean isClustered()
-        {
-            return clustered;
-        }
     }
 
-    // placeholder for postQueryScorer call; see usage in sortedRowsBuilder
-    private static class VectorColumnComparator extends ColumnComparator<List<ByteBuffer>>
+    private static class IndexColumnComparator extends ColumnComparator<List<ByteBuffer>>
     {
-        private final SingleRestriction restriction;
-        private final int columnIndex;
-
-        public VectorColumnComparator(SingleRestriction restriction, int columnIndex)
-        {
-            this.restriction = restriction;
-            this.columnIndex = columnIndex;
-        }
-
         @Override
-        public boolean isClustered()
+        public boolean indexOrdering()
         {
-            return false;
+            return true;
         }
 
         @Override

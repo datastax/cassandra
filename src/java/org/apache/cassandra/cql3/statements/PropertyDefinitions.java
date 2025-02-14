@@ -20,6 +20,8 @@ package org.apache.cassandra.cql3.statements;
 import java.util.*;
 import java.util.regex.Pattern;
 
+import javax.annotation.Nullable;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -32,7 +34,7 @@ public class PropertyDefinitions
     
     protected static final Logger logger = LoggerFactory.getLogger(PropertyDefinitions.class);
 
-    protected final Map<String, Object> properties = new HashMap<String, Object>();
+    protected final Map<String, Object> properties = new HashMap<>();
 
     public void addProperty(String name, String value) throws SyntaxException
     {
@@ -60,6 +62,7 @@ public class PropertyDefinitions
         }
     }
 
+    @Nullable
     protected String getSimple(String name) throws SyntaxException
     {
         Object val = properties.get(name);
@@ -70,6 +73,7 @@ public class PropertyDefinitions
         return (String)val;
     }
 
+    @Nullable
     public Map<String, String> getMap(String name) throws SyntaxException
     {
         Object val = properties.get(name);

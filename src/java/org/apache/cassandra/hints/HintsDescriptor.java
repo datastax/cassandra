@@ -71,8 +71,9 @@ final class HintsDescriptor
 
     static final int VERSION_30 = 1;
     static final int VERSION_40 = 2;
-    static final int VERSION_SG_10 = 100;
-    static final int CURRENT_VERSION = VERSION_SG_10;
+    static final int VERSION_DS_10 = MessagingService.VERSION_DS_10;
+    static final int VERSION_DS_11 = MessagingService.VERSION_DS_11;
+    static final int CURRENT_VERSION = MessagingService.current_version;
 
     static final String COMPRESSION = "compression";
     static final String ENCRYPTION = "encryption";
@@ -264,8 +265,10 @@ final class HintsDescriptor
                 return MessagingService.VERSION_30;
             case VERSION_40:
                 return MessagingService.VERSION_40;
-            case VERSION_SG_10:
-                return MessagingService.VERSION_SG_10;
+            case VERSION_DS_10:
+                return MessagingService.VERSION_DS_10;
+            case VERSION_DS_11:
+                return MessagingService.VERSION_DS_11;
             default:
                 throw new AssertionError();
         }

@@ -175,6 +175,7 @@ import org.json.simple.JSONObject;
 
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 import static org.apache.cassandra.config.CassandraRelevantProperties.DISABLED_AUTO_COMPACTION_PROPERTY;
+import static org.apache.cassandra.config.CassandraRelevantProperties.UNSAFE_SYSTEM;
 import static org.apache.cassandra.utils.Throwables.maybeFail;
 import static org.apache.cassandra.utils.Throwables.merge;
 import static org.apache.cassandra.utils.Throwables.perform;
@@ -1894,6 +1895,12 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         return data;
     }
 
+
+    /**
+     * Convenience method for getting the set of live sstables associated with this ColumnFamilyStore. Note that this
+     * will also contain any early-opened sstables.
+     * @return the tracker's current view's {@link SSTableSet#LIVE} sstables
+     */
     public Set<SSTableReader> getLiveSSTables()
     {
         return data.getLiveSSTables();
@@ -3465,9 +3472,12 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         }
         else
         {
-            if (logger.isTraceEnabled())
-                logger.trace("Recycling CL segments for dropping {}", metadata);
-            CommitLog.instance.forceRecycleAllSegments(Collections.singleton(metadata.id));
+            if (!UNSAFE_SYSTEM.getBoolean())
+            {
+                if (logger.isTraceEnabled())
+                    logger.trace("Recycling CL segments for dropping {}", metadata);
+                CommitLog.instance.forceRecycleAllSegments(Collections.singleton(metadata.id));
+            }
         }
 
         if (logger.isTraceEnabled())

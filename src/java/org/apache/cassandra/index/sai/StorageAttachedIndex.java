@@ -41,7 +41,6 @@ import java.util.function.BooleanSupplier;
 import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Preconditions;
 import com.google.common.base.Predicates;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.util.concurrent.Futures;
@@ -50,15 +49,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
-import io.github.jbellis.jvector.vector.VectorizationProvider;
-import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.Operator;
-import org.apache.cassandra.cql3.QueryOptions;
-import org.apache.cassandra.cql3.restrictions.Restriction;
-import org.apache.cassandra.cql3.restrictions.SingleColumnRestriction;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget;
 import org.apache.cassandra.db.CassandraWriteContext;
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -84,6 +78,7 @@ import org.apache.cassandra.dht.LocalPartitioner;
 import org.apache.cassandra.dht.OrderPreservingPartitioner;
 import org.apache.cassandra.dht.RandomPartitioner;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.db.filter.ANNOptions;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.IndexBuildDecider;
 import org.apache.cassandra.index.IndexRegistry;
@@ -124,7 +119,6 @@ public class StorageAttachedIndex implements Index
     "In most cases it's better to use a simpler query_analyzer such as the standard one.";
 
     private static final Logger logger = LoggerFactory.getLogger(StorageAttachedIndex.class);
-    private static final VectorTypeSupport vts = VectorizationProvider.getInstance().getVectorTypeSupport();
 
     private static final boolean VALIDATE_TERMS_AT_COORDINATOR = SAI_VALIDATE_TERMS_AT_COORDINATOR.getBoolean();
 
@@ -672,26 +666,36 @@ public class StorageAttachedIndex implements Index
     }
 
     @Override
-    public Optional<Analyzer> getAnalyzer()
+    public Optional<Analyzer> getIndexAnalyzer()
     {
-        if (!indexContext.isAnalyzed())
-            return Optional.empty();
+        return indexContext.isAnalyzed()
+               ? Optional.of(value -> analyze(indexContext.getAnalyzerFactory(), value))
+               : Optional.empty();
+    }
 
-        return Optional.of(value -> {
-            List<ByteBuffer> tokens = new ArrayList<>();
-            AbstractAnalyzer analyzer = indexContext.getQueryAnalyzerFactory().create();
-            try
-            {
-                analyzer.reset(value);
-                while (analyzer.hasNext())
-                    tokens.add(analyzer.next());
-            }
-            finally
-            {
-                analyzer.end();
-            }
-            return tokens;
-        });
+    @Override
+    public Optional<Analyzer> getQueryAnalyzer()
+    {
+        return indexContext.isAnalyzed()
+               ? Optional.of(value -> analyze(indexContext.getQueryAnalyzerFactory(), value))
+               : Optional.empty();
+    }
+
+    private static List<ByteBuffer> analyze(AbstractAnalyzer.AnalyzerFactory factory, ByteBuffer value)
+    {
+        List<ByteBuffer> tokens = new ArrayList<>();
+        AbstractAnalyzer analyzer = factory.create();
+        try
+        {
+            analyzer.reset(value.duplicate());
+            while (analyzer.hasNext())
+                tokens.add(analyzer.next());
+        }
+        finally
+        {
+            analyzer.end();
+        }
+        return tokens;
     }
 
     @Override
@@ -699,37 +703,6 @@ public class StorageAttachedIndex implements Index
     {
         // it should be executed from the SAI query plan, this is only used by the singleton index query plan
         throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public Scorer postQueryScorer(Restriction restriction, int columnIndex, QueryOptions options)
-    {
-        // TODO remove this with SelectStatement.ANN_USE_SYNTHETIC_SCORE.
-        assert restriction instanceof SingleColumnRestriction.AnnRestriction;
-
-        Preconditions.checkState(indexContext.isVector());
-
-        SingleColumnRestriction.AnnRestriction annRestriction = (SingleColumnRestriction.AnnRestriction) restriction;
-        VectorSimilarityFunction similarityFunction = indexContext.getIndexWriterConfig().getSimilarityFunction();
-
-        var targetVector = vts.createFloatVector(TypeUtil.decomposeVector(indexContext, annRestriction.value(options).duplicate()));
-
-        return new Scorer()
-        {
-            @Override
-            public float score(List<ByteBuffer> row)
-            {
-                ByteBuffer vectorBuffer = row.get(columnIndex);
-                var vector = vts.createFloatVector(TypeUtil.decomposeVector(indexContext, vectorBuffer.duplicate()));
-                return similarityFunction.compare(vector, targetVector);
-            }
-
-            @Override
-            public boolean reversed()
-            {
-                return true;
-            }
-        };
     }
 
     @Override
@@ -743,6 +716,10 @@ public class StorageAttachedIndex implements Index
         if (command.limits().isUnlimited() || command.limits().count() > MAX_TOP_K)
             throw new InvalidRequestException(String.format("SAI based ORDER BY clause requires a LIMIT that is not greater than %s. LIMIT was %s",
                                                             MAX_TOP_K, command.limits().isUnlimited() ? "NO LIMIT" : command.limits().count()));
+
+        ANNOptions annOptions = command.rowFilter().annOptions();
+        if (annOptions != ANNOptions.NONE)
+            throw new InvalidRequestException("SAI doesn't support ANN options yet.");
 
         indexContext.validate(command.rowFilter());
     }
@@ -795,7 +772,7 @@ public class StorageAttachedIndex implements Index
             //   1. The current view does not contain the SSTable
             //   2. The SSTable is not marked compacted
             //   3. The column index does not have a completion marker
-            if (!view.containsSSTable(sstable)
+            if (!view.containsSSTableIndex(sstable.descriptor)
                 && !sstable.isMarkedCompacted()
                 && !IndexDescriptor.isIndexBuildCompleteOnDisk(sstable, indexContext))
             {

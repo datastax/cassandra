@@ -84,9 +84,9 @@ public class Overlaps
     /// @param endsComparator   Comparator of items' ending positions.
     /// @return The maximum overlap in the given set of items.
     public static <E> int maxOverlap(Collection<E> items,
-                                     BiPredicate<E, E> startsAfter,
-                                     Comparator<E> startsComparator,
-                                     Comparator<E> endsComparator)
+                                     BiPredicate<? super E, ? super E> startsAfter,
+                                     Comparator<? super E> startsComparator,
+                                     Comparator<? super E> endsComparator)
     {
         return constructOverlapSets(items, startsAfter, startsComparator, endsComparator,
                                     (max, active) -> Math.max(max, active.size()), 0);
@@ -119,9 +119,9 @@ public class Overlaps
     /// @param initialValue     Initial value for the reducer.
     /// @return The result of processing the overlap sets.
     public static <E, R> R constructOverlapSets(Collection<E> items,
-                                                BiPredicate<E, E> startsAfter,
-                                                Comparator<E> startsComparator,
-                                                Comparator<E> endsComparator,
+                                                BiPredicate<? super E, ? super E> startsAfter,
+                                                Comparator<? super E> startsComparator,
+                                                Comparator<? super E> endsComparator,
                                                 BiFunction<R, Collection<E>, R> reducer,
                                                 R initialValue)
     {

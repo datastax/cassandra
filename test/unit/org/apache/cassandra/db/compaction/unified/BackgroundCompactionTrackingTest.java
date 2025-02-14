@@ -41,6 +41,7 @@ import org.apache.cassandra.db.compaction.AbstractTableOperation;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.compaction.CompactionStrategy;
 import org.apache.cassandra.db.compaction.CompactionStrategyStatistics;
+import org.apache.cassandra.db.compaction.TableOperation;
 import org.apache.cassandra.db.compaction.UnifiedCompactionStatistics;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.utils.UUIDGen;
@@ -57,8 +58,8 @@ import static org.junit.Assert.assertTrue;
 @BMUnitConfig(debug=true)
 @BMRule(
 name = "Get stats before task completion",
-targetClass = "org.apache.cassandra.db.compaction.CompactionTask$CompactionOperation",
-targetMethod = "close()",
+targetClass = "org.apache.cassandra.db.compaction.ActiveOperations",
+targetMethod = "completeOperation",
 targetLocation = "AT ENTRY",
 action = "org.apache.cassandra.db.compaction.unified.BackgroundCompactionTrackingTest.getStats()"
 )
@@ -151,44 +152,21 @@ public class BackgroundCompactionTrackingTest extends CQLTester
             // Check that the background compactions state is correct during the compaction
             Assert.assertTrue("Byteman rule did not fire", !operations.isEmpty());
             printStats();
-            int tasks = parallelize ? shards : 1;
-            assertEquals(tasks, operations.size());
-            UUID mainOpId = null;
-            for (int i = 0; i < operations.size(); ++i)
+            assertEquals(1, operations.size());
+            var ops = operations.get(0)
+                                .stream()
+                                .filter(op -> op.metadata() == cfs.metadata())
+                                .collect(Collectors.toList());
+            assertEquals(1, ops.size());
+            var op = ops.get(0);
             {
-                BitSet seqs = new BitSet(shards);
-                int expectedSize = tasks - i;
-                var ops = operations.get(i)
-                                    .stream()
-                                    .filter(op -> op.metadata() == cfs.metadata())
-                                    .collect(Collectors.toList());
-                final int size = ops.size();
-                int finished = tasks - size;
-                assertTrue(size >= expectedSize); // some task may have not managed to close
-                for (var op : ops)
-                {
-                    assertSame(cfs.metadata(), op.metadata());
+                assertSame(cfs.metadata(), op.metadata());
 
-                    final UUID opIdSeq0 = UUIDGen.withSequence(op.operationId(), 0);
-                    if (mainOpId == null)
-                        mainOpId = opIdSeq0;
-                    else
-                        assertEquals(mainOpId, opIdSeq0);
-                    seqs.set(UUIDGen.sequence(op.operationId()));
-
-                    if (i == 0)
-                        Assert.assertEquals(uncompressedSize * 1.0 / tasks, op.total(), uncompressedSize * 0.03);
-                    assertTrue(op.totalByteScanned() <= op.total());
-                    assertFalse(op.totalByteScanned() > op.total());
-                    if (op.totalByteScanned() == op.total())
-                        ++finished;
-                }
-                assertTrue(finished > i);
-                assertEquals(size, seqs.cardinality());
+                assertEquals(uncompressedSize, op.total());
+                assertEquals(uncompressedSize, op.completed());
             }
 
-            // The last stats should list the right totals
-            var stats = statistics.get(statistics.size() - 1).get(0); // unrepaired
+            var stats = statistics.get(0).get(0); // unrepaired
             if (stats.aggregates().size() > 1)
             {
                 var L1 = (UnifiedCompactionStatistics) stats.aggregates().get(1);
@@ -236,11 +214,28 @@ public class BackgroundCompactionTrackingTest extends CQLTester
 
     public static synchronized void getStats()
     {
-        operations.add(CompactionManager.instance.getSSTableTasks());
+        operations.add(CompactionManager.instance.getSSTableTasks()
+                                                 .stream()
+                                                 .map(BackgroundCompactionTrackingTest::snapshot)
+                                                 .collect(Collectors.toList()));
         statistics.add(strategy.getStatistics());
+    }
+
+    private static TableOperation.Progress snapshot(TableOperation.Progress progress)
+    {
+        // Take a snapshot to make sure we are capturing the values at the time ActiveOperations is called.
+        // This is to make sure we report the completed state then, and not end up okay because they were corrected
+        // when some component closed at a later time.
+        return new AbstractTableOperation.OperationProgress(progress.metadata(),
+                                                            progress.operationType(),
+                                                            progress.completed(),
+                                                            progress.total(),
+                                                            progress.unit(),
+                                                            progress.operationId(),
+                                                            progress.sstables());
     }
 
     static CompactionStrategy strategy;
     static List<List<CompactionStrategyStatistics>> statistics;
-    static List<List<AbstractTableOperation.OperationProgress>> operations;
+    static List<List<TableOperation.Progress>> operations;
 }

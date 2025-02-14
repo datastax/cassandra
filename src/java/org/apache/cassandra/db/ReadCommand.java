@@ -37,6 +37,8 @@ import com.google.common.collect.Sets;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.cql3.statements.SelectOptions;
+import org.apache.cassandra.db.filter.ANNOptions;
 import org.apache.cassandra.db.filter.ClusteringIndexFilter;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.filter.DataLimits;
@@ -778,6 +780,11 @@ public abstract class ReadCommand extends AbstractReadQuery
 
         if (limits() != DataLimits.NONE)
             sb.append(' ').append(limits());
+
+        ANNOptions annOptions = rowFilter().annOptions();
+        if (annOptions != ANNOptions.NONE)
+            sb.append(" WITH ").append(SelectOptions.ANN_OPTIONS).append(" = ").append(annOptions.toCQLString());
+
         return sb.toString();
     }
 

@@ -85,7 +85,7 @@
     <property name="test.driver.connection_timeout_ms" value="5000"/>
     <property name="test.driver.read_timeout_ms" value="12000"/>
     <property name="dist.dir" value="${build.dir}/dist"/>
-    <property name="tmp.dir" value="${java.io.tmpdir}"/>
+    <property name="tmp.dir" value="${build.test.dir}/cassandra"/>
     <property name="test.logback.configurationFile" value="${test.conf}/logback-test.xml"/>
     <property name="doc.dir" value="${basedir}/doc"/>
     <property name="repetition" value=""/>
@@ -129,7 +129,7 @@
     <property name="cassandra.test.processorCount" value="4"/>
 
     <!-- skip flushing schema tables during tests -->
-    <property name="cassandra.test.flush_local_schema_changes" value="true" />
+    <property name="cassandra.unsafesystem" value="true" />
 
     <!-- fast shutdown of messaging service -->
     <property name="cassandra.test.messagingService.nonGracefulShutdown" value="false"/>
@@ -441,7 +441,10 @@
     </target>
 
     <target name="clean" description="Remove all locally created artifacts">
-        <delete dir="${build.test.dir}" />
+        <delete includeemptydirs="true" failonerror="false">
+            <fileset dir="${build.test.dir}/cassandra" includes="**/*"/>
+            <fileset dir="${build.test.dir}" includes="**/*" excludes="cassandra"/>
+        </delete>
         <delete dir="${build.classes}" />
         <delete dir="${build.src.gen-java}" />
         <delete dir="${version.properties.dir}" />
@@ -454,7 +457,7 @@
         <delete>
           <fileset dir="${build.lib}" excludes="cassandra-driver-internal-only-*"/>
         </delete>
-        <delete dir="${build.dir}" />
+        <delete includeemptydirs="false" dir="${build.dir}" failonerror="false"/>
         <delete dir="${doc.dir}/build" />
         <delete dir="${doc.dir}/source/tools/nodetool" />
     </target>
@@ -595,11 +598,11 @@
           <dependency groupId="org.antlr" artifactId="antlr-runtime" version="3.5.2">
             <exclusion groupId="org.antlr" artifactId="stringtemplate"/>
           </dependency>
-          <dependency groupId="org.slf4j" artifactId="slf4j-api" version="1.7.25"/>
-          <dependency groupId="org.slf4j" artifactId="log4j-over-slf4j" version="1.7.25"/>
-          <dependency groupId="org.slf4j" artifactId="jcl-over-slf4j" version="1.7.25" />
-          <dependency groupId="ch.qos.logback" artifactId="logback-core" version="1.2.9"/>
-          <dependency groupId="ch.qos.logback" artifactId="logback-classic" version="1.2.9"/>
+          <dependency groupId="org.slf4j" artifactId="slf4j-api" version="2.0.9"/>
+          <dependency groupId="org.slf4j" artifactId="log4j-over-slf4j" version="2.0.9"/>
+          <dependency groupId="org.slf4j" artifactId="jcl-over-slf4j" version="2.0.9" />
+          <dependency groupId="ch.qos.logback" artifactId="logback-core" version="1.4.14"/>
+          <dependency groupId="ch.qos.logback" artifactId="logback-classic" version="1.4.14"/>
           <dependency groupId="com.fasterxml.jackson.core" artifactId="jackson-core" version="2.13.2"/>
           <dependency groupId="com.fasterxml.jackson.core" artifactId="jackson-databind" version="2.13.2.2"/>
           <dependency groupId="com.fasterxml.jackson.core" artifactId="jackson-annotations" version="2.13.2"/>
@@ -1516,7 +1519,6 @@
         <jvmarg value="-Dcassandra.test.driver.read_timeout_ms=${test.driver.read_timeout_ms}"/>
         <jvmarg value="-Dcassandra.memtable_row_overhead_computation_step=100"/>
         <jvmarg value="-Dcassandra.test.use_prepared=${cassandra.test.use_prepared}"/>
-        <jvmarg value="-Dcassandra.test.flush_local_schema_changes=${cassandra.test.flush_local_schema_changes}"/>
         <jvmarg value="-Dcassandra.test.messagingService.nonGracefulShutdown=${cassandra.test.messagingService.nonGracefulShutdown}"/>
         <jvmarg value="-Dcassandra.cluster_version_provider.min_stable_duration_ms=0"/>
         <jvmarg value="-Dcassandra.test.cluster_version_provider.skip_wait_for_gossip=true"/>
@@ -1528,7 +1530,7 @@
         <jvmarg value="-Dcassandra.testtag=${tag}.jdk${ant.java.version}"/>
         <jvmarg value="-Dcassandra.keepBriefBrief=${cassandra.keepBriefBrief}" />
         <jvmarg value="-Dcassandra.strict.runtime.checks=true" />
-        <jvmarg value="-Dcassandra.test.flush_local_schema_changes=${cassandra.test.flush_local_schema_changes}"/>
+        <jvmarg value="-Dcassandra.unsafesystem=${cassandra.unsafesystem}"/>
         <jvmarg value="-Dcassandra.test.messagingService.nonGracefulShutdown=${cassandra.test.messagingService.nonGracefulShutdown}"/>
         <jvmarg value="-Dcassandra.use_nix_recursive_delete=${cassandra.use_nix_recursive_delete}"/>
         <jvmarg line="${java-jvmargs}"/>
@@ -1538,6 +1540,7 @@
         <jvmarg value="-Dcassandra.use_nix_recursive_delete=true"/>
         <jvmarg value="-Dcassandra.test.fail_on_forbidden_log_entries=${cassandra.test.fail_on_forbidden_log_entries}"/>
         <jvmarg line="${_std-test-jvmargs} " />
+        <jvmarg value="-Djava.io.tmpdir=${build.test.dir}/cassandra"/>
         <optjvmargs/>
         <!-- Uncomment to debug unittest, attach debugger to port 1416 -->
         <!--

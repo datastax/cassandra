@@ -23,6 +23,7 @@ import java.util.concurrent.TimeUnit;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.metrics.TableMetrics;
+import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.sensors.SensorsFactory;
 import org.apache.cassandra.service.reads.range.EndpointGroupingRangeCommandIterator;
 
@@ -287,11 +288,11 @@ public enum CassandraRelevantProperties
      * when the JVM terminates. Therefore, we can use such optimization and not wait unnecessarily. */
     NON_GRACEFUL_SHUTDOWN("cassandra.test.messagingService.nonGracefulShutdown"),
 
-    /** Flush changes of {@link org.apache.cassandra.schema.SchemaKeyspace} after each schema modification. In production,
-     * we always do that. However, tests which do not restart nodes may disable this functionality in order to run
-     * faster. Note that this is disabled for unit tests but if an individual test requires schema to be flushed, it
-     * can be also done manually for that particular case: {@code flush(SchemaConstants.SCHEMA_KEYSPACE_NAME);}. */
-    FLUSH_LOCAL_SCHEMA_CHANGES("cassandra.test.flush_local_schema_changes", "true"),
+    /** Disables flush changes to local and schema keyspaces. Also, disables recycling all segments of commitlog after
+     * dropping a table. Tests which do not restart nodes may enable this option in order to run faster. Note that this
+     * is enabled for unit tests but if an individual test requires schema to be flushed, it can be also done manually
+     * for that particular case: {@code flush(SchemaConstants.SCHEMA_KEYSPACE_NAME);}. */
+    UNSAFE_SYSTEM("cassandra.unsafesystem", "false"),
 
     /**
      * Delay before checking if gossip is settled.
@@ -574,7 +575,13 @@ public enum CassandraRelevantProperties
     /**
      * If true, the coordinator will propagate sensors via the native protocol custom payload bytes map.
      */
-    SENSORS_VIA_NATIVE_PROTOCOL("cassandra.sensors_via_native_protocol", "false");
+    SENSORS_VIA_NATIVE_PROTOCOL("cassandra.sensors_via_native_protocol", "false"),
+
+    /**
+     * The current messaging version. This is used when we add new messaging versions without adopting them immediately,
+     * or to force the node to use a specific version for testing purposes.
+     */
+    DS_CURRENT_MESSAGING_VERSION("ds.current_messaging_version", Integer.toString(MessagingService.VERSION_DS_10));
 
     CassandraRelevantProperties(String key, String defaultVal)
     {

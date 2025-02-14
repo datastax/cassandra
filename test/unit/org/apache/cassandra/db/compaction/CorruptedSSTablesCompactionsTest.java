@@ -57,6 +57,7 @@ import org.apache.cassandra.io.sstable.ISSTableScanner;
 import org.apache.cassandra.io.sstable.compaction.SSTableCursor;
 import org.apache.cassandra.io.sstable.compaction.SortedStringTableCursor;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.CompactionParams;
 import org.apache.cassandra.schema.CompressionParams;
@@ -239,10 +240,10 @@ public class CorruptedSSTablesCompactionsTest
                 }
                 finally
                 {
-                FileUtils.closeQuietly(raf);
+                    FileUtils.closeQuietly(raf);
                 }
                 if (ChunkCache.instance != null)
-                    ChunkCache.instance.invalidateFile(sstable.getFilename());
+                    ChunkCache.instance.invalidateFileNow(sstable.getDataFile());
             }
             while (readsWithoutError(sstable));
 
@@ -283,6 +284,11 @@ public class CorruptedSSTablesCompactionsTest
 
     private int processException(Throwable e) throws Throwable
     {
+        return processException(e, new HashSet<>());
+    }
+
+    private int processException(Throwable e, Set<File> countedFiles) throws Throwable
+    {
         Throwable cause = e;
         int failures = 0;
         boolean foundCause = false;
@@ -292,7 +298,8 @@ public class CorruptedSSTablesCompactionsTest
             // should move on to the next corruption.
             if (cause instanceof CorruptSSTableException)
             {
-                ++failures;
+                if (countedFiles.add(((CorruptSSTableException) cause).file))
+                    failures++;
                 foundCause = true;
                 break;
             }
@@ -310,7 +317,7 @@ public class CorruptedSSTablesCompactionsTest
             // If the compactions are parallelized, the error message should contain all failures of the current path.
             for (var t : cause.getSuppressed())
             {
-                final int childFailures = processException(t);
+                final int childFailures = processException(t, countedFiles);
                 if (childFailures == COMPACTION_FAIL)
                     return COMPACTION_FAIL;
                 failures += childFailures;

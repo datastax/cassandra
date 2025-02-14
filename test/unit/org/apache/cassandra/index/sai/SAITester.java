@@ -63,6 +63,8 @@ import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.compaction.CompactionManager;
+import org.apache.cassandra.db.lifecycle.SSTableSet;
+import org.apache.cassandra.db.lifecycle.View;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.exceptions.RequestFailureReason;
@@ -332,15 +334,19 @@ public class SAITester extends CQLTester
     {
         ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(currentTable());
 
-        for (SSTableReader sstable : cfs.getLiveSSTables())
+        try (ColumnFamilyStore.RefViewFragment rvf = cfs.selectAndReference(View.selectFunction(SSTableSet.CANONICAL)))
         {
-            IndexDescriptor indexDescriptor = loadDescriptor(sstable, cfs);
-            if (indexDescriptor.isIndexEmpty(context))
-                continue;
-            if (!indexDescriptor.perSSTableComponents().validateComponents(sstable, cfs.getTracker(), true)
-                || !indexDescriptor.perIndexComponents(context).validateComponents(sstable, cfs.getTracker(), true))
-                return false;
+            for (SSTableReader sstable : rvf.sstables)
+            {
+                IndexDescriptor indexDescriptor = loadDescriptor(sstable, cfs);
+                if (indexDescriptor.isIndexEmpty(context))
+                    continue;
+                if (!indexDescriptor.perSSTableComponents().validateComponents(sstable, cfs.getTracker(), true)
+                    || !indexDescriptor.perIndexComponents(context).validateComponents(sstable, cfs.getTracker(), true))
+                    return false;
+            }
         }
+
         return true;
     }
 

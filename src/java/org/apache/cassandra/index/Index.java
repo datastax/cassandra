@@ -35,8 +35,6 @@ import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import org.apache.cassandra.cql3.Operator;
-import org.apache.cassandra.cql3.QueryOptions;
-import org.apache.cassandra.cql3.restrictions.Restriction;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
@@ -59,8 +57,6 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.TableMetadata;
-
-import org.apache.commons.lang3.NotImplementedException;
 
 
 /**
@@ -435,12 +431,23 @@ public interface Index
     }
 
     /**
-     * Returns the {@link Analyzer} for this index, if any. If the index doesn't transform the column values, this
-     * method will return an empty optional.
+     * Returns the write-time {@link Analyzer} for this index, if any. If the index doesn't transform the column values,
+     * this method will return an empty optional.
      *
-     * @return the transforming column value analyzer for the index, if any
+     * @return the write-time transforming column value analyzer for the index, if any
      */
-    default Optional<Analyzer> getAnalyzer()
+    default Optional<Analyzer> getIndexAnalyzer()
+    {
+        return Optional.empty();
+    }
+
+    /**
+     * Returns the query-time {@link Analyzer} for this index, if any. If the index doesn't transform the column values,
+     * this method will return an empty optional.
+     *
+     * @return the query-time transforming column value analyzer for the index, if any
+     */
+    default Optional<Analyzer> getQueryAnalyzer()
     {
         return Optional.empty();
     }
@@ -468,41 +475,7 @@ public interface Index
      * @return the (hopefully) reduced filter that would still need to be applied after
      *         the index was used to narrow the initial result set
      */
-    public RowFilter getPostIndexQueryFilter(RowFilter filter);
-
-    /**
-     * Returns a {@link Scorer} to give a similarity/proximity score to CQL result rows, so they can be ordered by the
-     * coordinator before sending them to client.
-     *
-     * @param restriction restriction that requires current index
-     * @param columnIndex idx of the indexed column in returned row
-     * @param options     query options
-     * @return a scorer to score the rows
-     */
-    default Scorer postQueryScorer(Restriction restriction, int columnIndex, QueryOptions options)
-    {
-        throw new NotImplementedException();
-    }
-
-    /**
-     * Gives a similarity/proximity score to CQL result rows.
-     */
-    interface Scorer
-    {
-        /**
-         * @param row a CQL result row
-         * @return the similarity/proximity score for the row
-         */
-        float score(List<ByteBuffer> row);
-
-        /**
-         * @return {@code true} if higher scores are considered better, {@code false} otherwise
-         */
-        default boolean reversed()
-        {
-            return false;
-        }
-    }
+    RowFilter getPostIndexQueryFilter(RowFilter filter);
 
     /**
      * Return an estimate of the number of results this index is expected to return for any given
@@ -512,7 +485,7 @@ public interface Index
      *
      * @return the estimated average number of results a Searcher may return for any given query
      */
-    public long getEstimatedResultRows();
+    long getEstimatedResultRows();
 
     /**
      * Check if current index is queryable based on the index status.

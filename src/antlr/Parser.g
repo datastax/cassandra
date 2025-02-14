@@ -260,6 +260,7 @@ selectStatement returns [SelectStatement.RawStatement expr]
         List<ColumnIdentifier> groups = new ArrayList<>();
         boolean allowFiltering = false;
         boolean isJson = false;
+        SelectOptions options = new SelectOptions();
     }
     : K_SELECT
         // json is a valid column name. By consequence, we need to resolve the ambiguity for "json - json"
@@ -271,6 +272,7 @@ selectStatement returns [SelectStatement.RawStatement expr]
       ( K_PER K_PARTITION K_LIMIT rows=intValue { perPartitionLimit = rows; } )?
       ( K_LIMIT rows=intValue { limit = rows; } ( K_OFFSET rows=intValue { offset = rows; } )? )?
       ( K_ALLOW K_FILTERING  { allowFiltering = true; } )?
+      ( K_WITH properties[options] )?
       {
           SelectStatement.Parameters params = new SelectStatement.Parameters(orderings,
                                                                              groups,
@@ -278,7 +280,7 @@ selectStatement returns [SelectStatement.RawStatement expr]
                                                                              allowFiltering,
                                                                              isJson);
           WhereClause where = wclause == null ? WhereClause.empty() : wclause.build();
-          $expr = new SelectStatement.RawStatement(cf, params, $sclause.selectors, where, limit, perPartitionLimit, offset);
+          $expr = new SelectStatement.RawStatement(cf, params, $sclause.selectors, where, limit, perPartitionLimit, offset, options);
       }
     ;
 
@@ -462,8 +464,8 @@ orderByClause[List<Ordering.Raw> orderings]
         Ordering.Raw.Expression expr = null;
     }
     : c=cident
-        ( K_ANN_OF t=term { expr = new Ordering.Raw.Ann(c, t); }
-        | K_BM25_OF t=term { expr = new Ordering.Raw.Bm25(c, t); }
+        ( K_ANN K_OF t=term { expr = new Ordering.Raw.Ann(c, t); }
+        | K_BM25 K_OF t=term { expr = new Ordering.Raw.Bm25(c, t); }
         )?
         (K_ASC | K_DESC { direction = Ordering.Direction.DESC; })?
     {
@@ -1970,8 +1972,8 @@ basic_unreserved_keyword returns [String str]
         | K_DROPPED
         | K_COLUMN
         | K_RECORD
-        | K_ANN_OF
-        | K_BM25_OF
+        | K_ANN
+        | K_BM25
         | K_OFFSET
         ) { $str = $k.text; }
     ;

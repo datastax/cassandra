@@ -28,6 +28,7 @@ import java.util.UUID;
 
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Iterables;
 
 import org.slf4j.Logger;
@@ -48,6 +49,7 @@ import org.apache.cassandra.io.sstable.SSTableMultiWriter;
 import org.apache.cassandra.io.sstable.ScannerList;
 import org.apache.cassandra.io.sstable.SimpleSSTableMultiWriter;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.utils.Overlaps;
 
 abstract class AbstractCompactionStrategy implements CompactionStrategy
 {
@@ -396,5 +398,15 @@ abstract class AbstractCompactionStrategy implements CompactionStrategy
             logCount = 0;
             logger.statistics(this, "periodic", backgroundCompactions.getStatistics(this));
         }
+    }
+
+    @Override
+    public Map<String, String> getMaxOverlapsMap()
+    {
+        final Set<? extends CompactionSSTable> liveSSTables = getSSTables();
+        return ImmutableMap.of("all", Integer.toString(Overlaps.maxOverlap(liveSSTables,
+                                                                           CompactionSSTable.startsAfter,
+                                                                           CompactionSSTable.firstKeyComparator,
+                                                                           CompactionSSTable.lastKeyComparator)));
     }
 }

@@ -226,8 +226,8 @@ K_LABEL:       L A B E L;
 K_DROPPED:     D R O P P E D;
 K_COLUMN:      C O L U M N;
 K_RECORD:      R E C O R D;
-K_ANN_OF:      A N N WS+ O F;
-K_BM25_OF:     'BM25' WS+ 'OF';
+K_ANN:         A N N;
+K_BM25:        B M '2' '5';
 
 // Case-insensitive alpha characters
 fragment A: ('a'|'A');

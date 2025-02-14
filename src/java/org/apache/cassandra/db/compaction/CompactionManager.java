@@ -1772,9 +1772,9 @@ public class CompactionManager implements CompactionManagerMBean
     {
         return new CompactionIterator(OperationType.ANTICOMPACTION, scanners, controller, nowInSec, timeUUID) {
             @Override
-            public TableOperation createOperation()
+            public TableOperation createOperation(CompactionProgress progress)
             {
-                return getAntiCompactionOperation(super.createOperation(), isCancelled);
+                return getAntiCompactionOperation(super.createOperation(progress), isCancelled);
             }
         };
     }
@@ -1791,7 +1791,7 @@ public class CompactionManager implements CompactionManagerMBean
             }
 
             @Override
-            public OperationProgress getProgress()
+            public Progress getProgress()
             {
                 return compaction.getProgress();
             }
@@ -2331,7 +2331,7 @@ public class CompactionManager implements CompactionManagerMBean
         Set<TableOperation> interrupted = new HashSet<>();
         for (TableOperation operationSource : active.getTableOperations())
         {
-            AbstractTableOperation.OperationProgress info = operationSource.getProgress();
+            TableOperation.Progress info = operationSource.getProgress();
 
             if (Iterables.contains(tables, info.metadata()) && opPredicate.test(info.operationType()))
             {
@@ -2381,7 +2381,7 @@ public class CompactionManager implements CompactionManagerMBean
         boolean interrupted = false;
         for (TableOperation operationSource : active.getTableOperations())
         {
-            AbstractTableOperation.OperationProgress info = operationSource.getProgress();
+            TableOperation.Progress info = operationSource.getProgress();
             if ((info.operationType() == OperationType.VALIDATION) && !interruptValidation)
                 continue;
 
@@ -2429,7 +2429,7 @@ public class CompactionManager implements CompactionManagerMBean
     }
 
 
-    public List<AbstractTableOperation.OperationProgress> getSSTableTasks()
+    public List<TableOperation.Progress> getSSTableTasks()
     {
         return active.getTableOperations()
                      .stream()

@@ -35,6 +35,7 @@ import org.apache.commons.lang3.builder.HashCodeBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.cache.ChunkCache;
 import org.apache.cassandra.config.ParameterizedClass;
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.exceptions.ConfigurationException;
@@ -43,6 +44,7 @@ import org.apache.cassandra.io.compress.*;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.utils.PageAware;
 
 import static java.lang.String.format;
 
@@ -384,6 +386,10 @@ public final class CompressionParams
             int parsed = Integer.parseInt(chLengthKB);
             if (parsed > Integer.MAX_VALUE / 1024)
                 throw new ConfigurationException(format("Value of %s is too large (%s)", CHUNK_LENGTH_IN_KB,parsed));
+            if (parsed * 1024 < PageAware.PAGE_SIZE && ChunkCache.instance != null && ChunkCache.instance.isEnabled())
+                logger.warn("Chunk length {} KiB is smaller than the page size {} KiB. " +
+                            "This is not recommended as it will cause wasted chunk cache space.",
+                            parsed, PageAware.PAGE_SIZE / 1024);
             return 1024 * parsed;
         }
         catch (NumberFormatException e)

@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.index.sai.plan;
 
+import java.io.IOError;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -103,30 +104,54 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
     @SuppressWarnings("unchecked")
     public UnfilteredPartitionIterator search(ReadExecutionController executionController) throws RequestTimeoutException
     {
-        try
+        int retries = 0;
+        while (true)
         {
-            FilterTree filterTree = analyzeFilter();
-            Plan plan = controller.buildPlan();
-            Iterator<? extends PrimaryKey> keysIterator = controller.buildIterator(plan);
-
-            // Can't check for `command.isTopK()` because the planner could optimize sorting out
-            Orderer ordering = plan.ordering();
-            if (ordering == null)
+            try
             {
-                assert keysIterator instanceof KeyRangeIterator;
-                return new ResultRetriever((KeyRangeIterator) keysIterator, filterTree, controller, executionController, queryContext);
-            }
+                FilterTree filterTree = analyzeFilter();
+                Plan plan = controller.buildPlan();
+                Iterator<? extends PrimaryKey> keysIterator = controller.buildIterator(plan);
 
-            assert !(keysIterator instanceof KeyRangeIterator);
-            var scoredKeysIterator = (CloseableIterator<PrimaryKeyWithSortKey>) keysIterator;
-            var result = new ScoreOrderedResultRetriever(scoredKeysIterator, filterTree, controller,
-                                                         executionController, queryContext, command.limits().count());
-            return (UnfilteredPartitionIterator) new TopKProcessor(command).filter(result);
-        }
-        catch (Throwable t)
-        {
-            controller.abort();
-            throw t;
+                // Can't check for `command.isTopK()` because the planner could optimize sorting out
+                Orderer ordering = plan.ordering();
+                if (ordering == null)
+                {
+                    assert keysIterator instanceof KeyRangeIterator;
+                    return new ResultRetriever((KeyRangeIterator) keysIterator, filterTree, controller, executionController, queryContext);
+                }
+
+                assert !(keysIterator instanceof KeyRangeIterator);
+                var scoredKeysIterator = (CloseableIterator<PrimaryKeyWithSortKey>) keysIterator;
+                var result = new ScoreOrderedResultRetriever(scoredKeysIterator, filterTree, controller,
+                                                             executionController, queryContext, command.limits().count());
+                return (UnfilteredPartitionIterator) new TopKProcessor(command).filter(result);
+            }
+            catch (QueryView.Builder.MissingIndexException e)
+            {
+                // If an index was dropped while we were preparing the plan or between preparing the plan
+                // and creating the result retriever, we can retry without that index,
+                // because there may be other indexes that could be used to run the query.
+                // And if there are no good indexes left, we'd get a good contextual request error message.
+                if (e.context.isDropped() && retries < 8)
+                {
+                    logger.debug("Index " + e.context.getIndexName() + " dropped while preparing the query plan. Retrying.");
+                    retries++;
+                    continue;
+                }
+
+                // If we end up here, this is either a bug or a problem with an index (corrupted / missing components?).
+                controller.abort();
+                // Throwing IOError here because we want the coordinator to handle it as any other serious storage error
+                // and report it up to the user as failed query. It is better to fail than to return an incomplete
+                // result set.
+                throw new IOError(e);
+            }
+            catch (Throwable t)
+            {
+                controller.abort();
+                throw t;
+            }
         }
     }
 

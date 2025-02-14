@@ -788,7 +788,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
     private CompactionProgress mockProgress(UnifiedCompactionStrategy strategy, UUID id)
     {
         CompactionProgress progress = Mockito.mock(CompactionProgress.class);
-        when(progress.durationInNanos()).thenReturn(1000L*1000*1000);
+        when(progress.durationInMillis()).thenReturn(1000L);
         when(progress.outputDiskSize()).thenReturn(1L);
         when(progress.operationId()).thenReturn(id);
         return progress;
@@ -1976,6 +1976,10 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
                 }
             }
         }
+
+        Mockito.when(controller.getNumShards(anyDouble())).thenReturn(16);  // co-prime with counts to ensure multiple sstables fall in each shard
+        System.out.println(strategy.getMaxOverlapsMap());
+
         dataTracker.removeUnsafe(allSSTables);
     }
 

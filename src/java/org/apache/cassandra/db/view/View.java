@@ -27,6 +27,7 @@ import com.google.common.collect.Iterables;
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.cql3.selection.RawSelector;
 import org.apache.cassandra.cql3.selection.Selectable;
+import org.apache.cassandra.cql3.statements.SelectOptions;
 import org.apache.cassandra.cql3.statements.SelectStatement;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.rows.*;
@@ -175,7 +176,8 @@ public class View
                                                  definition.whereClause,
                                                  null,
                                                  null,
-                                                 null);
+                                                 null,
+                                                 SelectOptions.EMPTY);
 
             rawSelect.setBindVariables(Collections.emptyList());
 

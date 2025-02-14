@@ -24,6 +24,7 @@ import java.util.*;
 import com.google.common.collect.Sets;
 
 import org.apache.cassandra.cql3.PageSize;
+import org.apache.cassandra.db.filter.ANNOptions;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.cql3.ColumnIdentifier;
@@ -182,7 +183,13 @@ public abstract class AbstractReadCommandBuilder
         else if (op == Operator.CONTAINS_KEY)
             type = forKeys(type);
 
-        this.filter.add(def, op, bb(value, type));
+        ByteBuffer bb = bb(value, type);
+
+        if (op == Operator.ANN)
+            filter.addANNExpression(def, bb, ANNOptions.NONE);
+        else
+            filter.add(def, op, bb);
+
         return this;
     }
 

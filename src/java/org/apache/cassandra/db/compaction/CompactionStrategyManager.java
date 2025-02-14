@@ -24,7 +24,9 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.ConcurrentModificationException;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
@@ -1153,5 +1155,17 @@ public class CompactionStrategyManager implements CompactionStrategyContainer
     public void onCompleted(UUID id, boolean isSuccess)
     {
 
+    }
+
+    @Override
+    public Map<String, String> getMaxOverlapsMap()
+    {
+        Map<String, String> result = new LinkedHashMap<>();
+
+        for (AbstractStrategyHolder holder : holders)
+            for (LegacyAbstractCompactionStrategy strategy : holder.allStrategies())
+                result.putAll(strategy.getMaxOverlapsMap());
+
+        return result;
     }
 }

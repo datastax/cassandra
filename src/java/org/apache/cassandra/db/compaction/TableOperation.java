@@ -18,6 +18,8 @@
 
 package org.apache.cassandra.db.compaction;
 
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -44,7 +46,7 @@ public interface TableOperation
     /**
      * @return the progress of the operation, see {@link Progress}.
      */
-    AbstractTableOperation.OperationProgress getProgress();
+    TableOperation.Progress getProgress();
 
     /**
      * Interrupt the current operation if possible.
@@ -213,5 +215,32 @@ public interface TableOperation
          * @return a set of SSTables participating in this operation
          */
         Set<SSTableReader> sstables();
+
+        default String progressToString()
+        {
+            StringBuilder buff = new StringBuilder();
+            buff.append(String.format("%s(%s, %s / %s %s)", operationType(), operationId(), completed(), total(), unit()));
+            TableMetadata metadata = metadata();
+            if (metadata != null)
+            {
+                buff.append(String.format("@%s(%s, %s)", metadata.id, metadata.keyspace, metadata.name));
+            }
+            return buff.toString();
+        }
+
+        default Map<String, String> asMap()
+        {
+            Map<String, String> ret = new HashMap<>(8);
+            TableMetadata metadata = metadata();
+            ret.put(ID, metadata != null ? metadata.id.toString() : "");
+            ret.put(KEYSPACE, keyspace().orElse(null));
+            ret.put(COLUMNFAMILY, table().orElse(null));
+            ret.put(COMPLETED, Long.toString(completed()));
+            ret.put(TOTAL, Long.toString(total()));
+            ret.put(OPERATION_TYPE, operationType().toString());
+            ret.put(UNIT, unit().toString());
+            ret.put(OPERATION_ID, operationId() == null ? "" : operationId().toString());
+            return ret;
+        }
     }
 }
