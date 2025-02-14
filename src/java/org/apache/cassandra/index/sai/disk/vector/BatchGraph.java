@@ -27,6 +27,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ForkJoinPool;
@@ -126,13 +127,12 @@ public class BatchGraph implements Closeable, Accountable
     private final VectorType.VectorSerializer serializer;
     private final VectorSimilarityFunction similarityFunction;
     private final ChronicleMap<VectorFloat<?>, CompactionVectorPostings> postingsMap;
-    private final ChronicleMap<Integer, VectorFloat<?>> ravvMap;
+    private final ConcurrentHashMap<Integer, VectorFloat<?>> ravvMap;
     private final IndexComponents.ForWrite perIndexComponents;
     private final IndexContext context;
     private final boolean unitVectors;
     private final int postingsEntriesAllocated;
     private final File postingsFile;
-    private final File ravvFile;
     private final File termsFile;
     private final int dimension;
     private Structure postingsStructure;
@@ -192,12 +192,7 @@ public class BatchGraph implements Closeable, Accountable
                                          .createPersistedTo(postingsFile.toJavaIOFile());
 
         Component tmpRavvComponent = new Component(Component.Type.CUSTOM, "chronicleravv" + Descriptor.TMP_EXT);
-        ravvFile = dd.fileFor(tmpRavvComponent);
-        ravvMap = ChronicleMapBuilder.of(Integer.class, (Class<VectorFloat<?>>) (Class<?>) VectorFloat.class)
-                                        .averageValueSize(dimension * Float.BYTES)
-                                        .valueMarshaller(new NonReusingVectorFloatMarshaller())  // Ensure this correctly handles VectorFloat<?> serialization
-                                        .entries(postingsEntriesAllocated)
-                                        .createPersistedTo(ravvFile.toJavaIOFile());
+        ravvMap = new ConcurrentHashMap<>();
 
 
         termsFile = perIndexComponents.addOrGet(IndexComponentType.TERMS_DATA).file();
@@ -225,9 +220,7 @@ public class BatchGraph implements Closeable, Accountable
     {
         // this gets called in `finally` blocks, so use closeQuietly to avoid generating additional exceptions
         FileUtils.closeQuietly(postingsMap);
-        FileUtils.closeQuietly(ravvMap);
         Files.delete(postingsFile.toJavaIOFile().toPath());
-        Files.delete(ravvFile.toJavaIOFile().toPath());
     }
 
     public int size()
