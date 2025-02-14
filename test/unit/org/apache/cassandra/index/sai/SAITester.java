@@ -219,12 +219,14 @@ public class SAITester extends CQLTester
         Injections.deleteAll();
     }
 
+    /**
+     * Enable external execution of all queries because want to use reconciliation in SELECT queries so that we can
+     * simulate the application of the entire row filter in the coordinator node, even if unit tests are not multinode.
+     */
     @BeforeClass
-    public static void enableDistributedExecution()
+    public static void enableExternalExecution()
     {
-        // We want to use reconciliation in SELECT queries so that we can simulate the application of the entire row
-        // filter in the coordinator node, even if unit tests are not multinode.
-        CQLTester.enableDistributedExecution();
+        CQLTester.enableExternalExecution();
     }
 
     public static IndexContext createIndexContext(String name, AbstractType<?> validator, ColumnFamilyStore cfs)

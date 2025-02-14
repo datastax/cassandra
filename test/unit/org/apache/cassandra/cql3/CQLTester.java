@@ -109,7 +109,6 @@ import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.ReadCommand;
-import org.apache.cassandra.db.ReadExecutionController;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.BooleanType;
 import org.apache.cassandra.db.marshal.ByteType;
@@ -205,10 +204,12 @@ public abstract class CQLTester
     private static final User SUPER_USER = new User("cassandra", "cassandra");
 
     /**
-     * Whether to use distributed execution in {@link #execute(String, Object...)},
-     * so queries get full validation and go through reconciliation.
+     * Whether to use external execution in {@link #execute(String, Object...)}, so queries get full validation and go
+     * through reconciliation.
+     *
+     * @see #execute
      */
-    private static boolean distributedExecution = false;
+    private static boolean externalExecution = false;
 
     private static org.apache.cassandra.transport.Server server;
     private static JMXConnectorServer jmxServer;
@@ -1530,37 +1531,37 @@ public abstract class CQLTester
     }
 
     /**
-     * Enables distributed execution in {@link #execute(String, Object...)}, so queries get full validation and go
+     * Enables external execution in {@link #execute(String, Object...)}, so queries get full validation and go
      * through reconciliation.
      */
-    protected static void enableDistributedExecution()
+    protected static void enableExternalExecution()
     {
-        distributedExecution = true;
+        externalExecution = true;
     }
 
     /**
-     * Disables distributed execution in {@link #execute(String, Object...)}, so queries won't get full validation nor
+     * Disables external execution in {@link #execute(String, Object...)}, so queries won't get full validation nor
      * go through reconciliation.
      */
-    protected static void disableDistributedExecution()
+    protected static void disableExternalExecution()
     {
-        distributedExecution = false;
+        externalExecution = false;
     }
 
     /**
-     * Execute the specified query as either an internal query or a distributed query depending on the value of
-     * {@link #distributedExecution}.
-     * </p>
-     * See {@link #executeInternal(String, Object...)} and {@link #executeDistributed(String, Object...)}.
+     * Execute the specified query as either an internal query or an external query depending on the value of
+     * {@link #externalExecution}.
      *
      * @param query a CQL query
      * @param values the values to bind to the query
      * @return the query results
+     * @see #execute
+     * @see #executeInternal
      */
     public UntypedResultSet execute(String query, Object... values)
     {
-        return distributedExecution
-               ? executeDistributed(query, values)
+        return externalExecution
+               ? executeExternal(query, values)
                : executeInternal(query, values);
     }
 
@@ -1570,13 +1571,11 @@ public abstract class CQLTester
      * </p>
      * For the particular case of {@code SELECT} queries using secondary indexes, the skipping of reconciliation means
      * that the query {@link org.apache.cassandra.db.filter.RowFilter} might not be fully applied to the index results.
-     * </p>
-     * See {@link CQLStatement#executeLocally(QueryState, QueryOptions)} and
-     * {@link org.apache.cassandra.db.ReadQuery#execute(ConsistencyLevel, QueryState, long)}.
      *
      * @param query a CQL query
      * @param values the values to bind to the query
      * @return the query results
+     * @see CQLStatement#executeLocally
      */
     public UntypedResultSet executeInternal(String query, Object... values)
     {
@@ -1584,32 +1583,30 @@ public abstract class CQLTester
     }
 
     /**
-     * Execute the specified query as a distributed query meant for all the relevant nodes in the cluster, even if
+     * Execute the specified query as an external query meant for all the relevant nodes in the cluster, even if
      * {@link CQLTester} tests are single-node. This won't skip reconciliation and will do full validation.
      * </p>
      * For the particular case of {@code SELECT} queries using secondary indexes, applying reconciliation means that the
      * query {@link org.apache.cassandra.db.filter.RowFilter} will be fully applied to the index results.
-     * </p>
-     * See {@link CQLStatement#execute(QueryState, QueryOptions, long)} and
-     * {@link org.apache.cassandra.db.ReadQuery#executeInternal(ReadExecutionController)}.
      *
      * @param query a CQL query
      * @param values the values to bind to the query
      * @return the query results
+     * @see CQLStatement#execute
      */
-    public UntypedResultSet executeDistributed(String query, Object... values)
+    public UntypedResultSet executeExternal(String query, Object... values)
     {
         return executeFormattedQuery(formatQuery(query), true, values);
     }
 
     public UntypedResultSet executeFormattedQuery(String query, Object... values)
     {
-        return executeFormattedQuery(query, distributedExecution, values);
+        return executeFormattedQuery(query, externalExecution, values);
     }
 
-    public UntypedResultSet executeFormattedQuery(String query, boolean distributed, Object... values)
+    public UntypedResultSet executeFormattedQuery(String query, boolean external, Object... values)
     {        
-        if (distributed)
+        if (external)
             requireNetworkWithoutDriver();
         
         UntypedResultSet rs;
@@ -1622,7 +1619,7 @@ public abstract class CQLTester
 
             if (reusePrepared)
             {
-                rs = distributed
+                rs = external
                      ? QueryProcessor.execute(query, ConsistencyLevel.ONE, transformedValues)
                      : QueryProcessor.executeInternal(query, transformedValues);
 
@@ -1635,7 +1632,7 @@ public abstract class CQLTester
             }
             else
             {
-                rs = distributed
+                rs = external
                      ? QueryProcessor.executeOnce(query, ConsistencyLevel.ONE, transformedValues)
                      : QueryProcessor.executeOnceInternal(query, transformedValues);
             }
@@ -1643,9 +1640,11 @@ public abstract class CQLTester
         else
         {
             query = replaceValues(query, values);
+
             if (logger.isTraceEnabled())
                 logger.trace("Executing: {}", query);
-            rs = distributed
+
+            rs = external
                  ? QueryProcessor.executeOnce(query, ConsistencyLevel.ONE)
                  : QueryProcessor.executeOnceInternal(query);
         }
