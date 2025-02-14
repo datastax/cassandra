@@ -30,13 +30,13 @@ import org.apache.cassandra.index.sai.disk.format.Version;
 @RunWith(Parameterized.class)
 public class InetTest extends IndexingTypeSupport
 {
-    // TODO: Disables distributed execution because we know SAI indexing for inet works differently than RowFilter,
+    // TODO: Disables external execution because we know SAI indexing for inet works differently than RowFilter,
     //  which can wrongly discard rows in the coordinator. This is reported in CNDB-12978, and we should enable
     //  distributed execution again once we have a fix.
     @BeforeClass
-    public static void disableDistributedExecution()
+    public static void disableExternalExecution()
     {
-        CQLTester.disableDistributedExecution();
+        CQLTester.disableExternalExecution();
     }
 
     @Parameterized.Parameters(name = "version={0},dataset={1},wide={2},scenario={3}")
