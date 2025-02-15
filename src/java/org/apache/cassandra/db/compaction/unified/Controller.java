@@ -752,7 +752,7 @@ public abstract class Controller
             metrics = null;
         }
 
-        logger.debug("Stopped compaction controller {}", this);
+        logger.debug("Stopped compaction controller for {}.{}:  {}", keyspaceName, tableName, this);
     }
 
     /**

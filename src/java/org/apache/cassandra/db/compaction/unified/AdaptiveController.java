@@ -32,6 +32,7 @@ import org.apache.cassandra.db.compaction.UnifiedCompactionStrategy;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileReader;
+import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.MonotonicClock;
 import org.apache.cassandra.utils.Overlaps;
@@ -198,7 +199,8 @@ public class AdaptiveController extends Controller
         }
         catch (IOException e)
         {
-            logger.debug("No controller config file found. Using starting value instead.");
+            if (!SchemaConstants.isSystemKeyspace(keyspaceName))
+                logger.debug("No controller config file found. Using starting value instead.");
         }
         catch (ParseException e)
         {
