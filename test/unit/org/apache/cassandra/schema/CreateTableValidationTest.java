@@ -19,11 +19,13 @@
 package org.apache.cassandra.schema;
 
 import org.apache.cassandra.cql3.CQLTester;
+import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 
 import org.junit.Test;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.junit.Assert.fail;
 
@@ -98,6 +100,25 @@ public class CreateTableValidationTest extends CQLTester
     {
         expectedFailure("CREATE TABLE %s (pk int, ck1 int, ck2 int, v int, PRIMARY KEY ((pk),ck1, ck2)) WITH CLUSTERING ORDER BY (ck2 ASC);",
                         "Missing CLUSTERING ORDER for column ck1");
+    }
+
+    @Test
+    public void testCreatingTableWithLongName() throws Throwable
+    {
+        String keyspace = "g38373639353166362d356631322d343864652d393063362d653862616534343165333764_tpch";
+        String table = "test_create_k8yq1r75bpzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz";
+
+        execute(String.format("CREATE KEYSPACE %s with replication = " +
+                              "{ 'class' : 'SimpleStrategy', 'replication_factor' : 1 }",
+                              keyspace));
+        createTableMayThrow(String.format("CREATE TABLE %s.%s (" +
+                                           "key int PRIMARY KEY," +
+                                           "val int)", keyspace, table));
+
+        execute(String.format("INSERT INTO %s.%s (key,val) VALUES (1,1)", keyspace, table));
+        flush(keyspace, table);
+        UntypedResultSet result = execute(String.format("SELECT * from %s.%s", keyspace, table));
+        assertThat(result.size()).isEqualTo(1);
     }
 
     private void expectedFailure(String statement, String errorMsg)
