@@ -27,6 +27,7 @@ import org.apache.cassandra.db.compaction.UnifiedCompactionStrategy;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileReader;
+import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.MonotonicClock;
 import org.apache.cassandra.utils.Overlaps;
 import org.json.simple.JSONObject;
@@ -143,6 +144,11 @@ public class StaticController extends Controller
         catch (ParseException e)
         {
             logger.warn("Unable to parse saved flush size. Using starting value instead:", e);
+        }
+        catch (Throwable e)
+        {
+            logger.warn("Unable to read controller config file. Using starting value instead:", e);
+            JVMStabilityInspector.inspectThrowable(e);
         }
         return new StaticController(env,
                                     scalingParameters,
