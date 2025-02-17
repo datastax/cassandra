@@ -36,6 +36,7 @@ import javax.annotation.Nullable;
 import com.google.common.annotations.VisibleForTesting;
 
 import org.apache.cassandra.config.Config;
+import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -426,6 +427,7 @@ public abstract class Controller
         catch(Throwable e)
         {
             logger.warn("Unable to save current scaling parameters and flush size. Current controller configuration will be lost if a node restarts: ", e);
+            JVMStabilityInspector.inspectThrowable(e);
         }
     }
 
