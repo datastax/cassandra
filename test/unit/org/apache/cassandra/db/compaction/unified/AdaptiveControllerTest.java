@@ -103,16 +103,12 @@ public class AdaptiveControllerTest extends ControllerTest
         String longTableName = "test_create_k8yq1r75bpzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz";
         when(cfs.getTableName()).thenReturn(longTableName);
 
-        int[] scalingParameters = new int[30];
-        Arrays.fill(scalingParameters, 1);
-        AdaptiveController.storeOptions(keyspaceName, longTableName, scalingParameters, 10 << 20);
         Map<String, String> options = new HashMap<>();
         options.put(AdaptiveController.THRESHOLD, "0.15");
-        // Call fromOptions on long table name, which tries to write options into a file
+        // Calls fromOptions on long table name, which tries to read options from a file.
+        // The too long file name should not lead to a failure.
         Controller controller = testFromOptions(true, options);
         assertTrue(controller instanceof AdaptiveController);
-        // Test that writing the file failed
-        assert !Controller.getControllerConfigPath(keyspaceName, longTableName).exists();
 
         when(cfs.getTableName()).thenReturn(tableName);
     }
@@ -136,8 +132,6 @@ public class AdaptiveControllerTest extends ControllerTest
 
         Controller controller = testFromOptions(true, options);
         assertTrue(controller instanceof AdaptiveController);
-        // Controls that fromOptions successfully written options into a file
-        assert Controller.getControllerConfigPath(keyspaceName, tableName).exists();
 
         for (int i = 0; i < 10; i++)
         {
