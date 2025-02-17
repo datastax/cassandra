@@ -86,6 +86,7 @@ public class AdaptiveControllerTest extends ControllerTest
                                       Controller.DEFAULT_RESERVED_THREADS_TYPE,
                                       Controller.DEFAULT_OVERLAP_INCLUSION_METHOD,
                                       true,
+                                      false,
                                       interval,
                                       minW,
                                       maxW,
