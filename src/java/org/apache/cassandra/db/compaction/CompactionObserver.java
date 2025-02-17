@@ -19,6 +19,7 @@
 package org.apache.cassandra.db.compaction;
 
 import java.util.UUID;
+import javax.annotation.Nullable;
 
 /**
  * An observer of a compaction operation. It is notified when a compaction operation is started.
@@ -40,7 +41,7 @@ public interface CompactionObserver
      * Indicates that a compaction with the given id has completed.
      * <p/>
      * @param id  the id of the compaction
-     * @param isSuccess true if compaction finished without any exceptions
+     * @param error error if compaction failed with any exceptions; or null if completed successfully
      */
-    void onCompleted(UUID id, boolean isSuccess);
+    void onCompleted(UUID id, @Nullable Throwable error);
 }

@@ -120,7 +120,7 @@ abstract class AbstractCompactionStrategy implements CompactionStrategy
     }
 
     @Override
-    public void onCompleted(UUID id, boolean isSuccess)
+    public void onCompleted(UUID id, Throwable err)
     {
         backgroundCompactions.onCompleted(this, id);
     }
