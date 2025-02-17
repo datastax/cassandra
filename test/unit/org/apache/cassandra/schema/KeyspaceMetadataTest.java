@@ -35,7 +35,9 @@ import org.apache.cassandra.cql3.functions.FunctionName;
 import org.apache.cassandra.cql3.functions.UDAggregate;
 import org.apache.cassandra.cql3.functions.UDFunction;
 import org.apache.cassandra.cql3.functions.UserFunction;
+import org.apache.cassandra.cql3.functions.types.ParseUtils;
 import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.UserType;
 import org.apache.cassandra.service.StorageService;
@@ -45,6 +47,7 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.psjava.util.AssertStatus.assertTrue;
 
 public class KeyspaceMetadataTest extends CQLTester
@@ -172,6 +175,26 @@ public class KeyspaceMetadataTest extends CQLTester
         assertNotNull(original);
         Predicate<Boolean> isCdcDisabled = cdc -> !cdc;
         checkTransformedParams(original, transformed, params -> params.cdc, isCdcDisabled);
+    }
+
+    @Test
+    public void testUnsafeKeyspaceName()
+    {
+        String badKeyspaceName0 = "\"non-alphanumeric\"";
+
+        assertThatExceptionOfType(InvalidRequestException.class)
+                .isThrownBy(() -> createTableMayThrow(String.format("CREATE KEYSPACE %s with replication = { 'class' : 'SimpleStrategy', 'replication_factor' : 1 }",
+                                                                    badKeyspaceName0)))
+                .withMessageContaining(String.format("Keyspace name must not be empty and must contain alphanumeric or underscore characters only (got \"%s\")",
+                                                     ParseUtils.unDoubleQuote(badKeyspaceName0)));
+
+        String badKeyspaceName1 = "test_create_k8yq1r75bpzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz";
+
+        assertThatExceptionOfType(InvalidRequestException.class)
+                .isThrownBy(() -> createTableMayThrow(String.format("CREATE KEYSPACE %s with replication = { 'class' : 'SimpleStrategy', 'replication_factor' : 1 }",
+                                                                    badKeyspaceName1)))
+                .withMessageContaining(String.format("Keyspace name must not be more than %s characters long",
+                                                     SchemaConstants.NAME_LENGTH));
     }
 
     private void checkKeyspaceRenaming(KeyspaceMetadata original, String newName)

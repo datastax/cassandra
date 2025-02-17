@@ -68,6 +68,7 @@ import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.Keyspaces;
 import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
 import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableParams;
 import org.apache.cassandra.schema.Types;
@@ -161,6 +162,10 @@ public final class CreateTableStatement extends AlterSchemaStatement
     public void validate(ClientState state)
     {
         super.validate(state);
+
+        if (!state.isInternal && tableName.length() > SchemaConstants.NAME_LENGTH - keyspaceName.length())
+            throw ire("Keyspace and table names combined shouldn't be more than %s characters long (got keyspace of %s chars and table of %s chars for %s.%s)",
+                      SchemaConstants.NAME_LENGTH, keyspaceName.length(), tableName.length(), keyspaceName, tableName);
 
         // Guardrail on table properties
         Guardrails.tableProperties.guard(attrs.updatedProperties(), attrs::removeProperty, state);
