@@ -18,7 +18,10 @@
  */
 package org.apache.cassandra.schema;
 
+import com.datastax.driver.core.exceptions.InvalidQueryException;
 import org.apache.cassandra.cql3.CQLTester;
+import org.apache.cassandra.cql3.UntypedResultSet;
+import org.apache.cassandra.cql3.functions.types.ParseUtils;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 
@@ -105,7 +108,20 @@ public class CreateTableValidationTest extends CQLTester
     }
 
     @Test
-    public void testCreatingTableWithLongName() throws Throwable
+    public void failCreatingNewTableWithLongName()
+    {
+        String table = "test_create_k8yq1r75bpzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz";
+        assertThatExceptionOfType(InvalidQueryException.class)
+        .isThrownBy(() -> executeNet(String.format("CREATE TABLE \"%s\".%s (" +
+                                                   "key int PRIMARY KEY," +
+                                                   "val int)",
+                                                   KEYSPACE, table)))
+        .withMessageContaining(String.format("Keyspace and table names combined shouldn't be more than %s characters long (got keyspace of %s chars and table of %s chars for %s.%s)",
+                                             SchemaConstants.NAME_LENGTH, KEYSPACE.length(), table.length(), KEYSPACE, table));
+    }
+
+    @Test
+    public void testCreatingInternalTableWithLongName() throws Throwable
     {
         int tableIdSuffix = "-1b255f4def2540a60000000000000000".length();
         String keyspaceName = "k".repeat(NAME_LENGTH);
@@ -138,6 +154,25 @@ public class CreateTableValidationTest extends CQLTester
                              String.format("CREATE TABLE %s.\"d-3\" (key int PRIMARY KEY, val int)", KEYSPACE));
         assertInvalidMessage(String.format("%s.    : Table name must not be empty or not contain non-alphanumeric-underscore characters (got \"    \")", KEYSPACE),
                              String.format("CREATE TABLE %s.\"    \" (key int PRIMARY KEY, val int)", KEYSPACE));
+
+        String keyspace = "\"38373639353166362d356631322d343864652d393063362d653862616534343165333764_tpch\"";
+        String table = "test_create_k8yq1r75bpzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz";
+
+        execute(String.format("CREATE KEYSPACE %s with replication = " +
+                              "{ 'class' : 'SimpleStrategy', 'replication_factor' : 1 }",
+                              keyspace));
+        createTableMayThrow(String.format("CREATE TABLE %s.%s (" +
+                                           "key int PRIMARY KEY," +
+                                           "val int)", keyspace, table));
+
+        execute(String.format("INSERT INTO %s.%s (key,val) VALUES (1,1)", keyspace, table));
+        flush(ParseUtils.unDoubleQuote(keyspace), table);
+        UntypedResultSet result = execute(String.format("SELECT * from %s.%s", keyspace, table));
+        assertThat(result.size()).isEqualTo(1);
+        
+        assertThatExceptionOfType(ConfigurationException.class)
+            .isThrownBy(() -> createTableMayThrow(String.format("CREATE TABLE %s.\"d-3\" (key int PRIMARY KEY, val int)", KEYSPACE)))
+            .withMessageContaining("Table name must not be empty or contain non-alphanumeric-underscore characters (got \"d-3\")");
     }
 
     private void expectedFailure(String statement, String errorMsg)
