@@ -119,11 +119,10 @@ short=$(echo "${jvmver}" | cut -c1-2)
 JAVA_VERSION=22
 if [ "$short" = "11" ]  ; then
      JAVA_VERSION=11
-elif [ "$JVM_VERSION" \< "17" ] ; then
-    echo "DSE DB 4.0 requires Java 11 or higher."
-    exit 1;
 elif [ "$short" = "17" ]  ; then
      JAVA_VERSION=17
+elif [ "$short" = "21" ]  ; then
+     JAVA_VERSION=21
 elif [ "$JVM_VERSION" \< "22" ] ; then
     echo "DSE DB 4.0 requires Java 11 or higher."
     exit 1;

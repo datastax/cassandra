@@ -83,18 +83,14 @@ JVM_VERSION=${jvmver%_*}
 short=$(echo "${jvmver}" | cut -c1-2)
 
 JAVA_VERSION=22
-
-if [ "$JVM_VERSION" \< "11" ] ; then
-    echo "Cassandra 4.0 requires either Java 11 or newer."
-    exit 1;
-elif [ "$short" = "11" ] ; then
+if [ "$short" = "11" ] ; then
      JAVA_VERSION=11
-elif [ "$JVM_VERSION" \< "17" ] ; then
-     echo "Cassandra 4.0 requires Java 11 or Java 17(or newer)."
 elif [ "$short" = "17" ] ; then
      JAVA_VERSION=17
+elif [ "$short" = "21" ] ; then
+     JAVA_VERSION=21
 elif [ "$JVM_VERSION" \< "22" ] ; then
-    echo "Cassandra requires Java 11 or Java 22(or newer)."
+    echo "DSE DB 4.0 requires Java 11 or higher."
 fi
 
 jvm=`echo "$java_ver_output" | grep -A 1 '[openjdk|java] version' | awk 'NR==2 {print $1}'`
