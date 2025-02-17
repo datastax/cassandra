@@ -327,9 +327,6 @@ public class AdaptiveController extends Controller
             parseScalingParameters(staticScalingFactors);
         else if (staticScalingParameters != null)
             parseScalingParameters(staticScalingParameters);
-        String vectorScalingParameters = options.remove(VECTOR_SCALING_PARAMETERS_OPTION);
-        if (vectorScalingParameters != null)
-            throw new ConfigurationException(String.format("%s option is not supported with Adaptive UCS", VECTOR_SCALING_PARAMETERS_OPTION));
         s = options.remove(MIN_SCALING_PARAMETER);
         if (s != null)
             minScalingParameter = Integer.parseInt(s);

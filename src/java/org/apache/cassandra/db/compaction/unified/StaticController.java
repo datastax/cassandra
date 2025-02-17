@@ -47,7 +47,7 @@ public class StaticController extends Controller
      * Higher indexes will use the value of the last index with a W specified.
      */
     private static final String DEFAULT_STATIC_SCALING_PARAMETERS = getSystemProperty(SCALING_PARAMETERS_OPTION, "T4");
-    private static final String VECTOR_DEFAULT_STATIC_SCALING_PARAMETERS = System.getProperty(PREFIX + VECTOR_SCALING_PARAMETERS_OPTION, "-8");
+    static final String DEFAULT_VECTOR_STATIC_SCALING_PARAMETERS = getSystemProperty(VECTOR_PREFIX + SCALING_PARAMETERS_OPTION, "L10");
     private final int[] scalingParameters;
 
     @VisibleForTesting // comp. simulation
@@ -126,9 +126,9 @@ public class StaticController extends Controller
         if (options.containsKey(STATIC_SCALING_FACTORS_OPTION))
             scalingParameters = parseScalingParameters(options.get(STATIC_SCALING_FACTORS_OPTION));
         else
-            scalingParameters = parseScalingParameters(options.getOrDefault(SCALING_PARAMETERS_OPTION, DEFAULT_STATIC_SCALING_PARAMETERS));
-
-        int[] vectorScalingParameters = parseScalingParameters(options.getOrDefault(VECTOR_SCALING_PARAMETERS_OPTION, VECTOR_DEFAULT_STATIC_SCALING_PARAMETERS));
+            scalingParameters = parseScalingParameters(options.getOrDefault(SCALING_PARAMETERS_OPTION,
+                                                                            useVectorOptions ? DEFAULT_VECTOR_STATIC_SCALING_PARAMETERS
+                                                                                             : DEFAULT_STATIC_SCALING_PARAMETERS));
 
         long currentFlushSize = flushSizeOverride;
 
@@ -157,7 +157,7 @@ public class StaticController extends Controller
             JVMStabilityInspector.inspectThrowable(e);
         }
         return new StaticController(env,
-                                    useVectorOptions ? vectorScalingParameters : scalingParameters,
+                                    scalingParameters,
                                     survivalFactors,
                                     dataSetSize,
                                     minSSTableSize,
@@ -190,9 +190,6 @@ public class StaticController extends Controller
             parseScalingParameters(factors);
         if (parameters != null && factors != null)
             throw new ConfigurationException(String.format("Either '%s' or '%s' should be used, not both", SCALING_PARAMETERS_OPTION, STATIC_SCALING_FACTORS_OPTION));
-        String vectorParameters = options.remove(VECTOR_SCALING_PARAMETERS_OPTION);
-        if (vectorParameters != null)
-            parseScalingParameters(vectorParameters);
         return options;
     }
 

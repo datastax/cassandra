@@ -29,7 +29,6 @@ import org.apache.cassandra.db.compaction.UnifiedCompactionStrategy;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.locator.ReplicationFactor;
 import org.apache.cassandra.schema.SchemaConstants;
-import org.apache.cassandra.utils.FBUtilities;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
@@ -42,13 +41,6 @@ import static org.mockito.Mockito.when;
 public class StaticControllerTest extends ControllerTest
 {
     static final int[] Ws = new int[] { 30, 2, 0, -6};
-    static final int[] VectorWs = new int[] {-8, -8, -8, -8};
-    static final int vectorBaseShardCount = 1;
-    static final double vectorSstableGrowthModifier = 1;
-    static final int vectorReservedThreads = Integer.MAX_VALUE;
-    static final int vectorScalingParameter = -8;
-    static final String vectorMinSSTableSize = "1024MiB";
-    static final String  vectorTargetSSTableSize = "5GiB";
 
     @Test
     public void testFromOptions()
@@ -72,17 +64,6 @@ public class StaticControllerTest extends ControllerTest
                             .collect(Collectors.joining(","));
         options.put(StaticController.SCALING_PARAMETERS_OPTION, wStr);
         options.put(Controller.SSTABLE_GROWTH_OPTION, "0");
-    }
-
-    private static void addVectorOptions(Map<String, String> options)
-    {
-        options.put(Controller.VECTOR_BASE_SHARD_COUNT_OPTION, String.valueOf(vectorBaseShardCount));
-        options.put(Controller.VECTOR_SSTABLE_GROWTH_OPTION, String.valueOf(vectorSstableGrowthModifier));
-        options.put(Controller.VECTOR_RESERVED_THREADS_OPTION, String.valueOf(vectorReservedThreads));
-        options.put(Controller.VECTOR_SCALING_PARAMETERS_OPTION, String.valueOf(vectorScalingParameter));
-        options.put(Controller.VECTOR_MIN_SSTABLE_SIZE_OPTION, vectorMinSSTableSize);
-        options.put(Controller.VECTOR_TARGET_SSTABLE_SIZE_OPTION, vectorTargetSSTableSize);
-        options.put(Controller.OVERRIDE_UCS_CONFIG_FOR_VECTOR_TABLES_OPTION, String.valueOf(true));
     }
 
     @Test
@@ -122,27 +103,31 @@ public class StaticControllerTest extends ControllerTest
     @Test
     public void testFromOptionsVectorTable()
     {
+        useVector = true;
         Map<String, String> options = new HashMap<>();
-        addOptions(false, options);
-        addVectorOptions(options);
+        Controller controller = Controller.fromOptions(cfs, new HashMap<>());
+        assertNotNull(controller);
+        assertNotNull(controller.toString());
 
-        Controller controller = testFromOptions(false, options);
+        assertEquals(Controller.DEFAULT_VECTOR_BASE_SHARD_COUNT, controller.baseShardCount);
+        assertEquals(Controller.DEFAULT_VECTOR_SSTABLE_GROWTH, controller.sstableGrowthModifier, 0.01);
+        assertEquals(Controller.DEFAULT_VECTOR_MIN_SSTABLE_SIZE, controller.minSSTableSize);
+        assertEquals(Controller.DEFAULT_VECTOR_RESERVED_THREADS, controller.getReservedThreads());
+        assertEquals(Controller.DEFAULT_VECTOR_TARGET_SSTABLE_SIZE, controller.getTargetSSTableSize());
+        int[] vectorScalingParameter = Controller.parseScalingParameters(StaticController.DEFAULT_VECTOR_STATIC_SCALING_PARAMETERS);
+        for (int i = 0; i < vectorScalingParameter.length; i++)
+            assertEquals(vectorScalingParameter[i], controller.getScalingParameter(i));
+
+        addOptions(false, options);
+
+        // Test overrides still work.
+        controller = testFromOptionsVector(false, options);
         assertTrue(controller instanceof StaticController);
 
         for (int i = 0; i < Ws.length; i++)
             assertEquals(Ws[i], controller.getScalingParameter(i));
 
         assertEquals(Ws[Ws.length-1], controller.getScalingParameter(Ws.length));
-
-        controller = testFromOptionsVector(false, options);
-
-        assertEquals(vectorBaseShardCount, controller.baseShardCount);
-        assertEquals(vectorSstableGrowthModifier, controller.sstableGrowthModifier, 0.01);
-        assertEquals(FBUtilities.parseHumanReadableBytes(vectorMinSSTableSize), controller.minSSTableSize);
-        assertEquals(vectorReservedThreads, controller.getReservedThreads());
-        assertEquals(FBUtilities.parseHumanReadableBytes(vectorTargetSSTableSize), controller.getTargetSSTableSize());
-        for (int i = 0; i < Ws.length; i++)
-            assertEquals(vectorScalingParameter, controller.getScalingParameter(i));
     }
 
     @Test
@@ -152,29 +137,6 @@ public class StaticControllerTest extends ControllerTest
         addOptions(false, options);
 
         super.testValidateOptions(options, false);
-    }
-
-    @Test
-    public void testValidateVectorOptions()
-    {
-        Map<String, String> options = new HashMap<>();
-        options.put(Controller.VECTOR_BASE_SHARD_COUNT_OPTION, "-1");
-        assertThrows(ConfigurationException.class, () -> Controller.validateOptions(options));
-        options.clear();
-        options.put(Controller.VECTOR_SSTABLE_GROWTH_OPTION, "-1");
-        assertThrows(ConfigurationException.class, () -> Controller.validateOptions(options));
-        options.clear();
-        options.put(Controller.VECTOR_RESERVED_THREADS_OPTION, "-1");
-        assertThrows(ConfigurationException.class, () -> Controller.validateOptions(options));
-        options.clear();
-        options.put(Controller.VECTOR_MIN_SSTABLE_SIZE_OPTION, "10GiB");
-        assertThrows(ConfigurationException.class, () -> Controller.validateOptions(options));
-        options.clear();
-        options.put(Controller.VECTOR_TARGET_SSTABLE_SIZE_OPTION, "-1MiB");
-        assertThrows(ConfigurationException.class, () -> Controller.validateOptions(options));
-        options.clear();
-        options.put(Controller.OVERRIDE_UCS_CONFIG_FOR_VECTOR_TABLES_OPTION, "not true");
-        assertThrows(ConfigurationException.class, () -> Controller.validateOptions(options));
     }
 
     @Test
