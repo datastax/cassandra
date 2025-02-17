@@ -363,6 +363,7 @@
         <string>--add-opens java.base/java.net=ALL-UNNAMED</string>
         <string>--add-opens java.base/java.nio=ALL-UNNAMED</string>
         <string>--add-opens java.base/java.nio.file.spi=ALL-UNNAMED</string>
+        <string>--add-opens java.base/java.security=ALL-UNNAMED</string>
         <string>--add-opens java.base/java.util=ALL-UNNAMED</string>
         <string>--add-opens java.base/java.util.concurrent.locks=ALL-UNNAMED</string>
         <string>--add-opens java.base/jdk.internal.loader=ALL-UNNAMED</string>
