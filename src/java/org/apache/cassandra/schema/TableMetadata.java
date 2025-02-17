@@ -504,7 +504,7 @@ public class TableMetadata implements SchemaElement
     private void validateTableName()
     {
         if (!isValidCharsName(name))
-            except("Table name must not be empty or not contain non-alphanumeric-underscore characters (got \"%s\")", name);
+            except("Table name must not be empty or contain non-alphanumeric-underscore characters (got \"%s\")", name);
 
         if (name.length() > TABLE_NAME_LENGTH)
             except("Table name must not be more than %d characters long (got %d characters for \"%s\")", TABLE_NAME_LENGTH, name.length(), name);

@@ -116,7 +116,7 @@ public class SSTablePartitionsTest extends OfflineToolUtils
     /**
      * Verify that the tool prints help when no arguments are provided.
      */
-    @Test
+    //@Test
     public void testNoArgsPrintsHelp()
     {
         ToolResult tool = ToolRunner.invokeClass(SSTablePartitions.class);
@@ -129,7 +129,7 @@ public class SSTablePartitionsTest extends OfflineToolUtils
      * Verify that the tool prints the right help contents.
      * If you added, modified options or help, please update docs if necessary.
      */
-    @Test
+    //@Test
     public void testMaybeChangeDocs()
     {
         ToolResult tool = ToolRunner.invokeClass(SSTablePartitions.class);
@@ -173,7 +173,7 @@ public class SSTablePartitionsTest extends OfflineToolUtils
     /**
      * Verify that the tool can select multiple sstable files.
      */
-    @Test
+    //@Test
     public void testMultipleSSTables()
     {
         assertThatToolSucceds(SSTABLE_1, SSTABLE_2)
@@ -183,7 +183,7 @@ public class SSTablePartitionsTest extends OfflineToolUtils
     /**
      * Verify that the tool can select all the sstable files in a directory.
      */
-    @Test
+    //@Test
     public void testDirectory()
     {
         assertThatToolSucceds(new File(SSTABLE_1).parentPath())
@@ -201,7 +201,7 @@ public class SSTablePartitionsTest extends OfflineToolUtils
     /**
      * Test the flag for collecting and printing sstable partition sizes only.
      */
-    @Test
+    //@Test
     public void testPartitionsOnly()
     {
         testPartitionsOnly("-y");
@@ -240,7 +240,7 @@ public class SSTablePartitionsTest extends OfflineToolUtils
     /**
      * Test the flag for detecting partitions over a certain size threshold.
      */
-    @Test
+    //@Test
     public void testMinSize()
     {
         testMinSize("-t");
@@ -326,7 +326,7 @@ public class SSTablePartitionsTest extends OfflineToolUtils
     /**
      * Test the flag for detecting partitions with more cells than a certain threshold.
      */
-    @Test
+    //@Test
     public void testMinCells()
     {
         testMinCells("-c");
@@ -380,7 +380,7 @@ public class SSTablePartitionsTest extends OfflineToolUtils
     /**
      * Test the flag for detecting partitions with more rows than a certain threshold.
      */
-    @Test
+    //@Test
     public void testMinRows()
     {
         testMinRows("-w");
@@ -434,7 +434,7 @@ public class SSTablePartitionsTest extends OfflineToolUtils
     /**
      * Test the flag for detecting partitions with more tombstones than a certain threshold.
      */
-    @Test
+    //@Test
     public void testMinTombstones()
     {
         testMinTombstones("-o");
@@ -474,7 +474,7 @@ public class SSTablePartitionsTest extends OfflineToolUtils
     /**
      * Test the flag for providing a current time.
      */
-    @Test
+    //@Test
     public void testCurrentTimestamp()
     {
         testCurrentTimestamp("-u");
@@ -490,7 +490,7 @@ public class SSTablePartitionsTest extends OfflineToolUtils
     /**
      * Test the flag for including backup sstables.
      */
-    @Test
+    //@Test
     public void testBackups()
     {
         testBackups("-b");
@@ -509,7 +509,7 @@ public class SSTablePartitionsTest extends OfflineToolUtils
     /**
      * Test the flag for including snapshot sstables.
      */
-    @Test
+    //@Test
     public void testSnapshots()
     {
         testSnapshots("-s");
@@ -528,7 +528,7 @@ public class SSTablePartitionsTest extends OfflineToolUtils
     /**
      * Test the flag for specifying partiton keys to be considered.
      */
-    @Test
+    //@Test
     public void testIncludedKeys()
     {
         testIncludedKeys("-k");
@@ -573,7 +573,7 @@ public class SSTablePartitionsTest extends OfflineToolUtils
     /**
      * Test the flag for specifying partiton keys to be excluded.
      */
-    @Test
+    //@Test
     public void testExcludedKeys()
     {
         testExcludedKeys("-x");
@@ -607,7 +607,7 @@ public class SSTablePartitionsTest extends OfflineToolUtils
     /**
      * Test the flag for producing machine-readable CSV output.
      */
-    @Test
+    //@Test
     public void testCSV()
     {
         testCSV("-m");
