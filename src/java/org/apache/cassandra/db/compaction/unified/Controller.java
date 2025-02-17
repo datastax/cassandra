@@ -423,7 +423,7 @@ public abstract class Controller
 
             logger.debug(String.format("Writing current scaling parameters and flush size to file %s: %s", f.toPath().toString(), jsonObject));
         }
-        catch(IOException e)
+        catch(Throwable e)
         {
             logger.warn("Unable to save current scaling parameters and flush size. Current controller configuration will be lost if a node restarts: ", e);
         }

@@ -178,6 +178,28 @@ public class CompactionControllerConfigTest extends TestBaseImpl
     }
 
     @Test
+    public void testStoreLongNameControllerConfig() throws Throwable
+    {
+        try (Cluster cluster = init(Cluster.build(1).start()))
+        {
+            cluster.get(1).runOnInstance(() ->
+                                         {
+                                             String keyspaceName = "keyspace_name";
+                                             String longTableName = "test_create_k8yq1r75bpzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz";
+                                             CompactionManager.storeControllerConfig();
+
+                                             // try to store controller config for a table with a long name
+                                             int[] scalingParameters = new int[32];
+                                             Arrays.fill(scalingParameters, 5);
+                                             AdaptiveController.storeOptions(keyspaceName, longTableName, scalingParameters, 10 << 20);
+
+                                             // verify that the file wasn't created
+                                             assert !Controller.getControllerConfigPath(keyspaceName, longTableName).exists();
+                                         });
+        }
+    }
+
+    @Test
     public void testVectorControllerConfig() throws Throwable
     {
         vectorControllerConfig(true);
@@ -234,7 +256,6 @@ public class CompactionControllerConfigTest extends TestBaseImpl
                                                           controller2.getTargetSSTableSize());
                                              assertEquals(0, controller2.getScalingParameter(0));
                                          });
-
         }
     }
 }
