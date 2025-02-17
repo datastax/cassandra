@@ -178,17 +178,17 @@ public class CompactionControllerConfigTest extends TestBaseImpl
     }
 
     @Test
-    public void testStoreLongNameControllerConfig() throws Throwable
+    public void testStoreLongTableName() throws Throwable
     {
         try (Cluster cluster = init(Cluster.build(1).start()))
         {
             cluster.get(1).runOnInstance(() ->
                                          {
-                                             String keyspaceName = "g38373639353166362d356631322d343864652d393063362d653862616534343165333764_tpch";
-                                             String longTableName = "test_create_k8yq1r75bpzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz";
                                              CompactionManager.storeControllerConfig();
 
                                              // try to store controller config for a table with a long name
+                                             String keyspaceName = "g38373639353166362d356631322d343864652d393063362d653862616534343165333764_tpch";
+                                             String longTableName = "test_create_k8yq1r75bpzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz";
                                              int[] scalingParameters = new int[32];
                                              Arrays.fill(scalingParameters, 5);
                                              AdaptiveController.storeOptions(keyspaceName, longTableName, scalingParameters, 10 << 20);
