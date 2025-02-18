@@ -830,7 +830,6 @@
           <dependency groupId="io.netty" artifactId="netty-transport-native-epoll" version="4.1.117.Final"/>
           <dependency groupId="io.netty" artifactId="netty-transport-native-epoll" version="4.1.117.Final" classifier="linux-x86_64"/>
           <dependency groupId="io.netty" artifactId="netty-transport-native-epoll" version="4.1.117.Final" classifier="linux-aarch_64"/>
-          <dependency groupId="org.bouncycastle" artifactId="bcpkix-jdk18on" version="1.80"/>
           <dependency groupId="net.openhft" artifactId="chronicle-queue" version="${chronicle-queue.version}">
             <exclusion groupId="com.sun" artifactId="tools" />
           </dependency>
@@ -1071,7 +1070,6 @@
         <dependency groupId="io.netty" artifactId="netty-transport-native-epoll"/>
         <dependency groupId="io.netty" artifactId="netty-transport-native-epoll" classifier="linux-x86_64"/>
         <dependency groupId="io.netty" artifactId="netty-transport-native-epoll" classifier="linux-aarch_64"/>
-        <dependency groupId="org.bouncycastle" artifactId="bcpkix-jdk18on"/>
         <dependency groupId="net.openhft" artifactId="chronicle-queue"/>
         <dependency groupId="net.openhft" artifactId="chronicle-core"/>
         <dependency groupId="net.openhft" artifactId="chronicle-bytes"/>
