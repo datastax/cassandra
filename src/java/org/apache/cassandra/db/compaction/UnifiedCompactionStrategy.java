@@ -30,6 +30,7 @@ import java.util.TreeMap;
 import java.util.function.BiPredicate;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
@@ -215,14 +216,24 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
     /// same effect as compacting all of the sstables in the arena together in one operation.
     public synchronized List<CompactionAggregate.UnifiedAggregate> getMaximalAggregates()
     {
-        maybeUpdateSelector();
+        return getMaximalAggregates(realm.getLiveSSTables());
+    }
+
+    public synchronized List<CompactionAggregate.UnifiedAggregate> getMaximalAggregates(Collection<? extends CompactionSSTable> sstables)
+    {
+        maybeUpdateSelector(); // must be called before computing compaction arenas
+        return getMaximalAggregatesWithArenas(getCompactionArenas(sstables, UnifiedCompactionStrategy::isSuitableForCompaction));
+    }
+
+    private synchronized List<CompactionAggregate.UnifiedAggregate> getMaximalAggregatesWithArenas(Collection<Arena> compactionArenas)
+    {
         // The aggregates are split into arenas by repair status and disk, as well as in non-overlapping sections to
         // enable some parallelism and efficient use of extra space. The result will be split across shards according to
         // its density.
         // Depending on the parallelism, the operation may require up to 100% extra space to complete.
         List<CompactionAggregate.UnifiedAggregate> aggregates = new ArrayList<>();
 
-        for (Arena arena : getCompactionArenas(realm.getLiveSSTables(), UnifiedCompactionStrategy::isSuitableForCompaction))
+        for (Arena arena : compactionArenas)
         {
             // If possible, we want to issue separate compactions for non-overlapping sets of sstables, to allow
             // for smaller extra space requirements. However, if the sharding configuration has changed, a major
