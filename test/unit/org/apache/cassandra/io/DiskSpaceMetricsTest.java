@@ -49,6 +49,7 @@ import org.apache.cassandra.utils.ExpMovingAverage;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.MovingAverage;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.UNSAFE_SYSTEM;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.assertEquals;
 import static org.psjava.util.AssertStatus.assertTrue;
@@ -61,6 +62,8 @@ public class DiskSpaceMetricsTest extends CQLTester
     @Test
     public void baseline() throws Throwable
     {
+        // CNDB-10289 sets this to true in build.xml, but that prevents SystemKeyspace.forceBlockingFlush
+        UNSAFE_SYSTEM.setBoolean(false);
         createTable("CREATE TABLE %s (pk bigint, PRIMARY KEY (pk)) WITH min_index_interval=1");
         ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
 
@@ -70,6 +73,7 @@ public class DiskSpaceMetricsTest extends CQLTester
         // create 100 sstables
         for (int i = 0; i < 100; i++)
             insert(cfs, i);
+
         assertDiskSpaceEqual(cfs);
     }
 
