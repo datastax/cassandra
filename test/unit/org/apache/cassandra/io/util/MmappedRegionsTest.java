@@ -149,8 +149,8 @@ public class MmappedRegionsTest
     @Test
     public void testSmallSegmentSize() throws Exception
     {
-        MmappedRegions.MAX_SEGMENT_SIZE = 1024;
         int bufSize = 1024;
+        MmappedRegions.MAX_SEGMENT_SIZE = 1024;
 
         ByteBuffer buffer = allocateBuffer(4096);
         try (ChannelProxy channel = new ChannelProxy(writeFile("testSmallSegmentSize", buffer));
@@ -202,9 +202,9 @@ public class MmappedRegionsTest
     public void testAllocRegions() throws Exception
     {
         MmappedRegions.MAX_SEGMENT_SIZE = 1024;
+        int bufSize = 1024;
 
         ByteBuffer buffer = allocateBuffer(MmappedRegions.MAX_SEGMENT_SIZE * MmappedRegions.REGION_ALLOC_SIZE * 3);
-        int bufSize = 1024;
 
         try (ChannelProxy channel = new ChannelProxy(writeFile("testAllocRegions", buffer));
              MmappedRegions regions = MmappedRegions.empty(channel))
@@ -460,7 +460,7 @@ public class MmappedRegionsTest
                     writer.sync();
 
                     // verify that calling extend for the same (first iteration) or some previous metadata (further iterations) has no effect
-                    assertFalse(regions.extend(metadata, bufSize));
+                    assertFalse(regions.extend(metadata, bufSize, 0));
 
                     logger.info("Checking extend on compressed chunk for range={} {}..{} / {}", idx, pos, pos + (writeSizes[idx] << 10), size);
                     checkExtendOnCompressedChunks(f, writer, regions, bufSize);
@@ -476,7 +476,7 @@ public class MmappedRegionsTest
         int dataOffset;
         try (CompressionMetadata metadata = writer.open(writer.getLastFlushOffset()))
         {
-            regions.extend(metadata, bufSize);
+            regions.extend(metadata, bufSize, 0);
             assertFalse(regions.isEmpty());
             dataOffset = 0;
             while (dataOffset < metadata.dataLength)
