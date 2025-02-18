@@ -35,7 +35,7 @@ import java.util.concurrent.atomic.AtomicReference;
 public class SharedCompactionObserver implements CompactionObserver
 {
     private final AtomicInteger toReportOnComplete = new AtomicInteger(0);
-    private final AtomicBoolean onCompleteIsSuccess = new AtomicBoolean(true);
+    private final AtomicReference<Throwable> onCompleteException = new AtomicReference(null);
     private final AtomicReference<CompactionProgress> inProgressReported = new AtomicReference<>(null);
     private final CompactionObserver observer;
 
@@ -61,14 +61,14 @@ public class SharedCompactionObserver implements CompactionObserver
     }
 
     @Override
-    public void onCompleted(UUID id, boolean isSuccess)
+    public void onCompleted(UUID id, Throwable err)
     {
-        onCompleteIsSuccess.compareAndSet(true, isSuccess); // acts like AND
+        onCompleteException.compareAndSet(null, err); // acts like AND
         final int remainingToComplete = toReportOnComplete.decrementAndGet();
         assert inProgressReported.get() != null : "onCompleted called before onInProgress";
         assert remainingToComplete >= 0 : "onCompleted called without corresponding registerExpectedSubtask";
         // The individual operation ID given here may be different from the shared ID. Pass on the shared one.
         if (remainingToComplete == 0)
-            observer.onCompleted(inProgressReported.get().operationId(), onCompleteIsSuccess.get());
+            observer.onCompleted(inProgressReported.get().operationId(), onCompleteException.get());
     }
 }
