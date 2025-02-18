@@ -351,7 +351,7 @@ public enum CassandraRelevantProperties
     CUSTOM_SSTABLE_WATCHER("cassandra.custom_sstable_watcher"),
 
     /** When enabled, a user can set compression options in the index schema */
-    INDEX_COMPRESSION("cassandra.index.compression_enabled", "false"),
+    INDEX_COMPRESSION_ENABLED("cassandra.index.compression_enabled", "false"),
 
     /** Controls the maximum top-k limit for vector search */
     SAI_VECTOR_SEARCH_MAX_TOP_K("cassandra.sai.vector_search.max_top_k", "1000"),

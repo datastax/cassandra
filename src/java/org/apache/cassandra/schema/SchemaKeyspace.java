@@ -822,7 +822,9 @@ public final class SchemaKeyspace
                .add("kind", index.kind.toString())
                .add("options", index.options);
 
-        if (CassandraRelevantProperties.INDEX_COMPRESSION.getBoolean())
+        // We must not write those properties when index compression is disabled,
+        // in order to allow rolling back to the previous release that doesn't recognize those schema columns.
+        if (CassandraRelevantProperties.INDEX_COMPRESSION_ENABLED.getBoolean())
         {
             rowBuilder.add("key_compression", index.keyCompression.asMap());
             rowBuilder.add("value_compression", index.valueCompression.asMap());

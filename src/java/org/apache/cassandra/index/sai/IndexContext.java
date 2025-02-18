@@ -137,7 +137,7 @@ public class IndexContext
     private final ColumnFamilyStore cfs;
 
     // Config can be null if the column context is "fake" (i.e. created for a filtering expression).
-    private final IndexMetadata config;
+    public final IndexMetadata config;
     private final VectorSimilarityFunction vectorSimilarityFunction;
 
     private final ConcurrentMap<Memtable, MemtableIndex> liveMemtables = new ConcurrentHashMap<>();

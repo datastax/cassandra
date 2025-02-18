@@ -225,8 +225,7 @@ public class StorageAttachedIndex implements Index
             ImmutableSet.of(OrderPreservingPartitioner.class, LocalPartitioner.class, ByteOrderedPartitioner.class, RandomPartitioner.class);
 
     private final ColumnFamilyStore baseCfs;
-    private final IndexMetadata config;
-    private final IndexContext indexContext;
+    private volatile IndexContext indexContext;
 
     // Tracks whether or not we've started the index build on initialization.
     private volatile boolean canFlushFromMemtableIndex = false;
@@ -240,7 +239,21 @@ public class StorageAttachedIndex implements Index
     public StorageAttachedIndex(ColumnFamilyStore baseCfs, IndexMetadata config)
     {
         this.baseCfs = baseCfs;
-        this.config = config;
+        TableMetadata tableMetadata = baseCfs.metadata();
+        Pair<ColumnMetadata, IndexTarget.Type> target = TargetParser.parse(tableMetadata, config);
+        this.indexContext = new IndexContext(tableMetadata.keyspace,
+                                             tableMetadata.name,
+                                             tableMetadata.id,
+                                             tableMetadata.partitionKeyType,
+                                             tableMetadata.comparator,
+                                             target.left,
+                                             target.right,
+                                             config,
+                                             baseCfs);
+    }
+
+    private void setMetadata(IndexMetadata config)
+    {
         TableMetadata tableMetadata = baseCfs.metadata();
         Pair<ColumnMetadata, IndexTarget.Type> target = TargetParser.parse(tableMetadata, config);
         this.indexContext = new IndexContext(tableMetadata.keyspace,
@@ -390,7 +403,7 @@ public class StorageAttachedIndex implements Index
     @Override
     public IndexMetadata getIndexMetadata()
     {
-        return config;
+        return indexContext.config;
     }
 
     @Override
@@ -520,7 +533,10 @@ public class StorageAttachedIndex implements Index
     @Override
     public Callable<?> getMetadataReloadTask(IndexMetadata indexMetadata)
     {
-        return null;
+        return () -> {
+            this.setMetadata(indexMetadata);
+            return null;
+        };
     }
 
     @Override
@@ -872,6 +888,7 @@ public class StorageAttachedIndex implements Index
     @Override
     public String toString()
     {
+        IndexMetadata config = indexContext.config;
         return String.format("%s.%s.%s", baseCfs.keyspace.getName(), baseCfs.name, config == null ? "?" : config.name);
     }
 

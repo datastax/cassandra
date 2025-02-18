@@ -30,7 +30,6 @@ import org.apache.cassandra.audit.AuditLogEntryType;
 import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.config.ParameterizedClass;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.QualifiedName;
 import org.apache.cassandra.cql3.statements.RawKeyspaceAwareStatement;
@@ -173,9 +172,9 @@ public final class CreateIndexStatement extends AlterSchemaStatement
                                            ? CompressionParams.fromMap(valueCompressionOptions)
                                            : CompressionParams.noCompression();
 
-        if ((keyCompression.isEnabled() || valueCompression.isEnabled()) && !CassandraRelevantProperties.INDEX_COMPRESSION.getBoolean())
+        if ((keyCompression.isEnabled() || valueCompression.isEnabled()) && !CassandraRelevantProperties.INDEX_COMPRESSION_ENABLED.getBoolean())
             throw ire("Cannot create a compressed index, because index compression is disabled. " +
-                      "Please set " + CassandraRelevantProperties.INDEX_COMPRESSION.getKey() + " property to enable it.");
+                      "Please set " + CassandraRelevantProperties.INDEX_COMPRESSION_ENABLED.getKey() + " property to enable it.");
 
         IndexMetadata index = IndexMetadata.fromIndexTargets(indexTargets, name, kind, options, keyCompression, valueCompression);
 

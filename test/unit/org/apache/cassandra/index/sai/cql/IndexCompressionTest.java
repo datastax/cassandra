@@ -1,13 +1,11 @@
 /*
- * Licensed to the Apache Software Foundation (ASF) under one
- * or more contributor license agreements.  See the NOTICE file
- * distributed with this work for additional information
- * regarding copyright ownership.  The ASF licenses this file
- * to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance
- * with the License.  You may obtain a copy of the License at
+ * Copyright DataStax, Inc.
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -32,8 +30,10 @@ import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.io.compress.CompressionMetadata;
+import org.apache.cassandra.io.compress.ZstdCompressor;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.schema.IndexMetadata;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
@@ -43,7 +43,7 @@ public class IndexCompressionTest extends SAITester
     @BeforeClass
     public static void setup()
     {
-        CassandraRelevantProperties.INDEX_COMPRESSION.setBoolean(true);
+        CassandraRelevantProperties.INDEX_COMPRESSION_ENABLED.setBoolean(true);
     }
 
     @Test
@@ -70,6 +70,24 @@ public class IndexCompressionTest extends SAITester
             assertCompressed(descriptor.perSSTableComponents().get(IndexComponentType.PRIMARY_KEY_TRIE));
             assertCompressed(descriptor.perSSTableComponents().get(IndexComponentType.PRIMARY_KEY_BLOCKS));
         }
+    }
+
+    @Test
+    public void testKeyCompressionIsCommonForAllIndexes() throws InterruptedException
+    {
+        // When creating another index with different key compression, the key compression of the first index
+        // gets overwritten by the compression settings of the second index.
+        // This is beacuse both indexes share the same primary key map, and it can be compressed in one way only.
+        createTable("CREATE TABLE %s (pk int, c text, val1 text, val2 text, PRIMARY KEY(pk, c))");
+        String index1 = createIndex("CREATE CUSTOM INDEX ON %s(val1) USING 'StorageAttachedIndex' WITH key_compression = {'class': 'LZ4Compressor'}");
+        String index2 = createIndex("CREATE CUSTOM INDEX ON %s(val2) USING 'StorageAttachedIndex' WITH key_compression = {'class': 'ZstdCompressor'}");
+
+        ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
+        IndexMetadata index1Metadata = cfs.indexManager.getIndexByName(index1).getIndexMetadata();
+        IndexMetadata index2Metadata = cfs.indexManager.getIndexByName(index2).getIndexMetadata();
+
+        assertTrue(index2Metadata.keyCompression.getSstableCompressor() instanceof ZstdCompressor);
+        assertTrue(index1Metadata.keyCompression.getSstableCompressor() instanceof ZstdCompressor);
     }
 
     @Test

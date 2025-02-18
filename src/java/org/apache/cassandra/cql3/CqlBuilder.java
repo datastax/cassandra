@@ -252,8 +252,8 @@ public final class CqlBuilder
 
     public static class OptionsBuilder
     {
-        private CqlBuilder builder;
-        boolean empty = true;
+        private final CqlBuilder builder;
+        private boolean empty = true;
 
         OptionsBuilder(CqlBuilder builder)
         {
