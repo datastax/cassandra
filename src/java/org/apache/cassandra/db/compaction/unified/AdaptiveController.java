@@ -23,6 +23,9 @@ import java.util.concurrent.TimeUnit;
 import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
+
+import org.apache.cassandra.io.FSError;
+import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -209,6 +212,15 @@ public class AdaptiveController extends Controller
         catch (ParseException e)
         {
             logger.warn("Unable to parse saved options. Using starting value instead:", e);
+        }
+        catch (FSError e)
+        {
+            logger.warn("Unable to read controller config file. Using starting value instead:", e);
+        }
+        catch (Throwable e)
+        {
+            logger.warn("Unable to read controller config file. Using starting value instead:", e);
+            JVMStabilityInspector.inspectThrowable(e);
         }
 
         if (scalingParameters == null)
