@@ -1286,7 +1286,7 @@ public class CompactionStrategyManager implements CompactionStrategyContainer
     }
 
     @Override
-    public void onCompleted(TimeUUID id, boolean isSuccess)
+    public void onCompleted(TimeUUID id, Throwable err)
     {
 
     }
