@@ -43,6 +43,7 @@ import org.apache.cassandra.index.sasi.SASIIndex;
 import org.apache.cassandra.schema.*;
 import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
 import org.apache.cassandra.service.ClientState;
+import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.Event.SchemaChange;
 import org.apache.cassandra.transport.Event.SchemaChange.Change;
@@ -211,6 +212,9 @@ public final class CreateIndexStatement extends AlterSchemaStatement
 
         // All indexes on one table must use the same key_compression.
         // The newly created index forces key_compression on the previous indexes.
+        for (var i : table.indexes)
+            if (!i.keyCompression.equals(index.keyCompression))
+                ClientWarn.instance.warn("Setting key_compression to " + index.keyCompression.asMap() + " for index " + i.name);
         Indexes newIndexes = table.indexes.withKeyCompression(index.keyCompression).with(index);
         TableMetadata newTable = table.withSwapped(newIndexes);
         newTable.validate();
