@@ -96,10 +96,11 @@ public class MmappedRegionsTest
     public void testTwoSegments() throws Exception
     {
         ByteBuffer buffer = allocateBuffer(2048);
+        int bufSize = 1024;
         try(ChannelProxy channel = new ChannelProxy(writeFile("testTwoSegments", buffer));
             MmappedRegions regions = MmappedRegions.empty(channel))
         {
-            regions.extend(1024);
+            regions.extend(1024, bufSize);
             for (int i = 0; i < 1024; i++)
             {
                 MmappedRegions.Region region = regions.floor(i);
@@ -108,7 +109,7 @@ public class MmappedRegionsTest
                 assertEquals(1024, region.end());
             }
 
-            regions.extend(2048);
+            regions.extend(2048, bufSize);
             for (int i = 0; i < 2048; i++)
             {
                 MmappedRegions.Region region = regions.floor(i);
@@ -131,15 +132,16 @@ public class MmappedRegionsTest
     public void testSmallSegmentSize() throws Exception
     {
         int OLD_MAX_SEGMENT_SIZE = MmappedRegions.MAX_SEGMENT_SIZE;
+        int bufSize = 1024;
         MmappedRegions.MAX_SEGMENT_SIZE = 1024;
 
         ByteBuffer buffer = allocateBuffer(4096);
         try(ChannelProxy channel = new ChannelProxy(writeFile("testSmallSegmentSize", buffer));
             MmappedRegions regions = MmappedRegions.empty(channel))
         {
-            regions.extend(1024);
-            regions.extend(2048);
-            regions.extend(4096);
+            regions.extend(1024, bufSize);
+            regions.extend(2048, bufSize);
+            regions.extend(4096, bufSize);
 
             final int SIZE = MmappedRegions.MAX_SEGMENT_SIZE;
             for (int i = 0; i < buffer.capacity(); i++)
@@ -157,17 +159,45 @@ public class MmappedRegionsTest
     }
 
     @Test
+    public void testSizeIsChunkMultiple() throws Exception
+    {
+        final int oldMaxSegmentSize = MmappedRegions.MAX_SEGMENT_SIZE;
+        final int bufSize = 1024;
+        MmappedRegions.MAX_SEGMENT_SIZE = 2047;
+        ByteBuffer buffer = allocateBuffer(4096);
+        try(ChannelProxy channel = new ChannelProxy(writeFile("testSmallSegmentSize", buffer));
+            MmappedRegions regions = MmappedRegions.empty(channel))
+        {
+            regions.extend(1024, bufSize);
+            regions.extend(2048, bufSize);
+            regions.extend(4096, bufSize);
+            for (int i = 0; i < buffer.capacity(); i++)
+            {
+                MmappedRegions.Region region = regions.floor(i);
+                assertNotNull(region);
+                assertEquals(bufSize * (i / bufSize), region.offset());
+                assertEquals(bufSize + (bufSize * (i / bufSize)), region.end());
+            }
+        }
+        finally
+        {
+            MmappedRegions.MAX_SEGMENT_SIZE = oldMaxSegmentSize;
+        }
+    }
+
+    @Test
     public void testAllocRegions() throws Exception
     {
         int OLD_MAX_SEGMENT_SIZE = MmappedRegions.MAX_SEGMENT_SIZE;
         MmappedRegions.MAX_SEGMENT_SIZE = 1024;
+        int bufSize = 1024;
 
         ByteBuffer buffer = allocateBuffer(MmappedRegions.MAX_SEGMENT_SIZE * MmappedRegions.REGION_ALLOC_SIZE * 3);
 
         try(ChannelProxy channel = new ChannelProxy(writeFile("testAllocRegions", buffer));
             MmappedRegions regions = MmappedRegions.empty(channel))
         {
-            regions.extend(buffer.capacity());
+            regions.extend(buffer.capacity(), bufSize);
 
             final int SIZE = MmappedRegions.MAX_SEGMENT_SIZE;
             for (int i = 0; i < buffer.capacity(); i++)
@@ -188,17 +218,18 @@ public class MmappedRegionsTest
     public void testCopy() throws Exception
     {
         ByteBuffer buffer = allocateBuffer(128 * 1024);
+        int bufSize = 4096;
 
         MmappedRegions snapshot;
         ChannelProxy channelCopy;
 
         try(ChannelProxy channel = new ChannelProxy(writeFile("testSnapshot", buffer));
-            MmappedRegions regions = MmappedRegions.map(channel, buffer.capacity() / 4, 0, false))
+            MmappedRegions regions = MmappedRegions.map(channel, buffer.capacity() / 4, bufSize, 0, false))
         {
             // create 3 more segments, one per quater capacity
-            regions.extend(buffer.capacity() / 2);
-            regions.extend(3 * buffer.capacity() / 4);
-            regions.extend(buffer.capacity());
+            regions.extend(buffer.capacity() / 2, bufSize);
+            regions.extend(3 * buffer.capacity() / 4, bufSize);
+            regions.extend(buffer.capacity(), bufSize);
 
             // make a snapshot
             snapshot = regions.sharedCopy();
@@ -230,6 +261,7 @@ public class MmappedRegionsTest
     public void testCopyCannotExtend() throws Exception
     {
         ByteBuffer buffer = allocateBuffer(128 * 1024);
+        int bufSize = 1024;
 
         MmappedRegions snapshot;
         ChannelProxy channelCopy;
@@ -237,7 +269,7 @@ public class MmappedRegionsTest
         try(ChannelProxy channel = new ChannelProxy(writeFile("testSnapshotCannotExtend", buffer));
             MmappedRegions regions = MmappedRegions.empty(channel))
         {
-            regions.extend(buffer.capacity() / 2);
+            regions.extend(buffer.capacity() / 2, bufSize);
 
             // make a snapshot
             snapshot = regions.sharedCopy();
@@ -248,7 +280,7 @@ public class MmappedRegionsTest
 
         try
         {
-            snapshot.extend(buffer.capacity());
+            snapshot.extend(buffer.capacity(), bufSize);
         }
         finally
         {
@@ -261,12 +293,13 @@ public class MmappedRegionsTest
     public void testExtendOutOfOrder() throws Exception
     {
         ByteBuffer buffer = allocateBuffer(4096);
+        int bufSize = 1024;
         try(ChannelProxy channel = new ChannelProxy(writeFile("testExtendOutOfOrder", buffer));
             MmappedRegions regions = MmappedRegions.empty(channel))
         {
-            regions.extend(4096);
-            regions.extend(1024);
-            regions.extend(2048);
+            regions.extend(4096, bufSize);
+            regions.extend(1024, bufSize);
+            regions.extend(2048, bufSize);
 
             for (int i = 0; i < buffer.capacity(); i++)
             {
@@ -282,10 +315,11 @@ public class MmappedRegionsTest
     public void testNegativeExtend() throws Exception
     {
         ByteBuffer buffer = allocateBuffer(1024);
+        int bufSize = 1024;
         try(ChannelProxy channel = new ChannelProxy(writeFile("testNegativeExtend", buffer));
             MmappedRegions regions = MmappedRegions.empty(channel))
         {
-            regions.extend(-1);
+            regions.extend(-1, bufSize);
         }
     }
 
@@ -346,8 +380,9 @@ public class MmappedRegionsTest
     public void testIllegalArgForMap1() throws Exception
     {
         ByteBuffer buffer = allocateBuffer(1024);
+        int bufSize = 1024;
         try(ChannelProxy channel = new ChannelProxy(writeFile("testIllegalArgForMap1", buffer));
-            MmappedRegions regions = MmappedRegions.map(channel, 0, 0, false))
+            MmappedRegions regions = MmappedRegions.map(channel, 0, bufSize, 0, false))
         {
             assertTrue(regions.isEmpty());
         }
@@ -357,8 +392,9 @@ public class MmappedRegionsTest
     public void testIllegalArgForMap2() throws Exception
     {
         ByteBuffer buffer = allocateBuffer(1024);
+        int bufSize = 1024;
         try(ChannelProxy channel = new ChannelProxy(writeFile("testIllegalArgForMap2", buffer));
-            MmappedRegions regions = MmappedRegions.map(channel, -1L, 0, false))
+            MmappedRegions regions = MmappedRegions.map(channel, -1L, bufSize, 0, false))
         {
             assertTrue(regions.isEmpty());
         }
@@ -374,5 +410,4 @@ public class MmappedRegionsTest
             assertTrue(regions.isEmpty());
         }
     }
-
 }
