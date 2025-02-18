@@ -160,9 +160,9 @@ public abstract class AbstractCompactionTask extends WrappedRunnable
 
     protected Throwable cleanup(Throwable err)
     {
-        final boolean isSuccess = err == null;
+        final Throwable originalError = err;
         for (CompactionObserver compObserver : compObservers)
-            err = Throwables.perform(err, () -> compObserver.onCompleted(transaction.opId(), isSuccess));
+            err = Throwables.perform(err, () -> compObserver.onCompleted(transaction.opId(), originalError));
 
         return Throwables.perform(err, () -> transaction.close());
     }
