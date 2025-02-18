@@ -98,6 +98,22 @@ public class AdaptiveControllerTest extends ControllerTest
     }
 
     @Test
+    public void testLongTableNameFromOptions()
+    {
+        String longTableName = "test_create_k8yq1r75bpzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz";
+        when(cfs.getTableName()).thenReturn(longTableName);
+
+        Map<String, String> options = new HashMap<>();
+        options.put(AdaptiveController.THRESHOLD, "0.15");
+        // Calls fromOptions on long table name, which tries to read options from a file.
+        // The too long file name should not lead to a failure.
+        Controller controller = testFromOptions(true, options);
+        assertTrue(controller instanceof AdaptiveController);
+
+        when(cfs.getTableName()).thenReturn(tableName);
+    }
+
+    @Test
     public void testFromOptions()
     {
         Map<String, String> options = new HashMap<>();
