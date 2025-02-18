@@ -35,6 +35,7 @@ import org.json.simple.parser.JSONParser;
 import org.json.simple.parser.ParseException;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.UCS_STATIC_SCALING_PARAMETERS;
+import static org.apache.cassandra.config.CassandraRelevantProperties.UCS_VECTOR_SCALING_PARAMETERS;
 
 /**
  * The static compaction controller periodically checks the IO costs
@@ -48,6 +49,7 @@ public class StaticController extends Controller
      */
     static final String STATIC_SCALING_FACTORS_OPTION = "static_scaling_factors";
     private final static String DEFAULT_STATIC_SCALING_PARAMETERS = UCS_STATIC_SCALING_PARAMETERS.getStringWithLegacyFallback();
+    final static String DEFAULT_VECTOR_STATIC_SCALING_PARAMETERS = UCS_VECTOR_SCALING_PARAMETERS.getStringWithLegacyFallback();
 
     private final int[] scalingParameters;
 
@@ -71,6 +73,7 @@ public class StaticController extends Controller
                             Reservations.Type reservationsType,
                             Overlaps.InclusionMethod overlapInclusionMethod,
                             boolean parallelizeOutputShards,
+                            boolean hasVectorType,
                             String keyspaceName,
                             String tableName)
     {
@@ -92,7 +95,8 @@ public class StaticController extends Controller
               reservedThreadsPerLevel,
               reservationsType,
               overlapInclusionMethod,
-              parallelizeOutputShards);
+              parallelizeOutputShards,
+              hasVectorType);
         this.scalingParameters = scalingParameters;
         this.keyspaceName = keyspaceName;
         this.tableName = tableName;
@@ -115,15 +119,20 @@ public class StaticController extends Controller
                                   Reservations.Type reservationsType,
                                   Overlaps.InclusionMethod overlapInclusionMethod,
                                   boolean parallelizeOutputShards,
+                                  boolean hasVectorType,
                                   String keyspaceName,
                                   String tableName,
-                                  Map<String, String> options)
+                                  Map<String, String> options,
+                                  boolean useVectorOptions)
     {
         int[] scalingParameters;
         if (options.containsKey(STATIC_SCALING_FACTORS_OPTION))
             scalingParameters = parseScalingParameters(options.get(STATIC_SCALING_FACTORS_OPTION));
         else
-            scalingParameters = parseScalingParameters(options.getOrDefault(SCALING_PARAMETERS_OPTION, DEFAULT_STATIC_SCALING_PARAMETERS));
+            scalingParameters = parseScalingParameters(options.getOrDefault(SCALING_PARAMETERS_OPTION,
+                                                                            useVectorOptions ? DEFAULT_VECTOR_STATIC_SCALING_PARAMETERS
+                                                                                             : DEFAULT_STATIC_SCALING_PARAMETERS));
+
         long currentFlushSize = flushSizeOverride;
 
         File f = getControllerConfigPath(keyspaceName, tableName);
@@ -169,6 +178,7 @@ public class StaticController extends Controller
                                     reservationsType,
                                     overlapInclusionMethod,
                                     parallelizeOutputShards,
+                                    hasVectorType,
                                     keyspaceName,
                                     tableName);
     }
@@ -223,6 +233,9 @@ public class StaticController extends Controller
     @Override
     public String toString()
     {
-        return String.format("Static controller, m: %d, o: %s, scalingParameters: %s, cost: %s", minSSTableSize, Arrays.toString(survivalFactors), printScalingParameters(scalingParameters), calculator);
+        return String.format("Static controller, m: %d, o: %s, scalingParameters: %s, cost: %s", minSSTableSize,
+                             Arrays.toString(survivalFactors),
+                             printScalingParameters(scalingParameters),
+                             calculator);
     }
 }

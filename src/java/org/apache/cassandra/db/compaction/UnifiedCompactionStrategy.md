@@ -475,8 +475,8 @@ UCS accepts these compaction strategy parameters:
   expense of making reads more difficult.  
   N is the middle ground that has the features of levelled (one sstable run per level) as well as tiered (one
   compaction to be promoted to the next level) and a fan factor of 2. This can also be specified as T2 or L2.  
-  The default value is T4, matching the default STCS behaviour with threshold 4. To select an equivalent of LCS
-  with its default fan factor 10, use L10.
+  The default value is T4, matching the default STCS behaviour with threshold 4. The default value in vector mode (see
+  paragraph below) is L10, equivalent to LCS with its default fan factor 10.
 * `target_sstable_size` The target sstable size $t$, specified as a human-friendly size in bytes (e.g. 100 MiB =
   $100\cdot 2^{20}$ B or (10 MB = 10,000,000 B)). The strategy will split data in shards that aim to produce sstables
   of size between $t / \sqrt 2$ and $t \cdot \sqrt 2$.  
@@ -484,11 +484,12 @@ UCS accepts these compaction strategy parameters:
   on disk has a non-trivial in-memory footprint that also affects garbage collection times.  
   Increase this if the memory pressure from the number of sstables in the system becomes too high. Also see
   `sstable_growth` below.  
-  The default value is 1 GiB.
+  The default value is 1 GiB. The default value in vector mode is 5GiB.
 * `base_shard_count` The minimum number of shards $b$, used for levels with the smallest density. This gives the
   minimum compaction concurrency for the lowest levels. A low number would result in larger L0 sstables but may limit
-  the overall maximum write throughput (as every piece of data has to go through L0). The base shard count only applies after `min_sstable_size` is reached.  
-  The default value is 4 for all tables.
+  the overall maximum write throughput (as every piece of data has to go through L0). The base shard count only applies 
+  after `min_sstable_size` is reached.  
+  The default value is 4. The default value in vector mode is 1. 
 * `sstable_growth` The sstable growth component $\lambda$, applied as a factor in the shard exponent calculation.
   This is a number between 0 and 1 that controls what part of the density growth should apply to individual sstable
   size and what part should increase the number of shards. Using a value of 1 has the effect of fixing the shard
@@ -503,10 +504,12 @@ UCS accepts these compaction strategy parameters:
   two can be further tweaked by increasing $\lambda$ to get fewer but bigger sstables on the top level, and decreasing
   it to favour a higher count of smaller sstables.  
   The default value is 0.333 meaning the sstable size grows with the square root of the growth of the shard count.
+  The default value in vector mode is 1 which means the shard count will be fixed to the base value.
 * `min_sstable_size` The minimum sstable size $m$, applicable when the base shard count will result is sstables
   that are considered too small. If set, the strategy will split the space into fewer than the base count shards, to
-  make the estimated sstables size at least as large as this value. A value of 0 disables this feature. A value of `auto` sets the minimum sstable size to the size
-  of sstables resulting from flushes. The default value is 100MiB.
+  make the estimated sstables size at least as large as this value. A value of 0 disables this feature. 
+  A value of `auto` sets the minimum sstable size to the size of sstables resulting from flushes. 
+  The default value is 100MiB. The default value in vector mode is 1GiB.
 * `reserved_threads` Specifies the number of threads to reserve per level. Any remaining threads will take
   work according to the prioritization mechanism (i.e. higher overlap first). Higher reservations mean better
   responsiveness of the compaction strategy to new work, or smoother performance, at the expense of reducing the
@@ -530,6 +533,17 @@ UCS accepts these compaction strategy parameters:
   Sets $b$ to the specified value, $\lambda$ to 1, and the default minimum sstable size to 'auto'.  
   Disabled by default and cannot be used in combination with `base_shard_count`, `target_sstable_size` or
   `sstable_growth`.
+
+All UCS options can also be supplied as system properties, using the prefix `unified_compaction.`, e.g. 
+`-Dunified_compaction.sstable_growth=0.5` sets the default `sstable_growth` to 0.5.
+
+In addition to this, the strategy permits different defaults to be applied to tables that have a vector column when the 
+system property `unified_compaction.override_ucs_config_for_vector_tables` is set to `true`. If this is enabled and the
+table has a column of type `vector`, the "vector mode" defaults in the list above apply. These vector defaults can be 
+altered using the prefix `unified_compaction.vector_`, e.g. 
+`-Dunified_compaction.vector_sstable_growth=1` in combination with 
+`-Dunified_compaction.override_ucs_config_for_vector_tables=true` sets the growth to 1 only for tables with a vector
+column.
 
 In `cassandra.yaml`:
 
