@@ -68,8 +68,8 @@ public class SharedCompactionObserverTest
     {
         sharedCompactionObserver.registerExpectedSubtask();
         sharedCompactionObserver.onInProgress(mockProgress);
-        sharedCompactionObserver.onCompleted(operationId, true);
-        verify(mockObserver, times(1)).onCompleted(operationId, true);
+        sharedCompactionObserver.onCompleted(operationId, null);
+        verify(mockObserver, times(1)).onCompleted(operationId, null);
     }
 
     @Test
@@ -77,8 +77,10 @@ public class SharedCompactionObserverTest
     {
         sharedCompactionObserver.registerExpectedSubtask();
         sharedCompactionObserver.onInProgress(mockProgress);
-        sharedCompactionObserver.onCompleted(operationId, false);
-        verify(mockObserver, times(1)).onCompleted(operationId, false);
+
+        Exception err = new RuntimeException();
+        sharedCompactionObserver.onCompleted(operationId, err);
+        verify(mockObserver, times(1)).onCompleted(operationId, err);
     }
 
     @Test
@@ -89,11 +91,11 @@ public class SharedCompactionObserverTest
         sharedCompactionObserver.onInProgress(mockProgress);
         sharedCompactionObserver.onInProgress(mockProgress);
 
-        sharedCompactionObserver.onCompleted(operationId, true);
-        verify(mockObserver, never()).onCompleted(any(TimeUUID.class), anyBoolean());
+        sharedCompactionObserver.onCompleted(operationId, null);
+        verify(mockObserver, never()).onCompleted(any(TimeUUID.class), any());
 
-        sharedCompactionObserver.onCompleted(operationId, true);
-        verify(mockObserver, times(1)).onCompleted(operationId, true);
+        sharedCompactionObserver.onCompleted(operationId, null);
+        verify(mockObserver, times(1)).onCompleted(operationId, null);
     }
 
     @Test
@@ -102,12 +104,12 @@ public class SharedCompactionObserverTest
         sharedCompactionObserver.registerExpectedSubtask();
         sharedCompactionObserver.registerExpectedSubtask();
         sharedCompactionObserver.onInProgress(mockProgress);
-        sharedCompactionObserver.onCompleted(operationId, true);
-        verify(mockObserver, never()).onCompleted(any(TimeUUID.class), anyBoolean());
+        sharedCompactionObserver.onCompleted(operationId, null);
+        verify(mockObserver, never()).onCompleted(any(TimeUUID.class), any());
 
         sharedCompactionObserver.onInProgress(mockProgress);
-        sharedCompactionObserver.onCompleted(operationId, true);
-        verify(mockObserver, times(1)).onCompleted(operationId, true);
+        sharedCompactionObserver.onCompleted(operationId, null);
+        verify(mockObserver, times(1)).onCompleted(operationId, null);
     }
 
     @Test
@@ -118,11 +120,12 @@ public class SharedCompactionObserverTest
         sharedCompactionObserver.onInProgress(mockProgress);
         sharedCompactionObserver.onInProgress(mockProgress);
 
-        sharedCompactionObserver.onCompleted(operationId, true);
-        verify(mockObserver, never()).onCompleted(any(TimeUUID.class), anyBoolean());
+        sharedCompactionObserver.onCompleted(operationId, null);
+        verify(mockObserver, never()).onCompleted(any(TimeUUID.class), any());
 
-        sharedCompactionObserver.onCompleted(operationId, false);
-        verify(mockObserver, times(1)).onCompleted(operationId, false);
+        Exception err = new RuntimeException();
+        sharedCompactionObserver.onCompleted(operationId, err);
+        verify(mockObserver, times(1)).onCompleted(operationId, err);
     }
 
     @Test
@@ -143,7 +146,7 @@ public class SharedCompactionObserverTest
                                             sharedCompactionObserver.onInProgress(mockProgress);
                                             if (ThreadLocalRandom.current().nextBoolean())
                                                 FBUtilities.sleepQuietly(ThreadLocalRandom.current().nextInt(1));
-                                            sharedCompactionObserver.onCompleted(operationId, true);
+                                            sharedCompactionObserver.onCompleted(operationId, null);
                                             latch.countDown();
                                         }));
         }
@@ -152,7 +155,7 @@ public class SharedCompactionObserverTest
             future.get();
 
         verify(mockObserver, times(1)).onInProgress(mockProgress);
-        verify(mockObserver, times(1)).onCompleted(operationId, true);
+        verify(mockObserver, times(1)).onCompleted(operationId, null);
         executor.shutdown();
     }
 
@@ -160,7 +163,7 @@ public class SharedCompactionObserverTest
     public void testErrorNoRegister()
     {
         Util.assumeAssertsEnabled();
-        Assert.assertThrows(AssertionError.class, () -> sharedCompactionObserver.onCompleted(operationId, true));
+        Assert.assertThrows(AssertionError.class, () -> sharedCompactionObserver.onCompleted(operationId, null));
     }
 
     @Test
@@ -168,7 +171,7 @@ public class SharedCompactionObserverTest
     {
         Util.assumeAssertsEnabled();
         sharedCompactionObserver.registerExpectedSubtask();
-        Assert.assertThrows(AssertionError.class, () -> sharedCompactionObserver.onCompleted(operationId, true));
+        Assert.assertThrows(AssertionError.class, () -> sharedCompactionObserver.onCompleted(operationId, null));
     }
 
     @Test
