@@ -48,6 +48,7 @@ import org.apache.cassandra.db.compaction.CompactionStrategy;
 import org.apache.cassandra.db.compaction.UnifiedCompactionStrategy;
 import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.io.FSError;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileWriter;
 import org.apache.cassandra.metrics.DefaultNameFactory;
@@ -55,6 +56,7 @@ import org.apache.cassandra.metrics.MetricNameFactory;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.MonotonicClock;
 import org.apache.cassandra.utils.Overlaps;
 import org.json.simple.JSONArray;
@@ -426,9 +428,14 @@ public abstract class Controller
 
             logger.debug(String.format("Writing current scaling parameters and flush size to file %s: %s", f.toPath().toString(), jsonObject));
         }
-        catch(IOException e)
+        catch (IOException | FSError e)
         {
             logger.warn("Unable to save current scaling parameters and flush size. Current controller configuration will be lost if a node restarts: ", e);
+        }
+        catch (Throwable e)
+        {
+            logger.warn("Unable to save current scaling parameters and flush size. Current controller configuration will be lost if a node restarts: ", e);
+            JVMStabilityInspector.inspectThrowable(e);
         }
     }
 
