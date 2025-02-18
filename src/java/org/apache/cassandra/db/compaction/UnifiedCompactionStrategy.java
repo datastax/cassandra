@@ -1298,14 +1298,19 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
 
     public static int[] getMaxOverlapsPerShard(Collection<? extends CompactionSSTable> sstables, ShardManager shardManager, int shardCount)
     {
+        final int maxPerShard = 65536; // 64k
         int[] overlapsMap = new int[shardCount];
+
         shardManager.assignSSTablesToShardIndexes(sstables, null, shardCount,
-                                                  (shardSSTables, shard) ->
-                                                  overlapsMap[shard] = Overlaps.maxOverlap(shardSSTables,
-                                                                                           CompactionSSTable.startsAfter,
-                                                                                           CompactionSSTable.firstKeyComparator,
-                                                                                           CompactionSSTable.lastKeyComparator));
-        // Indexes that do not have sstables are left with 0 overlaps.
+                                                  (shardSSTables, shard) -> {
+                                                      if (shard >= 0 && shard < shardCount) {
+                                                          int overlap = Overlaps.maxOverlap(shardSSTables,
+                                                                                            CompactionSSTable.startsAfter,
+                                                                                            CompactionSSTable.firstKeyComparator,
+                                                                                            CompactionSSTable.lastKeyComparator);
+                                                          overlapsMap[shard] = Math.min(overlap, maxPerShard);
+                                                      }
+                                                  });
         return overlapsMap;
     }
 
