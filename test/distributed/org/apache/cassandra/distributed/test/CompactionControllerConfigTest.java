@@ -32,6 +32,7 @@ import org.apache.cassandra.db.compaction.unified.Controller;
 import org.apache.cassandra.db.compaction.unified.StaticController;
 import org.apache.cassandra.distributed.Cluster;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.UCS_OVERRIDE_UCS_CONFIG_FOR_VECTOR_TABLES;
 import static org.apache.cassandra.distributed.shared.FutureUtils.waitOn;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
@@ -172,6 +173,67 @@ public class CompactionControllerConfigTest extends TestBaseImpl
                                              //verify that the file was deleted
                                              assert !Controller.getControllerConfigPath("does_not", "exist").exists();
 
+                                         });
+
+        }
+    }
+
+    @Test
+    public void testVectorControllerConfig() throws Throwable
+    {
+        vectorControllerConfig(true);
+        vectorControllerConfig(false);
+    }
+
+
+    public void vectorControllerConfig(boolean vectorOverride) throws Throwable
+    {
+        UCS_OVERRIDE_UCS_CONFIG_FOR_VECTOR_TABLES.setBoolean(vectorOverride);
+        try(Cluster cluster = init(Cluster.build(1).start()))
+        {
+            cluster.schemaChange(withKeyspace("CREATE KEYSPACE ks WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 2};"));
+            cluster.schemaChange(withKeyspace("CREATE TABLE ks.tbl (pk int, ck int, val vector<float, 2>, PRIMARY KEY (pk, ck)) WITH compaction = " +
+                                              "{'class': 'UnifiedCompactionStrategy', " +
+                                              "'adaptive': 'false', " +
+                                              "'scaling_parameters': '0'};"));
+            cluster.schemaChange(withKeyspace("CREATE TABLE ks.tbl2 (pk int, ck int, PRIMARY KEY (pk, ck)) WITH compaction = " +
+                                              "{'class': 'UnifiedCompactionStrategy', " +
+                                              "'adaptive': 'false', " +
+                                              "'scaling_parameters': '0'};"));
+
+            cluster.get(1).runOnInstance(() ->
+                                         {
+                                             ColumnFamilyStore cfs = Keyspace.open("ks").getColumnFamilyStore("tbl");
+                                             UnifiedCompactionContainer container = (UnifiedCompactionContainer) cfs.getCompactionStrategy();
+                                             UnifiedCompactionStrategy ucs = (UnifiedCompactionStrategy) container.getStrategies().get(0);
+                                             Controller controller = ucs.getController();
+                                             // ucs config should be set to the vector config
+                                             assertEquals(vectorOverride ? Controller.DEFAULT_VECTOR_TARGET_SSTABLE_SIZE
+                                                                         : Controller.DEFAULT_TARGET_SSTABLE_SIZE,
+                                                          controller.getTargetSSTableSize());
+                                             // but any property set in the table compaction config should override the vector config
+                                             assertEquals(0, controller.getScalingParameter(0));
+
+                                             ColumnFamilyStore cfs2 = Keyspace.open("ks").getColumnFamilyStore("tbl2");
+                                             UnifiedCompactionContainer container2 = (UnifiedCompactionContainer) cfs2.getCompactionStrategy();
+                                             UnifiedCompactionStrategy ucs2 = (UnifiedCompactionStrategy) container2.getStrategies().get(0);
+                                             Controller controller2 = ucs2.getController();
+                                             // since tbl2 does not have a vectorType the ucs config should not be set to the vector config
+                                             assertEquals(Controller.DEFAULT_TARGET_SSTABLE_SIZE, controller2.getTargetSSTableSize());
+                                             assertEquals(0, controller2.getScalingParameter(0));
+                                         });
+            cluster.schemaChange(withKeyspace("ALTER TABLE ks.tbl2 ADD val vector<float, 2>;"));
+            cluster.get(1).runOnInstance(() ->
+                                         {
+                                             ColumnFamilyStore cfs2 = Keyspace.open("ks").getColumnFamilyStore("tbl2");
+                                             UnifiedCompactionContainer container2 = (UnifiedCompactionContainer) cfs2.getCompactionStrategy();
+                                             UnifiedCompactionStrategy ucs2 = (UnifiedCompactionStrategy) container2.getStrategies().get(0);
+                                             Controller controller2 = ucs2.getController();
+                                             // a vector was added to tbl2 so it should now have the vector config
+                                             assertEquals(vectorOverride ? Controller.DEFAULT_VECTOR_TARGET_SSTABLE_SIZE
+                                                                         : Controller.DEFAULT_TARGET_SSTABLE_SIZE,
+                                                          controller2.getTargetSSTableSize());
+                                             assertEquals(0, controller2.getScalingParameter(0));
                                          });
 
         }
