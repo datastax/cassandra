@@ -207,20 +207,19 @@ public class CompactionControllerConfigTest extends TestBaseImpl
                                              UnifiedCompactionStrategy ucs = (UnifiedCompactionStrategy) container.getStrategies().get(0);
                                              Controller controller = ucs.getController();
                                              // ucs config should be set to the vector config
-                                             if (vectorOverride)
-                                                 assertEquals(controller.getScalingParameter(0), -8);
-                                             else
-                                                 assertEquals(controller.getScalingParameter(0), 0);
+                                             assertEquals(vectorOverride ? Controller.DEFAULT_VECTOR_TARGET_SSTABLE_SIZE
+                                                                         : Controller.DEFAULT_TARGET_SSTABLE_SIZE,
+                                                          controller.getTargetSSTableSize());
+                                             // but any property set in the table compaction config should override the vector config
+                                             assertEquals(0, controller.getScalingParameter(0));
 
                                              ColumnFamilyStore cfs2 = Keyspace.open("ks").getColumnFamilyStore("tbl2");
                                              UnifiedCompactionContainer container2 = (UnifiedCompactionContainer) cfs2.getCompactionStrategy();
                                              UnifiedCompactionStrategy ucs2 = (UnifiedCompactionStrategy) container2.getStrategies().get(0);
                                              Controller controller2 = ucs2.getController();
                                              // since tbl2 does not have a vectorType the ucs config should not be set to the vector config
-                                             if (vectorOverride)
-                                                 assertEquals(controller2.getScalingParameter(0), 0);
-                                             else
-                                                 assertEquals(controller2.getScalingParameter(0), 0);
+                                             assertEquals(Controller.DEFAULT_TARGET_SSTABLE_SIZE, controller2.getTargetSSTableSize());
+                                             assertEquals(0, controller2.getScalingParameter(0));
                                          });
             cluster.schemaChange(withKeyspace("ALTER TABLE ks.tbl2 ADD val vector<float, 2>;"));
             cluster.get(1).runOnInstance(() ->
@@ -230,10 +229,10 @@ public class CompactionControllerConfigTest extends TestBaseImpl
                                              UnifiedCompactionStrategy ucs2 = (UnifiedCompactionStrategy) container2.getStrategies().get(0);
                                              Controller controller2 = ucs2.getController();
                                              // a vector was added to tbl2 so it should now have the vector config
-                                             if (vectorOverride)
-                                                 assertEquals(controller2.getScalingParameter(0), -8);
-                                             else
-                                                 assertEquals(controller2.getScalingParameter(0), 0);
+                                             assertEquals(vectorOverride ? Controller.DEFAULT_VECTOR_TARGET_SSTABLE_SIZE
+                                                                         : Controller.DEFAULT_TARGET_SSTABLE_SIZE,
+                                                          controller2.getTargetSSTableSize());
+                                             assertEquals(0, controller2.getScalingParameter(0));
                                          });
 
         }
