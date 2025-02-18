@@ -20,6 +20,7 @@ package org.apache.cassandra.db.compaction;
 
 import org.apache.cassandra.utils.TimeUUID;
 
+import javax.annotation.Nullable;
 
 /**
  * An observer of a compaction operation. It is notified when a compaction operation is started.
@@ -36,7 +37,7 @@ public interface CompactionObserver
         public void onInProgress(CompactionProgress progress) { }
 
         @Override
-        public void onCompleted(TimeUUID id, boolean isSuccess) { }
+        public void onCompleted(TimeUUID id, @Nullable Throwable error) { }
     };
 
     /**
@@ -50,7 +51,7 @@ public interface CompactionObserver
      * Indicates that a compaction with the given id has completed.
      * <p/>
      * @param id  the id of the compaction
-     * @param isSuccess true if compaction finished without any exceptions
+     * @param error error if compaction failed with any exceptions; or null if completed successfully
      */
-    void onCompleted(TimeUUID id, boolean isSuccess);
+    void onCompleted(TimeUUID id, @Nullable Throwable error);
 }
