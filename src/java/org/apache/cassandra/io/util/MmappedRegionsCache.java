@@ -67,7 +67,7 @@ public class MmappedRegionsCache implements AutoCloseable
         Preconditions.checkState(!closed);
         MmappedRegions regions = cache.computeIfAbsent(channel.file(), ignored -> MmappedRegions.map(channel, metadata, uncompressedSliceOffset, false));
         Preconditions.checkArgument(regions.isValid(channel));
-        regions.extend(metadata, bufferSize);
+        regions.extend(metadata, bufferSize, uncompressedSliceOffset);
         return regions.sharedCopy();
     }
 
