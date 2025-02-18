@@ -444,7 +444,7 @@ public class FileHandle extends SharedCloseableImpl
                     }
                     else
                     {
-                        regions = mmappedRegionsCache != null ? mmappedRegionsCache.getOrCreate(channel, length, bufferSize, sliceDescriptor.sliceStart)
+                        regions = mmappedRegionsCache != null ? mmappedRegionsCache.getOrCreate(channel, sliceDescriptor.dataEndOr(length), bufferSize, sliceDescriptor.sliceStart)
                                                               : MmappedRegions.map(channel, sliceDescriptor.dataEndOr(length), bufferSize, sliceDescriptor.sliceStart, adviseRandom);
                         rebuffererFactory = new MmapRebufferer(channel, sliceDescriptor.dataEndOr(length), regions);
 
