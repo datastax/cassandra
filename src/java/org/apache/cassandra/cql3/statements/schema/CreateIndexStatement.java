@@ -51,6 +51,8 @@ import org.apache.cassandra.transport.Event.SchemaChange.Target;
 
 import static com.google.common.collect.Iterables.transform;
 import static com.google.common.collect.Iterables.tryFind;
+import static org.apache.cassandra.cql3.statements.schema.IndexAttributes.KW_KEY_COMPRESSION;
+import static org.apache.cassandra.cql3.statements.schema.IndexAttributes.KW_VALUE_COMPRESSION;
 
 public final class CreateIndexStatement extends AlterSchemaStatement
 {
@@ -163,12 +165,12 @@ public final class CreateIndexStatement extends AlterSchemaStatement
 
         Map<String, String> options = attrs.isCustom ? attrs.getOptions() : Collections.emptyMap();
 
-        Map<String, String> keyCompressionOptions = attrs.getMap("key_compression");
+        Map<String, String> keyCompressionOptions = attrs.getMap(KW_KEY_COMPRESSION);
         CompressionParams keyCompression = keyCompressionOptions != null
                                         ? CompressionParams.fromMap(keyCompressionOptions)
                                         : CompressionParams.noCompression();
 
-        Map<String, String> valueCompressionOptions = attrs.getMap("value_compression");
+        Map<String, String> valueCompressionOptions = attrs.getMap(KW_VALUE_COMPRESSION);
         CompressionParams valueCompression = valueCompressionOptions != null
                                            ? CompressionParams.fromMap(valueCompressionOptions)
                                            : CompressionParams.noCompression();
@@ -214,7 +216,7 @@ public final class CreateIndexStatement extends AlterSchemaStatement
         // The newly created index forces key_compression on the previous indexes.
         for (var i : table.indexes)
             if (!i.keyCompression.equals(index.keyCompression))
-                ClientWarn.instance.warn("Setting key_compression to " + index.keyCompression.asMap() + " for index " + i.name);
+                ClientWarn.instance.warn("Setting " + KW_KEY_COMPRESSION + " to " + index.keyCompression.asMap() + " for index " + i.name);
         Indexes newIndexes = table.indexes.withKeyCompression(index.keyCompression).with(index);
         TableMetadata newTable = table.withSwapped(newIndexes);
         newTable.validate();

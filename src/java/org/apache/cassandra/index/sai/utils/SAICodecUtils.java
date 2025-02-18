@@ -231,6 +231,7 @@ public class SAICodecUtils
 
     /**
      * Reads CRC32 value as a 64-bit long from the input.
+     * Can return -1 if CRC was not computed when creating the file.
      *
      * @throws CorruptIndexException if CRC is formatted incorrectly (wrong bits set)
      * @throws IOException if an i/o error occurs

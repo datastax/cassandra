@@ -91,6 +91,8 @@ import static org.apache.cassandra.config.CassandraRelevantProperties.DURATION_I
 import static org.apache.cassandra.config.CassandraRelevantProperties.UNSAFE_SYSTEM;
 import static org.apache.cassandra.cql3.QueryProcessor.executeInternal;
 import static org.apache.cassandra.cql3.QueryProcessor.executeOnceInternal;
+import static org.apache.cassandra.cql3.statements.schema.IndexAttributes.KW_KEY_COMPRESSION;
+import static org.apache.cassandra.cql3.statements.schema.IndexAttributes.KW_VALUE_COMPRESSION;
 import static org.apache.cassandra.schema.SchemaKeyspaceTables.AGGREGATES;
 import static org.apache.cassandra.schema.SchemaKeyspaceTables.ALL;
 import static org.apache.cassandra.schema.SchemaKeyspaceTables.COLUMNS;
@@ -826,8 +828,8 @@ public final class SchemaKeyspace
         // in order to allow rolling back to the previous release that doesn't recognize those schema columns.
         if (CassandraRelevantProperties.INDEX_COMPRESSION_ENABLED.getBoolean())
         {
-            rowBuilder.add("key_compression", index.keyCompression.asMap());
-            rowBuilder.add("value_compression", index.valueCompression.asMap());
+            rowBuilder.add(KW_KEY_COMPRESSION, index.keyCompression.asMap());
+            rowBuilder.add(KW_VALUE_COMPRESSION, index.valueCompression.asMap());
         }
     }
 
@@ -1135,12 +1137,12 @@ public final class SchemaKeyspace
         IndexMetadata.Kind type = IndexMetadata.Kind.valueOf(row.getString("kind"));
         Map<String, String> options = row.getFrozenTextMap("options");
 
-        Map<String, String> keyCompressionOptions = row.getFrozenTextMap("key_compression");
+        Map<String, String> keyCompressionOptions = row.getFrozenTextMap(KW_KEY_COMPRESSION);
         CompressionParams keyCompression = keyCompressionOptions != null
                                         ? CompressionParams.fromMap(keyCompressionOptions)
                                         : CompressionParams.noCompression();
 
-        Map<String, String> valueCompressionOptions = row.getFrozenTextMap("value_compression");
+        Map<String, String> valueCompressionOptions = row.getFrozenTextMap(KW_VALUE_COMPRESSION);
         CompressionParams valueCompression =valueCompressionOptions != null
                                            ? CompressionParams.fromMap(valueCompressionOptions)
                                            : CompressionParams.noCompression();

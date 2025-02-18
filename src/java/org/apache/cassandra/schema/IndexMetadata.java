@@ -46,6 +46,9 @@ import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.UUIDSerializer;
 
+import static org.apache.cassandra.cql3.statements.schema.IndexAttributes.KW_KEY_COMPRESSION;
+import static org.apache.cassandra.cql3.statements.schema.IndexAttributes.KW_VALUE_COMPRESSION;
+
 /**
  * An immutable representation of secondary index metadata.
  */
@@ -80,8 +83,13 @@ public final class IndexMetadata
     public final String name;
     public final Kind kind;
 
+    /** Compression parameters to use for compressing primary keys of the table the index points to */
     public final CompressionParams keyCompression;
+
+    /** Compression parameters to use for compressing values (terms) of the indexed column */
     public final CompressionParams valueCompression;
+
+    /** Other index-specific options */
     public final Map<String, String> options;
 
     private IndexMetadata(String name,
@@ -324,9 +332,9 @@ public final class IndexMetadata
             builder.appendOptions(b -> {
                 b.append("options", copyOptions);
                 if (valueCompression.isEnabled())
-                    b.append("value_compression", valueCompression.asMap());
+                    b.append(KW_VALUE_COMPRESSION, valueCompression.asMap());
                 if (keyCompression.isEnabled())
-                    b.append("key_compression", keyCompression.asMap());
+                    b.append(KW_KEY_COMPRESSION, keyCompression.asMap());
             });
         }
         else

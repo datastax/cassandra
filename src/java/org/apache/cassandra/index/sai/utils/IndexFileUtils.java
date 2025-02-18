@@ -105,9 +105,9 @@ public class IndexFileUtils
     }
 
     public static File addSuffix(File file, String suffix) {
-        if (file == null || suffix == null) {
+        if (file == null || suffix == null)
             throw new IllegalArgumentException("File and suffix cannot be null.");
-        }
+
         String fileName = file.name();
         int lastDotIndex = fileName.lastIndexOf('.');
         String baseName = (lastDotIndex == -1) ? fileName : fileName.substring(0, lastDotIndex);
