@@ -73,7 +73,7 @@ public class IndexCompressionTest extends SAITester
     }
 
     @Test
-    public void testKeyCompressionIsCommonForAllIndexes() throws InterruptedException
+    public void testKeyCompressionIsCommonForAllIndexes()
     {
         // When creating another index with different key compression, the key compression of the first index
         // gets overwritten by the compression settings of the second index.
