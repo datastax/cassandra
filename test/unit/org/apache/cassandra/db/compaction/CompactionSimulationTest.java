@@ -410,6 +410,7 @@ public class CompactionSimulationTest extends BaseCompactionStrategyTest
                                                          Reservations.Type.PER_LEVEL,
                                                          overlapInclusionMethod,
                                                          true,
+                                                         false,
                                                          updateTimeSec,
                                                          minW,
                                                          maxW,
@@ -437,6 +438,7 @@ public class CompactionSimulationTest extends BaseCompactionStrategyTest
                                                        Reservations.Type.PER_LEVEL,
                                                        overlapInclusionMethod,
                                                        true,
+                                                       false,
                                                        "ks",
                                                        "tbl");
 
