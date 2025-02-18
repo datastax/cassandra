@@ -29,11 +29,11 @@ import org.apache.cassandra.db.compaction.UnifiedCompactionStrategy;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.locator.ReplicationFactor;
 import org.apache.cassandra.schema.SchemaConstants;
-import org.apache.cassandra.utils.Overlaps;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 import static org.mockito.Mockito.when;
@@ -93,6 +93,36 @@ public class StaticControllerTest extends ControllerTest
         Controller controller = testFromOptions(false, options);
         assertTrue(controller instanceof StaticController);
 
+
+        for (int i = 0; i < Ws.length; i++)
+            assertEquals(Ws[i], controller.getScalingParameter(i));
+
+        assertEquals(Ws[Ws.length-1], controller.getScalingParameter(Ws.length));
+    }
+
+    @Test
+    public void testFromOptionsVectorTable()
+    {
+        useVector = true;
+        Map<String, String> options = new HashMap<>();
+        Controller controller = Controller.fromOptions(cfs, new HashMap<>());
+        assertNotNull(controller);
+        assertNotNull(controller.toString());
+
+        assertEquals(Controller.DEFAULT_VECTOR_BASE_SHARD_COUNT, controller.baseShardCount);
+        assertEquals(Controller.DEFAULT_VECTOR_SSTABLE_GROWTH, controller.sstableGrowthModifier, 0.01);
+        assertEquals(Controller.DEFAULT_VECTOR_MIN_SSTABLE_SIZE, controller.minSSTableSize);
+        assertEquals(Controller.DEFAULT_VECTOR_RESERVED_THREADS, controller.getReservedThreads());
+        assertEquals(Controller.DEFAULT_VECTOR_TARGET_SSTABLE_SIZE, controller.getTargetSSTableSize());
+        int[] vectorScalingParameter = Controller.parseScalingParameters(StaticController.DEFAULT_VECTOR_STATIC_SCALING_PARAMETERS);
+        for (int i = 0; i < vectorScalingParameter.length; i++)
+            assertEquals(vectorScalingParameter[i], controller.getScalingParameter(i));
+
+        addOptions(false, options);
+
+        // Test overrides still work.
+        controller = testFromOptionsVector(false, options);
+        assertTrue(controller instanceof StaticController);
 
         for (int i = 0; i < Ws.length; i++)
             assertEquals(Ws[i], controller.getScalingParameter(i));
@@ -183,6 +213,7 @@ public class StaticControllerTest extends ControllerTest
                                                            Controller.DEFAULT_RESERVED_THREADS_TYPE,
                                                            Controller.DEFAULT_OVERLAP_INCLUSION_METHOD,
                                                            true,
+                                                           false,
                                                            keyspaceName,
                                                            tableName);
         super.testStartShutdown(controller);
@@ -201,7 +232,7 @@ public class StaticControllerTest extends ControllerTest
                                                            Controller.DEFAULT_MAX_SPACE_OVERHEAD,
                                                            0,
                                                            Controller.DEFAULT_EXPIRED_SSTABLE_CHECK_FREQUENCY_SECONDS,
-                                                           Controller.ALLOW_UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION,
+                                                           Controller.DEFAULT_ALLOW_UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION,
                                                            numShards,
                                                            false,
                                                            sstableSizeMB << 20,
@@ -210,6 +241,7 @@ public class StaticControllerTest extends ControllerTest
                                                            Controller.DEFAULT_RESERVED_THREADS_TYPE,
                                                            Controller.DEFAULT_OVERLAP_INCLUSION_METHOD,
                                                            true,
+                                                           false,
                                                            keyspaceName,
                                                            tableName);
         super.testShutdownNotStarted(controller);
@@ -228,7 +260,7 @@ public class StaticControllerTest extends ControllerTest
                                                            Controller.DEFAULT_MAX_SPACE_OVERHEAD,
                                                            0,
                                                            Controller.DEFAULT_EXPIRED_SSTABLE_CHECK_FREQUENCY_SECONDS,
-                                                           Controller.ALLOW_UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION,
+                                                           Controller.DEFAULT_ALLOW_UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION,
                                                            numShards,
                                                            false,
                                                            sstableSizeMB << 20,
@@ -237,6 +269,7 @@ public class StaticControllerTest extends ControllerTest
                                                            Controller.DEFAULT_RESERVED_THREADS_TYPE,
                                                            Controller.DEFAULT_OVERLAP_INCLUSION_METHOD,
                                                            true,
+                                                           false,
                                                            keyspaceName,
                                                            tableName);
         super.testStartAlreadyStarted(controller);

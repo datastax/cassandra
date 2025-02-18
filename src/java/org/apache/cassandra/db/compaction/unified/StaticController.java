@@ -47,6 +47,7 @@ public class StaticController extends Controller
      * Higher indexes will use the value of the last index with a W specified.
      */
     private static final String DEFAULT_STATIC_SCALING_PARAMETERS = getSystemProperty(SCALING_PARAMETERS_OPTION, "T4");
+    static final String DEFAULT_VECTOR_STATIC_SCALING_PARAMETERS = getSystemProperty(VECTOR_PREFIX + SCALING_PARAMETERS_OPTION, "L10");
     private final int[] scalingParameters;
 
     @VisibleForTesting // comp. simulation
@@ -69,6 +70,7 @@ public class StaticController extends Controller
                             Reservations.Type reservationsType,
                             Overlaps.InclusionMethod overlapInclusionMethod,
                             boolean parallelizeOutputShards,
+                            boolean hasVectorType,
                             String keyspaceName,
                             String tableName)
     {
@@ -90,7 +92,8 @@ public class StaticController extends Controller
               reservedThreadsPerLevel,
               reservationsType,
               overlapInclusionMethod,
-              parallelizeOutputShards);
+              parallelizeOutputShards,
+              hasVectorType);
         this.scalingParameters = scalingParameters;
         this.keyspaceName = keyspaceName;
         this.tableName = tableName;
@@ -113,15 +116,20 @@ public class StaticController extends Controller
                                   Reservations.Type reservationsType,
                                   Overlaps.InclusionMethod overlapInclusionMethod,
                                   boolean parallelizeOutputShards,
+                                  boolean hasVectorType,
                                   String keyspaceName,
                                   String tableName,
-                                  Map<String, String> options)
+                                  Map<String, String> options,
+                                  boolean useVectorOptions)
     {
         int[] scalingParameters;
         if (options.containsKey(STATIC_SCALING_FACTORS_OPTION))
             scalingParameters = parseScalingParameters(options.get(STATIC_SCALING_FACTORS_OPTION));
         else
-            scalingParameters = parseScalingParameters(options.getOrDefault(SCALING_PARAMETERS_OPTION, DEFAULT_STATIC_SCALING_PARAMETERS));
+            scalingParameters = parseScalingParameters(options.getOrDefault(SCALING_PARAMETERS_OPTION,
+                                                                            useVectorOptions ? DEFAULT_VECTOR_STATIC_SCALING_PARAMETERS
+                                                                                             : DEFAULT_STATIC_SCALING_PARAMETERS));
+
         long currentFlushSize = flushSizeOverride;
 
         File f = getControllerConfigPath(keyspaceName, tableName);
@@ -167,6 +175,7 @@ public class StaticController extends Controller
                                     reservationsType,
                                     overlapInclusionMethod,
                                     parallelizeOutputShards,
+                                    hasVectorType,
                                     keyspaceName,
                                     tableName);
     }
@@ -221,6 +230,9 @@ public class StaticController extends Controller
     @Override
     public String toString()
     {
-        return String.format("Static controller, m: %d, o: %s, scalingParameters: %s, cost: %s", minSSTableSize, Arrays.toString(survivalFactors), printScalingParameters(scalingParameters), calculator);
+        return String.format("Static controller, m: %d, o: %s, scalingParameters: %s, cost: %s", minSSTableSize,
+                             Arrays.toString(survivalFactors),
+                             printScalingParameters(scalingParameters),
+                             calculator);
     }
 }

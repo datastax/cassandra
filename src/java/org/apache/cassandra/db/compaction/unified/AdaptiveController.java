@@ -119,6 +119,7 @@ public class AdaptiveController extends Controller
                               Reservations.Type reservationsType,
                               Overlaps.InclusionMethod overlapInclusionMethod,
                               boolean parallelizeOutputShards,
+                              boolean hasVectorType,
                               int intervalSec,
                               int minScalingParameter,
                               int maxScalingParameter,
@@ -146,7 +147,8 @@ public class AdaptiveController extends Controller
               reservedThreadsPerLevel,
               reservationsType,
               overlapInclusionMethod,
-              parallelizeOutputShards);
+              parallelizeOutputShards,
+              hasVectorType);
 
         this.scalingParameters = scalingParameters;
         this.previousScalingParameters = previousScalingParameters;
@@ -175,8 +177,9 @@ public class AdaptiveController extends Controller
                                   double sstableGrowthModifier,
                                   int reservedThreadsPerLevel,
                                   Reservations.Type reservationsType,
-                                  boolean parallelizeOutputShards,
                                   Overlaps.InclusionMethod overlapInclusionMethod,
+                                  boolean parallelizeOutputShards,
+                                  boolean hasVectorType,
                                   String keyspaceName,
                                   String tableName,
                                   Map<String, String> options)
@@ -276,6 +279,7 @@ public class AdaptiveController extends Controller
                                       reservationsType,
                                       overlapInclusionMethod,
                                       parallelizeOutputShards,
+                                      hasVectorType,
                                       intervalSec,
                                       minScalingParameter,
                                       maxScalingParameter,
