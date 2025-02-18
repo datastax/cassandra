@@ -63,37 +63,21 @@ public class MmappedRegions extends SharedCloseableImpl
      */
     private volatile State copy;
 
-    private final long uncompressedSliceOffset;
-
-    private MmappedRegions(ChannelProxy channel, CompressionMetadata metadata, long length, long uncompressedSliceOffset, boolean adviseRandom)
+    private MmappedRegions(State state, CompressionMetadata metadata, long uncompressedSliceOffset)
     {
-        this(new State(channel, offsetFrom(metadata, uncompressedSliceOffset), adviseRandom),
-             metadata,
-             length,
-             uncompressedSliceOffset);
+        super(new Tidier(state));
+        this.state = state;
+        updateState(metadata, uncompressedSliceOffset);
+        this.copy = new State(state);
     }
 
-    private static long offsetFrom(CompressionMetadata metadata, long uncompressedSliceOffset)
-    {
-        return metadata == null ? uncompressedSliceOffset : metadata.chunkFor(uncompressedSliceOffset).offset;
-    }
-
-    private MmappedRegions(State state, CompressionMetadata metadata, long length, long uncompressedSliceOffset)
+    private MmappedRegions(State state, long length, int chunkSize)
     {
         super(new Tidier(state));
 
         this.state = state;
-        this.uncompressedSliceOffset = uncompressedSliceOffset;
-
-        if (metadata != null)
-        {
-            assert length == 0 : "expected no length with metadata";
-            updateState(metadata);
-        }
-        else if (length > 0)
-        {
-            updateState(length);
-        }
+        if (length > 0)
+            updateState(length, chunkSize);
 
         this.copy = new State(state);
     }
@@ -102,12 +86,11 @@ public class MmappedRegions extends SharedCloseableImpl
     {
         super(original);
         this.state = original.copy;
-        this.uncompressedSliceOffset = original.uncompressedSliceOffset;
     }
 
     public static MmappedRegions empty(ChannelProxy channel)
     {
-        return new MmappedRegions(channel, null, 0, 0, false);
+        return new MmappedRegions(new State(channel, 0, false), 0, 0);
     }
 
     /**
@@ -125,16 +108,17 @@ public class MmappedRegions extends SharedCloseableImpl
     {
         if (metadata == null)
             throw new IllegalArgumentException("metadata cannot be null");
-
-        return new MmappedRegions(channel, metadata, 0, uncompressedSliceOffset, adviseRandom);
+        State state = new State(channel, metadata.chunkFor(uncompressedSliceOffset).offset, adviseRandom);
+        return new MmappedRegions(state, metadata, uncompressedSliceOffset);
     }
 
-    public static MmappedRegions map(ChannelProxy channel, long length, long uncompressedSliceOffset, boolean adviseRandom)
+    public static MmappedRegions map(ChannelProxy channel, long length, int chunkSize, long uncompressedSliceOffset, boolean adviseRandom)
     {
         if (length <= 0)
             throw new IllegalArgumentException("Length must be positive");
 
-        return new MmappedRegions(channel, null, length, uncompressedSliceOffset, adviseRandom);
+        State state = new State(channel, uncompressedSliceOffset, adviseRandom);
+        return new MmappedRegions(state, length, chunkSize);
     }
 
     /**
@@ -153,23 +137,21 @@ public class MmappedRegions extends SharedCloseableImpl
 
     /**
      * Extends this collection of mmapped regions up to the provided total length.
-     *
-     * @return {@code true} if new regions have been created
      */
-    public boolean extend(long length)
+    public void extend(long length, int chunkSize)
     {
+        // We cannot enforce length to be a multiple of chunkSize (at the very least the last extend on a file
+        // will not satisfy this), so we hope the caller knows what they are doing.
         if (length < 0)
             throw new IllegalArgumentException("Length must not be negative");
 
         assert !isCopy() : "Copies cannot be extended";
 
         if (length <= state.length)
-            return false;
+            return;
 
-        int initialRegions = state.last;
-        updateState(length);
+        updateState(length, chunkSize);
         copy = new State(state);
-        return state.last > initialRegions;
     }
 
     /**
@@ -178,7 +160,7 @@ public class MmappedRegions extends SharedCloseableImpl
      *
      * @return {@code true} if new regions have been created
      */
-    public boolean extend(CompressionMetadata compressionMetadata)
+    public boolean extend(CompressionMetadata compressionMetadata, int chunkSize, long uncompressedSliceOffset)
     {
         assert !isCopy() : "Copies cannot be extended";
 
@@ -187,9 +169,9 @@ public class MmappedRegions extends SharedCloseableImpl
 
         int initialRegions = state.last;
         if (compressionMetadata.compressedFileLength - state.length <= MAX_SEGMENT_SIZE)
-            updateState(compressionMetadata.compressedFileLength);
+            updateState(compressionMetadata.compressedFileLength, chunkSize);
         else
-            updateState(compressionMetadata);
+            updateState(compressionMetadata, uncompressedSliceOffset);
 
         copy = new State(state);
         return state.last > initialRegions;
@@ -199,19 +181,21 @@ public class MmappedRegions extends SharedCloseableImpl
      * Updates state by adding the remaining segments. It starts with the current state last segment end position and
      * subsequently add new segments until all data up to the provided length are mapped.
      */
-    private void updateState(long length)
+    private void updateState(long length, int chunkSize)
     {
+        // make sure the regions span whole chunks
+        long maxSize = (long) (MAX_SEGMENT_SIZE / chunkSize) * chunkSize;
         state.length = length;
         long pos = state.getPosition();
         while (pos < length)
         {
-            long size = Math.min(MAX_SEGMENT_SIZE, length - pos);
+            long size = Math.min(maxSize, length - pos);
             state.add(pos, size);
             pos += size;
         }
     }
 
-    private void updateState(CompressionMetadata metadata)
+    private void updateState(CompressionMetadata metadata, long uncompressedSliceOffset)
     {
         long uncompressedPosition = metadata.getDataOffsetForChunkOffset(state.getPosition()); // uncompressed position of the current compressed chunk in the original (compressed) file
         long compressedPosition = state.getPosition();   // position on disk of the current compressed chunk in the original (compressed) file
@@ -342,7 +326,7 @@ public class MmappedRegions extends SharedCloseableImpl
         private final long onDiskSliceOffset;
 
         /** whether to apply fadv_random to mapped regions */
-        private boolean adviseRandom;
+        private final boolean adviseRandom;
 
         private State(ChannelProxy channel, long onDiskSliceOffset, boolean adviseRandom)
         {
