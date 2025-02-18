@@ -367,6 +367,7 @@
         <string>--add-opens java.base/java.util=ALL-UNNAMED</string>
         <string>--add-opens java.base/java.util.concurrent.locks=ALL-UNNAMED</string>
         <string>--add-opens java.base/java.util.jar=ALL-UNNAMED</string>
+        <string>--add-opens java.base/java.util.zip=ALL-UNNAMED</string>
         <string>--add-opens java.base/jdk.internal.loader=ALL-UNNAMED</string>
         <string>--add-opens java.base/jdk.internal.math=ALL-UNNAMED</string>
         <string>--add-opens java.base/jdk.internal.module=ALL-UNNAMED</string>
