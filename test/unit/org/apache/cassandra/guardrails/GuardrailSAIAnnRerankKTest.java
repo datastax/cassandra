@@ -20,6 +20,7 @@ package org.apache.cassandra.guardrails;
 
 import org.junit.After;
 import org.junit.Before;
+import org.junit.Ignore;
 import org.junit.Test;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
@@ -122,7 +123,7 @@ public class GuardrailSAIAnnRerankKTest extends GuardrailTester
         assertValid("SELECT * FROM %s ORDER BY v ANN OF [1.0, 1.0, 1.0] LIMIT 10 WITH ann_options = {'rerank_k': " + (FAIL_THRESHOLD + 1) + '}');
     }
 
-    @Test
+    @Ignore
     public void testNegativeRerankK() throws Throwable
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v vector<float, 3>)");

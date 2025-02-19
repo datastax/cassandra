@@ -64,7 +64,7 @@ public class ANNOptions
 
     public void validate(QueryState state, int limit)
     {
-        if (rerankK == null || rerankK <= 0)
+        if (rerankK == null)
             return;
 
         if (rerankK < limit)

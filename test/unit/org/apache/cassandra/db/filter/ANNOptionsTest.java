@@ -91,12 +91,18 @@ public class ANNOptionsTest extends CQLTester
         execute("SELECT * FROM %s WHERE k=0 ORDER BY v ANN OF [1, 1] WITH ann_options = {}");
 
         // correct queries with specific ANN options
-        execute("SELECT * FROM %s ORDER BY v ANN OF [1, 1] LIMIT 10 WITH ann_options = {'rerank_k': 0}");
+        execute("SELECT * FROM %s ORDER BY v ANN OF [1, 1] LIMIT 10 WITH ann_options = {'rerank_k': 10}");
+        execute("SELECT * FROM %s ORDER BY v ANN OF [1, 1] LIMIT 10 WITH ann_options = {'rerank_k': 11}");
         execute("SELECT * FROM %s ORDER BY v ANN OF [1, 1] LIMIT 10 WITH ann_options = {'rerank_k': 1000}");
-        execute("SELECT * FROM %s ORDER BY v ANN OF [1, 1] LIMIT 10 WITH ann_options = {'rerank_k': '0'}");
         execute("SELECT * FROM %s ORDER BY v ANN OF [1, 1] LIMIT 10 WITH ann_options = {'rerank_k': '1000'}");
-        execute("SELECT * FROM %s ORDER BY v ANN OF [1, 1] LIMIT 10 WITH ann_options = {'rerank_k': '-1'}");
-        execute("SELECT * FROM %s ORDER BY v ANN OF [1, 1] LIMIT 10 WITH ann_options = {'rerank_k': '-1000'}");
+
+        // Queries with invalid ann options that will eventually be valid when we support disabling reranking
+        assertInvalidThrowMessage("Invalid rerank_k value -1 lesser than limit 100",
+                                  InvalidRequestException.class,
+                                  "SELECT * FROM %s ORDER BY v ANN OF [1, 1] LIMIT 100 WITH ann_options = {'rerank_k': -1}");
+        assertInvalidThrowMessage("Invalid rerank_k value 0 lesser than limit 100",
+                                  InvalidRequestException.class,
+                                  "SELECT * FROM %s ORDER BY v ANN OF [1, 1] LIMIT 100 WITH ann_options = {'rerank_k': 0}");
 
         // Queries that exceed the failure threshold for the guardrail. Specifies a protocol version to trigger
         // validation in the coordinator.
@@ -192,12 +198,13 @@ public class ANNOptionsTest extends CQLTester
         testTransport("SELECT * FROM %s ORDER BY v ANN OF [1, 1]", ANNOptions.NONE);
         testTransport("SELECT * FROM %s ORDER BY v ANN OF [1, 1] WITH ann_options = {}", ANNOptions.NONE);
 
+        // TODO re-enable this test when we support negative rerank_k values
         // some random negative values, all should be accepted and not be mapped to NONE
-        String negativeQuery = "SELECT * FROM %%s ORDER BY v ANN OF [1, 1] LIMIT 10 WITH ann_options = {'rerank_k': %d}";
-        QuickTheory.qt()
-                   .withExamples(100)
-                   .forAll(integers().allPositive())
-                   .checkAssert(i -> testTransport(String.format(negativeQuery, -i), ANNOptions.create(-i)));
+//        String negativeQuery = "SELECT * FROM %%s ORDER BY v ANN OF [1, 1] LIMIT 10 WITH ann_options = {'rerank_k': %d}";
+//        QuickTheory.qt()
+//                   .withExamples(100)
+//                   .forAll(integers().allPositive())
+//                   .checkAssert(i -> testTransport(String.format(negativeQuery, -i), ANNOptions.create(-i)));
 
         // some random positive values, all should be accepted
         String positiveQuery = "SELECT * FROM %%s ORDER BY v ANN OF [1, 1] LIMIT %d WITH ann_options = {'rerank_k': %<d}";
