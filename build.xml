@@ -377,6 +377,7 @@
         <string>--add-opens java.base/jdk.internal.ref=ALL-UNNAMED</string>
         <string>--add-opens java.base/jdk.internal.reflect=ALL-UNNAMED</string>
         <string>--add-opens java.base/jdk.internal.vm=ALL-UNNAMED</string>
+        <string>--add-opens java.base/sun.net.www.protocol.jar=ALL-UNNAMED</string>
         <string>--add-opens java.base/sun.nio.ch=ALL-UNNAMED</string>
         <string>--add-opens java.base/sun.nio.fs=ALL-UNNAMED</string>
         <string>--add-opens java.base/sun.reflect.generics.repository=ALL-UNNAMED</string>
