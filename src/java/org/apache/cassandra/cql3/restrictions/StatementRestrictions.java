@@ -1000,7 +1000,7 @@ public class StatementRestrictions
             return RowFilter.NONE;
         }
 
-        ANNOptions annOptions = selectOptions.parseANNOptions();
+        ANNOptions annOptions = selectOptions.parseANNOptions(options.getKeyspace());
         RowFilter rowFilter = RowFilter.builder(indexManager)
                                        .buildFromRestrictions(this, table, options, queryState, annOptions);
 
