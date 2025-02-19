@@ -225,7 +225,7 @@ public class StorageAttachedIndex implements Index
             ImmutableSet.of(OrderPreservingPartitioner.class, LocalPartitioner.class, ByteOrderedPartitioner.class, RandomPartitioner.class);
 
     private final ColumnFamilyStore baseCfs;
-    private volatile IndexContext indexContext;
+    private final IndexContext indexContext;
 
     // Tracks whether or not we've started the index build on initialization.
     private volatile boolean canFlushFromMemtableIndex = false;
@@ -254,17 +254,7 @@ public class StorageAttachedIndex implements Index
 
     private void setMetadata(IndexMetadata config)
     {
-        TableMetadata tableMetadata = baseCfs.metadata();
-        Pair<ColumnMetadata, IndexTarget.Type> target = TargetParser.parse(tableMetadata, config);
-        this.indexContext = new IndexContext(tableMetadata.keyspace,
-                                             tableMetadata.name,
-                                             tableMetadata.id,
-                                             tableMetadata.partitionKeyType,
-                                             tableMetadata.comparator,
-                                             target.left,
-                                             target.right,
-                                             config,
-                                             baseCfs);
+        indexContext.setConfig(config);
     }
 
     /**
@@ -403,7 +393,7 @@ public class StorageAttachedIndex implements Index
     @Override
     public IndexMetadata getIndexMetadata()
     {
-        return indexContext.config;
+        return indexContext.getConfig();
     }
 
     @Override
@@ -888,7 +878,7 @@ public class StorageAttachedIndex implements Index
     @Override
     public String toString()
     {
-        IndexMetadata config = indexContext.config;
+        IndexMetadata config = indexContext.getConfig();
         return String.format("%s.%s.%s", baseCfs.keyspace.getName(), baseCfs.name, config == null ? "?" : config.name);
     }
 

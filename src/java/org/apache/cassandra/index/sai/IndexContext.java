@@ -137,7 +137,7 @@ public class IndexContext
     private final ColumnFamilyStore cfs;
 
     // Config can be null if the column context is "fake" (i.e. created for a filtering expression).
-    public final IndexMetadata config;
+    private volatile IndexMetadata config;
     private final VectorSimilarityFunction vectorSimilarityFunction;
 
     private final ConcurrentMap<Memtable, MemtableIndex> liveMemtables = new ConcurrentHashMap<>();
@@ -218,6 +218,16 @@ public class IndexContext
 
 
         logger.debug(logMessage("Initialized index context with index writer config: {}"), indexWriterConfig);
+    }
+
+    public IndexMetadata getConfig()
+    {
+        return config;
+    }
+
+    public void setConfig(IndexMetadata config)
+    {
+        this.config = config;
     }
 
     public AbstractType<?> keyValidator()
@@ -1010,4 +1020,5 @@ public class IndexContext
         getView().getIndexes().stream().map(SSTableIndex::indexFeatureSet).forEach(set -> accumulator.accumulate(set));
         return accumulator.complete();
     }
+
 }
