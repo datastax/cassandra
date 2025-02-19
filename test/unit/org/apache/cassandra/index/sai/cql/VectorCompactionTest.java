@@ -110,6 +110,69 @@ public class VectorCompactionTest extends VectorTester.Versioned
         testOneToManyCompactionHolesInternal(MIN_PQ_ROWS, sstables);
     }
 
+    @Test
+    public void testZeroOrOneToManyCompaction()
+    {
+        for (int sstables = 2; sstables <= 3; sstables++)
+        {
+            testZeroOrOneToManyCompactionInternal(10, sstables);
+            testZeroOrOneToManyCompactionInternal(MIN_PQ_ROWS, sstables);
+        }
+    }
+
+    public void testZeroOrOneToManyCompactionInternal(int vectorsPerSstable, int sstables)
+    {
+        createTable();
+        disableCompaction();
+
+        insertZeroOrOneToManyRows(vectorsPerSstable, sstables);
+
+        validateQueries();
+        compact();
+        validateQueries();
+    }
+
+    private void insertZeroOrOneToManyRows(int vectorsPerSstable, int sstables)
+    {
+        var R = getRandom();
+        double duplicateChance = R.nextDouble() * 0.2;
+        int j = 0;
+        boolean nullInserted = false;
+        
+        for (int i = 0; i < sstables; i++)
+        {
+            var vectorsInserted = new ArrayList<Vector<Float>>();
+            var duplicateExists = false;
+            while (vectorsInserted.size() < vectorsPerSstable || !duplicateExists)
+            {
+                if (!nullInserted && vectorsInserted.size() == vectorsPerSstable/2)
+                {
+                    // Insert one null vector in the middle
+                    execute("INSERT INTO %s (pk, v) VALUES (?, null)", j++);
+                    nullInserted = true;
+                    continue;
+                }
+
+                Vector<Float> v;
+                if (R.nextDouble() < duplicateChance && !vectorsInserted.isEmpty())
+                {
+                    // insert a duplicate
+                    v = vectorsInserted.get(R.nextIntBetween(0, vectorsInserted.size() - 1));
+                    duplicateExists = true;
+                }
+                else
+                {
+                    // insert a new random vector
+                    v = randomVectorBoxed(2);
+                    vectorsInserted.add(v);
+                }
+                assert v != null;
+                execute("INSERT INTO %s (pk, v) VALUES (?, ?)", j++, v);
+            }
+            flush();
+        }
+    }
+
     public void testOneToManyCompactionHolesInternal(int vectorsPerSstable, int sstables)
     {
         createTable();
