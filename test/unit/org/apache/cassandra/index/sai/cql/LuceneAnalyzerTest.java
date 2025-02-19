@@ -867,8 +867,14 @@ public class LuceneAnalyzerTest extends SAITester
     public void testAnalyzerOnSet() throws Throwable
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, genres set<text>)");
-        createIndex("CREATE CUSTOM INDEX ON %s(genres) USING 'StorageAttachedIndex' WITH OPTIONS = { 'index_analyzer':'STANDARD'}");
         execute("INSERT INTO %s (id, genres) VALUES ('1', {'Horror', 'comedy'})");
+
+        assertRowsNet(executeNet("SELECT id FROM %s WHERE genres CONTAINS 'Horror' ALLOW FILTERING"), row("1"));
+        assertRowsNet(executeNet("SELECT id FROM %s WHERE genres NOT CONTAINS 'Horror' ALLOW FILTERING"));
+        assertRowsNet(executeNet("SELECT id FROM %s WHERE genres CONTAINS 'horror' ALLOW FILTERING"));
+        assertRowsNet(executeNet("SELECT id FROM %s WHERE genres NOT CONTAINS 'horror' ALLOW FILTERING"), row("1"));
+
+        createIndex("CREATE CUSTOM INDEX ON %s(genres) USING 'StorageAttachedIndex' WITH OPTIONS = { 'index_analyzer':'STANDARD'}");
 
         beforeAndAfterFlush(() -> {
             assertRowsNet(executeNet("SELECT id FROM %s WHERE genres CONTAINS 'horror'"), row("1"));
@@ -916,8 +922,14 @@ public class LuceneAnalyzerTest extends SAITester
     public void testAnalyzerOnList() throws Throwable
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, genres list<text>)");
-        createIndex("CREATE CUSTOM INDEX ON %s(genres) USING 'StorageAttachedIndex' WITH OPTIONS = { 'index_analyzer':'STANDARD'}");
         execute("INSERT INTO %s (id, genres) VALUES ('1', ['Horror', 'comedy'])");
+
+        assertRowsNet(executeNet("SELECT id FROM %s WHERE genres CONTAINS 'Horror' ALLOW FILTERING"), row("1"));
+        assertRowsNet(executeNet("SELECT id FROM %s WHERE genres NOT CONTAINS 'Horror' ALLOW FILTERING"));
+        assertRowsNet(executeNet("SELECT id FROM %s WHERE genres CONTAINS 'horror' ALLOW FILTERING"));
+        assertRowsNet(executeNet("SELECT id FROM %s WHERE genres NOT CONTAINS 'horror' ALLOW FILTERING"), row("1"));
+
+        createIndex("CREATE CUSTOM INDEX ON %s(genres) USING 'StorageAttachedIndex' WITH OPTIONS = { 'index_analyzer':'STANDARD'}");
 
         beforeAndAfterFlush(() -> {
             assertRowsNet(executeNet("SELECT id FROM %s WHERE genres CONTAINS 'horror'"), row("1"));
@@ -965,8 +977,14 @@ public class LuceneAnalyzerTest extends SAITester
     public void testAnalyzerOnMapKeys() throws Throwable
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, genres map<text, int>)");
-        createIndex("CREATE CUSTOM INDEX ON %s(KEYS(genres)) USING 'StorageAttachedIndex' WITH OPTIONS = { 'index_analyzer':'STANDARD'}");
         execute("INSERT INTO %s (id, genres) VALUES ('1', {'Horror' : 1, 'comedy' : 2})");
+
+        assertRowsNet(executeNet("SELECT id FROM %s WHERE genres CONTAINS KEY 'Horror' ALLOW FILTERING"), row("1"));
+        assertRowsNet(executeNet("SELECT id FROM %s WHERE genres NOT CONTAINS KEY 'Horror' ALLOW FILTERING"));
+        assertRowsNet(executeNet("SELECT id FROM %s WHERE genres CONTAINS KEY 'horror' ALLOW FILTERING"));
+        assertRowsNet(executeNet("SELECT id FROM %s WHERE genres NOT CONTAINS KEY 'horror' ALLOW FILTERING"), row("1"));
+
+        createIndex("CREATE CUSTOM INDEX ON %s(KEYS(genres)) USING 'StorageAttachedIndex' WITH OPTIONS = { 'index_analyzer':'STANDARD'}");
 
         beforeAndAfterFlush(() -> {
             assertRowsNet(executeNet("SELECT id FROM %s WHERE genres CONTAINS KEY 'horror'"), row("1"));
