@@ -577,7 +577,7 @@
           <dependency groupId="org.lz4" artifactId="lz4-java" version="1.8.0"/>
           <dependency groupId="com.ning" artifactId="compress-lzf" version="0.8.4" scope="provided"/>
           <dependency groupId="com.github.luben" artifactId="zstd-jni" version="1.5.5-1"/>
-          <dependency groupId="com.google.guava" artifactId="guava" version="29.0-jre">
+          <dependency groupId="com.google.guava" artifactId="guava" version="33.4.0-jre">
             <exclusion groupId="com.google.code.findbugs" artifactId="jsr305" />
             <exclusion groupId="org.codehaus.mojo" artifactId="animal-sniffer-annotations" />
             <exclusion groupId="com.google.guava" artifactId="listenablefuture" />
