@@ -381,6 +381,7 @@
         <string>--add-opens java.base/sun.nio.ch=ALL-UNNAMED</string>
         <string>--add-opens java.base/sun.nio.fs=ALL-UNNAMED</string>
         <string>--add-opens java.base/sun.reflect.generics.repository=ALL-UNNAMED</string>
+        <string>--add-opens java.base/sun.reflect.generics.tree=ALL-UNNAMED</string>
         <string>--add-opens java.base/sun.security.util=ALL-UNNAMED</string>
         <string>--add-opens jdk.compiler/com.sun.tools.javac=ALL-UNNAMED</string>
         <string>--add-opens jdk.management.jfr/jdk.management.jfr=ALL-UNNAMED</string>
