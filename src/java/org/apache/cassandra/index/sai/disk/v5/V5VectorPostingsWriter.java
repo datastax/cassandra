@@ -281,7 +281,7 @@ public class V5VectorPostingsWriter<T>
             int postingListSize;
             if (originalOrdinal == OrdinalMapper.OMITTED)
             {
-                assert remappedPostings.structure == Structure.ONE_TO_MANY;
+                assert remappedPostings.structure == Structure.ZERO_OR_ONE_TO_MANY;
                 postingListSize = 0;
             }
             else
@@ -298,7 +298,7 @@ public class V5VectorPostingsWriter<T>
             int originalOrdinal = newToOldMapper.applyAsInt(i);
             if (originalOrdinal == OrdinalMapper.OMITTED)
             {
-                assert remappedPostings.structure == Structure.ONE_TO_MANY;
+                assert remappedPostings.structure == Structure.ZERO_OR_ONE_TO_MANY;
                 writer.writeInt(0);
                 continue;
             }
@@ -321,6 +321,9 @@ public class V5VectorPostingsWriter<T>
         var rowIdToOrdinalMap = new Int2IntHashMap(remappedPostings.maxNewOrdinal, 0.65f, OrdinalMapper.OMITTED);
         for (int i = 0; i <= remappedPostings.maxNewOrdinal; i++) {
             int ord = remappedPostings.ordinalMapper.newToOld(i);
+            if (ord == OrdinalMapper.OMITTED)
+                continue;
+
             var rowIds = postingsMap.get(vectorValues.getVector(ord)).getRowIds();
             for (int r = 0; r < rowIds.size(); r++)
             {
