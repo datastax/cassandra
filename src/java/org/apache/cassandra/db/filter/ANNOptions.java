@@ -79,10 +79,10 @@ public class ANNOptions
      * @param map the map of options in the {@code WITH ANN_OPTION} of a {@code SELECT} query
      * @return the ANN options in the specified {@code SELECT} options, or {@link #NONE} if no options are present
      */
-    public static ANNOptions fromMap(Map<String, String> map)
+    public static ANNOptions fromMap(String keyspace, Map<String, String> map)
     {
         // ensure that all nodes in the cluster are in a version that supports ANN options, including this one
-        Set<InetAddressAndPort> badNodes = MessagingService.instance().endpointsWithVersionBelow(MessagingService.VERSION_DS_11);
+        Set<InetAddressAndPort> badNodes = MessagingService.instance().endpointsWithVersionBelow(keyspace, MessagingService.VERSION_DS_11);
         if (MessagingService.current_version < MessagingService.VERSION_DS_11)
             badNodes.add(FBUtilities.getBroadcastAddressAndPort());
         if (!badNodes.isEmpty())
