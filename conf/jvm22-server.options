@@ -74,6 +74,7 @@
 --add-opens java.base/java.lang.module=ALL-UNNAMED
 --add-opens java.base/java.lang=ALL-UNNAMED
 --add-opens java.base/java.lang.reflect=ALL-UNNAMED
+--add-opens java.base/java.nio.charset=ALL-UNNAMED
 --add-opens java.base/java.nio.file.spi=ALL-UNNAMED
 --add-opens java.base/java.nio=ALL-UNNAMED
 --add-opens java.base/java.net=ALL-UNNAMED
