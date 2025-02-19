@@ -515,9 +515,9 @@ public class FileHandle extends SharedCloseableImpl
             }
 
             if (regions == null)
-                regions = MmappedRegions.map(channel, length, startOffset, adviseRandom);
+                regions = MmappedRegions.map(channel, length, bufferSize, startOffset, adviseRandom);
             else
-                regions.extend(length);
+                regions.extend(length, bufferSize);
         }
     }
 
