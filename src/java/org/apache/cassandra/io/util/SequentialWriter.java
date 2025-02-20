@@ -296,6 +296,26 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
         return PageAware.padded(position());
     }
 
+    public void updateFileHandle(FileHandle.Builder fhBuilder)
+    {
+        // Set actual length to avoid having to read it off the file system.
+        fhBuilder.withLength(lastFlushOffset);
+    }
+
+    // Page management using on-disk pages
+
+    /**
+     * Some writers cannot feasibly calculate the exact length of a file. If any user needs to be able to store
+     * metadata at the end, they should use this function to ensure the content to be written can be addressed
+     * using `fileLength - bytesNeeded`.
+     *
+     * See PartitionIndexBuilder#complete and PartitionIndex#load for usage example.
+     */
+    public void establishEndAddressablePosition(int bytesNeeded) throws IOException
+    {
+        // Nothing to do when file length can be exactly determined.
+    }
+
     /**
      * Returns the current file pointer of the underlying on-disk file.
      * Note that since write works by buffering data, the value of this will increase by buffer
@@ -467,7 +487,7 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
      */
     protected static class BufferedFileWriterMark implements DataPosition
     {
-        final long pointer;
+        public final long pointer;
 
         public BufferedFileWriterMark(long pointer)
         {
