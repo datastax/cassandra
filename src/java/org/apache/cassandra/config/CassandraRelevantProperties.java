@@ -22,6 +22,8 @@ import java.util.concurrent.TimeUnit;
 
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.io.compress.AdaptiveCompressor;
+import org.apache.cassandra.io.compress.LZ4Compressor;
 import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.sensors.SensorsFactory;
@@ -348,6 +350,14 @@ public enum CassandraRelevantProperties
     /** Watcher used when opening sstables to discover extra components, eg. archive component */
     CUSTOM_SSTABLE_WATCHER("cassandra.custom_sstable_watcher"),
 
+    /**
+     * When enabled, a user can set compression options in the index schema.
+     * We don't want to enable it by default, because it is going to write compression options to the index schema
+     * even when compression is not enabled on particular index, and once that happens, it is not possible to
+     * downgrade to a version from before the index compression feature was introduced.
+     */
+    INDEX_COMPRESSION_ENABLED("cassandra.index.compression_enabled", "false"),
+
     /** Controls the maximum top-k limit for vector search */
     SAI_VECTOR_SEARCH_MAX_TOP_K("cassandra.sai.vector_search.max_top_k", "1000"),
 
@@ -581,7 +591,13 @@ public enum CassandraRelevantProperties
      * The current messaging version. This is used when we add new messaging versions without adopting them immediately,
      * or to force the node to use a specific version for testing purposes.
      */
-    DS_CURRENT_MESSAGING_VERSION("ds.current_messaging_version", Integer.toString(MessagingService.VERSION_DS_10));
+    DS_CURRENT_MESSAGING_VERSION("ds.current_messaging_version", Integer.toString(MessagingService.VERSION_DS_10)),
+
+    /**
+     * Which compression algorithm to use for SSTable compression when not specified explicitly in the sstable options.
+     * Can be "fast", which selects {@link LZ4Compressor}, or "adaptive" which selects {@link AdaptiveCompressor}.
+     */
+    DEFAULT_SSTABLE_COMPRESSION("cassandra.default_sstable_compression", "fast");
 
     CassandraRelevantProperties(String key, String defaultVal)
     {

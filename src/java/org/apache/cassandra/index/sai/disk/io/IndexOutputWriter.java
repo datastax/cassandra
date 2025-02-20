@@ -55,7 +55,9 @@ public class IndexOutputWriter extends IndexOutput
     @Override
     public long getChecksum()
     {
-        return ((IndexFileUtils.ChecksumWriter)out).getChecksum();
+        return (out instanceof IndexFileUtils.ChecksumWriter)
+            ? ((IndexFileUtils.ChecksumWriter)out).getChecksum()
+            : -1;
     }
 
     @Override
@@ -137,6 +139,7 @@ public class IndexOutputWriter extends IndexOutput
             {
                 logger.trace("Closing index output: {}", this);
             }
+
 
             // The writer should sync its contents to disk before closing...
             out.close();
