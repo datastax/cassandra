@@ -7,8 +7,8 @@
 # - only static flags are accepted (no variables or parameters)           #
 # - dynamic flags will be appended to these on cassandra-env              #
 #                                                                         #
-# See jvm8-server.options and jvm11-server.options for Java version       #
-# specific options.                                                       #
+# See jvm11-server.options, jvm17-server.options, and                     #
+# jvm21-server.options for Java version specific options.                 #
 ###########################################################################
 
 ######################
@@ -66,7 +66,7 @@
 #-Dcassandra.triggers_dir=directory
 
 # For testing new compaction and compression strategies. It allows you to experiment with different
-# strategies and benchmark write performance differences without affecting the production workload. 
+# strategies and benchmark write performance differences without affecting the production workload.
 #-Dcassandra.write_survey=true
 
 # To disable configuration via JMX of auth caches (such as those for credentials, permissions and
