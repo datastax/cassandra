@@ -34,6 +34,8 @@ import org.apache.cassandra.io.compress.ZstdCompressor;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.schema.IndexMetadata;
+import org.apache.cassandra.service.ClientWarn;
+import org.assertj.core.api.Assertions;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
