@@ -21,7 +21,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.locks.Lock;
 
 import org.junit.After;
 import org.junit.BeforeClass;
@@ -37,6 +36,7 @@ import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.Mutation.PartitionUpdateCollector;
 import org.apache.cassandra.db.RowUpdateBuilder;
+import org.apache.cassandra.db.counters.CounterLockManager;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.schema.KeyspaceParams;
@@ -100,7 +100,7 @@ public class CounterMutationMetricsTest
         metrics.assertLocksPerUpdate(1);
     }
 
-    private void obtainLocks(TableMetadata metadata, List<Lock> locks)
+    private void obtainLocks(TableMetadata metadata, List<CounterLockManager.Lock> locks)
     {
         RowUpdateBuilder mutationBuilder = new RowUpdateBuilder(metadata, 5, "key1");
         Mutation mutation = mutationBuilder.clustering("cc")
@@ -138,7 +138,7 @@ public class CounterMutationMetricsTest
 
         TableMetadata metadata = Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF1).metadata();
 
-        List<Lock> obtainedLocks = new ArrayList<>();
+        List<CounterLockManager.Lock> obtainedLocks = new ArrayList<>();
         try
         {
             obtainLocks(metadata, obtainedLocks);
@@ -149,8 +149,8 @@ public class CounterMutationMetricsTest
         }
         finally
         {
-            for (Lock lock : obtainedLocks)
-                lock.unlock();
+            for (CounterLockManager.Lock lock : obtainedLocks)
+                lock.release();
         }
 
         metrics.assertLockTimeout(1);
