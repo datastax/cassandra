@@ -36,6 +36,7 @@ import javax.annotation.Nullable;
 import com.google.common.annotations.VisibleForTesting;
 
 import org.apache.cassandra.config.Config;
+import org.apache.cassandra.db.compaction.CompactionSSTable;
 import org.apache.cassandra.io.FSError;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.slf4j.Logger;
@@ -1417,9 +1418,9 @@ public abstract class Controller
         return env.maxThroughput();
     }
 
-    public long getOverheadSizeInBytes(CompactionPick compactionPick)
+    public long getOverheadSizeInBytes(Iterable<? extends CompactionSSTable> sstables, long totalDataSize)
     {
-        return env.getOverheadSizeInBytes(compactionPick);
+        return env.getOverheadSizeInBytes(sstables, totalDataSize);
     }
 
     public int maxConcurrentCompactions()

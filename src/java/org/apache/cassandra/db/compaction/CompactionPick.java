@@ -64,6 +64,9 @@ public class CompactionPick
     /** The total size on disk for the sstables in this compaction */
     private final long totSizeInBytes;
 
+    /** The total space overhead for this compaction, including primary and secondary indexes. */
+    private final long totalOverheadInBytes;
+
     /** This is set to true when the compaction is submitted */
     private volatile boolean submitted;
 
@@ -82,7 +85,8 @@ public class CompactionPick
                            Collection<? extends CompactionSSTable> expired,
                            double hotness,
                            long avgSizeInBytes,
-                           long totSizeInBytes)
+                           long totSizeInBytes,
+                           long totalOverheadInBytes)
     {
         this.id = Objects.requireNonNull(id);
         this.parent = parent;
@@ -91,6 +95,7 @@ public class CompactionPick
         this.hotness = hotness;
         this.avgSizeInBytes = avgSizeInBytes;
         this.totSizeInBytes = totSizeInBytes;
+        this.totalOverheadInBytes = totalOverheadInBytes;
     }
 
     /**
@@ -102,13 +107,15 @@ public class CompactionPick
                                         Collection<? extends CompactionSSTable> expired)
     {
         Collection<CompactionSSTable> nonExpiring = sstables.stream().filter(sstable -> !expired.contains(sstable)).collect(Collectors.toList());
+        final long totSizeBytes = CompactionAggregate.getTotSizeBytes(nonExpiring);
         return create(id,
                       parent,
                       sstables,
                       expired,
                       CompactionAggregate.getTotHotness(nonExpiring),
-                      CompactionAggregate.getAvgSizeBytes(nonExpiring),
-                      CompactionAggregate.getTotSizeBytes(nonExpiring));
+                      totSizeBytes / Math.max(nonExpiring.size(), 1),
+                      totSizeBytes,
+                      totSizeBytes);
     }
 
     /**
@@ -117,13 +124,15 @@ public class CompactionPick
     public static CompactionPick create(long parent, Collection<? extends CompactionSSTable> sstables, Collection<? extends CompactionSSTable> expired)
     {
         Collection<CompactionSSTable> nonExpiring = sstables.stream().filter(sstable -> !expired.contains(sstable)).collect(Collectors.toList());
+        final long totSizeBytes = CompactionAggregate.getTotSizeBytes(nonExpiring);
         return create(LifecycleTransaction.newId(),
                       parent,
                       sstables,
                       expired,
                       CompactionAggregate.getTotHotness(nonExpiring),
-                      CompactionAggregate.getAvgSizeBytes(nonExpiring),
-                      CompactionAggregate.getTotSizeBytes(nonExpiring));
+                      totSizeBytes / Math.max(nonExpiring.size(), 1),
+                      totSizeBytes,
+                      totSizeBytes);
     }
 
     static CompactionPick create(long parent, Collection<? extends CompactionSSTable> sstables)
@@ -131,9 +140,9 @@ public class CompactionPick
         return create(parent, sstables, Collections.emptyList());
     }
 
-    static CompactionPick create(UUID id, long parent, Collection<? extends CompactionSSTable> sstables)
+    static CompactionPick createWithUnknownParent(UUID id, Collection<? extends CompactionSSTable> sstables)
     {
-        return create(id, parent, sstables, Collections.emptyList());
+        return create(id, -1, sstables, Collections.emptyList());
     }
 
     /**
@@ -141,7 +150,15 @@ public class CompactionPick
      */
     static CompactionPick create(long parent, Collection<? extends CompactionSSTable> sstables, double hotness)
     {
-        return create(LifecycleTransaction.newId(), parent, sstables, Collections.emptyList(), hotness, CompactionAggregate.getAvgSizeBytes(sstables), CompactionAggregate.getTotSizeBytes(sstables));
+        final long totSizeBytes = CompactionAggregate.getTotSizeBytes(sstables);
+        return create(LifecycleTransaction.newId(),
+                      parent,
+                      sstables,
+                      Collections.emptyList(),
+                      hotness,
+                      totSizeBytes / Math.max(sstables.size(), 1),
+                      totSizeBytes,
+                      totSizeBytes);
     }
 
     /**
@@ -153,9 +170,10 @@ public class CompactionPick
                                  Collection<? extends CompactionSSTable> expired,
                                  double hotness,
                                  long avgSizeInBytes,
-                                 long totSizeInBytes)
+                                 long totSizeInBytes,
+                                 long totalOverheadInBytes)
     {
-        return new CompactionPick(id, parent, sstables, expired, hotness, avgSizeInBytes, totSizeInBytes);
+        return new CompactionPick(id, parent, sstables, expired, hotness, avgSizeInBytes, totSizeInBytes, totalOverheadInBytes);
     }
 
     public double hotness()
@@ -171,6 +189,11 @@ public class CompactionPick
     public long totSizeInBytes()
     {
         return totSizeInBytes;
+    }
+
+    public long totalOverheadInBytes()
+    {
+        return totalOverheadInBytes;
     }
 
     public long parent()
@@ -257,7 +280,8 @@ public class CompactionPick
                                   expired,
                                   hotness,
                                   avgSizeInBytes,
-                                  totSizeInBytes);
+                                  totSizeInBytes,
+                                  totalOverheadInBytes);
     }
 
     /**
@@ -283,7 +307,8 @@ public class CompactionPick
                                   newExpired,
                                   hotness,
                                   avgSizeInBytes,
-                                  totSizeInBytes);
+                                  totSizeInBytes,
+                                  totalOverheadInBytes);
     }
 
     /**
