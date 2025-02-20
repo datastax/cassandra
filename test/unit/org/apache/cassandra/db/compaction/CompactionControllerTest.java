@@ -36,6 +36,7 @@ import org.junit.runner.RunWith;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
+import org.apache.cassandra.schema.MemtableParams;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
@@ -85,6 +86,7 @@ public class CompactionControllerTest extends SchemaLoader
                                                  .addClusteringColumn("ck", AsciiType.instance)
                                                  .addRegularColumn("val", AsciiType.instance),
                                     TableMetadata.builder(KEYSPACE, CF2)
+                                                 .memtable(MemtableParams.get("trie"))
                                                  .addPartitionKeyColumn("pk", AsciiType.instance)
                                                  .addClusteringColumn("ck", AsciiType.instance)
                                                  .addRegularColumn("val", AsciiType.instance));
@@ -260,7 +262,7 @@ public class CompactionControllerTest extends SchemaLoader
         // making its reads corrupted. See CNDB-11398
 
         Keyspace keyspace = Keyspace.open(KEYSPACE);
-        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF1);
+        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF2);
         cfs.truncateBlocking();
         cfs.disableAutoCompaction();
 
