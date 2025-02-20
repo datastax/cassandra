@@ -254,7 +254,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                                                                                      CompactionSSTable.startsAfter,
                                                                                      CompactionSSTable.firstKeyComparator,
                                                                                      CompactionSSTable.lastKeyComparator),
-                                                                 CompactionPick.create(nextTimeUUID(), LEVEL_MAXIMAL.index, group),
+                                                                 createPick(nextTimeUUID(), LEVEL_MAXIMAL.index, group),
                                                                  Collections.emptyList(),
                                                                  arena,
                                                                  LEVEL_MAXIMAL));
@@ -836,7 +836,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
             ++perLevel[level];
             ++runningCompactions;
             levelCount = Math.max(levelCount, level + 1);
-            spaceAvailable -= controller.getOverheadSizeInBytes(compaction);
+            spaceAvailable -= compaction.totalOverheadInBytes();
             if (controller.isRecentAdaptive(compaction))
                 --remainingAdaptiveCompactions;
         }
@@ -972,13 +972,13 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
     /// the operators must be warned if this happens, and that's the purpose of this warning.
     private void warnIfSizeAbove(CompactionAggregate.UnifiedAggregate aggregate, long spaceOverheadLimit)
     {
-        if (controller.getOverheadSizeInBytes(aggregate.selected) > spaceOverheadLimit)
+        if (aggregate.getSelected().totalOverheadInBytes() > spaceOverheadLimit)
             logger.warn("Compaction needs to perform an operation that is bigger than the current space overhead " +
                         "limit - size {} (compacting {} sstables in arena {}/bucket {}); limit {} = {}% of dataset size {}. " +
                         "To honor the limit, this operation will not be performed, which may result in degraded performance.\n" +
                         "Please verify the compaction parameters, specifically {} and {}.",
-                        FBUtilities.prettyPrintMemory(controller.getOverheadSizeInBytes(aggregate.selected)),
-                        aggregate.selected.sstables().size(),
+                        FBUtilities.prettyPrintMemory(aggregate.getSelected().totalOverheadInBytes()),
+                        aggregate.getSelected().sstables().size(),
                         aggregate.getArena().name(),
                         aggregate.bucketIndex(),
                         FBUtilities.prettyPrintMemory(spaceOverheadLimit),
@@ -1044,7 +1044,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                 continue;
 
             ++proposed;
-            long overheadSizeInBytes = controller.getOverheadSizeInBytes(pick);
+            long overheadSizeInBytes = pick.totalOverheadInBytes();
             if (overheadSizeInBytes > spaceAvailable)
                 continue; // compaction is too large for current cycle
 
@@ -1334,6 +1334,18 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         return realm.metadata();
     }
 
+    CompactionPick createPick(UUID id, long parent, Collection<? extends CompactionSSTable> sstables)
+    {
+        return createPick(controller, id, parent, sstables);
+    }
+
+    static CompactionPick createPick(Controller controller, UUID id, long parent, Collection<? extends CompactionSSTable> sstables)
+    {
+        long totalDataSize = CompactionAggregate.getTotSizeBytes(sstables);
+        long totalSpaceOverhead = controller.getOverheadSizeInBytes(sstables, totalDataSize);
+        return CompactionPick.create(id, parent, sstables, Collections.emptyList(), 0, totalDataSize / Math.max(sstables.size(), 1), totalDataSize, totalSpaceOverhead);
+    }
+
     /// A compaction arena contains the list of sstables that belong to this arena as well as the arena
     /// selector used for comparison.
     public static class Arena implements Comparable<Arena>
@@ -1586,7 +1598,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                 // prevent if from being selected; space may be available on a later compaction round.
                 return CompactionAggregate.createUnified(allSSTablesSorted,
                                                          maxOverlap,
-                                                         CompactionPick.create(nextTimeUUID(), index, allSSTablesSorted),
+                                                         createPick(controller, nextTimeUUID(), index, allSSTablesSorted),
                                                          Collections.emptySet(),
                                                          arena,
                                                          level);
@@ -1602,17 +1614,17 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                 if (count <= maxSSTablesToCompact)
                     return CompactionAggregate.createUnified(allSSTablesSorted,
                                                              maxOverlap,
-                                                             CompactionPick.create(nextTimeUUID(), index, allSSTablesSorted),
+                                                             createPick(controller, nextTimeUUID(), index, allSSTablesSorted),
                                                              Collections.emptySet(),
                                                              arena,
                                                              level);
 
-                CompactionPick pick = CompactionPick.create(nextTimeUUID(), index, pullOldestSSTables(maxSSTablesToCompact));
+                CompactionPick pick = createPick(controller, nextTimeUUID(), index, pullOldestSSTables(maxSSTablesToCompact));
                 count -= maxSSTablesToCompact;
                 List<CompactionPick> pending = new ArrayList<>();
                 while (count >= threshold)
                 {
-                    pending.add(CompactionPick.create(nextTimeUUID(), index, pullOldestSSTables(maxSSTablesToCompact)));
+                    pending.add(createPick(controller, nextTimeUUID(), index, pullOldestSSTables(maxSSTablesToCompact)));
                     count -= maxSSTablesToCompact;
                 }
 
@@ -1646,7 +1658,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
             if (size - pos >= level.threshold) // can only happen in the levelled case.
             {
                 assert size - pos < maxSSTablesToCompact; // otherwise it should have already been picked
-                pending.add(CompactionPick.create(nextTimeUUID(), level.index, allSSTablesSorted));
+                pending.add(createPick(controller, nextTimeUUID(), level.index, allSSTablesSorted));
             }
             return pending;
         }
@@ -1707,9 +1719,10 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                 // threshold (which corresponds to pickSize == step, always the case for tiered); in the case of
                 // levelled compaction, when we compact more than 1 but less than F sstables on a level (which
                 // corresponds to pickSize > step), it is an operation that is triggered on the same level.
-                list.add(CompactionPick.create(nextTimeUUID(),
-                                               pickSize > step ? level : level - 1,
-                                               pullOldestSSTables(pickSize)));
+                list.add(createPick(controller,
+                                    nextTimeUUID(),
+                                    pickSize > step ? level : level - 1,
+                                    pullOldestSSTables(pickSize)));
                 pos += pickSize;
             }
 
@@ -1718,9 +1731,10 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
             if (pos + step <= total)
             {
                 pickSize = ((total - pos) / step) * step;
-                list.add(CompactionPick.create(nextTimeUUID(),
-                                               pickSize > step ? level : level - 1,
-                                               pullOldestSSTables(pickSize)));
+                list.add(createPick(controller,
+                                    nextTimeUUID(),
+                                    pickSize > step ? level : level - 1,
+                                    pullOldestSSTables(pickSize)));
                 pos += pickSize;
             }
             return pos;
