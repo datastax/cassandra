@@ -19,9 +19,7 @@
 package org.apache.cassandra.cache;
 
 import java.io.IOException;
-import java.lang.management.ManagementFactory;
 import java.nio.ByteBuffer;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -43,9 +41,6 @@ import org.apache.cassandra.io.util.ChunkReader;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.ObjectSizes;
-import org.apache.cassandra.utils.memory.BufferPool;
-import org.apache.cassandra.utils.memory.BufferPools;
 import org.github.jamm.MemoryMeter;
 import org.mockito.Mockito;
 
@@ -53,11 +48,9 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
 import static org.junit.Assume.assumeNotNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.Mockito.anyInt;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doThrow;
@@ -70,7 +63,6 @@ public class CachingRebuffererTest
     private final int PAGE_SIZE = 4096;
     private File file;
     private ChunkReader chunkReader;
-    private BufferPool bufferPool;
     private ChannelProxy blockingChannel;
 
     @BeforeClass
@@ -89,7 +81,6 @@ public class CachingRebuffererTest
 
         blockingChannel = new ChannelProxy(file);
         chunkReader = Mockito.mock(ChunkReader.class);
-        bufferPool = BufferPools.forChunkCache();
 
         when(chunkReader.chunkSize()).thenReturn(PAGE_SIZE);
         when(chunkReader.channel()).thenReturn(blockingChannel);
@@ -130,6 +121,11 @@ public class CachingRebuffererTest
             public void invalidateIfCached(long position)
             {
                 // do nothing
+            }
+
+            public long adjustPosition(long position)
+            {
+                return position;
             }
 
             public void close()

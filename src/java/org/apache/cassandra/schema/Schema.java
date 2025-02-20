@@ -85,6 +85,7 @@ import static org.apache.cassandra.config.DatabaseDescriptor.isToolInitialized;
  * the registered callback is executed which performs the remaining updates for tables metadata refs and keyspace
  * instances (see {@link #mergeAndUpdateVersion(SchemaTransformationResult, boolean)}).
  */
+//TODO are cjanges for this class needed?
 public class Schema implements SchemaProvider
 {
     private static final Logger logger = LoggerFactory.getLogger(Schema.class);
