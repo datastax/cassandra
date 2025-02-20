@@ -395,6 +395,12 @@ public class TrieIndexFormat implements SSTableFormat
         }
 
         @Override
+        public boolean indicesAreEncrypted()
+        {
+            return version.compareTo("b") >= 0;
+        }
+
+        @Override
         public boolean hasZeroCopyMetadata()
         {
             return version.compareTo("b") >= 0 && version.compareTo("c") < 0;
