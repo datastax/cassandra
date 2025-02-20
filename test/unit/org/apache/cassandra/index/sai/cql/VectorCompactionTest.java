@@ -25,6 +25,7 @@ import org.junit.Test;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
 import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
 
+import static org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph.MIN_PQ_ROWS;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
