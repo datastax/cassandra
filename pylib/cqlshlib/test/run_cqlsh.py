@@ -155,6 +155,7 @@ class ProcRunner:
             env = {}
         self.env = env
         self.readbuf = ''
+        self._partial_bytes = b''
 
         self.start_proc()
 
@@ -174,6 +175,7 @@ class ProcRunner:
             self.childpty = masterfd
             self.send = self.send_tty
             self.read = self.read_tty
+            self._partial_bytes = b''
         else:
             stdin = stdout = subprocess.PIPE
             stderr = subprocess.STDOUT
@@ -188,6 +190,7 @@ class ProcRunner:
                 self.read = self.read_pipe
 
     def close(self):
+        self._partial_bytes = b''
         cqlshlog.info("Closing %r subprocess." % (self.exe_path,))
         if self.realtty:
             os.close(self.childpty)
@@ -207,7 +210,23 @@ class ProcRunner:
     def read_tty(self, blksize, timeout=None):
         buf = os.read(self.childpty, blksize)
         if isinstance(buf, bytes):
-            buf = buf.decode("utf-8")
+            # Combine with any partial bytes from previous read
+            buf = self._partial_bytes + buf
+            try:
+                result = buf.decode("utf-8")
+                self._partial_bytes = b''
+                return result
+            except UnicodeDecodeError:
+                # Try to decode as much as possible
+                for i in range(len(buf), 0, -1):
+                    try:
+                        result = buf[:i].decode("utf-8")
+                        self._partial_bytes = buf[i:]
+                        return result
+                    except UnicodeDecodeError:
+                        continue
+                self._partial_bytes = buf
+                return ''
         return buf
 
     def read_pipe(self, blksize, timeout=None):
@@ -289,6 +308,8 @@ class CqlshRunner(ProcRunner):
         env.setdefault('TERM', 'xterm')
         env.setdefault('CQLSH_NO_BUNDLED', os.environ.get('CQLSH_NO_BUNDLED', ''))
         env.setdefault('PYTHONPATH', os.environ.get('PYTHONPATH', ''))
+        # Initialize the partial bytes buffer
+        self._partial_bytes = b''
         coverage = False
         if ('CQLSH_COVERAGE' in env.keys()):
             coverage = True
