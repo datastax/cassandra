@@ -227,6 +227,9 @@ public class Dispatcher
                       .addCallback((result, ignored) -> {
                           try
                           {
+                              if (request.isTrackable())
+                                  CoordinatorWarnings.done();
+
                               result.setStreamId(request.getStreamId());
                               result.setWarnings(ClientWarn.instance.getWarnings());
                               result.attach(connection);
@@ -234,8 +237,6 @@ public class Dispatcher
                           }
                           finally
                           {
-                              if (request.isTrackable())
-                                  CoordinatorWarnings.done();
                               CoordinatorWarnings.reset();
                               ClientWarn.instance.resetWarnings();
                           }
