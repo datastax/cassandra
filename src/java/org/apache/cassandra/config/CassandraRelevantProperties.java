@@ -279,6 +279,9 @@ public enum CassandraRelevantProperties
      */
     SCHEMA_PULL_BACKOFF_DELAY_MS("cassandra.schema_pull_backoff_delay_ms", "3000"),
 
+    /** Maximum length allowed for schema names to be short enough for a file or directory name */
+    SCHEMA_FILE_NAME_LENGTH("cassandra.schema_file_name_length", "222"),
+
     /** When enabled, recursive directory deletion will be executed using a unix command `rm -rf` instead of traversing
      * and removing individual files. This is now used only tests, but eventually we will make it true by default.*/
     USE_NIX_RECURSIVE_DELETE("cassandra.use_nix_recursive_delete"),

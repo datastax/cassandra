@@ -28,6 +28,8 @@ import com.google.common.collect.ImmutableSet;
 
 import org.apache.cassandra.db.Digest;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.SCHEMA_FILE_NAME_LENGTH;
+
 public final class SchemaConstants
 {
     public static final Pattern PATTERN_WORD_CHARS = Pattern.compile("\\w+");
@@ -65,7 +67,7 @@ public final class SchemaConstants
      * Note: This extended to 222 for CNDB tenant specific keyspaces. The windows restriction is not valid here
      * because CNDB does not support windows.
      */
-    public static final int NAME_LENGTH = 222;
+    public static final int NAME_LENGTH = SCHEMA_FILE_NAME_LENGTH.getInt();
 
     // 59adb24e-f3cd-3e02-97f0-5b395827453f
     public static final UUID emptyVersion;
@@ -74,7 +76,7 @@ public final class SchemaConstants
 
     public static boolean isSafeLengthForFilename(String name)
     {
-        return name.length() <= NAME_LENGTH;
+        return name.length() <= SCHEMA_FILE_NAME_LENGTH.getInt();
     }
 
     /**
