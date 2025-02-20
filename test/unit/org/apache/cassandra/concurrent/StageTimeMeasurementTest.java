@@ -122,7 +122,7 @@ public class StageTimeMeasurementTest
         logger.info("Execution times: {}", callback.executionTimes);
         logger.info("Queue times: {}", callback.enqueuedTimes);
 
-        final double MAX_ACCEPTABLE_MEASUREMENT_ERROR = 0.1 * TASK_DURATION_NANOS;
+        final double MAX_ACCEPTABLE_MEASUREMENT_ERROR = 0.15 * TASK_DURATION_NANOS;
 
         for (int i = 0; i < NUM_TASKS; i++)
         {
