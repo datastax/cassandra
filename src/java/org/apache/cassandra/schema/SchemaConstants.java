@@ -28,6 +28,8 @@ import com.google.common.collect.ImmutableSet;
 
 import org.apache.cassandra.db.Digest;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.SCHEMA_FILE_NAME_LENGTH;
+
 public final class SchemaConstants
 {
     public static final Pattern PATTERN_WORD_CHARS = Pattern.compile("\\w+");
@@ -65,16 +67,38 @@ public final class SchemaConstants
      * Note: This extended to 222 for CNDB tenant specific keyspaces. The windows restriction is not valid here
      * because CNDB does not support windows.
      */
-    public static final int NAME_LENGTH = 222;
+    public static int NAME_LENGTH = SCHEMA_FILE_NAME_LENGTH.getInt();
 
     // 59adb24e-f3cd-3e02-97f0-5b395827453f
     public static final UUID emptyVersion;
 
     public static final List<String> LEGACY_AUTH_TABLES = Arrays.asList("credentials", "users", "permissions");
 
-    public static boolean isValidName(String name)
+    public static boolean isSafeLengthForFilename(String name)
     {
-        return name != null && !name.isEmpty() && name.length() <= NAME_LENGTH && PATTERN_WORD_CHARS.matcher(name).matches();
+        return name.length() <= NAME_LENGTH;
+    }
+
+    /**
+     * Names such as keyspace, table, index names are used in file paths and file names,
+     * so, they need to be safe for the use there, i.e., short enough and
+     * containing only alphanumeric characters and underscores.
+     * @param name the name to check
+     * @return whether the name is safe for use in file paths and file names
+     */
+    public static boolean isNameSafeForFilename(String name)
+    {
+        return name != null && !name.isEmpty() && isSafeLengthForFilename(name) && PATTERN_WORD_CHARS.matcher(name).matches();
+    }
+
+    /**
+     * Checks if the name contains only alphanumeric characters and underscores and is not empty.
+     * @param name the name to check
+     * @return true if the name is valid, false otherwise
+     */
+    public static boolean isValidCharsName(String name)
+    {
+        return name != null && !name.isEmpty() && PATTERN_WORD_CHARS.matcher(name).matches();
     }
 
     static
