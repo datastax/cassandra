@@ -58,7 +58,6 @@ import org.apache.cassandra.db.marshal.FloatType;
 import org.apache.cassandra.db.marshal.ListType;
 import org.apache.cassandra.db.marshal.LongType;
 import org.apache.cassandra.db.marshal.MapType;
-import org.apache.cassandra.db.marshal.SetType;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.db.partitions.PartitionIterator;
@@ -1390,22 +1389,28 @@ public class RowFilter
         private boolean contains(TableMetadata metadata, DecoratedKey partitionKey, Row row, long nowInSec)
         {
             assert column.type.isCollection();
-            CollectionType<?> type = (CollectionType<?>)column.type;
+            assert (indexAnalyzer == null) == (queryAnalyzer == null);
+
+            CollectionType<?> type = (CollectionType<?>) column.type;
+            List<ByteBuffer> analyzedValues = queryAnalyzer == null ? null : queryAnalyzer.analyze(value);
+
             if (column.isComplex())
             {
                 ComplexColumnData complexData = row.getComplexColumnData(column);
                 if (complexData != null)
                 {
+                    AbstractType<?> elementType = type.kind == CollectionType.Kind.SET ? type.nameComparator() : type.valueComparator();
                     for (Cell<?> cell : complexData)
                     {
-                        if (type.kind == CollectionType.Kind.SET)
+                        ByteBuffer elementValue = type.kind == CollectionType.Kind.SET ? cell.path().get(0) : cell.buffer();
+                        if (analyzedValues == null)
                         {
-                            if (type.nameComparator().compare(cell.path().get(0), value) == 0)
+                            if (elementType.compare(elementValue, value) == 0)
                                 return true;
                         }
                         else
                         {
-                            if (type.valueComparator().compare(cell.buffer(), value) == 0)
+                            if (Operator.ANALYZER_MATCHES.isSatisfiedBy(elementType, elementValue, analyzedValues, indexAnalyzer))
                                 return true;
                         }
                     }
@@ -1415,37 +1420,35 @@ public class RowFilter
             else
             {
                 ByteBuffer foundValue = getValue(metadata, partitionKey, row, nowInSec);
-                if (foundValue == null)
-                    return false;
-
-                switch (type.kind)
-                {
-                    case LIST:
-                        ListType<?> listType = (ListType<?>)type;
-                        return listType.compose(foundValue).contains(listType.getElementsType().compose(value));
-                    case SET:
-                        SetType<?> setType = (SetType<?>)type;
-                        return setType.compose(foundValue).contains(setType.getElementsType().compose(value));
-                    case MAP:
-                        MapType<?,?> mapType = (MapType<?, ?>)type;
-                        return mapType.compose(foundValue).containsValue(mapType.getValuesType().compose(value));
-                }
-                throw new AssertionError();
+                return foundValue != null && Operator.CONTAINS.isSatisfiedBy(type, foundValue, value, indexAnalyzer, queryAnalyzer);
             }
         }
 
         private boolean containsKey(TableMetadata metadata, DecoratedKey partitionKey, Row row, long nowInSec)
         {
             assert column.type.isCollection() && column.type instanceof MapType;
-            MapType<?, ?> mapType = (MapType<?, ?>)column.type;
+            MapType<?, ?> mapType = (MapType<?, ?>) column.type;
             if (column.isComplex())
             {
+                if (queryAnalyzer != null)
+                {
+                    assert indexAnalyzer != null;
+                    List<ByteBuffer> values = queryAnalyzer.analyze(value);
+                    for (Cell<?> cell : row.getComplexColumnData(column))
+                    {
+                        AbstractType<?> elementType = mapType.nameComparator();
+                        ByteBuffer elementValue = cell.path().get(0);
+                        if (Operator.ANALYZER_MATCHES.isSatisfiedBy(elementType, elementValue, values, indexAnalyzer))
+                            return true;
+                    }
+                    return false;
+                }
                 return row.getCell(column, CellPath.create(value)) != null;
             }
             else
             {
                 ByteBuffer foundValue = getValue(metadata, partitionKey, row, nowInSec);
-                return foundValue != null && mapType.getSerializer().getSerializedValue(foundValue, value, mapType.getKeysType()) != null;
+                return foundValue != null && Operator.CONTAINS_KEY.isSatisfiedBy(mapType, foundValue, value, indexAnalyzer, queryAnalyzer);
             }
         }
 
