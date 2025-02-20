@@ -1621,6 +1621,12 @@ public class CustomIndexTest extends CQLTester
             }
 
             @Override
+            public QueryPlan queryPlanForIndices(RowFilter rowFilter, Set<Index> indexes)
+            {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
             public SSTableFlushObserver getFlushObserver(Descriptor descriptor, LifecycleNewTracker tracker, TableMetadata tableMetadata, long keyCount)
             {
                 Set<SSTableFlushObserver> observers = indexes.values()
