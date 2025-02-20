@@ -83,7 +83,10 @@ public final class IndexMetadata
     public final String name;
     public final Kind kind;
 
-    /** Compression parameters to use for compressing primary keys of the table the index points to */
+    /**
+     * Compression parameters to use for compressing primary keys of the table the index points to.
+     * Shared by all indexes on the same table.
+     */
     public final CompressionParams keyCompression;
 
     /** Compression parameters to use for compressing values (terms) of the indexed column */

@@ -214,9 +214,11 @@ public final class CreateIndexStatement extends AlterSchemaStatement
 
         // All indexes on one table must use the same key_compression.
         // The newly created index forces key_compression on the previous indexes.
-        for (var i : table.indexes)
-            if (!i.keyCompression.equals(index.keyCompression))
-                ClientWarn.instance.warn("Setting " + KW_KEY_COMPRESSION + " to " + index.keyCompression.asMap() + " for index " + i.name);
+        for (var existingIndex : table.indexes)
+            if (!existingIndex.keyCompression.equals(index.keyCompression))
+                ClientWarn.instance.warn("Setting " + KW_KEY_COMPRESSION +
+                                         " from " + existingIndex.keyCompression.asMap() +
+                                         " to " + index.keyCompression.asMap() + " for index " + existingIndex.name);
         Indexes newIndexes = table.indexes.withKeyCompression(index.keyCompression).with(index);
         TableMetadata newTable = table.withSwapped(newIndexes);
         newTable.validate();
