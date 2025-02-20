@@ -127,6 +127,10 @@ batchlog_replay_throttle_in_kb: 1024
 # Authentication backend, implementing IAuthenticator; used to identify users
 # Out of the box, Cassandra provides org.apache.cassandra.auth.{AllowAllAuthenticator,
 # PasswordAuthenticator}.
+# Optional parameters can be specified in the form of:
+#   parameters:
+#    param_key1: param_value1
+#    ...
 #
 # - AllowAllAuthenticator performs no checks - set it to disable authentication.
 # - PasswordAuthenticator relies on username/password pairs to authenticate
@@ -138,6 +142,10 @@ authenticator: AllowAllAuthenticator
 # Authorization backend, implementing IAuthorizer; used to limit access/provide permissions
 # Out of the box, Cassandra provides org.apache.cassandra.auth.{AllowAllAuthorizer,
 # CassandraAuthorizer}.
+# Optional parameters can be specified in the form of:
+#   parameters:
+#    param_key1: param_value1
+#    ...
 #
 # - AllowAllAuthorizer allows any action to any user - set it to disable authorization.
 # - CassandraAuthorizer stores permissions in system_auth.role_permissions table. Please
@@ -150,6 +158,10 @@ authorizer: AllowAllAuthorizer
 # which stores role information in the system_auth keyspace. Most functions of the
 # IRoleManager require an authenticated login, so unless the configured IAuthenticator
 # actually implements authentication, most of this functionality will be unavailable.
+# Optional parameters can be specified in the form of:
+#   parameters:
+#    param_key1: param_value1
+#    ...
 #
 # - CassandraRoleManager stores role data in the system_auth keyspace. Please
 #   increase system_auth keyspace replication factor if you use this role manager.
@@ -159,6 +171,10 @@ role_manager: CassandraRoleManager
 # access to certain DCs
 # Out of the box, Cassandra provides org.apache.cassandra.auth.{AllowAllNetworkAuthorizer,
 # CassandraNetworkAuthorizer}.
+# Optional parameters can be specified in the form of:
+#   parameters:
+#    param_key1: param_value1
+#    ...
 #
 # - AllowAllNetworkAuthorizer allows access to any DC to any user - set it to disable authorization.
 # - CassandraNetworkAuthorizer stores permissions in system_auth.network_permissions table. Please
