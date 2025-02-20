@@ -25,6 +25,7 @@ import org.junit.Test;
 
 import org.apache.cassandra.cql3.ColumnIdentifier;
 
+import static org.apache.cassandra.schema.SchemaConstants.isNameSafeForFilename;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
@@ -33,19 +34,19 @@ public class IndexMetadataTest {
     @Test
     public void testIsNameValidPositive()
     {
-        assertTrue(IndexMetadata.isNameValid("abcdefghijklmnopqrstuvwxyz"));
-        assertTrue(IndexMetadata.isNameValid("ABCDEFGHIJKLMNOPQRSTUVWXYZ"));
-        assertTrue(IndexMetadata.isNameValid("_01234567890"));
+        assertTrue(isNameSafeForFilename("abcdefghijklmnopqrstuvwxyz"));
+        assertTrue(isNameSafeForFilename("ABCDEFGHIJKLMNOPQRSTUVWXYZ"));
+        assertTrue(isNameSafeForFilename("_01234567890"));
     }
     
     @Test
     public void testIsNameValidNegative()
     {
-        assertFalse(IndexMetadata.isNameValid(null));
-        assertFalse(IndexMetadata.isNameValid(""));
-        assertFalse(IndexMetadata.isNameValid(" "));
-        assertFalse(IndexMetadata.isNameValid("@"));
-        assertFalse(IndexMetadata.isNameValid("!"));
+        assertFalse(isNameSafeForFilename(null));
+        assertFalse(isNameSafeForFilename(""));
+        assertFalse(isNameSafeForFilename(" "));
+        assertFalse(isNameSafeForFilename("@"));
+        assertFalse(isNameSafeForFilename("!"));
     }
     
     @Test
