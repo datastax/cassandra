@@ -702,6 +702,12 @@ public class ChunkCache
         }
 
         @Override
+        public long adjustPosition(long position)
+        {
+            return source.adjustPosition(position);
+        }
+
+        @Override
         public void close()
         {
             source.close();

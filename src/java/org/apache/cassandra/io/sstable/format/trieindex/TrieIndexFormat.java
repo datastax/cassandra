@@ -200,8 +200,8 @@ public class TrieIndexFormat implements SSTableFormat
             {
                 @SuppressWarnings("unused") StatsMetadata stats = (StatsMetadata) desc.getMetadataSerializer().deserialize(desc, MetadataType.STATS);
 
-                try (FileHandle.Builder piBuilder = defaultIndexHandleBuilder(desc, Component.PARTITION_INDEX);
-                     FileHandle.Builder riBuilder = defaultIndexHandleBuilder(desc, Component.ROW_INDEX);
+                try (FileHandle.Builder piBuilder = defaultIndexHandleBuilder(desc, Component.PARTITION_INDEX, compressedData);
+                     FileHandle.Builder riBuilder = defaultIndexHandleBuilder(desc, Component.ROW_INDEX, compressedData);
                      FileHandle.Builder dBuilder = defaultDataHandleBuilder(desc, stats.zeroCopyMetadata).compressed(compressedData);
                      PartitionIndex index = PartitionIndex.load(piBuilder, partitioner, false, stats.zeroCopyMetadata, desc.version.getByteComparableVersion());
                      FileHandle dFile = dBuilder.complete();
@@ -320,6 +320,7 @@ public class TrieIndexFormat implements SSTableFormat
         // ca (DSE-DB aka Stargazer based on OSS 4.0): bb fields without maxColumnValueLengths + all OSS fields
         // cb (OSS 5.0): token space coverage
         // cc : added explicitly frozen tuples in header, non-frozen UDT columns dropping support
+        // cd : encrypted indices
         // NOTE: when adding a new version, please add that to LegacySSTableTest, too.
 
         private final boolean isLatestVersion;
@@ -392,6 +393,12 @@ public class TrieIndexFormat implements SSTableFormat
         public boolean hasMetadataChecksum()
         {
             return true;
+        }
+
+        @Override
+        public boolean indicesAreEncrypted()
+        {
+            return version.compareTo("b") >= 0;
         }
 
         @Override

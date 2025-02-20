@@ -109,24 +109,25 @@ public class CompressionMetadata implements AutoCloseable
      *
      * @return metadata about given compressed file.
      */
-    public static CompressionMetadata create(File dataFilePath)
+    public static CompressionMetadata read(File dataFilePath, boolean skipOffsets)
     {
-        return create(dataFilePath, SliceDescriptor.NONE);
+        return read(dataFilePath, SliceDescriptor.NONE, skipOffsets);
     }
 
-    public static CompressionMetadata create(File dataFilePath, SliceDescriptor sliceDescription)
+    public static CompressionMetadata read(File dataFilePath, SliceDescriptor sliceDescription, boolean skipOffsets)
     {
         Descriptor descriptor = Descriptor.fromFilename(dataFilePath);
         return new CompressionMetadata(descriptor.fileFor(Component.COMPRESSION_INFO),
                                        dataFilePath.length(),
                                        descriptor.version.hasMaxCompressedLength(),
-                                       sliceDescription);
+                                       sliceDescription,
+                                       skipOffsets);
     }
 
     @VisibleForTesting
     public CompressionMetadata(File indexFilePath, long compressedLength, boolean hasMaxCompressedSize)
     {
-        this(indexFilePath, compressedLength, hasMaxCompressedSize, SliceDescriptor.NONE);
+        this(indexFilePath, compressedLength, hasMaxCompressedSize, SliceDescriptor.NONE, false);
     }
 
     /*
@@ -134,7 +135,7 @@ public class CompressionMetadata implements AutoCloseable
      * data file rather than the partial file it deals.
      */
     @VisibleForTesting
-    public CompressionMetadata(File indexFilePath, long compressedLength, boolean hasMaxCompressedSize, SliceDescriptor sliceDescriptor)
+    public CompressionMetadata(File indexFilePath, long compressedLength, boolean hasMaxCompressedSize, SliceDescriptor sliceDescriptor, boolean skipOffsets)
     {
         this.indexFilePath = indexFilePath;
         long uncompressedOffset = sliceDescriptor.exists() ? sliceDescriptor.sliceStart : 0;
@@ -170,17 +171,25 @@ public class CompressionMetadata implements AutoCloseable
             dataLength = uncompressedLength >= 0 ? uncompressedLength : readDataLength;
 
             startChunkIndex = Math.toIntExact(uncompressedOffset >> chunkLengthBits);
-            assert uncompressedOffset == (long) startChunkIndex << chunkLengthBits;
 
-            int endChunkIndex = Math.toIntExact((uncompressedOffset + dataLength - 1) >> chunkLengthBits) + 1;
 
-            Pair<Memory.LongArray, Long> offsetsAndLimit = readChunkOffsets(stream, startChunkIndex, endChunkIndex, compressedLength);
-            chunkOffsets = offsetsAndLimit.left;
-            // We adjust the compressed file length to store the position after the last chunk just to be able to
-            // calculate the offset of the chunk next to the last one (in order to calculate the length of the last chunk).
-            // Obvously, we could use the compressed file length for that purpose but unfortunately, sometimes there is
-            // an empty chunk added to the end of the file thus we cannot rely on the file length.
-            compressedFileLength = offsetsAndLimit.right;
+            if (skipOffsets)
+            {
+                chunkOffsets = null;
+                compressedFileLength = compressedLength;
+            }
+            else
+            {
+                assert uncompressedOffset == (long) startChunkIndex << chunkLengthBits;
+                int endChunkIndex = Math.toIntExact((uncompressedOffset + dataLength - 1) >> chunkLengthBits) + 1;
+                Pair<Memory.LongArray, Long> offsetsAndLimit = readChunkOffsets(stream, startChunkIndex, endChunkIndex, compressedLength);
+                chunkOffsets = offsetsAndLimit.left;
+                // We adjust the compressed file length to store the position after the last chunk just to be able to
+                // calculate the offset of the chunk next to the last one (in order to calculate the length of the last chunk).
+                // Obvously, we could use the compressed file length for that purpose but unfortunately, sometimes there is
+                // an empty chunk added to the end of the file thus we cannot rely on the file length.
+                compressedFileLength = offsetsAndLimit.right;
+            }
         }
         catch (FileNotFoundException | NoSuchFileException e)
         {
@@ -206,6 +215,23 @@ public class CompressionMetadata implements AutoCloseable
         this.chunkOffsets = offsets;
         this.dataLength = dataLength;
         this.startChunkIndex = 0;
+    }
+
+    private CompressionMetadata(File filePath, CompressionParams parameters, long dataLength, long compressedLength)
+    {
+        this.indexFilePath = filePath;
+        this.parameters = parameters;
+        assert Integer.bitCount(parameters.chunkLength()) == 1;
+        this.chunkLengthBits = Integer.numberOfTrailingZeros(parameters.chunkLength());
+        this.compressedFileLength = compressedLength;
+        this.chunkOffsets = null;
+        this.dataLength = dataLength;
+        this.startChunkIndex = 0;
+    }
+
+    static public CompressionMetadata encryptedOnly(CompressionParams parameters)
+    {
+        return new CompressionMetadata(null, parameters, 0, 0);
     }
 
     public static long nativeMemoryAllocated()
@@ -234,12 +260,18 @@ public class CompressionMetadata implements AutoCloseable
      */
     public long offHeapSize()
     {
-        return chunkOffsets.memory.size();
+        return hasOffsets() ? chunkOffsets.memory.size() : 0;
+    }
+
+    public boolean hasOffsets()
+    {
+        return chunkOffsets != null;
     }
 
     public void addTo(Ref.IdentityCollection identities)
     {
-        identities.add(chunkOffsets.memory);
+        if (hasOffsets())
+            identities.add(chunkOffsets.memory);
     }
 
     /**
@@ -317,6 +349,8 @@ public class CompressionMetadata implements AutoCloseable
      */
     public Chunk chunkFor(long uncompressedDataPosition)
     {
+        assert hasOffsets();
+
         int chunkIdx = chunkIndex(uncompressedDataPosition);
         return chunk(chunkIdx);
     }
@@ -339,6 +373,8 @@ public class CompressionMetadata implements AutoCloseable
      */
     public long getTotalSizeForSections(Collection<SSTableReader.PartitionPositionBounds> sections)
     {
+        assert hasOffsets();
+
         long size = 0;
         int lastIncludedChunkIdx = -1;
         for (SSTableReader.PartitionPositionBounds section : sections)
@@ -372,6 +408,8 @@ public class CompressionMetadata implements AutoCloseable
      */
     public Chunk[] getChunksForSections(Collection<SSTableReader.PartitionPositionBounds> sections)
     {
+        assert hasOffsets();
+
         // use SortedSet to eliminate duplicates and sort by chunk offset
         SortedSet<Chunk> offsets = new TreeSet<>((o1, o2) -> Longs.compare(o1.offset, o2.offset));
 
@@ -402,8 +440,11 @@ public class CompressionMetadata implements AutoCloseable
 
     public void close()
     {
-        NATIVE_MEMORY_USAGE.addAndGet(-chunkOffsets.memoryUsed());
-        chunkOffsets.close();
+        if (hasOffsets())
+        {
+            NATIVE_MEMORY_USAGE.addAndGet(-chunkOffsets.memoryUsed());
+            chunkOffsets.close();
+        }
     }
 
     public static class Writer extends Transactional.AbstractTransactional implements Transactional
