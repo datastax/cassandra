@@ -36,7 +36,6 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.InheritingClass;
 import org.apache.cassandra.config.ParameterizedClass;
 import org.apache.cassandra.db.memtable.Memtable;
-import org.apache.cassandra.db.memtable.SkipListMemtableFactory;
 import org.apache.cassandra.db.memtable.TrieMemtableFactory;
 import org.apache.cassandra.exceptions.ConfigurationException;
 
