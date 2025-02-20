@@ -490,9 +490,17 @@ public enum Operator
         {
             assert indexAnalyzer != null && queryAnalyzer != null : ": operation can only be computed by an indexed column with a configured analyzer";
 
-            List<ByteBuffer> leftTokens = indexAnalyzer.analyze(leftOperand);
             List<ByteBuffer> rightTokens = queryAnalyzer.analyze(rightOperand);
+            return isSatisfiedBy(type, leftOperand, rightTokens, indexAnalyzer);
+        }
 
+        @Override
+        public boolean isSatisfiedBy(AbstractType<?> type,
+                                     ByteBuffer leftValue,
+                                     List<ByteBuffer> rightTokens,
+                                     Index.Analyzer indexAnalyzer)
+        {
+            List<ByteBuffer> leftTokens = indexAnalyzer.analyze(leftValue);
             Iterator<ByteBuffer> it = rightTokens.iterator();
 
             do
@@ -640,6 +648,22 @@ public enum Operator
                                           ByteBuffer rightOperand,
                                           @Nullable Index.Analyzer indexAnalyzer,
                                           @Nullable Index.Analyzer queryAnalyzer);
+    /**
+     * Whether 2 analyzable values satisfy this operator (given the type they should be compared with).
+     *
+     * @param type the type of the values to compare.
+     * @param leftOperand the left operand of the comparison.
+     * @param rightTokens the right operand of the comparison decomposed as analyzed tokens.
+     * @param indexAnalyzer an index-provided function to transform the left-side compared value before comparison,
+     * it shouldn't be {@code null}.
+     */
+    public boolean isSatisfiedBy(AbstractType<?> type,
+                                 ByteBuffer leftOperand,
+                                 List<ByteBuffer> rightTokens,
+                                 Index.Analyzer indexAnalyzer)
+    {
+        throw new UnsupportedOperationException();
+    }
 
     public int serializedSize()
     {
