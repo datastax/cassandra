@@ -295,6 +295,12 @@ public class BigFormat implements SSTableFormat
         }
 
         @Override
+        public boolean indicesAreEncrypted()
+        {
+            return false;
+        }
+
+        @Override
         public boolean hasAccurateMinMax()
         {
             return hasAccurateMinMax;
