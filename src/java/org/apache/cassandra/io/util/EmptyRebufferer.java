@@ -27,6 +27,11 @@ public class EmptyRebufferer implements Rebufferer, RebuffererFactory
         this.channel = channel;
     }
 
+    public long adjustPosition(long position)
+    {
+        return position;
+    }
+
     @Override
     public void close()
     {
