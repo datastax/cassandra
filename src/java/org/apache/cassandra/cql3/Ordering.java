@@ -20,6 +20,7 @@ package org.apache.cassandra.cql3;
 
 import org.apache.cassandra.cql3.restrictions.SingleColumnRestriction;
 import org.apache.cassandra.cql3.restrictions.SingleRestriction;
+import org.apache.cassandra.cql3.statements.SelectStatement;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 
@@ -48,6 +49,11 @@ public class Ordering
         SingleRestriction toRestriction();
 
         ColumnMetadata getColumn();
+
+        default boolean isScored()
+        {
+            return false;
+        }
     }
 
     /**
@@ -117,6 +123,54 @@ public class Ordering
         public ColumnMetadata getColumn()
         {
             return column;
+        }
+
+        @Override
+        public boolean isScored()
+        {
+            return SelectStatement.ANN_USE_SYNTHETIC_SCORE;
+        }
+    }
+
+    /**
+     * An expression used in BM25 ordering.
+     * <code>ORDER BY column BM25 OF value</code>
+     */
+    public static class Bm25 implements Expression
+    {
+        final ColumnMetadata column;
+        final Term queryValue;
+        final Direction direction;
+
+        public Bm25(ColumnMetadata column, Term queryValue, Direction direction)
+        {
+            this.column = column;
+            this.queryValue = queryValue;
+            this.direction = direction;
+        }
+
+        @Override
+        public boolean hasNonClusteredOrdering()
+        {
+            return true;
+        }
+
+        @Override
+        public SingleRestriction toRestriction()
+        {
+            return new SingleColumnRestriction.Bm25Restriction(column, queryValue);
+        }
+
+        @Override
+        public ColumnMetadata getColumn()
+        {
+            return column;
+        }
+
+        @Override
+        public boolean isScored()
+        {
+            return true;
         }
     }
 
@@ -188,6 +242,27 @@ public class Ordering
                 Term value = vectorValue.prepare(table.keyspace, column);
                 value.collectMarkerSpecification(boundNames);
                 return new Ordering.Ann(column, value, direction);
+            }
+        }
+
+        public static class Bm25 implements Expression
+        {
+            final ColumnIdentifier columnId;
+            final Term.Raw queryValue;
+
+            Bm25(ColumnIdentifier column, Term.Raw queryValue)
+            {
+                this.columnId = column;
+                this.queryValue = queryValue;
+            }
+
+            @Override
+            public Ordering.Expression bind(TableMetadata table, VariableSpecifications boundNames, Direction direction)
+            {
+                ColumnMetadata column = table.getExistingColumn(columnId);
+                Term value = queryValue.prepare(table.keyspace, column);
+                value.collectMarkerSpecification(boundNames);
+                return new Ordering.Bm25(column, value, direction);
             }
         }
     }
