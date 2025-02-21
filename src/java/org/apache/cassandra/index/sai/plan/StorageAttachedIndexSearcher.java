@@ -535,6 +535,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             // Sort the primary keys by PrK order, just in case that helps with cache and disk efficiency
             var primaryKeyPriorityQueue = new PriorityQueue<>(groupedKeys.keySet());
 
+            // drain groupedKeys into pendingRows
             while (!groupedKeys.isEmpty())
             {
                 var pk = primaryKeyPriorityQueue.poll();
@@ -550,7 +551,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         }
 
         /**
-         * Fills the keys map with the next `count` unique primary keys that are in the keys produced by calling
+         * Fills the `groupedKeys` Map with the next `count` unique primary keys that are in the keys produced by calling
          * {@link #nextSelectedKeyInRange()}. We map PrimaryKey to List<PrimaryKeyWithSortKey> because the same
          * primary key can be in the result set multiple times, but with different source tables.
          * @param groupedKeys the map to fill
