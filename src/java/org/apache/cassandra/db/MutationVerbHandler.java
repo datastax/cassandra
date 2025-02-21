@@ -100,7 +100,7 @@ public class MutationVerbHandler extends AbstractMutationVerbHandler<Mutation>
                 requestSensors.incrementSensor(context, Type.INTERNODE_BYTES, message.payloadSize(MessagingService.current_version) / tables.size());
             }
 
-            message.payload.applyFuture(WriteOptions.DEFAULT).addCallback(o -> respond(requestSensors, message, respondToAddress), e -> failed());
+            processMessage(message, respondToAddress);
         }
         catch (WriteTimeoutException wto)
         {
