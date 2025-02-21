@@ -426,7 +426,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             checkFalse(userOffset != NO_OFFSET, String.format(TOPK_OFFSET_ERROR, userOffset));
         }
 
-        selectOptions.validate(queryState, options.getKeyspace(), userLimit);
+        selectOptions.validate(queryState, table.keyspace, userLimit);
 
         return query;
     }

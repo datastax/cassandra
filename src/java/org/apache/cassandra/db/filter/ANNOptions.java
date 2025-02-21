@@ -81,6 +81,7 @@ public class ANNOptions
      */
     public static ANNOptions fromMap(String keyspace, Map<String, String> map)
     {
+        assert keyspace != null;
         // ensure that all nodes in the cluster are in a version that supports ANN options, including this one
         Set<InetAddressAndPort> badNodes = MessagingService.instance().endpointsWithVersionBelow(keyspace, MessagingService.VERSION_DS_11);
         if (MessagingService.current_version < MessagingService.VERSION_DS_11)
