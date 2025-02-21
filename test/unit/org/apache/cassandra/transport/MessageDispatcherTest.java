@@ -101,6 +101,12 @@ public class MessageDispatcherTest
             long auths = completedAuth();
             long requests = tryAuth(this::completedRequests, new Message.Request(type)
             {
+                @Override
+                public Connection connection()
+                {
+                    return connectionMock();
+                }
+
                 public Future<Response> maybeExecuteAsync(QueryState queryState, Dispatcher.RequestTime requestTime, boolean traceRequest)
                 {
                     return ImmediateFuture.success(null);
