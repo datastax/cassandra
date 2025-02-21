@@ -76,7 +76,7 @@ public final class SchemaConstants
 
     public static boolean isSafeLengthForFilename(String name)
     {
-        return name.length() <= NAME_LENGTH;
+        return name.length() <= SCHEMA_FILE_NAME_LENGTH.getInt();
     }
 
     /**

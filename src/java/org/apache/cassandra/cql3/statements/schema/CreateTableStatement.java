@@ -54,7 +54,6 @@ import org.apache.cassandra.transport.Event.SchemaChange.Target;
 import static com.google.common.collect.Iterables.concat;
 import static java.util.Comparator.comparing;
 import static org.apache.cassandra.config.CassandraRelevantProperties.SCHEMA_FILE_NAME_LENGTH;
-import static org.apache.cassandra.schema.SchemaConstants.NAME_LENGTH;
 import static org.apache.cassandra.schema.SchemaConstants.isSafeLengthForFilename;
 
 public final class CreateTableStatement extends AlterSchemaStatement
@@ -161,7 +160,7 @@ public final class CreateTableStatement extends AlterSchemaStatement
         if (!isSafeLengthForFilename(keyspaceName + '.' + tableName))
         {
             String combinedName = keyspaceName + '.' + tableName;
-            throw new ConfigurationException(String.format("Keyspace and table names combined must fit %s characters to be safe for filenames. Got %s chars for %s", NAME_LENGTH, combinedName.length(), combinedName));
+            throw new ConfigurationException(String.format("Keyspace and table names combined must fit %s characters to be safe for filenames. Got %s chars for %s", SCHEMA_FILE_NAME_LENGTH.getInt(), combinedName.length(), combinedName));
         }
 
         TableMetadata table = builder(keyspace.types).build();
