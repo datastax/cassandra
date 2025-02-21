@@ -125,7 +125,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                 var scoredKeysIterator = (CloseableIterator<PrimaryKeyWithSortKey>) keysIterator;
                 var result = new ScoreOrderedResultRetriever(scoredKeysIterator, filterTree, controller,
                                                              executionController, queryContext, command.limits().count());
-                return (UnfilteredPartitionIterator) new TopKProcessor(command).filter(result);
+                return new TopKProcessor(command).filter(result);
             }
             catch (QueryView.Builder.MissingIndexException e)
             {
