@@ -259,7 +259,7 @@ public class CompactionTask extends AbstractCompactionTask
 
         // Calculate the operation total sizes if not already set
         if (totals == null)
-            totals = getOperationTotals(actuallyCompact, tokenRange());
+            totals = getOperationTotals(actuallyCompact, tokenRange(), 1.0);
 
         // sanity check: sstables to compact is a subset of the transaction originals
         assert transaction.originals().containsAll(actuallyCompact);
@@ -295,15 +295,17 @@ public class CompactionTask extends AbstractCompactionTask
     {
         public final long inputDiskSize;
         public final long inputUncompressedSize;
+        public final long spaceOverhead;
 
-        OperationTotals(long inputDiskSize, long inputUncompressedSize)
+        OperationTotals(long inputDiskSize, long inputUncompressedSize, long spaceOverhead)
         {
             this.inputDiskSize = inputDiskSize;
             this.inputUncompressedSize = inputUncompressedSize;
+            this.spaceOverhead = spaceOverhead;
         }
     }
 
-    public static OperationTotals getOperationTotals(Collection<SSTableReader> sstables, Range<Token> tokenRange)
+    public static OperationTotals getOperationTotals(Collection<SSTableReader> sstables, Range<Token> tokenRange, double overheadToDataRatio)
     {
         long inputDiskSize = 0;
         long inputUncompressedSize = 0;
@@ -326,7 +328,12 @@ public class CompactionTask extends AbstractCompactionTask
                 inputDiskSize += rdr.onDiskSizeForPartitionPositions(positionsForRanges);
             }
         }
-        return new OperationTotals(inputDiskSize, inputUncompressedSize);
+        return new OperationTotals(inputDiskSize, inputUncompressedSize, (long) (overheadToDataRatio * inputDiskSize));
+    }
+
+    public OperationTotals getTotals()
+    {
+        return totals;
     }
 
     /**

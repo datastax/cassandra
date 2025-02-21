@@ -185,7 +185,7 @@ public class UnifiedCompactionStrategyGetSelectionTest extends BaseCompactionStr
         when(controller.overlapInclusionMethod()).thenReturn(ignoreRepeats ? Overlaps.InclusionMethod.TRANSITIVE : Overlaps.InclusionMethod.NONE);
         when(controller.parallelizeOutputShards()).thenReturn(true);
 
-        UnifiedCompactionStrategy.ShardingStats stats = new UnifiedCompactionStrategy.ShardingStats(null, null, 0, 0, 0, 0, requestedParallelism);
+        UnifiedCompactionStrategy.ShardingStats stats = new UnifiedCompactionStrategy.ShardingStats(null, null, 0, 1.0, 0, 0, 0, requestedParallelism);
         UnifiedCompactionStrategy strategy = Mockito.mock(UnifiedCompactionStrategy.class, Mockito.withSettings().stubOnly());
         when(strategy.getController()).thenReturn(controller);
         when(strategy.getShardingStats(any())).thenReturn(stats);
