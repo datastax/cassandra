@@ -204,12 +204,14 @@ public abstract class CQLTester
     private static final User SUPER_USER = new User("cassandra", "cassandra");
 
     /**
-     * Whether to use external execution in {@link #execute(String, Object...)}, so queries get full validation and go
-     * through reconciliation.
+     * Whether to use coorfinator execution in {@link #execute(String, Object...)}, so queries get full validation and
+     * go through reconciliation. When enabled, calls to {@link #execute(String, Object...)} will behave as calls to
+     * {@link #executeWithCoordinator(String, Object...)}. Otherwise, they will behave as calls to
+     * {@link #executeInternal(String, Object...)}.
      *
      * @see #execute
      */
-    private static boolean externalExecution = false;
+    private static boolean coordinatorExecution = false;
 
     private static org.apache.cassandra.transport.Server server;
     private static JMXConnectorServer jmxServer;
@@ -1531,27 +1533,29 @@ public abstract class CQLTester
     }
 
     /**
-     * Enables external execution in {@link #execute(String, Object...)}, so queries get full validation and go
-     * through reconciliation.
+     * Enables coordinator execution in {@link #execute(String, Object...)}, so queries get full validation and go
+     * through reconciliation. This makes calling {@link #execute(String, Object...)} equivalent to calling
+     * {@link #executeWithCoordinator(String, Object...)}.
      */
-    protected static void enableExternalExecution()
+    protected static void enableCoordinatorExecution()
     {
         requireNetworkWithoutDriver();
-        externalExecution = true;
+        coordinatorExecution = true;
     }
 
     /**
-     * Disables external execution in {@link #execute(String, Object...)}, so queries won't get full validation nor
-     * go through reconciliation.
+     * Disables coordinator execution in {@link #execute(String, Object...)}, so queries won't get full validation nor
+     * go through reconciliation.This makes calling {@link #execute(String, Object...)} equivalent to calling
+     * {@link #executeInternal(String, Object...)}.
      */
-    protected static void disableExternalExecution()
+    protected static void disableCoordinatorExecution()
     {
-        externalExecution = false;
+        coordinatorExecution = false;
     }
 
     /**
-     * Execute the specified query as either an internal query or an external query depending on the value of
-     * {@link #externalExecution}.
+     * Execute the specified query as either an internal query or a coordinator query depending on the value of
+     * {@link #coordinatorExecution}.
      *
      * @param query a CQL query
      * @param values the values to bind to the query
@@ -1561,8 +1565,8 @@ public abstract class CQLTester
      */
     public UntypedResultSet execute(String query, Object... values)
     {
-        return externalExecution
-               ? executeExternal(query, values)
+        return coordinatorExecution
+               ? executeWithCoordinator(query, values)
                : executeInternal(query, values);
     }
 
@@ -1584,7 +1588,7 @@ public abstract class CQLTester
     }
 
     /**
-     * Execute the specified query as an external query meant for all the relevant nodes in the cluster, even if
+     * Execute the specified query as an coordinator-side query meant for all the relevant nodes in the cluster, even if
      * {@link CQLTester} tests are single-node. This won't skip reconciliation and will do full validation.
      * </p>
      * For the particular case of {@code SELECT} queries using secondary indexes, applying reconciliation means that the
@@ -1595,19 +1599,19 @@ public abstract class CQLTester
      * @return the query results
      * @see CQLStatement#execute
      */
-    public UntypedResultSet executeExternal(String query, Object... values)
+    public UntypedResultSet executeWithCoordinator(String query, Object... values)
     {
         return executeFormattedQuery(formatQuery(query), true, values);
     }
 
     public UntypedResultSet executeFormattedQuery(String query, Object... values)
     {
-        return executeFormattedQuery(query, externalExecution, values);
+        return executeFormattedQuery(query, coordinatorExecution, values);
     }
 
-    public UntypedResultSet executeFormattedQuery(String query, boolean external, Object... values)
+    private UntypedResultSet executeFormattedQuery(String query, boolean useCoordinator, Object... values)
     {        
-        if (external)
+        if (useCoordinator)
             requireNetworkWithoutDriver();
         
         UntypedResultSet rs;
@@ -1620,7 +1624,7 @@ public abstract class CQLTester
 
             if (reusePrepared)
             {
-                rs = external
+                rs = useCoordinator
                      ? QueryProcessor.execute(query, ConsistencyLevel.ONE, transformedValues)
                      : QueryProcessor.executeInternal(query, transformedValues);
 
@@ -1633,7 +1637,7 @@ public abstract class CQLTester
             }
             else
             {
-                rs = external
+                rs = useCoordinator
                      ? QueryProcessor.executeOnce(query, ConsistencyLevel.ONE, transformedValues)
                      : QueryProcessor.executeOnceInternal(query, transformedValues);
             }
@@ -1645,7 +1649,7 @@ public abstract class CQLTester
             if (logger.isTraceEnabled())
                 logger.trace("Executing: {}", query);
 
-            rs = external
+            rs = useCoordinator
                  ? QueryProcessor.executeOnce(query, ConsistencyLevel.ONE)
                  : QueryProcessor.executeOnceInternal(query);
         }

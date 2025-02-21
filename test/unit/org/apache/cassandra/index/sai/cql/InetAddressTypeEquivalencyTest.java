@@ -33,13 +33,13 @@ import org.apache.cassandra.index.sai.cql.types.InetTest;
  */
 public class InetAddressTypeEquivalencyTest extends SAITester
 {
-    // TODO: Disables external execution because we know SAI indexing for inet works differently than RowFilter,
+    // TODO: Disables coordinator execution because we know SAI indexing for inet works differently than RowFilter,
     //  which can wrongly discard rows in the coordinator. This is reported in CNDB-12978, and we should enable
     //  distributed execution again once we have a fix.
     @BeforeClass
-    public static void disableExternalExecution()
+    public static void disableCoordinatorExecution()
     {
-        CQLTester.disableExternalExecution();
+        CQLTester.disableCoordinatorExecution();
     }
 
     @Before

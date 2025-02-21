@@ -114,7 +114,7 @@ public class GenericOrderByTest extends SAITester
 
         // Insert many rows and then ensure we can get each of them when querying with specific bounds.
         for (int i = 0; i < 100; i++)
-            execute("INSERT INTO %s (pk, x, val, str_val) VALUES (?, ?, ?, ?)", i, i, i, String.valueOf(i));
+            execute("INSERT INTO %s (pk, x, val, str_val) VALUES (?, ?, ?, ?)", i, i, i, i);
 
         // Test caught a bug in the way we created boundaries.
         beforeAndAfterFlush(() -> {
