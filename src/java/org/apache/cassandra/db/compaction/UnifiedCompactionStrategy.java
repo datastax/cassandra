@@ -461,13 +461,19 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         public final PartitionPosition min;
         public final PartitionPosition max;
         public final long totalOnDiskSize;
+        public final double overheadToDataRatio;
         public final double uniqueKeyRatio;
         public final double density;
         public final int shardCountForDensity;
         public final int coveredShardCount;
 
-        /// Construct sharding statistics for the given collection of sstables that are to be compacted in full.
         public ShardingStats(Collection<? extends CompactionSSTable> sstables, ShardManager shardManager, Controller controller)
+        {
+            this(sstables, shardManager, getOverheadToDataRatio(sstables, controller), controller);
+        }
+
+        /// Construct sharding statistics for the given collection of sstables that are to be compacted in full.
+        public ShardingStats(Collection<? extends CompactionSSTable> sstables, ShardManager shardManager, double overheadToDataRatio, Controller controller)
         {
             assert !sstables.isEmpty();
             // the partition count aggregation is costly, so we only perform this once when the aggregate is selected for execution.
@@ -493,6 +499,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                 estimatedPartitionCount = partitionCountSum;
 
             this.totalOnDiskSize = onDiskLength;
+            this.overheadToDataRatio = overheadToDataRatio;
             this.uniqueKeyRatio = 1.0 * estimatedPartitionCount / partitionCountSum;
             this.min = min;
             this.max = max;
@@ -503,7 +510,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
 
         /// Construct sharding statistics for the given collection of sstables that are to be partially compacted
         /// in the given operation range. Done by adjusting numbers by the fraction of the sstable that is in range.
-        public ShardingStats(Collection<? extends CompactionSSTable> sstables, Range<Token> operationRange, ShardManager shardManager, Controller controller)
+        public ShardingStats(Collection<? extends CompactionSSTable> sstables, Range<Token> operationRange, ShardManager shardManager, double overheadToDataRatio, Controller controller)
         {
             assert !sstables.isEmpty();
             assert operationRange != null;
@@ -545,6 +552,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
             this.min = min;
             this.max = max;
             this.totalOnDiskSize = onDiskLengthInRange;
+            this.overheadToDataRatio = overheadToDataRatio;
             this.uniqueKeyRatio = 1.0 * estimatedPartitionCount / partitionCountSum;
             this.density = shardManager.density(onDiskLengthInRange, min, max, (long) (partitionCountSumInRange * uniqueKeyRatio));
             this.shardCountForDensity = controller.getNumShards(this.density * shardManager.shardSetCoverage());
@@ -553,12 +561,13 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
 
         /// Testing only, use specified values.
         @VisibleForTesting
-        ShardingStats(PartitionPosition min, PartitionPosition max, long totalOnDiskSize, double uniqueKeyRatio, double density, int shardCountForDensity, int coveredShardCount)
+        ShardingStats(PartitionPosition min, PartitionPosition max, long totalOnDiskSize, double overheadToDataRatio, double uniqueKeyRatio, double density, int shardCountForDensity, int coveredShardCount)
         {
 
             this.min = min;
             this.max = max;
             this.totalOnDiskSize = totalOnDiskSize;
+            this.overheadToDataRatio = overheadToDataRatio;
             this.uniqueKeyRatio = uniqueKeyRatio;
             this.density = density;
             this.shardCountForDensity = shardCountForDensity;
@@ -574,8 +583,8 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         {
             final Range<Token> operationRange = aggregate.operationRange();
             shardingStats = operationRange != null
-                            ? new ShardingStats(aggregate.getSelected().sstables(), operationRange, getShardManager(), controller)
-                            : new ShardingStats(aggregate.getSelected().sstables(), getShardManager(), controller);
+                            ? new ShardingStats(aggregate.getSelected().sstables(), operationRange, getShardManager(), aggregate.getSelected().overheadToDataRatio(), controller)
+                            : new ShardingStats(aggregate.getSelected().sstables(), getShardManager(), aggregate.getSelected().overheadToDataRatio(), controller);
             aggregate.setShardingStats(shardingStats);
         }
         return shardingStats;
@@ -589,6 +598,12 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
     ShardingStats makeShardingStats(Collection<? extends CompactionSSTable> sstables)
     {
         return new ShardingStats(sstables, getShardManager(), controller);
+    }
+
+    static double getOverheadToDataRatio(Collection<? extends CompactionSSTable> sstables, Controller controller)
+    {
+        final long totSizeBytes = CompactionAggregate.getTotSizeBytes(sstables);
+        return controller.getOverheadSizeInBytes(sstables, totSizeBytes) / totSizeBytes;
     }
 
     void createAndAddTasks(int gcBefore,

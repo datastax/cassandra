@@ -77,7 +77,7 @@ public class UnifiedCompactionTask extends CompactionTask
               // - there are no expired sstables in the compaction (UCS processes them separately)
               // - sstable exclusion for lack of space does not apply (shared progress is only use when an operation
               //   range applies, which disables this)
-              sharedProgress != null ? getOperationTotals(actuallyCompact, operationRange) : null,
+              sharedProgress != null ? getOperationTotals(actuallyCompact, operationRange, shardingStats.overheadToDataRatio) : null,
               gcBefore,
               keepOriginals,
               strategy,

@@ -29,6 +29,8 @@ import javax.annotation.Nullable;
 import com.google.common.collect.ImmutableSet;
 
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
+import org.apache.cassandra.dht.Range;
+import org.apache.cassandra.dht.Token;
 
 /**
  * A set of sstables that were picked for compaction along with some other relevant properties.
@@ -194,6 +196,11 @@ public class CompactionPick
     public long totalOverheadInBytes()
     {
         return totalOverheadInBytes;
+    }
+
+    public double overheadToDataRatio()
+    {
+        return totalOverheadInBytes / Math.max(totSizeInBytes, 1);
     }
 
     public long parent()
