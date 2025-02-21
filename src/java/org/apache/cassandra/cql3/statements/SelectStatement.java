@@ -1539,6 +1539,10 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
 
         private boolean isReversed(TableMetadata table, Map<ColumnMetadata, Ordering> orderingColumns) throws InvalidRequestException
         {
+            // Nonclustered ordering handles descending logic through ScoreOrderedResultRetriever and TKP
+            if (orderingColumns.values().stream().anyMatch(o -> o.expression.hasNonClusteredOrdering()))
+                return false;
+
             Boolean[] clusteredMap = new Boolean[table.clusteringColumns().size()];
             for (var entry : orderingColumns.entrySet())
             {
