@@ -524,13 +524,14 @@ public class QueryProcessor implements QueryHandler
             return null;
     }
 
-    public static UntypedResultSet executeOnce(String query, ConsistencyLevel cl, Object... values)
+    /**
+     * Same than {@link #execute(String, ConsistencyLevel, Object...)}, but to use for queries we know are only executed
+     * once so that the created statement object is not cached.
+     */
+    @VisibleForTesting
+    static UntypedResultSet executeOnce(String query, ConsistencyLevel cl, Object... values)
     {
-        return executeOnce(query, cl, internalQueryState(), values);
-    }
-
-    public static UntypedResultSet executeOnce(String query, ConsistencyLevel cl, QueryState queryState, Object... values)
-    {
+        QueryState queryState = internalQueryState();
         CQLStatement statement = parseStatement(query, queryState.getClientState());
         statement.validate(queryState);
         ResultMessage<?> result = statement.execute(queryState, makeInternalOptions(statement, values, cl), System.nanoTime());
