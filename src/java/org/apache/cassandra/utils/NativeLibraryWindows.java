@@ -77,15 +77,15 @@ public class NativeLibraryWindows implements NativeLibraryWrapper
     }
 
     @Override
-    public void callMlockall(int flags)
+    public int callMlockall(int flags)
     {
-        // Unsupported
+        throw new UnsatisfiedLinkError();
     }
 
     @Override
-    public void callMunlockall()
+    public int callMunlockall()
     {
-        // Unsupported
+        throw new UnsatisfiedLinkError();
     }
 
     @Override
@@ -95,15 +95,15 @@ public class NativeLibraryWindows implements NativeLibraryWrapper
     }
 
     @Override
-    public void callPosixFadvise(int fd, long offset, int len, int flag)
+    public int callPosixFadvise(int fd, long offset, int len, int flag)
     {
-        // Unsupported
+        throw new UnsatisfiedLinkError();
     }
 
     @Override
-    public void callPosixMadvise(Pointer addr, long length, int advice)
+    public int callPosixMadvise(Pointer addr, long length, int advice)
     {
-        // Unsupported
+        throw new UnsatisfiedLinkError();
     }
 
     @Override
@@ -113,15 +113,15 @@ public class NativeLibraryWindows implements NativeLibraryWrapper
     }
 
     @Override
-    public void callFsync(int fd)
+    public int callFsync(int fd)
     {
-        // Unsupported
+        throw new UnsatisfiedLinkError();
     }
 
     @Override
-    public void callClose(int fd)
+    public int callClose(int fd)
     {
-        // Unsupported
+        throw new UnsatisfiedLinkError();
     }
 
     /**
