@@ -25,6 +25,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -60,11 +61,9 @@ import org.apache.cassandra.streaming.PreviewKind;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.MerkleTree;
 import org.apache.cassandra.utils.MerkleTrees;
-import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.UUIDGen;
 
 import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
-import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
@@ -195,9 +194,6 @@ public class ValidatorTest
         cfs.forceBlockingFlush(UNIT_TESTS);
         assertEquals(1, cfs.getLiveSSTables().size());
 
-        // wait enough to force single compaction
-        TimeUnit.SECONDS.sleep(5);
-
         SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
         UUID repairSessionId = UUIDGen.getTimeUUID();
         final RepairJobDesc desc = new RepairJobDesc(repairSessionId, UUIDGen.getTimeUUID(), cfs.keyspace.getName(),
@@ -223,7 +219,7 @@ public class ValidatorTest
 
         final CompletableFuture<Message> outgoingMessageSink = registerOutgoingMessageSink();
         Validator validator = new Validator(desc, host, 0, true, false, PreviewKind.NONE);
-        ValidationManager.instance.submitValidation(cfs, validator);
+        Future<?> validationFuture = ValidationManager.instance.submitValidation(cfs, validator);
 
         Message message = outgoingMessageSink.get(TEST_TIMEOUT, TimeUnit.SECONDS);
         assertEquals(Verb.VALIDATION_RSP, message.verb());
@@ -238,6 +234,8 @@ public class ValidatorTest
         }
         assertEquals(m.trees.rowCount(), n);
 
+        // block on validation future to ensure the compaction progress listener has been called
+        validationFuture.get(TEST_TIMEOUT, TimeUnit.SECONDS);
         assertNotNull(progressOnCompletion.get());
         assertEquals(OperationType.VALIDATION, progressOnCompletion.get().operationType());
         assertTrue(progressOnCompletion.get().completed() > 0);
@@ -267,9 +265,6 @@ public class ValidatorTest
 
         cfs.forceBlockingFlush(UNIT_TESTS);
         assertEquals(1, cfs.getLiveSSTables().size());
-
-        // wait enough to force single compaction
-        TimeUnit.SECONDS.sleep(5);
 
         SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
         UUID repairSessionId = UUIDGen.getTimeUUID();
@@ -326,9 +321,6 @@ public class ValidatorTest
 
         cfs.forceBlockingFlush(UNIT_TESTS);
         assertEquals(1, cfs.getLiveSSTables().size());
-
-        // wait enough to force single compaction
-        TimeUnit.SECONDS.sleep(5);
 
         SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
         UUID repairSessionId = UUIDGen.getTimeUUID();
