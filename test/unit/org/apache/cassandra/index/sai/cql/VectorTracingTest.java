@@ -30,9 +30,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class VectorTracingTest extends VectorTester.VersionedWithChecksums
 {
     @BeforeClass
-    public static void setupClass()
+    public static void setUpClass()
     {
         System.setProperty("cassandra.custom_tracing_class", "org.apache.cassandra.tracing.TracingTestImpl");
+        VectorTester.setUpClass();
     }
 
     @Test

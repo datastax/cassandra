@@ -224,8 +224,9 @@ public class SAITester extends CQLTester
      * simulate the application of the entire row filter in the coordinator node, even if unit tests are not multinode.
      */
     @BeforeClass
-    public static void enableExternalExecution()
+    public static void setUpClass()
     {
+        CQLTester.setUpClass();
         CQLTester.enableCoordinatorExecution();
     }
 

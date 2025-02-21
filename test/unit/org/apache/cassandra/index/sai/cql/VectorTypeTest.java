@@ -79,9 +79,10 @@ public class VectorTypeTest extends VectorTester
     private static final IPartitioner partitioner = Murmur3Partitioner.instance;
 
     @BeforeClass
-    public static void setupClass()
+    public static void setUpClass()
     {
         System.setProperty("cassandra.custom_tracing_class", "org.apache.cassandra.tracing.TracingTestImpl");
+        VectorTester.setUpClass();
     }
 
     @Before
