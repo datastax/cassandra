@@ -85,19 +85,19 @@ public class NativeLibraryDarwin implements NativeLibraryWrapper
     }
 
     @Override
-    public void callMlockall(int flags) throws NativeError
+    public int callMlockall(int flags) throws NativeError
     {
-        int r = mlockall(flags);
-        if (r != 0)
+        if (0 != mlockall(flags))
             throwNativeError();
+        return 0;
     }
 
     @Override
-    public void callMunlockall() throws NativeError
+    public int callMunlockall() throws NativeError
     {
-        int r = munlockall();
-        if (r != 0)
+        if (0 != munlockall())
             throwNativeError();
+        return 0;
     }
 
     @Override
@@ -110,15 +110,15 @@ public class NativeLibraryDarwin implements NativeLibraryWrapper
     }
 
     @Override
-    public void callPosixFadvise(int fd, long offset, int len, int flag)
+    public int callPosixFadvise(int fd, long offset, int len, int flag)
     {
-        // Unsupported
+        throw new UnsatisfiedLinkError();
     }
 
     @Override
-    public void callPosixMadvise(Pointer addr, long length, int advice)
+    public int callPosixMadvise(Pointer addr, long length, int advice)
     {
-        // Unsupported
+        throw new UnsatisfiedLinkError();
     }
 
     @Override
@@ -131,19 +131,19 @@ public class NativeLibraryDarwin implements NativeLibraryWrapper
     }
 
     @Override
-    public void callFsync(int fd) throws NativeError
+    public int callFsync(int fd) throws NativeError
     {
-        int r = fsync(fd);
-        if (r != 0)
+        if (0 != fsync(fd))
             throwNativeError();
+        return 0;
     }
 
     @Override
-    public void callClose(int fd) throws NativeError
+    public int callClose(int fd) throws NativeError
     {
-        int r = close(fd);
-        if (r != 0)
+        if (0 != close(fd))
             throwNativeError();
+        return 0;
     }
 
     @Override
