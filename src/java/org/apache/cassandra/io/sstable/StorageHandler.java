@@ -70,8 +70,10 @@ public abstract class StorageHandler
         REGION_CHANGED(false),
         /** When index is built */
         INDEX_BUILT(false),
-        /** New node restarted with existing on disk data*/
-        REPLACE(true);
+        /** New node restarted with existing on disk data */
+        REPLACE(true),
+        /** Retry in case of failure, i.e. if a timeout occurred **/
+        RETRY(false);
 
         /** When this is true, a reload operation will reload all sstables even those that could
          * have been flushed by other nodes. */
