@@ -248,14 +248,21 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean, 
 
             // Check the release version of all the peers it heard of. Not necessary the peer that it has/had contacted with.
             CassandraVersion minVersion = SystemKeyspace.CURRENT_VERSION;
-            boolean allHostsHaveKnownVersion = true;
-            for (InetAddressAndPort host : endpointStateMap.keySet())
+            hasNodeWithUnknownVersion = false;
+            for (Entry<InetAddressAndPort, EndpointState> entry : endpointStateMap.entrySet())
             {
-                CassandraVersion version = getReleaseVersion(host);
 
+                if (justRemovedEndpoints.containsKey(entry.getKey()))
+                    continue;
+
+                CassandraVersion version = getReleaseVersion(entry.getKey());
+
+                // if it is dead state, we skip the version check
+                if (isDeadState(entry.getValue()))
+                    continue;
                 //Raced with changes to gossip state, wait until next iteration
                 if (version == null)
-                    allHostsHaveKnownVersion = false;
+                    hasNodeWithUnknownVersion = true;
                 else if (version.compareTo(minVersion) < 0)
                     minVersion = version;
             }
@@ -265,7 +272,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean, 
                 return new ExpiringMemoizingSupplier.Memoized<>(minVersion);
 
             // don't remember the minimum version and recheck whenever requested
-            if (!allHostsHaveKnownVersion)
+            if (hasNodeWithUnknownVersion)
                 return new ExpiringMemoizingSupplier.NotMemoized<>(minVersion);
 
             // all hosts have known versions and == CURRENT_VERSION, we can stop checking - the cluster is fully upgraded
@@ -2570,7 +2577,10 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean, 
      */
     public boolean hasMajorVersion3OrUnknownNodes()
     {
-        return isUpgradingFromVersionLowerThan(CassandraVersion.CASSANDRA_4_0);
+        return isUpgradingFromVersionLowerThan(CassandraVersion.CASSANDRA_4_0) || // this is quite obvious
+               // this is not so obvious:// however if we discovered only nodes at current version so far (in particular only this node),
+               // but still there are nodes with unknown version, we also want to report that the cluster may have nodes at 3.x
+               hasNodeWithUnknownVersion;
     }
 
     /**
