@@ -46,6 +46,8 @@ import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.UUIDSerializer;
 
+import static org.apache.cassandra.schema.SchemaConstants.isValidCharsName;
+
 /**
  * An immutable representation of secondary index metadata.
  */
@@ -108,11 +110,6 @@ public final class IndexMetadata
         return new IndexMetadata(name, newOptions, kind);
     }
 
-    public static boolean isNameValid(String name)
-    {
-        return name != null && !name.isEmpty() && PATTERN_WORD_CHARS.matcher(name).matches();
-    }
-
     public static String generateDefaultIndexName(String table, ColumnIdentifier column)
     {
         return PATTERN_NON_WORD_CHAR.matcher(table + "_" + column.toString() + "_idx").replaceAll("");
@@ -125,7 +122,7 @@ public final class IndexMetadata
 
     public void validate(TableMetadata table)
     {
-        if (!isNameValid(name))
+        if (!isValidCharsName(name))
             throw new ConfigurationException("Illegal index name " + name);
 
         if (kind == null)
