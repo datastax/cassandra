@@ -375,4 +375,13 @@ public class RowWithSourceTable implements Row
             return this;
         return new RowWithSourceTable(r, source);
     }
+
+    @Override
+    public String toString()
+    {
+        return "RowWithSourceTable{" +
+               row +
+               ", source=" + source +
+               '}';
+    }
 }

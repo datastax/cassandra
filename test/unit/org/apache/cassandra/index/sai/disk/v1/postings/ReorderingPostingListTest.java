@@ -30,14 +30,14 @@ import org.apache.cassandra.utils.CloseableIterator;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
-public class VectorPostingListTest
+public class ReorderingPostingListTest
 {
     @Test
     public void ensureEmptySourceBehavesCorrectly() throws Throwable
     {
         var source = new TestIterator(CloseableIterator.emptyIterator());
 
-        try (var postingList = new VectorPostingList(source))
+        try (var postingList = new ReorderingPostingList(source, RowIdWithScore::getSegmentRowId))
         {
             // Even an empty source should be closed
             assertTrue(source.isClosed);
@@ -55,7 +55,7 @@ public class VectorPostingListTest
                 new RowIdWithScore(4, 4),
         }).iterator());
 
-        try (var postingList = new VectorPostingList(source))
+        try (var postingList = new ReorderingPostingList(source, RowIdWithScore::getSegmentRowId))
         {
             // The posting list is eagerly consumed, so it should be closed before
             // we close postingList
@@ -80,7 +80,7 @@ public class VectorPostingListTest
         new RowIdWithScore(2, 2),
         }).iterator());
 
-        try (var postingList = new VectorPostingList(source))
+        try (var postingList = new ReorderingPostingList(source, RowIdWithScore::getSegmentRowId))
         {
             assertEquals(3, postingList.advance(3));
             assertEquals(PostingList.END_OF_STREAM, postingList.advance(4));

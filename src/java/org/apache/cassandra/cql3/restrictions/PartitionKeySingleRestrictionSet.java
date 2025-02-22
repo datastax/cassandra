@@ -191,7 +191,7 @@ final class PartitionKeySingleRestrictionSet extends RestrictionSetWrapper imple
                 if (restriction.isOnToken())
                     return buildWithTokens(restrictionSet, i, indexRegistry);
 
-                restrictionSet.addRestriction((SingleRestriction) restriction, isDisjunction, indexRegistry);
+                restrictionSet.addRestriction((SingleRestriction) restriction, isDisjunction);
             }
 
             return buildPartitionKeyRestrictions(restrictionSet);
