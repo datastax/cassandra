@@ -46,7 +46,6 @@ import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.IndexNotAvailableException;
 import org.apache.cassandra.index.sai.IndexContext;
-import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.disk.v1.SSTableIndexWriter;
 import org.apache.cassandra.index.sai.metrics.AbstractMetricsTest;
 import org.apache.cassandra.inject.ActionBuilder;
@@ -184,7 +183,7 @@ public class CompactionTest extends AbstractMetricsTest
             verifySSTableIndexes(v2IndexName, 1);
 
             // But index queries should not be allowed.
-            assertThrows(IndexNotAvailableException.class, () -> execute("SELECT id1 FROM %s WHERE v1>=0"));
+            assertThrows(IndexNotAvailableException.class, () -> executeInternal("SELECT id1 FROM %s WHERE v1>=0"));
         }
         finally
         {
