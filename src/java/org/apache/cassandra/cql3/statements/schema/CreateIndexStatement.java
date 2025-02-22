@@ -28,6 +28,7 @@ import com.google.common.collect.Lists;
 import org.apache.cassandra.audit.AuditLogContext;
 import org.apache.cassandra.audit.AuditLogEntryType;
 import org.apache.cassandra.auth.Permission;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.QualifiedName;
@@ -42,6 +43,7 @@ import org.apache.cassandra.index.sasi.SASIIndex;
 import org.apache.cassandra.schema.*;
 import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
 import org.apache.cassandra.service.ClientState;
+import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.Event.SchemaChange;
 import org.apache.cassandra.transport.Event.SchemaChange.Change;
@@ -49,6 +51,8 @@ import org.apache.cassandra.transport.Event.SchemaChange.Target;
 
 import static com.google.common.collect.Iterables.transform;
 import static com.google.common.collect.Iterables.tryFind;
+import static org.apache.cassandra.cql3.statements.schema.IndexAttributes.KW_KEY_COMPRESSION;
+import static org.apache.cassandra.cql3.statements.schema.IndexAttributes.KW_VALUE_COMPRESSION;
 
 public final class CreateIndexStatement extends AlterSchemaStatement
 {
@@ -161,7 +165,21 @@ public final class CreateIndexStatement extends AlterSchemaStatement
 
         Map<String, String> options = attrs.isCustom ? attrs.getOptions() : Collections.emptyMap();
 
-        IndexMetadata index = IndexMetadata.fromIndexTargets(indexTargets, name, kind, options);
+        Map<String, String> keyCompressionOptions = attrs.getMap(KW_KEY_COMPRESSION);
+        CompressionParams keyCompression = keyCompressionOptions != null
+                                        ? CompressionParams.fromMap(keyCompressionOptions)
+                                        : CompressionParams.noCompression();
+
+        Map<String, String> valueCompressionOptions = attrs.getMap(KW_VALUE_COMPRESSION);
+        CompressionParams valueCompression = valueCompressionOptions != null
+                                           ? CompressionParams.fromMap(valueCompressionOptions)
+                                           : CompressionParams.noCompression();
+
+        if ((keyCompression.isEnabled() || valueCompression.isEnabled()) && !CassandraRelevantProperties.INDEX_COMPRESSION_ENABLED.getBoolean())
+            throw ire("Cannot create a compressed index, because index compression is disabled. " +
+                      "Please set " + CassandraRelevantProperties.INDEX_COMPRESSION_ENABLED.getKey() + " property to enable it.");
+
+        IndexMetadata index = IndexMetadata.fromIndexTargets(indexTargets, name, kind, options, keyCompression, valueCompression);
 
         String className = index.getIndexClassName();
         IndexGuardrails guardRails = IndexGuardrails.forClassName(className);
@@ -194,7 +212,15 @@ public final class CreateIndexStatement extends AlterSchemaStatement
             throw ire("Index %s is a duplicate of existing index %s", index.name, equalIndex.name);
         }
 
-        TableMetadata newTable = table.withSwapped(table.indexes.with(index));
+        // All indexes on one table must use the same key_compression.
+        // The newly created index forces key_compression on the previous indexes.
+        for (var existingIndex : table.indexes)
+            if (!existingIndex.keyCompression.equals(index.keyCompression))
+                ClientWarn.instance.warn("Setting " + KW_KEY_COMPRESSION +
+                                         " from " + existingIndex.keyCompression.asMap() +
+                                         " to " + index.keyCompression.asMap() + " for index " + existingIndex.name);
+        Indexes newIndexes = table.indexes.withKeyCompression(index.keyCompression).with(index);
+        TableMetadata newTable = table.withSwapped(newIndexes);
         newTable.validate();
 
         return schema.withAddedOrUpdated(keyspace.withSwapped(keyspace.tables.withSwapped(newTable)));

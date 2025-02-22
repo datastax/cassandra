@@ -46,6 +46,9 @@ import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.UUIDSerializer;
 
+import static org.apache.cassandra.cql3.statements.schema.IndexAttributes.KW_KEY_COMPRESSION;
+import static org.apache.cassandra.cql3.statements.schema.IndexAttributes.KW_VALUE_COMPRESSION;
+
 /**
  * An immutable representation of secondary index metadata.
  */
@@ -79,21 +82,45 @@ public final class IndexMetadata
     public final UUID id;
     public final String name;
     public final Kind kind;
+
+    /**
+     * Compression parameters to use for compressing primary keys of the table the index points to.
+     * Shared by all indexes on the same table.
+     */
+    public final CompressionParams keyCompression;
+
+    /** Compression parameters to use for compressing values (terms) of the indexed column */
+    public final CompressionParams valueCompression;
+
+    /** Other index-specific options */
     public final Map<String, String> options;
 
     private IndexMetadata(String name,
                           Map<String, String> options,
-                          Kind kind)
+                          Kind kind,
+                          CompressionParams keyCompression,
+                          CompressionParams valueCompression)
     {
         this.id = UUID.nameUUIDFromBytes(name.getBytes());
         this.name = name;
         this.options = options == null ? ImmutableMap.of() : ImmutableMap.copyOf(options);
         this.kind = kind;
+        this.keyCompression = keyCompression;
+        this.valueCompression = valueCompression;
     }
 
     public static IndexMetadata fromSchemaMetadata(String name, Kind kind, Map<String, String> options)
     {
-        return new IndexMetadata(name, options, kind);
+        return new IndexMetadata(name, options, kind, CompressionParams.noCompression(), CompressionParams.noCompression());
+    }
+
+    public static IndexMetadata fromSchemaMetadata(String name,
+                                                   Kind kind,
+                                                   Map<String, String> options,
+                                                   CompressionParams keyCompression,
+                                                   CompressionParams valueCompression)
+    {
+        return new IndexMetadata(name, options, kind, keyCompression, valueCompression);
     }
 
     public static IndexMetadata fromIndexTargets(List<IndexTarget> targets,
@@ -101,11 +128,22 @@ public final class IndexMetadata
                                                  Kind kind,
                                                  Map<String, String> options)
     {
+        return fromIndexTargets(targets, name, kind, options,
+                                CompressionParams.noCompression(), CompressionParams.noCompression());
+    }
+
+    public static IndexMetadata fromIndexTargets(List<IndexTarget> targets,
+                                                 String name,
+                                                 Kind kind,
+                                                 Map<String, String> options,
+                                                 CompressionParams keyCompression,
+                                                 CompressionParams valueCompression)
+    {
         Map<String, String> newOptions = new HashMap<>(options);
         newOptions.put(IndexTarget.TARGET_OPTION_NAME, targets.stream()
                                                               .map(target -> target.asCqlString())
                                                               .collect(Collectors.joining(", ")));
-        return new IndexMetadata(name, newOptions, kind);
+        return new IndexMetadata(name, newOptions, kind, keyCompression, valueCompression);
     }
 
     public static boolean isNameValid(String name)
@@ -221,13 +259,15 @@ public final class IndexMetadata
     @Override
     public int hashCode()
     {
-        return Objects.hashCode(id, name, kind, options);
+        return Objects.hashCode(id, name, kind, options, keyCompression, valueCompression);
     }
 
     public boolean equalsWithoutName(IndexMetadata other)
     {
         return Objects.equal(kind, other.kind)
-               && Objects.equal(options, other.options);
+               && Objects.equal(options, other.options)
+               && Objects.equal(keyCompression, other.keyCompression)
+               && Objects.equal(valueCompression, other.valueCompression);
     }
 
     @Override
@@ -252,6 +292,8 @@ public final class IndexMetadata
                .append("name", name)
                .append("kind", kind)
                .append("options", options)
+               .append("keyCompression", keyCompression)
+               .append("valueCompression", valueCompression)
                .build();
     }
 
@@ -289,9 +331,14 @@ public final class IndexMetadata
                    .append(") USING ")
                    .appendWithSingleQuotes(copyOptions.remove(IndexTarget.CUSTOM_INDEX_OPTION_NAME));
 
-            if (!copyOptions.isEmpty())
-                builder.append(" WITH OPTIONS = ")
-                       .append(copyOptions);
+
+            builder.appendOptions(b -> {
+                b.append("options", copyOptions);
+                if (valueCompression.isEnabled())
+                    b.append(KW_VALUE_COMPRESSION, valueCompression.asMap());
+                if (keyCompression.isEnabled())
+                    b.append(KW_KEY_COMPRESSION, keyCompression.asMap());
+            });
         }
         else
         {
