@@ -24,6 +24,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -197,9 +198,6 @@ public class ValidatorTest
         Util.flush(cfs);
         assertEquals(1, cfs.getLiveSSTables().size());
 
-        // wait enough to force single compaction
-        TimeUnit.SECONDS.sleep(5);
-
         SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
         TimeUUID repairSessionId = nextTimeUUID();
         final RepairJobDesc desc = new RepairJobDesc(repairSessionId, nextTimeUUID(), cfs.getKeyspaceName(),
@@ -225,7 +223,7 @@ public class ValidatorTest
 
         final CompletableFuture<Message> outgoingMessageSink = registerOutgoingMessageSink();
         Validator validator = new Validator(SharedContext.Global.instance, new ValidationState(Clock.Global.clock(), desc, host), 0, true, false, PreviewKind.NONE);
-        ValidationManager.instance.submitValidation(cfs, validator);
+        Future<?> validationFuture = ValidationManager.instance.submitValidation(cfs, validator);
 
         Message message = outgoingMessageSink.get(TEST_TIMEOUT, TimeUnit.SECONDS);
         assertEquals(Verb.VALIDATION_RSP, message.verb());
@@ -240,6 +238,8 @@ public class ValidatorTest
         }
         assertEquals(m.trees.rowCount(), n);
 
+        // block on validation future to ensure the compaction progress listener has been called
+        validationFuture.get(TEST_TIMEOUT, TimeUnit.SECONDS);
         assertNotNull(progressOnCompletion.get());
         assertEquals(OperationType.VALIDATION, progressOnCompletion.get().operationType());
         assertTrue(progressOnCompletion.get().completed() > 0);
@@ -269,9 +269,6 @@ public class ValidatorTest
 
         Util.flush(cfs);
         assertEquals(1, cfs.getLiveSSTables().size());
-
-        // wait enough to force single compaction
-        TimeUnit.SECONDS.sleep(5);
 
         SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
         TimeUUID repairSessionId = nextTimeUUID();
@@ -328,9 +325,6 @@ public class ValidatorTest
 
         Util.flush(cfs);
         assertEquals(1, cfs.getLiveSSTables().size());
-
-        // wait enough to force single compaction
-        TimeUnit.SECONDS.sleep(5);
 
         SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
         TimeUUID repairSessionId = nextTimeUUID();
