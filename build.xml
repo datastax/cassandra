@@ -44,8 +44,7 @@
         When building, javac's source and target flags are set to the jdk used, so lower JDKs are not supported at runtime.
     -->
     <property name="java.default" value="11" />
-    <!-- Not sure whether we need 17 below, at least jvm options were added some time ago for 17 -->
-    <property name="java.supported" value="11,17,22" />
+    <property name="java.supported" value="11,17,21,22" />
 
     <!-- directory details -->
     <property name="basedir" value="."/>
@@ -82,8 +81,8 @@
     <property name="test.microbench.src" value="${test.dir}/microbench"/>
     <property name="test.distributed.src" value="${test.dir}/distributed"/>
     <property name="test.compression.algo" value="LZ4"/>
-    <property name="test.driver.connection_timeout_ms" value="5000"/>
-    <property name="test.driver.read_timeout_ms" value="12000"/>
+    <property name="test.driver.connection_timeout_ms" value="10000"/>
+    <property name="test.driver.read_timeout_ms" value="24000"/>
     <property name="dist.dir" value="${build.dir}/dist"/>
     <property name="tmp.dir" value="${build.test.dir}/cassandra"/>
     <property name="test.logback.configurationFile" value="${test.conf}/logback-test.xml"/>
@@ -116,11 +115,12 @@
     <property name="maven-repository-url" value="https://repo.aws.dsinternal.org/artifactory/datastax-snapshots-local"/>
     <property name="maven-repository-id" value="datastax.snapshots.https"/>
 
-    <property name="test.timeout" value="240000" />
+    <property name="test.timeout" value="480000" />
     <property name="test.memory.timeout" value="480000" />
     <property name="test.long.timeout" value="600000" />
     <property name="test.burn.timeout" value="60000000" />
     <property name="test.distributed.timeout" value="900000" />
+    <property name="test.simulation.timeout" value="1800000" />
 
     <!-- default for cql tests. Can be overridden by -Dcassandra.test.use_prepared=false -->
     <property name="cassandra.test.use_prepared" value="true" />
@@ -130,9 +130,6 @@
 
     <!-- skip flushing schema tables during tests -->
     <property name="cassandra.unsafesystem" value="true" />
-
-    <!-- fast shutdown of messaging service -->
-    <property name="cassandra.test.messagingService.nonGracefulShutdown" value="false"/>
 
     <!-- fast shutdown of messaging service -->
     <property name="cassandra.test.messagingService.nonGracefulShutdown" value="true"/>
@@ -211,9 +208,17 @@
     <condition property="is.java.default"><equals arg1="${ant.java.version}" arg2="${java.default}"/></condition>
     <echo unless:true="${is.java.default}" message="Non default JDK version used: ${ant.java.version}"/>
 
+    <condition property="arch_x86">
+      <equals arg1="${os.arch}" arg2="x86" />
+    </condition>
+    <!-- On non-X86 JDK 8 (such as M1 Mac) the smallest allowed Xss is 384k; so need a larger value
+    when on these platforms. -->
+    <condition property="jvm_xss" value="-Xss256k" else="-Xss384k">
+      <isset property="arch_x86" />
+    </condition>
+
     <resources id="_jvm11_arg_items">
         <string>-Djdk.attach.allowAttachSelf=true</string>
-
         <string>-XX:+UseConcMarkSweepGC</string>
         <string>-XX:+CMSParallelRemarkEnabled</string>
         <string>-XX:SurvivorRatio=8</string>
@@ -250,11 +255,150 @@
         <string>--add-opens java.base/jdk.internal.util.jar=ALL-UNNAMED</string>
         <string>--add-opens jdk.compiler/com.sun.tools.javac=ALL-UNNAMED</string>
         <string>--add-opens jdk.management/com.sun.management.internal=ALL-UNNAMED</string>
-
     </resources>
     <pathconvert property="_jvm11_args_concat" refid="_jvm11_arg_items" pathsep=" "/>
     <condition property="java-jvmargs" value="${_jvm11_args_concat}">
         <equals arg1="${ant.java.version}" arg2="11"/>
+    </condition>
+
+    <resources id="_jvm17_arg_items">
+        <string>-Djdk.attach.allowAttachSelf=true</string>
+        <string>-XX:+UseG1GC</string>
+        <string>-XX:+ParallelRefProcEnabled</string>
+        <string>-XX:MaxTenuringThreshold=1</string>
+        <string>-XX:G1HeapRegionSize=16m</string>
+
+        <string>--add-exports java.base/jdk.internal.misc=ALL-UNNAMED</string>
+        <string>--add-exports java.base/jdk.internal.perf=ALL-UNNAMED</string>
+        <string>--add-exports java.base/jdk.internal.ref=ALL-UNNAMED</string>
+        <string>--add-exports java.base/jdk.internal.util.random=ALL-UNNAMED</string>
+        <string>--add-exports java.management.rmi/com.sun.jmx.remote.internal.rmi=ALL-UNNAMED</string>
+        <string>--add-exports java.rmi/sun.rmi.registry=ALL-UNNAMED</string>
+        <string>--add-exports java.rmi/sun.rmi.server=ALL-UNNAMED</string>
+        <string>--add-exports jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED</string>
+        <string>--add-exports jdk.naming.dns/com.sun.jndi.dns=java.naming</string>
+
+        <string>--add-exports java.rmi/sun.rmi.transport.tcp=ALL-UNNAMED</string>
+        <string>--add-exports java.sql/java.sql=ALL-UNNAMED</string>
+        <string>--add-exports jdk.unsupported/sun.misc=ALL-UNNAMED</string>
+        <string>--add-exports jdk.attach/sun.tools.attach=ALL-UNNAMED</string>
+
+        <string>--add-opens java.base/jdk.internal.loader=ALL-UNNAMED</string>
+        <string>--add-opens java.base/jdk.internal.ref=ALL-UNNAMED</string>
+        <string>--add-opens java.base/jdk.internal.reflect=ALL-UNNAMED</string>
+        <string>--add-opens java.base/jdk.internal.math=ALL-UNNAMED</string>
+        <string>--add-opens java.base/jdk.internal.module=ALL-UNNAMED</string>
+        <string>--add-opens java.base/jdk.internal.util.jar=ALL-UNNAMED</string>
+        <string>--add-opens java.base/sun.nio.ch=ALL-UNNAMED</string>
+        <string>--add-opens java.base/sun.security.util=ALL-UNNAMED</string>
+        <string>--add-opens jdk.management/com.sun.management.internal=ALL-UNNAMED</string>
+        <string>--add-opens jdk.naming.dns/com.sun.jndi.dns=ALL-UNNAMED</string>
+
+        <string>--add-opens java.base/java.io=ALL-UNNAMED</string>
+        <string>--add-opens java.base/java.lang=ALL-UNNAMED</string>
+        <string>--add-opens java.base/java.lang.module=ALL-UNNAMED</string>
+        <string>--add-opens java.base/java.lang.ref=ALL-UNNAMED</string>
+        <string>--add-opens java.base/java.lang.reflect=ALL-UNNAMED</string>
+        <string>--add-opens java.base/java.math=ALL-UNNAMED</string>
+        <string>--add-opens java.base/java.net=ALL-UNNAMED</string>
+        <string>--add-opens java.base/java.security=ALL-UNNAMED</string>
+
+        <string>--add-opens jdk.compiler/com.sun.tools.javac=ALL-UNNAMED</string>
+        <string>--add-opens java.base/java.util=ALL-UNNAMED</string>
+        <string>--add-opens java.base/java.util.concurrent.locks=ALL-UNNAMED</string>
+
+        <string>--add-opens java.base/java.nio=ALL-UNNAMED</string>
+        <string>--add-opens java.base/java.nio.file.attribute=ALL-UNNAMED</string>
+
+        <string>--add-opens java.base/java.util.concurrent=ALL-UNNAMED</string>
+        <string>--add-opens java.base/java.util.concurrent.atomic=ALL-UNNAMED</string>
+    </resources>
+    <pathconvert property="_jvm17_args_concat" refid="_jvm17_arg_items" pathsep=" "/>
+    <condition property="java-jvmargs" value="${_jvm17_args_concat}">
+        <equals arg1="${ant.java.version}" arg2="17"/>
+    </condition>
+
+    <resources id="_jvm21_arg_items">
+        <string>-XX:+UnlockDiagnosticVMOptions</string>
+        <string>-Djdk.attach.allowAttachSelf=true</string>
+        <string>-XX:+UseG1GC</string>
+        <string>-XX:+ParallelRefProcEnabled</string>
+        <!-- Below two are used in Cassandra, not in CNDB-->
+        <!--<string>-XX:MaxTenuringThreshold=1</string>
+        <string>-XX:G1HeapRegionSize=16m</string>-->
+        <string>-XX:G1RSetUpdatingPauseTimePercent=5</string>
+        <string>-XX:MaxGCPauseMillis=100</string>
+
+        <!-- Copy-paste for now these options from cndb/docker-entrypoint.sh; we will verify later whether we
+         want all of them for tests-->
+        <string>-XX:-RestrictContended</string>
+        <string>-XX:+UseThreadPriorities</string>
+        <string>-XX:+DebugNonSafepoints</string>
+        <string>-XX:+UseStringDeduplication</string>
+        <string>-XX:StringTableSize=1000003</string>
+        <string>-XX:+PerfDisableSharedMem</string>
+        <string>-XX:+AlwaysPreTouch</string>
+        <string>-XX:+UseTLAB</string>
+        <string>-XX:+ResizeTLAB</string>
+        <string>-XX:+UseNUMA</string>
+
+
+        <string>--add-exports java.base/jdk.internal.misc=ALL-UNNAMED</string>
+        <string>--add-exports java.base/jdk.internal.perf=ALL-UNNAMED</string>
+        <string>--add-exports java.base/jdk.internal.ref=ALL-UNNAMED</string>
+        <string>--add-exports java.base/jdk.internal.util.random=ALL-UNNAMED</string>
+        <string>--add-exports java.base/sun.nio.ch=ALL-UNNAMED</string>
+        <string>--add-exports java.management.rmi/com.sun.jmx.remote.internal.rmi=ALL-UNNAMED</string>
+        <string>--add-exports java.rmi/sun.rmi.registry=ALL-UNNAMED</string>
+        <string>--add-exports java.rmi/sun.rmi.server=ALL-UNNAMED</string>
+        <string>--add-exports jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED</string>
+        <string>--add-exports jdk.naming.dns/com.sun.jndi.dns=java.naming</string>
+        <string>--add-exports jdk.unsupported/sun.misc=ALL-UNNAMED</string>
+
+        <string>--add-opens java.base/java.io=ALL-UNNAMED</string>
+        <string>--add-opens java.base/java.lang=ALL-UNNAMED</string>
+        <string>--add-opens java.base/java.lang.invoke=ALL-UNNAMED</string>
+        <string>--add-opens java.base/java.lang.module=ALL-UNNAMED</string>
+        <string>--add-opens java.base/java.lang.ref=ALL-UNNAMED</string>
+        <string>--add-opens java.base/java.lang.reflect=ALL-UNNAMED</string>
+        <string>--add-opens java.base/java.math=ALL-UNNAMED</string>
+        <string>--add-opens java.base/java.net=ALL-UNNAMED</string>
+        <string>--add-opens java.base/java.nio=ALL-UNNAMED</string>
+        <string>--add-opens java.base/java.nio.channels.spi=ALL-UNNAMED</string>
+        <string>--add-opens java.base/java.nio.charset=ALL-UNNAMED</string>
+        <string>--add-opens java.base/java.nio.file.spi=ALL-UNNAMED</string>
+        <string>--add-opens java.base/java.security=ALL-UNNAMED</string>
+        <string>--add-opens java.base/java.util=ALL-UNNAMED</string>
+        <string>--add-opens java.base/java.util.concurrent.locks=ALL-UNNAMED</string>
+        <string>--add-opens java.base/java.util.jar=ALL-UNNAMED</string>
+        <string>--add-opens java.base/java.util.zip=ALL-UNNAMED</string>
+        <string>--add-opens java.base/jdk.internal.loader=ALL-UNNAMED</string>
+        <string>--add-opens java.base/jdk.internal.math=ALL-UNNAMED</string>
+        <string>--add-opens java.base/jdk.internal.misc=ALL-UNNAMED</string>
+        <string>--add-opens java.base/jdk.internal.module=ALL-UNNAMED</string>
+        <string>--add-opens java.base/jdk.internal.ref=ALL-UNNAMED</string>
+        <string>--add-opens java.base/jdk.internal.reflect=ALL-UNNAMED</string>
+        <string>--add-opens java.base/jdk.internal.vm=ALL-UNNAMED</string>
+        <string>--add-opens java.base/sun.net.www.protocol.jar=ALL-UNNAMED</string>
+        <string>--add-opens java.base/sun.nio.ch=ALL-UNNAMED</string>
+        <string>--add-opens java.base/sun.nio.fs=ALL-UNNAMED</string>
+        <string>--add-opens java.base/sun.reflect.generics.repository=ALL-UNNAMED</string>
+        <string>--add-opens java.base/sun.reflect.generics.tree=ALL-UNNAMED</string>
+        <string>--add-opens java.base/sun.security.util=ALL-UNNAMED</string>
+        <string>--add-opens jdk.compiler/com.sun.tools.javac=ALL-UNNAMED</string>
+        <string>--add-opens jdk.management.jfr/jdk.management.jfr=ALL-UNNAMED</string>
+        <string>--add-opens jdk.management/com.sun.management.internal=ALL-UNNAMED</string>
+        <string>--add-opens jdk.naming.dns/com.sun.jndi.dns=ALL-UNNAMED</string>
+        <!-- required for org.apache.cassandra.Util.getSupportedMTimeGranularity-->
+        <string>--add-opens java.base/java.nio.file.attribute=ALL-UNNAMED</string>
+
+        <!-- below 2 were added to support jamm and fix BatchCommitLogTest -->
+        <string>--add-opens java.base/java.util.concurrent=ALL-UNNAMED</string>
+        <string>--add-opens java.base/java.util.concurrent.atomic=ALL-UNNAMED</string>
+    </resources>
+    <pathconvert property="_jvm21_args_concat" refid="_jvm21_arg_items" pathsep=" "/>
+    <condition property="java-jvmargs" value="${_jvm21_args_concat}">
+        <equals arg1="${ant.java.version}" arg2="21"/>
     </condition>
 
     <resources id="_jvm22_arg_items">
@@ -323,7 +467,6 @@
         <!-- below 2 were added to support jamm and fix BatchCommitLogTest -->
         <string>--add-opens java.base/java.util.concurrent=ALL-UNNAMED</string>
         <string>--add-opens java.base/java.util.concurrent.atomic=ALL-UNNAMED</string>
-        <string>--add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED</string>
     </resources>
     <pathconvert property="_jvm22_args_concat" refid="_jvm22_arg_items" pathsep=" "/>
     <condition property="java-jvmargs" value="${_jvm22_args_concat}">
@@ -342,22 +485,37 @@
       In java 11 we also need to set a system property to enable netty to use Unsafe direct byte
       buffer construction (see CASSANDRA-16493)
     -->
-    <resources id="_jvm8_test_arg_items">
-      <!-- TODO see CASSANDRA-16212 - we seem to OOM non stop now after CASSANDRA-16212, so to have clean CI while this gets looked into, disabling limiting metaspace
-        <string>-XX:MaxMetaspaceExpansion=64M</string>
-        <string>-XX:MaxMetaspaceSize=512M</string>
-        <string>-XX:MetaspaceSize=128M</string>
-      -->
-    </resources>
-    <pathconvert property="_jvm8_test_arg_items_concat" refid="_jvm8_test_arg_items" pathsep=" "/>
     <resources id="_jvm11_test_arg_items">
         <string>-XX:-CMSClassUnloadingEnabled</string>
         <string>-Dio.netty.tryReflectionSetAccessible=true</string>
     </resources>
     <pathconvert property="_jvm11_test_arg_items_concat" refid="_jvm11_test_arg_items" pathsep=" "/>
+    <resources id="_jvm17_test_arg_items">
+        <string>-Dio.netty.tryReflectionSetAccessible=true</string>
+    </resources>
+    <pathconvert property="_jvm17_test_arg_items_concat" refid="_jvm17_test_arg_items" pathsep=" "/>
+    <condition property="_std-test-jvmargs" value="${_jvm11_test_arg_items_concat}">
+            <equals arg1="${ant.java.version}" arg2="11"/>
+    </condition>
+    <condition property="_std-test-jvmargs" value="${_jvm17_test_arg_items_concat}">
+        <equals arg1="${ant.java.version}" arg2="17"/>
+    </condition>
+    <resources id="_jvm21_test_arg_items">
+        <string>-Djava.security.manager=allow</string>
+        <string>-Dio.netty.tryReflectionSetAccessible=true</string>
+        <string>-Dnet.bytebuddy.experimental=true</string>
+
+        <!-- Enable vector incubator feature (simd support)-->
+        <string>--add-modules jdk.incubator.vector</string>
+    </resources>
+    <pathconvert property="_jvm21_test_arg_items_concat" refid="_jvm21_test_arg_items" pathsep=" "/>
+    <condition property="_std-test-jvmargs" value="${_jvm21_test_arg_items_concat}">
+        <equals arg1="${ant.java.version}" arg2="21"/>
+    </condition>
     <resources id="_jvm22_test_arg_items">
         <string>-Djava.security.manager=allow</string>
         <string>-Dio.netty.tryReflectionSetAccessible=true</string>
+        <string>-Dnet.bytebuddy.experimental=true</string>
 
         <!-- Enable vector incubator feature (simd support)-->
         <string>--add-modules jdk.incubator.vector</string>
@@ -434,11 +592,17 @@
         <mkdir dir="${jacoco.partials.dir}"/>
 
         <!-- Set up jdk specific properties -->
-        <javac includes="**/JdkProperties.java" srcdir="test/anttasks" destdir="${test.classes}" includeantruntime="true" source="${java.default}" target="${java.default}">
-          <compilerarg value="-Xlint:-options"/>
+        <javac includes="**/JdkProperties.java,**/SetSystemProperty.java" srcdir="test/anttasks" destdir="${test.classes}" includeantruntime="true" source="${java.default}" target="${java.default}">
+            <compilerarg value="-Xlint:-options"/>
         </javac>
         <taskdef name="JdkProperties" classname="org.apache.cassandra.anttasks.JdkProperties" classpath="${test.classes}"/>
+        <taskdef name="SetSystemProperty" classname="org.apache.cassandra.anttasks.SetSystemProperty" classpath="${test.classes}"/>
         <JdkProperties/>
+
+        <!-- https://issues.apache.org/jira/browse/CASSANDRA-16391?focusedCommentId=17310803&page=com.atlassian.jira.plugin.system.issuetabpanels%3Acomment-tabpanel#comment-17310803 -->
+        <SetSystemProperty name="jmc5.path" value="/tmp"/>
+        <SetSystemProperty name="jmc6.path" value="/tmp"/>
+        <SetSystemProperty name="visualvm.path" value="/tmp"/>
     </target>
 
     <target name="clean" description="Remove all locally created artifacts">
@@ -669,6 +833,10 @@
           <dependency groupId="io.netty" artifactId="netty-bom" version="4.1.117.Final" type="pom" scope="provided"/>
           <dependency groupId="io.netty" artifactId="netty-all" version="4.1.117.Final" />
           <dependency groupId="io.netty" artifactId="netty-tcnative-boringssl-static" version="2.0.69.Final"/>
+          <dependency groupId="io.netty" artifactId="netty-transport-native-epoll" version="4.1.117.Final"/>
+          <dependency groupId="io.netty" artifactId="netty-transport-native-epoll" version="4.1.117.Final" classifier="linux-x86_64"/>
+          <dependency groupId="io.netty" artifactId="netty-transport-native-epoll" version="4.1.117.Final" classifier="linux-aarch_64"/>
+          <dependency groupId="org.bouncycastle" artifactId="bcpkix-jdk18on" version="1.80"/>
           <dependency groupId="net.openhft" artifactId="chronicle-queue" version="${chronicle-queue.version}">
             <exclusion groupId="com.sun" artifactId="tools" />
           </dependency>
@@ -905,6 +1073,11 @@
         <dependency groupId="de.huxhorn.sulky" artifactId="de.huxhorn.sulky.ulid"/>
         <dependency groupId="io.netty" artifactId="netty-bom"  type="pom"  />
         <dependency groupId="io.netty" artifactId="netty-all"/>
+        <dependency groupId="io.netty" artifactId="netty-tcnative-boringssl-static"/>
+        <dependency groupId="io.netty" artifactId="netty-transport-native-epoll"/>
+        <dependency groupId="io.netty" artifactId="netty-transport-native-epoll" classifier="linux-x86_64"/>
+        <dependency groupId="io.netty" artifactId="netty-transport-native-epoll" classifier="linux-aarch_64"/>
+        <dependency groupId="org.bouncycastle" artifactId="bcpkix-jdk18on"/>
         <dependency groupId="net.openhft" artifactId="chronicle-queue"/>
         <dependency groupId="net.openhft" artifactId="chronicle-core"/>
         <dependency groupId="net.openhft" artifactId="chronicle-bytes"/>
@@ -928,7 +1101,6 @@
         <dependency groupId="org.gridkit.jvmtool" artifactId="sjk-json"/>
         <dependency groupId="com.github.luben" artifactId="zstd-jni"/>
         <dependency groupId="org.psjava" artifactId="psjava"/>
-        <dependency groupId="io.netty" artifactId="netty-tcnative-boringssl-static"/>
         <dependency groupId="javax.inject" artifactId="javax.inject"/>
         <dependency groupId="com.google.j2objc" artifactId="j2objc-annotations"/>
         <dependency groupId="org.hdrhistogram" artifactId="HdrHistogram"/>
@@ -1437,7 +1609,7 @@
           <include name="**/*.jar" />
         </fileset>
       </classpath>
-      <jvmarg line="${java11-jvmargs}"/>
+      <jvmarg line="${java-jvmargs}"/>
     </java>
   </target>
 
@@ -1508,7 +1680,7 @@
         <jvmarg value="-ea"/>
         <jvmarg value="-Djava.io.tmpdir=${tmp.dir}"/>
         <jvmarg value="-Dcassandra.debugrefcount=true"/>
-        <jvmarg value="-Xss256k"/>
+        <jvmarg value="${jvm_xss}"/>
         <!-- When we do classloader manipulation SoftReferences can cause memory leaks
              that can OOM our test runs. The next two settings informs our GC
              algorithm to limit the metaspace size and clean up SoftReferences
@@ -1534,6 +1706,8 @@
         <jvmarg value="-Dcassandra.unsafesystem=${cassandra.unsafesystem}"/>
         <jvmarg value="-Dcassandra.test.messagingService.nonGracefulShutdown=${cassandra.test.messagingService.nonGracefulShutdown}"/>
         <jvmarg value="-Dcassandra.use_nix_recursive_delete=${cassandra.use_nix_recursive_delete}"/>
+        <jvmarg value="-Dio.netty.allocator.useCacheForAllThreads=true"/>
+        <jvmarg value="-Dio.netty.allocator.maxOrder=11"/>
         <jvmarg line="${java-jvmargs}"/>
         <!-- disable shrinks in quicktheories CASSANDRA-15554 -->
         <jvmarg value="-DQT_SHRINKS=0"/>
@@ -1592,12 +1766,17 @@
   <macrodef name="testlist">
     <attribute name="test.file.list"/>
     <sequential>
+      <condition property="maxMemory" value="8G" else="4G">
+          <equals arg1="${test.classlistprefix}" arg2="distributed"/>
+      </condition>
       <testmacrohelper inputdir="${test.dir}/${test.classlistprefix}" filelist="@{test.file.list}" exclude="**/*.java" timeout="${test.timeout}">
         <jvmarg value="-Dlegacy-sstable-root=${test.data}/legacy-sstables"/>
         <jvmarg value="-Dinvalid-legacy-sstable-root=${test.data}/invalid-legacy-sstables"/>
         <jvmarg value="-Dcassandra.ring_delay_ms=1000"/>
         <jvmarg value="-Dcassandra.tolerate_sstable_size=true"/>
         <jvmarg value="-Dcassandra.skip_sync=true" />
+        <jvmarg value="-Xmx${maxMemory}"/>
+
         <jvmarg value="-Dlogback.configurationFile=file://${test.logback.configurationFile}"/>
       </testmacrohelper>
     </sequential>
@@ -1908,7 +2087,7 @@
         <jvmarg value="-Djava.awt.headless=true"/>
         <jvmarg value="-javaagent:${build.lib}/jamm-${jamm.version}.jar" />
         <jvmarg value="-ea"/>
-        <jvmarg value="-Xss256k"/>
+        <jvmarg value="${jvm_xss}"/>
         <jvmarg value="-Dcassandra.memtable_row_overhead_computation_step=100"/>
         <jvmarg value="-Dcassandra.test.use_prepared=${cassandra.test.use_prepared}"/>
         <jvmarg value="-Dcassandra.skip_sync=true" />
@@ -1954,7 +2133,7 @@
         <jvmarg value="-Djava.awt.headless=true"/>
         <jvmarg value="-javaagent:${build.lib}/jamm-${jamm.version}.jar" />
         <jvmarg value="-ea"/>
-        <jvmarg value="-Xss256k"/>
+        <jvmarg value="${jvm_xss}"/>
         <jvmarg value="-Dcassandra.test.use_prepared=${cassandra.test.use_prepared}"/>
         <jvmarg value="-Dcassandra.memtable_row_overhead_computation_step=100"/>
         <jvmarg value="-Dcassandra.skip_sync=true" />
@@ -2148,6 +2327,7 @@
       <jvmarg value="-Dcassandra.ring_delay_ms=10000"/>
       <jvmarg value="-Dcassandra.tolerate_sstable_size=true"/>
       <jvmarg value="-Dcassandra.skip_sync=true" />
+      <jvmarg value="-Xmx8G"/>
     </testmacro>
   </target>
 
@@ -2157,6 +2337,7 @@
       <jvmarg value="-Dcassandra.ring_delay_ms=10000"/>
       <jvmarg value="-Dcassandra.tolerate_sstable_size=true"/>
       <jvmarg value="-Dcassandra.skip_sync=true" />
+      <jvmarg value="-Xmx8G"/>
     </testmacro>
   </target>
 
@@ -2229,10 +2410,10 @@
       </java>
   </target>
 
-  <target name="_maybe_update_idea_to_java11plus" depends="init" unless="java.version.8">
-      <replace file="${eclipse.project.name}.iml" token="JDK_1_8" value="JDK_${ant.java.version}"/>
-      <replace file=".idea/misc.xml" token="JDK_1_8" value="JDK_${ant.java.version}"/>
-      <replace file=".idea/misc.xml" token="1.8" value="${ant.java.version}"/>
+  <target name="_maybe_update_idea_to_java11plus" depends="init">
+    <replace file="${eclipse.project.name}.iml" token="JDK_11" value="JDK_${ant.java.version}"/>
+    <replace file=".idea/misc.xml" token="JDK_11" value="JDK_${ant.java.version}"/>
+    <replace file=".idea/misc.xml" token="11" value="${ant.java.version}"/>
     <replaceregexp file=".idea/workspace.xml"
                    match="name=&quot;VM_PARAMETERS&quot; value=&quot;(.*)"
                    replace="name=&quot;VM_PARAMETERS&quot; value=&quot;\1 ${java-jvmargs} ${_std-test-jvmargs}"
@@ -2242,6 +2423,7 @@
 <project version="4">
   <component name="JavacSettings">
     <option name="ADDITIONAL_OPTIONS_STRING" value="--add-exports java.rmi/sun.rmi.registry=ALL-UNNAMED
+                                                    --add-exports java.rmi/sun.rmi.transport=ALL-UNNAMED
                                                     --add-exports java.rmi/sun.rmi.transport.tcp=ALL-UNNAMED
                                                     --add-exports java.base/jdk.internal.ref=ALL-UNNAMED
                                                     --add-exports java.base/sun.nio.ch=ALL-UNNAMED" />
