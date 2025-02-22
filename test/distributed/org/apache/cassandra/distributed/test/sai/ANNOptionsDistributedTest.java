@@ -22,6 +22,7 @@ import net.bytebuddy.ByteBuddy;
 import net.bytebuddy.dynamic.loading.ClassLoadingStrategy;
 import net.bytebuddy.implementation.MethodDelegation;
 import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.db.filter.ANNOptions;
 import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.distributed.api.ConsistencyLevel;
 import org.apache.cassandra.distributed.api.ICoordinator;
@@ -70,7 +71,7 @@ public class ANNOptionsDistributedTest extends TestBaseImpl
                                            .withConfig(config -> config.with(GOSSIP).with(NETWORK))
                                            .start(), RF))
         {
-            test(cluster, "ANN options are not supported in clusters below DS 11.");
+            test(cluster, ANNOptions.REQUIRES_HIGHER_MESSAGING_VERSION);
         }
     }
 
@@ -85,7 +86,7 @@ public class ANNOptionsDistributedTest extends TestBaseImpl
                                            .withConfig(config -> config.with(GOSSIP).with(NETWORK).with(NATIVE_PROTOCOL))
                                            .start(), RF))
         {
-            test(cluster, "ANN options are not supported in clusters below DS 11.");
+            test(cluster, ANNOptions.REQUIRES_HIGHER_MESSAGING_VERSION);
         }
     }
 
