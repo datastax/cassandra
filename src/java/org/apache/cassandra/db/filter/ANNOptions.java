@@ -24,10 +24,12 @@ import javax.annotation.Nullable;
 
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.guardrails.Guardrails;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.utils.FBUtilities;
 
 /**
@@ -60,10 +62,15 @@ public class ANNOptions
         return rerankK == null ? NONE : new ANNOptions(rerankK);
     }
 
-    public void validate(int limit)
+    public void validate(QueryState state, int limit)
     {
-        if (rerankK != null && rerankK > 0 && rerankK < limit)
+        if (rerankK == null)
+            return;
+
+        if (rerankK < limit)
             throw new InvalidRequestException(String.format("Invalid rerank_k value %d lesser than limit %d", rerankK, limit));
+
+        Guardrails.annRerankKMaxValue.guard(rerankK, "ANN options", false, state);
     }
 
     /**
@@ -72,10 +79,11 @@ public class ANNOptions
      * @param map the map of options in the {@code WITH ANN_OPTION} of a {@code SELECT} query
      * @return the ANN options in the specified {@code SELECT} options, or {@link #NONE} if no options are present
      */
-    public static ANNOptions fromMap(Map<String, String> map)
+    public static ANNOptions fromMap(String keyspace, Map<String, String> map)
     {
+        assert keyspace != null;
         // ensure that all nodes in the cluster are in a version that supports ANN options, including this one
-        Set<InetAddressAndPort> badNodes = MessagingService.instance().endpointsWithVersionBelow(MessagingService.VERSION_DS_11);
+        Set<InetAddressAndPort> badNodes = MessagingService.instance().endpointsWithVersionBelow(keyspace, MessagingService.VERSION_DS_11);
         if (MessagingService.current_version < MessagingService.VERSION_DS_11)
             badNodes.add(FBUtilities.getBroadcastAddressAndPort());
         if (!badNodes.isEmpty())
