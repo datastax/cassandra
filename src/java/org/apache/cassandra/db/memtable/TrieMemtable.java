@@ -194,6 +194,7 @@ public class TrieMemtable extends AbstractShardedMemtable
         // the buffer release is a longer-running process, do it in a separate loop to not make the metrics update wait
         for (MemtableShard shard : shards)
         {
+            shard.allocator.setDiscarded();
             shard.data.discardBuffers();
         }
     }
