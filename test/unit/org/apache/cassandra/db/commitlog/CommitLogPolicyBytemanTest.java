@@ -22,6 +22,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.junit.After;
 import org.junit.AfterClass;
@@ -72,7 +73,7 @@ public class CommitLogPolicyBytemanTest
     private static KillerForTests testKiller;
     private static Config.CommitFailurePolicy oldPolicy;
 
-    public static volatile boolean failSync = false;
+    public static final AtomicBoolean failSync = new AtomicBoolean(false);
 
     @BeforeClass
     public static void beforeClass() throws ConfigurationException
@@ -134,7 +135,7 @@ public class CommitLogPolicyBytemanTest
     @BMRules(rules = { @BMRule(name = "Fail sync in CommitLog",
             targetClass = "CommitLog",
             targetMethod = "sync",
-            condition = "org.apache.cassandra.db.commitlog.CommitLogPolicyBytemanTest.failSync",
+            condition = "org.apache.cassandra.db.commitlog.CommitLogPolicyBytemanTest.failSync.get()",
             action = "throw new java.lang.RuntimeException(\"Fail CommitLog.sync to test fail_writes policy\");") } )
     public void testFailWritesPolicies() throws IOException
     {
@@ -149,12 +150,12 @@ public class CommitLogPolicyBytemanTest
         CommitLog.instance.add(m);
         Assert.assertFalse(CommitLog.instance.shouldRejectMutations());
 
-        failSync = true;
+        failSync.set(true);
         await().atMost(2, TimeUnit.SECONDS)
                 .until(() -> CommitLog.instance.shouldRejectMutations());
         Assert.assertThrows(FSWriteError.class, () -> CommitLog.instance.add(m));
 
-        failSync = false;
+        failSync.set(false);
         // Force a sync to clear the error
         CommitLog.instance.sync(false);
         await().atMost(2, TimeUnit.SECONDS)
