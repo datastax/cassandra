@@ -19,7 +19,10 @@
 package org.apache.cassandra.db.counters;
 
 import java.lang.reflect.Method;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
 import com.google.common.base.Supplier;
@@ -33,9 +36,8 @@ import static org.apache.cassandra.config.CassandraRelevantProperties.COUNTER_LO
 
 public class StripedCounterLockManager implements CounterLockManager
 {
-    private static final Striped<java.util.concurrent.locks.Lock> LOCKS;
+    private final Striped<java.util.concurrent.locks.Lock> LOCKS;
 
-    static
     {
         int numStripes = COUNTER_LOCK_NUM_STRIPES_PER_THREAD.getInt() * DatabaseDescriptor.getConcurrentCounterWriters();
         if (COUNTER_LOCK_FAIR_LOCK.getBoolean())
@@ -63,9 +65,18 @@ public class StripedCounterLockManager implements CounterLockManager
     }
 
     @Override
-    public Iterable<Lock> grabLocks(Iterable<Integer> keys)
+    public List<Lock> grabLocks(Iterable<Integer> keys)
     {
-        return Iterables.transform(LOCKS.bulkGet(keys), LockImpl::new);
+        List<Lock> result = new ArrayList<>();
+        Iterable<java.util.concurrent.locks.Lock> locks = LOCKS.bulkGet(keys);
+        locks.forEach(l -> result.add(new LockImpl(l)));
+        return result;
+    }
+
+    @Override
+    public boolean hasNumKeys()
+    {
+        return false;
     }
 
     private static class LockImpl implements Lock
@@ -92,5 +103,4 @@ public class StripedCounterLockManager implements CounterLockManager
             return acquired;
         }
     }
-
 }

@@ -249,14 +249,13 @@ public class CounterMutation implements IMutation
         long startTime = System.nanoTime();
 
         AbstractReplicationStrategy replicationStrategy = keyspace.getReplicationStrategy();
-        Iterable<CounterLockManager.Lock> sortedLocks = CounterLockManager.instance.grabLocks(getCounterLockKeys());
-        locksPerUpdate.update(countDistinctLocks(sortedLocks));
-
+        List<CounterLockManager.Lock> sortedLocks = CounterLockManager.instance.grabLocks(getCounterLockKeys());
         // always return all the locks to the caller, this way they can be released even in case of errors
-        sortedLocks.forEach(locks::add);
+        locks.addAll(sortedLocks);
+        locksPerUpdate.update(countDistinctLocks(sortedLocks));
         try
         {
-            for (CounterLockManager.Lock lock : locks)
+            for (CounterLockManager.Lock lock : sortedLocks)
             {
                 long timeout = getTimeout(NANOSECONDS) - (System.nanoTime() - startTime);
                 try

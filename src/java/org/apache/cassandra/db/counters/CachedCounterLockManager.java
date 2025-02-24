@@ -18,6 +18,8 @@
 
 package org.apache.cassandra.db.counters;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
@@ -37,11 +39,12 @@ public class CachedCounterLockManager implements CounterLockManager
     private final static int EXPECTED_CONCURRENCY = DatabaseDescriptor.getConcurrentCounterWriters() * 16;
 
     @Override
-    public Iterable<Lock> grabLocks(Iterable<Integer> keys)
+    public List<Lock> grabLocks(Iterable<Integer> keys)
     {
-        return Iterables.transform(keys, k -> {
-            return makeLockForKey(k);
-        });
+        List<Lock> result = new ArrayList<>();
+        for (Integer key : keys)
+            result.add(makeLockForKey(key));
+        return result;
     }
 
     private StampedLock makeLock()
@@ -91,6 +94,13 @@ public class CachedCounterLockManager implements CounterLockManager
         this.locks.clear();
     }
 
+    @Override
+    public boolean hasNumKeys()
+    {
+        return true;
+    }
+
+    @Override
     public int getNumKeys()
     {
         return locks.size();
@@ -143,5 +153,4 @@ public class CachedCounterLockManager implements CounterLockManager
             return "RefCountedStampedLock{" + "lock=" + lock + ", count=" + count + '}';
         }
     }
-
 }

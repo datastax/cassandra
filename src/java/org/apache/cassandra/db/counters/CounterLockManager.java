@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.db.counters;
 
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 public interface CounterLockManager
@@ -44,5 +45,13 @@ public interface CounterLockManager
         void release();
     }
 
-    Iterable<Lock> grabLocks(Iterable<Integer> keys);
+    List<Lock> grabLocks(Iterable<Integer> keys);
+
+    boolean hasNumKeys();
+
+    default int getNumKeys()
+    {
+        throw new UnsupportedOperationException();
+    }
+
 }
