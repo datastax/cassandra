@@ -88,6 +88,13 @@ public final class CreateTableStatement extends AlterSchemaStatement
                                 boolean useCompactStorage)
     {
         super(queryString, keyspaceName);
+
+        if (!isSafeLengthForFilename(keyspaceName + tableName))
+        {
+            String combinedName = keyspaceName + tableName;
+            throw new ConfigurationException(String.format("Keyspace and table names combined must fit %s characters to be safe for filenames. Got %s chars for %s", SCHEMA_FILE_NAME_LENGTH.getInt(), combinedName.length(), combinedName));
+        }
+
         this.tableName = tableName;
 
         this.rawColumns = rawColumns;
@@ -111,12 +118,6 @@ public final class CreateTableStatement extends AlterSchemaStatement
     public void validate(QueryState state)
     {
         super.validate(state);
-
-        if (!isSafeLengthForFilename(keyspaceName + tableName))
-        {
-            String combinedName = keyspaceName + tableName;
-            throw new ConfigurationException(String.format("Keyspace and table names combined must fit %s characters to be safe for filenames. Got %s chars for %s", SCHEMA_FILE_NAME_LENGTH.getInt(), combinedName.length(), combinedName));
-        }
 
         // Some tools use CreateTableStatement, and the guardrails below both don't make too much sense for tools and
         // require the server to be initialized, so skipping them if it isn't.
