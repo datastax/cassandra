@@ -87,19 +87,6 @@ public class MutationVerbHandler extends AbstractMutationVerbHandler<Mutation>
         InetAddressAndPort respondToAddress = message.respondTo();
         try
         {
-            // Initialize the sensor and set ExecutorLocals
-            RequestSensors requestSensors = SensorsFactory.instance.createRequestSensors(message.payload.getKeyspaceName());
-            RequestTracker.instance.set(requestSensors);
-
-            // Initialize internode bytes with the inbound message size:
-            Collection<TableMetadata> tables = message.payload.getPartitionUpdates().stream().map(PartitionUpdate::metadata).collect(Collectors.toList());
-            for (TableMetadata tm : tables)
-            {
-                Context context = Context.from(tm);
-                requestSensors.registerSensor(context, Type.INTERNODE_BYTES);
-                requestSensors.incrementSensor(context, Type.INTERNODE_BYTES, message.payloadSize(MessagingService.current_version) / tables.size());
-            }
-
             processMessage(message, respondToAddress);
         }
         catch (WriteTimeoutException wto)
@@ -114,6 +101,15 @@ public class MutationVerbHandler extends AbstractMutationVerbHandler<Mutation>
         // Initialize the sensor and set ExecutorLocals
         RequestSensors requestSensors = SensorsFactory.instance.createRequestSensors(message.payload.getKeyspaceName());
         RequestTracker.instance.set(requestSensors);
+
+        // Initialize internode bytes with the inbound message size:
+        Collection<TableMetadata> tables = message.payload.getPartitionUpdates().stream().map(PartitionUpdate::metadata).collect(Collectors.toList());
+        for (TableMetadata tm : tables)
+        {
+            Context context = Context.from(tm);
+            requestSensors.registerSensor(context, Type.INTERNODE_BYTES);
+            requestSensors.incrementSensor(context, Type.INTERNODE_BYTES, message.payloadSize(MessagingService.current_version) / tables.size());
+        }
 
         message.payload.applyFuture(WriteOptions.DEFAULT).addCallback(o -> respond(requestSensors, message, respondToAddress), wto -> failed());
     }
