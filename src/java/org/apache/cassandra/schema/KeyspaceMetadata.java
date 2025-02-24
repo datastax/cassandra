@@ -45,6 +45,7 @@ import static com.google.common.collect.Iterables.any;
 import static com.google.common.collect.Iterables.transform;
 import static com.google.common.collect.Maps.transformValues;
 import static java.lang.String.format;
+import static org.apache.cassandra.config.CassandraRelevantProperties.SCHEMA_FILE_NAME_LENGTH;
 
 /**
  * An immutable representation of keyspace metadata (name, params, tables, types, and functions).
@@ -367,7 +368,7 @@ public final class KeyspaceMetadata implements SchemaElement
         {
             throw new ConfigurationException(format("Keyspace name must not be empty, more than %s characters long, "
                                                     + "or contain non-alphanumeric-underscore characters (got \"%s\")",
-                                                    SchemaConstants.NAME_LENGTH,
+                                                    SCHEMA_FILE_NAME_LENGTH.getInt(),
                                                     name));
         }
 

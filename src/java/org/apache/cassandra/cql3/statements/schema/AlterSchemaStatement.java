@@ -39,6 +39,8 @@ import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.Event.SchemaChange;
 import org.apache.cassandra.transport.messages.ResultMessage;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.SCHEMA_FILE_NAME_LENGTH;
+
 public abstract class AlterSchemaStatement implements CQLStatement.SingleKeyspaceCqlStatement, SchemaTransformation
 {
     private final String rawCQLStatement;
@@ -150,7 +152,7 @@ public abstract class AlterSchemaStatement implements CQLStatement.SingleKeyspac
         {
             throw ire("Keyspace name must not be empty, more than %d characters long, " +
                       "or contain non-alphanumeric-underscore characters (got '%s')",
-                      SchemaConstants.NAME_LENGTH, keyspaceName);
+                      SCHEMA_FILE_NAME_LENGTH.getInt(), keyspaceName);
         }
     }
 

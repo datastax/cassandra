@@ -49,6 +49,7 @@ import org.apache.cassandra.transport.Event.SchemaChange.Target;
 
 import static com.google.common.collect.Iterables.transform;
 import static com.google.common.collect.Iterables.tryFind;
+import static org.apache.cassandra.config.CassandraRelevantProperties.SCHEMA_FILE_NAME_LENGTH;
 
 public final class CreateIndexStatement extends AlterSchemaStatement
 {
@@ -226,7 +227,7 @@ public final class CreateIndexStatement extends AlterSchemaStatement
 
         if ((kind == IndexMetadata.Kind.CUSTOM) && !SchemaConstants.isNameSafeForFilename(target.column.toString()))
             throw ire("Column '%s' is longer than the permissible name length of %d characters or" +
-                      " contains non-alphanumeric-underscore characters", target.column, SchemaConstants.NAME_LENGTH);
+                      " contains non-alphanumeric-underscore characters", target.column, SCHEMA_FILE_NAME_LENGTH.getInt());
 
         if (column.type.referencesDuration())
         {

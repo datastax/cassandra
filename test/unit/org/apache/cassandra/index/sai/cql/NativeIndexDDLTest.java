@@ -75,7 +75,6 @@ import org.apache.cassandra.inject.Injections;
 import org.apache.cassandra.inject.InvokePointBuilder;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.IndexMetadata;
-import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Throwables;
@@ -83,6 +82,7 @@ import org.mockito.Mockito;
 
 import static java.util.Collections.singletonList;
 import static junit.framework.TestCase.fail;
+import static org.apache.cassandra.config.CassandraRelevantProperties.SCHEMA_FILE_NAME_LENGTH;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
@@ -273,7 +273,7 @@ public class NativeIndexDDLTest extends SAITester
                                                           " USING 'StorageAttachedIndex'", invalidColumn)))
                 .isInstanceOf(InvalidQueryException.class)
                 .hasMessage(String.format("Column '%s' is longer than the permissible name length of %d characters or" +
-                                          " contains non-alphanumeric-underscore characters", invalidColumn, SchemaConstants.NAME_LENGTH));
+                                          " contains non-alphanumeric-underscore characters", invalidColumn, SCHEMA_FILE_NAME_LENGTH.getInt()));
     }
 
     @Test

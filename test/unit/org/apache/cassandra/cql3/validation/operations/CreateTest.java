@@ -62,6 +62,7 @@ import org.apache.cassandra.triggers.ITrigger;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
 import static java.lang.String.format;
+import static org.apache.cassandra.config.CassandraRelevantProperties.SCHEMA_FILE_NAME_LENGTH;
 import static org.apache.cassandra.cql3.Duration.NANOS_PER_HOUR;
 import static org.apache.cassandra.cql3.Duration.NANOS_PER_MICRO;
 import static org.apache.cassandra.cql3.Duration.NANOS_PER_MILLI;
@@ -457,7 +458,7 @@ public class CreateTest extends CQLTester
 
         execute("CREATE KEYSPACE testXYZ WITH replication = { 'class' : 'SimpleStrategy', 'replication_factor' : 1 }");
 
-        String tooLongKeyspace = IntStream.range(0, SchemaConstants.NAME_LENGTH + 1).mapToObj(i ->"x").collect(Collectors.joining());
+        String tooLongKeyspace = IntStream.range(0, SCHEMA_FILE_NAME_LENGTH.getInt() + 1).mapToObj(i ->"x").collect(Collectors.joining());
         assertInvalid("CREATE KEYSPACE " + tooLongKeyspace + " WITH replication = { 'class' : 'SimpleStrategy', 'replication_factor' : 1 }");
 
         execute("DROP KEYSPACE testXYZ");
