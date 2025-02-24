@@ -112,6 +112,12 @@ public final class CreateTableStatement extends AlterSchemaStatement
     {
         super.validate(state);
 
+        if (!isSafeLengthForFilename(keyspaceName + '.' + tableName))
+        {
+            String combinedName = keyspaceName + '.' + tableName;
+            throw new ConfigurationException(String.format("Keyspace and table names combined must fit %s characters to be safe for filenames. Got %s chars for %s", SCHEMA_FILE_NAME_LENGTH.getInt(), combinedName.length(), combinedName));
+        }
+
         // Some tools use CreateTableStatement, and the guardrails below both don't make too much sense for tools and
         // require the server to be initialized, so skipping them if it isn't.
         if (Guardrails.ready())
@@ -155,12 +161,6 @@ public final class CreateTableStatement extends AlterSchemaStatement
                 return schema;
 
             throw new AlreadyExistsException(keyspaceName, tableName);
-        }
-
-        if (!isSafeLengthForFilename(keyspaceName + '.' + tableName))
-        {
-            String combinedName = keyspaceName + '.' + tableName;
-            throw new ConfigurationException(String.format("Keyspace and table names combined must fit %s characters to be safe for filenames. Got %s chars for %s", SCHEMA_FILE_NAME_LENGTH.getInt(), combinedName.length(), combinedName));
         }
 
         TableMetadata table = builder(keyspace.types).build();
