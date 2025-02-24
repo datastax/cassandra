@@ -1391,6 +1391,13 @@ abstract public class Plan
                    ? this
                    : new AnnIndexScan(factory, id, access, ordering);
         }
+
+        @Nullable
+        @Override
+        protected IndexContext getIndexContext()
+        {
+            return ordering.context;
+        }
     }
 
     /**
