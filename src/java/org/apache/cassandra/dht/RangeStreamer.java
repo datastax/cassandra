@@ -92,6 +92,7 @@ public class RangeStreamer
     /* address of this node */
     private final InetAddressAndPort address;
     /* streaming description */
+    private final StreamOperation streamOperation;
     private final String description;
     private final Map<String, Multimap<InetAddressAndPort, FetchReplica>> toFetch = new HashMap<>();
     private final List<SourceFilter> sourceFilters = new ArrayList<>();
@@ -272,6 +273,7 @@ public class RangeStreamer
         this.metadata = metadata;
         this.tokens = tokens;
         this.address = address;
+        this.streamOperation = streamOperation;
         this.description = streamOperation.getDescription();
         this.streamPlan = new StreamPlan(streamOperation, connectionsPerHost, connectSequentially, null, PreviewKind.NONE);
         this.useStrictConsistency = useStrictConsistency;
@@ -331,7 +333,11 @@ public class RangeStreamer
         Multimap<InetAddressAndPort, FetchReplica> workMap;
         //Only use the optimized strategy if we don't care about strict sources, have a replication factor > 1, and no
         //transient replicas.
-        if (useStrictSource || strat == null || strat.getReplicationFactor().allReplicas == 1 || strat.getReplicationFactor().hasTransientReplicas())
+        if (useStrictSource ||
+            strat == null ||
+            strat.getReplicationFactor().allReplicas == 1 ||
+            strat.getReplicationFactor().hasTransientReplicas() ||
+            (!strat.isPartitioned() && (streamOperation == StreamOperation.BOOTSTRAP || streamOperation == StreamOperation.REBUILD)))
         {
             workMap = convertPreferredEndpointsToWorkMap(fetchMap);
         }
