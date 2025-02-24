@@ -112,9 +112,9 @@ public final class CreateTableStatement extends AlterSchemaStatement
     {
         super.validate(state);
 
-        if (!isSafeLengthForFilename(keyspaceName + '.' + tableName))
+        if (!isSafeLengthForFilename(keyspaceName + tableName))
         {
-            String combinedName = keyspaceName + '.' + tableName;
+            String combinedName = keyspaceName + tableName;
             throw new ConfigurationException(String.format("Keyspace and table names combined must fit %s characters to be safe for filenames. Got %s chars for %s", SCHEMA_FILE_NAME_LENGTH.getInt(), combinedName.length(), combinedName));
         }
 

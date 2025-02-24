@@ -19,14 +19,12 @@
 package org.apache.cassandra.schema;
 
 import org.apache.cassandra.cql3.CQLTester;
-import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.cql3.functions.types.ParseUtils;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 
 import org.junit.Test;
 
-import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.junit.Assert.fail;
 
@@ -110,7 +108,7 @@ public class CreateTableValidationTest extends CQLTester
         String veryLongName = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab";
         String longName = veryLongName.substring(0, 200);
 
-        assertInvalidMessage(String.format("Keyspace and table names combined must fit 222 characters to be safe for filenames. Got 241 chars for %s.%s", KEYSPACE, veryLongName),
+        assertInvalidMessage(String.format("Keyspace and table names combined must fit 222 characters to be safe for filenames. Got 240 chars for %s%s", KEYSPACE, veryLongName),
                              String.format("CREATE TABLE %s.%s (" +
                                            "key int PRIMARY KEY," +
                                            "\"a very very very very very very very very long field\" int)", KEYSPACE, veryLongName));
@@ -118,7 +116,7 @@ public class CreateTableValidationTest extends CQLTester
         execute(String.format("CREATE KEYSPACE %s WITH replication = " +
                               "{ 'class' : 'SimpleStrategy', 'replication_factor' : 1 }",
                               keyspaceName));
-        assertInvalidMessage(String.format("Keyspace and table names combined must fit 222 characters to be safe for filenames. Got 313 chars for %s.%s", ParseUtils.unDoubleQuote(keyspaceName), veryLongName),
+        assertInvalidMessage(String.format("Keyspace and table names combined must fit 222 characters to be safe for filenames. Got 312 chars for %s%s", ParseUtils.unDoubleQuote(keyspaceName), veryLongName),
                              String.format("CREATE TABLE %s.%s (" +
                                            "key int PRIMARY KEY," +
                                            "\"a very very very very very very very very long field\" int)", keyspaceName, veryLongName));
@@ -126,7 +124,7 @@ public class CreateTableValidationTest extends CQLTester
         execute(String.format("CREATE KEYSPACE %s with replication = " +
                               "{ 'class' : 'SimpleStrategy', 'replication_factor' : 1 }",
                               longName));
-        assertInvalidMessage(String.format("Keyspace and table names combined must fit 222 characters to be safe for filenames. Got 248 chars for %s.%s", veryLongName, "rather_longer_table_name"),
+        assertInvalidMessage(String.format("Keyspace and table names combined must fit 222 characters to be safe for filenames. Got 247 chars for %s%s", veryLongName, "rather_longer_table_name"),
                              String.format("CREATE TABLE %s.%s (" +
                                            "key int PRIMARY KEY," +
                                            "\"a very very very very very very very very long field\" int)", veryLongName, "rather_longer_table_name"));
