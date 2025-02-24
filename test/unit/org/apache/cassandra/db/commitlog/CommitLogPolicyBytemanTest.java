@@ -136,7 +136,7 @@ public class CommitLogPolicyBytemanTest
             targetMethod = "sync",
             condition = "org.apache.cassandra.db.commitlog.CommitLogPolicyBytemanTest.failSync",
             action = "throw new java.lang.RuntimeException(\"Fail CommitLog.sync to test fail_writes policy\");") } )
-    public void testFailWritesPolicies()
+    public void testFailWritesPolicies() throws IOException
     {
         DatabaseDescriptor.setCommitFailurePolicy(Config.CommitFailurePolicy.fail_writes);
 
@@ -155,6 +155,8 @@ public class CommitLogPolicyBytemanTest
         Assert.assertThrows(FSWriteError.class, () -> CommitLog.instance.add(m));
 
         failSync = false;
+        // Force a sync to clear the error
+        CommitLog.instance.sync(false);
         await().atMost(2, TimeUnit.SECONDS)
                 .until(() -> !CommitLog.instance.shouldRejectMutations());
         CommitLog.instance.add(m);
