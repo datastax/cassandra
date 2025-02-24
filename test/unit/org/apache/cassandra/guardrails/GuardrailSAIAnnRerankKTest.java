@@ -88,7 +88,7 @@ public class GuardrailSAIAnnRerankKTest extends GuardrailTester
         // Test values below and at warning threshold
         assertValid("SELECT * FROM %s ORDER BY v ANN OF [1.0, 1.0, 1.0] LIMIT 10 WITH ann_options = {'rerank_k': 10}");
         assertValid("SELECT * FROM %s ORDER BY v ANN OF [1.0, 1.0, 1.0] LIMIT 10 WITH ann_options = {'rerank_k': " + (WARN_THRESHOLD - 1) + '}');
-        assertValid("SELECT * FROM %s ORDER BY v ANN OF [1.0, 1.0, 1.0] LIMIT 10 WITH ann_options = {'rerank_k': " + (WARN_THRESHOLD) + '}');
+        assertValid("SELECT * FROM %s ORDER BY v ANN OF [1.0, 1.0, 1.0] LIMIT 10 WITH ann_options = {'rerank_k': " + WARN_THRESHOLD + '}');
 
         // Test values between warning and failure thresholds
         assertWarns(String.format("ANN options specifies rerank_k=%d, this exceeds the warning threshold of %d.",
@@ -121,7 +121,7 @@ public class GuardrailSAIAnnRerankKTest extends GuardrailTester
         assertValid("SELECT * FROM %s ORDER BY v ANN OF [1.0, 1.0, 1.0] LIMIT 10 WITH ann_options = {'rerank_k': " + (FAIL_THRESHOLD + 1) + '}');
     }
 
-    @Ignore
+    @Ignore // TODO: e-enable this test when we support negative rerank_k values
     public void testNegativeRerankK() throws Throwable
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v vector<float, 3>)");
@@ -138,7 +138,7 @@ public class GuardrailSAIAnnRerankKTest extends GuardrailTester
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v vector<float, 3>)");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
 
-        // Queries without rerank_k should be valid
+        // Queries without rerank_k should be valid and not trigger warnings.
         assertValid("SELECT * FROM %s ORDER BY v ANN OF [1.0, 1.0, 1.0] LIMIT 10");
         assertValid("SELECT * FROM %s ORDER BY v ANN OF [1.0, 1.0, 1.0] LIMIT 10 WITH ann_options = {}");
     }
