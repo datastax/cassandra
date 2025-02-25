@@ -45,11 +45,7 @@ import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.memtable.AbstractShardedMemtable;
 import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.memtable.ShardBoundaries;
-//<<<<<<< HEAD
-//=======
-import org.apache.cassandra.db.memtable.TrieMemtable;
 import org.apache.cassandra.db.rows.Row;
-//>>>>>>> b0cdc37bc2 (Implement synthetic columns and ORDER BY BM25 (#1434))
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Bounds;
 import org.apache.cassandra.index.sai.IndexContext;
@@ -59,10 +55,7 @@ import org.apache.cassandra.index.sai.iterators.KeyRangeConcatIterator;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIntersectionIterator;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.iterators.KeyRangeLazyIterator;
-//<<<<<<< HEAD
-//=======
 import org.apache.cassandra.index.sai.memory.MemoryIndex.PkWithFrequency;
-//>>>>>>> b0cdc37bc2 (Implement synthetic columns and ORDER BY BM25 (#1434))
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.plan.Orderer;
 import org.apache.cassandra.index.sai.utils.BM25Utils;
@@ -81,6 +74,8 @@ import org.apache.cassandra.utils.Reducer;
 import org.apache.cassandra.utils.SortingIterator;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.concurrent.OpOrder;
+
+import static org.apache.cassandra.io.sstable.SSTableReadsListener.NOOP_LISTENER;
 
 public class TrieMemtableIndex implements MemtableIndex
 {
@@ -308,15 +303,6 @@ public class TrieMemtableIndex implements MemtableIndex
         if (keys.isEmpty())
             return CloseableIterator.emptyIterator();
 
-//<<<<<<< HEAD
-//                // We do two kinds of encoding... it'd be great to make this more straight forward, but this is what
-//                // we have for now. I leave it to the reader to inspect the two methods to see the nuanced differences.
-//                var encoding = encode(TypeUtil.asIndexBytes(cell.buffer(), validator));
-//                return new PrimaryKeyWithByteComparable(indexContext, memtable, key, encoding);
-//            },
-//            Runnables.doNothing()
-//        );
-//=======
         if (!orderer.isBM25())
         {
             return SortingIterator.createCloseable(
@@ -336,7 +322,7 @@ public class TrieMemtableIndex implements MemtableIndex
 
                     // We do two kinds of encoding... it'd be great to make this more straight forward, but this is what
                     // we have for now. I leave it to the reader to inspect the two methods to see the nuanced differences.
-                    var encoding = encode(TypeUtil.encode(cell.buffer(), validator));
+                    var encoding = encode(TypeUtil.asIndexBytes(cell.buffer(), validator));
                     return new PrimaryKeyWithByteComparable(indexContext, memtable, key, encoding);
                 },
                 Runnables.doNothing()
@@ -373,8 +359,8 @@ public class TrieMemtableIndex implements MemtableIndex
         long docCount = 0;
 
         // count all documents in the queried column
-        try (var it = memtable.makePartitionIterator(ColumnFilter.selection(RegularAndStaticColumns.of(indexContext.getDefinition())),
-                                                     DataRange.allData(memtable.metadata().partitioner)))
+        try (var it = memtable.partitionIterator(ColumnFilter.selection(RegularAndStaticColumns.of(indexContext.getDefinition())),
+                                                     DataRange.allData(memtable.metadata().partitioner), NOOP_LISTENER))
         {
             while (it.hasNext())
             {
@@ -406,7 +392,6 @@ public class TrieMemtableIndex implements MemtableIndex
         if (row == null)
             return null;
         return row.getCell(indexContext.getDefinition());
-//>>>>>>> b0cdc37bc2 (Implement synthetic columns and ORDER BY BM25 (#1434))
     }
 
     private ByteComparable encode(ByteBuffer input)

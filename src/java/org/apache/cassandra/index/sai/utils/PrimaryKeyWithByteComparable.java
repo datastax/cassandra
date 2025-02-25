@@ -24,11 +24,8 @@ import java.util.Arrays;
 import io.github.jbellis.jvector.util.RamUsageEstimator;
 import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.index.sai.IndexContext;
-//<<<<<<< HEAD
 import org.apache.cassandra.utils.ByteBufferUtil;
-//=======
 import org.apache.cassandra.io.sstable.SSTableId;
-//>>>>>>> b0cdc37bc2 (Implement synthetic columns and ORDER BY BM25 (#1434))
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;

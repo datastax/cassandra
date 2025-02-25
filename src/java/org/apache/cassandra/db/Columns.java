@@ -471,14 +471,10 @@ public class Columns extends AbstractCollection<ColumnMetadata> implements Colle
 
         public void serialize(Columns columns, DataOutputPlus out) throws IOException
         {
-//<<<<<<< HEAD
-//            out.writeUnsignedVInt32(columns.size());
-//=======
             int regularCount = 0;
             int syntheticCount = 0;
 
             // Count regular and synthetic columns
-//>>>>>>> b0cdc37bc2 (Implement synthetic columns and ORDER BY BM25 (#1434))
             for (ColumnMetadata column : columns)
             {
                 if (column.isSynthetic())
@@ -544,10 +540,6 @@ public class Columns extends AbstractCollection<ColumnMetadata> implements Colle
 
         public Columns deserialize(DataInputPlus in, TableMetadata metadata) throws IOException
         {
-//<<<<<<< HEAD
-//            int length = in.readUnsignedVInt32();
-//=======
-//>>>>>>> b0cdc37bc2 (Implement synthetic columns and ORDER BY BM25 (#1434))
             try (BTree.FastBuilder<ColumnMetadata> builder = BTree.fastBuilder())
             {
                 long packedCount = in.readUnsignedVInt() ;

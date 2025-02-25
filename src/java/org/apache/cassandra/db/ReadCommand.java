@@ -70,7 +70,6 @@ import org.apache.cassandra.db.transform.StoppingTransformation;
 import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.exceptions.UnknownIndexException;
 import org.apache.cassandra.index.Index;
-import org.apache.cassandra.index.IndexRegistry;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.DataInputPlus;
@@ -78,12 +77,7 @@ import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.locator.Replica;
 import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.net.Message;
-//<<<<<<< HEAD
-//=======
-//import org.apache.cassandra.net.MessageFlag;
-//import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.schema.ColumnMetadata;
-//>>>>>>> b0cdc37bc2 (Implement synthetic columns and ORDER BY BM25 (#1434))
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
@@ -467,28 +461,7 @@ public abstract class ReadCommand extends AbstractReadQuery
                                   // iterators created inside the try as long as we do close the original resultIterator), or by closing the result.
     public UnfilteredPartitionIterator executeLocally(ReadExecutionController executionController)
     {
-//<<<<<<< HEAD
         long startTimeNanos = nanoTime();
-//=======
-//        long startTimeNanos = System.nanoTime();
-//
-//        ColumnFamilyStore cfs = Keyspace.openAndGetStore(metadata());
-//
-//        Index.Searcher searcher = null;
-//        if (indexQueryPlan != null)
-//        {
-//            cfs.indexManager.checkQueryability(indexQueryPlan);
-//            searcher = indexSearcher();
-//            Index index = indexQueryPlan.getFirst();
-//            Tracing.trace("Executing read on {}.{} using index {}", cfs.metadata.keyspace, cfs.metadata.name, index.getIndexMetadata().name);
-//        }
-//
-//        Context context = Context.from(this);
-//        var storageTarget = (null == searcher) ? queryStorage(cfs, executionController)
-//                                               : searchStorage(searcher, executionController);
-//        UnfilteredPartitionIterator iterator = Transformation.apply(storageTarget, new TrackingRowIterator(context));
-//        iterator = RTBoundValidator.validate(iterator, Stage.MERGED, false);
-//>>>>>>> b0cdc37bc2 (Implement synthetic columns and ORDER BY BM25 (#1434))
 
         COMMAND.set(this);
         try
@@ -1327,27 +1300,9 @@ public abstract class ReadCommand extends AbstractReadQuery
             }
             metadata = tmb.build();
 
-//<<<<<<< HEAD
             RowFilter rowFilter = RowFilter.serializer.deserialize(in, version, metadata, needsReconciliation);
             DataLimits limits = DataLimits.serializer.deserialize(in, version,  metadata);
 
-//=======
-//
-//            // add synthetic columns to the tablemetadata so we can serialize them in our response
-//            var tmb = metadata.unbuild();
-//            for (var it = columnFilter.fetchedColumns().regulars.simpleColumns(); it.hasNext(); )
-//            {
-//                var c = it.next();
-//                // synthetic columns sort first, so when we hit the first non-synthetic, we're done
-//                if (!c.isSynthetic())
-//                    break;
-//                tmb.addColumn(ColumnMetadata.syntheticColumn(c.ksName, c.cfName, c.name, c.type));
-//            }
-//            metadata = tmb.build();
-//
-//            RowFilter rowFilter = RowFilter.serializer.deserialize(in, version, metadata);
-//            DataLimits limits = DataLimits.serializer.deserialize(in, version,  metadata.comparator);
-//>>>>>>> b0cdc37bc2 (Implement synthetic columns and ORDER BY BM25 (#1434))
             Index.QueryPlan indexQueryPlan = null;
             if (hasIndex)
             {

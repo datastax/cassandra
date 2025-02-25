@@ -127,12 +127,7 @@ public class RowMapping
 
                     for (var pkWithFreq : primaryKeysWithFreq)
                     {
-//<<<<<<< HEAD
-//                        PrimaryKey primaryKey = primaryKeys.next();
-//                        ByteComparable byteComparable = primaryKey::asComparableBytes;
-//=======
                         ByteComparable byteComparable = pkWithFreq.pk::asComparableBytes;
-//>>>>>>> b0cdc37bc2 (Implement synthetic columns and ORDER BY BM25 (#1434))
                         Integer segmentRowId = rowMapping.get(byteComparable);
 
                         if (segmentRowId != null)

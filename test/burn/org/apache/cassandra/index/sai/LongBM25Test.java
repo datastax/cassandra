@@ -36,7 +36,7 @@ import org.junit.Before;
 import org.junit.Test;
 import org.slf4j.Logger;
 
-import org.apache.cassandra.db.memtable.TrieMemtable;
+import static org.apache.cassandra.config.CassandraRelevantProperties.MEMTABLE_SHARD_COUNT;
 
 public class LongBM25Test extends SAITester
 {
@@ -86,9 +86,7 @@ public class LongBM25Test extends SAITester
     @Before
     public void setup() throws Throwable
     {
-        // we don't get loaded until after TM, so we can't affect the very first memtable,
-        // but this will affect all subsequent ones
-        TrieMemtable.SHARD_COUNT = 4 * threadCount;
+        MEMTABLE_SHARD_COUNT.setInt(4 * threadCount);
     }
 
     @FunctionalInterface

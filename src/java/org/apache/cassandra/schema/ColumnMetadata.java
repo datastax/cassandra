@@ -74,11 +74,6 @@ public final class ColumnMetadata extends ColumnSpecification implements Selecta
 
     /**
      * The type of CQL3 column this definition represents.
-     * Bit layout (from most to least significant):
-     * - Bits 61-63: Kind ordinal (3 bits, supporting up to 8 Kind values)
-     * - Bit 60: isComplex flag
-     * - Bits 48-59: position (12 bits, see assert)
-     * - Bits 0-47: name.prefixComparison (shifted right by 16)
      * There are 5 types of columns: those parts of the partition key,
      * those parts of the clustering columns and amongst the others, regular,
      * static, and synthetic ones.
@@ -139,6 +134,14 @@ public final class ColumnMetadata extends ColumnSpecification implements Selecta
     @Nullable
     private final ColumnMask mask;
 
+    /**
+     * The type of CQL3 column this definition represents.
+     * Bit layout (from most to least significant):
+     * - Bits 61-63: Kind ordinal (3 bits, supporting up to 8 Kind values)
+     * - Bit 60: isComplex flag
+     * - Bits 48-59: position (12 bits, see assert)
+     * - Bits 0-47: name.prefixComparison (shifted right by 16)
+     */
     private static long comparisonOrder(Kind kind, boolean isComplex, long position, ColumnIdentifier name)
     {
         assert position >= 0 && position < 1 << 12;
@@ -193,7 +196,7 @@ public final class ColumnMetadata extends ColumnSpecification implements Selecta
      */
     public static ColumnMetadata syntheticColumn(String keyspace, String table, ColumnIdentifier id, AbstractType<?> type)
     {
-        return new ColumnMetadata(keyspace, table, id, type, NO_POSITION, Kind.SYNTHETIC);
+        return new ColumnMetadata(keyspace, table, id, type, NO_POSITION, Kind.SYNTHETIC, null);
     }
 
     /**

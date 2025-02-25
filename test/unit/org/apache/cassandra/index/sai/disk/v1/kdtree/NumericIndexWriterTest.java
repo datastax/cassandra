@@ -24,7 +24,6 @@ import java.util.List;
 import org.junit.Before;
 import org.junit.Test;
 
-import com.carrotsearch.hppc.IntArrayList;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;

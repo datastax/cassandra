@@ -59,8 +59,8 @@ import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.RowIdWithByteComparable;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
+import org.apache.cassandra.io.sstable.SSTableReadsListener;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.CloseableIterator;
@@ -159,7 +159,7 @@ public class InvertedIndexSearcher extends IndexSearcher
     {
         var dk = primaryKey.partitionKey();
         var slices = Slices.with(indexContext.comparator(), Slice.make(primaryKey.clustering()));
-        try (var rowIterator = sstable.iterator(dk, slices, columnFilter, false, SSTableReadsListener.NOOP_LISTENER))
+        try (var rowIterator = sstable.rowIterator(dk, slices, columnFilter, false, SSTableReadsListener.NOOP_LISTENER))
         {
             var unfiltered = rowIterator.next();
             assert unfiltered.isRow() : unfiltered;

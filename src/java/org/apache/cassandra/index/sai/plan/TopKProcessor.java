@@ -27,11 +27,6 @@ import java.util.SortedMap;
 import java.util.SortedSet;
 import java.util.TreeMap;
 import java.util.TreeSet;
-//<<<<<<< HEAD
-//import java.util.concurrent.CompletableFuture; // checkstyle: permit this import
-//import java.util.concurrent.CompletionException;
-//=======
-//>>>>>>> b0cdc37bc2 (Implement synthetic columns and ORDER BY BM25 (#1434))
 import javax.annotation.Nullable;
 
 import org.apache.commons.lang3.tuple.Triple;
@@ -41,13 +36,6 @@ import org.slf4j.LoggerFactory;
 import io.github.jbellis.jvector.vector.VectorizationProvider;
 import io.github.jbellis.jvector.vector.types.VectorFloat;
 import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
-//<<<<<<< HEAD
-//import org.apache.cassandra.concurrent.ImmediateExecutor;
-//import org.apache.cassandra.concurrent.LocalAwareExecutorPlus;
-//import org.apache.cassandra.concurrent.SharedExecutorPool;
-//import org.apache.cassandra.config.CassandraRelevantProperties;
-//=======
-//>>>>>>> b0cdc37bc2 (Implement synthetic columns and ORDER BY BM25 (#1434))
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.cql3.statements.SelectStatement;
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -96,10 +84,6 @@ public class TopKProcessor
     public static final String INDEX_MAY_HAVE_BEEN_DROPPED = "An index may have been dropped. Ordering on non-clustering " +
                                                              "column requires the column to be indexed";
     protected static final Logger logger = LoggerFactory.getLogger(TopKProcessor.class);
-//<<<<<<< HEAD
-//    private static final LocalAwareExecutorPlus PARALLEL_EXECUTOR = getExecutor();
-//=======
-//>>>>>>> b0cdc37bc2 (Implement synthetic columns and ORDER BY BM25 (#1434))
     private static final VectorTypeSupport vts = VectorizationProvider.getInstance().getVectorTypeSupport();
 
     private final ReadCommand command;
@@ -126,33 +110,7 @@ public class TopKProcessor
         else
             this.queryVector = null;
         this.limit = command.limits().count();
-//<<<<<<< HEAD
-//    }
-//
-//    /**
-//     * Executor to use for parallel index reads.
-//     * Defined by -Dcassandra.index_read.parallele=true/false, true by default.
-//     * </p>
-//     * INDEX_READ uses 2 * cpus threads by default but can be overridden with {@literal -Dcassandra.index_read.parallel_thread_num=<value>}
-//     *
-//     * @return stage to use, default INDEX_READ
-//     */
-//    private static LocalAwareExecutorPlus getExecutor()
-//    {
-//        boolean isParallel = CassandraRelevantProperties.USE_PARALLEL_INDEX_READ.getBoolean();
-//
-//        if (isParallel)
-//        {
-//            int numThreads = CassandraRelevantProperties.PARALLEL_INDEX_READ_NUM_THREADS.isPresent()
-//                                ? CassandraRelevantProperties.PARALLEL_INDEX_READ_NUM_THREADS.getInt()
-//                                : FBUtilities.getAvailableProcessors() * 2;
-//            return SharedExecutorPool.SHARED.newExecutor(numThreads, maximumPoolSize -> {}, "request", "IndexParallelRead");
-//        }
-//        else
-//            return ImmediateExecutor.INSTANCE;
-//=======
         this.scoreColumn = ColumnMetadata.syntheticColumn(indexContext.getKeyspace(), indexContext.getTable(), ColumnMetadata.SYNTHETIC_SCORE_ID, FloatType.instance);
-//>>>>>>> b0cdc37bc2 (Implement synthetic columns and ORDER BY BM25 (#1434))
     }
 
     /**

@@ -45,12 +45,8 @@ import org.apache.cassandra.db.MessageParams;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.ReadExecutionController;
-//<<<<<<< HEAD
 import org.apache.cassandra.db.guardrails.Guardrails;
-//=======
-import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.marshal.FloatType;
-//>>>>>>> b0cdc37bc2 (Implement synthetic columns and ORDER BY BM25 (#1434))
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.AbstractUnfilteredRowIterator;
 import org.apache.cassandra.db.rows.BTreeRow;
@@ -73,11 +69,8 @@ import org.apache.cassandra.index.sai.utils.PrimaryKeyWithScore;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
 import org.apache.cassandra.io.util.FileUtils;
-//<<<<<<< HEAD
 import org.apache.cassandra.net.ParamType;
-//=======
 import org.apache.cassandra.schema.ColumnMetadata;
-//>>>>>>> b0cdc37bc2 (Implement synthetic columns and ORDER BY BM25 (#1434))
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.AbstractIterator;
@@ -131,19 +124,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
 
                 // Can't check for `command.isTopK()` because the planner could optimize sorting out
                 Orderer ordering = plan.ordering();
-//<<<<<<< HEAD
-//                if (ordering != null)
-//                {
-//                    assert !(keysIterator instanceof KeyRangeIterator);
-//                    var scoredKeysIterator = (CloseableIterator<PrimaryKeyWithSortKey>) keysIterator;
-//                    var result = new ScoreOrderedResultRetriever(scoredKeysIterator, filterTree, executionController,
-//                                                                 command.limits().count());
-//                    return new TopKProcessor(command).filter(result);
-//                }
-//                else
-//=======
                 if (ordering == null)
-//>>>>>>> b0cdc37bc2 (Implement synthetic columns and ORDER BY BM25 (#1434))
                 {
                     assert keysIterator instanceof KeyRangeIterator;
                     return new ResultRetriever((KeyRangeIterator) keysIterator, filterTree, executionController);
@@ -599,13 +580,8 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         }
 
         /**
-<<<<<<< HEAD
-         * Fills the keys map with the next `count` unique primary keys that are in the keys produced by calling
-         * {@link #nextSelectedKeyInRange()}. We map PrimaryKey to {@literal List<PrimaryKeyWithSortKey>} because the same
-=======
          * Fills the `groupedKeys` Map with the next `count` unique primary keys that are in the keys produced by calling
-         * {@link #nextSelectedKeyInRange()}. We map PrimaryKey to List<PrimaryKeyWithSortKey> because the same
->>>>>>> b0cdc37bc2 (Implement synthetic columns and ORDER BY BM25 (#1434))
+         * {@link #nextSelectedKeyInRange()}. We map PrimaryKey to {@literal List<PrimaryKeyWithSortKey>} because the same
          * primary key can be in the result set multiple times, but with different source tables.
          * @param groupedKeys the map to fill
          * @param count the number of unique PrimaryKeys to consume from the iterator
@@ -717,39 +693,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                         }
                     }
                 }
-//<<<<<<< HEAD
-//                return isRowValid ? new PrimaryKeyIterator(partition, staticRow, row) : null;
-//            }
-//        }
-//
-//        public class PrimaryKeyIterator extends AbstractUnfilteredRowIterator
-//        {
-//            private boolean consumed = false;
-//            private final Unfiltered row;
-//
-//            public PrimaryKeyIterator(UnfilteredRowIterator partition, Row staticRow, Unfiltered content)
-//            {
-//                super(partition.metadata(),
-//                      partition.partitionKey(),
-//                      partition.partitionLevelDeletion(),
-//                      partition.columns(),
-//                      staticRow,
-//                      partition.isReverseOrder(),
-//                      partition.stats());
-//
-//                row = content;
-//            }
-//
-//            @Override
-//            protected Unfiltered computeNext()
-//            {
-//                if (consumed)
-//                    return endOfData();
-//                consumed = true;
-//                return row;
-//=======
                 return isRowValid ? new PrimaryKeyIterator(partition, staticRow, row, sourceKeys, controller.command()) : null;
-//>>>>>>> b0cdc37bc2 (Implement synthetic columns and ORDER BY BM25 (#1434))
             }
         }
 
@@ -768,7 +712,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                 tableQueryMetrics.record(queryContext);
         }
 
-        public static class PrimaryKeyIterator extends AbstractUnfilteredRowIterator
+        public class PrimaryKeyIterator extends AbstractUnfilteredRowIterator
         {
             private boolean consumed = false;
             private final Unfiltered row;

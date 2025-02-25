@@ -35,11 +35,7 @@ import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.disk.MemtableTermsIterator;
 import org.apache.cassandra.index.sai.disk.PerIndexWriter;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
-//<<<<<<< HEAD
-import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
-//=======
 import org.apache.cassandra.index.sai.disk.format.Version;
-//>>>>>>> b0cdc37bc2 (Implement synthetic columns and ORDER BY BM25 (#1434))
 import org.apache.cassandra.index.sai.disk.v1.kdtree.ImmutableOneDimPointValues;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.NumericIndexWriter;
 import org.apache.cassandra.index.sai.disk.v1.trie.InvertedIndexWriter;

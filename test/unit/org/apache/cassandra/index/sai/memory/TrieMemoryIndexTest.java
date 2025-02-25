@@ -114,14 +114,8 @@ public class TrieMemoryIndexTest
         int valueCount = 0;
         while(iterator.hasNext())
         {
-//<<<<<<< HEAD
-//            Pair<ByteComparable, PrimaryKeys> pair = iterator.next();
-//            String value = new String(ByteSourceInverse.readBytes(ByteSource.peekable(pair.left.asComparableBytes(TypeUtil.BYTE_COMPARABLE_VERSION))), StandardCharsets.UTF_8);
-//=======
             var pair = iterator.next();
-//            String value = new String(ByteSourceInverse.readBytes(pair.left.asPeekableBytes(TypeUtil.BYTE_COMPARABLE_VERSION)), StandardCharsets.UTF_8);
             String value = new String(ByteSourceInverse.readBytes(ByteSource.peekable(pair.left.asComparableBytes(TypeUtil.BYTE_COMPARABLE_VERSION))), StandardCharsets.UTF_8);
-//>>>>>>> b0cdc37bc2 (Implement synthetic columns and ORDER BY BM25 (#1434))
             int idCount = 0;
             for (var pkf : pair.right)
             {

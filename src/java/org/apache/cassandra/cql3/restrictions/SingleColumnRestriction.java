@@ -24,32 +24,20 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-//<<<<<<< HEAD
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.filter.ANNOptions;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.serializers.ListSerializer;
-//import org.apache.cassandra.cql3.*;
-//=======
 import org.apache.cassandra.cql3.MarkerOrTerms;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.Term;
 import org.apache.cassandra.cql3.Terms;
-//>>>>>>> b0cdc37bc2 (Implement synthetic columns and ORDER BY BM25 (#1434))
 import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.cql3.statements.Bound;
 import org.apache.cassandra.db.MultiClusteringBuilder;
-//import org.apache.cassandra.db.filter.ANNOptions;
-//import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.IndexRegistry;
-//<<<<<<< HEAD
-//=======
-//import org.apache.cassandra.schema.ColumnMetadata;
-//import org.apache.cassandra.serializers.ListSerializer;
-//import org.apache.cassandra.transport.ProtocolVersion;
-//>>>>>>> b0cdc37bc2 (Implement synthetic columns and ORDER BY BM25 (#1434))
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Pair;
 

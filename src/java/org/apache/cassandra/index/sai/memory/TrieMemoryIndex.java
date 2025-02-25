@@ -254,7 +254,6 @@ public class TrieMemoryIndex extends MemoryIndex
     }
 
     @Override
-//<<<<<<< HEAD
     public KeyRangeIterator search(Expression expression, AbstractBounds<PartitionPosition> keyRange)
     {
         if (logger.isTraceEnabled())
@@ -275,10 +274,7 @@ public class TrieMemoryIndex extends MemoryIndex
     }
 
     @Override
-//    public Iterator<Pair<ByteComparable, PrimaryKeys>> iterator()
-//=======
     public Iterator<Pair<ByteComparable, List<PkWithFrequency>>> iterator()
-//>>>>>>> b0cdc37bc2 (Implement synthetic columns and ORDER BY BM25 (#1434))
     {
         Iterator<Map.Entry<ByteComparable, PrimaryKeys>> iterator = data.entrySet().iterator();
         return new Iterator<>()
@@ -332,226 +328,6 @@ public class TrieMemoryIndex extends MemoryIndex
         return new FilteringKeyRangeIterator(new SortedSetKeyRangeIterator(primaryKeys.keys()), keyRange);
     }
 
-//<<<<<<< HEAD
-//=======
-//    private KeyRangeIterator rangeMatch(Expression expression, AbstractBounds<PartitionPosition> keyRange)
-//    {
-//        Trie<PrimaryKeys> subtrie = getSubtrie(expression);
-//
-//        var capacity = Math.max(MINIMUM_QUEUE_SIZE, lastQueueSize.get());
-//        var mergingIteratorBuilder = MergingKeyRangeIterator.builder(keyBounds, indexContext.keyFactory(), capacity);
-//        lastQueueSize.set(mergingIteratorBuilder.size());
-//
-//        if (!Version.latest().onOrAfter(Version.DB) && TypeUtil.isComposite(expression.validator))
-//            subtrie.entrySet().forEach(entry -> {
-//                // Before version DB, we encoded composite types using a non order-preserving function. In order to
-//                // perform a range query on a map, we use the bounds to get all entries for a given map key and then
-//                // only keep the map entries that satisfy the expression.
-//                byte[] key = ByteSourceInverse.readBytes(entry.getKey().asComparableBytes(TypeUtil.BYTE_COMPARABLE_VERSION));
-//                if (expression.isSatisfiedBy(ByteBuffer.wrap(key)))
-//                    mergingIteratorBuilder.add(entry.getValue());
-//            });
-//        else
-//            subtrie.values().forEach(mergingIteratorBuilder::add);
-//
-//        return mergingIteratorBuilder.isEmpty()
-//               ? KeyRangeIterator.empty()
-//               : new FilteringKeyRangeIterator(mergingIteratorBuilder.build(), keyRange);
-//    }
-//
-//    @Override
-//    public long estimateMatchingRowsCount(Expression expression, AbstractBounds<PartitionPosition> keyRange)
-//    {
-//        switch (expression.getOp())
-//        {
-//            case MATCH:
-//            case EQ:
-//            case CONTAINS_KEY:
-//            case CONTAINS_VALUE:
-//                return estimateNumRowsMatchingExact(expression);
-//            case NOT_EQ:
-//            case NOT_CONTAINS_KEY:
-//            case NOT_CONTAINS_VALUE:
-//                if (TypeUtil.supportsRounding(expression.validator))
-//                    return Memtable.estimateRowCount(memtable);
-//                else
-//                    // need to clamp at 0, because row count is imprecise
-//                    return Math.max(0, Memtable.estimateRowCount(memtable) - estimateNumRowsMatchingExact(expression));
-//            case RANGE:
-//                return estimateNumRowsMatchingRange(expression);
-//            default:
-//                throw new IllegalArgumentException("Unsupported expression: " + expression);
-//        }
-//    }
-//
-//
-//    private int estimateNumRowsMatchingExact(Expression expression)
-//    {
-//        final ByteComparable prefix = expression.lower == null ? ByteComparable.EMPTY : asByteComparable(expression.lower.value.encoded);
-//        final PrimaryKeys primaryKeys = data.get(prefix);
-//        return primaryKeys == null ? 0 : primaryKeys.size();
-//    }
-//
-//    private long estimateNumRowsMatchingRange(Expression expression)
-//    {
-//        final Trie<PrimaryKeys> subtrie = getSubtrie(expression);
-//
-//        // We could compute the number of matching rows by iterating the subtrie
-//        // and summing the sizes of PrimaryKeys collections. But this could be very costly
-//        // if the subtrie is large. Instead, we iterate a limited number of entries, and then we
-//        // check how far we got by inspecting the term and comparing it to the start term and the end term.
-//        // For now, we assume that term values are distributed uniformly.
-//
-//        var iterator = subtrie.entryIterator();
-//        if (!iterator.hasNext())
-//            return 0;
-//
-//        AbstractType<?> termType = indexContext.getValidator();
-//        ByteBuffer endTerm = expression.upper != null && TypeUtil.compare(expression.upper.value.encoded, maxTerm, termType, Version.latest()) < 0
-//                             ? expression.upper.value.encoded
-//                             : maxTerm;
-//
-//        long pointCount = 0;
-//        long keyCount = 0;
-//
-//        ByteComparable startTerm = null;
-//        ByteComparable currentTerm = null;
-//
-//        while (iterator.hasNext() && pointCount < 64)
-//        {
-//            var entry = iterator.next();
-//            pointCount += 1;
-//            keyCount += entry.getValue().size();
-//            currentTerm = entry.getKey();
-//            if (startTerm == null)
-//                startTerm = currentTerm;
-//        }
-//        assert currentTerm != null;
-//
-//        // We iterated all points matched by the query, so keyCount contains the exact value of keys.
-//        // This is a happy path, because the returned value will be accurate.
-//        if (!iterator.hasNext())
-//            return keyCount;
-//
-//        // There are some points remaining; let's estimate their count by extrapolation.
-//        // Express the distance we iterated as a double value and the whole subtrie range also as a double.
-//        // Then the ratio of those two values would give us a hint on how many total points there
-//        // are in the subtrie. This should be fairly accurate assuming values are distributed uniformly.
-//        BigDecimal startValue = toBigDecimal(startTerm);
-//        BigDecimal endValue = toBigDecimal(endTerm);
-//        BigDecimal currentValue = toBigDecimal(currentTerm);
-//        double totalDistance = endValue.subtract(startValue).doubleValue() + Double.MIN_NORMAL;
-//        double iteratedDistance = currentValue.subtract(startValue).doubleValue() + Double.MIN_NORMAL;
-//        assert totalDistance > 0.0;
-//        assert iteratedDistance > 0.0;
-//
-//        double extrapolatedPointCount = Math.min((pointCount - 1) * (totalDistance / iteratedDistance), this.data.valuesCount());
-//        double keysPerPoint = (double) keyCount / pointCount;
-//        return (long) (extrapolatedPointCount * keysPerPoint);
-//    }
-//
-//    /**
-//     * Converts the term to a BigDecimal in a way that it keeps the sort order
-//     * (so terms comparing larger yield larger numbers).
-//     * Works on raw representation (as passed to the index).
-//     *
-//     * @see #toBigDecimal(ByteComparable)
-//     */
-//    private BigDecimal toBigDecimal(ByteBuffer endTerm)
-//    {
-//        ByteComparable bc = Version.latest().onDiskFormat().encodeForTrie(endTerm, indexContext.getValidator());
-//        return toBigDecimal(bc);
-//    }
-//
-//    /**
-//     * Converts the term to a BigDecimal in a way that it keeps the sort order
-//     * (so terms comparing larger yield larger numbers).
-//     * @see TermsDistribution#toBigDecimal(ByteComparable, AbstractType, Version, ByteComparable.Version)
-//     */
-//    private BigDecimal toBigDecimal(ByteComparable term)
-//    {
-//        AbstractType<?> type = indexContext.getValidator();
-//        return TermsDistribution.toBigDecimal(term, type, Version.latest(), TypeUtil.BYTE_COMPARABLE_VERSION);
-//    }
-//
-//    private Trie<PrimaryKeys> getSubtrie(@Nullable Expression expression)
-//    {
-//        if (expression == null)
-//            return data;
-//
-//        ByteComparable lowerBound, upperBound;
-//        boolean lowerInclusive, upperInclusive;
-//        if (expression.lower != null)
-//        {
-//            lowerBound = expression.getEncodedLowerBoundByteComparable(Version.latest());
-//            lowerInclusive = expression.lower.inclusive;
-//        }
-//        else
-//        {
-//            lowerBound = ByteComparable.EMPTY;
-//            lowerInclusive = false;
-//        }
-//
-//        if (expression.upper != null)
-//        {
-//            upperBound = expression.getEncodedUpperBoundByteComparable(Version.latest());
-//            upperInclusive = expression.upper.inclusive;
-//        }
-//        else
-//        {
-//            upperBound = null;
-//            upperInclusive = false;
-//        }
-//
-//        return data.subtrie(lowerBound, lowerInclusive, upperBound, upperInclusive);
-//    }
-//
-//    public ByteBuffer getMinTerm()
-//    {
-//        return minTerm;
-//    }
-//
-//    public ByteBuffer getMaxTerm()
-//    {
-//        return maxTerm;
-//    }
-//
-//    private void setMinMaxTerm(ByteBuffer term)
-//    {
-//        assert term != null;
-//
-//        minTerm = TypeUtil.min(term, minTerm, indexContext.getValidator(), Version.latest());
-//        maxTerm = TypeUtil.max(term, maxTerm, indexContext.getValidator(), Version.latest());
-//    }
-//
-//    private ByteComparable asByteComparable(ByteBuffer input)
-//    {
-//        return Version.latest().onDiskFormat().encodeForTrie(input, indexContext.getValidator());
-//    }
-//
-//    class PrimaryKeysReducer implements InMemoryTrie.UpsertTransformer<PrimaryKeys, PrimaryKey>
-//    {
-//        private final LongAdder heapAllocations = new LongAdder();
-//
-//        @Override
-//        public PrimaryKeys apply(PrimaryKeys existing, PrimaryKey neww)
-//        {
-//            if (existing == null)
-//            {
-//                existing = new PrimaryKeys();
-//                heapAllocations.add(existing.unsharedHeapSize());
-//            }
-//            heapAllocations.add(existing.add(neww));
-//            return existing;
-//        }
-//
-//        long heapAllocations()
-//        {
-//            return heapAllocations.longValue();
-//        }
-//    }
-//
-//>>>>>>> b0cdc37bc2 (Implement synthetic columns and ORDER BY BM25 (#1434))
     /**
      * A sorting iterator over items that can either be singleton PrimaryKey or a SortedSetKeyRangeIterator.
      */
@@ -773,7 +549,6 @@ public class TrieMemoryIndex extends MemoryIndex
         }
     }
 
-//<<<<<<< HEAD
     private KeyRangeIterator rangeMatch(Expression expression, AbstractBounds<PartitionPosition> keyRange)
     {
         Trie<PrimaryKeys> subtrie = getSubtrie(expression);
@@ -988,7 +763,6 @@ public class TrieMemoryIndex extends MemoryIndex
         maxTerm = TypeUtil.max(term, maxTerm, indexContext.getValidator(), Version.latest());
     }
 
-//=======
     /**
      * Iterator that provides ordered access to all indexed terms and their associated primary keys
      * in the TrieMemoryIndex. For each term in the index, yields PrimaryKeyWithSortKey objects that
@@ -996,7 +770,6 @@ public class TrieMemoryIndex extends MemoryIndex
      * <p>
      * A more verbose name could be KeysMatchingTermsByTermIterator.
      */
-//>>>>>>> b0cdc37bc2 (Implement synthetic columns and ORDER BY BM25 (#1434))
     private class AllTermsIterator extends AbstractIterator<PrimaryKeyWithSortKey>
     {
         private final Iterator<Map.Entry<ByteComparable, PrimaryKeys>> iterator;
