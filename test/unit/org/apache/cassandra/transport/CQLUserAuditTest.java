@@ -43,9 +43,6 @@ import org.apache.cassandra.ServerTestUtils;
 import org.apache.cassandra.audit.AuditEvent;
 import org.apache.cassandra.audit.AuditLogEntryType;
 import org.apache.cassandra.audit.AuditLogManager;
-import org.apache.cassandra.audit.DiagnosticEventAuditLogger;
-import org.apache.cassandra.auth.CassandraRoleManager;
-import org.apache.cassandra.auth.PasswordAuthenticator;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.OverrideConfigurationLoader;
 import org.apache.cassandra.config.ParameterizedClass;
@@ -66,11 +63,11 @@ public class CQLUserAuditTest
     public static void setup() throws Exception
     {
         OverrideConfigurationLoader.override((config) -> {
-            config.authenticator = new ParameterizedClass(PasswordAuthenticator.class.getName());
-            config.role_manager = new ParameterizedClass(CassandraRoleManager.class.getName());
+            config.authenticator = "PasswordAuthenticator";
+            config.role_manager = "CassandraRoleManager";
             config.diagnostic_events_enabled = true;
             config.audit_logging_options.enabled = true;
-            config.audit_logging_options.logger = new ParameterizedClass(DiagnosticEventAuditLogger.class.getName(), null);
+            config.audit_logging_options.logger = new ParameterizedClass("DiagnosticEventAuditLogger", null);
         });
 
         System.setProperty("cassandra.superuser_setup_delay_ms", "0");

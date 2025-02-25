@@ -17,18 +17,10 @@
  */
 package org.apache.cassandra.config;
 
-import java.lang.reflect.Constructor;
-import java.lang.reflect.InvocationTargetException;
-import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 import com.google.common.base.Objects;
-
-import org.apache.cassandra.exceptions.ConfigurationException;
-import org.apache.cassandra.utils.IntegerInterval;
 
 public class ParameterizedClass
 {
@@ -43,12 +35,6 @@ public class ParameterizedClass
         // for snakeyaml
     }
 
-    public ParameterizedClass(String class_name)
-    {
-        this.class_name = class_name;
-        this.parameters = Collections.emptyMap();
-    }
-
     public ParameterizedClass(String class_name, Map<String, String> parameters)
     {
         this.class_name = class_name;
@@ -60,67 +46,6 @@ public class ParameterizedClass
     {
         this((String)p.get(CLASS_NAME),
              p.containsKey(PARAMETERS) ? (Map<String, String>)((List<?>)p.get(PARAMETERS)).get(0) : null);
-    }
-
-    static public <K> K newInstance(ParameterizedClass parameterizedClass, List<String> searchPackages)
-    {
-        Class<?> providerClass = null;
-        if (searchPackages == null || searchPackages.isEmpty())
-            searchPackages = Collections.singletonList("");
-        for (String searchPackage : searchPackages)
-        {
-            try
-            {
-                if (!searchPackage.isEmpty() && !searchPackage.endsWith("."))
-                    searchPackage = searchPackage + '.';
-                String name = searchPackage + parameterizedClass.class_name;
-                providerClass = Class.forName(name);
-            }
-            catch (ClassNotFoundException e)
-            {
-                //no-op
-            }
-        }
-
-        if (providerClass == null)
-        {
-            String error = "Unable to find class " + parameterizedClass.class_name + " in packages [" +
-                           searchPackages.stream().map(p -> '"' + p + '"').collect(Collectors.joining(",")) + ']';
-            throw new ConfigurationException(error);
-        }
-
-        try
-        {
-            Constructor<?>[] declaredConstructors = providerClass.getDeclaredConstructors();
-
-            Constructor mapConstructor = Arrays.stream(declaredConstructors)
-                                               .filter(c -> c.getParameterTypes().length == 1 && c.getParameterTypes()[0].equals(Map.class))
-                                               .findFirst().orElse(null);
-            if (mapConstructor != null)
-                return (K) mapConstructor.newInstance(parameterizedClass.parameters);
-
-            // Falls-back to no-arg constructor if no parameters are present
-            if (parameterizedClass.parameters == null || parameterizedClass.parameters.isEmpty())
-            {
-                Constructor emptyConstructor = Arrays.stream(declaredConstructors)
-                                                     .filter(c -> c.getParameterTypes().length == 0)
-                                                     .findFirst().orElse(null);
-                if (emptyConstructor != null)
-                    return (K) emptyConstructor.newInstance();
-            }
-
-            throw new ConfigurationException("No valid constructor found for class " + parameterizedClass.class_name);
-        }
-        catch (IllegalAccessException|InstantiationException|ExceptionInInitializerError e)
-        {
-            throw new ConfigurationException("Unable to instantiate parameterized class " + parameterizedClass.class_name, e);
-        }
-        catch (InvocationTargetException e)
-        {
-            Throwable cause = e.getCause();
-            String error = "Failed to instantiate class " + parameterizedClass.class_name + ": " + cause.getMessage();
-            throw new ConfigurationException(error, cause);
-        }
     }
 
     @Override
