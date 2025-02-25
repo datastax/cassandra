@@ -19,9 +19,12 @@
 package org.apache.cassandra.index.sai.cql;
 
 import java.util.ArrayList;
+import java.util.stream.Collectors;
 
 import org.junit.Test;
 
+import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
+import org.apache.cassandra.db.marshal.FloatType;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
 import org.apache.cassandra.index.sai.disk.vector.CompactionGraph;
 
@@ -59,13 +62,16 @@ public class VectorCompactionTest extends VectorTester.Versioned
         createTable();
         disableCompaction();
 
+        var vectors = new ArrayList<float[]>();
         // 3 sstables
         for (int j = 0; j < 3; j++)
         {
             for (int i = 0; i <= MIN_PQ_ROWS; i++)
             {
                 var pk = j * MIN_PQ_ROWS + i;
-                execute("INSERT INTO %s (pk, v) VALUES (?, ?)", pk, vector(pk, pk + 1));
+                var v = create2DVector();
+                vectors.add(v);
+                execute("INSERT INTO %s (pk, v) VALUES (?, ?)", pk, vector(v));
             }
             flush();
         }
@@ -73,8 +79,21 @@ public class VectorCompactionTest extends VectorTester.Versioned
         CompactionGraph.PQ_TRAINING_SIZE = 2 * MIN_PQ_ROWS;
         compact();
 
-        // Confirm we can query the data
-        assertRowCount(execute("SELECT * FROM %s ORDER BY v ANN OF [1,2] LIMIT 1"), 1);
+        // Confirm we can query the data with reasonable recall
+        double recall = 0;
+        int ITERS = 10;
+        for (int i = 0; i < ITERS; i++)
+        {
+            var q = create2DVector();
+            var result = execute("SELECT pk, v FROM %s ORDER BY v ANN OF ? LIMIT 20", vector(q));
+            var ann = result.stream().map(row -> {
+                var vList = row.getVector("v", FloatType.instance, 2);
+                return new float[]{ vList.get(0), vList.get(1) };
+            }).collect(Collectors.toList());
+            recall += computeRecall(vectors, q, ann, VectorSimilarityFunction.COSINE);
+        }
+        recall /= ITERS;
+        assert recall >= 0.9 : recall;
     }
 
     @Test
@@ -241,5 +260,10 @@ public class VectorCompactionTest extends VectorTester.Versioned
                 lastSimilarity = similarity;
             }
         }
+    }
+
+    private static float[] create2DVector() {
+        var R = getRandom();
+        return new float[] { R.nextFloatBetween(-100, 100), R.nextFloatBetween(-100, 100) };
     }
 }
