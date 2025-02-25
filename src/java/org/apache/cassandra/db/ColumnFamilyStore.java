@@ -1468,9 +1468,16 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
 
             if (memtable.isClean() || truncate)
             {
-                cfs.replaceFlushed(memtable, Collections.emptyList(), Optional.empty());
-                reclaim(memtable);
-                return Collections.emptyList();
+                try
+                {
+                    cfs.replaceFlushed(memtable, Collections.emptyList(), Optional.empty());
+                    return Collections.emptyList();
+                }
+                finally
+                {
+                    if (!cfs.getTracker().getView().flushingMemtables.contains(memtable))
+                        reclaim(memtable);
+                }
             }
             long start = Clock.Global.nanoTime();
             List<Future<SSTableMultiWriter>> futures = new ArrayList<>();
@@ -1588,7 +1595,11 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
 
                 cfs.replaceFlushed(memtable, sstables, Optional.of(txn.opId()));
             }
-            reclaim(memtable);
+            finally
+            {
+                if (!cfs.getTracker().getView().flushingMemtables.contains(memtable))
+                    reclaim(memtable);
+            }
             cfs.strategyFactory.getCompactionLogger().flush(sstables);
             if (logger.isTraceEnabled())
             {
@@ -2008,6 +2019,9 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         maybeFail(data.dropSSTables(Predicates.in(sstables), compactionType, null));
     }
 
+    /**
+     * Beware, this code doesn't have noexcept guarantees
+     */
     void replaceFlushed(Memtable memtable, Collection<SSTableReader> sstables, Optional<TimeUUID> operationId)
     {
         data.replaceFlushed(memtable, sstables, operationId);
