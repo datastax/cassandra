@@ -37,15 +37,12 @@ public interface ShardTracker
 
     double shardSpanSize();
 
-    /**
-     * Advance to the given token (e.g. before writing a key). Returns true if this resulted in advancing to a new
-     * shard, and false otherwise.
-     */
+    /// Advance to the given token (e.g. before writing a key). Returns true if this resulted in advancing to a new
+    /// shard, and false otherwise.
     boolean advanceTo(Token nextToken);
 
-    /**
-     * Returns the number of shards tracked by this tracker.
-     */
+    /// Returns the number of shards tracked by this tracker. This is not necessarily the number of shards requested
+    /// when [ShardManager#boundaries] was called, because this requests the per-disk number.
     int count();
 
     /**
@@ -56,9 +53,7 @@ public interface ShardTracker
 
     double rangeSpanned(PartitionPosition first, PartitionPosition last);
 
-    /**
-     * The index of the shard this tracker is currently on.
-     */
+    /// The index of the shard this tracker is currently on, between `0` and `count() - 1`.
     int shardIndex();
 
     default long shardAdjustedKeyCount(Set<? extends CompactionSSTable> sstables)

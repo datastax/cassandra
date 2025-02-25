@@ -270,6 +270,8 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
                 assertEquals(expectedCount, selectedCount);
             }
         }
+        // Make sure getMaxOverlapsMap does not fail.
+        System.out.println(strategy.getMaxOverlapsMap());
     }
 
     @Test
@@ -391,6 +393,8 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
                 assertThat(selectedCount).isGreaterThanOrEqualTo(1);
             }
         }
+        // Make sure getMaxOverlapsMap does not fail.
+        System.out.println(strategy.getMaxOverlapsMap());
     }
 
     private BufferDecoratedKey key(long token)
@@ -1137,6 +1141,8 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
             for (int i = 0; i < currentArenaSpecs.expectedBuckets.length; i++)
                 assertEquals(currentArenaSpecs.expectedBuckets[i], levels.get(i).sstables.size());
         }
+        // Make sure getMaxOverlapsMap does not fail.
+        System.out.println(strategy.getMaxOverlapsMap());
     }
 
     @Test
@@ -1980,6 +1986,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         }
 
         Mockito.when(controller.getNumShards(anyDouble())).thenReturn(16);  // co-prime with counts to ensure multiple sstables fall in each shard
+        // Make sure getMaxOverlapsMap does not fail.
         System.out.println(strategy.getMaxOverlapsMap());
 
         dataTracker.removeUnsafe(allSSTables);
