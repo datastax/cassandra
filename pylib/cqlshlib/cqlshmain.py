@@ -508,15 +508,17 @@ class Shell(cmd.Cmd):
         # Remove any pre-release secondary component, e.g. SNAPSHOT, when delimited by either '-' or '.'
         # ex. 5.0.0-beta2-SNAPSHOT -> 5.0.0-beta2
         # ex. 5.0.0-beta2.SNAPSHOT -> 5.0.0-beta2
-        # ex. 5.0.0-rc1 -> no change
+        # ex. 5.0.2-SNAPSHOT - > 5.0.2
         if baseversion.count('-') > 0:
-            if baseversion.count('-') > 1:
-                # When the pre-release component delimiter is a dash, e.g. 5.0.0-beta2-SNAPSHOT
+            if baseversion.count('-') > build_version.count('-'):
+                # When the baseversion has more dashes than the build_version
+                # e.g. baseversion=5.0.0-beta2-SNAPSHOT, build_version=5.0.0-beta2
                 extra = baseversion.rfind('-')
                 if extra != -1:
                     baseversion = baseversion[0:extra]
             else:
-                # When the pre-release component delimiter is a dot, e.g. 5.0.0-beta2.SNAPSHOT
+                # When the pre-release component delimiter is a dot, and beyond the last '-'
+                # e.g. 5.0.0-beta2.SNAPSHOT, build_version=5.0.0-beta2
                 prerelease_start = baseversion.rfind('-')
                 extra = baseversion.rfind('.')
                 if extra > prerelease_start:
