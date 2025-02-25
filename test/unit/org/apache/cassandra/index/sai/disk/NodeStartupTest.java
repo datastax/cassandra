@@ -199,7 +199,7 @@ public class NodeStartupTest extends SAITester
     }
 
     // TODO: Disable the coordinator execution used by SAITester until we have a way to simulate node restarts combined
-    //  with CQLTester#requireNetwork and CQLTester#requireNetworkWithoutDriver.
+    //  with CQLTester#requireNetwork and CQLTester#requireNetworkWithoutDriver. This should be improved in CNDB-13125.
     @BeforeClass
     public static void setUpClass()
     {
