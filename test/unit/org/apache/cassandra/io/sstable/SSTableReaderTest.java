@@ -107,6 +107,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.hamcrest.Matchers.is;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
@@ -416,6 +417,35 @@ public class SSTableReaderTest
                 .isInstanceOf(AssertionError.class);
         assertThatThrownBy(() -> sstable.onDiskSizeForPartitionPositions(Collections.singleton(new PartitionPositionBounds(2, 1))))
                 .isInstanceOf(AssertionError.class);
+    }
+
+    @Test
+    public void testDoNotFailOnChunkEndingPosition()
+    {
+        Keyspace keyspace = Keyspace.open(KEYSPACE1);
+        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF_COMPRESSED);
+        int count = 530;
+        // insert data and compact to a single sstable
+        for (int j = 0; j < count; j++)
+        {
+            new RowUpdateBuilder(cfs.metadata(), 15000, k0(j))
+                    .clustering("0")
+                    .add("val", ByteBufferUtil.EMPTY_BYTE_BUFFER)
+                    .build()
+                    .applyUnsafe();
+        }
+        cfs.forceBlockingFlush(UNIT_TESTS);
+        cfs.forceMajorCompaction();
+        SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
+
+        partitioner = sstable.getPartitioner();
+        int chunkLength = sstable.getCompressionMetadata().parameters.chunkLength();
+        long chunkCount = (long) Math.ceil((double) sstable.uncompressedLength() / chunkLength);
+        assertEquals(2, chunkCount);
+        long endPosition = chunkLength * chunkCount;
+
+        long size = sstable.onDiskSizeForPartitionPositions(Collections.singleton(new PartitionPositionBounds(0, endPosition)));
+        assertNotEquals(0, size);
     }
 
     long onDiskSizeForRanges(SSTableReader sstable, Collection<Range<Token>> ranges)
