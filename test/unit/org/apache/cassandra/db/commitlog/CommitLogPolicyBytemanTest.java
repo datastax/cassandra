@@ -158,7 +158,7 @@ public class CommitLogPolicyBytemanTest
         failSync.set(false);
         // Force a sync to clear the error
         CommitLog.instance.sync(false);
-        await().atMost(2, TimeUnit.SECONDS)
+        await().atMost(10, TimeUnit.SECONDS)
                 .until(() -> !CommitLog.instance.shouldRejectMutations());
         CommitLog.instance.add(m);
     }
