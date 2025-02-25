@@ -30,6 +30,7 @@ import static org.junit.Assert.assertTrue;
 
 public class IndexMetricsTest extends AbstractMetricsTest
 {
+
     private static final String TABLE = "table_name";
     private static final String INDEX = "table_name_index";
 
