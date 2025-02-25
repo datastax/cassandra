@@ -299,8 +299,9 @@ public class CompactionGraph implements Closeable, Accountable
                 var trainingVectors = new ArrayList<VectorFloat<?>>(postingsMap.size());
                 var vectorsByOrdinal = new Int2ObjectHashMap<VectorFloat<?>>();
                 postingsMap.forEach((v, p) -> {
-                    trainingVectors.add(v);
-                    vectorsByOrdinal.put(p.getOrdinal(), v);
+                    var vectorClone = v.copy();
+                    trainingVectors.add(vectorClone);
+                    vectorsByOrdinal.put(p.getOrdinal(), vectorClone);
                 });
 
                 // lock the addGraphNode threads out so they don't try to use old pq codepoints against the new codebook
