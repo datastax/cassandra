@@ -25,23 +25,23 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.StampedLock;
 
-import com.google.common.collect.Iterables;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.db.CounterMutation;
 
+/**
+ * Implemetation of {@link CounterLockManager} that uses a cache of locks.
+ * Note: this implemetation tries to reduce the change of having two counters lock each other, but as the counters
+ * are identified by the hash of the primary key of the row, it is still possible to
+ * have some cross-counter contention for counters with different primary keys but the same hash.
+ */
 public class CachedCounterLockManager implements CounterLockManager
 {
-    private static final Logger logger = LoggerFactory.getLogger(CachedCounterLockManager.class);
     private final static int EXPECTED_CONCURRENCY = DatabaseDescriptor.getConcurrentCounterWriters() * 16;
+    private final ConcurrentMap<Integer, RefCountedStampedLock> locks = new ConcurrentHashMap<>(EXPECTED_CONCURRENCY);
 
     @Override
-    public List<Lock> grabLocks(Iterable<Integer> keys)
+    public List<LockHandle> grabLocks(Iterable<Integer> keys)
     {
-        List<Lock> result = new ArrayList<>();
+        List<LockHandle> result = new ArrayList<>();
         for (Integer key : keys)
             result.add(makeLockForKey(key));
         return result;
@@ -52,10 +52,7 @@ public class CachedCounterLockManager implements CounterLockManager
         return new StampedLock();
     }
 
-
-    private final ConcurrentMap<Integer, RefCountedStampedLock> locks = new ConcurrentHashMap<>(EXPECTED_CONCURRENCY);
-
-    private LockHandle makeLockForKey(Integer key)
+    private LockHandleImpl makeLockForKey(Integer key)
     {
         RefCountedStampedLock instance = locks.compute(key, (k, existing) -> {
             if (existing != null)
@@ -68,7 +65,7 @@ public class CachedCounterLockManager implements CounterLockManager
                 return new RefCountedStampedLock(makeLock(), 1);
             }
         });
-        return new LockHandle(key, instance);
+        return new LockHandleImpl(key, instance);
     }
 
     private void returnLockForKey(RefCountedStampedLock instance, Integer key) throws IllegalStateException
@@ -89,11 +86,6 @@ public class CachedCounterLockManager implements CounterLockManager
         });
     }
 
-    public void clear()
-    {
-        this.locks.clear();
-    }
-
     @Override
     public boolean hasNumKeys()
     {
@@ -106,14 +98,16 @@ public class CachedCounterLockManager implements CounterLockManager
         return locks.size();
     }
 
-    private class LockHandle implements Lock
+    /**
+     * This class is not thread safe, it is expected to be used by a single thread.
+     */
+    private class LockHandleImpl implements LockHandle
     {
-
-        public volatile long stamp;
+        public long stamp;
         public final Integer key;
         public final RefCountedStampedLock handle;
 
-        public LockHandle(Integer key, RefCountedStampedLock handle)
+        public LockHandleImpl(Integer key, RefCountedStampedLock handle)
         {
             this.key = key;
             this.handle = handle;

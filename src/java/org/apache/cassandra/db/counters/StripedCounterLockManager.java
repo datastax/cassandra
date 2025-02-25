@@ -22,23 +22,24 @@ import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
 import com.google.common.base.Supplier;
-import com.google.common.collect.Iterables;
 import com.google.common.util.concurrent.Striped;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.COUNTER_LOCK_FAIR_LOCK;
 import static org.apache.cassandra.config.CassandraRelevantProperties.COUNTER_LOCK_NUM_STRIPES_PER_THREAD;
-
+/**
+ * Legacy implemetation of {@link CounterLockManager} that uses a fixes set of locks.
+ * On a workload with many different counters it is likely to see two counters sharing the same lock.
+ */
 public class StripedCounterLockManager implements CounterLockManager
 {
-    private final Striped<java.util.concurrent.locks.Lock> LOCKS;
+    private final Striped<java.util.concurrent.locks.Lock> locks;
 
-    {
+    StripedCounterLockManager () {
         int numStripes = COUNTER_LOCK_NUM_STRIPES_PER_THREAD.getInt() * DatabaseDescriptor.getConcurrentCounterWriters();
         if (COUNTER_LOCK_FAIR_LOCK.getBoolean())
         {
@@ -51,7 +52,7 @@ public class StripedCounterLockManager implements CounterLockManager
                 customMethod.setAccessible(true);
 
                 Supplier<java.util.concurrent.locks.Lock> lockSupplier = () -> new ReentrantLock(true);
-                LOCKS = (Striped<java.util.concurrent.locks.Lock>) customMethod.invoke(null, numStripes, lockSupplier);
+                locks = (Striped<java.util.concurrent.locks.Lock>) customMethod.invoke(null, numStripes, lockSupplier);
             }
             catch (Exception e)
             {
@@ -60,15 +61,15 @@ public class StripedCounterLockManager implements CounterLockManager
         }
         else
         {
-            LOCKS = Striped.lock(numStripes);
+            locks = Striped.lock(numStripes);
         }
     }
 
     @Override
-    public List<Lock> grabLocks(Iterable<Integer> keys)
+    public List<LockHandle> grabLocks(Iterable<Integer> keys)
     {
-        List<Lock> result = new ArrayList<>();
-        Iterable<java.util.concurrent.locks.Lock> locks = LOCKS.bulkGet(keys);
+        List<LockHandle> result = new ArrayList<>();
+        Iterable<java.util.concurrent.locks.Lock> locks = this.locks.bulkGet(keys);
         locks.forEach(l -> result.add(new LockImpl(l)));
         return result;
     }
@@ -79,7 +80,7 @@ public class StripedCounterLockManager implements CounterLockManager
         return false;
     }
 
-    private static class LockImpl implements Lock
+    private static class LockImpl implements LockHandle
     {
         private final java.util.concurrent.locks.Lock lock;
         private boolean acquired;

@@ -100,14 +100,14 @@ public class CounterMutationMetricsTest
         metrics.assertLocksPerUpdate(1);
     }
 
-    private void obtainLocks(TableMetadata metadata, List<CounterLockManager.Lock> locks)
+    private void obtainLocks(TableMetadata metadata, List<CounterLockManager.LockHandle> lockHandles)
     {
         RowUpdateBuilder mutationBuilder = new RowUpdateBuilder(metadata, 5, "key1");
         Mutation mutation = mutationBuilder.clustering("cc")
                                            .add("val", 1L)
                                            .build();
         CounterMutation counterMutation = new CounterMutation(mutation , ConsistencyLevel.ONE);
-        counterMutation.grabCounterLocks(Keyspace.open(KEYSPACE1), locks);
+        counterMutation.grabCounterLocks(Keyspace.open(KEYSPACE1), lockHandles);
     }
 
     private void tryMutate(TableMetadata metadata)
@@ -138,10 +138,10 @@ public class CounterMutationMetricsTest
 
         TableMetadata metadata = Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF1).metadata();
 
-        List<CounterLockManager.Lock> obtainedLocks = new ArrayList<>();
+        List<CounterLockManager.LockHandle> obtainedLockHandles = new ArrayList<>();
         try
         {
-            obtainLocks(metadata, obtainedLocks);
+            obtainLocks(metadata, obtainedLockHandles);
             metrics.assertLockTimeout(0);
 
             CompletableFuture.runAsync(() -> tryMutate(metadata))
@@ -149,8 +149,8 @@ public class CounterMutationMetricsTest
         }
         finally
         {
-            for (CounterLockManager.Lock lock : obtainedLocks)
-                lock.release();
+            for (CounterLockManager.LockHandle lockHandle : obtainedLockHandles)
+                lockHandle.release();
         }
 
         metrics.assertLockTimeout(1);

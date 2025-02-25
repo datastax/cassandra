@@ -21,34 +21,60 @@ package org.apache.cassandra.db.counters;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
+/**
+ * Interface for managing locks for CounterMutation.
+ * CounterMutation needs to ensure that each local counter is accessed by only one thread at a time.
+ * Please note that the id of the counter is an integer hash of the primary key of the row.
+ */
 public interface CounterLockManager
 {
     boolean USE_STRIPED_COUNTER_LOCK_MANAGER = Boolean.getBoolean("cassandra.use_striped_counter_lock_manager");
     CounterLockManager instance = USE_STRIPED_COUNTER_LOCK_MANAGER ? new StripedCounterLockManager() : new CachedCounterLockManager();
 
-    interface Lock
+    /**
+     * Handle to a lock for a particular key.
+     * Some expectations:
+     * - instances of this class are not thread-safe
+     * - it is not required that the underlying lock is reentrant
+     */
+    interface LockHandle
     {
         /**
-         * Try to get the lock.
+         * Try to get the lock. This method can be called at most once.
          *
          * @param timeout  timeout.
          * @param timeUnit time unit.
          * @return false in case the lock could not be acquired within the timeout.
-         * @throws InterruptedException
+         * @throws InterruptedException in case the thread is interrupted while waiting for the lock.
          */
         boolean tryLock(long timeout, TimeUnit timeUnit) throws InterruptedException;
 
         /**
-         * Unlock the lock. This method is to be called even if the acquire method failed.
+         * Unlock the lock if it was acquired and release the handle. This method is to be called even if the acquire method failed or even if tryLock has never been called.
          * This method is to be called only once.
          */
         void release();
     }
 
-    List<Lock> grabLocks(Iterable<Integer> keys);
+    /**
+     * Grab locks for the given keys. The returned handles must be released by calling {@link LockHandle#release()}.
+     * @param keys list of keys, the Iterable is scanned only once in order to prevent side effects.
+     * @return a list of lock handles. The List can be iterated multiple times without side effects.
+     */
+    List<LockHandle> grabLocks(Iterable<Integer> keys);
 
+    /**
+     * Check if the implementation can return the number of keys that are handled by the lock manager.
+     * This method is useful only for testing.
+     * @return true if the implementation can return the number of keys.
+     */
     boolean hasNumKeys();
 
+    /**
+     * Get the number of keys that are handled by the lock manager.
+     * This method is useful only for testing.
+     * @return the number of keys.
+     */
     default int getNumKeys()
     {
         throw new UnsupportedOperationException();

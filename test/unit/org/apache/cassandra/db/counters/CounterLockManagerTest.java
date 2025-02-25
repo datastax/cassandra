@@ -57,20 +57,20 @@ public class CounterLockManagerTest
     private static void basicTest(CounterLockManager manager) throws Exception
     {
         List<Integer> keys = List.of(1, 2, 3, 4, 5);
-        List<CounterLockManager.Lock> lockHandles = manager.grabLocks(keys);
-        for (CounterLockManager.Lock l : lockHandles)
+        List<CounterLockManager.LockHandle> lockHandleHandles = manager.grabLocks(keys);
+        for (CounterLockManager.LockHandle l : lockHandleHandles)
             assertThat(l.tryLock(1, TimeUnit.SECONDS)).isTrue();
 
         if (manager.hasNumKeys())
             assertThat(manager.getNumKeys()).isEqualTo(keys.size());
 
-        lockHandles.forEach(CounterLockManager.Lock::release);
+        lockHandleHandles.forEach(CounterLockManager.LockHandle::release);
 
         if (manager.hasNumKeys())
             assertThat(manager.getNumKeys()).isZero();
 
         // double release is not allowed (expecting IllegalMonitorStateException)
-        for (CounterLockManager.Lock l : lockHandles)
+        for (CounterLockManager.LockHandle l : lockHandleHandles)
             assertThatThrownBy(l::release).isInstanceOf(IllegalMonitorStateException.class);
 
         // the number of keys is still zero
@@ -94,8 +94,8 @@ public class CounterLockManagerTest
     private static void lockTimeout(CounterLockManager manager) throws Exception
     {
         List<Integer> keys = List.of(1, 2, 3, 4, 5);
-        List<CounterLockManager.Lock> lockHandles = manager.grabLocks(keys);
-        for (CounterLockManager.Lock l : lockHandles)
+        List<CounterLockManager.LockHandle> lockHandleHandles = manager.grabLocks(keys);
+        for (CounterLockManager.LockHandle l : lockHandleHandles)
             assertThat(l.tryLock(1, TimeUnit.SECONDS)).isTrue();
 
         if (manager.hasNumKeys())
@@ -106,10 +106,10 @@ public class CounterLockManagerTest
             try
             {
                 int numAcquired = 0;
-                List<CounterLockManager.Lock> newLockHandles = manager.grabLocks(keys);
+                List<CounterLockManager.LockHandle> newLockHandleHandles = manager.grabLocks(keys);
                 try
                 {
-                    for (CounterLockManager.Lock l : newLockHandles)
+                    for (CounterLockManager.LockHandle l : newLockHandleHandles)
                     {
                         if (l.tryLock(1, TimeUnit.SECONDS))
                             numAcquired++;
@@ -117,7 +117,7 @@ public class CounterLockManagerTest
                 }
                 finally
                 {
-                    newLockHandles.forEach(CounterLockManager.Lock::release);
+                    newLockHandleHandles.forEach(CounterLockManager.LockHandle::release);
                 }
                 return numAcquired;
             }
@@ -128,7 +128,7 @@ public class CounterLockManagerTest
         }).join();
         assertThat(count).isZero();
 
-        lockHandles.forEach(CounterLockManager.Lock::release);
+        lockHandleHandles.forEach(CounterLockManager.LockHandle::release);
 
         if (manager.hasNumKeys())
             assertThat(manager.getNumKeys()).isZero();
@@ -137,10 +137,10 @@ public class CounterLockManagerTest
             try
             {
                 int numAcquired = 0;
-                List<CounterLockManager.Lock> newLockHandles = manager.grabLocks(keys);
+                List<CounterLockManager.LockHandle> newLockHandleHandles = manager.grabLocks(keys);
                 try
                 {
-                    for (CounterLockManager.Lock l : newLockHandles)
+                    for (CounterLockManager.LockHandle l : newLockHandleHandles)
                     {
                         if (l.tryLock(1, TimeUnit.SECONDS))
                             numAcquired++;
@@ -148,7 +148,7 @@ public class CounterLockManagerTest
                 }
                 finally
                 {
-                    newLockHandles.forEach(CounterLockManager.Lock::release);
+                    newLockHandleHandles.forEach(CounterLockManager.LockHandle::release);
                 }
                 return numAcquired;
             }
@@ -178,8 +178,8 @@ public class CounterLockManagerTest
     private static void testInterruptedException(CounterLockManager manager) throws Exception
     {
         List<Integer> keys = List.of(1, 2, 3, 4, 5);
-        List<CounterLockManager.Lock> lockHandles = manager.grabLocks(keys);
-        for (CounterLockManager.Lock l : lockHandles)
+        List<CounterLockManager.LockHandle> lockHandleHandles = manager.grabLocks(keys);
+        for (CounterLockManager.LockHandle l : lockHandleHandles)
             assertThat(l.tryLock(1, TimeUnit.SECONDS)).isTrue();
 
         if (manager.hasNumKeys())
@@ -187,12 +187,12 @@ public class CounterLockManagerTest
 
         CompletableFuture<Void> result = new CompletableFuture<>();
         Thread otherThread = new Thread(() -> {
-            List<CounterLockManager.Lock> newLockHandles = manager.grabLocks(keys);
+            List<CounterLockManager.LockHandle> newLockHandleHandles = manager.grabLocks(keys);
             try
             {
                 try
                 {
-                    for (CounterLockManager.Lock l : newLockHandles)
+                    for (CounterLockManager.LockHandle l : newLockHandleHandles)
                     {
                         // the first of these locks will be interrupted
                         l.tryLock(1, TimeUnit.HOURS);
@@ -207,7 +207,7 @@ public class CounterLockManagerTest
             finally
             {
                 // in any case all the locks have to be released
-                newLockHandles.forEach(CounterLockManager.Lock::release);
+                newLockHandleHandles.forEach(CounterLockManager.LockHandle::release);
             }
         });
 
@@ -215,7 +215,7 @@ public class CounterLockManagerTest
         otherThread.interrupt();
         assertThatThrownBy(result::join).hasCauseInstanceOf(InterruptedException.class);
 
-        lockHandles.forEach(CounterLockManager.Lock::release);
+        lockHandleHandles.forEach(CounterLockManager.LockHandle::release);
 
         if (manager.hasNumKeys())
             assertThat(manager.getNumKeys()).isZero();

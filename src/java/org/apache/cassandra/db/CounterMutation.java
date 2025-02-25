@@ -18,22 +18,17 @@
 package org.apache.cassandra.db;
 
 import java.io.IOException;
-import java.lang.reflect.Method;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.locks.Lock;
-import java.util.concurrent.locks.ReentrantLock;
 import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Function;
 import com.google.common.base.Objects;
-import com.google.common.base.Supplier;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Iterators;
 import com.google.common.collect.PeekingIterator;
-import com.google.common.util.concurrent.Striped;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -62,8 +57,6 @@ import org.apache.cassandra.utils.*;
 import org.apache.cassandra.utils.btree.BTreeSet;
 
 import static java.util.concurrent.TimeUnit.*;
-import static org.apache.cassandra.config.CassandraRelevantProperties.COUNTER_LOCK_FAIR_LOCK;
-import static org.apache.cassandra.config.CassandraRelevantProperties.COUNTER_LOCK_NUM_STRIPES_PER_THREAD;
 import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
 import static org.apache.cassandra.net.MessagingService.VERSION_DS_10;
 import static org.apache.cassandra.net.MessagingService.VERSION_DS_11;
@@ -180,7 +173,7 @@ public class CounterMutation implements IMutation
         Mutation.PartitionUpdateCollector resultBuilder = new Mutation.PartitionUpdateCollector(getKeyspaceName(), key());
         Keyspace keyspace = Keyspace.open(getKeyspaceName());
 
-        List<CounterLockManager.Lock> locks = new ArrayList<>();
+        List<CounterLockManager.LockHandle> lockHandles = new ArrayList<>();
         Tracing.trace("Acquiring counter locks");
 
         long clock = FBUtilities.timestampMicros();
@@ -188,7 +181,7 @@ public class CounterMutation implements IMutation
 
         try
         {
-            grabCounterLocks(keyspace, locks);
+            grabCounterLocks(keyspace, lockHandles);
             for (PartitionUpdate upd : getPartitionUpdates())
                 resultBuilder.add(processModifications(upd, clock, counterId));
 
@@ -199,8 +192,8 @@ public class CounterMutation implements IMutation
         finally
         {
             // iterate over all locks in reverse order and unlock them
-            for (int i = locks.size() - 1; i >= 0; i--)
-                locks.get(i).release();
+            for (int i = lockHandles.size() - 1; i >= 0; i--)
+                lockHandles.get(i).release();
         }
     }
 
@@ -229,11 +222,11 @@ public class CounterMutation implements IMutation
         applyCounterMutation();
     }
 
-    private int countDistinctLocks(Iterable<CounterLockManager.Lock> sortedLocks)
+    private int countDistinctLocks(Iterable<CounterLockManager.LockHandle> sortedLocks)
     {
-        CounterLockManager.Lock prev = null;
+        CounterLockManager.LockHandle prev = null;
         int counter = 0;
-        for(CounterLockManager.Lock l: sortedLocks)
+        for(CounterLockManager.LockHandle l: sortedLocks)
         {
             if (prev != l)
                 counter++;
@@ -243,24 +236,24 @@ public class CounterMutation implements IMutation
     }
 
     @VisibleForTesting
-    public void grabCounterLocks(Keyspace keyspace, List<CounterLockManager.Lock> locks) throws WriteTimeoutException
+    public void grabCounterLocks(Keyspace keyspace, List<CounterLockManager.LockHandle> lockHandles) throws WriteTimeoutException
     {
-        assert locks.isEmpty();
+        assert lockHandles.isEmpty();
         long startTime = System.nanoTime();
 
         AbstractReplicationStrategy replicationStrategy = keyspace.getReplicationStrategy();
-        List<CounterLockManager.Lock> sortedLocks = CounterLockManager.instance.grabLocks(getCounterLockKeys());
+        List<CounterLockManager.LockHandle> sortedLockHandles = CounterLockManager.instance.grabLocks(getCounterLockKeys());
         // always return all the locks to the caller, this way they can be released even in case of errors
-        locks.addAll(sortedLocks);
-        locksPerUpdate.update(countDistinctLocks(sortedLocks));
+        lockHandles.addAll(sortedLockHandles);
+        locksPerUpdate.update(countDistinctLocks(sortedLockHandles));
         try
         {
-            for (CounterLockManager.Lock lock : sortedLocks)
+            for (CounterLockManager.LockHandle lockHandle : sortedLockHandles)
             {
                 long timeout = getTimeout(NANOSECONDS) - (System.nanoTime() - startTime);
                 try
                 {
-                    if (!lock.tryLock(timeout, NANOSECONDS))
+                    if (!lockHandle.tryLock(timeout, NANOSECONDS))
                         handleLockTimeoutAndThrow(replicationStrategy);
 
                 }
