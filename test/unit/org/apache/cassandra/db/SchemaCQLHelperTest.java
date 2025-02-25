@@ -577,16 +577,14 @@ public class SchemaCQLHelperTest extends CQLTester
                           "    ck1 varint,\n" +
                           "    ck2 varint,\n" +
                           "    reg1 int,\n" +
-                          "    reg3 int,\n" +
-                          "    reg2 int,\n" +
                           "    PRIMARY KEY ((pk1, pk2), ck1, ck2)\n" +
                           ") WITH ID = " + cfs.metadata.id + "\n" +
                           "    AND CLUSTERING ORDER BY (ck1 ASC, ck2 DESC)";
 
         assertThat(schema,
                    allOf(startsWith(expected),
-                         containsString("ALTER TABLE " + keyspace() + "." + tableName + " DROP reg2 USING TIMESTAMP 10000;"),
-                         containsString("ALTER TABLE " + keyspace() + "." + tableName + " DROP reg3 USING TIMESTAMP 10000;")));
+                         containsString("DROPPED COLUMN RECORD reg3 int USING TIMESTAMP 10000"),
+                         containsString("DROPPED COLUMN RECORD reg2 int USING TIMESTAMP 10000")));
 
         JsonNode manifest = JsonUtils.JSON_OBJECT_MAPPER.readTree(cfs.getDirectories().getSnapshotManifestFile(SNAPSHOT).toJavaIOFile());
         JsonNode files = manifest.get("files");
@@ -616,15 +614,13 @@ public class SchemaCQLHelperTest extends CQLTester
         schema = schema.substring(schema.indexOf("CREATE TABLE")); // trim to ensure order
         String expected = "CREATE TABLE IF NOT EXISTS " + keyspace() + "." + tableName + " (\n" +
                           "    pk1 varint PRIMARY KEY,\n" +
-                          "    reg1 int,\n" +
-                          "    reg3 int,\n" +
-                          "    reg2 int\n" +
+                          "    reg1 int\n" +
                           ") WITH ID = " + cfs.metadata.id + "\n";
 
         assertThat(schema,
                    allOf(startsWith(expected),
-                         containsString("ALTER TABLE " + keyspace() + "." + tableName + " DROP reg2 USING TIMESTAMP 10000;"),
-                         containsString("ALTER TABLE " + keyspace() + "." + tableName + " DROP reg3 USING TIMESTAMP 10000;")));
+                         containsString("DROPPED COLUMN RECORD reg3 int USING TIMESTAMP 10000"),
+                         containsString("DROPPED COLUMN RECORD reg2 int USING TIMESTAMP 10000")));
 
         JsonNode manifest = JsonUtils.JSON_OBJECT_MAPPER.readTree(cfs.getDirectories().getSnapshotManifestFile(SNAPSHOT).toJavaIOFile());
         JsonNode files = manifest.get("files");
