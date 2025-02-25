@@ -54,10 +54,10 @@ public class Config
     public static final String PROPERTY_PREFIX = "cassandra.";
 
     public String cluster_name = "Test Cluster";
-    public ParameterizedClass authenticator;
-    public ParameterizedClass authorizer;
-    public ParameterizedClass role_manager;
-    public ParameterizedClass network_authorizer;
+    public String authenticator;
+    public String authorizer;
+    public String role_manager;
+    public String network_authorizer;
     public volatile int permissions_validity_in_ms = 2000;
     public volatile int permissions_cache_max_entries = 1000;
     public volatile int permissions_update_interval_in_ms = -1;
@@ -158,7 +158,7 @@ public class Config
     public boolean listen_interface_prefer_ipv6 = false;
     public String broadcast_address;
     public boolean listen_on_broadcast_address = false;
-    public ParameterizedClass internode_authenticator;
+    public String internode_authenticator;
 
     /*
      * RPC address and interface refer to the address/interface used for the native protocol used to communicate with
