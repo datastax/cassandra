@@ -27,6 +27,7 @@ import org.apache.cassandra.db.ClusteringPrefix;
 import org.apache.cassandra.io.sstable.format.AbstractSSTableIterator.RowReader;
 import org.apache.cassandra.io.util.DataPosition;
 import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.io.util.ReadCtx;
 
 // Used by indexed readers to store where they are of the index.
 public class IndexState implements AutoCloseable
@@ -47,12 +48,13 @@ public class IndexState implements AutoCloseable
                       ClusteringComparator comparator,
                       BigTableRowIndexEntry indexEntry,
                       boolean reversed,
-                      FileHandle indexFile)
+                      FileHandle indexFile,
+                      ReadCtx ctx)
     {
         this.reader = reader;
         this.comparator = comparator;
         this.indexEntry = indexEntry;
-        this.indexInfoRetriever = indexEntry.openWithIndex(indexFile);
+        this.indexInfoRetriever = indexEntry.openWithIndex(indexFile, ctx);
         this.reversed = reversed;
         this.currentIndexIdx = reversed ? indexEntry.columnsIndexCount() : -1;
     }

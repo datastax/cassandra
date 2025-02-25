@@ -52,6 +52,7 @@ import org.apache.cassandra.io.sstable.format.SSTableZeroCopyWriter;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.net.AsyncStreamingInputPlus;
 import org.apache.cassandra.schema.CachingParams;
 import org.apache.cassandra.schema.KeyspaceParams;
@@ -191,7 +192,8 @@ public class SSTableZeroCopyWriterTest
                                                              Slices.ALL,
                                                              ColumnFilter.all(store.metadata()),
                                                              false,
-                                                             SSTableReadsListener.NOOP_LISTENER);
+                                                             SSTableReadsListener.NOOP_LISTENER,
+                                                             ReadCtx.FOR_TEST);
             while (rowIter.hasNext())
             {
                 rowIter.next();
@@ -207,7 +209,7 @@ public class SSTableZeroCopyWriterTest
         FileHandle componentFile = new FileHandle.Builder(sstable.descriptor.fileFor(component))
                                    .bufferSize(1024).complete();
         ByteBuffer buffer = ByteBuffer.allocate((int) componentFile.channel.size());
-        componentFile.channel.read(buffer, 0);
+        componentFile.channel.read(buffer, 0, ReadCtx.FOR_TEST);
         buffer.flip();
 
         DataInputPlus inputPlus = bufferMapper.apply(buffer);

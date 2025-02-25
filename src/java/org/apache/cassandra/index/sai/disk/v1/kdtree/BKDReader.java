@@ -53,6 +53,7 @@ import org.apache.cassandra.index.sai.utils.SeekingRandomAccessInput;
 import org.apache.cassandra.io.compress.ICompressor;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.utils.AbstractGuavaIterator;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.lucene.index.CorruptIndexException;
@@ -84,13 +85,14 @@ public class BKDReader extends TraversingBKDReader implements Closeable
                      FileHandle kdtreeFile,
                      long bkdIndexRoot,
                      FileHandle postingsFile,
-                     long bkdPostingsRoot) throws IOException
+                     long bkdPostingsRoot,
+                     ReadCtx ctx) throws IOException
     {
-        super(kdtreeFile, bkdIndexRoot);
+        super(kdtreeFile, bkdIndexRoot, ctx);
         this.indexContext = indexContext;
         this.postingsFile = postingsFile;
         this.kdtreeFile = kdtreeFile;
-        this.postingsIndex = new BKDPostingsIndex(postingsFile, bkdPostingsRoot);
+        this.postingsIndex = new BKDPostingsIndex(postingsFile, bkdPostingsRoot, ctx);
         this.compressor = null;
     }
 
@@ -99,15 +101,15 @@ public class BKDReader extends TraversingBKDReader implements Closeable
         int oldToNew(int rowID);
     }
 
-    public IteratorState iteratorState(Direction direction, IntersectVisitor query) throws IOException
+    public IteratorState iteratorState(Direction direction, IntersectVisitor query, ReadCtx ctx) throws IOException
     {
-        return new IteratorState(rowID -> rowID, direction, query);
+        return new IteratorState(rowID -> rowID, direction, query, ctx);
     }
 
     @VisibleForTesting
-    public IteratorState iteratorState() throws IOException
+    public IteratorState iteratorState(ReadCtx ctx) throws IOException
     {
-        return iteratorState(Direction.FORWARD, null);
+        return iteratorState(Direction.FORWARD, null, ctx);
     }
 
     public class IteratorState extends AbstractGuavaIterator<Integer> implements Comparable<IteratorState>, Closeable
@@ -128,7 +130,7 @@ public class BKDReader extends TraversingBKDReader implements Closeable
         private final Direction direction;
         private final BKDReader.IntersectVisitor query;
 
-        public IteratorState(DocMapper docMapper, Direction direction, BKDReader.IntersectVisitor query) throws IOException
+        public IteratorState(DocMapper docMapper, Direction direction, BKDReader.IntersectVisitor query, ReadCtx ctx) throws IOException
         {
             this.docMapper = docMapper;
             this.direction = direction;
@@ -137,8 +139,8 @@ public class BKDReader extends TraversingBKDReader implements Closeable
             scratch = new byte[packedBytesLength];
 
             final long firstLeafFilePointer = getMinLeafBlockFP();
-            bkdInput = IndexFileUtils.instance.openInput(kdtreeFile);
-            bkdPostingsInput = IndexFileUtils.instance.openInput(postingsFile);
+            bkdInput = IndexFileUtils.instance.openInput(kdtreeFile, ctx);
+            bkdPostingsInput = IndexFileUtils.instance.openInput(postingsFile, ctx);
             bkdInput.seek(firstLeafFilePointer);
 
             leafCursor = new LeafCursor(direction, query);
@@ -320,9 +322,9 @@ public class BKDReader extends TraversingBKDReader implements Closeable
         }
 
         listener.onSegmentHit();
-        IndexInput bkdInput = IndexFileUtils.instance.openInput(indexFile);
-        IndexInput postingsInput = IndexFileUtils.instance.openInput(postingsFile);
-        IndexInput postingsSummaryInput = IndexFileUtils.instance.openInput(postingsFile);
+        IndexInput bkdInput = IndexFileUtils.instance.openInput(indexFile, context.readCtx());
+        IndexInput postingsInput = IndexFileUtils.instance.openInput(postingsFile, context.readCtx());
+        IndexInput postingsSummaryInput = IndexFileUtils.instance.openInput(postingsFile, context.readCtx());
         PackedIndexTree index = new PackedIndexTree();
 
         Intersection completable =

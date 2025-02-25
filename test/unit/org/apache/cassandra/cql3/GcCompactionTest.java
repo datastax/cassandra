@@ -37,6 +37,7 @@ import org.apache.cassandra.io.sstable.ISSTableScanner;
 import org.apache.cassandra.io.sstable.SSTableId;
 import org.apache.cassandra.io.sstable.SSTableIdFactory;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.schema.CompactionParams;
 import org.apache.cassandra.schema.CompactionParams.TombstoneOption;
 import org.apache.cassandra.utils.FBUtilities;
@@ -544,7 +545,7 @@ public class GcCompactionTest extends CQLTester
     int count(SSTableReader reader, ToIntFunction<Unfiltered> predicate, ToIntFunction<UnfilteredRowIterator> partitionPredicate)
     {
         int instances = 0;
-        try (ISSTableScanner partitions = reader.getScanner())
+        try (ISSTableScanner partitions = reader.getScanner(ReadCtx.FOR_TEST))
         {
             while (partitions.hasNext())
             {

@@ -65,6 +65,7 @@ import org.apache.cassandra.index.transactions.IndexTransaction;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableFlushObserver;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.notifications.INotification;
 import org.apache.cassandra.notifications.INotificationConsumer;
 import org.apache.cassandra.notifications.MemtableDiscardedNotification;
@@ -91,7 +92,8 @@ public class SASIIndex implements Index, INotificationConsumer
         public SecondaryIndexBuilder getIndexBuildTask(ColumnFamilyStore cfs,
                                                        Set<Index> indexes,
                                                        Collection<SSTableReader> sstablesToRebuild,
-                                                       boolean isFullRebuild)
+                                                       boolean isFullRebuild,
+                                                       ReadCtx buildCtx)
         {
             NavigableMap<SSTableReader, Map<ColumnMetadata, ColumnIndex>> sstables = new TreeMap<>(SSTableReader.idComparator);
 

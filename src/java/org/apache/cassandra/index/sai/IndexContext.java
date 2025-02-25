@@ -85,7 +85,9 @@ import org.apache.cassandra.index.sai.view.IndexViewManager;
 import org.apache.cassandra.index.sai.view.View;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.TableId;
@@ -927,7 +929,7 @@ public class IndexContext
                 return;
             }
 
-            try
+            try(ReadCtx ctx = StorageProvider.instance.readCtxFor(ReadCtx.Kind.INDEX_LOAD))
             {
                 if (validate)
                 {
@@ -940,7 +942,7 @@ public class IndexContext
                 }
 
                 SSTableIndex index = new SSTableIndex(context, perIndexComponents);
-                long count = context.primaryKeyMapFactory().count();
+                long count = context.primaryKeyMapFactory().count(ctx);
                 logger.debug(logMessage("Successfully created index for SSTable {} with {} rows."), context.descriptor(), count);
 
                 // Try to add new index to the set, if set already has such index, we'll simply release and move on.

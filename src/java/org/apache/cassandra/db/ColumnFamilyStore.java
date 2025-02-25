@@ -144,8 +144,10 @@ import org.apache.cassandra.io.sstable.StorageHandler;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.Version;
+import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileOutputStreamPlus;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.locator.AbstractReplicationStrategy;
 import org.apache.cassandra.metrics.KeyspaceMetrics;
 import org.apache.cassandra.metrics.Sampler;
@@ -1798,9 +1800,10 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         // cleanup size estimation only counts bytes for keys local to this node
         long expectedFileSize = 0;
         Collection<Range<Token>> ranges = StorageService.instance.getLocalReplicas(keyspace.getName()).ranges();
+        ReadCtx ctx = StorageProvider.instance.readCtxFor(ReadCtx.Kind.COMPACTION_PREPARATION);
         for (SSTableReader sstable : sstables)
         {
-            List<SSTableReader.PartitionPositionBounds> positions = sstable.getPositionsForRanges(ranges);
+            List<SSTableReader.PartitionPositionBounds> positions = sstable.getPositionsForRanges(ranges, ctx);
             for (SSTableReader.PartitionPositionBounds position : positions)
                 expectedFileSize += position.upperPosition - position.lowerPosition;
         }
@@ -2066,13 +2069,14 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     {
         ByteBuffer keyBuffer = hexFormat ? ByteBufferUtil.hexToBytes(key) : metadata().partitionKeyType.fromString(key);
         DecoratedKey dk = decorateKey(keyBuffer);
-        try (OpOrder.Group op = readOrdering.start())
+        try (OpOrder.Group op = readOrdering.start();
+             ReadCtx ctx = StorageProvider.instance.readCtxFor(ReadCtx.Kind.NODEPROBE))
         {
             List<String> files = new ArrayList<>();
             for (SSTableReader sstr : select(View.select(SSTableSet.LIVE, dk)).sstables)
             {
                 // check if the key actually exists in this sstable, without updating cache and stats
-                if (sstr.checkEntryExists(dk, SSTableReader.Operator.EQ, false))
+                if (sstr.checkEntryExists(dk, SSTableReader.Operator.EQ, false, ctx))
                     files.add(sstr.getFilename());
             }
             return files;
@@ -2516,7 +2520,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         return Iterables.concat(stores);
     }
 
-    public Iterable<DecoratedKey> keySamples(Range<Token> range)
+    public Iterable<DecoratedKey> keySamples(Range<Token> range, ReadCtx ctx)
     {
         try (RefViewFragment view = selectAndReference(View.selectFunction(SSTableSet.CANONICAL)))
         {
@@ -2524,19 +2528,19 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
             int i = 0;
             for (SSTableReader sstable: view.sstables)
             {
-                samples[i++] = sstable.getKeySamples(range);
+                samples[i++] = sstable.getKeySamples(range, ctx);
             }
             return Iterables.concat(samples);
         }
     }
 
-    public long estimatedKeysForRange(Range<Token> range)
+    public long estimatedKeysForRange(Range<Token> range, ReadCtx ctx)
     {
         try (RefViewFragment view = selectAndReference(View.selectFunction(SSTableSet.CANONICAL)))
         {
             long count = 0;
             for (SSTableReader sstable : view.sstables)
-                count += sstable.estimatedKeysForRanges(Collections.singleton(range));
+                count += sstable.estimatedKeysForRanges(Collections.singleton(range), ctx);
             return count;
         }
     }

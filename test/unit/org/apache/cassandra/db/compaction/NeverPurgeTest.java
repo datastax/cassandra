@@ -32,6 +32,7 @@ import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.ReadCtx;
 
 import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
 import static org.junit.Assert.assertEquals;
@@ -105,7 +106,7 @@ public class NeverPurgeTest extends CQLTester
         assertEquals(1, sstables.size()); // always run a major compaction before calling this
         SSTableReader sstable = sstables.iterator().next();
         int tombstoneCount = 0;
-        try (ISSTableScanner scanner = sstable.getScanner())
+        try (ISSTableScanner scanner = sstable.getScanner(ReadCtx.FOR_TEST))
         {
             while (scanner.hasNext())
             {

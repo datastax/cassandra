@@ -85,8 +85,10 @@ import org.apache.cassandra.index.sai.utils.LowPriorityThreadFactory;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
+import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.service.StorageService;
 
 import static java.lang.Math.max;
@@ -410,7 +412,8 @@ public class CompactionGraph implements Closeable, Accountable
             var es = Executors.newSingleThreadExecutor(new NamedThreadFactory("CompactionGraphPostingsWriter"));
             long postingsLength;
             try (var indexHandle = perIndexComponents.get(IndexComponentType.TERMS_DATA).createIndexBuildTimeFileHandle();
-                 var index = OnDiskGraphIndex.load(indexHandle::createReader, termsOffset))
+                 var readCtx = StorageProvider.instance.readCtxFor(ReadCtx.Kind.VECTOR_INDEX_FLUSH);
+                 var index = OnDiskGraphIndex.load(() -> indexHandle.createReader(readCtx), termsOffset))
             {
                 var postingsFuture = es.submit(() -> {
                     // V2 doesn't support ONE_TO_MANY so force it to ZERO_OR_ONE_TO_MANY if necessary;

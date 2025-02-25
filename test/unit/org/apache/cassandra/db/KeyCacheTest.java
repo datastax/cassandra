@@ -51,6 +51,7 @@ import org.apache.cassandra.io.sstable.format.big.BigTableRowIndexEntry;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.DataInputPlus;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.service.CacheService;
 import org.apache.cassandra.utils.Pair;
@@ -156,7 +157,7 @@ public class KeyCacheTest
                 BigTableRowIndexEntry rie = CacheService.instance.keyCache.get(k);
                 savedMap.put(k, rie);
                 SSTableReader sstr = readerForKey(k);
-                savedInfoMap.put(k, rie.openWithIndex(sstr.getIndexFile()));
+                savedInfoMap.put(k, rie.openWithIndex(sstr.getIndexFile(), ReadCtx.FOR_TEST));
             }
         }
 
@@ -179,7 +180,7 @@ public class KeyCacheTest
             for (int i = 0; i < expected.columnsIndexCount(); i++)
             {
                 SSTableReader actualSstr = readerForKey(entry.getKey());
-                try (BigTableRowIndexEntry.IndexInfoRetriever actualIir = actual.openWithIndex(actualSstr.getIndexFile()))
+                try (BigTableRowIndexEntry.IndexInfoRetriever actualIir = actual.openWithIndex(actualSstr.getIndexFile(), ReadCtx.FOR_TEST))
                 {
                     BigTableRowIndexEntry.IndexInfoRetriever expectedIir = savedInfoMap.get(entry.getKey());
                     assertEquals(expectedIir.columnsIndex(i), actualIir.columnsIndex(i));

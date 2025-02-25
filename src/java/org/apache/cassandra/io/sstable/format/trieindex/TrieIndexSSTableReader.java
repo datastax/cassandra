@@ -17,7 +17,6 @@
  */
 package org.apache.cassandra.io.sstable.format.trieindex;
 
-import java.io.Closeable;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
@@ -49,7 +48,6 @@ import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.Slices;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.rows.Rows;
-import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.rows.UnfilteredRowIterators;
 import org.apache.cassandra.dht.AbstractBounds;
@@ -76,6 +74,7 @@ import org.apache.cassandra.io.sstable.metadata.MetadataComponent;
 import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.io.sstable.metadata.ValidationMetadata;
+import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.io.util.BufferedDataOutputStreamPlus;
 import org.apache.cassandra.io.util.ChannelProxy;
 import org.apache.cassandra.io.util.DataOutputStreamPlus;
@@ -84,6 +83,7 @@ import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileInputStreamPlus;
 import org.apache.cassandra.io.util.RandomAccessReader;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
@@ -233,7 +233,7 @@ public class TrieIndexSSTableReader extends SSTableReader
     }
 
     @Override
-    protected RowIndexEntry getPosition(PartitionPosition key, Operator op, boolean updateCacheAndStats, boolean permitMatchPastLast, SSTableReadsListener listener)
+    protected RowIndexEntry getPosition(PartitionPosition key, Operator op, boolean updateCacheAndStats, boolean permitMatchPastLast, SSTableReadsListener listener, ReadCtx ctx)
     {
         assert !permitMatchPastLast;
 
@@ -241,7 +241,7 @@ public class TrieIndexSSTableReader extends SSTableReader
         Operator searchOp;
 
         if (op == EQ)
-            return getExactPosition((DecoratedKey) key, listener, updateCacheAndStats);
+            return getExactPosition((DecoratedKey) key, listener, updateCacheAndStats, ctx);
 
         if (op == GT || op == GE)
         {
@@ -251,9 +251,9 @@ public class TrieIndexSSTableReader extends SSTableReader
             searchKey = filteredLeft ? first : key;
             searchOp = filteredLeft ? GE : op;
 
-            try (PartitionIndex.Reader reader = partitionIndex.openReader())
+            try (PartitionIndex.Reader reader = partitionIndex.openReader(ctx))
             {
-                return reader.ceiling(searchKey, (pos, assumeNoMatch, compareKey) -> retrieveEntryIfAcceptable(searchOp, compareKey, pos, assumeNoMatch));
+                return reader.ceiling(searchKey, (pos, assumeNoMatch, compareKey) -> retrieveEntryIfAcceptable(searchOp, compareKey, pos, assumeNoMatch, ctx));
             }
             catch (IOException e)
             {
@@ -272,11 +272,11 @@ public class TrieIndexSSTableReader extends SSTableReader
      * (with assumeNoMatch: true).
      * Returns the index entry at this position, or null if the search op rejects it.
      */
-    private RowIndexEntry retrieveEntryIfAcceptable(Operator searchOp, PartitionPosition searchKey, long pos, boolean assumeNoMatch) throws IOException
+    private RowIndexEntry retrieveEntryIfAcceptable(Operator searchOp, PartitionPosition searchKey, long pos, boolean assumeNoMatch, ReadCtx ctx) throws IOException
     {
         if (pos >= 0)
         {
-            try (FileDataInput in = rowIndexFile.createReader(pos))
+            try (FileDataInput in = rowIndexFile.createReader(ctx, pos))
             {
                 if (assumeNoMatch)
                     ByteBufferUtil.skipShortLength(in);
@@ -295,7 +295,7 @@ public class TrieIndexSSTableReader extends SSTableReader
             pos = ~pos;
             if (!assumeNoMatch)
             {
-                try (FileDataInput in = dfile.createReader(pos))
+                try (FileDataInput in = dfile.createReader(ctx, pos))
                 {
                     ByteBuffer indexKey = ByteBufferUtil.readWithShortLength(in);
                     DecoratedKey decorated = decorateKey(indexKey);
@@ -325,7 +325,8 @@ public class TrieIndexSSTableReader extends SSTableReader
 
     public RowIndexEntry getExactPosition(DecoratedKey dk,
                                           SSTableReadsListener listener,
-                                          boolean updateStats)
+                                          boolean updateStats,
+                                          ReadCtx ctx)
     {
         if (!inBloomFilter(dk))
         {
@@ -347,7 +348,7 @@ public class TrieIndexSSTableReader extends SSTableReader
 
         listener.onSSTablePartitionIndexAccessed(this);
 
-        try (PartitionIndex.Reader reader = partitionIndex.openReader())
+        try (PartitionIndex.Reader reader = partitionIndex.openReader(ctx))
         {
             long indexPos = reader.exactCandidate(dk);
             if (indexPos == PartitionIndex.NOT_FOUND)
@@ -371,7 +372,7 @@ public class TrieIndexSSTableReader extends SSTableReader
                 seekPosition = ~indexPos;
             }
 
-            try (FileDataInput in = fh.createReader(seekPosition))
+            try (FileDataInput in = fh.createReader(ctx, seekPosition))
             {
                 return ByteBufferUtil.equalsWithShortLength(in, dk.getKey())
                        ? handleKeyFound(updateStats, listener, in, indexPos)
@@ -408,9 +409,9 @@ public class TrieIndexSSTableReader extends SSTableReader
      * @param bounds Must not be wrapped around ranges
      * @return PartitionIndexIterator within the given bounds
      */
-    public PartitionIterator coveredKeysIterator(AbstractBounds<PartitionPosition> bounds) throws IOException
+    public PartitionIterator coveredKeysIterator(AbstractBounds<PartitionPosition> bounds, ReadCtx ctx) throws IOException
     {
-        return new KeysRange(bounds).iterator();
+        return new KeysRange(bounds).iterator(ctx);
     }
 
     private final class KeysRange
@@ -441,13 +442,13 @@ public class TrieIndexSSTableReader extends SSTableReader
             }
         }
 
-        PartitionIterator iterator() throws IOException
+        PartitionIterator iterator(ReadCtx ctx) throws IOException
         {
-            return coveredKeysIterator(left, inclusiveLeft, right, inclusiveRight);
+            return coveredKeysIterator(left, inclusiveLeft, right, inclusiveRight, ctx);
         }
     }
 
-    public PartitionIterator coveredKeysIterator(PartitionPosition left, boolean inclusiveLeft, PartitionPosition right, boolean inclusiveRight) throws IOException
+    public PartitionIterator coveredKeysIterator(PartitionPosition left, boolean inclusiveLeft, PartitionPosition right, boolean inclusiveRight, ReadCtx ctx) throws IOException
     {
         AbstractBounds<PartitionPosition> cover = Bounds.bounds(left, inclusiveLeft, right, inclusiveRight);
         boolean isLeftInSStableRange = !filterFirst() || first.compareTo(left) <= 0 && last.compareTo(left) >= 0;
@@ -460,31 +461,33 @@ public class TrieIndexSSTableReader extends SSTableReader
                                          metadata().partitioner,
                                          rowIndexFile, dfile,
                                          isLeftInSStableRange ? left : first, inclusiveLeft ? -1 : 0,
-                                         isRightInSStableRange ? right : last, inclusiveRight ? 0 : -1);
+                                         isRightInSStableRange ? right : last, inclusiveRight ? 0 : -1,
+                                         ctx);
         }
         else
-            return PartitionIterator.empty(partitionIndex);
-    }
-
-    public PartitionIterator allKeysIterator() throws IOException
-    {
-        return new PartitionIterator(partitionIndex, metadata().partitioner, rowIndexFile, dfile);
-    }
-
-    public ScrubPartitionIterator scrubPartitionsIterator() throws IOException
-    {
-        if (partitionIndex == null)
-            return null;
-        return new ScrubIterator(partitionIndex, rowIndexFile);
+            return PartitionIterator.empty(partitionIndex, ctx);
     }
 
     @Override
-    public Iterable<DecoratedKey> getKeySamples(final Range<Token> range)
+    public PartitionIterator allKeysIterator(ReadCtx ctx) throws IOException
+    {
+        return new PartitionIterator(partitionIndex, metadata().partitioner, rowIndexFile, dfile, ctx);
+    }
+
+    public ScrubPartitionIterator scrubPartitionsIterator(ReadCtx ctx) throws IOException
+    {
+        if (partitionIndex == null)
+            return null;
+        return new ScrubIterator(partitionIndex, rowIndexFile, ctx);
+    }
+
+    @Override
+    public Iterable<DecoratedKey> getKeySamples(final Range<Token> range, ReadCtx ctx)
     {
         Iterator<IndexPosIterator> partitionKeyIterators = TrieIndexScanner.makeBounds(this,
                                                                                        Range.makeRowRange(range))
                                                                            .stream()
-                                                                           .map(this::indexPosIteratorForRange)
+                                                                           .map(r -> indexPosIteratorForRange(r, ctx))
                                                                            .iterator();
 
         if (!partitionKeyIterators.hasNext())
@@ -528,7 +531,7 @@ public class TrieIndexSSTableReader extends SSTableReader
                         if (count % Downsampling.BASE_SAMPLING_LEVEL == 0)
                         {
                             // handle exclusive start and exclusive end
-                            DecoratedKey key = getKeyByPos(pos);
+                            DecoratedKey key = getKeyByPos(pos, ctx);
                             if (range.contains(key.getToken()))
                                 return key;
                             count--;
@@ -547,29 +550,29 @@ public class TrieIndexSSTableReader extends SSTableReader
         };
     }
 
-    private DecoratedKey getKeyByPos(long pos) throws IOException
+    private DecoratedKey getKeyByPos(long pos, ReadCtx ctx) throws IOException
     {
         assert pos != PartitionIndex.NOT_FOUND;
 
         if (pos >= 0)
-            try (FileDataInput in = rowIndexFile.createReader(pos))
+            try (FileDataInput in = rowIndexFile.createReader(ctx, pos))
             {
                 return metadata().partitioner.decorateKey(ByteBufferUtil.readWithShortLength(in));
             }
         else
-            try (FileDataInput in = dfile.createReader(~pos))
+            try (FileDataInput in = dfile.createReader(ctx, ~pos))
             {
                 return metadata().partitioner.decorateKey(ByteBufferUtil.readWithShortLength(in));
             }
     }
 
-    private IndexPosIterator indexPosIteratorForRange(AbstractBounds<PartitionPosition> bound)
+    private IndexPosIterator indexPosIteratorForRange(AbstractBounds<PartitionPosition> bound, ReadCtx ctx)
     {
-        return new IndexPosIterator(partitionIndex, bound.left, bound.right);
+        return new IndexPosIterator(partitionIndex, bound.left, bound.right, ctx);
     }
 
     @Override
-    public long estimatedKeysForRanges(Collection<Range<Token>> ranges)
+    public long estimatedKeysForRanges(Collection<Range<Token>> ranges, ReadCtx ctx)
     {
         // Estimate the number of partitions by calculating the bytes of the sstable that are covered by the specified
         // ranges and using the mean partition size to obtain a number of partitions from that.
@@ -596,8 +599,8 @@ public class TrieIndexSSTableReader extends SSTableReader
             if (right == null && filterLast())
                 right = last;
 
-            long startPos = left != null ? getPosition(left, GE).position : 0;
-            long endPos = right != null ? getPosition(right, GE).position : uncompressedLength();
+            long startPos = left != null ? getPosition(left, GE, ctx).position : 0;
+            long endPos = right != null ? getPosition(right, GE, ctx).position : uncompressedLength();
             selectedDataSize += endPos - startPos;
         }
         return (long) (selectedDataSize / sstableMetadata.estimatedPartitionSize.rawMean());
@@ -608,9 +611,10 @@ public class TrieIndexSSTableReader extends SSTableReader
                                           Slices slices,
                                           ColumnFilter selectedColumns,
                                           boolean reversed,
-                                          SSTableReadsListener listener)
+                                          SSTableReadsListener listener,
+                                          ReadCtx ctx)
     {
-        return iterator(null, key, getExactPosition(key, listener, true), slices, selectedColumns, reversed);
+        return iterator(null, key, getExactPosition(key, listener, true, ctx), slices, selectedColumns, reversed, ctx);
     }
 
     public UnfilteredRowIterator iterator(FileDataInput dataFileInput,
@@ -618,20 +622,21 @@ public class TrieIndexSSTableReader extends SSTableReader
                                           RowIndexEntry indexEntry,
                                           Slices slices,
                                           ColumnFilter selectedColumns,
-                                          boolean reversed)
+                                          boolean reversed,
+                                          ReadCtx ctx)
     {
         if (indexEntry == null)
             return UnfilteredRowIterators.noRowsIterator(metadata(), key, Rows.EMPTY_STATIC_ROW, DeletionTime.LIVE, reversed);
 
         return reversed
-               ? new SSTableReversedIterator(this, dataFileInput, key, indexEntry, slices, selectedColumns, rowIndexFile)
-               : new SSTableIterator(this, dataFileInput, key, indexEntry, slices, selectedColumns, rowIndexFile);
+               ? new SSTableReversedIterator(this, dataFileInput, key, indexEntry, slices, selectedColumns, rowIndexFile, ctx)
+               : new SSTableIterator(this, dataFileInput, key, indexEntry, slices, selectedColumns, rowIndexFile, ctx);
     }
 
     @Override
-    public UnfilteredRowIterator simpleIterator(FileDataInput dfile, DecoratedKey key, boolean tombstoneOnly)
+    public UnfilteredRowIterator simpleIterator(FileDataInput dfile, DecoratedKey key, boolean tombstoneOnly, ReadCtx ctx)
     {
-        RowIndexEntry position = getPosition(key, SSTableReader.Operator.EQ, true, false, SSTableReadsListener.NOOP_LISTENER);
+        RowIndexEntry position = getPosition(key, SSTableReader.Operator.EQ, true, false, SSTableReadsListener.NOOP_LISTENER, ctx);
         if (position == null)
             return null;
         return SSTableIdentityIterator.create(this, dfile, position, key, tombstoneOnly);
@@ -643,9 +648,9 @@ public class TrieIndexSSTableReader extends SSTableReader
     }
 
     @Override
-    public ISSTableScanner getScanner(ColumnFilter columns, DataRange dataRange, SSTableReadsListener listener)
+    public ISSTableScanner getScanner(ColumnFilter columns, DataRange dataRange, SSTableReadsListener listener, ReadCtx ctx)
     {
-        return TrieIndexScanner.getScanner(this, columns, dataRange, listener);
+        return TrieIndexScanner.getScanner(this, columns, dataRange, listener, ctx);
     }
 
     @Override
@@ -691,7 +696,7 @@ public class TrieIndexSSTableReader extends SSTableReader
             // TODO: merge with caller's firstKeyBeyond() work,to save time
             if (newStart.compareTo(first) > 0)
             {
-                final long dataStart = getPosition(newStart, Operator.EQ).position;
+                final long dataStart = getPosition(newStart, Operator.EQ, StorageProvider.instance.readCtxFor(ReadCtx.Kind.SSTABLE_MOVED_START)).position;
                 runOnClose(new DropPageCache(dfile, dataStart, null, -1, runOnClose));
             }
 
@@ -787,15 +792,15 @@ public class TrieIndexSSTableReader extends SSTableReader
     }
 
     @Override
-    public DecoratedKey firstKeyBeyond(PartitionPosition token)
+    public DecoratedKey firstKeyBeyond(PartitionPosition token, ReadCtx ctx)
     {
         try
         {
-            RowIndexEntry pos = getPosition(token, Operator.GT);
+            RowIndexEntry pos = getPosition(token, Operator.GT, ctx);
             if (pos == null)
                 return null;
 
-            try (FileDataInput in = dfile.createReader(pos.position))
+            try (FileDataInput in = dfile.createReader(ctx, pos.position))
             {
                 ByteBuffer indexKey = ByteBufferUtil.readWithShortLength(in);
                 return decorateKey(indexKey);
@@ -833,15 +838,15 @@ public class TrieIndexSSTableReader extends SSTableReader
     }
 
     @Override
-    public RandomAccessReader openIndexReader()
+    public RandomAccessReader openIndexReader(ReadCtx ctx)
     {
         throw new UnsupportedOperationException("tries do not have primary index");
     }
 
     @Override
-    public RandomAccessReader openKeyComponentReader()
+    public RandomAccessReader openKeyComponentReader(ReadCtx ctx)
     {
-        return openDataReader();
+        return openDataReader(ctx);
     }
 
     @Override
@@ -880,7 +885,8 @@ public class TrieIndexSSTableReader extends SSTableReader
             bf = FilterFactory.getFilter(estimatedKeysCount, fpChance);
 
             Factory readerFactory = descriptor.getFormat().getReaderFactory();
-            try (PartitionIterator iter = (PartitionIterator) readerFactory.indexIterator(descriptor, metadata))
+            try (ReadCtx ctx = StorageProvider.instance.readCtxFor(ReadCtx.Kind.SSTABLE_METADATA_CHANGE);
+                 PartitionIterator iter = (PartitionIterator) readerFactory.indexIterator(descriptor, metadata, ctx))
             {
                 while (true)
                 {
@@ -1005,10 +1011,11 @@ public class TrieIndexSSTableReader extends SSTableReader
             if (components.contains(Component.PARTITION_INDEX))
             {
                 try (FileHandle.Builder partitionIdxFHBuilder = defaultIndexHandleBuilder(descriptor, Component.PARTITION_INDEX);
-                     FileHandle.Builder rowIdxFHBuilder = defaultIndexHandleBuilder(descriptor, Component.ROW_INDEX))
+                     FileHandle.Builder rowIdxFHBuilder = defaultIndexHandleBuilder(descriptor, Component.ROW_INDEX);
+                     ReadCtx ctx = StorageProvider.instance.readCtxFor(ReadCtx.Kind.SSTABLE_OPEN))
                 {
                     rowIdxFH = rowIdxFHBuilder.complete();
-                    partitionIndex = PartitionIndex.load(partitionIdxFHBuilder, metadata.get().partitioner, bloomFilter == FilterFactory.AlwaysPresent, statsMetadata.zeroCopyMetadata, descriptor.version.getByteComparableVersion());
+                    partitionIndex = PartitionIndex.load(partitionIdxFHBuilder, metadata.get().partitioner, bloomFilter == FilterFactory.AlwaysPresent, statsMetadata.zeroCopyMetadata, descriptor.version.getByteComparableVersion(), ctx);
                     sstable = TrieIndexSSTableReader.internalOpen(descriptor,
                                                                   components,
                                                                   metadata,

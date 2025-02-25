@@ -21,6 +21,8 @@ import java.io.Closeable;
 import java.io.IOException;
 import java.util.function.Supplier;
 
+import org.apache.cassandra.io.util.ReadCtx;
+
 /**
  * Abstraction over a long-indexed array of longs.
  */
@@ -113,6 +115,6 @@ public interface LongArray extends Closeable
 
     interface Factory
     {
-        LongArray open();
+        LongArray open(ReadCtx ctx);
     }
 }

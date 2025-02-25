@@ -36,6 +36,7 @@ import org.apache.cassandra.index.sai.disk.v1.IndexSearcher;
 import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.v2.V2OnDiskFormat;
+import org.apache.cassandra.io.util.ReadCtx;
 
 /**
  * Different vector components compared to V2OnDiskFormat (supporting DiskANN/jvector instead of HNSW/lucene).
@@ -93,13 +94,14 @@ public class V3OnDiskFormat extends V2OnDiskFormat
     public IndexSearcher newIndexSearcher(SSTableContext sstableContext,
                                           IndexContext indexContext,
                                           PerIndexFiles indexFiles,
-                                          SegmentMetadata segmentMetadata) throws IOException
+                                          SegmentMetadata segmentMetadata,
+                                          ReadCtx searcherCreationContext) throws IOException
     {
         if (indexContext.isVector())
-            return new V3VectorIndexSearcher(sstableContext, indexFiles, segmentMetadata, indexContext);
+            return new V3VectorIndexSearcher(sstableContext, indexFiles, segmentMetadata, indexContext, searcherCreationContext);
         if (indexContext.isLiteral())
-            return new V3InvertedIndexSearcher(sstableContext, indexFiles, segmentMetadata, indexContext);
-        return super.newIndexSearcher(sstableContext, indexContext, indexFiles, segmentMetadata);
+            return new V3InvertedIndexSearcher(sstableContext, indexFiles, segmentMetadata, indexContext, searcherCreationContext);
+        return super.newIndexSearcher(sstableContext, indexContext, indexFiles, segmentMetadata, searcherCreationContext);
     }
 
     @Override

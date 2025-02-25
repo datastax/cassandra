@@ -34,6 +34,8 @@ import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.io.sstable.format.RowIndexEntry;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
+import org.apache.cassandra.io.storage.StorageProvider;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.utils.INativeLibrary;
 import org.apache.cassandra.utils.concurrent.Transactional;
 
@@ -183,10 +185,13 @@ public class SSTableRewriter extends Transactional.AbstractTransactional impleme
         {
             if (transaction.isOffline())
             {
-                for (SSTableReader reader : transaction.originals())
+                try (ReadCtx ctx = StorageProvider.instance.readCtxFor(ReadCtx.Kind.SSTABLE_OPEN))
                 {
-                    RowIndexEntry index = reader.getPosition(key, SSTableReader.Operator.GE);
-                    INativeLibrary.instance.trySkipCache(reader.getDataFile(), 0, index == null ? 0 : index.position);
+                    for (SSTableReader reader : transaction.originals())
+                    {
+                        RowIndexEntry index = reader.getPosition(key, SSTableReader.Operator.GE, ctx);
+                        INativeLibrary.instance.trySkipCache(reader.getDataFile(), 0, index == null ? 0 : index.position);
+                    }
                 }
             }
             else
@@ -260,10 +265,13 @@ public class SSTableRewriter extends Transactional.AbstractTransactional impleme
 
             if (!transaction.isObsolete(latest))
             {
-                DecoratedKey newStart = latest.firstKeyBeyond(lowerbound);
-                assert newStart != null;
-                SSTableReader replacement = latest.cloneWithNewStart(newStart, null);
-                transaction.update(replacement, true);
+                try (ReadCtx ctx = StorageProvider.instance.readCtxFor(ReadCtx.Kind.SSTABLE_MOVED_START))
+                {
+                    DecoratedKey newStart = latest.firstKeyBeyond(lowerbound, ctx);
+                    assert newStart != null;
+                    SSTableReader replacement = latest.cloneWithNewStart(newStart, null);
+                    transaction.update(replacement, true);
+                }
             }
         }
     }

@@ -26,6 +26,7 @@ import com.google.common.util.concurrent.FutureCallback;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.MoreExecutors;
 
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.locator.RangesAtEndpoint;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -279,9 +280,9 @@ public class StreamingTransferTest
         {
             streams.add(new CassandraOutgoingFile(operation,
                                                   sstables.get(sstable),
-                                                  sstable.getPositionsForRanges(ranges),
+                                                  sstable.getPositionsForRanges(ranges, ReadCtx.FOR_TEST),
                                                   ranges,
-                                                  sstable.estimatedKeysForRanges(ranges)));
+                                                  sstable.estimatedKeysForRanges(ranges, ReadCtx.FOR_TEST)));
         }
         return streams;
     }

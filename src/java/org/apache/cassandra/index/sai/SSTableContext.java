@@ -24,6 +24,8 @@ import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.storage.StorageProvider;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.concurrent.Ref;
 import org.apache.cassandra.utils.concurrent.RefCounted;
@@ -73,7 +75,7 @@ public class SSTableContext extends SharedCloseableImpl
         Ref<? extends SSTableReader> sstableRef = null;
         PrimaryKeyMap.Factory primaryKeyMapFactory = null;
 
-        try
+        try (ReadCtx loadCtx = StorageProvider.instance.readCtxFor(ReadCtx.Kind.INDEX_LOAD))
         {
             sstableRef = sstable.tryRef();
 
@@ -82,7 +84,7 @@ public class SSTableContext extends SharedCloseableImpl
                 throw new IllegalStateException("Couldn't acquire reference to the sstable: " + sstable);
             }
 
-            primaryKeyMapFactory = onDiskFormat.newPrimaryKeyMapFactory(perSSTableComponents, primaryKeyFactory, sstable);
+            primaryKeyMapFactory = onDiskFormat.newPrimaryKeyMapFactory(perSSTableComponents, primaryKeyFactory, sstable, loadCtx);
 
             Cleanup cleanup = new Cleanup(primaryKeyMapFactory, sstableRef);
 

@@ -38,6 +38,7 @@ import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.RandomAccessReader;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.io.util.SequentialWriter;
 import org.apache.cassandra.io.util.SequentialWriterOption;
 import org.apache.cassandra.schema.CompressionParams;
@@ -128,7 +129,7 @@ public class CompressedRandomAccessReaderTest
         try (FileHandle.Builder builder = new FileHandle.Builder(f)
                                                               .withCompressionMetadata(new CompressionMetadata(new File(filename + ".metadata"), f.length(), true));
              FileHandle fh = builder.complete();
-             RandomAccessReader reader = fh.createReader())
+             RandomAccessReader reader = fh.createReader(ReadCtx.FOR_TEST))
         {
             String res = reader.readLine();
             assertEquals(res, "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx");
@@ -186,7 +187,7 @@ public class CompressedRandomAccessReaderTest
         CompressionMetadata compressionMetadata = compressed ? new CompressionMetadata(new File(filename + ".metadata"), f.length(), true) : null;
         try (FileHandle.Builder builder = new FileHandle.Builder(f).mmapped(usemmap).withCompressionMetadata(compressionMetadata);
              FileHandle fh = builder.complete();
-             RandomAccessReader reader = fh.createReader())
+             RandomAccessReader reader = fh.createReader(ReadCtx.FOR_TEST))
         {
             String expected = "The quick brown fox jumps over the lazy dog";
             assertEquals(expected.length(), reader.length());
@@ -263,7 +264,7 @@ public class CompressedRandomAccessReaderTest
 
         try (FileHandle.Builder builder = new FileHandle.Builder(file).withCompressionMetadata(meta);
              FileHandle fh = builder.complete();
-             RandomAccessReader reader = fh.createReader())
+             RandomAccessReader reader = fh.createReader(ReadCtx.FOR_TEST))
         {// read and verify compressed data
             assertEquals(CONTENT, reader.readLine());
             Random random = new Random();
@@ -284,7 +285,7 @@ public class CompressedRandomAccessReaderTest
 
                 updateChecksum(checksumModifier, chunk.length, corruptChecksum);
 
-                try (final RandomAccessReader r = fh.createReader())
+                try (final RandomAccessReader r = fh.createReader(ReadCtx.FOR_TEST))
                 {
                     Throwable exception = null;
                     try
@@ -304,7 +305,7 @@ public class CompressedRandomAccessReaderTest
                 updateChecksum(checksumModifier, chunk.length, checksum);
 
                 // read and verify compressed data
-                try (RandomAccessReader cr = fh.createReader())
+                try (RandomAccessReader cr = fh.createReader(ReadCtx.FOR_TEST))
                 {
                     assertEquals(CONTENT, cr.readLine());
                 }

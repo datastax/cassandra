@@ -35,6 +35,7 @@ import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.metrics.QueryEventListener;
 import org.apache.cassandra.index.sai.utils.SaiRandomizedTest;
 import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.lucene.index.PointValues.Relation;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.NumericUtils;
@@ -125,7 +126,7 @@ public class BKDReaderTest extends SaiRandomizedTest
 
         final BKDReader reader = finishAndOpenReaderOneDim(2, buffer);
 
-        try (BKDReader.IteratorState iterator = reader.iteratorState())
+        try (BKDReader.IteratorState iterator = reader.iteratorState(ReadCtx.FOR_TEST))
         {
             while (iterator.hasNext())
             {
@@ -187,7 +188,7 @@ public class BKDReaderTest extends SaiRandomizedTest
         }
 
         try (BKDReader reader = finishAndOpenReaderOneDim(2, buffer);
-             BKDReader.IteratorState iterator = reader.iteratorState(BKDReader.Direction.FORWARD, null))
+             BKDReader.IteratorState iterator = reader.iteratorState(BKDReader.Direction.FORWARD, null, ReadCtx.FOR_TEST))
         {
             int docId = 0;
             while (iterator.hasNext())
@@ -216,7 +217,7 @@ public class BKDReaderTest extends SaiRandomizedTest
         }
 
         try (BKDReader reader = finishAndOpenReaderOneDim(2, buffer);
-             BKDReader.IteratorState iterator = reader.iteratorState(BKDReader.Direction.FORWARD, buildQuery(queryMin, queryMax)))
+             BKDReader.IteratorState iterator = reader.iteratorState(BKDReader.Direction.FORWARD, buildQuery(queryMin, queryMax), ReadCtx.FOR_TEST))
         {
             int docId = Math.max(0, queryMin);
             while (iterator.hasNext())
@@ -244,7 +245,7 @@ public class BKDReaderTest extends SaiRandomizedTest
         }
 
         try (BKDReader reader = finishAndOpenReaderOneDim(2, buffer);
-             BKDReader.IteratorState iterator = reader.iteratorState(BKDReader.Direction.BACKWARD, null))
+             BKDReader.IteratorState iterator = reader.iteratorState(BKDReader.Direction.BACKWARD, null, ReadCtx.FOR_TEST))
         {
             int docId = numRows;
             while (iterator.hasNext())
@@ -274,7 +275,7 @@ public class BKDReaderTest extends SaiRandomizedTest
         }
 
         try (BKDReader reader = finishAndOpenReaderOneDim(2, buffer);
-             BKDReader.IteratorState iterator = reader.iteratorState(BKDReader.Direction.BACKWARD, buildQuery(queryMin, queryMax)))
+             BKDReader.IteratorState iterator = reader.iteratorState(BKDReader.Direction.BACKWARD, buildQuery(queryMin, queryMax), ReadCtx.FOR_TEST))
         {
             int docId = Math.min(numRows, queryMax);
             while (iterator.hasNext())
@@ -417,7 +418,8 @@ public class BKDReaderTest extends SaiRandomizedTest
                              kdtreeHandle,
                              bkdPosition,
                              kdtreePostingsHandle,
-                             postingsPosition);
+                             postingsPosition,
+                             ReadCtx.FOR_TEST);
     }
 
     private BKDReader finishAndOpenReaderOneDim(int maxPointsPerLeaf, MutableOneDimPointValues values, int numRows) throws IOException
@@ -442,6 +444,7 @@ public class BKDReaderTest extends SaiRandomizedTest
                              kdtreeHandle,
                              bkdPosition,
                              kdtreePostingsHandle,
-                             postingsPosition);
+                             postingsPosition,
+                             ReadCtx.FOR_TEST);
     }
 }

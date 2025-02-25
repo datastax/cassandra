@@ -106,8 +106,10 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
+import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.locator.RangesAtEndpoint;
 import org.apache.cassandra.metrics.CompactionMetrics;
 import org.apache.cassandra.metrics.TableMetrics;
@@ -591,36 +593,39 @@ public class CompactionManager implements CompactionManagerMBean
             @Override
             public Iterable<SSTableReader> filterSSTables(LifecycleTransaction transaction)
             {
-                List<SSTableReader> sortedSSTables = Lists.newArrayList(transaction.originals());
-                Iterator<SSTableReader> sstableIter = sortedSSTables.iterator();
-                int totalSSTables = 0;
-                int skippedSStables = 0;
-                while (sstableIter.hasNext())
+                try (ReadCtx ctx = StorageProvider.instance.readCtxFor(ReadCtx.Kind.COMPACTION_PREPARATION))
                 {
-                    SSTableReader sstable = sstableIter.next();
-                    boolean needsCleanupFull = needsCleanup(sstable, fullRanges);
-                    boolean needsCleanupTransient = !transientRanges.isEmpty() && sstable.isRepaired() && needsCleanup(sstable, transientRanges);
-                    //If there are no ranges for which the table needs cleanup either due to lack of intersection or lack
-                    //of the table being repaired.
-                    totalSSTables++;
-                    if (!needsCleanupFull && !needsCleanupTransient)
+                    List<SSTableReader> sortedSSTables = Lists.newArrayList(transaction.originals());
+                    Iterator<SSTableReader> sstableIter = sortedSSTables.iterator();
+                    int totalSSTables = 0;
+                    int skippedSStables = 0;
+                    while (sstableIter.hasNext())
                     {
-                        logger.debug("Skipping {} ([{}, {}]) for cleanup; all rows should be kept. Needs cleanup full ranges: {} Needs cleanup transient ranges: {} Repaired: {}",
-                                    sstable,
-                                    sstable.first.getToken(),
-                                    sstable.last.getToken(),
-                                    needsCleanupFull,
-                                    needsCleanupTransient,
-                                    sstable.isRepaired());
-                        sstableIter.remove();
-                        transaction.cancel(sstable);
-                        skippedSStables++;
+                        SSTableReader sstable = sstableIter.next();
+                        boolean needsCleanupFull = needsCleanup(sstable, fullRanges, ctx);
+                        boolean needsCleanupTransient = !transientRanges.isEmpty() && sstable.isRepaired() && needsCleanup(sstable, transientRanges, ctx);
+                        //If there are no ranges for which the table needs cleanup either due to lack of intersection or lack
+                        //of the table being repaired.
+                        totalSSTables++;
+                        if (!needsCleanupFull && !needsCleanupTransient)
+                        {
+                            logger.debug("Skipping {} ([{}, {}]) for cleanup; all rows should be kept. Needs cleanup full ranges: {} Needs cleanup transient ranges: {} Repaired: {}",
+                                         sstable,
+                                         sstable.first.getToken(),
+                                         sstable.last.getToken(),
+                                         needsCleanupFull,
+                                         needsCleanupTransient,
+                                         sstable.isRepaired());
+                            sstableIter.remove();
+                            transaction.cancel(sstable);
+                            skippedSStables++;
+                        }
                     }
+                    logger.info("Skipping cleanup for {}/{} sstables for {}.{} since they are fully contained in owned ranges (full ranges: {}, transient ranges: {})",
+                                skippedSStables, totalSSTables, cfStore.keyspace.getName(), cfStore.getTableName(), fullRanges, transientRanges);
+                    sortedSSTables.sort(SSTableReader.sizeComparator);
+                    return sortedSSTables;
                 }
-                logger.info("Skipping cleanup for {}/{} sstables for {}.{} since they are fully contained in owned ranges (full ranges: {}, transient ranges: {})",
-                            skippedSStables, totalSSTables, cfStore.keyspace.getName(), cfStore.getTableName(), fullRanges, transientRanges);
-                sortedSSTables.sort(SSTableReader.sizeComparator);
-                return sortedSSTables;
             }
 
             @Override
@@ -1232,7 +1237,7 @@ public class CompactionManager implements CompactionManagerMBean
      * on a set of owned ranges.
      */
     @VisibleForTesting
-    public static boolean needsCleanup(SSTableReader sstable, Collection<Range<Token>> ownedRanges)
+    public static boolean needsCleanup(SSTableReader sstable, Collection<Range<Token>> ownedRanges, ReadCtx ctx)
     {
         if (ownedRanges.isEmpty())
         {
@@ -1260,7 +1265,7 @@ public class CompactionManager implements CompactionManagerMBean
                 return false;
             }
 
-            DecoratedKey firstBeyondRange = sstable.firstKeyBeyond(range.right.maxKeyBound());
+            DecoratedKey firstBeyondRange = sstable.firstKeyBeyond(range.right.maxKeyBound(), ctx);
             if (firstBeyondRange == null)
             {
                 // we ran off the end of the sstable looking for the next key; we don't need to check any more ranges
@@ -1330,8 +1335,8 @@ public class CompactionManager implements CompactionManagerMBean
 
         int nowInSec = FBUtilities.nowInSeconds();
         try (SSTableRewriter writer = SSTableRewriter.construct(cfs, txn, false, sstable.maxDataAge);
-             ISSTableScanner scanner = cleanupStrategy.getScanner(sstable);
              CompactionController controller = new CompactionController(cfs, txn.originals(), getDefaultGcBefore(cfs, nowInSec));
+             ISSTableScanner scanner = cleanupStrategy.getScanner(sstable, controller.readCtx());
              Refs<SSTableReader> refs = Refs.ref(singleton(sstable));
              CompactionIterator ci = new CompactionIterator(OperationType.CLEANUP, Collections.singletonList(scanner), controller, nowInSec, UUIDGen.getTimeUUID()))
         {
@@ -1431,7 +1436,7 @@ public class CompactionManager implements CompactionManagerMBean
             return new Bounded(cfs, ranges, transientRanges, isRepaired, nowInSec);
         }
 
-        public abstract ISSTableScanner getScanner(SSTableReader sstable);
+        public abstract ISSTableScanner getScanner(SSTableReader sstable, ReadCtx ctx);
         public abstract UnfilteredRowIterator cleanup(UnfilteredRowIterator partition);
 
         private static final class Bounded extends CleanupStrategy
@@ -1455,7 +1460,7 @@ public class CompactionManager implements CompactionManagerMBean
             }
 
             @Override
-            public ISSTableScanner getScanner(SSTableReader sstable)
+            public ISSTableScanner getScanner(SSTableReader sstable, ReadCtx ctx)
             {
                 //If transient replication is enabled and there are transient ranges
                 //then cleanup should remove any partitions that are repaired and in the transient range
@@ -1466,7 +1471,7 @@ public class CompactionManager implements CompactionManagerMBean
                 {
                     rangesToScan = Collections2.filter(ranges, range -> !transientRanges.contains(range));
                 }
-                return sstable.getScanner(rangesToScan);
+                return sstable.getScanner(rangesToScan, ctx);
             }
 
             @Override
@@ -1487,9 +1492,9 @@ public class CompactionManager implements CompactionManagerMBean
             }
 
             @Override
-            public ISSTableScanner getScanner(SSTableReader sstable)
+            public ISSTableScanner getScanner(SSTableReader sstable, ReadCtx ctx)
             {
-                return sstable.getScanner();
+                return sstable.getScanner(ctx);
             }
 
             @Override
@@ -1681,8 +1686,8 @@ public class CompactionManager implements CompactionManagerMBean
              SSTableRewriter transWriter = SSTableRewriter.constructWithoutEarlyOpening(sharedTxn, false, groupMaxDataAge);
              SSTableRewriter unrepairedWriter = SSTableRewriter.constructWithoutEarlyOpening(sharedTxn, false, groupMaxDataAge);
 
-             ScannerList scanners = strategy.getScanners(txn.originals());
              CompactionController controller = new CompactionController(cfs, sstableAsSet, getDefaultGcBefore(cfs, nowInSec));
+             ScannerList scanners = strategy.getScanners(txn.originals(), controller.readCtx());
              CompactionIterator ci = getAntiCompactionIterator(scanners.scanners, controller, nowInSec, UUIDGen.getTimeUUID(), isCancelled))
         {
             TableOperation op = ci.getOperation();

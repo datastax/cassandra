@@ -128,7 +128,7 @@ public abstract class IndexSearcher implements Closeable, SegmentOrdering
             {
                 var slices = Slices.with(indexContext.comparator(), Slice.make(key.clustering()));
                 // TODO if we end up needing to read the row still, is it better to store offset and use reader.unfilteredAt?
-                try (var iter = reader.iterator(key.partitionKey(), slices, columnFilter, false, SSTableReadsListener.NOOP_LISTENER))
+                try (var iter = reader.iterator(key.partitionKey(), slices, columnFilter, false, SSTableReadsListener.NOOP_LISTENER, context.readCtx()))
                 {
                     if (iter.hasNext())
                     {
@@ -166,7 +166,7 @@ public abstract class IndexSearcher implements Closeable, SegmentOrdering
                                                                         metadata.segmentRowIdOffset,
                                                                         queryContext,
                                                                         postingList);
-        return new PostingListKeyRangeIterator(indexContext, primaryKeyMapFactory.newPerSSTablePrimaryKeyMap(), searcherContext);
+        return new PostingListKeyRangeIterator(indexContext, primaryKeyMapFactory.newPerSSTablePrimaryKeyMap(queryContext.readCtx()), searcherContext);
     }
 
     protected CloseableIterator<PrimaryKeyWithSortKey> toMetaSortedIterator(CloseableIterator<? extends RowIdWithMeta> rowIdIterator, QueryContext queryContext) throws IOException
@@ -184,7 +184,7 @@ public abstract class IndexSearcher implements Closeable, SegmentOrdering
                                                                         metadata.segmentRowIdOffset,
                                                                         queryContext,
                                                                         null);
-        var pkm = primaryKeyMapFactory.newPerSSTablePrimaryKeyMap();
+        var pkm = primaryKeyMapFactory.newPerSSTablePrimaryKeyMap(queryContext.readCtx());
         return new RowIdToPrimaryKeyWithSortKeyIterator(indexContext,
                                                         pkm.getSSTableId(),
                                                         rowIdIterator,

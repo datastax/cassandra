@@ -57,7 +57,9 @@ import org.apache.cassandra.io.sstable.SSTableWatcher;
 import org.apache.cassandra.io.sstable.format.PartitionIndexIterator;
 import org.apache.cassandra.io.sstable.format.RowIndexEntry;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.io.util.RandomAccessReader;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ApproximateTime;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -155,7 +157,8 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
 
         Set<Component> replacedComponents = new HashSet<>();
 
-        try (RandomAccessReader dataFile = sstable.openDataReader();
+        try (ReadCtx ctx = StorageProvider.instance.readCtxFor(ReadCtx.Kind.INDEX_BUILD);
+             RandomAccessReader dataFile = sstable.openDataReader(ctx);
              LifecycleTransaction txn = LifecycleTransaction.offline(OperationType.INDEX_BUILD, tracker.metadata))
         {
             perSSTableFileLock = shouldWritePerSSTableFiles(sstable, indexDescriptor, replacedComponents);
@@ -172,7 +175,7 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
             long previousKeyPosition = 0;
             indexWriter.begin();
 
-            try (PartitionIndexIterator keys = sstable.allKeysIterator())
+            try (PartitionIndexIterator keys = sstable.allKeysIterator(ctx))
             {
                 while (!keys.isExhausted())
                 {
@@ -187,7 +190,7 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
 
                     indexWriter.startPartition(key, keyPosition);
 
-                    RowIndexEntry indexEntry = sstable.getPosition(key, SSTableReader.Operator.EQ);
+                    RowIndexEntry indexEntry = sstable.getPosition(key, SSTableReader.Operator.EQ, ctx);
                     dataFile.seek(indexEntry.position);
                     ByteBufferUtil.skipShortLength(dataFile); // key
 

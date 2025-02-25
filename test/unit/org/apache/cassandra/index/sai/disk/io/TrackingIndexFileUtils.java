@@ -30,6 +30,7 @@ import org.junit.Assert;
 
 import org.apache.cassandra.index.sai.utils.IndexFileUtils;
 import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.io.util.SequentialWriterOption;
 import org.apache.lucene.index.CorruptIndexException;
 
@@ -44,17 +45,17 @@ public class TrackingIndexFileUtils extends IndexFileUtils
     }
 
     @Override
-    public IndexInputReader openInput(FileHandle handle)
+    public IndexInputReader openInput(FileHandle handle, ReadCtx ctx)
     {
-        TrackingIndexInput input = new TrackingIndexInput(super.openInput(handle));
+        TrackingIndexInput input = new TrackingIndexInput(super.openInput(handle, ctx));
         openInputs.put(input, Throwables.getStackTraceAsString(new RuntimeException("Input created")));
         return input;
     }
 
     @Override
-    public IndexInputReader openBlockingInput(FileHandle fileHandle)
+    public IndexInputReader openBlockingInput(FileHandle fileHandle, ReadCtx ctx)
     {
-        TrackingIndexInput input = new TrackingIndexInput(super.openBlockingInput(fileHandle));
+        TrackingIndexInput input = new TrackingIndexInput(super.openBlockingInput(fileHandle, ctx));
         openInputs.put(input, Throwables.getStackTraceAsString(new RuntimeException("Blocking input created")));
         return input;
     }

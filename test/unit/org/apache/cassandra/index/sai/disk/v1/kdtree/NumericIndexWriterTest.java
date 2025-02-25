@@ -43,6 +43,7 @@ import org.apache.cassandra.index.sai.metrics.QueryEventListeners;
 import org.apache.cassandra.index.sai.utils.SaiRandomizedTest;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.utils.AbstractGuavaIterator;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
@@ -106,7 +107,8 @@ public class NumericIndexWriterTest extends SaiRandomizedTest
                                               kdtreeHandle,
                                               indexMetas.get(IndexComponentType.KD_TREE).root,
                                               kdtreePostingsHandle,
-                                              indexMetas.get(IndexComponentType.KD_TREE_POSTING_LISTS).root
+                                              indexMetas.get(IndexComponentType.KD_TREE_POSTING_LISTS).root,
+                                              ReadCtx.FOR_TEST
         ))
         {
             final Counter visited = Counter.newCounter();
@@ -158,7 +160,8 @@ public class NumericIndexWriterTest extends SaiRandomizedTest
                                               kdtreeHandle,
                                               indexMetas.get(IndexComponentType.KD_TREE).root,
                                               kdtreePostingsHandle,
-                                              indexMetas.get(IndexComponentType.KD_TREE_POSTING_LISTS).root
+                                              indexMetas.get(IndexComponentType.KD_TREE_POSTING_LISTS).root,
+                                              ReadCtx.FOR_TEST
         ))
         {
             final Counter visited = Counter.newCounter();

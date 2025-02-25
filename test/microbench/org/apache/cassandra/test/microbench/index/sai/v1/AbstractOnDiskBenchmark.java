@@ -51,6 +51,7 @@ import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.schema.TableMetadata;
 import org.openjdk.jmh.annotations.Level;
 import org.openjdk.jmh.annotations.Setup;
@@ -174,8 +175,8 @@ public abstract class AbstractOnDiskBenchmark
 
     protected final PostingsReader openPostingsReader() throws IOException
     {
-        IndexInput input = IndexFileUtils.instance.openInput(postings);
-        IndexInput summaryInput = IndexFileUtils.instance.openInput(postings);
+        IndexInput input = IndexFileUtils.instance.openInput(postings, ReadCtx.FOR_TEST);
+        IndexInput summaryInput = IndexFileUtils.instance.openInput(postings, ReadCtx.FOR_TEST);
 
         PostingsReader.BlocksSummary summary = new PostingsReader.BlocksSummary(summaryInput, summaryPosition);
         return new PostingsReader(input, summary, QueryEventListener.PostingListEventListener.NO_OP);
@@ -193,8 +194,8 @@ public abstract class AbstractOnDiskBenchmark
     protected final LongArray openRowIdToTokenReader() throws IOException
     {
         IndexComponents.ForRead components = indexDescriptor.perSSTableComponents();
-        MetadataSource source = MetadataSource.loadMetadata(components);
+        MetadataSource source = MetadataSource.loadMetadata(components, ReadCtx.FOR_TEST);
         NumericValuesMeta tokensMeta = new NumericValuesMeta(source.get(components.get(IndexComponentType.TOKEN_VALUES)));
-        return new BlockPackedReader(token, tokensMeta).open();
+        return new BlockPackedReader(token, tokensMeta, ReadCtx.FOR_TEST).open(ReadCtx.FOR_TEST);
     }
 }

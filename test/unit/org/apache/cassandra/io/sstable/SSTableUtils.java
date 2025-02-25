@@ -43,6 +43,7 @@ import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
 
@@ -101,8 +102,8 @@ public class SSTableUtils
 
     public static void assertContentEquals(SSTableReader lhs, SSTableReader rhs) throws Exception
     {
-        try (ISSTableScanner slhs = lhs.getScanner();
-             ISSTableScanner srhs = rhs.getScanner())
+        try (ISSTableScanner slhs = lhs.getScanner(ReadCtx.FOR_TEST);
+             ISSTableScanner srhs = rhs.getScanner(ReadCtx.FOR_TEST))
         {
             while (slhs.hasNext())
             {

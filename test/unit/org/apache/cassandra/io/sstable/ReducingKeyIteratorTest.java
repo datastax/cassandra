@@ -33,6 +33,7 @@ import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.RowUpdateBuilder;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
@@ -93,7 +94,7 @@ public class ReducingKeyIteratorTest
         }
 
         Set<SSTableReader> sstables = store.getLiveSSTables();
-        ReducingKeyIterator reducingIterator = new ReducingKeyIterator(sstables);
+        ReducingKeyIterator reducingIterator = new ReducingKeyIterator(sstables, ReadCtx.FOR_TEST);
 
         while (reducingIterator.hasNext())
         {

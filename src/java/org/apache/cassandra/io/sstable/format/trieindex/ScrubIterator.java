@@ -21,8 +21,10 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 
 import org.apache.cassandra.io.sstable.format.ScrubPartitionIterator;
+import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
 // TODO STAR-247: implement unit test
@@ -32,9 +34,9 @@ public class ScrubIterator extends PartitionIndex.IndexPosIterator implements Sc
     long dataPosition;
     final FileHandle rowIndexFile;
 
-    ScrubIterator(PartitionIndex partitionIndex, FileHandle rowIndexFile) throws IOException
+    ScrubIterator(PartitionIndex partitionIndex, FileHandle rowIndexFile, ReadCtx ctx) throws IOException
     {
-        super(partitionIndex);
+        super(partitionIndex, ctx);
         this.rowIndexFile = rowIndexFile.sharedCopy();
         advance();
     }
@@ -66,7 +68,7 @@ public class ScrubIterator extends PartitionIndex.IndexPosIterator implements Sc
         {
             if (pos >= 0) // row index position
             {
-                try (FileDataInput in = rowIndexFile.createReader(pos))
+                try (FileDataInput in = rowIndexFile.createReader(source.readCtx(), pos))
                 {
                     key = ByteBufferUtil.readWithShortLength(in);
                     dataPosition = TrieIndexEntry.deserialize(in, in.getFilePointer()).position;

@@ -56,6 +56,7 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.notifications.SSTableAddedNotification;
 import org.apache.cassandra.notifications.SSTableRepairStatusChanged;
 import org.apache.cassandra.repair.RepairJobDesc;
@@ -277,7 +278,7 @@ public class LeveledCompactionStrategyTest
 
         // get LeveledScanner for level 1 sstables
         Collection<SSTableReader> sstables = Collections2.transform(strategy.manifest.getLevel(1), SSTableReader.class::cast);
-        List<ISSTableScanner> scanners = strategy.getScanners(sstables).scanners;
+        List<ISSTableScanner> scanners = strategy.getScanners(sstables, ReadCtx.FOR_TEST).scanners;
         assertEquals(1, scanners.size()); // should be one per level
         ISSTableScanner scanner = scanners.get(0);
         // scan through to the end

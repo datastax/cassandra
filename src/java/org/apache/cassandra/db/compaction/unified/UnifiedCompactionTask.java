@@ -37,6 +37,8 @@ import org.apache.cassandra.db.lifecycle.ILifecycleTransaction;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.storage.StorageProvider;
+import org.apache.cassandra.io.util.ReadCtx;
 
 public class UnifiedCompactionTask extends CompactionTask
 {
@@ -77,7 +79,7 @@ public class UnifiedCompactionTask extends CompactionTask
               // - there are no expired sstables in the compaction (UCS processes them separately)
               // - sstable exclusion for lack of space does not apply (shared progress is only use when an operation
               //   range applies, which disables this)
-              sharedProgress != null ? getOperationTotals(actuallyCompact, operationRange) : null,
+              sharedProgress != null ? getOperationTotals(actuallyCompact, operationRange, StorageProvider.instance.readCtxFor(ReadCtx.Kind.COMPACTION_PREPARATION)) : null,
               gcBefore,
               keepOriginals,
               strategy,

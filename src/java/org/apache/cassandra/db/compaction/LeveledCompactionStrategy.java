@@ -50,6 +50,7 @@ import org.apache.cassandra.io.sstable.ISSTableScanner;
 import org.apache.cassandra.io.sstable.ScannerList;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.schema.CompactionParams;
 import org.apache.cassandra.schema.TableMetadata;
 
@@ -258,7 +259,7 @@ public class LeveledCompactionStrategy extends LegacyAbstractCompactionStrategy.
         return levelFanoutSize;
     }
 
-    public ScannerList getScanners(Collection<SSTableReader> sstables, Collection<Range<Token>> ranges)
+    public ScannerList getScanners(Collection<SSTableReader> sstables, Collection<Range<Token>> ranges, ReadCtx ctx)
     {
         Set<CompactionSSTable>[] sstablesPerLevel = manifest.getSStablesPerLevelSnapshot();
 
@@ -290,7 +291,7 @@ public class LeveledCompactionStrategy extends LegacyAbstractCompactionStrategy.
                 {
                     // L0 makes no guarantees about overlapping-ness.  Just create a direct scanner for each
                     for (SSTableReader sstable : byLevel.get(level))
-                        scanners.add(sstable.getScanner(ranges));
+                        scanners.add(sstable.getScanner(ranges, ctx));
                 }
                 else
                 {
@@ -299,7 +300,7 @@ public class LeveledCompactionStrategy extends LegacyAbstractCompactionStrategy.
                     if (!intersecting.isEmpty())
                     {
                         @SuppressWarnings("resource") // The ScannerList will be in charge of closing (and we close properly on errors)
-                        ISSTableScanner scanner = new LeveledScanner(realm.metadata(), intersecting, ranges, level);
+                        ISSTableScanner scanner = new LeveledScanner(realm.metadata(), intersecting, ranges, level, ctx);
                         scanners.add(scanner);
                     }
                 }
@@ -361,6 +362,7 @@ public class LeveledCompactionStrategy extends LegacyAbstractCompactionStrategy.
     {
         private final TableMetadata metadata;
         private final Collection<Range<Token>> ranges;
+        private final ReadCtx readCtx;
         private final List<SSTableReader> sstables;
         private final int level;
         private final Iterator<SSTableReader> sstableIterator;
@@ -371,9 +373,10 @@ public class LeveledCompactionStrategy extends LegacyAbstractCompactionStrategy.
         private long positionOffset;
         private long totalBytesScanned = 0;
 
-        public LeveledScanner(TableMetadata metadata, Collection<SSTableReader> sstables, Collection<Range<Token>> ranges, int level)
+        public LeveledScanner(TableMetadata metadata, Collection<SSTableReader> sstables, Collection<Range<Token>> ranges, int level, ReadCtx ctx)
         {
             this.metadata = metadata;
+            this.readCtx = ctx;
             this.ranges = ranges;
 
             // add only sstables that intersect our range, and estimate how much data that involves
@@ -388,7 +391,7 @@ public class LeveledCompactionStrategy extends LegacyAbstractCompactionStrategy.
                 double estKeysInRangeRatio = 1.0;
 
                 if (estimatedKeys > 0 && ranges != null)
-                    estKeysInRangeRatio = ((double) sstable.estimatedKeysForRanges(ranges)) / estimatedKeys;
+                    estKeysInRangeRatio = ((double) sstable.estimatedKeysForRanges(ranges, readCtx)) / estimatedKeys;
 
                 length += sstable.uncompressedLength() * estKeysInRangeRatio;
                 cLength += sstable.onDiskLength() * estKeysInRangeRatio;
@@ -400,7 +403,7 @@ public class LeveledCompactionStrategy extends LegacyAbstractCompactionStrategy.
             sstableIterator = this.sstables.iterator();
             assert sstableIterator.hasNext(); // caller should check intersecting first
             SSTableReader currentSSTable = sstableIterator.next();
-            currentScanner = currentSSTable.getScanner(ranges);
+            currentScanner = currentSSTable.getScanner(ranges, readCtx);
 
         }
 
@@ -448,7 +451,7 @@ public class LeveledCompactionStrategy extends LegacyAbstractCompactionStrategy.
                     return endOfData();
                 }
                 SSTableReader currentSSTable = sstableIterator.next();
-                currentScanner = currentSSTable.getScanner(ranges);
+                currentScanner = currentSSTable.getScanner(ranges, readCtx);
             }
         }
 

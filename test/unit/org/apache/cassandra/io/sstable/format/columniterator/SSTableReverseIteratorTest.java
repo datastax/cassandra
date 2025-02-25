@@ -36,6 +36,7 @@ import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.io.sstable.format.RowIndexEntry;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.db.marshal.Int32Type;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.schema.KeyspaceParams;
 
 import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
@@ -86,7 +87,7 @@ public class SSTableReverseIteratorTest
         tbl.forceBlockingFlush(UNIT_TESTS);
         SSTableReader sstable = Iterables.getOnlyElement(tbl.getLiveSSTables());
         DecoratedKey dk = tbl.getPartitioner().decorateKey(Int32Type.instance.decompose(key));
-        RowIndexEntry indexEntry = sstable.getPosition(dk, SSTableReader.Operator.EQ);
+        RowIndexEntry indexEntry = sstable.getPosition(dk, SSTableReader.Operator.EQ, ReadCtx.FOR_TEST);
         Assert.assertTrue(indexEntry.isIndexed());
         Assert.assertTrue(indexEntry.columnsIndexCount() > 2);
 

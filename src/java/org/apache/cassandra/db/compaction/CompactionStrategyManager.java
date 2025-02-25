@@ -59,6 +59,7 @@ import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.sstable.SSTableMultiWriter;
 import org.apache.cassandra.io.sstable.ScannerList;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.notifications.INotification;
 import org.apache.cassandra.notifications.SSTableAddedNotification;
 import org.apache.cassandra.notifications.SSTableDeletingNotification;
@@ -794,7 +795,7 @@ public class CompactionStrategyManager implements CompactionStrategyContainer
      * @return
      */
     @SuppressWarnings("resource")
-    private ScannerList maybeGetScanners(Collection<SSTableReader> sstables, Collection<Range<Token>> ranges)
+    private ScannerList maybeGetScanners(Collection<SSTableReader> sstables, Collection<Range<Token>> ranges, ReadCtx ctx)
     {
         maybeReloadDiskBoundaries();
         List<ISSTableScanner> scanners = new ArrayList<>(sstables.size());
@@ -807,7 +808,7 @@ public class CompactionStrategyManager implements CompactionStrategyContainer
             {
                 AbstractStrategyHolder holder = holders.get(i);
                 GroupedSSTableContainer<SSTableReader> group = sstableGroups.get(i);
-                scanners.addAll(holder.getScanners(group, ranges));
+                scanners.addAll(holder.getScanners(group, ranges, ctx));
             }
         }
         catch (PendingRepairManager.IllegalSSTableArgumentException e)
@@ -822,13 +823,13 @@ public class CompactionStrategyManager implements CompactionStrategyContainer
     }
 
     @Override
-    public ScannerList getScanners(Collection<SSTableReader> sstables,  Collection<Range<Token>> ranges)
+    public ScannerList getScanners(Collection<SSTableReader> sstables, Collection<Range<Token>> ranges, ReadCtx ctx)
     {
         while (true)
         {
             try
             {
-                return maybeGetScanners(sstables, ranges);
+                return maybeGetScanners(sstables, ranges, ctx);
             }
             catch (ConcurrentModificationException e)
             {
@@ -838,9 +839,9 @@ public class CompactionStrategyManager implements CompactionStrategyContainer
     }
 
     @Override
-    public ScannerList getScanners(Collection<SSTableReader> sstables)
+    public ScannerList getScanners(Collection<SSTableReader> sstables, ReadCtx ctx)
     {
-        return getScanners(sstables, null);
+        return getScanners(sstables, null, ctx);
     }
 
     @Override

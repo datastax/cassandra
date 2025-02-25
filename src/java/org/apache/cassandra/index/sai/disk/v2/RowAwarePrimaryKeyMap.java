@@ -46,6 +46,7 @@ import org.apache.cassandra.io.sstable.SSTableId;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
@@ -84,23 +85,23 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
         private final PrimaryKey.Factory primaryKeyFactory;
         private final SSTableId<?> sstableId;
 
-        public RowAwarePrimaryKeyMapFactory(IndexComponents.ForRead perSSTableComponents, PrimaryKey.Factory primaryKeyFactory, SSTableReader sstable)
+        public RowAwarePrimaryKeyMapFactory(IndexComponents.ForRead perSSTableComponents, PrimaryKey.Factory primaryKeyFactory, SSTableReader sstable, ReadCtx indexLoadContext)
         {
             try
             {
                 this.perSSTableComponents = perSSTableComponents;
-                MetadataSource metadataSource = MetadataSource.loadMetadata(perSSTableComponents);
+                MetadataSource metadataSource = MetadataSource.loadMetadata(perSSTableComponents, indexLoadContext);
                 NumericValuesMeta tokensMeta = new NumericValuesMeta(metadataSource.get(perSSTableComponents.get(IndexComponentType.TOKEN_VALUES)));
                 count = tokensMeta.valueCount;
                 SortedTermsMeta sortedTermsMeta = new SortedTermsMeta(metadataSource.get(perSSTableComponents.get(IndexComponentType.PRIMARY_KEY_BLOCKS)));
                 NumericValuesMeta blockOffsetsMeta = new NumericValuesMeta(metadataSource.get(perSSTableComponents.get(IndexComponentType.PRIMARY_KEY_BLOCK_OFFSETS)));
 
                 token = perSSTableComponents.get(IndexComponentType.TOKEN_VALUES).createFileHandle();
-                this.tokenReaderFactory = new BlockPackedReader(token, tokensMeta);
+                this.tokenReaderFactory = new BlockPackedReader(token, tokensMeta, indexLoadContext);
                 this.termsDataBlockOffsets = perSSTableComponents.get(IndexComponentType.PRIMARY_KEY_BLOCK_OFFSETS).createFileHandle();
                 this.termsData = perSSTableComponents.get(IndexComponentType.PRIMARY_KEY_BLOCKS).createFileHandle();
                 this.termsTrie = perSSTableComponents.get(IndexComponentType.PRIMARY_KEY_TRIE).createFileHandle();
-                this.sortedTermsReader = new SortedTermsReader(termsData, termsDataBlockOffsets, termsTrie, sortedTermsMeta, blockOffsetsMeta);
+                this.sortedTermsReader = new SortedTermsReader(termsData, termsDataBlockOffsets, termsTrie, sortedTermsMeta, blockOffsetsMeta, indexLoadContext);
                 this.partitioner = sstable.metadata().partitioner;
                 this.primaryKeyFactory = primaryKeyFactory;
                 this.clusteringComparator = sstable.metadata().comparator;
@@ -113,14 +114,14 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
         }
 
         @Override
-        public PrimaryKeyMap newPerSSTablePrimaryKeyMap()
+        public PrimaryKeyMap newPerSSTablePrimaryKeyMap(ReadCtx ctx)
         {
-            final LongArray rowIdToToken = new LongArray.DeferredLongArray(() -> tokenReaderFactory.open());
+            final LongArray rowIdToToken = new LongArray.DeferredLongArray(() -> tokenReaderFactory.open(ctx));
             try
             {
                 return new RowAwarePrimaryKeyMap(rowIdToToken,
                                                  sortedTermsReader,
-                                                 sortedTermsReader.openCursor(),
+                                                 sortedTermsReader.openCursor(ctx),
                                                  partitioner,
                                                  primaryKeyFactory,
                                                  clusteringComparator,
@@ -133,7 +134,7 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
         }
 
         @Override
-        public long count()
+        public long count(ReadCtx ctx)
         {
             return count;
         }

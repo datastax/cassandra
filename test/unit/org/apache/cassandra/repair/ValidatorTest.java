@@ -42,6 +42,7 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.schema.Schema;
@@ -118,7 +119,7 @@ public class ValidatorTest
         Validator validator = new Validator(desc, remote, 0, PreviewKind.NONE);
         MerkleTrees tree = new MerkleTrees(partitioner);
         tree.addMerkleTrees((int) Math.pow(2, 15), validator.desc.ranges);
-        validator.prepare(cfs, tree);
+        validator.prepare(cfs, tree, ReadCtx.FOR_TEST);
 
         // and confirm that the tree was split
         assertTrue(tree.size() > 1);

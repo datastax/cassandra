@@ -116,6 +116,8 @@ import org.apache.cassandra.index.transactions.CompactionTransaction;
 import org.apache.cassandra.index.transactions.IndexTransaction;
 import org.apache.cassandra.index.transactions.UpdateTransaction;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.storage.StorageProvider;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.locator.Endpoints;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.notifications.INotification;
@@ -626,11 +628,13 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
             stored.add(index);
         }
 
+        ReadCtx buildCtx = StorageProvider.instance.readCtxFor(ReadCtx.Kind.INDEX_BUILD);
+
         // Schedule all index building tasks with a callback to mark them as built or failed
         List<ListenableFuture<?>> futures = new ArrayList<>(byType.size());
         byType.forEach((buildingSupport, groupedIndexes) ->
                        {
-                           List<SecondaryIndexBuilder> builders = buildingSupport.getParallelIndexBuildTasks(baseCfs, groupedIndexes, sstables, isFullRebuild);
+                           List<SecondaryIndexBuilder> builders = buildingSupport.getParallelIndexBuildTasks(baseCfs, groupedIndexes, sstables, isFullRebuild, buildCtx);
                            List<ListenableFuture<?>> builderFutures = builders.stream().map(CompactionManager.instance::submitIndexBuild).collect(Collectors.toList());
                            final SettableFuture build = SettableFuture.create();
                            Futures.addCallback(Futures.allAsList(builderFutures), new FutureCallback()
@@ -660,6 +664,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         allIndexBuilds.addListener(() -> {
             try
             {
+                buildCtx.close();
                 finalizeIndexBuild(indexes, builtIndexes, unbuiltIndexes);
                 finalResult.setFuture(allIndexBuilds);
             }

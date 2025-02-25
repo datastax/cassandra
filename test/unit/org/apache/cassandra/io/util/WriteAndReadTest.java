@@ -93,42 +93,50 @@ public class WriteAndReadTest
             return false;
         }
 
-        public PartitionIndexIterator allKeysIterator() throws IOException
+        @Override
+        public PartitionIndexIterator allKeysIterator(ReadCtx ctx) throws IOException
         {
             return null;
         }
 
-        public ScrubPartitionIterator scrubPartitionsIterator() throws IOException
+        @Override
+        public ScrubPartitionIterator scrubPartitionsIterator(ReadCtx ctx) throws IOException
         {
             return null;
         }
 
-        protected RowIndexEntry getPosition(PartitionPosition key, Operator op, boolean updateCacheAndStats, boolean permitMatchPastLast, SSTableReadsListener listener)
+        @Override
+        protected RowIndexEntry getPosition(PartitionPosition key, Operator op, boolean updateCacheAndStats, boolean permitMatchPastLast, SSTableReadsListener listener, ReadCtx ctx)
         {
             return null;
         }
 
-        public UnfilteredRowIterator iterator(DecoratedKey key, Slices slices, ColumnFilter selectedColumns, boolean reversed, SSTableReadsListener listener)
+        @Override
+        public UnfilteredRowIterator iterator(DecoratedKey key, Slices slices, ColumnFilter selectedColumns, boolean reversed, SSTableReadsListener listener, ReadCtx ctx)
         {
             return null;
         }
 
-        public UnfilteredRowIterator simpleIterator(FileDataInput dfile, DecoratedKey key, boolean tombstoneOnly)
+        @Override
+        public UnfilteredRowIterator simpleIterator(FileDataInput dfile, DecoratedKey key, boolean tombstoneOnly, ReadCtx ctx)
         {
             return null;
         }
 
-        public ISSTableScanner getScanner(ColumnFilter columns, DataRange dataRange, SSTableReadsListener listener)
+        @Override
+        public ISSTableScanner getScanner(ColumnFilter columns, DataRange dataRange, SSTableReadsListener listener, ReadCtx ctx)
         {
             return null;
         }
 
+        @Override
         public DecoratedKey keyAt(FileDataInput reader) throws IOException
         {
             return null;
         }
 
-        public RandomAccessReader openKeyComponentReader()
+        @Override
+        public RandomAccessReader openKeyComponentReader(ReadCtx ctx)
         {
             return null;
         }
@@ -195,7 +203,7 @@ public class WriteAndReadTest
                 reader = new MockSSTableReader(descriptor, Collections.singleton(Component.PARTITION_INDEX), TableMetadataRef.forOfflineTools(TableMetadata.minimal(descriptor.ksname, descriptor.cfname)), dfh, ifh);
                 reader.setup(false);
 
-                try (FileDataInput index = ifh.createReader(ifh.dataLength() - 3 * 8))
+                try (FileDataInput index = ifh.createReader(ReadCtx.FOR_TEST, ifh.dataLength() - 3 * 8))
                 {
                     long firstPosR = index.readLong();
                     long keyCountR = index.readLong();
@@ -205,7 +213,7 @@ public class WriteAndReadTest
                     assertEquals(keyCount, keyCountR);
                     assertEquals(rootR, root);
                 }
-                try (FileDataInput data = dfh.createReader())
+                try (FileDataInput data = dfh.createReader(ReadCtx.FOR_TEST))
                 {
                     long lengthR = data.readLong();
                     assertEquals(length, lengthR);

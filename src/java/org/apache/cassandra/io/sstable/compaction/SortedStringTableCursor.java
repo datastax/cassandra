@@ -42,6 +42,7 @@ import org.apache.cassandra.io.sstable.format.RowIndexEntry;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.RandomAccessReader;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
@@ -81,22 +82,22 @@ public class SortedStringTableCursor implements SSTableCursor
 
     private Type currentType = Type.UNINITIALIZED;
 
-    public SortedStringTableCursor(SSTableReader sstable)
+    public SortedStringTableCursor(SSTableReader sstable, ReadCtx ctx)
     {
-        this(sstable, sstable.openDataReader(), null);
+        this(sstable, ctx, sstable.openDataReader(ctx), null);
     }
 
-    public SortedStringTableCursor(SSTableReader sstable, Range<Token> range)
+    public SortedStringTableCursor(SSTableReader sstable, ReadCtx ctx, Range<Token> range)
     {
-        this(sstable, sstable.openDataReader(), range);
+        this(sstable, ctx, sstable.openDataReader(ctx), range);
     }
 
-    public SortedStringTableCursor(SSTableReader sstable, Range<Token> tokenRange, RateLimiter limiter)
+    public SortedStringTableCursor(SSTableReader sstable, ReadCtx ctx, Range<Token> tokenRange, RateLimiter limiter)
     {
-        this(sstable, sstable.openDataReader(limiter), tokenRange);
+        this(sstable, ctx, sstable.openDataReader(ctx, limiter), tokenRange);
     }
 
-    public SortedStringTableCursor(SSTableReader sstable, RandomAccessReader dataFile, Range<Token> tokenRange)
+    public SortedStringTableCursor(SSTableReader sstable, ReadCtx ctx, RandomAccessReader dataFile, Range<Token> tokenRange)
     {
         try
         {
@@ -109,8 +110,8 @@ public class SortedStringTableCursor implements SSTableCursor
             this.staticColumns = toArray(header.columns(true));
             this.columnsReusableArray = new ColumnMetadata[Math.max(regularColumns.length, staticColumns.length)];
 
-            SSTableReader.PartitionPositionBounds bounds = tokenRange == null ? sstable.getPositionsForFullRange()
-                                                                              : sstable.getPositionsForBounds(Range.makeRowRange(tokenRange));
+            SSTableReader.PartitionPositionBounds bounds = tokenRange == null ? sstable.getPositionsForFullRange(ctx)
+                                                                              : sstable.getPositionsForBounds(Range.makeRowRange(tokenRange), ctx);
             if (bounds != null)
             {
                 this.startPosition = bounds.lowerPosition;

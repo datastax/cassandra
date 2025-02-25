@@ -45,6 +45,7 @@ import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.Throwables;
 
@@ -76,7 +77,7 @@ public class V1SearchableIndex implements SearchableIndex
     private final long numRows;
     private PerIndexFiles indexFiles;
 
-    public V1SearchableIndex(SSTableContext sstableContext, IndexComponents.ForRead perIndexComponents)
+    public V1SearchableIndex(SSTableContext sstableContext, IndexComponents.ForRead perIndexComponents, ReadCtx searcherCreationContext)
     {
         this.indexContext = perIndexComponents.context();
         try
@@ -85,13 +86,13 @@ public class V1SearchableIndex implements SearchableIndex
 
             ImmutableList.Builder<Segment> segmentsBuilder = ImmutableList.builder();
 
-            final MetadataSource source = MetadataSource.loadMetadata(perIndexComponents);
+            final MetadataSource source = MetadataSource.loadMetadata(perIndexComponents, searcherCreationContext);
 
             metadatas = SegmentMetadata.load(source, indexContext);
 
             for (SegmentMetadata metadata : metadatas)
             {
-                segmentsBuilder.add(new Segment(indexContext, sstableContext, indexFiles, metadata));
+                segmentsBuilder.add(new Segment(indexContext, sstableContext, indexFiles, metadata, searcherCreationContext));
             }
 
             segments = segmentsBuilder.build();

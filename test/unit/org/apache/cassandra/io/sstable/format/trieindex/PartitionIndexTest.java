@@ -57,6 +57,7 @@ import org.apache.cassandra.io.tries.TrieNode;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.io.util.SequentialWriter;
 import org.apache.cassandra.io.util.SequentialWriterOption;
@@ -165,7 +166,7 @@ public class PartitionIndexTest
     {
         List<DecoratedKey> keys = data.left;
         try (PartitionIndex summary = data.right;
-             PartitionIndex.Reader reader = summary.openReader())
+             PartitionIndex.Reader reader = summary.openReader(ReadCtx.FOR_TEST))
         {
             for (int i = 0; i < data.left.size(); i++)
             {
@@ -187,7 +188,7 @@ public class PartitionIndexTest
     {
         List<DecoratedKey> keys = data.left;
         try (PartitionIndex summary = data.right;
-             PartitionIndex.Reader reader = summary.openReader())
+             PartitionIndex.Reader reader = summary.openReader(ReadCtx.FOR_TEST))
         {
             for (int i = 0; i < data.left.size(); i++)
             {
@@ -209,7 +210,7 @@ public class PartitionIndexTest
     {
         List<DecoratedKey> keys = data.left;
         try (PartitionIndex summary = data.right;
-             PartitionIndex.Reader reader = summary.openReader())
+             PartitionIndex.Reader reader = summary.openReader(ReadCtx.FOR_TEST))
         {
             for (int i = 0; i < data.left.size(); i++)
             {
@@ -232,7 +233,7 @@ public class PartitionIndexTest
     {
         List<DecoratedKey> keys = data.left;
         try (PartitionIndex summary = data.right;
-             PartitionIndex.Reader reader = summary.openReader())
+             PartitionIndex.Reader reader = summary.openReader(ReadCtx.FOR_TEST))
         {
             for (int i = 0; i < data.left.size(); i++)
             {
@@ -316,7 +317,7 @@ public class PartitionIndexTest
             builder.addEntry(key, 42);
             builder.complete();
             try (PartitionIndex summary = loadPartitionIndex(fhBuilder, writer);
-                 PartitionIndex.Reader reader = summary.openReader())
+                 PartitionIndex.Reader reader = summary.openReader(ReadCtx.FOR_TEST))
             {
                 assertEquals(1, summary.size());
                 assertEquals(42, reader.getLastIndexPosition());
@@ -351,7 +352,7 @@ public class PartitionIndexTest
     public void checkIteration(List<DecoratedKey> keys, int keysSize, PartitionIndex index)
     {
         try (PartitionIndex enforceIndexClosing = index;
-             PartitionIndex.IndexPosIterator iter = index.allKeysIterator())
+             PartitionIndex.IndexPosIterator iter = index.allKeysIterator(ReadCtx.FOR_TEST))
         {
             int i = 0;
             while (true)
@@ -391,7 +392,7 @@ public class PartitionIndexTest
                     exactRight = b;
                 }
 
-                try (PartitionIndex.IndexPosIterator iter = new PartitionIndex.IndexPosIterator(summary, left, right))
+                try (PartitionIndex.IndexPosIterator iter = new PartitionIndex.IndexPosIterator(summary, left, right, ReadCtx.FOR_TEST))
                 {
                     long p = iter.nextIndexPos();
                     if (p == PartitionIndex.NOT_FOUND)
@@ -430,7 +431,7 @@ public class PartitionIndexTest
                 {
                     e.printStackTrace();
                     System.out.format("Left %s%s Right %s%s\n", left.byteComparableAsString(version), exactLeft ? "#" : "", right.byteComparableAsString(version), exactRight ? "#" : "");
-                    try (PartitionIndex.IndexPosIterator iter2 = new PartitionIndex.IndexPosIterator(summary, left, right))
+                    try (PartitionIndex.IndexPosIterator iter2 = new PartitionIndex.IndexPosIterator(summary, left, right, ReadCtx.FOR_TEST))
                     {
                         long pos;
                         while ((pos = iter2.nextIndexPos()) != PartitionIndex.NOT_FOUND)
@@ -557,7 +558,7 @@ public class PartitionIndexTest
                         builder.addEntry(list.get(i), i);
                     builder.complete();
 
-                    try (PartitionIndex index = PartitionIndex.load(fhBuilder, partitioner, true, version))
+                    try (PartitionIndex index = PartitionIndex.load(fhBuilder, partitioner, true, version, ReadCtx.FOR_TEST))
                     {
                         checkIteration(list, list.size(), index);
                     }
@@ -664,9 +665,9 @@ public class PartitionIndexTest
         }
 
         @Override
-        protected Rebufferer instantiateRebufferer()
+        protected Rebufferer instantiateRebufferer(ReadCtx ctx)
         {
-            return new JumpingRebufferer(super.instantiateRebufferer(), cutoffsAndOffsets);
+            return new JumpingRebufferer(super.instantiateRebufferer(ctx), cutoffsAndOffsets);
         }
     }
 
@@ -780,7 +781,7 @@ public class PartitionIndexTest
 
         public Analyzer(PartitionIndex index)
         {
-            super(index, index.version);
+            super(index, index.version, ReadCtx.FOR_TEST);
         }
 
         public void run()
@@ -939,6 +940,6 @@ public class PartitionIndexTest
 
     protected PartitionIndex loadPartitionIndex(FileHandle.Builder fhBuilder, SequentialWriter writer) throws IOException
     {
-        return PartitionIndex.load(fhBuilder, partitioner, false, version);
+        return PartitionIndex.load(fhBuilder, partitioner, false, version, ReadCtx.FOR_TEST);
     }
 }

@@ -40,6 +40,7 @@ import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
 import org.apache.cassandra.index.sai.disk.v1.postings.PostingsReader;
 import org.apache.cassandra.index.sai.postings.IntArrayPostingList;
 import org.apache.cassandra.index.sai.utils.SaiRandomizedTest;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.lucene.util.packed.PackedInts;
 import org.apache.lucene.util.packed.PackedLongValues;
 
@@ -81,7 +82,7 @@ public class OneDimBKDPostingsWriterTest extends SaiRandomizedTest
         }
 
         IndexComponent.ForRead kdTreePostings = components.get(IndexComponentType.KD_TREE_POSTING_LISTS);
-        BKDPostingsIndex postingsIndex = new BKDPostingsIndex(kdTreePostings.createFileHandle(), fp);
+        BKDPostingsIndex postingsIndex = new BKDPostingsIndex(kdTreePostings.createFileHandle(), fp, ReadCtx.FOR_TEST);
         assertEquals(10, postingsIndex.size());
 
         // Internal postings...
@@ -128,7 +129,7 @@ public class OneDimBKDPostingsWriterTest extends SaiRandomizedTest
         }
 
         // There is only a single posting list...the leaf posting list.
-        BKDPostingsIndex postingsIndex = new BKDPostingsIndex(components.get(IndexComponentType.KD_TREE_POSTING_LISTS).createFileHandle(), fp);
+        BKDPostingsIndex postingsIndex = new BKDPostingsIndex(components.get(IndexComponentType.KD_TREE_POSTING_LISTS).createFileHandle(), fp, ReadCtx.FOR_TEST);
         assertEquals(1, postingsIndex.size());
     }
 
@@ -149,13 +150,13 @@ public class OneDimBKDPostingsWriterTest extends SaiRandomizedTest
         }
 
         // There is only a single posting list...the leaf posting list.
-        BKDPostingsIndex postingsIndex = new BKDPostingsIndex(components.get(IndexComponentType.KD_TREE_POSTING_LISTS).createFileHandle(), fp);
+        BKDPostingsIndex postingsIndex = new BKDPostingsIndex(components.get(IndexComponentType.KD_TREE_POSTING_LISTS).createFileHandle(), fp, ReadCtx.FOR_TEST);
         assertEquals(1, postingsIndex.size());
     }
 
     private void assertPostingReaderEquals(IndexComponent.ForRead kdTreePostingLists, BKDPostingsIndex postingsIndex, int nodeID, int[] postings) throws IOException
     {
-        assertPostingReaderEquals(kdTreePostingLists.openInput(),
+        assertPostingReaderEquals(kdTreePostingLists.openInput(ReadCtx.FOR_TEST),
                                   postingsIndex.getPostingsFilePointer(nodeID),
                                   new IntArrayPostingList(postings));
     }

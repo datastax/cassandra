@@ -40,7 +40,7 @@ import static org.apache.cassandra.utils.Throwables.maybeFail;
  * {@link FileHandle} provides access to a file for reading, including the ones written by various {@link SequentialWriter}
  * instances, and it is typically used by {@link org.apache.cassandra.io.sstable.format.SSTableReader}.
  *
- * Use {@link FileHandle.Builder} to create an instance, and call {@link #createReader()} (and its variants) to
+ * Use {@link FileHandle.Builder} to create an instance, and call {@link #createReader} (and its variants) to
  * access the readers for the underlying file.
  *
  * You can use {@link Builder#complete()} several times during its lifecycle with different {@code overrideLength}(i.e. early opening file).
@@ -139,19 +139,19 @@ public class FileHandle extends SharedCloseableImpl
      *
      * @return RandomAccessReader for the file
      */
-    public RandomAccessReader createReader()
+    public RandomAccessReader createReader(ReadCtx ctx)
     {
-        return createReader(null);
+        return createReader(ctx,  null);
     }
 
-    public RandomAccessReader createReader(RateLimiter limiter)
+    public RandomAccessReader createReader(ReadCtx ctx, RateLimiter limiter)
     {
-        return createReader(limiter, sliceDescriptor.dataStart);
+        return createReader(ctx, limiter, sliceDescriptor.dataStart);
     }
 
-    public RandomAccessReader createReader(long position)
+    public RandomAccessReader createReader(ReadCtx ctx, long position)
     {
-        return createReader(null, position);
+        return createReader(ctx,  null, position);
     }
 
     /**
@@ -162,13 +162,13 @@ public class FileHandle extends SharedCloseableImpl
      * @param position Position in the file to start reading from
      * @return RandomAccessReader for the file
      */
-    public RandomAccessReader createReader(RateLimiter limiter, long position)
+    public RandomAccessReader createReader(ReadCtx ctx, RateLimiter limiter, long position)
     {
         assert position >= 0 : "Position must be non-negative - file: " + channel.filePath() + ", position: " + position;
         Rebufferer.BufferHolder bufferHolder = position > 0
                                                ? Rebufferer.emptyBufferHolderAt(position)
                                                : Rebufferer.EMPTY;
-        return new RandomAccessReader(instantiateRebufferer(limiter), order, bufferHolder);
+        return new RandomAccessReader(instantiateRebufferer(ctx, limiter), order, bufferHolder);
     }
 
     /**
@@ -191,14 +191,14 @@ public class FileHandle extends SharedCloseableImpl
             channel.trySkipCache(0, onDiskLength);
     }
 
-    public Rebufferer instantiateRebufferer()
+    public Rebufferer instantiateRebufferer(ReadCtx ctx)
     {
-        return instantiateRebufferer(null);
+        return instantiateRebufferer(ctx, null);
     }
 
-    private Rebufferer instantiateRebufferer(RateLimiter limiter)
+    private Rebufferer instantiateRebufferer(ReadCtx ctx, RateLimiter limiter)
     {
-        Rebufferer rebufferer = rebuffererFactory.instantiateRebufferer();
+        Rebufferer rebufferer = rebuffererFactory.instantiateRebufferer(ctx);
 
         if (limiter != null)
             rebufferer = new LimitingRebufferer(rebufferer, limiter, DiskOptimizationStrategy.MAX_BUFFER_SIZE);

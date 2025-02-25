@@ -26,6 +26,7 @@ import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.InvertedIndexSearcher;
 import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
+import org.apache.cassandra.io.util.ReadCtx;
 
 /**
  * The key override for this class is the use of {@link Version#DB}, which allows us to skip filtering range results.
@@ -35,8 +36,9 @@ class V4InvertedIndexSearcher extends InvertedIndexSearcher
     V4InvertedIndexSearcher(SSTableContext sstableContext,
                             PerIndexFiles perIndexFiles,
                             SegmentMetadata segmentMetadata,
-                            IndexContext indexContext) throws IOException
+                            IndexContext indexContext,
+                            ReadCtx searcherCreationContext) throws IOException
     {
-        super(sstableContext, perIndexFiles, segmentMetadata, indexContext, segmentMetadata.version, false);
+        super(sstableContext, perIndexFiles, segmentMetadata, indexContext, segmentMetadata.version, false, searcherCreationContext);
     }
 }

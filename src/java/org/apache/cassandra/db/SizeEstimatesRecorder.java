@@ -32,6 +32,8 @@ import org.apache.cassandra.db.lifecycle.View;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.storage.StorageProvider;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.locator.TokenMetadata;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaChangeListener;
@@ -160,10 +162,13 @@ public class SizeEstimatesRecorder implements SchemaChangeListener, Runnable
 
     private static long estimatePartitionsCount(Collection<SSTableReader> sstables, Range<Token> range)
     {
-        long count = 0;
-        for (SSTableReader sstable : sstables)
-            count += sstable.estimatedKeysForRanges(Collections.singleton(range));
-        return count;
+        try (ReadCtx ctx = StorageProvider.instance.readCtxFor(ReadCtx.Kind.SIZE_ESTIMATE_RECORDER))
+        {
+            long count = 0;
+            for (SSTableReader sstable : sstables)
+                count += sstable.estimatedKeysForRanges(Collections.singleton(range), ctx);
+            return count;
+        }
     }
 
     private static long estimateMeanPartitionSize(Collection<SSTableReader> sstables)

@@ -48,6 +48,7 @@ import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.SecondaryIndexBuilder;
 import org.apache.cassandra.io.sstable.IndexSummaryRedistribution;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.service.CacheService;
 import org.apache.cassandra.service.StorageService;
@@ -89,7 +90,7 @@ public class ActiveOperationsTest extends CQLTester
         for (int ii = 0; ii < loopCount; ii++)
         {
             CountDownLatch trigger = new CountDownLatch(1);
-            SecondaryIndexBuilder builder = idx.getBuildTaskSupport().getIndexBuildTask(getCurrentColumnFamilyStore(), Collections.singleton(idx), sstables, true);
+            SecondaryIndexBuilder builder = idx.getBuildTaskSupport().getIndexBuildTask(getCurrentColumnFamilyStore(), Collections.singleton(idx), sstables, true, ReadCtx.FOR_TEST);
             Future<?> f1 = es.submit(() -> {
                 Uninterruptibles.awaitUninterruptibly(trigger);
                 try
@@ -126,7 +127,7 @@ public class ActiveOperationsTest extends CQLTester
 
         Index idx = getCurrentColumnFamilyStore().indexManager.getIndexByName(idxName);
         Set<SSTableReader> sstables = getCurrentColumnFamilyStore().getLiveSSTables();
-        SecondaryIndexBuilder builder = idx.getBuildTaskSupport().getIndexBuildTask(getCurrentColumnFamilyStore(), Collections.singleton(idx), sstables, false);
+        SecondaryIndexBuilder builder = idx.getBuildTaskSupport().getIndexBuildTask(getCurrentColumnFamilyStore(), Collections.singleton(idx), sstables, false, ReadCtx.FOR_TEST);
 
         MockTableOperations mockActiveCompactions = new MockTableOperations();
         CompactionManager.instance.submitIndexBuild(builder, mockActiveCompactions).get();

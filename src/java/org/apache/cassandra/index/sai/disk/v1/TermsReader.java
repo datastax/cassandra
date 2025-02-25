@@ -47,6 +47,7 @@ import org.apache.cassandra.index.sai.utils.IndexFileUtils;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
@@ -83,7 +84,8 @@ public class TermsReader implements Closeable
                        FileHandle postingLists,
                        long root,
                        long termsFooterPointer,
-                       Version version) throws IOException
+                       Version version,
+                       ReadCtx creationCtx) throws IOException
     {
         this.indexContext = indexContext;
         this.version = version;
@@ -92,7 +94,7 @@ public class TermsReader implements Closeable
         termDictionaryRoot = root;
         this.termDictionaryFileEncodingVersion = termsDataEncodingVersion;
 
-        try (final IndexInput indexInput = IndexFileUtils.instance.openInput(termDictionaryFile))
+        try (final IndexInput indexInput = IndexFileUtils.instance.openInput(termDictionaryFile, creationCtx))
         {
             // if the pointer is -1 then this is a previous version of the index
             // use the old way to validate the footer
@@ -107,7 +109,7 @@ public class TermsReader implements Closeable
             }
         }
 
-        try (final IndexInput indexInput = IndexFileUtils.instance.openInput(postingsFile))
+        try (final IndexInput indexInput = IndexFileUtils.instance.openInput(postingsFile, creationCtx))
         {
             validate(indexInput);
         }
@@ -126,16 +128,16 @@ public class TermsReader implements Closeable
         }
     }
 
-    public TermsIterator allTerms()
+    public TermsIterator allTerms(ReadCtx ctx)
     {
-        return allTerms(true);
+        return allTerms(ctx, true);
     }
 
-    public TermsIterator allTerms(boolean ascending)
+    public TermsIterator allTerms(ReadCtx ctx, boolean ascending)
     {
         // blocking, since we use it only for segment merging for now
-        return ascending ? new TermsScanner(version, this.indexContext.getValidator())
-                         : new ReverseTermsScanner();
+        return ascending ? new TermsScanner(version, this.indexContext.getValidator(), ctx)
+                         : new ReverseTermsScanner(ctx);
     }
 
     public PostingList exactMatch(ByteComparable term, QueryEventListener.TrieIndexEventListener perQueryEventListener, QueryContext context)
@@ -168,8 +170,8 @@ public class TermsReader implements Closeable
         TermQuery(ByteComparable term, QueryEventListener.TrieIndexEventListener listener, QueryContext context)
         {
             this.listener = listener;
-            postingsInput = IndexFileUtils.instance.openInput(postingsFile);
-            postingsSummaryInput = IndexFileUtils.instance.openInput(postingsFile);
+            postingsInput = IndexFileUtils.instance.openInput(postingsFile, context.readCtx());
+            postingsSummaryInput = IndexFileUtils.instance.openInput(postingsFile, context.readCtx());
             this.term = term;
             lookupStartTime = System.nanoTime();
             this.context = context;
@@ -211,7 +213,7 @@ public class TermsReader implements Closeable
 
         public long lookupTermDictionary(ByteComparable term)
         {
-            try (TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(termDictionaryFile.instantiateRebufferer(), termDictionaryRoot, termDictionaryFileEncodingVersion))
+            try (TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(termDictionaryFile.instantiateRebufferer(context.readCtx()), termDictionaryRoot, termDictionaryFileEncodingVersion))
             {
                 final long offset = reader.exactMatch(term);
 
@@ -258,7 +260,7 @@ public class TermsReader implements Closeable
             // Note: we always pass true for include start because we use the ByteComparable terminator above
             // to selectively determine when we have a match on the first/last term. This is probably part of the API
             // that could change, but it's been there for a bit, so we'll leave it for now.
-            try (TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(termDictionaryFile.instantiateRebufferer(),
+            try (TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(termDictionaryFile.instantiateRebufferer(context.readCtx()),
                                                                                   termDictionaryRoot,
                                                                                   lower,
                                                                                   upper,
@@ -299,8 +301,8 @@ public class TermsReader implements Closeable
             ArrayList<PostingList> postingLists = new ArrayList<>();
 
             // index inputs will be closed with the onClose method of the returned merged posting list
-            IndexInput postingsInput = IndexFileUtils.instance.openInput(postingsFile);
-            IndexInput postingsSummaryInput = IndexFileUtils.instance.openInput(postingsFile);
+            IndexInput postingsInput = IndexFileUtils.instance.openInput(postingsFile, context.readCtx());
+            IndexInput postingsSummaryInput = IndexFileUtils.instance.openInput(postingsFile, context.readCtx());
 
             do
             {
@@ -329,8 +331,8 @@ public class TermsReader implements Closeable
             ArrayList<PostingList> postingLists = new ArrayList<>();
 
             // index inputs will be closed with the onClose method of the returned merged posting list
-            IndexInput postingsInput = IndexFileUtils.instance.openInput(postingsFile);
-            IndexInput postingsSummaryInput = IndexFileUtils.instance.openInput(postingsFile);
+            IndexInput postingsInput = IndexFileUtils.instance.openInput(postingsFile, context.readCtx());
+            IndexInput postingsSummaryInput = IndexFileUtils.instance.openInput(postingsFile, context.readCtx());
 
             do
             {
@@ -382,11 +384,11 @@ public class TermsReader implements Closeable
         private final IndexInput postingsInput;
         private final IndexInput postingsSummaryInput;
 
-        private TermsScanner(Version version, AbstractType<?> type)
+        private TermsScanner(Version version, AbstractType<?> type, ReadCtx ctx)
         {
-            this.termsDictionaryReader = new TrieTermsDictionaryReader(termDictionaryFile.instantiateRebufferer(), termDictionaryRoot, termDictionaryFileEncodingVersion);
-            this.postingsInput = IndexFileUtils.instance.openInput(postingsFile);
-            this.postingsSummaryInput = IndexFileUtils.instance.openInput(postingsFile);
+            this.termsDictionaryReader = new TrieTermsDictionaryReader(termDictionaryFile.instantiateRebufferer(ctx), termDictionaryRoot, termDictionaryFileEncodingVersion);
+            this.postingsInput = IndexFileUtils.instance.openInput(postingsFile, ctx);
+            this.postingsSummaryInput = IndexFileUtils.instance.openInput(postingsFile, ctx);
             // We decode based on the logic used to encode the min and max terms in the trie.
             if (version.onOrAfter(Version.DB) && TypeUtil.isComposite(type))
             {
@@ -454,11 +456,11 @@ public class TermsReader implements Closeable
         private final IndexInput postingsInput;
         private final IndexInput postingsSummaryInput;
 
-        private ReverseTermsScanner()
+        private ReverseTermsScanner(ReadCtx ctx)
         {
-            this.iterator = new ReverseTrieTermsDictionaryReader(termDictionaryFile.instantiateRebufferer(), termDictionaryRoot);
-            this.postingsInput = IndexFileUtils.instance.openInput(postingsFile);
-            this.postingsSummaryInput = IndexFileUtils.instance.openInput(postingsFile);
+            this.iterator = new ReverseTrieTermsDictionaryReader(termDictionaryFile.instantiateRebufferer(ctx), termDictionaryRoot);
+            this.postingsInput = IndexFileUtils.instance.openInput(postingsFile, ctx);
+            this.postingsSummaryInput = IndexFileUtils.instance.openInput(postingsFile, ctx);
         }
 
         @Override

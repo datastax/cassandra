@@ -38,6 +38,7 @@ import org.apache.cassandra.index.sai.disk.vector.RowIdsView;
 import org.apache.cassandra.index.sai.utils.SingletonIntIterator;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.RandomAccessReader;
+import org.apache.cassandra.io.util.ReadCtx;
 
 public class V2OnDiskOrdinalsMap implements OnDiskOrdinalsMap
 {
@@ -56,13 +57,13 @@ public class V2OnDiskOrdinalsMap implements OnDiskOrdinalsMap
     private final boolean canFastMapOrdinalsView;
     private final boolean canFastMapRowIdsView;
 
-    public V2OnDiskOrdinalsMap(FileHandle fh, long segmentOffset, long segmentLength)
+    public V2OnDiskOrdinalsMap(FileHandle fh, long segmentOffset, long segmentLength, ReadCtx searcherCreationContext)
     {
         deletedOrdinals = new HashSet<>();
 
         this.segmentEnd = segmentOffset + segmentLength;
         this.fh = fh;
-        try (var reader = fh.createReader())
+        try (var reader = fh.createReader(searcherCreationContext))
         {
             reader.seek(segmentOffset);
             int deletedCount = reader.readInt();
@@ -99,13 +100,13 @@ public class V2OnDiskOrdinalsMap implements OnDiskOrdinalsMap
     }
 
     @Override
-    public RowIdsView getRowIdsView()
+    public RowIdsView getRowIdsView(ReadCtx ctx)
     {
         if (canFastMapRowIdsView) {
             return ONE_TO_ONE_ROW_IDS_VIEW;
         }
 
-        return new FileReadingRowIdsView();
+        return new FileReadingRowIdsView(ctx);
     }
 
     @Override
@@ -116,7 +117,13 @@ public class V2OnDiskOrdinalsMap implements OnDiskOrdinalsMap
 
     private class FileReadingRowIdsView implements RowIdsView
     {
-        RandomAccessReader reader = fh.createReader();
+        final RandomAccessReader reader;
+
+        FileReadingRowIdsView(ReadCtx ctx)
+        {
+            reader = fh.createReader(ctx);
+
+        }
 
         @Override
         public PrimitiveIterator.OfInt getSegmentRowIdsMatching(int vectorOrdinal) throws IOException
@@ -166,13 +173,13 @@ public class V2OnDiskOrdinalsMap implements OnDiskOrdinalsMap
     }
 
     @Override
-    public OrdinalsView getOrdinalsView()
+    public OrdinalsView getOrdinalsView(ReadCtx ctx)
     {
         if (canFastMapOrdinalsView) {
             return fastOrdinalsView;
         }
 
-        return new FileReadingOrdinalsView();
+        return new FileReadingOrdinalsView(ctx);
     }
 
     /**
@@ -180,12 +187,18 @@ public class V2OnDiskOrdinalsMap implements OnDiskOrdinalsMap
      */
     private class FileReadingOrdinalsView implements OrdinalsView
     {
-        RandomAccessReader reader = fh.createReader();
+        final RandomAccessReader reader;
+
         private final long high = (segmentEnd - 8 - rowOrdinalOffset) / 8;
         private int lastFoundRowId = -1;
         private long lastFoundRowIdIndex = -1;
 
         private int lastRowId = -1;
+
+        FileReadingOrdinalsView(ReadCtx ctx)
+        {
+            this.reader = fh.createReader(ctx);
+        }
 
         /**
          * @return order if given row id is found; otherwise return -1

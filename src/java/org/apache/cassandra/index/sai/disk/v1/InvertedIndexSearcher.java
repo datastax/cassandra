@@ -62,6 +62,7 @@ import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
@@ -88,7 +89,8 @@ public class InvertedIndexSearcher extends IndexSearcher
                                     SegmentMetadata segmentMetadata,
                                     IndexContext indexContext,
                                     Version version,
-                                    boolean filterRangeResults) throws IOException
+                                    boolean filterRangeResults,
+                                    ReadCtx searcherCreationContext) throws IOException
     {
         super(sstableContext.primaryKeyMapFactory(), perIndexFiles, segmentMetadata, indexContext);
         this.sstable = sstableContext.sstable;
@@ -101,7 +103,7 @@ public class InvertedIndexSearcher extends IndexSearcher
         perColumnEventListener = (QueryEventListener.TrieIndexEventListener)indexContext.getColumnQueryMetrics();
         var docLengthsMeta = segmentMetadata.componentMetadatas.getOptional(IndexComponentType.DOC_LENGTHS);
         this.segmentRowIdOffset = segmentMetadata.segmentRowIdOffset;
-        this.docLengthsReader = docLengthsMeta == null ? null : new DocLengthsReader(indexFiles.docLengths(), docLengthsMeta);
+        this.docLengthsReader = docLengthsMeta == null ? null : new DocLengthsReader(indexFiles.docLengths(), docLengthsMeta, searcherCreationContext);
 
         Map<String,String> map = metadata.componentMetadatas.get(IndexComponentType.TERMS_DATA).attributes;
         String footerPointerString = map.get(SAICodecUtils.FOOTER_POINTER);
@@ -114,7 +116,8 @@ public class InvertedIndexSearcher extends IndexSearcher
                                  indexFiles.postingLists(),
                                  root,
                                  footerPointer,
-                                 version);
+                                 version,
+                                 searcherCreationContext);
     }
 
     @Override
@@ -155,11 +158,11 @@ public class InvertedIndexSearcher extends IndexSearcher
         throw new IllegalArgumentException(indexContext.logMessage("Unsupported expression: " + exp));
     }
 
-    private Cell<?> readColumn(SSTableReader sstable, PrimaryKey primaryKey)
+    private Cell<?> readColumn(SSTableReader sstable, PrimaryKey primaryKey, ReadCtx ctx)
     {
         var dk = primaryKey.partitionKey();
         var slices = Slices.with(indexContext.comparator(), Slice.make(primaryKey.clustering()));
-        try (var rowIterator = sstable.iterator(dk, slices, columnFilter, false, SSTableReadsListener.NOOP_LISTENER))
+        try (var rowIterator = sstable.iterator(dk, slices, columnFilter, false, SSTableReadsListener.NOOP_LISTENER, ctx))
         {
             var unfiltered = rowIterator.next();
             assert unfiltered.isRow() : unfiltered;
@@ -173,7 +176,7 @@ public class InvertedIndexSearcher extends IndexSearcher
     {
         if (!orderer.isBM25())
         {
-            var iter = new RowIdWithTermsIterator(reader.allTerms(orderer.isAscending()));
+            var iter = new RowIdWithTermsIterator(reader.allTerms(queryContext.readCtx(), orderer.isAscending()));
             return toMetaSortedIterator(iter, queryContext);
         }
         if (docLengthsReader == null)
@@ -192,7 +195,7 @@ public class InvertedIndexSearcher extends IndexSearcher
         // extract the match count for each
         var documentFrequencies = postingLists.entrySet().stream().collect(Collectors.toMap(Map.Entry::getKey, e -> (long) e.getValue().size()));
 
-        var pkm = primaryKeyMapFactory.newPerSSTablePrimaryKeyMap();
+        var pkm = primaryKeyMapFactory.newPerSSTablePrimaryKeyMap(queryContext.readCtx());
         var merged = IntersectingPostingList.intersect(postingLists);
         
         // Wrap the iterator with resource management
@@ -264,7 +267,7 @@ public class InvertedIndexSearcher extends IndexSearcher
             documentFrequencies.put(term, matches);
         }
         var analyzer = indexContext.getAnalyzerFactory().create();
-        var it = keys.stream().map(pk -> DocTF.createFromDocument(pk, readColumn(sstable, pk), analyzer, queryTerms)).iterator();
+        var it = keys.stream().map(pk -> DocTF.createFromDocument(pk, readColumn(sstable, pk, queryContext.readCtx()), analyzer, queryTerms)).iterator();
         return bm25Internal(CloseableIterator.wrap(it), queryTerms, documentFrequencies);
     }
 

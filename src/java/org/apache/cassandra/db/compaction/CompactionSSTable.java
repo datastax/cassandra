@@ -38,6 +38,7 @@ import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTableId;
 import org.apache.cassandra.io.sstable.SSTableIdFactory;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.ReadCtx;
 
 /**
  * An SSTable abstraction used by compaction. Implemented by {@link SSTableReader} and provided by
@@ -220,7 +221,7 @@ public interface CompactionSSTable
     /**
      * @return true if it is possible that the given key is contained in this sstable.
      */
-    boolean couldContain(DecoratedKey key);
+    boolean couldContain(DecoratedKey key, ReadCtx ctx);
 
     Descriptor getDescriptor();
     Path getFile();

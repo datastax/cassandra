@@ -292,7 +292,10 @@ public class EncryptionUtils
 
         public int read(ByteBuffer dst) throws IOException
         {
-            int bytesRead = channelProxy.read(dst, currentPosition);
+            // Currently, this class is only use by EcnryptedChecksummedDataInput, which itself is only used by
+            // `HintsReader` and thus never happen in the context of a user request. So for now we just pass `null` as
+            // context.
+            int bytesRead = channelProxy.read(dst, currentPosition, null);
             dst.flip();
             currentPosition += bytesRead;
             return bytesRead;

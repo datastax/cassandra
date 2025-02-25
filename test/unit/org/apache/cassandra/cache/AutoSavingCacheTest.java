@@ -20,6 +20,7 @@ package org.apache.cassandra.cache;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.big.BigTableRowIndexEntry;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -90,7 +91,7 @@ public class AutoSavingCacheTest
 
         // preheat key cache
         for (SSTableReader sstable : cfs.getLiveSSTables())
-            sstable.getPosition(Util.dk("key1"), SSTableReader.Operator.EQ);
+            sstable.getPosition(Util.dk("key1"), SSTableReader.Operator.EQ, ReadCtx.FOR_TEST);
 
         AutoSavingCache<KeyCacheKey, BigTableRowIndexEntry> keyCache = CacheService.instance.keyCache;
 

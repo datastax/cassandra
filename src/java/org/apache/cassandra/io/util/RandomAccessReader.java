@@ -297,6 +297,7 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
             return;
         bufferHolder.release();
         rebufferer.closeReader();
+
         buffer = null;
         bufferHolder = null;
 
@@ -468,7 +469,7 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
         try
         {
             ChunkReader reader = new SimpleChunkReader(channel, -1, BufferType.OFF_HEAP, DEFAULT_BUFFER_SIZE);
-            Rebufferer rebufferer = reader.instantiateRebufferer();
+            Rebufferer rebufferer = reader.instantiateRebufferer(null);
             return new RandomAccessReaderWithOwnChannel(rebufferer);
         }
         catch (Throwable t)

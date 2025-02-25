@@ -25,6 +25,7 @@ import javax.annotation.concurrent.NotThreadSafe;
 
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.sstable.SSTableId;
+import org.apache.cassandra.io.util.ReadCtx;
 
 /**
  * A bidirectional map of {@link PrimaryKey} to row Id. Implementations of this interface
@@ -45,16 +46,16 @@ public interface PrimaryKeyMap extends Closeable
          * @return a {@link PrimaryKeyMap}
          * @throws IOException
          */
-        PrimaryKeyMap newPerSSTablePrimaryKeyMap();
+        PrimaryKeyMap newPerSSTablePrimaryKeyMap(ReadCtx ctx);
 
         /**
          * Returns the number of primary keys in the map. This is part of the factory because
          * it can be retrieved without opening the map.
          * @return the number of primary keys in the map
          */
-        default long count()
+        default long count(ReadCtx ctx)
         {
-            try (PrimaryKeyMap map = newPerSSTablePrimaryKeyMap())
+            try (PrimaryKeyMap map = newPerSSTablePrimaryKeyMap(ctx))
             {
                 return map.count();
             }

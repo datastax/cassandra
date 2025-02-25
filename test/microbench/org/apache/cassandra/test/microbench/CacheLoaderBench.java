@@ -35,6 +35,7 @@ import org.apache.cassandra.db.RowUpdateBuilder;
 import org.apache.cassandra.db.marshal.AsciiType;
 import org.apache.cassandra.io.sstable.format.RowIndexEntry;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.service.CacheService;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -106,7 +107,7 @@ public class CacheLoaderBench extends CQLTester
 
             // preheat key cache
             for (SSTableReader sstable : cfs.getLiveSSTables())
-                sstable.getPosition(Util.dk("key"), SSTableReader.Operator.EQ);
+                sstable.getPosition(Util.dk("key"), SSTableReader.Operator.EQ, ReadCtx.FOR_TEST);
         }
 
         AutoSavingCache<KeyCacheKey, ? extends RowIndexEntry> keyCache = CacheService.instance.keyCache;

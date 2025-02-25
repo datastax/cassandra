@@ -49,6 +49,7 @@ import org.apache.cassandra.io.sstable.SSTableMultiWriter;
 import org.apache.cassandra.io.sstable.ScannerList;
 import org.apache.cassandra.io.sstable.SimpleSSTableMultiWriter;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.utils.Overlaps;
 
 abstract class AbstractCompactionStrategy implements CompactionStrategy
@@ -301,9 +302,9 @@ abstract class AbstractCompactionStrategy implements CompactionStrategy
      */
     @SuppressWarnings("resource")
     @Override
-    public ScannerList getScanners(Collection<SSTableReader> sstables, Collection<Range<Token>> ranges)
+    public ScannerList getScanners(Collection<SSTableReader> sstables, Collection<Range<Token>> ranges, ReadCtx ctx)
     {
-        return ScannerList.of(sstables, ranges);
+        return ScannerList.of(sstables, ranges, ctx);
     }
 
     @Override

@@ -21,6 +21,7 @@ import java.nio.ByteBuffer;
 
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.io.util.TailOverridingRebufferer;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
@@ -44,8 +45,8 @@ class PartitionIndexEarly extends PartitionIndex
     }
 
     @Override
-    protected Rebufferer instantiateRebufferer()
+    protected Rebufferer instantiateRebufferer(ReadCtx ctx)
     {
-        return new TailOverridingRebufferer(super.instantiateRebufferer(), cutoff, tail);
+        return new TailOverridingRebufferer(super.instantiateRebufferer(ctx), cutoff, tail);
     }
 }

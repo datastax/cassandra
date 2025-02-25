@@ -32,6 +32,7 @@ import org.apache.cassandra.db.compaction.CompactionInterruptedException;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.RandomAccessReader;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
@@ -157,8 +158,8 @@ public class CrcCheckChanceTest extends CQLTester
         // note: only compressed files currently perform crc checks, so only the dfile reader is relevant here
         SSTableReader baseSSTable = cfs.getLiveSSTables().iterator().next();
         SSTableReader idxSSTable = indexCfs.getLiveSSTables().iterator().next();
-        try (RandomAccessReader baseDataReader = baseSSTable.openDataReader();
-             RandomAccessReader idxDataReader = idxSSTable.openDataReader())
+        try (RandomAccessReader baseDataReader = baseSSTable.openDataReader(ReadCtx.FOR_TEST);
+             RandomAccessReader idxDataReader = idxSSTable.openDataReader(ReadCtx.FOR_TEST))
         {
             Assert.assertEquals(0.03, baseDataReader.getCrcCheckChance(), 0.0);
             Assert.assertEquals(0.03, idxDataReader.getCrcCheckChance(), 0.0);

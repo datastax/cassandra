@@ -31,6 +31,7 @@ import org.apache.cassandra.io.sstable.format.RowIndexEntry;
 import org.apache.cassandra.io.sstable.format.trieindex.RowIndexReader.IndexInfo;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.io.util.ReadCtx;
 
 /**
  *  A Cell Iterator in reversed clustering order over SSTable
@@ -48,9 +49,10 @@ class SSTableReversedIterator extends AbstractSSTableIterator<RowIndexEntry>
                                    RowIndexEntry indexEntry,
                                    Slices slices,
                                    ColumnFilter columns,
-                                   FileHandle ifile)
+                                   FileHandle ifile,
+                                   ReadCtx ctx)
     {
-        super(sstable, file, key, indexEntry, slices, columns, ifile);
+        super(sstable, file, key, indexEntry, slices, columns, ifile, ctx);
     }
 
     protected Reader createReaderInternal(RowIndexEntry indexEntry, FileDataInput file, boolean shouldCloseFile)
@@ -260,7 +262,8 @@ class SSTableReversedIterator extends AbstractSSTableIterator<RowIndexEntry>
             indexReader = new RowIndexReverseIterator(ifile,
                                                       indexEntry,
                                                       comparator.asByteComparable(slice.end()),
-                                                      sstable.descriptor.version.getByteComparableVersion());
+                                                      sstable.descriptor.version.getByteComparableVersion(),
+                                                      ctx);
             gotoBlock(indexReader.nextIndexInfo(), true, Long.MAX_VALUE);
         }
 

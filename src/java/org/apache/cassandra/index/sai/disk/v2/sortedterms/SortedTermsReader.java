@@ -32,7 +32,9 @@ import org.apache.cassandra.index.sai.disk.v1.bitpack.NumericValuesMeta;
 import org.apache.cassandra.index.sai.disk.v1.trie.TrieTermsDictionaryReader;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
+import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.util.BytesRef;
@@ -90,16 +92,17 @@ public class SortedTermsReader
                              @Nonnull FileHandle termsDataBlockOffsets,
                              @Nonnull FileHandle termsTrie,
                              @Nonnull SortedTermsMeta meta,
-                             @Nonnull NumericValuesMeta blockOffsetsMeta) throws IOException
+                             @Nonnull NumericValuesMeta blockOffsetsMeta,
+                             ReadCtx indexLoadCtx) throws IOException
     {
         this.termsData = termsData;
         this.termsTrie = termsTrie;
-        try (IndexInput trieInput = IndexInputReader.create(termsTrie))
+        try (IndexInput trieInput = IndexInputReader.create(termsTrie, indexLoadCtx))
         {
             SAICodecUtils.validate(trieInput);
         }
         this.meta = meta;
-        this.blockOffsetsFactory = new MonotonicBlockPackedReader(termsDataBlockOffsets, blockOffsetsMeta);
+        this.blockOffsetsFactory = new MonotonicBlockPackedReader(termsDataBlockOffsets, blockOffsetsMeta, indexLoadCtx);
     }
 
     /**
@@ -120,9 +123,9 @@ public class SortedTermsReader
      * The cursor is valid as long this object hasn't been closed.
      * You must close the cursor when you no longer need it.
      */
-    public @Nonnull Cursor openCursor() throws IOException
+    public @Nonnull Cursor openCursor(ReadCtx ctx) throws IOException
     {
-        return new Cursor(termsData, blockOffsetsFactory);
+        return new Cursor(termsData, blockOffsetsFactory, ctx);
     }
 
     /**
@@ -147,16 +150,16 @@ public class SortedTermsReader
 
         private TrieTermsDictionaryReader reader;
 
-        Cursor(FileHandle termsData, LongArray.Factory blockOffsetsFactory) throws IOException
+        Cursor(FileHandle termsData, LongArray.Factory blockOffsetsFactory, ReadCtx ctx) throws IOException
         {
             try
             {
-                this.termsData = IndexInputReader.create(termsData);
+                this.termsData = IndexInputReader.create(termsData, ctx);
                 SAICodecUtils.validate(this.termsData);
                 this.termsDataFp = this.termsData.getFilePointer();
-                this.blockOffsets = new LongArray.DeferredLongArray(blockOffsetsFactory::open);
+                this.blockOffsets = new LongArray.DeferredLongArray(() -> blockOffsetsFactory.open(ctx));
                 this.currentTerm = new BytesRef(Math.max(meta.maxTermLength, 0));  // maxTermLength can be negative if meta.count == 0
-                this.reader = new TrieTermsDictionaryReader(termsTrie.instantiateRebufferer(), meta.trieFP, TypeUtil.BYTE_COMPARABLE_VERSION);
+                this.reader = new TrieTermsDictionaryReader(termsTrie.instantiateRebufferer(ctx), meta.trieFP, TypeUtil.BYTE_COMPARABLE_VERSION);
             }
             catch (Throwable t)
             {

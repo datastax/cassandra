@@ -39,6 +39,7 @@ import org.apache.cassandra.dht.Bounds;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.repair.TableRepairManager;
 import org.apache.cassandra.repair.ValidationPartitionIterator;
 import org.apache.cassandra.repair.consistent.LocalSessions;
@@ -55,9 +56,9 @@ public class CassandraTableRepairManager implements TableRepairManager
     }
 
     @Override
-    public ValidationPartitionIterator getValidationIterator(Collection<Range<Token>> ranges, UUID parentId, UUID sessionID, boolean isIncremental, int nowInSec) throws IOException
+    public ValidationPartitionIterator getValidationIterator(Collection<Range<Token>> ranges, UUID parentId, UUID sessionID, boolean isIncremental, int nowInSec, ReadCtx ctx) throws IOException
     {
-        return new CassandraValidationIterator(cfs, ranges, parentId, sessionID, isIncremental, nowInSec);
+        return new CassandraValidationIterator(cfs, ranges, parentId, sessionID, isIncremental, nowInSec, ctx);
     }
 
     @Override

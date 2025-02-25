@@ -54,6 +54,7 @@ import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.TableMetadata;
@@ -203,7 +204,7 @@ public class SSTableCorruptionDetectionTest extends SSTableWriterTestBase
     private Consumer<SSTableReader> sstableScanner()
     {
         return (SSTableReader sstable) -> {
-            try (var scanner = sstable.getScanner(ColumnFilter.NONE, DataRange.allData(sstable.getPartitioner()), SSTableReadsListener.NOOP_LISTENER))
+            try (var scanner = sstable.getScanner(ColumnFilter.NONE, DataRange.allData(sstable.getPartitioner()), SSTableReadsListener.NOOP_LISTENER, ReadCtx.FOR_TEST))
             {
                 while (scanner.hasNext())
                 {
@@ -229,7 +230,7 @@ public class SSTableCorruptionDetectionTest extends SSTableWriterTestBase
     private Consumer<SSTableReader> sstableSimpleScanner()
     {
         return (SSTableReader sstable) -> {
-            try (ISSTableScanner scanner = sstable.getScanner())
+            try (ISSTableScanner scanner = sstable.getScanner(ReadCtx.FOR_TEST))
             {
                 while (scanner.hasNext())
                 {
@@ -262,7 +263,8 @@ public class SSTableCorruptionDetectionTest extends SSTableWriterTestBase
                                                                       Slices.ALL,
                                                                       ColumnFilter.all(cfs.metadata()),
                                                                       false,
-                                                                      SSTableReadsListener.NOOP_LISTENER))
+                                                                      SSTableReadsListener.NOOP_LISTENER,
+                                                                      ReadCtx.FOR_TEST))
                 {
                     while (rowIter.hasNext())
                     {

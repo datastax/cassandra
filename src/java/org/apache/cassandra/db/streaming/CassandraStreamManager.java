@@ -31,6 +31,8 @@ import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.big.BigTableReader;
+import org.apache.cassandra.io.storage.StorageProvider;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.locator.RangesAtEndpoint;
 import org.apache.cassandra.locator.Replica;
 import org.apache.cassandra.service.ActiveRepairService;
@@ -87,7 +89,7 @@ public class CassandraStreamManager implements TableStreamManager
     public Collection<OutgoingStream> createOutgoingStreams(StreamSession session, RangesAtEndpoint replicas, UUID pendingRepair, PreviewKind previewKind)
     {
         Refs<SSTableReader> refs = new Refs<>();
-        try
+        try (ReadCtx ctx = StorageProvider.instance.readCtxFor(ReadCtx.Kind.STEAMING))
         {
             final List<Range<PartitionPosition>> keyRanges = new ArrayList<>(replicas.size());
             for (Replica replica : replicas)
@@ -138,7 +140,7 @@ public class CassandraStreamManager implements TableStreamManager
             for (SSTableReader sstable : refs)
             {
                 List<Range<Token>> ranges = sstable.isRepaired() ? normalizedFullRanges : normalizedAllRanges;
-                List<BigTableReader.PartitionPositionBounds> sections = sstable.getPositionsForRanges(ranges);
+                List<BigTableReader.PartitionPositionBounds> sections = sstable.getPositionsForRanges(ranges, ctx);
 
                 Ref<? extends SSTableReader> ref = refs.get(sstable);
                 if (sections.isEmpty())
@@ -147,7 +149,7 @@ public class CassandraStreamManager implements TableStreamManager
                     continue;
                 }
                 streams.add(new CassandraOutgoingFile(session.getStreamOperation(), ref, sections, ranges,
-                                                      sstable.estimatedKeysForRanges(ranges)));
+                                                      sstable.estimatedKeysForRanges(ranges, ctx)));
             }
 
             return streams;

@@ -26,6 +26,7 @@ import org.apache.cassandra.io.sstable.format.AbstractSSTableIterator;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.io.util.ReadCtx;
 
 /**
  *  A Cell Iterator over SSTable
@@ -43,9 +44,10 @@ public class SSTableIterator extends AbstractSSTableIterator<BigTableRowIndexEnt
                            BigTableRowIndexEntry indexEntry,
                            Slices slices,
                            ColumnFilter columns,
-                           FileHandle ifile)
+                           FileHandle ifile,
+                           ReadCtx ctx)
     {
-        super(sstable, file, key, indexEntry, slices, columns, ifile);
+        super(sstable, file, key, indexEntry, slices, columns, ifile, ctx);
     }
 
     @SuppressWarnings("resource") // caller to close
@@ -82,7 +84,7 @@ public class SSTableIterator extends AbstractSSTableIterator<BigTableRowIndexEnt
         private ForwardIndexedReader(BigTableRowIndexEntry indexEntry, FileDataInput file, boolean shouldCloseFile)
         {
             super(file, shouldCloseFile);
-            this.indexState = new IndexState(this, metadata.comparator, indexEntry, false, ifile);
+            this.indexState = new IndexState(this, metadata.comparator, indexEntry, false, ifile, ctx);
             this.lastBlockIdx = indexState.blocksCount(); // if we never call setForSlice, that's where we want to stop
         }
 

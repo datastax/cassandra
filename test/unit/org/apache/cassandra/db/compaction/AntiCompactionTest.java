@@ -56,6 +56,7 @@ import org.apache.cassandra.io.sstable.ISSTableScanner;
 import org.apache.cassandra.io.sstable.SSTableTxnWriter;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.RangesAtEndpoint;
 import org.apache.cassandra.locator.Replica;
@@ -168,7 +169,7 @@ public class AntiCompactionTest
         {
             assertFalse(sstable.isRepaired());
             assertEquals(sstable.isPendingRepair() ? sessionID : NO_PENDING_REPAIR, sstable.getPendingRepair());
-            try (ISSTableScanner scanner = sstable.getScanner())
+            try (ISSTableScanner scanner = sstable.getScanner(ReadCtx.FOR_TEST))
             {
                 while (scanner.hasNext())
                 {

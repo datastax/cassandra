@@ -125,6 +125,7 @@ import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileOutputStreamPlus;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.RandomAccessReader;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.io.util.SliceDescriptor;
 import org.apache.cassandra.metrics.RestorableMeter;
 import org.apache.cassandra.schema.CachingParams;
@@ -808,7 +809,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         return dfile.sliceDescriptor;
     }
 
-    public abstract PartitionIndexIterator allKeysIterator() throws IOException;
+    public abstract PartitionIndexIterator allKeysIterator(ReadCtx ctx) throws IOException;
 
     /**
      * Partition iterator used only for scrubing (see {@link Scrubber} and {@link ScrubPartitionIterator}).
@@ -816,7 +817,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
      * @return iterator for scrubing or {@code null} if this {@link SSTableReader} doesn't have the iterator
      * implemenation (this may be the case if there is no index file for the iterator)
      */
-    public abstract ScrubPartitionIterator scrubPartitionsIterator() throws IOException;
+    public abstract ScrubPartitionIterator scrubPartitionsIterator(ReadCtx ctx) throws IOException;
 
     public boolean equals(Object that)
     {
@@ -1064,7 +1065,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
             // TODO: merge with caller's firstKeyBeyond() work,to save time
             if (newStart.compareTo(first) > 0)
             {
-                final long dataStart = getPosition(newStart, Operator.EQ).position;
+                final long dataStart = getPosition(newStart, Operator.EQ, StorageProvider.instance.readCtxFor(ReadCtx.Kind.SSTABLE_MOVED_START)).position;
                 final long indexStart = getIndexScanPosition(newStart);
                 this.tidy.runOnClose = new DropPageCache(dfile, dataStart, ifile, indexStart, runOnClose);
             }
@@ -1127,7 +1128,10 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         // 3. The max_index_interval was lowered, forcing us to raise the sampling level
         if (samplingLevel > indexSummary.getSamplingLevel() || indexSummary.getMinIndexInterval() != minIndexInterval || effectiveInterval > maxIndexInterval)
         {
-            newSummary = buildSummaryAtLevel(samplingLevel);
+            try (ReadCtx ctx = StorageProvider.instance.readCtxFor(ReadCtx.Kind.SSTABLE_METADATA_CHANGE))
+            {
+                newSummary = buildSummaryAtLevel(samplingLevel, ctx);
+            }
         }
         else if (samplingLevel < indexSummary.getSamplingLevel())
         {
@@ -1148,10 +1152,10 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         }
     }
 
-    private IndexSummary buildSummaryAtLevel(int newSamplingLevel) throws IOException
+    private IndexSummary buildSummaryAtLevel(int newSamplingLevel, ReadCtx ctx) throws IOException
     {
         // we read the positions in a BRAF so we don't have to worry about an entry spanning a mmap boundary.
-        try (PartitionIndexIterator iterator = allKeysIterator();
+        try (PartitionIndexIterator iterator = allKeysIterator(ctx);
              IndexSummaryBuilder summaryBuilder = new IndexSummaryBuilder(estimatedKeys(), metadata().params.minIndexInterval, newSamplingLevel))
         {
             while (!iterator.isExhausted())
@@ -1318,7 +1322,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
      * @param ranges
      * @return An estimate of the number of keys for given ranges in this SSTable.
      */
-    public long estimatedKeysForRanges(Collection<Range<Token>> ranges)
+    public long estimatedKeysForRanges(Collection<Range<Token>> ranges, ReadCtx ctx)
     {
         long sampleKeyCount = 0;
         List<IndexesBounds> sampleIndexes = getSampleIndexesForRanges(indexSummary, ranges);
@@ -1397,7 +1401,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         return positions;
     }
 
-    public Iterable<DecoratedKey> getKeySamples(final Range<Token> range)
+    public Iterable<DecoratedKey> getKeySamples(final Range<Token> range, ReadCtx ctx)
     {
         final List<IndexesBounds> indexRanges = getSampleIndexesForRanges(indexSummary, Collections.singletonList(range));
 
@@ -1450,7 +1454,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
      *
      * @return A sorted list of [offset,end) pairs that cover the given ranges in the datafile for this SSTable.
      */
-    public List<PartitionPositionBounds> getPositionsForRanges(Collection<Range<Token>> ranges)
+    public List<PartitionPositionBounds> getPositionsForRanges(Collection<Range<Token>> ranges, ReadCtx ctx)
     {
         // use the index to determine a minimal section for each range
         List<PartitionPositionBounds> positions = new ArrayList<>();
@@ -1458,7 +1462,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         {
             assert !range.isWrapAround() || range.right.isMinimum();
             AbstractBounds<PartitionPosition> bounds = Range.makeRowRange(range);
-            PartitionPositionBounds pb = getPositionsForBounds(bounds);
+            PartitionPositionBounds pb = getPositionsForBounds(bounds, ctx);
             if (pb != null)
                 positions.add(pb);
         }
@@ -1473,14 +1477,14 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
      * @return A sorted list of [offset,end) pairs corresponding to the given boundsList in the datafile for this
      *         SSTable.
      */
-    public List<PartitionPositionBounds> getPositionsForBoundsIterator(Iterator<AbstractBounds<PartitionPosition>> boundsList)
+    public List<PartitionPositionBounds> getPositionsForBoundsIterator(Iterator<AbstractBounds<PartitionPosition>> boundsList, ReadCtx ctx)
     {
         // use the index to determine a minimal section for each range
         List<PartitionPositionBounds> positions = new ArrayList<>();
         while (boundsList.hasNext())
         {
             AbstractBounds<PartitionPosition> bounds = boundsList.next();
-            PartitionPositionBounds pb = getPositionsForBounds(bounds);
+            PartitionPositionBounds pb = getPositionsForBounds(bounds, ctx);
             if (pb != null)
                 positions.add(pb);
         }
@@ -1493,17 +1497,17 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
      * @return An [offset,end) pair that cover the given bounds in the datafile for this SSTable, or null if the range
      *         is not covered by the sstable or is empty.
      */
-    public PartitionPositionBounds getPositionsForBounds(AbstractBounds<PartitionPosition> bounds)
+    public PartitionPositionBounds getPositionsForBounds(AbstractBounds<PartitionPosition> bounds, ReadCtx ctx)
     {
-        RowIndexEntry rieLeft = getPosition(bounds.left, bounds.inclusiveLeft() ? Operator.GE : Operator.GT);
+        RowIndexEntry rieLeft = getPosition(bounds.left, bounds.inclusiveLeft() ? Operator.GE : Operator.GT, ctx);
         // Note: getPosition will apply a moved start if the sstable is in MOVED_START state.
         if (rieLeft == null) // empty range
             return null;
         long left = rieLeft.position;
 
-        RowIndexEntry rieRight = bounds.right.isMinimum() ? null
-                                                          : getPosition(bounds.right, bounds.inclusiveRight() ? Operator.GT
-                                                                                                              : Operator.GE);
+        RowIndexEntry rieRight = bounds.right.isMinimum()
+                                 ? null
+                                 : getPosition(bounds.right, bounds.inclusiveRight() ? Operator.GT : Operator.GE, ctx);
         long right;
         if (rieRight != null)
             right = rieRight.position;
@@ -1523,7 +1527,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
      * Return a [offset, end) pair that covers the whole file. This could be null if the sstable's moved start has
      * made the sstable effectively empty.
      */
-    public PartitionPositionBounds getPositionsForFullRange()
+    public PartitionPositionBounds getPositionsForFullRange(ReadCtx ctx)
     {
         if (openReason != OpenReason.MOVED_START)
             return new PartitionPositionBounds(0, uncompressedLength());
@@ -1531,7 +1535,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         {
             // query a full range, so that the required adjustments can be applied
             PartitionPosition minToken = getPartitioner().getMinimumToken().minKeyBound();
-            return getPositionsForBounds(new Range<>(minToken, minToken));
+            return getPositionsForBounds(new Range<>(minToken, minToken), ctx);
         }
     }
 
@@ -1627,12 +1631,13 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         return keyCache != null && metadata().params.caching.cacheKeys();
     }
 
-    public boolean couldContain(DecoratedKey dk)
+    @Override
+    public boolean couldContain(DecoratedKey dk, ReadCtx ctx)
     {
         maybeDeserializeLazyBloomFilter();
         return !(bf instanceof AlwaysPresentFilter)
                ? bf.isPresent(dk)
-               : checkEntryExists(dk, Operator.EQ, false);
+               : checkEntryExists(dk, Operator.EQ, false, ctx);
     }
 
     protected boolean inBloomFilter(DecoratedKey dk)
@@ -1720,16 +1725,17 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
      * allow key selection by token bounds but only if op != * EQ
      * @param op The Operator defining matching keys: the nearest key to the target matching the operator wins.
      */
-    public final RowIndexEntry getPosition(PartitionPosition key, Operator op)
+    public final RowIndexEntry getPosition(PartitionPosition key, Operator op, ReadCtx ctx)
     {
-        return getPosition(key, op, true, false, SSTableReadsListener.NOOP_LISTENER);
+        return getPosition(key, op, true, false, SSTableReadsListener.NOOP_LISTENER, ctx);
     }
 
     public final boolean checkEntryExists(PartitionPosition key,
                                           Operator op,
-                                          boolean updateCacheAndStats)
+                                          boolean updateCacheAndStats,
+                                          ReadCtx ctx)
     {
-        return getPosition(key, op, updateCacheAndStats, false, SSTableReadsListener.NOOP_LISTENER) != null;
+        return getPosition(key, op, updateCacheAndStats, false, SSTableReadsListener.NOOP_LISTENER, ctx) != null;
     }
 
     /**
@@ -1744,20 +1750,22 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
                                                  Operator op,
                                                  boolean updateCacheAndStats,
                                                  boolean permitMatchPastLast,
-                                                 SSTableReadsListener listener);
+                                                 SSTableReadsListener listener,
+                                                 ReadCtx ctx);
 
     public abstract UnfilteredRowIterator iterator(DecoratedKey key,
                                                    Slices slices,
                                                    ColumnFilter selectedColumns,
                                                    boolean reversed,
-                                                   SSTableReadsListener listener);
+                                                   SSTableReadsListener listener,
+                                                   ReadCtx ctx);
 
-    public abstract UnfilteredRowIterator simpleIterator(FileDataInput dfile, DecoratedKey key, boolean tombstoneOnly);
+    public abstract UnfilteredRowIterator simpleIterator(FileDataInput dfile, DecoratedKey key, boolean tombstoneOnly, ReadCtx ctx);
 
     /**
      * Finds and returns the first key beyond a given token in this SSTable or null if no such key exists.
      */
-    public DecoratedKey firstKeyBeyond(PartitionPosition token)
+    public DecoratedKey firstKeyBeyond(PartitionPosition token, ReadCtx ctx)
     {
         if (token.compareTo(first) < 0)
             return first;
@@ -1767,7 +1775,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         if (ifile == null)
             return null;
 
-        try (PartitionIndexIterator iterator = allKeysIterator())
+        try (PartitionIndexIterator iterator = allKeysIterator(ctx))
         {
             iterator.indexPosition(sampledPosition);
             KeyIterator keyIterator = new KeyIterator(iterator, getPartitioner(), uncompressedLength());
@@ -1911,62 +1919,67 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
      * Direct I/O SSTableScanner over a defined range of tokens.
      *
      * @param range the range of keys to cover
+     * @param ctx the context for the use of the scanner.
      * @return A Scanner for seeking over the rows of the SSTable.
      */
-    public ISSTableScanner getScanner(Range<Token> range)
+    public ISSTableScanner getScanner(Range<Token> range, ReadCtx ctx)
     {
         if (range == null)
-            return getScanner();
+            return getScanner(ctx);
         else
-            return getScanner(Collections.singletonList(range));
+            return getScanner(Collections.singletonList(range), ctx);
     }
 
     /**
      * Direct I/O SSTableScanner over the entirety of the sstable.
      *
+     * @param ctx the context for the use of the scanner.
      * @return A Scanner over the full content of the SSTable.
      */
-    public ISSTableScanner getScanner()
+    public ISSTableScanner getScanner(ReadCtx ctx)
     {
-        return new SSTableSimpleScanner(this, Collections.singletonList(getPositionsForFullRange()));
+        return new SSTableSimpleScanner(this, Collections.singletonList(getPositionsForFullRange(ctx)), ctx);
     }
 
     /**
      * Direct I/O SSTableScanner over a defined collection of ranges of tokens.
      *
      * @param ranges the range of keys to cover
+     * @param ctx the context for the use of the scanner.
      * @return A Scanner for seeking over the rows of the SSTable.
      */
-    public ISSTableScanner getScanner(Collection<Range<Token>> ranges)
+    public ISSTableScanner getScanner(Collection<Range<Token>> ranges, ReadCtx ctx)
     {
         if (ranges != null)
-            return new SSTableSimpleScanner(this, getPositionsForRanges(ranges));
+            return new SSTableSimpleScanner(this, getPositionsForRanges(ranges, ctx), ctx);
         else
-            return getScanner();
+            return getScanner(ctx);
     }
 
     /**
      * Direct I/O SSTableScanner over an iterator of bounds.
      *
      * @param boundsIterator the keys to cover
+     * @param ctx the context for the use of the scanner.
      * @return A Scanner for seeking over the rows of the SSTable.
      */
-    public ISSTableScanner getScanner(Iterator<AbstractBounds<PartitionPosition>> boundsIterator)
+    public ISSTableScanner getScanner(Iterator<AbstractBounds<PartitionPosition>> boundsIterator, ReadCtx ctx)
     {
-        return new SSTableSimpleScanner(this, getPositionsForBoundsIterator(boundsIterator));
+        return new SSTableSimpleScanner(this, getPositionsForBoundsIterator(boundsIterator, ctx), ctx);
     }
 
     /**
      * @param columns the columns to return.
      * @param dataRange filter to use when reading the columns
      * @param listener a listener used to handle internal read events
+     * @param ctx the context for the use of the scanner.
      * @return A Scanner for seeking over the rows of the SSTable.
      */
-    public abstract ISSTableScanner getScanner(ColumnFilter columns, DataRange dataRange, SSTableReadsListener listener);
+    public abstract ISSTableScanner getScanner(ColumnFilter columns, DataRange dataRange, SSTableReadsListener listener, ReadCtx ctx);
 
-    public FileDataInput getFileDataInput(long position)
+    public FileDataInput getFileDataInput(ReadCtx ctx, long position)
     {
-        return dfile.createReader(position);
+        return dfile.createReader(ctx, position);
     }
 
     /**
@@ -2030,9 +2043,9 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
      * @param position the start position of the partion-level deletion time in the data file
      * @return the partion-level deletion time at the specified position
      */
-    public DeletionTime partitionLevelDeletionAt(long position) throws IOException
+    public DeletionTime partitionLevelDeletionAt(long position, ReadCtx ctx) throws IOException
     {
-        try (FileDataInput in = dfile.createReader(position))
+        try (FileDataInput in = dfile.createReader(ctx, position))
         {
             if (in.isEOF())
                 return null;
@@ -2049,12 +2062,12 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
      * @param columnFilter the columns to fetch, {@code null} to select all the columns
      * @return the static row at the specified position
      */
-    public Row staticRowAt(long position, ColumnFilter columnFilter) throws IOException
+    public Row staticRowAt(long position, ColumnFilter columnFilter, ReadCtx ctx) throws IOException
     {
         if (!header.hasStatic())
             return Rows.EMPTY_STATIC_ROW;
 
-        try (FileDataInput in = dfile.createReader(position))
+        try (FileDataInput in = dfile.createReader(ctx, position))
         {
             if (in.isEOF())
                 return null;
@@ -2076,9 +2089,9 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
      * @param position the start position of the unfiltered in the data file
      * @return the clustering prefix of the unfiltered at the specified position
      */
-    public ClusteringPrefix clusteringAt(long position) throws IOException
+    public ClusteringPrefix clusteringAt(long position, ReadCtx ctx) throws IOException
     {
-        try (FileDataInput in = dfile.createReader(position))
+        try (FileDataInput in = dfile.createReader(ctx, position))
         {
             if (in.isEOF())
                 return null;
@@ -2101,9 +2114,9 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
      * @param columnFilter the columns to fetch, {@code null} to select all the columns
      * @return the unfiltered at the specified position
      */
-    public Unfiltered unfilteredAt(long position, ColumnFilter columnFilter) throws IOException
+    public Unfiltered unfilteredAt(long position, ColumnFilter columnFilter, ReadCtx ctx) throws IOException
     {
-        try (FileDataInput in = dfile.createReader(position))
+        try (FileDataInput in = dfile.createReader(ctx, position))
         {
             if (in.isEOF())
                 return null;
@@ -2321,25 +2334,25 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         return sstableMetadata;
     }
 
-    public RandomAccessReader openDataReader(RateLimiter limiter)
+    public RandomAccessReader openDataReader(ReadCtx ctx, RateLimiter limiter)
     {
         assert limiter != null;
-        return dfile.createReader(limiter);
+        return dfile.createReader(ctx, limiter);
     }
 
-    public RandomAccessReader openDataReader()
+    public RandomAccessReader openDataReader(ReadCtx ctx)
     {
-        return dfile.createReader();
+        return dfile.createReader(ctx);
     }
 
-    public RandomAccessReader openIndexReader()
+    public RandomAccessReader openIndexReader(ReadCtx ctx)
     {
         if (ifile != null)
-            return ifile.createReader();
+            return ifile.createReader(ctx);
         return null;
     }
 
-    public abstract RandomAccessReader openKeyComponentReader();
+    public abstract RandomAccessReader openKeyComponentReader(ReadCtx ctx);
 
     public ChannelProxy getDataChannel()
     {
@@ -2806,7 +2819,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
      */
     public interface Factory
     {
-        PartitionIndexIterator indexIterator(Descriptor descriptor, TableMetadata metadata);
+        PartitionIndexIterator indexIterator(Descriptor descriptor, TableMetadata metadata, ReadCtx ctx);
 
         // TODO in the implementation of those methods we will refer the current static methods which are implemented in AbstractdBigTableReader
         // TODO make those static openXXX methods private

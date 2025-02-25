@@ -52,6 +52,7 @@ import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.util.ChannelProxy;
 import org.apache.cassandra.io.util.ChunkReader;
 import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.io.util.RebuffererFactory;
 import org.apache.cassandra.metrics.ChunkCacheMetrics;
@@ -144,13 +145,13 @@ public class ChunkCache
     }
 
 
-    private Chunk load(ChunkReader file, long position)
+    private Chunk load(ChunkReader file, long position, ReadCtx ctx)
     {
         Chunk chunk = null;
         try
         {
             chunk = newChunk(file.chunkSize(), position);  // Note: we need `chunk` to be assigned before we call read to release on error
-            chunk.read(file);
+            chunk.read(file, ctx);
         }
         catch (RuntimeException t)
         {
@@ -204,7 +205,7 @@ public class ChunkCache
 
     private RebuffererFactory wrap(ChunkReader file)
     {
-        return new CachingRebufferer(file);
+        return new CachingRebuffererFactory(file);
     }
 
     public RebuffererFactory maybeWrap(ChunkReader file)
@@ -403,7 +404,7 @@ public class ChunkCache
         /**
          * Load the data for this chunk.
          */
-        abstract void read(ChunkReader file);
+        abstract void read(ChunkReader file, ReadCtx ctx);
 
         /**
          * Return the correct buffer depending on the position requested by the client. The returned buffer cannot be
@@ -456,7 +457,7 @@ public class ChunkCache
                 bufferPool.put(MemoryUtil.allocateByteBuffer(pages[i], PageAware.PAGE_SIZE, PageAware.PAGE_SIZE, ByteOrder.BIG_ENDIAN, attachments[i]));
         }
 
-        void read(ChunkReader file)
+        void read(ChunkReader file, ReadCtx ctx)
         {
             // Note: We cannot use ThreadLocalByteBufferHolder because readChunk uses it for its temporary buffer.
             // Note: This uses the "Networking" buffer pool, which is meant to serve short-term buffers. Using
@@ -465,7 +466,7 @@ public class ChunkCache
             ByteBuffer scratchBuffer = BufferPools.forNetworking().get(capacity(), file.preferredBufferType());
             try
             {
-                file.readChunk(offset, scratchBuffer);
+                file.readChunk(offset, scratchBuffer, ctx);
                 int limit = scratchBuffer.limit();
                 int idx = 0;
                 int pageEnd;
@@ -580,10 +581,10 @@ public class ChunkCache
             bufferPool.put(MemoryUtil.allocateByteBuffer(address, capacity, capacity, ByteOrder.BIG_ENDIAN, attachment));
         }
 
-        void read(ChunkReader file)
+        void read(ChunkReader file, ReadCtx ctx)
         {
             ByteBuffer buffer = buffer();
-            file.readChunk(offset, buffer);
+            file.readChunk(offset, buffer, ctx);
             bytesRead = buffer.limit();
         }
 
@@ -599,17 +600,13 @@ public class ChunkCache
         }
     }
 
-    /**
-     * Rebufferer providing cached chunks where data is obtained from the specified ChunkReader.
-     * Thread-safe. One instance per SegmentedFile, created by ChunkCache.maybeWrap if the cache is enabled.
-     */
-    class CachingRebufferer implements Rebufferer, RebuffererFactory
+    class CachingRebuffererFactory implements RebuffererFactory
     {
         private final ChunkReader source;
         private final long readerId;
         final long alignmentMask;
 
-        public CachingRebufferer(ChunkReader file)
+        private CachingRebuffererFactory(ChunkReader file)
         {
             source = file;
             readerId = readerIdFor(file);
@@ -619,13 +616,78 @@ public class ChunkCache
         }
 
         @Override
+        public Rebufferer instantiateRebufferer(ReadCtx ctx)
+        {
+            return new CachingRebufferer(this, ctx);
+        }
+
+        @Override
+        public void invalidateIfCached(long position)
+        {
+            long pageAlignedPos = position & alignmentMask;
+            synchronousCache.invalidate(new Key(readerId, pageAlignedPos));
+        }
+
+        @Override
+        public void close()
+        {
+            source.close();
+        }
+
+        @Override
+        public ChannelProxy channel()
+        {
+            return source.channel();
+        }
+
+        @Override
+        public long fileLength()
+        {
+            return source.fileLength();
+        }
+
+        @Override
+        public double getCrcCheckChance()
+        {
+            return source.getCrcCheckChance();
+        }
+
+        @Override
+        public String toString()
+        {
+            return "CachingRebuffererFactory:" + source;
+        }
+    }
+
+    /**
+     * Rebufferer providing cached chunks where data is obtained from the specified ChunkReader.
+     * Thread-safe. One instance per SegmentedFile, created by ChunkCache.maybeWrap if the cache is enabled.
+     */
+    class CachingRebufferer implements Rebufferer
+    {
+        private final CachingRebuffererFactory factory;
+        private final ReadCtx ctx;
+
+        public CachingRebufferer(CachingRebuffererFactory factory, ReadCtx ctx)
+        {
+            this.factory = factory;
+            this.ctx = ctx;
+        }
+
+        @Override
+        public ReadCtx readCtx()
+        {
+            return ctx;
+        }
+
+        @Override
         public BufferHolder rebuffer(long position)
         {
             try
             {
-                long pageAlignedPos = position & alignmentMask;
+                long pageAlignedPos = position & factory.alignmentMask;
                 BufferHolder buf = null;
-                Key chunkKey = new Key(readerId, pageAlignedPos);
+                Key chunkKey = new Key(factory.readerId, pageAlignedPos);
 
                 int spin = 0;
                 //There is a small window when a released buffer/invalidated chunk
@@ -644,7 +706,7 @@ public class ChunkCache
                         {
                             try
                             {
-                                chunk = load(source, pageAlignedPos);
+                                chunk = load(factory.source, pageAlignedPos, ctx);
                             }
                             catch (Throwable t)
                             {
@@ -689,22 +751,27 @@ public class ChunkCache
         }
 
         @Override
-        public Rebufferer instantiateRebufferer()
-        {
-            return this;
-        }
-
-        @Override
-        public void invalidateIfCached(long position)
-        {
-            long pageAlignedPos = position & alignmentMask;
-            synchronousCache.invalidate(new Key(readerId, pageAlignedPos));
-        }
-
-        @Override
         public void close()
         {
-            source.close();
+            // Resources are hold by the factory, but nothing to release here.
+        }
+
+        @Override
+        public ChannelProxy channel()
+        {
+            return factory.channel();
+        }
+
+        @Override
+        public long fileLength()
+        {
+            return factory.fileLength();
+        }
+
+        @Override
+        public double getCrcCheckChance()
+        {
+            return factory.getCrcCheckChance();
         }
 
         @Override
@@ -714,27 +781,9 @@ public class ChunkCache
         }
 
         @Override
-        public ChannelProxy channel()
-        {
-            return source.channel();
-        }
-
-        @Override
-        public long fileLength()
-        {
-            return source.fileLength();
-        }
-
-        @Override
-        public double getCrcCheckChance()
-        {
-            return source.getCrcCheckChance();
-        }
-
-        @Override
         public String toString()
         {
-            return "CachingRebufferer:" + source;
+            return "Rebufferer(" + factory + ", " + ctx + ')';
         }
     }
 

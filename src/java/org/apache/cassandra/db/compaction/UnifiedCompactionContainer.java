@@ -40,6 +40,7 @@ import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTableMultiWriter;
 import org.apache.cassandra.io.sstable.ScannerList;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.notifications.INotification;
 import org.apache.cassandra.schema.CompactionParams;
 
@@ -300,9 +301,9 @@ public class UnifiedCompactionContainer implements CompactionStrategyContainer
     }
 
     @Override
-    public ScannerList getScanners(Collection<SSTableReader> sstables, Collection<Range<Token>> ranges)
+    public ScannerList getScanners(Collection<SSTableReader> sstables, Collection<Range<Token>> ranges, ReadCtx ctx)
     {
-        return strategy.getScanners(sstables, ranges);
+        return strategy.getScanners(sstables, ranges, ctx);
     }
 
     @Override

@@ -53,6 +53,7 @@ import org.apache.cassandra.index.sai.utils.NamedMemoryLimiter;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.storage.StorageProvider;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Throwables;
 
@@ -409,7 +410,8 @@ public class SSTableIndexWriter implements PerIndexWriter
 
         try (var fhBuilder = StorageProvider.instance.indexBuildTimeFileHandleBuilderFor(pqComponent);
              var fh = fhBuilder.complete();
-             var reader = fh.createReader())
+             var ctx = StorageProvider.instance.readCtxFor(ReadCtx.Kind.INDEX_BUILD);
+             var reader = fh.createReader(ctx))
         {
             var sm = segments.get(segments.size() - 1);
             long offset = sm.componentMetadatas.get(IndexComponentType.PQ).offset;

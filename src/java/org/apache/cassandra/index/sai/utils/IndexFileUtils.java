@@ -42,6 +42,7 @@ import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.RandomAccessReader;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.io.util.SequentialWriter;
 import org.apache.cassandra.io.util.SequentialWriterOption;
 import org.apache.lucene.codecs.CodecUtil;
@@ -95,14 +96,14 @@ public class IndexFileUtils
         return out;
     }
 
-    public IndexInputReader openInput(FileHandle handle)
+    public IndexInputReader openInput(FileHandle handle, ReadCtx ctx)
     {
-        return IndexInputReader.create(handle);
+        return IndexInputReader.create(handle, ctx);
     }
 
-    public IndexInputReader openBlockingInput(FileHandle fileHandle)
+    public IndexInputReader openBlockingInput(FileHandle fileHandle, ReadCtx ctx)
     {
-        final RandomAccessReader randomReader = fileHandle.createReader();
+        final RandomAccessReader randomReader = fileHandle.createReader(ctx);
         return IndexInputReader.create(randomReader, fileHandle::close);
     }
 

@@ -104,6 +104,8 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
     @SuppressWarnings("unchecked")
     public UnfilteredPartitionIterator search(ReadExecutionController executionController) throws RequestTimeoutException
     {
+        queryContext.setReadCtx(executionController.readCtx());
+
         int retries = 0;
         while (true)
         {

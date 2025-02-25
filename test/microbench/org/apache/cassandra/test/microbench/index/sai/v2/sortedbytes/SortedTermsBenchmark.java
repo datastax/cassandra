@@ -38,6 +38,7 @@ import org.apache.cassandra.index.sai.disk.v2.sortedterms.SortedTermsReader;
 import org.apache.cassandra.index.sai.disk.v2.sortedterms.SortedTermsWriter;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.test.microbench.index.sai.v1.AbstractOnDiskBenchmark;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
@@ -168,7 +169,7 @@ public class SortedTermsBenchmark extends AbstractOnDiskBenchmark
         tokenValues = new long[NUM_ROWS];
 
         IndexComponents.ForRead components = indexDescriptor.perSSTableComponents();
-        MetadataSource metadataSource = MetadataSource.loadMetadata(components);
+        MetadataSource metadataSource = MetadataSource.loadMetadata(components, ReadCtx.FOR_TEST);
         IndexComponent.ForRead blocksComponent = components.get(IndexComponentType.PRIMARY_KEY_BLOCKS);
         IndexComponent.ForRead blockOffsetsComponent = components.get(IndexComponentType.PRIMARY_KEY_BLOCK_OFFSETS);
         NumericValuesMeta blockOffsetMeta = new NumericValuesMeta(metadataSource.get(blockOffsetsComponent));
@@ -177,7 +178,7 @@ public class SortedTermsBenchmark extends AbstractOnDiskBenchmark
         termsData = blocksComponent.createFileHandle();
         blockOffsets = blockOffsetsComponent.createFileHandle();
 
-        sortedTermsReader = new SortedTermsReader(termsData,blockOffsets, trieFile, sortedTermsMeta, blockOffsetMeta);
+        sortedTermsReader = new SortedTermsReader(termsData,blockOffsets, trieFile, sortedTermsMeta, blockOffsetMeta, ReadCtx.FOR_TEST);
 
         luceneReader = DirectoryReader.open(directory);
         LeafReaderContext context = luceneReader.leaves().get(0);
@@ -223,7 +224,7 @@ public class SortedTermsBenchmark extends AbstractOnDiskBenchmark
     @BenchmarkMode({ Mode.Throughput})
     public void advance(Blackhole bh) throws IOException
     {
-        try (SortedTermsReader.Cursor cursor = sortedTermsReader.openCursor())
+        try (SortedTermsReader.Cursor cursor = sortedTermsReader.openCursor(ReadCtx.FOR_TEST))
         {
             for (int i = 0; i < NUM_INVOCATIONS; i++)
             {
@@ -238,7 +239,7 @@ public class SortedTermsBenchmark extends AbstractOnDiskBenchmark
     @BenchmarkMode({ Mode.Throughput})
     public void seekToPointID(Blackhole bh) throws IOException
     {
-        try (SortedTermsReader.Cursor cursor = sortedTermsReader.openCursor())
+        try (SortedTermsReader.Cursor cursor = sortedTermsReader.openCursor(ReadCtx.FOR_TEST))
         {
             for (int i = 0; i < NUM_INVOCATIONS; i++)
             {
@@ -253,7 +254,7 @@ public class SortedTermsBenchmark extends AbstractOnDiskBenchmark
     @BenchmarkMode({ Mode.Throughput})
     public void seekToTerm(Blackhole bh) throws IOException
     {
-        try (SortedTermsReader.Cursor cursor = sortedTermsReader.openCursor())
+        try (SortedTermsReader.Cursor cursor = sortedTermsReader.openCursor(ReadCtx.FOR_TEST))
         {
             for (int i = 0; i < NUM_INVOCATIONS; i++)
             {

@@ -57,6 +57,7 @@ import org.apache.cassandra.index.StubIndex;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.CompactionParams;
 import org.apache.cassandra.schema.IndexMetadata;
@@ -456,7 +457,8 @@ public class RangeTombstoneTest
                                                                                       Slices.ALL,
                                                                                       ColumnFilter.NONE,
                                                                                       false,
-                                                                                      SSTableReadsListener.NOOP_LISTENER);
+                                                                                      SSTableReadsListener.NOOP_LISTENER,
+                                                                                      ReadCtx.FOR_TEST);
         iter = new OrderCheckingIterator(iter);
         assertEquals(expected, Iterators.size(iter));
     }
@@ -677,7 +679,7 @@ public class RangeTombstoneTest
 
         // test the physical structure of the sstable i.e. rt & columns on disk
         SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
-        try (UnfilteredPartitionIterator scanner = sstable.getScanner())
+        try (UnfilteredPartitionIterator scanner = sstable.getScanner(ReadCtx.FOR_TEST))
         {
             try (UnfilteredRowIterator iter = scanner.next())
             {

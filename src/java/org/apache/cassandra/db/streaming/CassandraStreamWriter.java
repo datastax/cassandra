@@ -154,7 +154,7 @@ public class CassandraStreamWriter
         ByteBuffer buffer = BufferPools.forNetworking().get(minReadable, BufferType.OFF_HEAP);
         try
         {
-            int readCount = proxy.read(buffer, start - sstable.getDataFileSliceDescriptor().sliceStart);
+            int readCount = proxy.read(buffer, start - sstable.getDataFileSliceDescriptor().sliceStart, null);
             assert readCount == minReadable : String.format("could not read required number of bytes from file to be streamed: read %d bytes, wanted %d bytes", readCount, minReadable);
             buffer.flip();
 

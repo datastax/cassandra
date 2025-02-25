@@ -21,6 +21,7 @@ import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.AbstractIterator;
 
@@ -55,6 +56,7 @@ public class BigTableScanner implements ISSTableScanner
     protected final RandomAccessReader dfile;
     protected final RandomAccessReader ifile;
     public final BigTableReader sstable;
+    private final ReadCtx readCtx;
 
     private final Iterator<AbstractBounds<PartitionPosition>> rangeIterator;
     private AbstractBounds<PartitionPosition> currentRange;
@@ -71,16 +73,18 @@ public class BigTableScanner implements ISSTableScanner
     public static ISSTableScanner getScanner(BigTableReader sstable,
                                              ColumnFilter columns,
                                              DataRange dataRange,
-                                             SSTableReadsListener listener)
+                                             SSTableReadsListener listener,
+                                             ReadCtx ctx)
     {
-        return new BigTableScanner(sstable, columns, dataRange, makeBounds(sstable, dataRange).iterator(), listener);
+        return new BigTableScanner(sstable, columns, dataRange, makeBounds(sstable, dataRange).iterator(), listener, ctx);
     }
 
     private BigTableScanner(BigTableReader sstable,
                             ColumnFilter columns,
                             DataRange dataRange,
                             Iterator<AbstractBounds<PartitionPosition>> rangeIterator,
-                            SSTableReadsListener listener)
+                            SSTableReadsListener listener,
+                            ReadCtx ctx)
     {
         assert sstable != null;
 
@@ -88,8 +92,9 @@ public class BigTableScanner implements ISSTableScanner
         RandomAccessReader ifile = null;
         try
         {
-            dfile = sstable.openDataReader();
-            ifile = sstable.openIndexReader();
+            this.readCtx = ctx;
+            dfile = sstable.openDataReader(ctx);
+            ifile = sstable.openIndexReader(ctx);
             this.sstable = sstable;
             this.columns = columns;
             this.dataRange = dataRange;
@@ -351,7 +356,7 @@ public class BigTableScanner implements ISSTableScanner
                             }
 
                             ClusteringIndexFilter filter = dataRange.clusteringIndexFilter(partitionKey());
-                            return sstable.iterator(dfile, partitionKey(), currentEntry, filter.getSlices(BigTableScanner.this.metadata()), columns, filter.isReversed());
+                            return sstable.iterator(dfile, partitionKey(), currentEntry, filter.getSlices(BigTableScanner.this.metadata()), columns, filter.isReversed(), readCtx);
                         }
                         catch (CorruptSSTableException | IOException e)
                         {

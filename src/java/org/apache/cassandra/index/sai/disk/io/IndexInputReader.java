@@ -23,6 +23,7 @@ import java.io.IOException;
 import org.apache.cassandra.io.compress.CorruptBlockException;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.RandomAccessReader;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.lucene.index.CorruptIndexException;
 import org.apache.lucene.store.DataInput;
 
@@ -49,9 +50,9 @@ public class IndexInputReader extends IndexInput
     }
 
     @SuppressWarnings("resource")
-    public static IndexInputReader create(FileHandle handle)
+    public static IndexInputReader create(FileHandle handle, ReadCtx ctx)
     {
-        RandomAccessReader reader = handle.createReader();
+        RandomAccessReader reader = handle.createReader(ctx);
         return new IndexInputReader(reader, () -> {});
     }
 

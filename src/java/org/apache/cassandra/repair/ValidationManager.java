@@ -35,6 +35,8 @@ import org.apache.cassandra.db.compaction.TableOperation;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.io.storage.StorageProvider;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.metrics.CompactionMetrics;
 import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.utils.FBUtilities;
@@ -87,10 +89,10 @@ public class ValidationManager
         return tree;
     }
 
-    private static ValidationPartitionIterator getValidationIterator(TableRepairManager repairManager, Validator validator) throws IOException
+    private static ValidationPartitionIterator getValidationIterator(TableRepairManager repairManager, Validator validator, ReadCtx ctx) throws IOException
     {
         RepairJobDesc desc = validator.desc;
-        return repairManager.getValidationIterator(desc.ranges, desc.parentSessionId, desc.sessionId, validator.isIncremental, validator.nowInSec);
+        return repairManager.getValidationIterator(desc.ranges, desc.parentSessionId, desc.sessionId, validator.isIncremental, validator.nowInSec, ctx);
     }
 
     /**
@@ -113,14 +115,15 @@ public class ValidationManager
         long start = System.nanoTime();
         long partitionCount = 0;
         long estimatedTotalBytes = 0;
-        try (ValidationPartitionIterator vi = getValidationIterator(cfs.getRepairManager(), validator))
+        try (ReadCtx ctx = StorageProvider.instance.readCtxFor(ReadCtx.Kind.REPAIR_VALIDATION);
+             ValidationPartitionIterator vi = getValidationIterator(cfs.getRepairManager(), validator, ctx))
         {
             MerkleTrees tree = createMerkleTrees(vi, validator.desc.ranges, cfs);
             TableOperation op = vi.getCompactionIterator().getOperation();
             try (NonThrowingCloseable cls = CompactionManager.instance.active.onOperationStart(op))
             {
                 // validate the CF as we iterate over it
-                validator.prepare(cfs, tree);
+                validator.prepare(cfs, tree, ctx);
                 while (vi.hasNext())
                 {
                     try (UnfilteredRowIterator partition = vi.next())

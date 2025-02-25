@@ -25,6 +25,7 @@ import com.google.common.base.MoreObjects;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.RandomAccessReader;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.utils.Throwables;
 
 public class KeyFetcher
@@ -38,9 +39,9 @@ public class KeyFetcher
         this.sstable = sstable;
     }
 
-    public RandomAccessReader createReader()
+    public RandomAccessReader createReader(ReadCtx ctx)
     {
-        return sstable.openKeyComponentReader();
+        return sstable.openKeyComponentReader(ctx);
     }
 
     public DecoratedKey apply(RandomAccessReader reader, long keyOffset)

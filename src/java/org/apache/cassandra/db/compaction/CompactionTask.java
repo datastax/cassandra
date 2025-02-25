@@ -55,6 +55,7 @@ import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.sstable.ScannerList;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.schema.CompactionParams;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ActiveRepairService;
@@ -259,7 +260,7 @@ public class CompactionTask extends AbstractCompactionTask
 
         // Calculate the operation total sizes if not already set
         if (totals == null)
-            totals = getOperationTotals(actuallyCompact, tokenRange());
+            totals = getOperationTotals(actuallyCompact, tokenRange(), controller.readCtx());
 
         // sanity check: sstables to compact is a subset of the transaction originals
         assert transaction.originals().containsAll(actuallyCompact);
@@ -303,7 +304,7 @@ public class CompactionTask extends AbstractCompactionTask
         }
     }
 
-    public static OperationTotals getOperationTotals(Collection<SSTableReader> sstables, Range<Token> tokenRange)
+    public static OperationTotals getOperationTotals(Collection<SSTableReader> sstables, Range<Token> tokenRange, ReadCtx ctx)
     {
         long inputDiskSize = 0;
         long inputUncompressedSize = 0;
@@ -320,7 +321,7 @@ public class CompactionTask extends AbstractCompactionTask
             var rangeList = ImmutableList.of(tokenRange);
             for (SSTableReader rdr : sstables)
             {
-                final List<SSTableReader.PartitionPositionBounds> positionsForRanges = rdr.getPositionsForRanges(rangeList);
+                final List<SSTableReader.PartitionPositionBounds> positionsForRanges = rdr.getPositionsForRanges(rangeList, ctx);
                 for (SSTableReader.PartitionPositionBounds pp : positionsForRanges)
                     inputUncompressedSize += pp.upperPosition - pp.lowerPosition;
                 inputDiskSize += rdr.onDiskSizeForPartitionPositions(positionsForRanges);
@@ -690,8 +691,8 @@ public class CompactionTask extends AbstractCompactionTask
         TableOperation initializeSource(Range<Token> tokenRange)
         {
             var rangeList = tokenRange != null ? ImmutableList.of(tokenRange) : null;
-            this.scanners = strategy != null ? strategy.getScanners(actuallyCompact, rangeList)
-                                             : ScannerList.of(actuallyCompact, rangeList);
+            this.scanners = strategy != null ? strategy.getScanners(actuallyCompact, rangeList, controller.readCtx())
+                                             : ScannerList.of(actuallyCompact, rangeList, controller.readCtx());
             // We use `this` rather than `sharedProgress()` because the `TableOperation` tracks individual compactions.
             this.compactionIterator = new CompactionIterator(compactionType, scanners.scanners, controller, FBUtilities.nowInSeconds(), taskId, this);
             return compactionIterator.getOperation();

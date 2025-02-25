@@ -26,7 +26,6 @@ import java.nio.channels.WritableByteChannel;
 import java.nio.file.StandardOpenOption;
 
 import org.apache.cassandra.io.FSReadError;
-import org.apache.cassandra.utils.INativeLibrary;
 import org.apache.cassandra.utils.concurrent.RefCounted;
 import org.apache.cassandra.utils.concurrent.SharedCloseableImpl;
 
@@ -43,9 +42,9 @@ public final class ChannelProxy extends SharedCloseableImpl
 {
     private final File file;
 
-    private final FileChannel channel;
+    private final ContextAwareReadFileChannel channel;
 
-    public static FileChannel openChannel(File file)
+    private static FileChannel openChannel(File file)
     {
         try
         {
@@ -67,7 +66,7 @@ public final class ChannelProxy extends SharedCloseableImpl
         super(new Cleanup(file.path(), channel));
 
         this.file = file;
-        this.channel = channel;
+        this.channel = maybeWrap(file, channel);
     }
 
     public ChannelProxy(ChannelProxy copy)
@@ -76,6 +75,14 @@ public final class ChannelProxy extends SharedCloseableImpl
 
         this.file = copy.file;
         this.channel = copy.channel;
+    }
+
+    private static ContextAwareReadFileChannel maybeWrap(File file, FileChannel fileChannel)
+    {
+        if (fileChannel instanceof ContextAwareReadFileChannel)
+            return (ContextAwareReadFileChannel) fileChannel;
+
+        return new NoOpContextAwareReadFileChannel(file, fileChannel);
     }
 
     private final static class Cleanup implements RefCounted.Tidy
@@ -132,12 +139,12 @@ public final class ChannelProxy extends SharedCloseableImpl
         return file;
     }
 
-    public int read(ByteBuffer buffer, long position)
+    public int read(ByteBuffer buffer, long position, ReadCtx ctx)
     {
         try
         {
             // FIXME: consider wrapping in a while loop
-            return channel.read(buffer, position);
+            return channel.read(buffer, position, ctx);
         }
         catch (IOException e)
         {
@@ -145,11 +152,11 @@ public final class ChannelProxy extends SharedCloseableImpl
         }
     }
 
-    public long transferTo(long position, long count, WritableByteChannel target)
+    public long transferTo(long position, long count, WritableByteChannel target, ReadCtx ctx)
     {
         try
         {
-            return channel.transferTo(position, count, target);
+            return channel.transferTo(position, count, target, ctx);
         }
         catch (IOException e)
         {
@@ -186,8 +193,7 @@ public final class ChannelProxy extends SharedCloseableImpl
      */
     public void trySkipCache(long offset, long length)
     {
-        int fd = INativeLibrary.instance.getfd(channel);
-        INativeLibrary.instance.trySkipCache(fd, offset, length, file.absolutePath());
+        channel.trySkipCache(offset, length);
     }
 
     @Override

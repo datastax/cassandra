@@ -26,6 +26,7 @@ import org.apache.cassandra.index.sai.disk.v1.LongArray;
 import org.apache.cassandra.index.sai.utils.IndexFileUtils;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.lucene.index.CorruptIndexException;
 
 import static org.apache.cassandra.index.sai.utils.SAICodecUtils.checkBlockSize;
@@ -47,7 +48,7 @@ public class BlockPackedReader implements LongArray.Factory
     private final long[] minValues;
 
     @SuppressWarnings("resource")
-    public BlockPackedReader(FileHandle file, NumericValuesMeta meta) throws IOException
+    public BlockPackedReader(FileHandle file, NumericValuesMeta meta, ReadCtx indexLoadCtx) throws IOException
     {
         this.file = file;
 
@@ -60,7 +61,7 @@ public class BlockPackedReader implements LongArray.Factory
         blockOffsets = new long[numBlocks];
         minValues = new long[numBlocks];
 
-        try (final IndexInputReader in = IndexInputReader.create(this.file.createReader()))
+        try (final IndexInputReader in = IndexInputReader.create(this.file.createReader(indexLoadCtx)))
         {
             SAICodecUtils.validate(in);
             in.seek(meta.blockMetaOffset);
@@ -99,9 +100,9 @@ public class BlockPackedReader implements LongArray.Factory
 
     @VisibleForTesting
     @Override
-    public LongArray open()
+    public LongArray open(ReadCtx ctx)
     {
-        var indexInput = IndexFileUtils.instance.openInput(file);
+        var indexInput = IndexFileUtils.instance.openInput(file, ctx);
         return new AbstractBlockPackedReader(indexInput, blockBitsPerValue, blockShift, blockMask, 0, valueCount)
         {
             @Override

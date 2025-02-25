@@ -27,6 +27,7 @@ import org.apache.cassandra.io.sstable.format.PartitionIndexIterator;
 import org.apache.cassandra.io.sstable.format.RowIndexEntry;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Throwables;
 
@@ -54,9 +55,9 @@ class PartitionIterator extends PartitionIndex.IndexPosIterator implements Parti
      * If it is the only reference to the data, caller must request shared copies and apply closeHandles().
      */
     PartitionIterator(PartitionIndex partitionIndex, IPartitioner partitioner, FileHandle rowIndexFile, FileHandle dataFile,
-                      PartitionPosition left, int inclusiveLeft, PartitionPosition right, int exclusiveRight) throws IOException
+                      PartitionPosition left, int inclusiveLeft, PartitionPosition right, int exclusiveRight, ReadCtx ctx) throws IOException
     {
-        super(partitionIndex, left, right);
+        super(partitionIndex, left, right, ctx);
         this.partitionIndex = partitionIndex;
         this.partitioner = partitioner;
         this.limit = right;
@@ -77,14 +78,14 @@ class PartitionIterator extends PartitionIndex.IndexPosIterator implements Parti
      * Note: For performance reasons this class does not request a reference of the files it uses.
      * If it is the only reference to the data, caller must request shared copies and apply closeHandles().
      */
-    PartitionIterator(PartitionIndex partitionIndex, IPartitioner partitioner, FileHandle rowIndexFile, FileHandle dataFile) throws IOException
+    PartitionIterator(PartitionIndex partitionIndex, IPartitioner partitioner, FileHandle rowIndexFile, FileHandle dataFile, ReadCtx ctx) throws IOException
     {
-        this(partitionIndex, partitioner, rowIndexFile, dataFile, partitionIndex.firstKey(), -1, partitionIndex.lastKey(), 0);
+        this(partitionIndex, partitioner, rowIndexFile, dataFile, partitionIndex.firstKey(), -1, partitionIndex.lastKey(), 0, ctx);
     }
 
-    private PartitionIterator(PartitionIndex partitionIndex)
+    private PartitionIterator(PartitionIndex partitionIndex, ReadCtx ctx)
     {
-        super(partitionIndex, partitionIndex.firstKey(), partitionIndex.firstKey());
+        super(partitionIndex, partitionIndex.firstKey(), partitionIndex.firstKey(), ctx);
         this.partitionIndex = partitionIndex;
         this.partitioner = null;
         this.limit = partitionIndex.firstKey();
@@ -98,9 +99,9 @@ class PartitionIterator extends PartitionIndex.IndexPosIterator implements Parti
         this.nextKey = null;
     }
 
-    static PartitionIterator empty(PartitionIndex partitionIndex)
+    static PartitionIterator empty(PartitionIndex partitionIndex, ReadCtx ctx)
     {
-        return new PartitionIterator(partitionIndex);
+        return new PartitionIterator(partitionIndex, ctx);
     }
 
     public PartitionIterator closeHandles()
@@ -200,7 +201,7 @@ class PartitionIterator extends PartitionIndex.IndexPosIterator implements Parti
     {
         FileDataInput in = indexInput;
         if (in == null)
-            in = indexInput = rowIndexFile.createReader(pos);
+            in = indexInput = rowIndexFile.createReader(source.readCtx(), pos);
         else
             in.seek(pos);
         return in;
@@ -210,7 +211,7 @@ class PartitionIterator extends PartitionIndex.IndexPosIterator implements Parti
     {
         FileDataInput in = dataInput;
         if (in == null)
-            in = dataInput = dataFile.createReader(pos);
+            in = dataInput = dataFile.createReader(source.readCtx(), pos);
         else
             in.seek(pos);
         return in;

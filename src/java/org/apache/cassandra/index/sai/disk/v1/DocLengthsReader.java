@@ -25,6 +25,7 @@ import org.apache.cassandra.index.sai.utils.IndexFileUtils;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.lucene.codecs.CodecUtil;
 
 public class DocLengthsReader implements Closeable
@@ -33,10 +34,12 @@ public class DocLengthsReader implements Closeable
     private final IndexInputReader input;
     private final SegmentMetadata.ComponentMetadata componentMetadata;
 
-    public DocLengthsReader(FileHandle fileHandle, SegmentMetadata.ComponentMetadata componentMetadata)
+    public DocLengthsReader(FileHandle fileHandle, SegmentMetadata.ComponentMetadata componentMetadata, ReadCtx searcherCreationContext)
     {
         this.fileHandle = fileHandle;
-        this.input = IndexFileUtils.instance.openInput(fileHandle);
+        // TODO: this is not right afaict; we shouldn't be creating the input here at searcher creation and use it during search below,
+        //  since the underlying RAR is not thread safe.
+        this.input = IndexFileUtils.instance.openInput(fileHandle, searcherCreationContext);
         this.componentMetadata = componentMetadata;
     }
 

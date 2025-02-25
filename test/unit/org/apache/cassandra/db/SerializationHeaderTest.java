@@ -61,6 +61,7 @@ import org.apache.cassandra.io.sstable.format.big.BigTableWriter;
 import org.apache.cassandra.io.sstable.format.trieindex.TrieIndexFormat;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
@@ -139,7 +140,7 @@ public class SerializationHeaderTest
             SSTableReader readerWithStatic = sstableWithStatic.getFormat().getReaderFactory().openNoValidation(sstableWithStatic, TableMetadataRef.forOfflineTools(schemaWithRegular));
             SSTableReader readerWithRegular = sstableWithStatic.getFormat().getReaderFactory().openNoValidation(sstableWithRegular, TableMetadataRef.forOfflineTools(schemaWithStatic));
 
-            try (ISSTableScanner partitions = readerWithStatic.getScanner()) {
+            try (ISSTableScanner partitions = readerWithStatic.getScanner(ReadCtx.FOR_TEST)) {
                 for (int i = 0 ; i < 5 ; ++i)
                 {
                     UnfilteredRowIterator partition = partitions.next();
@@ -149,7 +150,7 @@ public class SerializationHeaderTest
                 }
                 Assert.assertFalse(partitions.hasNext());
             }
-            try (ISSTableScanner partitions = readerWithRegular.getScanner()) {
+            try (ISSTableScanner partitions = readerWithRegular.getScanner(ReadCtx.FOR_TEST)) {
                 for (int i = 0 ; i < 5 ; ++i)
                 {
                     UnfilteredRowIterator partition = partitions.next();

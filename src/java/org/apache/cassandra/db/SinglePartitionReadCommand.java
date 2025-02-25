@@ -46,6 +46,7 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.schema.ColumnMetadata;
@@ -706,8 +707,8 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
 
                 @SuppressWarnings("resource")
                 UnfilteredRowIterator iter = intersects
-                                             ? makeIterator(cfs, sstable, metricsCollector)
-                                             : makeIteratorWithSkippedNonStaticContent(cfs, sstable, metricsCollector);
+                                             ? makeIterator(cfs, sstable, metricsCollector, controller.readCtx())
+                                             : makeIteratorWithSkippedNonStaticContent(cfs, sstable, metricsCollector, controller.readCtx());
                 if (!intersects)
                 {
                     nonIntersectingSSTables++;
@@ -780,20 +781,23 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
 
     private UnfilteredRowIteratorWithLowerBound makeIterator(ColumnFamilyStore cfs,
                                                              SSTableReader sstable,
-                                                             SSTableReadsListener listener)
+                                                             SSTableReadsListener listener,
+                                                             ReadCtx ctx)
     {
         return StorageHook.instance.makeRowIteratorWithLowerBound(cfs,
                                                                   partitionKey(),
                                                                   sstable,
                                                                   clusteringIndexFilter(),
                                                                   columnFilter(),
-                                                                  listener);
+                                                                  listener,
+                                                                  ctx);
 
     }
 
     private UnfilteredRowIterator makeIteratorWithSkippedNonStaticContent(ColumnFamilyStore cfs,
                                                                           SSTableReader sstable,
-                                                                          SSTableReadsListener listener)
+                                                                          SSTableReadsListener listener,
+                                                                          ReadCtx ctx)
     {
         return StorageHook.instance.makeRowIterator(cfs,
                                                     sstable,
@@ -801,7 +805,8 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
                                                     Slices.NONE,
                                                     columnFilter(),
                                                     clusteringIndexFilter().isReversed(),
-                                                    listener);
+                                                    listener,
+                                                    ctx);
     }
 
     /**
@@ -939,7 +944,8 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
                                                                                    intersects ? filter.getSlices(metadata()) : Slices.NONE,
                                                                                    columnFilter(),
                                                                                    filter.isReversed(),
-                                                                                   metricsCollector))
+                                                                                   metricsCollector,
+                                                                                   controller.readCtx()))
             {
                 if (!hasRequiredStatics && !intersects && !iter.partitionLevelDeletion().isLive()) // => partitionLevelDelections == true
                 {

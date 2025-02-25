@@ -151,8 +151,10 @@ import org.apache.cassandra.index.SecondaryIndexManager;
 import org.apache.cassandra.io.sstable.SSTableLoader;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.VersionAndType;
+import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.locator.AbstractReplicationStrategy;
 import org.apache.cassandra.locator.DynamicEndpointSnitch;
 import org.apache.cassandra.locator.EndpointsByRange;
@@ -4688,22 +4690,24 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
      */
     public List<Pair<Range<Token>, Long>> getSplits(String keyspaceName, String cfName, Range<Token> range, int keysPerSplit)
     {
-        Keyspace t = Keyspace.open(keyspaceName);
-        ColumnFamilyStore cfs = t.getColumnFamilyStore(cfName);
-        List<DecoratedKey> keys = keySamples(Collections.singleton(cfs), range);
+        try (ReadCtx ctx = StorageProvider.instance.readCtxFor(ReadCtx.Kind.DESCRIBE_OWNERSHIP))
+        {
+            Keyspace t = Keyspace.open(keyspaceName);
+            ColumnFamilyStore cfs = t.getColumnFamilyStore(cfName);
+            List<DecoratedKey> keys = keySamples(Collections.singleton(cfs), range, ctx);
+            long totalRowCountEstimate = cfs.estimatedKeysForRange(range, ctx);
 
-        long totalRowCountEstimate = cfs.estimatedKeysForRange(range);
+            // splitCount should be much smaller than number of key samples, to avoid huge sampling error
+            int minSamplesPerSplit = 4;
+            int maxSplitCount = keys.size() / minSamplesPerSplit + 1;
+            int splitCount = Math.max(1, Math.min(maxSplitCount, (int)(totalRowCountEstimate / keysPerSplit)));
 
-        // splitCount should be much smaller than number of key samples, to avoid huge sampling error
-        int minSamplesPerSplit = 4;
-        int maxSplitCount = keys.size() / minSamplesPerSplit + 1;
-        int splitCount = Math.max(1, Math.min(maxSplitCount, (int)(totalRowCountEstimate / keysPerSplit)));
-
-        List<Token> tokens = keysToTokens(range, keys);
-        return getSplits(tokens, splitCount, cfs);
+            List<Token> tokens = keysToTokens(range, keys);
+            return getSplits(tokens, splitCount, cfs, ctx);
+        }
     }
 
-    private List<Pair<Range<Token>, Long>> getSplits(List<Token> tokens, int splitCount, ColumnFamilyStore cfs)
+    private List<Pair<Range<Token>, Long>> getSplits(List<Token> tokens, int splitCount, ColumnFamilyStore cfs, ReadCtx ctx)
     {
         double step = (double) (tokens.size() - 1) / splitCount;
         Token prevToken = tokens.get(0);
@@ -4714,7 +4718,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             Token token = tokens.get(index);
             Range<Token> range = new Range<>(prevToken, token);
             // always return an estimate > 0 (see CASSANDRA-7322)
-            splits.add(Pair.create(range, Math.max(cfs.metadata().params.minIndexInterval, cfs.estimatedKeysForRange(range))));
+            splits.add(Pair.create(range, Math.max(cfs.metadata().params.minIndexInterval, cfs.estimatedKeysForRange(range, ctx))));
             prevToken = token;
         }
         return splits;
@@ -4730,11 +4734,11 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         return tokens;
     }
 
-    private List<DecoratedKey> keySamples(Iterable<ColumnFamilyStore> cfses, Range<Token> range)
+    private List<DecoratedKey> keySamples(Iterable<ColumnFamilyStore> cfses, Range<Token> range, ReadCtx ctx)
     {
         List<DecoratedKey> keys = new ArrayList<>();
         for (ColumnFamilyStore cfs : cfses)
-            Iterables.addAll(keys, cfs.keySamples(range));
+            Iterables.addAll(keys, cfs.keySamples(range, ctx));
         FBUtilities.sortSampledKeys(keys, range);
         return keys;
     }
@@ -5893,16 +5897,19 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     public List<String> sampleKeyRange() // do not rename to getter - see CASSANDRA-4452 for details
     {
         List<DecoratedKey> keys = new ArrayList<>();
-        for (Keyspace keyspace : Keyspace.nonLocalStrategy())
+        try (ReadCtx ctx = StorageProvider.instance.readCtxFor(ReadCtx.Kind.NODEPROBE))
         {
-            for (Range<Token> range : getPrimaryRangesForEndpoint(keyspace.getName(), FBUtilities.getBroadcastAddressAndPort()))
-                keys.addAll(keySamples(keyspace.getColumnFamilyStores(), range));
-        }
+            for (Keyspace keyspace : Keyspace.nonLocalStrategy())
+            {
+                for (Range<Token> range : getPrimaryRangesForEndpoint(keyspace.getName(), FBUtilities.getBroadcastAddressAndPort()))
+                    keys.addAll(keySamples(keyspace.getColumnFamilyStores(), range, ctx));
+            }
 
-        List<String> sampledKeys = new ArrayList<>(keys.size());
-        for (DecoratedKey key : keys)
-            sampledKeys.add(key.getToken().toString());
-        return sampledKeys;
+            List<String> sampledKeys = new ArrayList<>(keys.size());
+            for (DecoratedKey key : keys)
+                sampledKeys.add(key.getToken().toString());
+            return sampledKeys;
+        }
     }
 
     /*

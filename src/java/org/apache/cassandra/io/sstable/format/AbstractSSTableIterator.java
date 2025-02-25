@@ -47,6 +47,7 @@ import org.apache.cassandra.db.rows.RangeTombstoneMarker;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
@@ -70,6 +71,8 @@ public abstract class AbstractSSTableIterator<E extends RowIndexEntry> implement
 
     protected final Slices slices;
 
+    protected final ReadCtx ctx;
+
     @SuppressWarnings("resource") // We need this because the analysis is not able to determine that we do close
                                   // file on every path where we created it.
     protected AbstractSSTableIterator(SSTableReader sstable,
@@ -78,7 +81,8 @@ public abstract class AbstractSSTableIterator<E extends RowIndexEntry> implement
                                       E indexEntry,
                                       Slices slices,
                                       ColumnFilter columnFilter,
-                                      FileHandle ifile)
+                                      FileHandle ifile,
+                                      ReadCtx ctx)
     {
         this.sstable = sstable;
         this.metadata = sstable.metadata();
@@ -86,6 +90,7 @@ public abstract class AbstractSSTableIterator<E extends RowIndexEntry> implement
         this.key = key;
         this.columns = columnFilter;
         this.slices = slices;
+        this.ctx = ctx;
         this.helper = new DeserializationHelper(metadata, sstable.descriptor.version.correspondingMessagingVersion(), DeserializationHelper.Flag.LOCAL, columnFilter);
 
         if (indexEntry == null)
@@ -109,7 +114,7 @@ public abstract class AbstractSSTableIterator<E extends RowIndexEntry> implement
                 {
                     // Not indexed (or is reading static), set to the beginning of the partition and read partition level deletion there
                     if (file == null)
-                        file = sstable.getFileDataInput(indexEntry.position);
+                        file = sstable.getFileDataInput(ctx, indexEntry.position);
                     else
                         file.seek(indexEntry.position);
 
@@ -331,7 +336,7 @@ public abstract class AbstractSSTableIterator<E extends RowIndexEntry> implement
             // This may be the first time we're actually looking into the file
             if (file == null)
             {
-                file = sstable.getFileDataInput(position);
+                file = sstable.getFileDataInput(ctx, position);
                 createDeserializer();
             }
             else

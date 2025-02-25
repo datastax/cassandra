@@ -70,6 +70,7 @@ import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.RangesAtEndpoint;
 import org.apache.cassandra.locator.Replica;
@@ -455,7 +456,7 @@ public class PendingAntiCompactionTest extends AbstractPendingAntiCompactionTest
         makeSSTables(2);
         UUID prsid = UUID.randomUUID();
         Set<SSTableReader> sstables = cfs.getLiveSSTables();
-        List<ISSTableScanner> scanners = sstables.stream().map(SSTableReader::getScanner).collect(Collectors.toList());
+        List<ISSTableScanner> scanners = sstables.stream().map(s -> s.getScanner(ReadCtx.FOR_TEST)).collect(Collectors.toList());
         try
         {
             try (LifecycleTransaction txn = cfs.getTracker().tryModify(sstables, OperationType.ANTICOMPACTION);
@@ -512,12 +513,12 @@ public class PendingAntiCompactionTest extends AbstractPendingAntiCompactionTest
         makeSSTables(2);
         UUID prsid = prepareSession();
         Set<SSTableReader> sstables = cfs.getLiveSSTables();
-        List<ISSTableScanner> scanners = sstables.stream().map(SSTableReader::getScanner).collect(Collectors.toList());
+        List<ISSTableScanner> scanners = sstables.stream().map(s -> s.getScanner(ReadCtx.FOR_TEST)).collect(Collectors.toList());
         try
         {
             try (LifecycleTransaction txn = cfs.getTracker().tryModify(sstables, OperationType.ANTICOMPACTION);
                  CompactionController controller = new CompactionController(cfs, sstables, 0);
-                 CompactionIterator ci = new CompactionIterator(OperationType.COMPACTION, scanners, controller, 0, UUID.randomUUID());)
+                 CompactionIterator ci = new CompactionIterator(OperationType.COMPACTION, scanners, controller, 0, UUID.randomUUID()))
             {
                 TableOperation op = ci.getOperation();
                 try (NonThrowingCloseable cls = CompactionManager.instance.active.onOperationStart(op))

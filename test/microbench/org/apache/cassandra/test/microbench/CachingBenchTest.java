@@ -50,6 +50,7 @@ import org.apache.cassandra.io.sstable.ISSTableScanner;
 import org.apache.cassandra.db.compaction.CompactionSSTable;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -238,7 +239,7 @@ public class CachingBenchTest extends CQLTester
         int startTableCount = cfs.getLiveSSTables().size();
         long startSize = CompactionSSTable.getTotalBytes(cfs.getLiveSSTables());
         System.out.println("\nCompession: " + cfs.getCompressionParameters().toString());
-        System.out.println("Reader " + cfs.getLiveSSTables().iterator().next().getFileDataInput(0).toString());
+        System.out.println("Reader " + cfs.getLiveSSTables().iterator().next().getFileDataInput(ReadCtx.FOR_TEST, 0).toString());
         if (cacheEnabled)
             System.out.format("Cache size %s requests %,d hit ratio %f\n",
                 FileUtils.stringifyFileSize(ChunkCache.instance.metrics.size()),
@@ -367,7 +368,7 @@ public class CachingBenchTest extends CQLTester
     int count(SSTableReader reader, Predicate<Unfiltered> predicate)
     {
         int instances = 0;
-        try (ISSTableScanner partitions = reader.getScanner())
+        try (ISSTableScanner partitions = reader.getScanner(ReadCtx.FOR_TEST))
         {
             while (partitions.hasNext())
             {

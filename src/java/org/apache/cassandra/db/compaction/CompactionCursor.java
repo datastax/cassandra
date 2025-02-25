@@ -92,7 +92,7 @@ public class CompactionCursor implements SSTableCursorMerger.MergeListener, Auto
             return SSTableCursor.empty();
 
         SSTableCursor merged = new SSTableCursorMerger(readers.stream()
-                                                              .map(r -> new SortedStringTableCursor(r, tokenRange, limiter))
+                                                              .map(r -> new SortedStringTableCursor(r, controller.readCtx(), tokenRange, limiter))
                                                               .collect(Collectors.toList()),
                                                        metadata(),
                                                        this);

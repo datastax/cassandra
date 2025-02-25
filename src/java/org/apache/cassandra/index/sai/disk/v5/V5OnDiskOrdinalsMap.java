@@ -21,7 +21,7 @@ package org.apache.cassandra.index.sai.disk.v5;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.PrimitiveIterator;
-import java.util.function.Supplier;
+import java.util.function.Function;
 import java.util.stream.IntStream;
 import javax.annotation.concurrent.NotThreadSafe;
 
@@ -38,6 +38,7 @@ import org.apache.cassandra.index.sai.disk.vector.RowIdsView;
 import org.apache.cassandra.index.sai.utils.SingletonIntIterator;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.RandomAccessReader;
+import org.apache.cassandra.io.util.ReadCtx;
 
 import static java.lang.Math.max;
 import static java.lang.Math.min;
@@ -59,8 +60,8 @@ public class V5OnDiskOrdinalsMap implements OnDiskOrdinalsMap
     @VisibleForTesting
     final V5VectorPostingsWriter.Structure structure;
 
-    private final Supplier<OrdinalsView> ordinalsViewSupplier;
-    private final Supplier<RowIdsView> rowIdsViewSupplier;
+    private final Function<ReadCtx, OrdinalsView> ordinalsViewSupplier;
+    private final Function<ReadCtx, RowIdsView> rowIdsViewSupplier;
 
     // cached values for OneToMany structure
     private Int2ObjectHashMap<int[]> extraRowsByOrdinal = null;
@@ -68,11 +69,11 @@ public class V5OnDiskOrdinalsMap implements OnDiskOrdinalsMap
     private int[] extraOrdinals = null;
 
 
-    public V5OnDiskOrdinalsMap(FileHandle fh, long segmentOffset, long segmentLength)
+    public V5OnDiskOrdinalsMap(FileHandle fh, long segmentOffset, long segmentLength, ReadCtx ctx)
     {
         this.segmentEnd = segmentOffset + segmentLength;
         this.fh = fh;
-        try (var reader = fh.createReader())
+        try (var reader = fh.createReader(ctx))
         {
             reader.seek(segmentOffset);
             int magic = reader.readInt();
@@ -96,20 +97,20 @@ public class V5OnDiskOrdinalsMap implements OnDiskOrdinalsMap
 
             if (maxOrdinal < 0)
             {
-                this.rowIdsViewSupplier = () -> EMPTY_ROW_IDS_VIEW;
-                this.ordinalsViewSupplier = () -> EMPTY_ORDINALS_VIEW;
+                this.rowIdsViewSupplier = __ -> EMPTY_ROW_IDS_VIEW;
+                this.ordinalsViewSupplier = __ -> EMPTY_ORDINALS_VIEW;
             }
             else if (structure == V5VectorPostingsWriter.Structure.ONE_TO_ONE)
             {
-                this.rowIdsViewSupplier = () -> ONE_TO_ONE_ROW_IDS_VIEW;
-                this.ordinalsViewSupplier = () -> new OneToOneOrdinalsView(maxOrdinal + 1);
+                this.rowIdsViewSupplier = __ -> ONE_TO_ONE_ROW_IDS_VIEW;
+                this.ordinalsViewSupplier = __ -> new OneToOneOrdinalsView(maxOrdinal + 1);
             }
             else if (structure == V5VectorPostingsWriter.Structure.ONE_TO_MANY)
             {
                 cacheExtraRowIds(reader);
                 cacheExtraRowOrdinals(reader);
-                this.rowIdsViewSupplier = OneToManyRowIdsView::new;
-                this.ordinalsViewSupplier = OneToManyOrdinalsView::new;
+                this.rowIdsViewSupplier = __ -> new OneToManyRowIdsView();
+                this.ordinalsViewSupplier = __ -> new OneToManyOrdinalsView();
             }
             else
             {
@@ -168,14 +169,20 @@ public class V5OnDiskOrdinalsMap implements OnDiskOrdinalsMap
         extraOrdinals = extraOrdinalsList.toIntArray();
     }
 
-    public RowIdsView getRowIdsView()
+    @Override
+    public RowIdsView getRowIdsView(ReadCtx ctx)
     {
-        return rowIdsViewSupplier.get();
+        return rowIdsViewSupplier.apply(ctx);
     }
 
     private class GenericRowIdsView implements RowIdsView
     {
-        RandomAccessReader reader = fh.createReader();
+        final RandomAccessReader reader;
+
+        private GenericRowIdsView(ReadCtx ctx)
+        {
+            this.reader = fh.createReader(ctx);
+        }
 
         @Override
         public PrimitiveIterator.OfInt getSegmentRowIdsMatching(int vectorOrdinal) throws IOException
@@ -224,15 +231,21 @@ public class V5OnDiskOrdinalsMap implements OnDiskOrdinalsMap
         }
     }
 
-    public OrdinalsView getOrdinalsView()
+    @Override
+    public OrdinalsView getOrdinalsView(ReadCtx ctx)
     {
-        return ordinalsViewSupplier.get();
+        return ordinalsViewSupplier.apply(ctx);
     }
 
     @NotThreadSafe
     private class GenericOrdinalsView implements OrdinalsView
     {
-        RandomAccessReader reader = fh.createReader();
+        final RandomAccessReader reader;
+
+        private GenericOrdinalsView(ReadCtx ctx)
+        {
+            this.reader = fh.createReader(ctx);
+        }
 
         /**
          * @return ordinal if given row id is found; otherwise return -1

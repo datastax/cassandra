@@ -37,6 +37,8 @@ import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.storage.StorageProvider;
+import org.apache.cassandra.io.util.ReadCtx;
 
 /**
  * Pluggable compaction strategy determines how SSTables get merged.
@@ -333,7 +335,13 @@ abstract class LegacyAbstractCompactionStrategy extends AbstractCompactionStrate
             Set<Range<Token>> ranges = new HashSet<Range<Token>>(overlaps.size());
             for (CompactionSSTable overlap : overlaps)
                 ranges.add(new Range<>(overlap.getFirst().getToken(), overlap.getLast().getToken()));
-            long remainingKeys = keys - reader.estimatedKeysForRanges(ranges);
+
+            long estimatedKeyForRanges;
+            try (ReadCtx ctx = StorageProvider.instance.readCtxFor(ReadCtx.Kind.COMPACTION))
+            {
+                estimatedKeyForRanges = reader.estimatedKeysForRanges(ranges, ctx);
+            }
+            long remainingKeys = keys - estimatedKeyForRanges;
             // next, calculate what percentage of columns we have within those keys
             long columns = reader.getEstimatedCellPerPartitionCount().mean() * remainingKeys;
             double remainingColumnsRatio = ((double) columns) / (reader.getEstimatedCellPerPartitionCount().count() *

@@ -29,6 +29,8 @@ import java.nio.LongBuffer;
  */
 public interface Rebufferer extends ReaderFileProxy
 {
+    ReadCtx readCtx();
+
     /**
      * Rebuffer (move on or seek to) a given position, and return a buffer that can be used there.
      * The only guarantee about the size of the returned data is that unless rebuffering at the end of the file,

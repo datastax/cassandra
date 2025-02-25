@@ -22,9 +22,6 @@ package org.apache.cassandra.io.util;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.nio.FloatBuffer;
-import java.nio.IntBuffer;
-import java.nio.LongBuffer;
 
 import org.apache.cassandra.utils.memory.BufferPools;
 
@@ -39,14 +36,16 @@ import org.apache.cassandra.utils.memory.BufferPools;
 public abstract class BufferManagingRebufferer implements Rebufferer, Rebufferer.BufferHolder
 {
     protected final ChunkReader source;
+    protected final ReadCtx ctx;
     protected final ByteBuffer buffer;
     protected long offset = 0;
 
     abstract long alignedPosition(long position);
 
-    protected BufferManagingRebufferer(ChunkReader wrapped)
+    protected BufferManagingRebufferer(ChunkReader wrapped, ReadCtx ctx)
     {
         this.source = wrapped;
+        this.ctx = ctx;
         // Note: This class uses the networking buffer pool which makes better sense for short-lifetime buffers.
         // Because this is meant to be used when the chunk cache is disabled, it also makes sense to use any memory
         // that may have been allocated for in-flight data by using the chunk-cache pool.
@@ -55,6 +54,12 @@ public abstract class BufferManagingRebufferer implements Rebufferer, Rebufferer
         // that we would prefer to avoid.
         buffer = BufferPools.forNetworking().get(wrapped.chunkSize(), wrapped.preferredBufferType()).order(ByteOrder.BIG_ENDIAN);
         buffer.limit(0);
+    }
+
+    @Override
+    public ReadCtx readCtx()
+    {
+        return ctx;
     }
 
     @Override
@@ -87,7 +92,7 @@ public abstract class BufferManagingRebufferer implements Rebufferer, Rebufferer
     public BufferHolder rebuffer(long position)
     {
         offset = alignedPosition(position);
-        source.readChunk(offset, buffer);
+        source.readChunk(offset, buffer, ctx);
         return this;
     }
 
@@ -123,9 +128,9 @@ public abstract class BufferManagingRebufferer implements Rebufferer, Rebufferer
 
     public static class Unaligned extends BufferManagingRebufferer
     {
-        public Unaligned(ChunkReader wrapped)
+        public Unaligned(ChunkReader wrapped, ReadCtx ctx)
         {
-            super(wrapped);
+            super(wrapped, ctx);
         }
 
         @Override
@@ -137,9 +142,9 @@ public abstract class BufferManagingRebufferer implements Rebufferer, Rebufferer
 
     public static class Aligned extends BufferManagingRebufferer
     {
-        public Aligned(ChunkReader wrapped)
+        public Aligned(ChunkReader wrapped, ReadCtx ctx)
         {
-            super(wrapped);
+            super(wrapped, ctx);
             assert Integer.bitCount(wrapped.chunkSize()) == 1;
         }
 

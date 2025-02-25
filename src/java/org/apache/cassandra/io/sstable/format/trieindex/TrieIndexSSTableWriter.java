@@ -52,11 +52,13 @@ import org.apache.cassandra.io.sstable.format.SSTableReaderBuilder;
 import org.apache.cassandra.io.sstable.format.SortedTableWriter;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
+import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.io.util.BufferedDataOutputStreamPlus;
 import org.apache.cassandra.io.util.DataOutputStreamPlus;
 import org.apache.cassandra.io.util.DataPosition;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.io.util.SequentialWriter;
 import org.apache.cassandra.io.util.SequentialWriterOption;
 import org.apache.cassandra.schema.TableMetadata;
@@ -430,9 +432,9 @@ public class TrieIndexSSTableWriter extends SortedTableWriter
         PartitionIndex completedPartitionIndex()
         {
             complete();
-            try
+            try (ReadCtx ctx = StorageProvider.instance.readCtxFor(ReadCtx.Kind.SSTABLE_OPEN))
             {
-                return PartitionIndex.load(partitionIndexFHBuilder, getPartitioner(), false, descriptor.version.getByteComparableVersion());
+                return PartitionIndex.load(partitionIndexFHBuilder, getPartitioner(), false, descriptor.version.getByteComparableVersion(), ctx);
             }
             catch (IOException e)
             {

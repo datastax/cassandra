@@ -37,6 +37,7 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
 import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static junit.framework.Assert.fail;
@@ -236,7 +237,8 @@ public class SSTableWriterTest extends SSTableWriterTestBase
                                                                  Slices.ALL,
                                                                  ColumnFilter.all(cfs.metadata()),
                                                                  false,
-                                                                 SSTableReadsListener.NOOP_LISTENER);
+                                                                 SSTableReadsListener.NOOP_LISTENER,
+                                                                 ReadCtx.FOR_TEST);
                 while (rowIter.hasNext())
                 {
                     rowIter.next();

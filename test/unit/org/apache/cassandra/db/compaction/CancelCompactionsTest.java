@@ -52,6 +52,7 @@ import org.apache.cassandra.index.internal.CollatedViewIndexBuilder;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
 import org.apache.cassandra.io.sstable.ReducingKeyIterator;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.RangesAtEndpoint;
 import org.apache.cassandra.locator.Replica;
@@ -307,7 +308,7 @@ public class CancelCompactionsTest extends CQLTester
         CountDownLatch indexBuildStarted = new CountDownLatch(1);
         CountDownLatch indexBuildRunning = new CountDownLatch(1);
         CountDownLatch compactionsStopped = new CountDownLatch(1);
-        ReducingKeyIterator reducingKeyIterator = new ReducingKeyIterator(sstables)
+        ReducingKeyIterator reducingKeyIterator = new ReducingKeyIterator(sstables, ReadCtx.FOR_TEST)
         {
             @Override
             public boolean hasNext()
@@ -400,7 +401,7 @@ public class CancelCompactionsTest extends CQLTester
 
         public void start()
         {
-            scanners = sstables.stream().map(SSTableReader::getScanner).collect(Collectors.toList());
+            scanners = sstables.stream().map(s -> s.getScanner(ReadCtx.FOR_TEST)).collect(Collectors.toList());
             txn = cfs.getTracker().tryModify(sstables, OperationType.COMPACTION);
             assertNotNull(txn);
             controller = new CompactionController(cfs, sstables, Integer.MIN_VALUE);

@@ -61,6 +61,7 @@ import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SequenceBasedSSTableId;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.MockSchema;
@@ -173,7 +174,7 @@ public class SegmentFlushTest
 
         writer.complete(Stopwatch.createStarted());
 
-        MetadataSource source = MetadataSource.loadMetadata(components);
+        MetadataSource source = MetadataSource.loadMetadata(components, ReadCtx.FOR_TEST);
 
         // verify segment count
         List<SegmentMetadata> segmentMetadatas = SegmentMetadata.load(source, indexContext);
@@ -224,9 +225,10 @@ public class SegmentFlushTest
                                                   postingLists,
                                                   segmentMetadata.componentMetadatas.get(IndexComponentType.TERMS_DATA).root,
                                                   termsFooterPointer,
-                                                  version))
+                                                  version,
+                                                  ReadCtx.FOR_TEST))
         {
-            TermsIterator iterator = reader.allTerms();
+            TermsIterator iterator = reader.allTerms(ReadCtx.FOR_TEST);
             assertEquals(minTerm, iterator.getMinTerm());
             assertEquals(maxTerm, iterator.getMaxTerm());
 

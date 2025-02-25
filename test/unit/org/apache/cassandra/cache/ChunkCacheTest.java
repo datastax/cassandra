@@ -44,6 +44,7 @@ import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.RandomAccessReader;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.io.util.SequentialWriter;
 import org.apache.cassandra.metrics.ChunkCacheMetrics;
 import org.apache.cassandra.utils.memory.BufferPool;
@@ -91,7 +92,7 @@ public class ChunkCacheTest
 
         try (FileHandle.Builder builder = new FileHandle.Builder(file).withChunkCache(ChunkCache.instance);
              FileHandle h = builder.complete();
-             RandomAccessReader r = h.createReader())
+             RandomAccessReader r = h.createReader(ReadCtx.FOR_TEST))
         {
             r.reBuffer();
 
@@ -125,7 +126,7 @@ public class ChunkCacheTest
         try (FileHandle.Builder builder1 = new FileHandle.Builder(file).withChunkCache(ChunkCache.instance))
         {
              try (FileHandle handle1 = builder1.complete();
-                  RandomAccessReader reader1 = handle1.createReader())
+                  RandomAccessReader reader1 = handle1.createReader(ReadCtx.FOR_TEST))
              {
                  // Read 2 chunks and verify contents
                  for (int i = 0; i < RandomAccessReader.DEFAULT_BUFFER_SIZE * 2; i++)
@@ -156,7 +157,7 @@ public class ChunkCacheTest
             // Existing handles and readers keep using the old file id. To make sure we get a new one, recreate the
             // handle and reader.
             try (FileHandle handle2 = builder1.complete();
-                 RandomAccessReader reader2 = handle2.createReader())
+                 RandomAccessReader reader2 = handle2.createReader(ReadCtx.FOR_TEST))
             {
                 for (int i = 0; i < RandomAccessReader.DEFAULT_BUFFER_SIZE * 3; i++)
                     assertEquals((byte) 1, reader2.readByte());
@@ -188,7 +189,7 @@ public class ChunkCacheTest
 
         try (FileHandle.Builder builderFoo = new FileHandle.Builder(fileFoo).withChunkCache(ChunkCache.instance);
              FileHandle handleFoo = builderFoo.complete();
-             RandomAccessReader readerFoo = handleFoo.createReader())
+             RandomAccessReader readerFoo = handleFoo.createReader(ReadCtx.FOR_TEST))
         {
             assertEquals((byte) 0, readerFoo.readByte());
 
@@ -197,7 +198,7 @@ public class ChunkCacheTest
 
             try (FileHandle.Builder builderBar = new FileHandle.Builder(fileBar).withChunkCache(ChunkCache.instance);
                  FileHandle handleBar = builderBar.complete();
-                 RandomAccessReader readerBar = handleBar.createReader())
+                 RandomAccessReader readerBar = handleBar.createReader(ReadCtx.FOR_TEST))
             {
                 assertEquals((byte) 1, readerBar.readByte());
 
@@ -291,7 +292,7 @@ public class ChunkCacheTest
             FileHandle.Builder builder = new FileHandle.Builder(proxy)
                                          .withChunkCache(chunkCache);
             fileHandle = builder.complete();
-            reader = fileHandle.createReader();
+            reader = fileHandle.createReader(ReadCtx.FOR_TEST);
 
             return reader;
         }

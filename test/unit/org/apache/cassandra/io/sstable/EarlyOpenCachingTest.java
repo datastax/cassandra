@@ -42,6 +42,7 @@ import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.notifications.INotificationConsumer;
 import org.apache.cassandra.notifications.SSTableAddingNotification;
 
@@ -108,7 +109,7 @@ public class EarlyOpenCachingTest extends CQLTester
              SSTableRewriter writer = new SSTableRewriter(txn, 1000, 100L << 10, false))
         {
             writer.switchWriter(SSTableWriterTestBase.getWriter(format, cfs, cfs.getDirectories().getDirectoryForNewSSTables(), txn));
-            var iter = source.getScanner();
+            var iter = source.getScanner(ReadCtx.FOR_TEST);
             while (iter.hasNext())
             {
                 var next = iter.next();
@@ -130,7 +131,7 @@ public class EarlyOpenCachingTest extends CQLTester
     {
         DecoratedKey firstKey = null;
         DecoratedKey lastKey = null;
-        for (var iter = s.getScanner(); iter.hasNext(); )
+        for (var iter = s.getScanner(ReadCtx.FOR_TEST); iter.hasNext(); )
         {
             var partition = iter.next();
             // consume all rows, so that the data is cached

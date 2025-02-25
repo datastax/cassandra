@@ -188,7 +188,7 @@ public class V2VectorIndexSearcher extends IndexSearcher
                                                              int rerankK,
                                                              float threshold) throws IOException
     {
-        try (PrimaryKeyMap primaryKeyMap = primaryKeyMapFactory.newPerSSTablePrimaryKeyMap())
+        try (PrimaryKeyMap primaryKeyMap = primaryKeyMapFactory.newPerSSTablePrimaryKeyMap(context.readCtx()))
         {
             // not restricted
             if (RangeUtil.coversFullRing(keyRange))
@@ -231,7 +231,7 @@ public class V2VectorIndexSearcher extends IndexSearcher
             {
                 var maxSize = endSegmentRowId - startSegmentRowId + 1;
                 var segmentOrdinalPairs = new IntIntPairArray(maxSize);
-                try (var ordinalsView = graph.getOrdinalsView())
+                try (var ordinalsView = graph.getOrdinalsView(context.readCtx()))
                 {
                     ordinalsView.forEachOrdinalInRange(startSegmentRowId, endSegmentRowId, segmentOrdinalPairs::add);
                 }
@@ -246,7 +246,7 @@ public class V2VectorIndexSearcher extends IndexSearcher
 
             // create a bitset of ordinals corresponding to the rows in the given key range
             final Bits bits;
-            try (var ordinalsView = graph.getOrdinalsView())
+            try (var ordinalsView = graph.getOrdinalsView(context.readCtx()))
             {
                 bits = ordinalsView.buildOrdinalBits(startSegmentRowId, endSegmentRowId, this::bitSetForSearch);
             }
@@ -474,7 +474,7 @@ public class V2VectorIndexSearcher extends IndexSearcher
 
         int rerankK = indexContext.getIndexWriterConfig().getSourceModel().rerankKFor(limit, graph.getCompression());
         // Convert PKs to segment row ids and map to ordinals, skipping any that don't exist in this segment
-        var segmentOrdinalPairs = flatmapPrimaryKeysToBitsAndRows(keys);
+        var segmentOrdinalPairs = flatmapPrimaryKeysToBitsAndRows(keys, context);
         var numRows = segmentOrdinalPairs.size();
         final CostEstimate cost = estimateCost(rerankK, numRows);
         Tracing.logAndTrace(logger, "{} relevant rows out of {} in range in index of {} nodes; estimate for LIMIT {} is {}",
@@ -505,12 +505,12 @@ public class V2VectorIndexSearcher extends IndexSearcher
      * @return a mapping of segment row id to ordinal
      * @throws IOException
      */
-    private IntIntPairArray flatmapPrimaryKeysToBitsAndRows(List<PrimaryKey> keysInRange) throws IOException
+    private IntIntPairArray flatmapPrimaryKeysToBitsAndRows(List<PrimaryKey> keysInRange, QueryContext context) throws IOException
     {
         var segmentOrdinalPairs = new IntIntPairArray(keysInRange.size());
         int lastSegmentRowId = -1;
-        try (var primaryKeyMap = primaryKeyMapFactory.newPerSSTablePrimaryKeyMap();
-             var ordinalsView = graph.getOrdinalsView())
+        try (var primaryKeyMap = primaryKeyMapFactory.newPerSSTablePrimaryKeyMap(context.readCtx());
+             var ordinalsView = graph.getOrdinalsView(context.readCtx()))
         {
             // track whether we are saving comparisons by using binary search to skip ahead
             // (if most of the keys belong to this sstable, bsearch will actually be slower)

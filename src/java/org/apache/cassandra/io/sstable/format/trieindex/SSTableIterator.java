@@ -28,6 +28,7 @@ import org.apache.cassandra.io.sstable.format.RowIndexEntry;
 import org.apache.cassandra.io.sstable.format.trieindex.RowIndexReader.IndexInfo;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.lucene.index.IndexReader;
 
 /**
@@ -46,9 +47,10 @@ class SSTableIterator extends AbstractSSTableIterator<RowIndexEntry>
                            RowIndexEntry indexEntry,
                            Slices slices,
                            ColumnFilter columns,
-                           FileHandle ifile)
+                           FileHandle ifile,
+                           ReadCtx ctx)
     {
-        super(sstable, file, key, indexEntry, slices, columns, ifile);
+        super(sstable, file, key, indexEntry, slices, columns, ifile, ctx);
     }
 
     protected Reader createReaderInternal(RowIndexEntry indexEntry, FileDataInput file, boolean shouldCloseFile)
@@ -84,7 +86,7 @@ class SSTableIterator extends AbstractSSTableIterator<RowIndexEntry>
         {
             super(file, shouldCloseFile);
             basePosition = indexEntry.position;
-            indexReader = new RowIndexReader(ifile, (TrieIndexEntry) indexEntry, sstable.descriptor.version.getByteComparableVersion());
+            indexReader = new RowIndexReader(ifile, (TrieIndexEntry) indexEntry, sstable.descriptor.version.getByteComparableVersion(), ctx);
         }
 
         @Override

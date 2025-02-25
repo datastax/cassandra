@@ -45,7 +45,9 @@ import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
 import org.apache.cassandra.io.sstable.KeyIterator;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.FBUtilities;
@@ -144,14 +146,14 @@ public class SSTableExport
             System.exit(1);
         }
         Descriptor desc = Descriptor.fromFilename(ssTableFileName);
-        try
+        try(ReadCtx readCtx = StorageProvider.instance.readCtxFor(ReadCtx.Kind.SSTABLE_EXPORT))
         {
             TableMetadata metadata = Util.metadataFromSSTable(desc);
             SSTableReader sstable = desc.getFormat().getReaderFactory().openNoValidation(desc, TableMetadataRef.forOfflineTools(metadata));
             IPartitioner partitioner = sstable.getPartitioner();
             if (cmd.hasOption(ENUMERATE_KEYS_OPTION))
             {
-                try (KeyIterator iter = KeyIterator.forSSTable(sstable))
+                try (KeyIterator iter = KeyIterator.forSSTable(sstable, readCtx))
                 {
                     JsonTransformer.keysToJson(null, Util.iterToStream(iter),
                                                cmd.hasOption(RAW_TIMESTAMPS),
@@ -171,11 +173,11 @@ public class SSTableExport
                             .sorted()
                             .map(DecoratedKey::getToken)
                             .map(token -> new Bounds<>(token.minKeyBound(), token.maxKeyBound())).collect(Collectors.toList());
-                    currentScanner = sstable.getScanner(bounds.iterator());
+                    currentScanner = sstable.getScanner(bounds.iterator(), readCtx);
                 }
                 else
                 {
-                    currentScanner = sstable.getScanner();
+                    currentScanner = sstable.getScanner(readCtx);
                 }
                 Stream<UnfilteredRowIterator> partitions = Util.iterToStream(currentScanner).filter(i ->
                     excludes.isEmpty() || !excludes.contains(metadata.partitionKeyType.getString(i.partitionKey().getKey()))

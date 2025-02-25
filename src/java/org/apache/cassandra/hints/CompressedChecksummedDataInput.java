@@ -108,7 +108,7 @@ public final class CompressedChecksummedDataInput extends ChecksummedDataInput
             return;
 
         metadataBuffer.clear();
-        channel.read(metadataBuffer, filePosition);
+        channel.read(metadataBuffer, filePosition, null);
         filePosition += CompressedHintsWriter.METADATA_SIZE;
         metadataBuffer.rewind();
 
@@ -127,7 +127,7 @@ public final class CompressedChecksummedDataInput extends ChecksummedDataInput
 
         compressedBuffer.clear();
         compressedBuffer.limit(compressedSize);
-        channel.read(compressedBuffer, filePosition);
+        channel.read(compressedBuffer, filePosition, null);
         compressedBuffer.rewind();
         filePosition += compressedSize;
 

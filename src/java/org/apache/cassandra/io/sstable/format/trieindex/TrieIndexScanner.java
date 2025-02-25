@@ -46,6 +46,7 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.RandomAccessReader;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.CloseableIterator;
@@ -60,6 +61,7 @@ public class TrieIndexScanner implements ISSTableScanner
     private final AtomicBoolean isClosed = new AtomicBoolean(false);
     protected final RandomAccessReader dfile;
     public final TrieIndexSSTableReader sstable;
+    protected final ReadCtx readCtx;
 
     private final Iterator<AbstractBounds<PartitionPosition>> rangeIterator;
 
@@ -74,20 +76,23 @@ public class TrieIndexScanner implements ISSTableScanner
     public static ISSTableScanner getScanner(TrieIndexSSTableReader sstable,
                                              ColumnFilter columns,
                                              DataRange dataRange,
-                                             SSTableReadsListener listener)
+                                             SSTableReadsListener listener,
+                                             ReadCtx ctx)
     {
-        return new TrieIndexScanner(sstable, columns, dataRange, makeBounds(sstable, dataRange.keyRange()).iterator(), listener);
+        return new TrieIndexScanner(sstable, columns, dataRange, makeBounds(sstable, dataRange.keyRange()).iterator(), listener, ctx);
     }
 
     private TrieIndexScanner(TrieIndexSSTableReader sstable,
                              ColumnFilter columns,
                              DataRange dataRange,
                              Iterator<AbstractBounds<PartitionPosition>> rangeIterator,
-                             SSTableReadsListener listener)
+                             SSTableReadsListener listener,
+                             ReadCtx ctx)
     {
         assert sstable != null;
 
-        this.dfile = sstable.openDataReader();
+        this.dfile = sstable.openDataReader(ctx);
+        this.readCtx = ctx;
         this.sstable = sstable;
         this.columns = columns;
         this.dataRange = dataRange;
@@ -260,7 +265,7 @@ public class TrieIndexScanner implements ISSTableScanner
                     // try next range
                     if (!rangeIterator.hasNext())
                         return endOfData();
-                    iterator = sstable.coveredKeysIterator(rangeIterator.next());
+                    iterator = sstable.coveredKeysIterator(rangeIterator.next(), readCtx);
                 }
                 startScan = -1;
 
@@ -290,7 +295,7 @@ public class TrieIndexScanner implements ISSTableScanner
                             else
                             {
                                 ClusteringIndexFilter filter = dataRange.clusteringIndexFilter(partitionKey());
-                                return sstable.iterator(dfile, partitionKey(), rowIndexEntry, filter.getSlices(TrieIndexScanner.this.metadata()), columns, filter.isReversed());
+                                return sstable.iterator(dfile, partitionKey(), rowIndexEntry, filter.getSlices(TrieIndexScanner.this.metadata()), columns, filter.isReversed(), readCtx);
                             }
                         }
                         catch (CorruptSSTableException e)

@@ -19,6 +19,7 @@ package org.apache.cassandra.io.sstable.format;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
@@ -45,6 +46,7 @@ import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.RowUpdateBuilder;
 import org.apache.cassandra.db.SinglePartitionReadCommand;
 import org.apache.cassandra.db.Slices;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.metrics.RestorableMeter;
 import org.apache.cassandra.schema.CachingParams;
 import org.apache.cassandra.schema.KeyspaceParams;
@@ -104,7 +106,7 @@ public class LazyBloomFilterTest
         SSTableReader sstable = reopenFlushedSSTable();
 
         // first read will trigger bloom filter deserialization
-        assertTrue(sstable.couldContain(Util.dk(String.valueOf(10))));
+        assertTrue(sstable.couldContain(Util.dk(String.valueOf(10)), ReadCtx.FOR_TEST));
         waitFor("Async BF deserialization", () -> sstable.getBloomFilter() != FilterFactory.AlwaysPresentForLazyLoading);
 
         IFilter deserializedBloomFilter = sstable.getBloomFilter();
@@ -113,7 +115,7 @@ public class LazyBloomFilterTest
         assertThat(deserializedBloomFilter.offHeapSize()).isGreaterThan(0);
 
         // second read will NOT trigger bloom filter deserialization
-        assertTrue(sstable.couldContain(Util.dk(String.valueOf(20))));
+        assertTrue(sstable.couldContain(Util.dk(String.valueOf(20)), ReadCtx.FOR_TEST));
         assertSame(deserializedBloomFilter, sstable.getBloomFilter());
         assertThat(deserializedBloomFilter.offHeapSize()).isGreaterThan(0);
 
@@ -199,7 +201,7 @@ public class LazyBloomFilterTest
         DecoratedKey key = Util.dk(String.valueOf(keyInt));
 
         // first read will NOT trigger bloom filter deserialization because of threshold not reached
-        sstable.couldContain(key);
+        sstable.couldContain(key, ReadCtx.FOR_TEST);
         assertSame(FilterFactory.AlwaysPresentForLazyLoading, sstable.getBloomFilter());
         assertThat(sstable.getBloomFilter().offHeapSize()).isEqualTo(0);
 

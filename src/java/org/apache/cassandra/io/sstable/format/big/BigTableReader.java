@@ -51,6 +51,7 @@ import org.apache.cassandra.io.sstable.format.ScrubPartitionIterator;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.RandomAccessReader;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
@@ -85,43 +86,45 @@ public class BigTableReader extends SSTableReader
         tidy.addCloseable(ifile);
         super.setup(trackHotness);
     }
+
     @Override
-    public PartitionIndexIterator allKeysIterator() throws IOException
+    public PartitionIndexIterator allKeysIterator(ReadCtx ctx) throws IOException
     {
-        return BigTablePartitionIndexIterator.create(getIndexFile(), rowIndexEntrySerializer);
+        return BigTablePartitionIndexIterator.create(getIndexFile(), rowIndexEntrySerializer, ctx);
     }
 
     public UnfilteredRowIterator iterator(DecoratedKey key,
                                           Slices slices,
                                           ColumnFilter selectedColumns,
                                           boolean reversed,
-                                          SSTableReadsListener listener)
+                                          SSTableReadsListener listener,
+                                          ReadCtx ctx)
     {
-        BigTableRowIndexEntry rie = getPosition(key, SSTableReader.Operator.EQ, true, false, listener);
-        return iterator(null, key, rie, slices, selectedColumns, reversed);
+        BigTableRowIndexEntry rie = getPosition(key, SSTableReader.Operator.EQ, true, false, listener, ctx);
+        return iterator(null, key, rie, slices, selectedColumns, reversed, ctx);
     }
 
     @SuppressWarnings("resource")
-    public UnfilteredRowIterator iterator(FileDataInput file, DecoratedKey key, BigTableRowIndexEntry indexEntry, Slices slices, ColumnFilter selectedColumns, boolean reversed)
+    public UnfilteredRowIterator iterator(FileDataInput file, DecoratedKey key, BigTableRowIndexEntry indexEntry, Slices slices, ColumnFilter selectedColumns, boolean reversed, ReadCtx ctx)
     {
         if (indexEntry == null)
             return UnfilteredRowIterators.noRowsIterator(metadata(), key, Rows.EMPTY_STATIC_ROW, DeletionTime.LIVE, reversed);
         return reversed
-             ? new SSTableReversedIterator(this, file, key, indexEntry, slices, selectedColumns, ifile)
-             : new SSTableIterator(this, file, key, indexEntry, slices, selectedColumns, ifile);
+             ? new SSTableReversedIterator(this, file, key, indexEntry, slices, selectedColumns, ifile, ctx)
+             : new SSTableIterator(this, file, key, indexEntry, slices, selectedColumns, ifile, ctx);
     }
 
     @Override
-    public ISSTableScanner getScanner(ColumnFilter columns, DataRange dataRange, SSTableReadsListener listener)
+    public ISSTableScanner getScanner(ColumnFilter columns, DataRange dataRange, SSTableReadsListener listener, ReadCtx ctx)
     {
-        return BigTableScanner.getScanner(this, columns, dataRange, listener);
+        return BigTableScanner.getScanner(this, columns, dataRange, listener, ctx);
     }
 
     @SuppressWarnings("resource") // caller to close
     @Override
-    public UnfilteredRowIterator simpleIterator(FileDataInput dfile, DecoratedKey key, boolean tombstoneOnly)
+    public UnfilteredRowIterator simpleIterator(FileDataInput dfile, DecoratedKey key, boolean tombstoneOnly, ReadCtx ctx)
     {
-        BigTableRowIndexEntry position = getPosition(key, SSTableReader.Operator.EQ, true, false, SSTableReadsListener.NOOP_LISTENER);
+        BigTableRowIndexEntry position = getPosition(key, SSTableReader.Operator.EQ, true, false, SSTableReadsListener.NOOP_LISTENER, ctx);
         if (position == null)
             return null;
         return SSTableIdentityIterator.create(this, dfile, position, key, tombstoneOnly);
@@ -139,7 +142,8 @@ public class BigTableReader extends SSTableReader
                                                 Operator op,
                                                 boolean updateCacheAndStats,
                                                 boolean permitMatchPastLast,
-                                                SSTableReadsListener listener)
+                                                SSTableReadsListener listener,
+                                                ReadCtx ctx)
     {
         // Having no index file is impossible in a normal operation. The only way it might happen is running
         // Scrubber that does not really rely onto this method.
@@ -220,7 +224,7 @@ public class BigTableReader extends SSTableReader
 
         int i = 0;
         File path = null;
-        try (FileDataInput in = ifile.createReader(sampledPosition))
+        try (FileDataInput in = ifile.createReader(ctx, sampledPosition))
         {
             path = in.getFile();
             while (!in.isEOF())
@@ -266,7 +270,7 @@ public class BigTableReader extends SSTableReader
                         if (logger.isTraceEnabled())
                         {
                             // expensive sanity check!  see CASSANDRA-4687
-                            try (FileDataInput fdi = dfile.createReader(indexEntry.position))
+                            try (FileDataInput fdi = dfile.createReader(ctx, indexEntry.position))
                             {
                                 DecoratedKey keyInDisk = decorateKey(ByteBufferUtil.readWithShortLength(fdi));
                                 if (!keyInDisk.equals(key))
@@ -309,16 +313,16 @@ public class BigTableReader extends SSTableReader
     }
 
     @Override
-    public RandomAccessReader openKeyComponentReader()
+    public RandomAccessReader openKeyComponentReader(ReadCtx ctx)
     {
-        return openIndexReader();
+        return openIndexReader(ctx);
     }
 
     @Override
-    public ScrubPartitionIterator scrubPartitionsIterator() throws IOException
+    public ScrubPartitionIterator scrubPartitionsIterator(ReadCtx ctx) throws IOException
     {
         if (ifile == null)
             return null;
-        return new ScrubIterator(ifile, rowIndexEntrySerializer);
+        return new ScrubIterator(ifile, rowIndexEntrySerializer, ctx);
     }
 }

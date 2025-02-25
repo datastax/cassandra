@@ -35,13 +35,23 @@ class MmapRebufferer extends AbstractReaderFileProxy implements Rebufferer, Rebu
     }
 
     @Override
+    public ReadCtx readCtx()
+    {
+        // TODO: should we store it? We need to split this into factory + buffer if we do so, which is probably ok,
+        //  but at the same time, we're not really using the ctx in the case of mmap, since we don't go down to
+        //  FileChannel anyway which are the only place currently where the ctx is truly used.
+        //  That said, the ctx could have other uses later so it could make sense to still ensure it's set.
+        return null;
+    }
+
+    @Override
     public BufferHolder rebuffer(long position)
     {
         return regions.floor(position);
     }
 
     @Override
-    public Rebufferer instantiateRebufferer()
+    public Rebufferer instantiateRebufferer(ReadCtx readCtx)
     {
         return this;
     }

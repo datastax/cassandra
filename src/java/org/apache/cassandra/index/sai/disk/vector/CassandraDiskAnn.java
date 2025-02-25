@@ -54,6 +54,7 @@ import org.apache.cassandra.index.sai.utils.RowIdWithScore;
 import org.apache.cassandra.io.sstable.SSTableId;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.CloseableIterator;
 
@@ -82,7 +83,7 @@ public class CassandraDiskAnn
 
     private final ExplicitThreadLocal<GraphSearcherAccessManager> searchers;
 
-    public CassandraDiskAnn(SSTableContext sstableContext, SegmentMetadata.ComponentMetadataMap componentMetadatas, PerIndexFiles indexFiles, IndexContext context, OrdinalsMapFactory omFactory) throws IOException
+    public CassandraDiskAnn(SSTableContext sstableContext, SegmentMetadata.ComponentMetadataMap componentMetadatas, PerIndexFiles indexFiles, IndexContext context, OrdinalsMapFactory omFactory, ReadCtx searcherCreationContext) throws IOException
     {
         this.source = sstableContext.sstable().getId();
         this.componentMetadatas = componentMetadatas;
@@ -92,13 +93,24 @@ public class CassandraDiskAnn
 
         SegmentMetadata.ComponentMetadata termsMetadata = this.componentMetadatas.get(IndexComponentType.TERMS_DATA);
         graphHandle = indexFiles.termsData();
-        var rawGraph = OnDiskGraphIndex.load(graphHandle::createReader, termsMetadata.offset);
+        // TODO: We have an issue here, because the `readerSupplier` provided to the `load` method below is what jvector
+        //   uses to create the readers it uses when executing searches (it also use it to load some initial value,
+        //   and that use case should use `searcherCreationContext`, but only that one usage).
+        //   In other words, passing `searcherCreationContext` to `graphHandler.createReader` below is mostly wrong; this
+        //   is not the right value for most use cases, as any call happening during a `search()` should be using
+        //   the context `queryContext.readCtx()`, but the current API doesn't quite let us do that.
+        //   We can maybe hack around this by relying on a thread local to get the context, and set that thread local
+        //   appropriately on every search, but that assumes the search stay on it's thread, at least as far as
+        //   creating readers goes. Which sound like it may be true given the `searchers` seems to be thread-scoped,
+        //   but haven't doubled-checked, but at best it would be fragile so probably shouldn't be the long-term
+        //   solution. TBD.
+        var rawGraph = OnDiskGraphIndex.load(() -> graphHandle.createReader(searcherCreationContext), termsMetadata.offset);
         features = rawGraph.getFeatureSet();
         graph = V3OnDiskFormat.ENABLE_EDGES_CACHE ? cachingGraphFor(rawGraph) : rawGraph;
 
         long pqSegmentOffset = this.componentMetadatas.get(IndexComponentType.PQ).offset;
         try (var pqFile = indexFiles.pq();
-             var reader = pqFile.createReader())
+             var reader = pqFile.createReader(searcherCreationContext))
         {
             reader.seek(pqSegmentOffset);
             var version = PQVersion.V0;
@@ -153,7 +165,7 @@ public class CassandraDiskAnn
         }
 
         SegmentMetadata.ComponentMetadata postingListsMetadata = this.componentMetadatas.get(IndexComponentType.POSTING_LISTS);
-        ordinalsMap = omFactory.create(indexFiles.postingLists(), postingListsMetadata.offset, postingListsMetadata.length);
+        ordinalsMap = omFactory.create(indexFiles.postingLists(), postingListsMetadata.offset, postingListsMetadata.length, searcherCreationContext);
 
         searchers = ExplicitThreadLocal.withInitial(() -> new GraphSearcherAccessManager(new GraphSearcher(graph)));
     }
@@ -165,7 +177,7 @@ public class CassandraDiskAnn
 
     @FunctionalInterface
     public interface OrdinalsMapFactory {
-        OnDiskOrdinalsMap create(FileHandle handle, long offset, long length);
+        OnDiskOrdinalsMap create(FileHandle handle, long offset, long length, ReadCtx ctx);
     }
 
     public ProductQuantization getPQ()
@@ -265,12 +277,12 @@ public class CassandraDiskAnn
                 graphAccessManager.release();
                 nodesVisitedConsumer.accept(result.getVisitedCount());
                 var nodeScores = CloseableIterator.wrap(Arrays.stream(result.getNodes()).iterator());
-                return new NodeScoreToRowIdWithScoreIterator(nodeScores, ordinalsMap.getRowIdsView());
+                return new NodeScoreToRowIdWithScoreIterator(nodeScores, ordinalsMap.getRowIdsView(context.readCtx()));
             }
             else
             {
                 var nodeScores = new AutoResumingNodeScoreIterator(searcher, graphAccessManager, result, nodesVisitedConsumer, limit, rerankK, false, source.toString());
-                return new NodeScoreToRowIdWithScoreIterator(nodeScores, ordinalsMap.getRowIdsView());
+                return new NodeScoreToRowIdWithScoreIterator(nodeScores, ordinalsMap.getRowIdsView(context.readCtx()));
             }
         }
         catch (Throwable t)
@@ -296,9 +308,9 @@ public class CassandraDiskAnn
         FileUtils.close(ordinalsMap, searchers, graph, graphHandle);
     }
 
-    public OrdinalsView getOrdinalsView()
+    public OrdinalsView getOrdinalsView(ReadCtx ctx)
     {
-        return ordinalsMap.getOrdinalsView();
+        return ordinalsMap.getOrdinalsView(ctx);
     }
 
     public GraphIndex.ScoringView getView()

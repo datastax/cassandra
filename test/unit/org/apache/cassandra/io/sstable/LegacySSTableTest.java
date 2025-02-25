@@ -65,6 +65,7 @@ import org.apache.cassandra.io.sstable.format.trieindex.TrieIndexFormat;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileInputStreamPlus;
 import org.apache.cassandra.io.util.FileOutputStreamPlus;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.service.CacheService;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.streaming.OutgoingStream;
@@ -421,9 +422,9 @@ public class LegacySSTableTest
         ranges.add(new Range<>(p.getToken(ByteBufferUtil.bytes("100")), p.getMinimumToken()));
         List<OutgoingStream> streams = Lists.newArrayList(new CassandraOutgoingFile(StreamOperation.OTHER,
                                                                                     sstable.ref(),
-                                                                                    sstable.getPositionsForRanges(ranges),
+                                                                                    sstable.getPositionsForRanges(ranges, ReadCtx.FOR_TEST),
                                                                                     ranges,
-                                                                                    sstable.estimatedKeysForRanges(ranges)));
+                                                                                    sstable.estimatedKeysForRanges(ranges, ReadCtx.FOR_TEST)));
         new StreamPlan(StreamOperation.OTHER).transferStreams(FBUtilities.getBroadcastAddressAndPort(), streams).execute().get();
     }
 

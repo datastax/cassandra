@@ -50,6 +50,7 @@ import org.apache.cassandra.io.util.ChannelProxy;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.io.util.SequentialWriter;
 import org.apache.cassandra.io.util.SequentialWriterOption;
 
@@ -198,12 +199,12 @@ public class V5OnDiskOrdinalsMapTest extends VectorTester
         try (FileHandle.Builder builder = new FileHandle.Builder(new ChannelProxy(tempFile)).compressed(false);
              FileHandle fileHandle = builder.complete())
         {
-            var odom = new V5OnDiskOrdinalsMap(fileHandle, postingsMd.postingsOffset, postingsMd.postingsLength);
+            var odom = new V5OnDiskOrdinalsMap(fileHandle, postingsMd.postingsOffset, postingsMd.postingsLength, ReadCtx.FOR_TEST);
             assertEquals(structure, odom.structure);
 
             // check row -> ordinal and ordinal -> rows
-            try (var rowIdsView = odom.getRowIdsView();
-                 var ordinalsView = odom.getOrdinalsView())
+            try (var rowIdsView = odom.getRowIdsView(ReadCtx.FOR_TEST);
+                 var ordinalsView = odom.getOrdinalsView(ReadCtx.FOR_TEST))
             {
                 for (var vp : postingsMap.values())
                 {
@@ -226,7 +227,7 @@ public class V5OnDiskOrdinalsMapTest extends VectorTester
             }
 
             // test buildOrdinalBits
-            try (var ordinalsView = odom.getOrdinalsView())
+            try (var ordinalsView = odom.getOrdinalsView(ReadCtx.FOR_TEST))
             {
                 for (int i = 0; i < 10; i++)
                 {

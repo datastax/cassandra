@@ -39,6 +39,7 @@ import org.apache.cassandra.index.sai.metrics.QueryEventListener;
 import org.apache.cassandra.index.sai.postings.IntArrayPostingList;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.index.sai.utils.SaiRandomizedTest;
+import org.apache.cassandra.io.util.ReadCtx;
 
 public class PostingsTest extends SaiRandomizedTest
 {
@@ -72,7 +73,7 @@ public class PostingsTest extends SaiRandomizedTest
             writer.complete();
         }
 
-        IndexInput input = components.get(IndexComponentType.POSTING_LISTS).openInput();
+        IndexInput input = components.get(IndexComponentType.POSTING_LISTS).openInput(ReadCtx.FOR_TEST);
         SAICodecUtils.validate(input);
         input.seek(postingPointer);
 
@@ -97,7 +98,7 @@ public class PostingsTest extends SaiRandomizedTest
         reader.close();
         assertEquals(reader.size(), listener.decodes);
 
-        input = components.get(IndexComponentType.POSTING_LISTS).openInput();
+        input = components.get(IndexComponentType.POSTING_LISTS).openInput(ReadCtx.FOR_TEST);
         listener = new CountingPostingListEventListener();
         reader = new PostingsReader(input, postingPointer, listener);
 
@@ -133,14 +134,14 @@ public class PostingsTest extends SaiRandomizedTest
         }
 
         IndexComponent.ForRead postingLists = components.get(IndexComponentType.POSTING_LISTS);
-        try (IndexInput input = postingLists.openInput())
+        try (IndexInput input = postingLists.openInput(ReadCtx.FOR_TEST))
         {
             SAICodecUtils.validate(input);
         }
 
         for (int i = 0; i < numPostingLists; ++i)
         {
-            IndexInput input = postingLists.openInput();
+            IndexInput input = postingLists.openInput(ReadCtx.FOR_TEST);
             input.seek(postingPointers[i]);
             final IntArrayPostingList expectedPostingList = expected[i];
             final PostingsReader.BlocksSummary summary = assertBlockSummary(blockSize, expectedPostingList, input);
@@ -158,7 +159,7 @@ public class PostingsTest extends SaiRandomizedTest
             }
 
             // test skipping to the last block
-            input = postingLists.openInput();
+            input = postingLists.openInput(ReadCtx.FOR_TEST);
             try (PostingsReader reader = new PostingsReader(input, postingPointers[i], listener))
             {
                 int tokenToAdvance = -1;
@@ -195,7 +196,7 @@ public class PostingsTest extends SaiRandomizedTest
         }
 
         IndexComponent.ForRead postingLists = components.get(IndexComponentType.POSTING_LISTS);
-        try (IndexInput input = postingLists.openInput())
+        try (IndexInput input = postingLists.openInput(ReadCtx.FOR_TEST))
         {
             SAICodecUtils.validate(input);
             input.seek(fp);
@@ -238,7 +239,7 @@ public class PostingsTest extends SaiRandomizedTest
         }
 
         IndexComponent.ForRead postingLists = components.get(IndexComponentType.POSTING_LISTS);
-        try (IndexInput input = postingLists.openInput())
+        try (IndexInput input = postingLists.openInput(ReadCtx.FOR_TEST))
         {
             SAICodecUtils.validate(input);
             input.seek(fp);
@@ -320,7 +321,7 @@ public class PostingsTest extends SaiRandomizedTest
 
     private PostingsReader openReader(IndexComponent.ForRead postingLists, long fp, QueryEventListener.PostingListEventListener listener) throws IOException
     {
-        IndexInput input = postingLists.openInput();
+        IndexInput input = postingLists.openInput(ReadCtx.FOR_TEST);
         input.seek(fp);
         return new PostingsReader(input, fp, listener);
     }

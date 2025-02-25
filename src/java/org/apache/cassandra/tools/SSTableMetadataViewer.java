@@ -61,7 +61,9 @@ import org.apache.cassandra.io.sstable.metadata.MetadataComponent;
 import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.io.sstable.metadata.ValidationMetadata;
+import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.tools.Util.TermHistogram;
@@ -175,7 +177,8 @@ public class SSTableMetadataViewer
     {
         TableMetadata cfm = Util.metadataFromSSTable(descriptor);
         SSTableReader reader = descriptor.getFormat().getReaderFactory().openNoValidation(descriptor, TableMetadataRef.forOfflineTools(cfm));
-        try (ISSTableScanner scanner = reader.getScanner())
+        try (ReadCtx ctx = StorageProvider.instance.readCtxFor(ReadCtx.Kind.SSTABLE_METADATA_VIEWER);
+             ISSTableScanner scanner = reader.getScanner(ctx))
         {
             long bytes = scanner.getLengthInBytes();
             MinMaxPriorityQueue<ValuedByteBuffer> widestPartitions = MinMaxPriorityQueue

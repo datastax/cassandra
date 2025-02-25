@@ -59,6 +59,7 @@ import org.apache.cassandra.io.sstable.compaction.SortedStringTableCursor;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.schema.CompactionParams;
 import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.schema.KeyspaceParams;
@@ -346,7 +347,7 @@ public class CorruptedSSTablesCompactionsTest
     {
         try
         {
-            ISSTableScanner scanner = sstable.getScanner();
+            ISSTableScanner scanner = sstable.getScanner(ReadCtx.FOR_TEST);
             while (scanner.hasNext())
             {
                 UnfilteredRowIterator iter = scanner.next();
@@ -366,7 +367,7 @@ public class CorruptedSSTablesCompactionsTest
     {
         try
         {
-            SSTableCursor cursor = new SortedStringTableCursor(sstable);
+            SSTableCursor cursor = new SortedStringTableCursor(sstable, ReadCtx.FOR_TEST);
             while (cursor.advance() != SSTableCursor.Type.EXHAUSTED) {}
             return true;
         }

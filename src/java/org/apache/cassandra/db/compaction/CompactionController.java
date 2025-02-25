@@ -34,8 +34,10 @@ import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.partitions.Partition;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.schema.CompactionParams.TombstoneOption;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 
@@ -58,6 +60,8 @@ public class CompactionController extends AbstractCompactionController
     private final RateLimiter limiter;
     private final long minTimestamp;
     private final Map<SSTableReader, FileDataInput> openDataFiles = new HashMap<>();
+
+    private final ReadCtx readCtx = StorageProvider.instance.readCtxFor(ReadCtx.Kind.COMPACTION);
 
     protected CompactionController(CompactionRealm realm, int maxValue)
     {
@@ -94,6 +98,12 @@ public class CompactionController extends AbstractCompactionController
 
         logger.debug("Compaction controller created for {} with {} compacting sstables, {} overlapping sstables, tsOption={}, compactingRepaired={}",
                      realm.metadata(), compacting == null ? 0 : compacting.size(), overlapTracker == null ? 0 : overlapTracker.overlaps().size(), tombstoneOption, compactingRepaired());
+    }
+
+    /** Context used for the reads made by the compaction. */
+    public ReadCtx readCtx()
+    {
+        return readCtx;
     }
 
     public void maybeRefreshOverlaps()
@@ -247,7 +257,7 @@ public class CompactionController extends AbstractCompactionController
             long sstableMinTimestamp = sstable.getMinTimestamp();
             // if we don't have bloom filter(bf_fp_chance=1.0 or filter file is missing),
             // we check index file instead.
-            if (sstableMinTimestamp < minTimestampSeen && sstable.couldContain(key))
+            if (sstableMinTimestamp < minTimestampSeen && sstable.couldContain(key, readCtx()))
             {
                 minTimestampSeen = sstableMinTimestamp;
                 hasTimestamp = true;
@@ -291,6 +301,7 @@ public class CompactionController extends AbstractCompactionController
 
     public void close()
     {
+        readCtx.close();
         closeDataFiles();
         FileUtils.closeQuietly(overlapTracker);
     }
@@ -317,7 +328,8 @@ public class CompactionController extends AbstractCompactionController
                                                               sstable -> sstable.simpleIterator(openDataFiles.computeIfAbsent(sstable,
                                                                                                                               this::openDataFile),
                                                                                                 key,
-                                                                                                tombstoneOnly));
+                                                                                                tombstoneOnly,
+                                                                                                readCtx));
     }
 
     private boolean isTombstoneShadowSource(CompactionSSTable ssTable)
@@ -352,6 +364,6 @@ public class CompactionController extends AbstractCompactionController
 
     private FileDataInput openDataFile(SSTableReader reader)
     {
-        return limiter != null ? reader.openDataReader(limiter) : reader.openDataReader();
+        return limiter != null ? reader.openDataReader(readCtx, limiter) : reader.openDataReader(readCtx);
     }
 }

@@ -38,6 +38,7 @@ import org.apache.cassandra.io.tries.ValueIterator;
 import org.apache.cassandra.io.tries.Walker;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.PageAware;
@@ -173,20 +174,22 @@ public class PartitionIndex implements Closeable
     public static PartitionIndex load(FileHandle.Builder fhBuilder,
                                       IPartitioner partitioner,
                                       boolean preload,
-                                      ByteComparable.Version version) throws IOException
+                                      ByteComparable.Version version,
+                                      ReadCtx ctx) throws IOException
     {
-        return load(fhBuilder, partitioner, preload, null, version);
+        return load(fhBuilder, partitioner, preload, null, version, ctx);
     }
 
     public static PartitionIndex load(FileHandle.Builder fhBuilder,
                                       IPartitioner partitioner,
                                       boolean preload,
                                       ZeroCopyMetadata zeroCopyMetadata,
-                                      ByteComparable.Version version) throws IOException
+                                      ByteComparable.Version version,
+                                      ReadCtx ctx) throws IOException
     {
         try (FileHandle fh = fhBuilder.complete())
         {
-            return load(fh, partitioner, preload, zeroCopyMetadata, version);
+            return load(fh, partitioner, preload, zeroCopyMetadata, version, ctx);
         }
     }
 
@@ -194,9 +197,10 @@ public class PartitionIndex implements Closeable
                                       IPartitioner partitioner,
                                       boolean preload,
                                       ZeroCopyMetadata zeroCopyMetadata,
-                                      ByteComparable.Version version) throws IOException
+                                      ByteComparable.Version version,
+                                      ReadCtx ctx) throws IOException
     {
-        try (FileDataInput rdr = fh.createReader(fh.dataLength() - FOOTER_LENGTH))
+        try (FileDataInput rdr = fh.createReader(ctx, fh.dataLength() - FOOTER_LENGTH))
         {
             long firstPos = rdr.readLong();
             long keyCount = rdr.readLong();
@@ -245,19 +249,19 @@ public class PartitionIndex implements Closeable
         fh.close();
     }
 
-    public Reader openReader()
+    public Reader openReader(ReadCtx ctx)
     {
-        return new Reader(this, version);
+        return new Reader(this, version, ctx);
     }
 
-    protected IndexPosIterator allKeysIterator()
+    protected IndexPosIterator allKeysIterator(ReadCtx ctx)
     {
-        return new IndexPosIterator(this);
+        return new IndexPosIterator(this, ctx);
     }
 
-    protected Rebufferer instantiateRebufferer()
+    protected Rebufferer instantiateRebufferer(ReadCtx ctx)
     {
-        return fh.instantiateRebufferer();
+        return fh.instantiateRebufferer(ctx);
     }
 
 
@@ -293,9 +297,9 @@ public class PartitionIndex implements Closeable
      */
     public static class Reader extends Walker<Reader>
     {
-        protected Reader(PartitionIndex index, ByteComparable.Version version)
+        protected Reader(PartitionIndex index, ByteComparable.Version version, ReadCtx ctx)
         {
-            super(index.instantiateRebufferer(), index.root, version);
+            super(index.instantiateRebufferer(ctx), index.root, version);
         }
 
         /**
@@ -412,14 +416,14 @@ public class PartitionIndex implements Closeable
          * Note: For performance reasons this class does not keep a reference of the index. Caller must ensure a
          * reference is held for the lifetime of this object.
          */
-        public IndexPosIterator(PartitionIndex index)
+        public IndexPosIterator(PartitionIndex index, ReadCtx ctx)
         {
-            super(index.instantiateRebufferer(), index.root, index.filterFirst, index.filterLast, LeftBoundTreatment.ADMIT_PREFIXES, index.version);
+            super(index.instantiateRebufferer(ctx), index.root, index.filterFirst, index.filterLast, LeftBoundTreatment.ADMIT_PREFIXES, index.version);
         }
 
-        IndexPosIterator(PartitionIndex index, PartitionPosition start, PartitionPosition end)
+        IndexPosIterator(PartitionIndex index, PartitionPosition start, PartitionPosition end, ReadCtx ctx)
         {
-            super(index.instantiateRebufferer(), index.root, start, end, LeftBoundTreatment.ADMIT_PREFIXES, index.version);
+            super(index.instantiateRebufferer(ctx), index.root, start, end, LeftBoundTreatment.ADMIT_PREFIXES, index.version);
         }
 
         /**
@@ -454,7 +458,7 @@ public class PartitionIndex implements Closeable
 
     private void dumpTrie(PrintStream out)
     {
-        try (Reader rdr = openReader())
+        try (Reader rdr = openReader(null))
         {
             rdr.dumpTrie(out, (buf, ppos, pbits) -> Long.toString(getIndexPos(buf, ppos, pbits)));
         }

@@ -56,6 +56,8 @@ import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.storage.StorageProvider;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.metrics.CassandraMetricsRegistry;
 import org.apache.cassandra.metrics.DefaultNameFactory;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
@@ -160,29 +162,30 @@ public class V1OnDiskFormat implements OnDiskFormat
     }
 
     @Override
-    public PrimaryKeyMap.Factory newPrimaryKeyMapFactory(IndexComponents.ForRead perSSTableComponents, PrimaryKey.Factory primaryKeyFactory, SSTableReader sstable) throws IOException
+    public PrimaryKeyMap.Factory newPrimaryKeyMapFactory(IndexComponents.ForRead perSSTableComponents, PrimaryKey.Factory primaryKeyFactory, SSTableReader sstable, ReadCtx indexLoadContext) throws IOException
     {
-        return new PartitionAwarePrimaryKeyMap.PartitionAwarePrimaryKeyMapFactory(perSSTableComponents, sstable, primaryKeyFactory);
+        return new PartitionAwarePrimaryKeyMap.PartitionAwarePrimaryKeyMapFactory(perSSTableComponents, sstable, primaryKeyFactory, indexLoadContext);
     }
 
     @Override
-    public SearchableIndex newSearchableIndex(SSTableContext sstableContext, IndexComponents.ForRead perIndexComponents)
+    public SearchableIndex newSearchableIndex(SSTableContext sstableContext, IndexComponents.ForRead perIndexComponents, ReadCtx searcherCreationContext)
     {
         return perIndexComponents.isEmpty()
                ? new EmptyIndex()
-               : new V1SearchableIndex(sstableContext, perIndexComponents);
+               : new V1SearchableIndex(sstableContext, perIndexComponents, searcherCreationContext);
     }
 
     @Override
     public IndexSearcher newIndexSearcher(SSTableContext sstableContext,
                                           IndexContext indexContext,
                                           PerIndexFiles indexFiles,
-                                          SegmentMetadata segmentMetadata) throws IOException
+                                          SegmentMetadata segmentMetadata,
+                                          ReadCtx searcherCreationContext) throws IOException
     {
         if (indexContext.isLiteral())
             // We filter because the CA format wrote maps acording to a different order than their abstract type.
-            return new InvertedIndexSearcher(sstableContext, indexFiles, segmentMetadata, indexContext, Version.AA, true);
-        return new KDTreeIndexSearcher(sstableContext.primaryKeyMapFactory(), indexFiles, segmentMetadata, indexContext);
+            return new InvertedIndexSearcher(sstableContext, indexFiles, segmentMetadata, indexContext, Version.AA, true, searcherCreationContext);
+        return new KDTreeIndexSearcher(sstableContext.primaryKeyMapFactory(), indexFiles, segmentMetadata, indexContext, searcherCreationContext);
     }
 
     @Override
@@ -243,7 +246,8 @@ public class V1OnDiskFormat implements OnDiskFormat
         }
 
         Version earliest = getExpectedEarliestVersion(context, component.componentType());
-        try (IndexInput input = component.openInput())
+        try (ReadCtx ctx = StorageProvider.instance.readCtxFor(ReadCtx.Kind.INDEX_LOAD);
+             IndexInput input = component.openInput(ctx))
         {
             if (checksum)
                 SAICodecUtils.validateChecksum(input);

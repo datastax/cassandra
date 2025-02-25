@@ -63,6 +63,7 @@ import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.RandomAccessReader;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
@@ -353,21 +354,21 @@ public class SSTableFlushObserverTest
         {
             for (FlushObserver.HeaderEntry e : observer.headers)
             {
-                try (RandomAccessReader in = reader.openKeyComponentReader())
+                try (RandomAccessReader in = reader.openKeyComponentReader(ReadCtx.FOR_TEST))
                 {
                     assertEquals(e.key, reader.keyAt(in, e.keyPosition));
-                    assertEquals(e.deletionTime, reader.partitionLevelDeletionAt(e.deletionTimePosition));
-                    assertEquals(e.staticRow, reader.staticRowAt(e.staticRowPosition, columnFilter));
+                    assertEquals(e.deletionTime, reader.partitionLevelDeletionAt(e.deletionTimePosition, ReadCtx.FOR_TEST));
+                    assertEquals(e.staticRow, reader.staticRowAt(e.staticRowPosition, columnFilter, ReadCtx.FOR_TEST));
                 }
             }
 
             for (FlushObserver.UnfilteredEntry e : observer.unfiltereds)
             {
-                try (RandomAccessReader in = reader.openKeyComponentReader())
+                try (RandomAccessReader in = reader.openKeyComponentReader(ReadCtx.FOR_TEST))
                 {
                     assertEquals(e.key, reader.keyAt(in, e.keyPosition));
-                    assertEquals(e.unfiltered.clustering(), reader.clusteringAt(e.unfilteredPosition));
-                    assertEquals(e.unfiltered, reader.unfilteredAt(e.unfilteredPosition, columnFilter));
+                    assertEquals(e.unfiltered.clustering(), reader.clusteringAt(e.unfilteredPosition, ReadCtx.FOR_TEST));
+                    assertEquals(e.unfiltered, reader.unfilteredAt(e.unfilteredPosition, columnFilter, ReadCtx.FOR_TEST));
                 }
             }
         }

@@ -59,6 +59,7 @@ import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
 import org.apache.cassandra.io.sstable.format.ScrubPartitionIterator;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.RandomAccessReader;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.locator.Replica;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.Schema;
@@ -234,7 +235,7 @@ public class SSTableWithZeroCopyMetadataTest
     private void checkSSTableReader(SSTableReader sstable) throws IOException
     {
         List<DecoratedKey> keys = new ArrayList<>();
-        try (RandomAccessReader dataReader = sstable.openDataReader())
+        try (RandomAccessReader dataReader = sstable.openDataReader(ReadCtx.FOR_TEST))
         {
             checkAllKeysIterator(sstable, dataReader, keys);
             checkSrubPartitionsIterator(sstable, dataReader, keys);
@@ -245,21 +246,21 @@ public class SSTableWithZeroCopyMetadataTest
                 int idx = keys.indexOf(key);
 
                 // EQ position
-                long eqPos = sstable.getPosition(key, SSTableReader.Operator.EQ).position;
+                long eqPos = sstable.getPosition(key, SSTableReader.Operator.EQ, ReadCtx.FOR_TEST).position;
                 dataReader.seek(eqPos);
                 ByteBuffer keyFromDataFile = ByteBufferUtil.readWithShortLength(dataReader);
                 assertThat(sstable.getPartitioner().decorateKey(keyFromDataFile)).isEqualTo(key);
 
                 // GE position
-                long gePos = sstable.getPosition(key, SSTableReader.Operator.GE).position;
+                long gePos = sstable.getPosition(key, SSTableReader.Operator.GE, ReadCtx.FOR_TEST).position;
                 assertThat(gePos).isEqualTo(eqPos); // because the key exists
 
                 // GT position
-                RowIndexEntry gtPos = sstable.getPosition(key, SSTableReader.Operator.GT);
+                RowIndexEntry gtPos = sstable.getPosition(key, SSTableReader.Operator.GT, ReadCtx.FOR_TEST);
                 if (idx != keys.size() - 1)
                 {
                     DecoratedKey nextKey = keys.get(idx + 1);
-                    long nextEqPos = sstable.getPosition(nextKey, SSTableReader.Operator.EQ).position;
+                    long nextEqPos = sstable.getPosition(nextKey, SSTableReader.Operator.EQ, ReadCtx.FOR_TEST).position;
                     assertThat(gtPos.position).isGreaterThan(eqPos);
                     assertThat(gtPos.position).isEqualTo(nextEqPos);
                 }
@@ -269,7 +270,7 @@ public class SSTableWithZeroCopyMetadataTest
                 if (idx == keys.size() - 1)
                     assertThat(key).isEqualTo(sstable.last);
 
-                try (UnfilteredRowIterator it = sstable.simpleIterator(dataReader, key, false))
+                try (UnfilteredRowIterator it = sstable.simpleIterator(dataReader, key, false, ReadCtx.FOR_TEST))
                 {
                     while (it.hasNext())
                     {
@@ -278,7 +279,7 @@ public class SSTableWithZeroCopyMetadataTest
                     }
                 }
 
-                try (UnfilteredRowIterator it = sstable.iterator(key, Slices.ALL, ColumnFilter.NONE, false, SSTableReadsListener.NOOP_LISTENER))
+                try (UnfilteredRowIterator it = sstable.iterator(key, Slices.ALL, ColumnFilter.NONE, false, SSTableReadsListener.NOOP_LISTENER, ReadCtx.FOR_TEST))
                 {
                     while (it.hasNext())
                     {
@@ -292,7 +293,7 @@ public class SSTableWithZeroCopyMetadataTest
 
     private static void checkSrubPartitionsIterator(SSTableReader sstable, RandomAccessReader dataReader, List<DecoratedKey> keys) throws IOException
     {
-        try (ScrubPartitionIterator it = sstable.scrubPartitionsIterator())
+        try (ScrubPartitionIterator it = sstable.scrubPartitionsIterator(ReadCtx.FOR_TEST))
         {
             while (!it.isExhausted())
             {
@@ -307,7 +308,7 @@ public class SSTableWithZeroCopyMetadataTest
 
     private static void checkAllKeysIterator(SSTableReader sstable, RandomAccessReader dataReader, List<DecoratedKey> keys) throws IOException
     {
-        try (PartitionIndexIterator it = sstable.allKeysIterator())
+        try (PartitionIndexIterator it = sstable.allKeysIterator(ReadCtx.FOR_TEST))
         {
             while (!it.isExhausted())
             {

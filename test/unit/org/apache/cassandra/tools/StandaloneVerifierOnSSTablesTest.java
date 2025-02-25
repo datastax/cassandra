@@ -35,6 +35,7 @@ import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.tools.ToolRunner.ToolResult;
@@ -153,8 +154,8 @@ public class StandaloneVerifierOnSSTablesTest extends OfflineToolUtils
 
         createAndPopulateTable(keyspaceName, corruptDataTable, cfs -> {
             SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
-            long row0Start = sstable.getPosition(PartitionPosition.ForKey.get(ByteBufferUtil.bytes("0"), cfs.getPartitioner()), SSTableReader.Operator.EQ).position;
-            long row1Start = sstable.getPosition(PartitionPosition.ForKey.get(ByteBufferUtil.bytes("1"), cfs.getPartitioner()), SSTableReader.Operator.EQ).position;
+            long row0Start = sstable.getPosition(PartitionPosition.ForKey.get(ByteBufferUtil.bytes("0"), cfs.getPartitioner()), SSTableReader.Operator.EQ, ReadCtx.FOR_TEST).position;
+            long row1Start = sstable.getPosition(PartitionPosition.ForKey.get(ByteBufferUtil.bytes("1"), cfs.getPartitioner()), SSTableReader.Operator.EQ, ReadCtx.FOR_TEST).position;
             long startPosition = Math.min(row0Start, row1Start);
 
             try (RandomAccessFile file = new RandomAccessFile(sstable.getFilename(), "rw"))

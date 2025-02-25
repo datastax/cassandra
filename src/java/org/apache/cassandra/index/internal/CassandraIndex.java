@@ -34,6 +34,8 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.compaction.TableOperation;
 import org.apache.cassandra.db.memtable.Memtable;
+import org.apache.cassandra.io.storage.StorageProvider;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.schema.ColumnMetadata;
@@ -703,7 +705,8 @@ public abstract class CassandraIndex implements Index
         baseCfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.INDEX_BUILD_STARTED);
 
         try (ColumnFamilyStore.RefViewFragment viewFragment = baseCfs.selectAndReference(View.selectFunction(SSTableSet.CANONICAL));
-             Refs<SSTableReader> sstables = viewFragment.refs)
+             Refs<SSTableReader> sstables = viewFragment.refs;
+             ReadCtx buildCtx = StorageProvider.instance.readCtxFor(ReadCtx.Kind.INDEX_BUILD))
         {
             if (sstables.isEmpty())
             {
@@ -720,7 +723,7 @@ public abstract class CassandraIndex implements Index
 
             SecondaryIndexBuilder builder = new CollatedViewIndexBuilder(baseCfs,
                                                                          Collections.singleton(this),
-                                                                         new ReducingKeyIterator(sstables),
+                                                                         new ReducingKeyIterator(sstables, buildCtx),
                                                                          ImmutableSet.copyOf(sstables));
             Future<?> future = CompactionManager.instance.submitIndexBuild(builder);
             FBUtilities.waitOnFuture(future);

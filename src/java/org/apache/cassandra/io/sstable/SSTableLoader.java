@@ -39,7 +39,9 @@ import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.FSError;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.streaming.DefaultConnectionFactory;
@@ -87,7 +89,7 @@ public class SSTableLoader implements StreamEventHandler
     }
 
     @SuppressWarnings("resource")
-    protected Collection<SSTableReader> openSSTables(final Map<InetAddressAndPort, Collection<Range<Token>>> ranges)
+    protected Collection<SSTableReader> openSSTables(final Map<InetAddressAndPort, Collection<Range<Token>>> ranges, ReadCtx ctx)
     {
         outputHandler.output("Opening sstables and calculating sections to stream");
 
@@ -155,13 +157,13 @@ public class SSTableLoader implements StreamEventHandler
                                                   InetAddressAndPort endpoint = entry.getKey();
                                                   List<Range<Token>> tokenRanges = Range.normalize(entry.getValue());
 
-                                                  List<SSTableReader.PartitionPositionBounds> sstableSections = sstable.getPositionsForRanges(tokenRanges);
+                                                  List<SSTableReader.PartitionPositionBounds> sstableSections = sstable.getPositionsForRanges(tokenRanges, ctx);
                                                   // Do not stream to nodes that don't own any part of the SSTable, empty streams
                                                   // will generate an error on the server. See CASSANDRA-16349 for details.
                                                   if (sstableSections.isEmpty())
                                                       continue;
 
-                                                  long estimatedKeys = sstable.estimatedKeysForRanges(tokenRanges);
+                                                  long estimatedKeys = sstable.estimatedKeysForRanges(tokenRanges, ctx);
                                                   Ref<? extends SSTableReader> ref = sstable.ref();
                                                   OutgoingStream stream = new CassandraOutgoingFile(StreamOperation.BULK_LOAD, ref, sstableSections, tokenRanges, estimatedKeys);
                                                   streamingDetails.put(endpoint, stream);
@@ -209,7 +211,10 @@ public class SSTableLoader implements StreamEventHandler
         StreamPlan plan = new StreamPlan(StreamOperation.BULK_LOAD, connectionsPerHost, false, null, PreviewKind.NONE).connectionFactory(client.getConnectionFactory());
 
         Map<InetAddressAndPort, Collection<Range<Token>>> endpointToRanges = client.getEndpointToRangesMap();
-        openSSTables(endpointToRanges);
+        try (ReadCtx ctx = StorageProvider.instance.readCtxFor(ReadCtx.Kind.SSTABLE_OPEN))
+        {
+            openSSTables(endpointToRanges, ctx);
+        }
         if (sstables.isEmpty())
         {
             // return empty result

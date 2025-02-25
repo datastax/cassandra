@@ -74,6 +74,7 @@ import org.apache.cassandra.io.sstable.SSTableId;
 import org.apache.cassandra.io.sstable.SSTableIdFactory;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.schema.CompactionParams;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.MockSchema;
@@ -442,7 +443,7 @@ public class CompactionsTest
         // We cannot read the data, since {@link ReadCommand#withoutPurgeableTombstones} will purge droppable tombstones
         // but we just want to check here that compaction did *NOT* drop the tombstone, so we read from the SSTable directly
         // instead
-        ISSTableScanner scanner = newSSTable.getScanner();
+        ISSTableScanner scanner = newSSTable.getScanner(ReadCtx.FOR_TEST);
         assertTrue(scanner.hasNext());
         UnfilteredRowIterator rowIt = scanner.next();
         assertTrue(rowIt.hasNext());
@@ -510,48 +511,48 @@ public class CompactionsTest
 
 
         // contiguous range spans all data
-        assertFalse(CompactionManager.needsCleanup(sstable, makeRanges(0, 209)));
-        assertFalse(CompactionManager.needsCleanup(sstable, makeRanges(0, 210)));
+        assertFalse(CompactionManager.needsCleanup(sstable, makeRanges(0, 209), ReadCtx.FOR_TEST));
+        assertFalse(CompactionManager.needsCleanup(sstable, makeRanges(0, 210), ReadCtx.FOR_TEST));
 
         // separate ranges span all data
         assertFalse(CompactionManager.needsCleanup(sstable, makeRanges(0, 9,
                                                                        100, 109,
-                                                                       200, 209)));
+                                                                       200, 209), ReadCtx.FOR_TEST));
         assertFalse(CompactionManager.needsCleanup(sstable, makeRanges(0, 109,
-                                                                       200, 210)));
+                                                                       200, 210), ReadCtx.FOR_TEST));
         assertFalse(CompactionManager.needsCleanup(sstable, makeRanges(0, 9,
-                                                                       100, 210)));
+                                                                       100, 210), ReadCtx.FOR_TEST));
 
         // one range is missing completely
         assertTrue(CompactionManager.needsCleanup(sstable, makeRanges(100, 109,
-                                                                      200, 209)));
+                                                                      200, 209), ReadCtx.FOR_TEST));
         assertTrue(CompactionManager.needsCleanup(sstable, makeRanges(0, 9,
-                                                                      200, 209)));
+                                                                      200, 209), ReadCtx.FOR_TEST));
         assertTrue(CompactionManager.needsCleanup(sstable, makeRanges(0, 9,
-                                                                      100, 109)));
+                                                                      100, 109), ReadCtx.FOR_TEST));
 
 
         // the beginning of one range is missing
         assertTrue(CompactionManager.needsCleanup(sstable, makeRanges(1, 9,
                                                                       100, 109,
-                                                                      200, 209)));
+                                                                      200, 209), ReadCtx.FOR_TEST));
         assertTrue(CompactionManager.needsCleanup(sstable, makeRanges(0, 9,
                                                                       101, 109,
-                                                                      200, 209)));
+                                                                      200, 209), ReadCtx.FOR_TEST));
         assertTrue(CompactionManager.needsCleanup(sstable, makeRanges(0, 9,
                                                                       100, 109,
-                                                                      201, 209)));
+                                                                      201, 209), ReadCtx.FOR_TEST));
 
         // the end of one range is missing
         assertTrue(CompactionManager.needsCleanup(sstable, makeRanges(0, 8,
                                                                       100, 109,
-                                                                      200, 209)));
+                                                                      200, 209), ReadCtx.FOR_TEST));
         assertTrue(CompactionManager.needsCleanup(sstable, makeRanges(0, 9,
                                                                       100, 108,
-                                                                      200, 209)));
+                                                                      200, 209), ReadCtx.FOR_TEST));
         assertTrue(CompactionManager.needsCleanup(sstable, makeRanges(0, 9,
                                                                       100, 109,
-                                                                      200, 208)));
+                                                                      200, 208), ReadCtx.FOR_TEST));
 
         // some ranges don't contain any data
         assertFalse(CompactionManager.needsCleanup(sstable, makeRanges(0, 0,
@@ -560,7 +561,7 @@ public class CompactionsTest
                                                                        100, 109,
                                                                        150, 199,
                                                                        200, 209,
-                                                                       300, 301)));
+                                                                       300, 301), ReadCtx.FOR_TEST));
         // same case, but with a middle range not covering some of the existing data
         assertFalse(CompactionManager.needsCleanup(sstable, makeRanges(0, 0,
                                                                        0, 9,
@@ -568,7 +569,7 @@ public class CompactionsTest
                                                                        100, 103,
                                                                        150, 199,
                                                                        200, 209,
-                                                                       300, 301)));
+                                                                       300, 301), ReadCtx.FOR_TEST));
     }
 
     @Test

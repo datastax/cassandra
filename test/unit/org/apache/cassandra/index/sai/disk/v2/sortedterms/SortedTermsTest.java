@@ -45,6 +45,7 @@ import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.index.sai.utils.SaiRandomizedTest;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
@@ -144,7 +145,7 @@ public class SortedTermsTest extends SaiRandomizedTest
         {
             for (int x = 0; x < terms.size(); x++)
             {
-                try (SortedTermsReader.Cursor cursor = reader.openCursor())
+                try (SortedTermsReader.Cursor cursor = reader.openCursor(ReadCtx.FOR_TEST))
                 {
                     long pointId = cursor.ceiling(ByteComparable.preencoded(VERSION, terms.get(x)));
                     assertEquals(x, pointId);
@@ -157,7 +158,7 @@ public class SortedTermsTest extends SaiRandomizedTest
         {
             for (int x = terms.size() - 1; x >= 0; x--)
             {
-                try (SortedTermsReader.Cursor cursor = reader.openCursor())
+                try (SortedTermsReader.Cursor cursor = reader.openCursor(ReadCtx.FOR_TEST))
                 {
                     long pointId = cursor.ceiling(ByteComparable.preencoded(VERSION, terms.get(x)));
                     assertEquals(x, pointId);
@@ -172,7 +173,7 @@ public class SortedTermsTest extends SaiRandomizedTest
             {
                 int target = nextInt(0, terms.size());
 
-                try (SortedTermsReader.Cursor cursor = reader.openCursor())
+                try (SortedTermsReader.Cursor cursor = reader.openCursor(ReadCtx.FOR_TEST))
                 {
                     long pointId = cursor.ceiling(ByteComparable.preencoded(VERSION, terms.get(target)));
                     assertEquals(target, pointId);
@@ -197,7 +198,7 @@ public class SortedTermsTest extends SaiRandomizedTest
         {
             for (int x = 0; x < termsMaxPrefixNoMatch.size(); x++)
             {
-                try (SortedTermsReader.Cursor cursor = reader.openCursor())
+                try (SortedTermsReader.Cursor cursor = reader.openCursor(ReadCtx.FOR_TEST))
                 {
                     int index = x;
                     long pointIdEnd = cursor.ceiling(v -> termsMinPrefixNoMatch.get(index));
@@ -230,7 +231,7 @@ public class SortedTermsTest extends SaiRandomizedTest
         {
             for (int x = 0; x < termsMaxPrefix.size(); x++)
             {
-                try (SortedTermsReader.Cursor cursor = reader.openCursor())
+                try (SortedTermsReader.Cursor cursor = reader.openCursor(ReadCtx.FOR_TEST))
                 {
                     int index = x;
                     long pointIdEnd = cursor.ceiling(v -> termsMinPrefix.get(index));
@@ -431,7 +432,7 @@ public class SortedTermsTest extends SaiRandomizedTest
                                        ThrowingConsumer<SortedTermsReader.Cursor> testCode) throws IOException
     {
         IndexComponents.ForRead components = indexDescriptor.perSSTableComponents();
-        MetadataSource metadataSource = MetadataSource.loadMetadata(components);
+        MetadataSource metadataSource = MetadataSource.loadMetadata(components, ReadCtx.FOR_TEST);
         IndexComponent.ForRead blocksComponent = components.get(IndexComponentType.PRIMARY_KEY_BLOCKS);
         IndexComponent.ForRead blockOffsetsComponent = components.get(IndexComponentType.PRIMARY_KEY_BLOCK_OFFSETS);
         NumericValuesMeta blockPointersMeta = new NumericValuesMeta(metadataSource.get(blockOffsetsComponent.fileNamePart()));
@@ -440,8 +441,8 @@ public class SortedTermsTest extends SaiRandomizedTest
              FileHandle termsData = blocksComponent.createFileHandle();
              FileHandle blockOffsets = blockOffsetsComponent.createFileHandle())
         {
-            SortedTermsReader reader = new SortedTermsReader(termsData, blockOffsets, trieHandle, sortedTermsMeta, blockPointersMeta);
-            try (SortedTermsReader.Cursor cursor = reader.openCursor())
+            SortedTermsReader reader = new SortedTermsReader(termsData, blockOffsets, trieHandle, sortedTermsMeta, blockPointersMeta, ReadCtx.FOR_TEST);
+            try (SortedTermsReader.Cursor cursor = reader.openCursor(ReadCtx.FOR_TEST))
             {
                 testCode.accept(cursor);
             }
@@ -452,7 +453,7 @@ public class SortedTermsTest extends SaiRandomizedTest
                                        ThrowingConsumer<SortedTermsReader> testCode) throws IOException
     {
         IndexComponents.ForRead components = indexDescriptor.perSSTableComponents();
-        MetadataSource metadataSource = MetadataSource.loadMetadata(components);
+        MetadataSource metadataSource = MetadataSource.loadMetadata(components, ReadCtx.FOR_TEST);
         IndexComponent.ForRead blocksComponent = components.get(IndexComponentType.PRIMARY_KEY_BLOCKS);
         IndexComponent.ForRead blockOffsetsComponent = components.get(IndexComponentType.PRIMARY_KEY_BLOCK_OFFSETS);
         NumericValuesMeta blockPointersMeta = new NumericValuesMeta(metadataSource.get(blockOffsetsComponent.fileNamePart()));
@@ -461,14 +462,14 @@ public class SortedTermsTest extends SaiRandomizedTest
              FileHandle termsData = blocksComponent.createFileHandle();
              FileHandle blockOffsets = blockOffsetsComponent.createFileHandle())
         {
-            SortedTermsReader reader = new SortedTermsReader(termsData, blockOffsets, trieHandle, sortedTermsMeta, blockPointersMeta);
+            SortedTermsReader reader = new SortedTermsReader(termsData, blockOffsets, trieHandle, sortedTermsMeta, blockPointersMeta, ReadCtx.FOR_TEST);
             testCode.accept(reader);
         }
     }
 
     private boolean validateComponent(IndexComponents.ForRead components, IndexComponentType indexComponentType, boolean checksum)
     {
-        try (IndexInput input = components.get(indexComponentType).openInput())
+        try (IndexInput input = components.get(indexComponentType).openInput(ReadCtx.FOR_TEST))
         {
             if (checksum)
                 SAICodecUtils.validateChecksum(input);

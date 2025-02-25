@@ -40,7 +40,7 @@ public interface ChunkReader extends RebuffererFactory
      * to the original file, not the slice, that is, the caller can provide only the position from the range of the
      * slice (i.e. {@link SliceDescriptor#sliceStart} (incl) ... {@link SliceDescriptor#sliceEnd} (excl)).
      */
-    void readChunk(long position, ByteBuffer buffer);
+    void readChunk(long position, ByteBuffer buffer, ReadCtx ctx);
 
     /**
      * Buffer size required for this rebufferer. Must be power of 2 if alignment is required.

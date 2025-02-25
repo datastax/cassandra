@@ -45,6 +45,7 @@ import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.notifications.SSTableAddedNotification;
 import org.apache.cassandra.notifications.SSTableListChangedNotification;
 import org.apache.cassandra.schema.IndexMetadata;
@@ -917,7 +918,7 @@ public class SecondaryIndexManagerTest extends CQLTester
                             buildWaitLatch.countDown();
                             buildLatch.await();
                         }
-                        final SecondaryIndexBuilder builder = super.getIndexBuildTask(cfs, indexes, sstables, isFullRebuild);
+                        final SecondaryIndexBuilder builder = super.getIndexBuildTask(cfs, indexes, sstables, isFullRebuild, ReadCtx.FOR_TEST);
                         return new SecondaryIndexBuilder()
                         {
 

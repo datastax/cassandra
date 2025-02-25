@@ -47,6 +47,12 @@ public abstract class WrappingRebufferer implements Rebufferer, Rebufferer.Buffe
     }
 
     @Override
+    public ReadCtx readCtx()
+    {
+        return source.readCtx();
+    }
+
+    @Override
     public BufferHolder rebuffer(long position)
     {
         assert buffer == null;

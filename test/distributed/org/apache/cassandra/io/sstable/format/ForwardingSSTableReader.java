@@ -54,6 +54,7 @@ import org.apache.cassandra.io.util.ChannelProxy;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.RandomAccessReader;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.metrics.RestorableMeter;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
@@ -76,9 +77,9 @@ public abstract class ForwardingSSTableReader extends SSTableReader
     }
 
     @Override
-    public PartitionIndexIterator allKeysIterator() throws IOException
+    public PartitionIndexIterator allKeysIterator(ReadCtx ctx) throws IOException
     {
-        return delegate.allKeysIterator();
+        return delegate.allKeysIterator(ctx);
     }
 
     @Override
@@ -220,9 +221,9 @@ public abstract class ForwardingSSTableReader extends SSTableReader
     }
 
     @Override
-    public long estimatedKeysForRanges(Collection<Range<Token>> ranges)
+    public long estimatedKeysForRanges(Collection<Range<Token>> ranges, ReadCtx ctx)
     {
-        return delegate.estimatedKeysForRanges(ranges);
+        return delegate.estimatedKeysForRanges(ranges, ctx);
     }
 
     @Override
@@ -244,15 +245,15 @@ public abstract class ForwardingSSTableReader extends SSTableReader
     }
 
     @Override
-    public Iterable<DecoratedKey> getKeySamples(Range<Token> range)
+    public Iterable<DecoratedKey> getKeySamples(Range<Token> range, ReadCtx ctx)
     {
-        return delegate.getKeySamples(range);
+        return delegate.getKeySamples(range, ctx);
     }
 
     @Override
-    public List<PartitionPositionBounds> getPositionsForRanges(Collection<Range<Token>> ranges)
+    public List<PartitionPositionBounds> getPositionsForRanges(Collection<Range<Token>> ranges, ReadCtx ctx)
     {
-        return delegate.getPositionsForRanges(ranges);
+        return delegate.getPositionsForRanges(ranges, ctx);
     }
 
     @Override
@@ -286,27 +287,27 @@ public abstract class ForwardingSSTableReader extends SSTableReader
     }
 
     @Override
-    protected BigTableRowIndexEntry getPosition(PartitionPosition key, Operator op, boolean updateCacheAndStats, boolean permitMatchPastLast, SSTableReadsListener listener)
+    protected BigTableRowIndexEntry getPosition(PartitionPosition key, Operator op, boolean updateCacheAndStats, boolean permitMatchPastLast, SSTableReadsListener listener, ReadCtx ctx)
     {
-        return (BigTableRowIndexEntry) delegate.getPosition(key, op, updateCacheAndStats, permitMatchPastLast, listener);
+        return (BigTableRowIndexEntry) delegate.getPosition(key, op, updateCacheAndStats, permitMatchPastLast, listener, ctx);
     }
 
     @Override
-    public UnfilteredRowIterator iterator(DecoratedKey key, Slices slices, ColumnFilter selectedColumns, boolean reversed, SSTableReadsListener listener)
+    public UnfilteredRowIterator iterator(DecoratedKey key, Slices slices, ColumnFilter selectedColumns, boolean reversed, SSTableReadsListener listener, ReadCtx ctx)
     {
-        return delegate.iterator(key, slices, selectedColumns, reversed, listener);
+        return delegate.iterator(key, slices, selectedColumns, reversed, listener, ctx);
     }
 
     @Override
-    public UnfilteredRowIterator simpleIterator(FileDataInput dfile, DecoratedKey key, boolean tombstoneOnly)
+    public UnfilteredRowIterator simpleIterator(FileDataInput dfile, DecoratedKey key, boolean tombstoneOnly, ReadCtx ctx)
     {
-        return delegate.simpleIterator(dfile, key, tombstoneOnly);
+        return delegate.simpleIterator(dfile, key, tombstoneOnly, ctx);
     }
 
     @Override
-    public DecoratedKey firstKeyBeyond(PartitionPosition token)
+    public DecoratedKey firstKeyBeyond(PartitionPosition token, ReadCtx ctx)
     {
-        return delegate.firstKeyBeyond(token);
+        return delegate.firstKeyBeyond(token, ctx);
     }
 
     @Override
@@ -364,39 +365,39 @@ public abstract class ForwardingSSTableReader extends SSTableReader
     }
 
     @Override
-    public ISSTableScanner getScanner(Range<Token> range)
+    public ISSTableScanner getScanner(Range<Token> range, ReadCtx ctx)
     {
-        return delegate.getScanner(range);
+        return delegate.getScanner(range, ctx);
     }
 
     @Override
-    public ISSTableScanner getScanner()
+    public ISSTableScanner getScanner(ReadCtx ctx)
     {
-        return delegate.getScanner();
+        return delegate.getScanner(ctx);
     }
 
     @Override
-    public ISSTableScanner getScanner(Collection<Range<Token>> ranges)
+    public ISSTableScanner getScanner(Collection<Range<Token>> ranges, ReadCtx ctx)
     {
-        return delegate.getScanner(ranges);
+        return delegate.getScanner(ranges, ctx);
     }
 
     @Override
-    public ISSTableScanner getScanner(Iterator<AbstractBounds<PartitionPosition>> rangeIterator)
+    public ISSTableScanner getScanner(Iterator<AbstractBounds<PartitionPosition>> rangeIterator, ReadCtx ctx)
     {
-        return delegate.getScanner(rangeIterator);
+        return delegate.getScanner(rangeIterator, ctx);
     }
 
     @Override
-    public ISSTableScanner getScanner(ColumnFilter columns, DataRange dataRange, SSTableReadsListener listener)
+    public ISSTableScanner getScanner(ColumnFilter columns, DataRange dataRange, SSTableReadsListener listener, ReadCtx ctx)
     {
-        return delegate.getScanner(columns, dataRange, listener);
+        return delegate.getScanner(columns, dataRange, listener, ctx);
     }
 
     @Override
-    public FileDataInput getFileDataInput(long position)
+    public FileDataInput getFileDataInput(ReadCtx ctx, long position)
     {
-        return delegate.getFileDataInput(position);
+        return delegate.getFileDataInput(ctx, position);
     }
 
     @Override
@@ -568,27 +569,27 @@ public abstract class ForwardingSSTableReader extends SSTableReader
     }
 
     @Override
-    public RandomAccessReader openDataReader(RateLimiter limiter)
+    public RandomAccessReader openDataReader(ReadCtx ctx, RateLimiter limiter)
     {
-        return delegate.openDataReader(limiter);
+        return delegate.openDataReader(ctx, limiter);
     }
 
     @Override
-    public RandomAccessReader openDataReader()
+    public RandomAccessReader openDataReader(ReadCtx ctx)
     {
-        return delegate.openDataReader();
+        return delegate.openDataReader(ctx);
     }
 
     @Override
-    public RandomAccessReader openIndexReader()
+    public RandomAccessReader openIndexReader(ReadCtx ctx)
     {
-        return delegate.openIndexReader();
+        return delegate.openIndexReader(ctx);
     }
 
     @Override
-    public RandomAccessReader openKeyComponentReader()
+    public RandomAccessReader openKeyComponentReader(ReadCtx ctx)
     {
-        return delegate.openKeyComponentReader();
+        return delegate.openKeyComponentReader(ctx);
     }
 
     @Override
@@ -754,9 +755,9 @@ public abstract class ForwardingSSTableReader extends SSTableReader
     }
 
     @Override
-    public ScrubPartitionIterator scrubPartitionsIterator() throws IOException
+    public ScrubPartitionIterator scrubPartitionsIterator(ReadCtx ctx) throws IOException
     {
-        return delegate.scrubPartitionsIterator();
+        return delegate.scrubPartitionsIterator(ctx);
     }
 
 }

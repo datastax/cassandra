@@ -23,6 +23,7 @@ import java.util.Collection;
 
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.MergeIterator;
 import org.apache.cassandra.utils.Reducer;
@@ -37,7 +38,7 @@ public class ReducingKeyIterator implements CloseableIterator<DecoratedKey>
     private volatile CloseableIterator<DecoratedKey> mi;
     private final long totalLength;
 
-    public ReducingKeyIterator(Collection<SSTableReader> sstables)
+    public ReducingKeyIterator(Collection<SSTableReader> sstables, ReadCtx ctx)
     {
         iters = new ArrayList<>(sstables.size());
         long len = 0;
@@ -45,7 +46,7 @@ public class ReducingKeyIterator implements CloseableIterator<DecoratedKey>
         {
             for (SSTableReader sstable : sstables)
             {
-                KeyIterator iter = KeyIterator.forSSTable(sstable);
+                KeyIterator iter = KeyIterator.forSSTable(sstable, ctx);
                 iters.add(iter);
                 len += iter.getTotalBytes();
             }

@@ -50,6 +50,7 @@ import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileInputStreamPlus;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
@@ -182,7 +183,8 @@ public abstract class SSTableReaderBuilder
         if (logger.isDebugEnabled())
             logger.debug("Attempting to build summary for {}", descriptor);
 
-        try (PartitionIndexIterator indexIterator = readerFactory.indexIterator(descriptor, metadata)) {
+        try (ReadCtx ctx = StorageProvider.instance.readCtxFor(ReadCtx.Kind.SSTABLE_METADATA_CHANGE);
+             PartitionIndexIterator indexIterator = readerFactory.indexIterator(descriptor, metadata, ctx)) {
             long histogramCount = statsMetadata.estimatedPartitionSize.count();
             long estimatedKeys = histogramCount > 0 && !statsMetadata.estimatedPartitionSize.isOverflowed()
                                  ? histogramCount

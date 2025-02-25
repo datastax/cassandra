@@ -44,6 +44,7 @@ import org.apache.cassandra.io.util.ChannelProxy;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.io.util.SequentialWriter;
 import org.apache.cassandra.io.util.SequentialWriterOption;
 
@@ -138,10 +139,10 @@ public class V2OnDiskOrdinalsMapTest
         try (FileHandle.Builder builder = new FileHandle.Builder(new ChannelProxy(tempFile)).compressed(false);
              FileHandle fileHandle = builder.complete())
         {
-            var odom = new V2OnDiskOrdinalsMap(fileHandle, postingsMd.postingsOffset, postingsMd.postingsLength);
+            var odom = new V2OnDiskOrdinalsMap(fileHandle, postingsMd.postingsOffset, postingsMd.postingsLength, ReadCtx.FOR_TEST);
 
-            try (var ordinalsView = odom.getOrdinalsView();
-                 var rowIdsView = odom.getRowIdsView())
+            try (var ordinalsView = odom.getOrdinalsView(ReadCtx.FOR_TEST);
+                 var rowIdsView = odom.getRowIdsView(ReadCtx.FOR_TEST))
             {
                 assertEquals(-1, ordinalsView.getOrdinalForRowId(0));
                 final AtomicInteger count = new AtomicInteger(0);
@@ -176,9 +177,9 @@ public class V2OnDiskOrdinalsMapTest
         try (FileHandle.Builder builder = new FileHandle.Builder(new ChannelProxy(tempFile)).compressed(false);
              FileHandle fileHandle = builder.complete())
         {
-            V2OnDiskOrdinalsMap odom = new V2OnDiskOrdinalsMap(fileHandle, postingsMd.postingsOffset, postingsMd.postingsLength);
+            V2OnDiskOrdinalsMap odom = new V2OnDiskOrdinalsMap(fileHandle, postingsMd.postingsOffset, postingsMd.postingsLength, ReadCtx.FOR_TEST);
 
-            try (var ordinalsView = odom.getOrdinalsView())
+            try (var ordinalsView = odom.getOrdinalsView(ReadCtx.FOR_TEST))
             {
                 final AtomicInteger count = new AtomicInteger(0);
                 ordinalsView.forEachOrdinalInRange(-100, Integer.MAX_VALUE / 2, (rowId, ordinal) -> {
@@ -214,9 +215,9 @@ public class V2OnDiskOrdinalsMapTest
         try (FileHandle.Builder builder = new FileHandle.Builder(new ChannelProxy(tempFile)).compressed(false);
              FileHandle fileHandle = builder.complete())
         {
-            V2OnDiskOrdinalsMap odom = new V2OnDiskOrdinalsMap(fileHandle, postingsMd.postingsOffset, postingsMd.postingsLength);
+            V2OnDiskOrdinalsMap odom = new V2OnDiskOrdinalsMap(fileHandle, postingsMd.postingsOffset, postingsMd.postingsLength, ReadCtx.FOR_TEST);
 
-            try (var ordinalsView = odom.getOrdinalsView())
+            try (var ordinalsView = odom.getOrdinalsView(ReadCtx.FOR_TEST))
             {
                 int lastRowId = Integer.MAX_VALUE;
                 for (var p: postingsMap.entrySet())

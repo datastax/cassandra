@@ -40,6 +40,7 @@ import org.apache.cassandra.index.sai.memory.RowMapping;
 import org.apache.cassandra.index.sai.memory.TrieMemtableIndex;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 /**
@@ -92,7 +93,7 @@ public interface OnDiskFormat
      * @return a {@link PrimaryKeyMap.Factory} for the SSTable
      * @throws IOException
      */
-    public PrimaryKeyMap.Factory newPrimaryKeyMapFactory(IndexComponents.ForRead perSSTableComponents, PrimaryKey.Factory primaryKeyFactory, SSTableReader sstable) throws IOException;
+    public PrimaryKeyMap.Factory newPrimaryKeyMapFactory(IndexComponents.ForRead perSSTableComponents, PrimaryKey.Factory primaryKeyFactory, SSTableReader sstable, ReadCtx indexLoadContext) throws IOException;
 
     /**
      * Create a new {@link SearchableIndex} for an on-disk index. This is held by the {@SSTableIndex}
@@ -101,14 +102,16 @@ public interface OnDiskFormat
      * @param sstableContext The {@link SSTableContext} holding the per-SSTable information for the index
      * @param perIndexComponents The group of per-index sstable components to use/read for the returned index (which
      *                           also link to the underlying {@link IndexContext} for the index).
+     * @param searcherCreationContext context to use for any read to index files done as part of creating the index searchers.
      * @return the created {@link SearchableIndex}.
      */
-    public SearchableIndex newSearchableIndex(SSTableContext sstableContext, IndexComponents.ForRead perIndexComponents);
+    public SearchableIndex newSearchableIndex(SSTableContext sstableContext, IndexComponents.ForRead perIndexComponents, ReadCtx searcherCreationContext);
 
     IndexSearcher newIndexSearcher(SSTableContext sstableContext,
                                    IndexContext indexContext,
                                    PerIndexFiles indexFiles,
-                                   SegmentMetadata segmentMetadata) throws IOException;
+                                   SegmentMetadata segmentMetadata,
+                                   ReadCtx searcherCreationContext) throws IOException;
 
     /**
      * Create a new writer for the per-SSTable on-disk components of an index.

@@ -72,6 +72,7 @@ import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.io.util.SequentialWriter;
 import org.apache.cassandra.io.util.SequentialWriterOption;
 import org.apache.cassandra.schema.TableMetadata;
@@ -816,7 +817,7 @@ public class BigTableRowIndexEntryTest extends CQLTester
         };
         
         IndexState indexState = new IndexState(
-            null, comp, rie, false, null                                                                                              
+        null, comp, rie, false, null, ReadCtx.FOR_TEST
         );
         
         assertEquals(0, indexState.indexFor(cn(-1L), -1));
@@ -830,7 +831,7 @@ public class BigTableRowIndexEntryTest extends CQLTester
         assertEquals(3, indexState.indexFor(cn(100L), 3));
 
         indexState = new IndexState(
-            null, comp, rie, true, null
+            null, comp, rie, true, null, ReadCtx.FOR_TEST
         );
 
         assertEquals(-1, indexState.indexFor(cn(-1L), -1));

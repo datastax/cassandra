@@ -52,6 +52,7 @@ import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -199,7 +200,8 @@ public class SSTableScannerTest
         {
             try(UnfilteredPartitionIterator scanner = sstable.getScanner(ColumnFilter.all(sstable.metadata()),
                                                                          range,
-                                                                         SSTableReadsListener.NOOP_LISTENER))
+                                                                         SSTableReadsListener.NOOP_LISTENER,
+                                                                         ReadCtx.FOR_TEST))
             {
                 for (int b = 0; b < boundaries.length; b += 2)
                     for (int i = boundaries[b]; i <= boundaries[b + 1]; i++)
@@ -221,7 +223,7 @@ public class SSTableScannerTest
             if (range.isWrapAround() && !range.keyRange().right.isMinimum()) // getScanner on AbstractBounds<PartitionPosition> does not handle wraparounds
                 continue;
 
-            try(UnfilteredPartitionIterator scanner = sstable.getScanner(Collections.singleton(range.keyRange()).iterator()))
+            try(UnfilteredPartitionIterator scanner = sstable.getScanner(Collections.singleton(range.keyRange()).iterator(), ReadCtx.FOR_TEST))
             {
                 for (int b = 0; b < boundaries.length; b += 2)
                     for (int i = boundaries[b]; i <= boundaries[b + 1]; i++)
@@ -258,7 +260,7 @@ public class SSTableScannerTest
         SSTableReader sstable = store.getLiveSSTables().iterator().next();
 
         // full range scan
-        ISSTableScanner scanner = sstable.getScanner();
+        ISSTableScanner scanner = sstable.getScanner(ReadCtx.FOR_TEST);
         for (int i = 2; i < 10; i++)
             assertEquals(toKey(i), new String(scanner.next().partitionKey().getKey().array()));
 
@@ -345,7 +347,7 @@ public class SSTableScannerTest
         sstable = sstable.cloneWithNewStart(dk(4), Runnables.doNothing());
 
         // full range scan
-        ISSTableScanner scanner = sstable.getScanner();
+        ISSTableScanner scanner = sstable.getScanner(ReadCtx.FOR_TEST);
         for (int i = 4; i < 10; i++)
             assertEquals(toKey(i), new String(scanner.next().partitionKey().getKey().array()));
 
@@ -451,7 +453,7 @@ public class SSTableScannerTest
         SSTableReader sstable = store.getLiveSSTables().iterator().next();
 
         // full range scan
-        ISSTableScanner fullScanner = sstable.getScanner();
+        ISSTableScanner fullScanner = sstable.getScanner(ReadCtx.FOR_TEST);
         assertScanContainsRanges(fullScanner,
                                  2, 9,
                                  102, 109,
@@ -461,7 +463,7 @@ public class SSTableScannerTest
         // scan all three ranges separately
         ISSTableScanner scanner = sstable.getScanner(makeRanges(1, 9,
                                                                    101, 109,
-                                                                   201, 209));
+                                                                   201, 209), ReadCtx.FOR_TEST);
         assertScanContainsRanges(scanner,
                                  2, 9,
                                  102, 109,
@@ -469,14 +471,14 @@ public class SSTableScannerTest
 
         // skip the first range
         scanner = sstable.getScanner(makeRanges(101, 109,
-                                                201, 209));
+                                                201, 209), ReadCtx.FOR_TEST);
         assertScanContainsRanges(scanner,
                                  102, 109,
                                  202, 209);
 
         // skip the second range
         scanner = sstable.getScanner(makeRanges(1, 9,
-                                                201, 209));
+                                                201, 209), ReadCtx.FOR_TEST);
         assertScanContainsRanges(scanner,
                                  2, 9,
                                  202, 209);
@@ -484,7 +486,7 @@ public class SSTableScannerTest
 
         // skip the last range
         scanner = sstable.getScanner(makeRanges(1, 9,
-                                                101, 109));
+                                                101, 109), ReadCtx.FOR_TEST);
         assertScanContainsRanges(scanner,
                                  2, 9,
                                  102, 109);
@@ -492,7 +494,7 @@ public class SSTableScannerTest
         // the first scanned range stops short of the actual data in the first range
         scanner = sstable.getScanner(makeRanges(1, 5,
                                                 101, 109,
-                                                201, 209));
+                                                201, 209), ReadCtx.FOR_TEST);
         assertScanContainsRanges(scanner,
                                  2, 5,
                                  102, 109,
@@ -501,7 +503,7 @@ public class SSTableScannerTest
         // the first scanned range requests data beyond actual data in the first range
         scanner = sstable.getScanner(makeRanges(1, 20,
                                                 101, 109,
-                                                201, 209));
+                                                201, 209), ReadCtx.FOR_TEST);
         assertScanContainsRanges(scanner,
                                  2, 9,
                                  102, 109,
@@ -511,7 +513,7 @@ public class SSTableScannerTest
         // the middle scan range splits the outside two data ranges
         scanner = sstable.getScanner(makeRanges(1, 5,
                                                 6, 205,
-                                                206, 209));
+                                                206, 209), ReadCtx.FOR_TEST);
         assertScanContainsRanges(scanner,
                                  2, 5,
                                  7, 9,
@@ -525,7 +527,7 @@ public class SSTableScannerTest
                                                 101, 109,
                                                 150, 159,
                                                 201, 209,
-                                                1000, 1001));
+                                                1000, 1001), ReadCtx.FOR_TEST);
         assertScanContainsRanges(scanner,
                                  3, 9,
                                  102, 109,
@@ -537,7 +539,7 @@ public class SSTableScannerTest
                                                 201, 209,
                                                 101, 109,
                                                 1000, 1001,
-                                                150, 159));
+                                                150, 159), ReadCtx.FOR_TEST);
         assertScanContainsRanges(scanner,
                                  2, 9,
                                  102, 109,
@@ -546,11 +548,11 @@ public class SSTableScannerTest
         // only empty ranges
         scanner = sstable.getScanner(makeRanges(0, 1,
                                                 150, 159,
-                                                250, 259));
+                                                250, 259), ReadCtx.FOR_TEST);
         assertFalse(scanner.hasNext());
 
         // no ranges is equivalent to a full scan
-        scanner = sstable.getScanner(new ArrayList<Range<Token>>());
+        scanner = sstable.getScanner(new ArrayList<Range<Token>>(), ReadCtx.FOR_TEST);
         assertFalse(scanner.hasNext());
     }
 
@@ -571,12 +573,12 @@ public class SSTableScannerTest
         SSTableReader sstable = store.getLiveSSTables().iterator().next();
 
         // full range scan
-        ISSTableScanner fullScanner = sstable.getScanner();
+        ISSTableScanner fullScanner = sstable.getScanner(ReadCtx.FOR_TEST);
         assertScanContainsRanges(fullScanner, 205, 205);
 
         // scan three ranges separately
         ISSTableScanner scanner = sstable.getScanner(makeRanges(101, 109,
-                                                                   201, 209));
+                                                                   201, 209), ReadCtx.FOR_TEST);
 
         // this will currently fail
         assertScanContainsRanges(scanner, 205, 205);
@@ -626,7 +628,7 @@ public class SSTableScannerTest
     @Test
     public void testSimpleHasNextRowIteratorWithoutConsumingPrevious()
     {
-        testRequestNextRowIteratorWithoutConsumingPrevious(SSTableReader::getScanner,
+        testRequestNextRowIteratorWithoutConsumingPrevious(s -> s.getScanner(ReadCtx.FOR_TEST),
                                                            UnfilteredPartitionIterator::hasNext,
                                                            "Iterator used after closing.");
     }
@@ -634,7 +636,7 @@ public class SSTableScannerTest
     @Test
     public void testSimpleNextRowIteratorWithoutConsumingPrevious()
     {
-        testRequestNextRowIteratorWithoutConsumingPrevious(SSTableReader::getScanner,
+        testRequestNextRowIteratorWithoutConsumingPrevious(s -> s.getScanner(ReadCtx.FOR_TEST),
                                                            UnfilteredPartitionIterator::next,
                                                            "Iterator used after closing.");
     }
@@ -642,7 +644,7 @@ public class SSTableScannerTest
     @Test
     public void testHasNextRowIteratorWithoutConsumingPrevious()
     {
-        testRequestNextRowIteratorWithoutConsumingPrevious(r -> r.getScanner(ColumnFilter.NONE, DataRange.allData(r.getPartitioner()), SSTableReadsListener.NOOP_LISTENER),
+        testRequestNextRowIteratorWithoutConsumingPrevious(r -> r.getScanner(ColumnFilter.NONE, DataRange.allData(r.getPartitioner()), SSTableReadsListener.NOOP_LISTENER, ReadCtx.FOR_TEST),
                                                            UnfilteredPartitionIterator::hasNext,
                                                            ".*UnfilteredRowIterator.*(should|must) be.*closed.*");
     }
@@ -650,7 +652,7 @@ public class SSTableScannerTest
     @Test
     public void testNextRowIteratorWithoutConsumingPrevious()
     {
-        testRequestNextRowIteratorWithoutConsumingPrevious(r -> r.getScanner(ColumnFilter.NONE, DataRange.allData(r.getPartitioner()), SSTableReadsListener.NOOP_LISTENER),
+        testRequestNextRowIteratorWithoutConsumingPrevious(r -> r.getScanner(ColumnFilter.NONE, DataRange.allData(r.getPartitioner()), SSTableReadsListener.NOOP_LISTENER, ReadCtx.FOR_TEST),
                                                            UnfilteredPartitionIterator::next,
                                                            ".*UnfilteredRowIterator.*(should|must) be.*closed.*");
     }
@@ -680,12 +682,12 @@ public class SSTableScannerTest
     @Test
     public void testSimpleRequestNextRowIteratorAfterClosingPreviouss()
     {
-        testRequestNextRowIteratorAfterClosingPrevious(SSTableReader::getScanner);
+        testRequestNextRowIteratorAfterClosingPrevious(s -> s.getScanner(ReadCtx.FOR_TEST));
     }
 
     @Test
     public void testRequestNextRowIteratorAfterClosingPrevious()
     {
-        testRequestNextRowIteratorAfterClosingPrevious(r -> r.getScanner(ColumnFilter.NONE, DataRange.allData(r.getPartitioner()), SSTableReadsListener.NOOP_LISTENER));
+        testRequestNextRowIteratorAfterClosingPrevious(r -> r.getScanner(ColumnFilter.NONE, DataRange.allData(r.getPartitioner()), SSTableReadsListener.NOOP_LISTENER, ReadCtx.FOR_TEST));
     }
 }

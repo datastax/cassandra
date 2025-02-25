@@ -23,6 +23,7 @@ import java.nio.ByteBuffer;
 import org.apache.cassandra.io.sstable.format.ScrubPartitionIterator;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.RandomAccessReader;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
 public class ScrubIterator implements ScrubPartitionIterator
@@ -34,10 +35,10 @@ public class ScrubIterator implements ScrubPartitionIterator
     private ByteBuffer key;
     private long dataPosition;
 
-    public ScrubIterator(FileHandle ifile, BigTableRowIndexEntry.IndexSerializer<IndexInfo> rowIndexEntrySerializer) throws IOException
+    public ScrubIterator(FileHandle ifile, BigTableRowIndexEntry.IndexSerializer<IndexInfo> rowIndexEntrySerializer, ReadCtx ctx) throws IOException
     {
         this.ifile = ifile.sharedCopy();
-        this.reader = this.ifile.createReader();
+        this.reader = this.ifile.createReader(ctx);
         this.rowIndexEntrySerializer = rowIndexEntrySerializer;
         advance();
     }

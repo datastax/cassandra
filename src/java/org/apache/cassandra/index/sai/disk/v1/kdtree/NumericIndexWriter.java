@@ -32,7 +32,8 @@ import org.apache.cassandra.index.sai.disk.io.IndexOutput;
 import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.oldlucene.MutablePointValues;
-import org.apache.lucene.index.PointValues;
+import org.apache.cassandra.io.storage.StorageProvider;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.lucene.util.IOUtils;
 import org.apache.lucene.util.packed.PackedInts;
 import org.apache.lucene.util.packed.PackedLongValues;
@@ -172,7 +173,8 @@ public class NumericIndexWriter implements Closeable
             components.put(IndexComponentType.KD_TREE, bkdPosition, bkdOffset, bkdLength, attributes);
         }
 
-        try (TraversingBKDReader reader = new TraversingBKDReader(this.components.get(IndexComponentType.KD_TREE).createIndexBuildTimeFileHandle(), bkdPosition);
+        try (ReadCtx ctx = StorageProvider.instance.readCtxFor(ReadCtx.Kind.INDEX_BUILD);
+             TraversingBKDReader reader = new TraversingBKDReader(this.components.get(IndexComponentType.KD_TREE).createIndexBuildTimeFileHandle(), bkdPosition, ctx);
              IndexOutput postingsOutput = this.components.addOrGet(IndexComponentType.KD_TREE_POSTING_LISTS).openOutput(true))
         {
             final long postingsOffset = postingsOutput.getFilePointer();

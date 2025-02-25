@@ -24,6 +24,7 @@ import org.apache.cassandra.index.sai.disk.v1.LongArray;
 import org.apache.cassandra.index.sai.utils.IndexFileUtils;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.lucene.index.CorruptIndexException;
 import org.apache.lucene.util.packed.PackedInts;
 import org.apache.lucene.util.packed.PackedLongValues;
@@ -46,7 +47,7 @@ public class MonotonicBlockPackedReader implements LongArray.Factory
     private final float[] averages;
 
     @SuppressWarnings("resource")
-    public MonotonicBlockPackedReader(FileHandle file, NumericValuesMeta meta) throws IOException
+    public MonotonicBlockPackedReader(FileHandle file, NumericValuesMeta meta, ReadCtx indexLoadCtx) throws IOException
     {
         this.valueCount = meta.valueCount;
         blockShift = checkBlockSize(meta.blockSize, AbstractBlockPackedWriter.MIN_BLOCK_SIZE, AbstractBlockPackedWriter.MAX_BLOCK_SIZE);
@@ -58,7 +59,7 @@ public class MonotonicBlockPackedReader implements LongArray.Factory
         blockBitsPerValue = new byte[numBlocks];
         this.file = file;
 
-        try (final IndexInputReader in = IndexInputReader.create(this.file.createReader()))
+        try (final IndexInputReader in = IndexInputReader.create(this.file.createReader(indexLoadCtx)))
         {
             SAICodecUtils.validate(in);
 
@@ -84,9 +85,9 @@ public class MonotonicBlockPackedReader implements LongArray.Factory
 
     @Override
     @SuppressWarnings("resource")
-    public LongArray open()
+    public LongArray open(ReadCtx ctx)
     {
-        var indexInput = IndexFileUtils.instance.openInput(file);
+        var indexInput = IndexFileUtils.instance.openInput(file, ctx);
         return new AbstractBlockPackedReader(indexInput, blockBitsPerValue, blockShift, blockMask, 0, valueCount)
         {
             @Override

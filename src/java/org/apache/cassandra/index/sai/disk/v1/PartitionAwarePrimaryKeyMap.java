@@ -38,6 +38,7 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.RandomAccessReader;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.utils.Throwables;
 
 /**
@@ -73,12 +74,12 @@ public class PartitionAwarePrimaryKeyMap implements PrimaryKeyMap
         private FileHandle token = null;
         private FileHandle offset = null;
 
-        public PartitionAwarePrimaryKeyMapFactory(IndexComponents.ForRead perSSTableComponents, SSTableReader sstable, PrimaryKey.Factory primaryKeyFactory)
+        public PartitionAwarePrimaryKeyMapFactory(IndexComponents.ForRead perSSTableComponents, SSTableReader sstable, PrimaryKey.Factory primaryKeyFactory, ReadCtx indexLoadContext)
         {
             try
             {
                 this.perSSTableComponents = perSSTableComponents;
-                this.metadata = MetadataSource.loadMetadata(perSSTableComponents);
+                this.metadata = MetadataSource.loadMetadata(perSSTableComponents, indexLoadContext);
 
                 IndexComponent.ForRead offsetsComponent = perSSTableComponents.get(IndexComponentType.OFFSETS_VALUES);
                 IndexComponent.ForRead tokensComponent = perSSTableComponents.get(IndexComponentType.TOKEN_VALUES);
@@ -90,8 +91,8 @@ public class PartitionAwarePrimaryKeyMap implements PrimaryKeyMap
                 token = tokensComponent.createFileHandle();
                 offset = offsetsComponent.createFileHandle();
 
-                this.tokenReaderFactory = new BlockPackedReader(token, tokensMeta);
-                this.offsetReaderFactory = new MonotonicBlockPackedReader(offset, offsetsMeta);
+                this.tokenReaderFactory = new BlockPackedReader(token, tokensMeta, indexLoadContext);
+                this.offsetReaderFactory = new MonotonicBlockPackedReader(offset, offsetsMeta, indexLoadContext);
                 this.partitioner = sstable.metadata().partitioner;
                 this.keyFetcher = new KeyFetcher(sstable);
                 this.primaryKeyFactory = primaryKeyFactory;
@@ -104,16 +105,16 @@ public class PartitionAwarePrimaryKeyMap implements PrimaryKeyMap
         }
 
         @Override
-        public PrimaryKeyMap newPerSSTablePrimaryKeyMap()
+        public PrimaryKeyMap newPerSSTablePrimaryKeyMap(ReadCtx ctx)
         {
-            final LongArray rowIdToToken = new LongArray.DeferredLongArray(() -> tokenReaderFactory.open());
-            final LongArray rowIdToOffset = new LongArray.DeferredLongArray(() -> offsetReaderFactory.open());
+            final LongArray rowIdToToken = new LongArray.DeferredLongArray(() -> tokenReaderFactory.open(ctx));
+            final LongArray rowIdToOffset = new LongArray.DeferredLongArray(() -> offsetReaderFactory.open(ctx));
 
-            return new PartitionAwarePrimaryKeyMap(rowIdToToken, rowIdToOffset, partitioner, keyFetcher, primaryKeyFactory, sstableId);
+            return new PartitionAwarePrimaryKeyMap(rowIdToToken, rowIdToOffset, partitioner, keyFetcher, primaryKeyFactory, sstableId, ctx);
         }
 
         @Override
-        public long count()
+        public long count(ReadCtx ctx)
         {
             return count;
         }
@@ -139,13 +140,14 @@ public class PartitionAwarePrimaryKeyMap implements PrimaryKeyMap
                                         IPartitioner partitioner,
                                         KeyFetcher keyFetcher,
                                         PrimaryKey.Factory primaryKeyFactory,
-                                        SSTableId<?> sstableId)
+                                        SSTableId<?> sstableId,
+                                        ReadCtx ctx)
     {
         this.rowIdToToken = rowIdToToken;
         this.rowIdToOffset = rowIdToOffset;
         this.partitioner = partitioner;
         this.keyFetcher = keyFetcher;
-        this.reader = keyFetcher.createReader();
+        this.reader = keyFetcher.createReader(ctx);
         this.primaryKeyFactory = primaryKeyFactory;
         this.sstableId = sstableId;
     }

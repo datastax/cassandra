@@ -52,6 +52,7 @@ import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.trieindex.TrieIndexFormat;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.service.StorageService;
@@ -117,7 +118,7 @@ public class LegacyOnDiskFormatTest
     public void canReadPerSSTableMetadata() throws Throwable
     {
         IndexComponents.ForRead components = indexDescriptor.perSSTableComponents();
-        final MetadataSource source = MetadataSource.loadMetadata(components);
+        final MetadataSource source = MetadataSource.loadMetadata(components, ReadCtx.FOR_TEST);
 
         NumericValuesMeta numericValuesMeta = new NumericValuesMeta(source.get(components.get(IndexComponentType.OFFSETS_VALUES)));
 
@@ -132,7 +133,7 @@ public class LegacyOnDiskFormatTest
     public void canReadPerIndexMetadata() throws Throwable
     {
         IndexComponents.ForRead components = indexDescriptor.perIndexComponents(intContext);
-        final MetadataSource source = MetadataSource.loadMetadata(components);
+        final MetadataSource source = MetadataSource.loadMetadata(components, ReadCtx.FOR_TEST);
 
         List<SegmentMetadata> metadatas = SegmentMetadata.load(source, intContext);
 
@@ -144,11 +145,11 @@ public class LegacyOnDiskFormatTest
     public void canCreateAndUsePrimaryKeyMapWithLegacyFormat() throws Throwable
     {
         var perSSTableComponents = indexDescriptor.perSSTableComponents();
-        PrimaryKeyMap.Factory primaryKeyMapFactory = perSSTableComponents.onDiskFormat().newPrimaryKeyMapFactory(perSSTableComponents, pkFactory, sstable);
+        PrimaryKeyMap.Factory primaryKeyMapFactory = perSSTableComponents.onDiskFormat().newPrimaryKeyMapFactory(perSSTableComponents, pkFactory, sstable, ReadCtx.FOR_TEST);
 
-        long countFromFactory = primaryKeyMapFactory.count();
+        long countFromFactory = primaryKeyMapFactory.count(ReadCtx.FOR_TEST);
 
-        PrimaryKeyMap primaryKeyMap = primaryKeyMapFactory.newPerSSTablePrimaryKeyMap();
+        PrimaryKeyMap primaryKeyMap = primaryKeyMapFactory.newPerSSTablePrimaryKeyMap(ReadCtx.FOR_TEST);
 
         long countFromMap = primaryKeyMap.count();
         assertEquals(countFromFactory, countFromMap);
@@ -165,7 +166,7 @@ public class LegacyOnDiskFormatTest
     {
         IndexComponents.ForRead components = indexDescriptor.perIndexComponents(intContext);
 
-        final MetadataSource source = MetadataSource.loadMetadata(components);
+        final MetadataSource source = MetadataSource.loadMetadata(components, ReadCtx.FOR_TEST);
 
         List<SegmentMetadata> metadatas = SegmentMetadata.load(source, intContext);
 
@@ -173,7 +174,8 @@ public class LegacyOnDiskFormatTest
                                             components.get(IndexComponentType.KD_TREE).createFileHandle(),
                                             metadatas.get(0).getIndexRoot(IndexComponentType.KD_TREE),
                                             components.get(IndexComponentType.KD_TREE_POSTING_LISTS).createFileHandle(),
-                                            metadatas.get(0).getIndexRoot(IndexComponentType.KD_TREE_POSTING_LISTS));
+                                            metadatas.get(0).getIndexRoot(IndexComponentType.KD_TREE_POSTING_LISTS),
+                                            ReadCtx.FOR_TEST);
 
         Expression expression = new Expression(intContext).add(Operator.LT, Int32Type.instance.decompose(10));
         BKDReader.IntersectVisitor query = bkdQueryFrom(expression, bkdReader.getNumDimensions(), bkdReader.getBytesPerDimension());
@@ -186,7 +188,7 @@ public class LegacyOnDiskFormatTest
     {
         IndexComponents.ForRead components = indexDescriptor.perIndexComponents(textContext);
 
-        final MetadataSource source = MetadataSource.loadMetadata(components);
+        final MetadataSource source = MetadataSource.loadMetadata(components, ReadCtx.FOR_TEST);
 
         SegmentMetadata metadata = SegmentMetadata.load(source, textContext).get(0);
 
@@ -202,7 +204,8 @@ public class LegacyOnDiskFormatTest
                                                   components.get(IndexComponentType.POSTING_LISTS).createFileHandle(),
                                                   root,
                                                   footerPointer,
-                                                  Version.AA); // These tests are for AA, so no need to parameterize
+                                                  Version.AA,
+                                                  ReadCtx.FOR_TEST); // These tests are for AA, so no need to parameterize
         Expression expression = new Expression(textContext).add(Operator.EQ, UTF8Type.instance.decompose("10"));
         ByteComparable term = ByteComparable.preencoded(byteComparableVersion, expression.lower.value.encoded);
 

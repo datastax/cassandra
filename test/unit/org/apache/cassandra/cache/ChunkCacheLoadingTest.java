@@ -52,6 +52,7 @@ import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.compress.ICompressor;
 import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.io.util.RebuffererFactory;
 import org.apache.cassandra.io.util.WrappingRebufferer;
@@ -95,7 +96,7 @@ public class ChunkCacheLoadingTest
         // Set up chunk cache interception, so that rebuffering results can be inspected and consumed.
         ChunkCache.instance.intercept(rf ->
                                       {
-                                          rebufferInterceptor = new RebufferInterceptingRebufferer(rf.instantiateRebufferer());
+                                          rebufferInterceptor = new RebufferInterceptingRebufferer(rf.instantiateRebufferer(ReadCtx.FOR_TEST));
                                           return rebufferInterceptor;
                                       });
 
@@ -376,7 +377,7 @@ public class ChunkCacheLoadingTest
         }
 
         @Override
-        public Rebufferer instantiateRebufferer()
+        public Rebufferer instantiateRebufferer(ReadCtx ctx)
         {
             return this;
         }

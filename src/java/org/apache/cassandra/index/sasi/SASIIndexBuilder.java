@@ -42,8 +42,10 @@ import org.apache.cassandra.io.sstable.SSTableWatcher;
 import org.apache.cassandra.io.sstable.format.PartitionIndexIterator;
 import org.apache.cassandra.io.sstable.format.RowIndexEntry;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.RandomAccessReader;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.UUIDGen;
@@ -80,12 +82,13 @@ class SASIIndexBuilder extends SecondaryIndexBuilder
             Map<ColumnMetadata, ColumnIndex> indexes = e.getValue();
 
             SSTableWatcher.instance.onIndexBuild(sstable, builtIndexes);
-            try (RandomAccessReader dataFile = sstable.openDataReader())
+            try (ReadCtx ctx = StorageProvider.instance.readCtxFor(ReadCtx.Kind.INDEX_BUILD);
+                 RandomAccessReader dataFile = sstable.openDataReader(ctx))
             {
                 PerSSTableIndexWriter indexWriter = SASIIndex.newWriter(keyValidator, sstable.descriptor, indexes, OperationType.COMPACTION);
 
                 long previousKeyPosition = 0;
-                try (PartitionIndexIterator keys = sstable.allKeysIterator())
+                try (PartitionIndexIterator keys = sstable.allKeysIterator(ctx))
                 {
                     while (!keys.isExhausted())
                     {
@@ -96,7 +99,7 @@ class SASIIndexBuilder extends SecondaryIndexBuilder
 
                         indexWriter.startPartition(key, keyPosition);
 
-                        RowIndexEntry indexEntry = sstable.getPosition(key, SSTableReader.Operator.EQ);
+                        RowIndexEntry indexEntry = sstable.getPosition(key, SSTableReader.Operator.EQ, ctx);
                         dataFile.seek(indexEntry.position);
                         ByteBufferUtil.readWithShortLength(dataFile); // key
 

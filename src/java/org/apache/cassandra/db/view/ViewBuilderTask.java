@@ -58,6 +58,8 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.io.sstable.ReducingKeyIterator;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.storage.StorageProvider;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.service.StorageProxy;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.UUIDGen;
@@ -142,7 +144,8 @@ public class ViewBuilderTask extends AbstractTableOperation implements Callable<
 
         try (ColumnFamilyStore.RefViewFragment viewFragment = baseCfs.selectAndReference(function);
              Refs<SSTableReader> sstables = viewFragment.refs;
-             ReducingKeyIterator keyIter = new ReducingKeyIterator(sstables))
+             ReadCtx ctx = StorageProvider.instance.readCtxFor(ReadCtx.Kind.MATERIALIZED_VIEW_BUILD);
+             ReducingKeyIterator keyIter = new ReducingKeyIterator(sstables, ctx))
         {
             PeekingIterator<DecoratedKey> iter = Iterators.peekingIterator(keyIter);
             while (!isStopped && iter.hasNext())
@@ -210,7 +213,11 @@ public class ViewBuilderTask extends AbstractTableOperation implements Callable<
 
         // When there is no splitter, estimate based on number of total keys but
         // take the max with keysBuilt + 1 to avoid having more completed than total
-        long keysTotal = Math.max(keysBuilt + 1, baseCfs.estimatedKeysForRange(range));
+        long keysTotal;
+        try (ReadCtx ctx = StorageProvider.instance.readCtxFor(ReadCtx.Kind.MATERIALIZED_VIEW_BUILD))
+        {
+           keysTotal = Math.max(keysBuilt + 1, baseCfs.estimatedKeysForRange(range, ctx));
+        }
         return OperationProgress.withoutSSTables(baseCfs.metadata(), OperationType.VIEW_BUILD, keysBuilt, keysTotal, Unit.KEYS, compactionId);
     }
 

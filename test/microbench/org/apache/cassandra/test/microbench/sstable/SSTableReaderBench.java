@@ -41,6 +41,7 @@ import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
 import org.openjdk.jmh.annotations.Fork;
@@ -125,35 +126,35 @@ public class SSTableReaderBench extends AbstractSSTableBench
     @BenchmarkMode(Mode.Throughput)
     public void getEQPosition()
     {
-        sstr.getPosition(pkeys[nextIdx()], SSTableReader.Operator.EQ);
+        sstr.getPosition(pkeys[nextIdx()], SSTableReader.Operator.EQ, ReadCtx.FOR_TEST);
     }
 
     @Benchmark
     @BenchmarkMode(Mode.Throughput)
     public void getEQPositionNonExisting()
     {
-        sstr.getPosition(nonpkeys[nextIdx()], SSTableReader.Operator.EQ);
+        sstr.getPosition(nonpkeys[nextIdx()], SSTableReader.Operator.EQ, ReadCtx.FOR_TEST);
     }
 
     @Benchmark
     @BenchmarkMode(Mode.Throughput)
     public void getGTPosition()
     {
-        sstr.getPosition(pkeys[nextIdx()], SSTableReader.Operator.GT);
+        sstr.getPosition(pkeys[nextIdx()], SSTableReader.Operator.GT, ReadCtx.FOR_TEST);
     }
 
     @Benchmark
     @BenchmarkMode(Mode.Throughput)
     public void getGTPositionNonExisting()
     {
-        sstr.getPosition(nonpkeys[nextIdx()], SSTableReader.Operator.GT);
+        sstr.getPosition(nonpkeys[nextIdx()], SSTableReader.Operator.GT, ReadCtx.FOR_TEST);
     }
 
     @Benchmark
     @BenchmarkMode(Mode.AverageTime)
     public void iterateOverAllKeys() throws Exception
     {
-        try (PartitionIndexIterator it = sstr.allKeysIterator())
+        try (PartitionIndexIterator it = sstr.allKeysIterator(ReadCtx.FOR_TEST))
         {
             while (!it.isExhausted()) it.advance();
         }
@@ -163,7 +164,7 @@ public class SSTableReaderBench extends AbstractSSTableBench
     @BenchmarkMode(Mode.AverageTime)
     public void fullScanTest()
     {
-        try (ISSTableScanner scanner = sstr.getScanner())
+        try (ISSTableScanner scanner = sstr.getScanner(ReadCtx.FOR_TEST))
         {
             while (scanner.hasNext())
             {

@@ -26,6 +26,7 @@ import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.InvertedIndexSearcher;
 import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
+import org.apache.cassandra.io.util.ReadCtx;
 
 /**
  * The key override for this class is the use of {@link Version#CA}.
@@ -35,9 +36,10 @@ class V3InvertedIndexSearcher extends InvertedIndexSearcher
     V3InvertedIndexSearcher(SSTableContext sstableContext,
                             PerIndexFiles perIndexFiles,
                             SegmentMetadata segmentMetadata,
-                            IndexContext indexContext) throws IOException
+                            IndexContext indexContext,
+                            ReadCtx searcherCreationContext) throws IOException
     {
         // We filter because the CA format wrote maps acording to a different order than their abstract type.
-        super(sstableContext, perIndexFiles, segmentMetadata, indexContext, Version.CA, true);
+        super(sstableContext, perIndexFiles, segmentMetadata, indexContext, Version.CA, true, searcherCreationContext);
     }
 }

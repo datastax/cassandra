@@ -42,10 +42,10 @@ class SimpleChunkReader extends AbstractReaderFileProxy implements ChunkReader
     }
 
     @Override
-    public void readChunk(long position, ByteBuffer buffer)
+    public void readChunk(long position, ByteBuffer buffer, ReadCtx ctx)
     {
         buffer.clear();
-        channel.read(buffer, position - startOffset);
+        channel.read(buffer, position - startOffset, ctx);
         buffer.flip();
     }
 
@@ -62,15 +62,15 @@ class SimpleChunkReader extends AbstractReaderFileProxy implements ChunkReader
     }
 
     @Override
-    public Rebufferer instantiateRebufferer()
+    public Rebufferer instantiateRebufferer(ReadCtx ctx)
     {
         if (Integer.bitCount(bufferSize) == 1)
         {
             assert startOffset == (startOffset & -bufferSize) : "startOffset must be aligned to buffer size";
-            return new BufferManagingRebufferer.Aligned(this);
+            return new BufferManagingRebufferer.Aligned(this, ctx);
         }
         else
-            return new BufferManagingRebufferer.Unaligned(this);
+            return new BufferManagingRebufferer.Unaligned(this, ctx);
     }
 
     @Override

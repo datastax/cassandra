@@ -29,6 +29,7 @@ import org.junit.Test;
 
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.repair.consistent.LocalSessionAccessor;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.UUIDGen;
@@ -270,7 +271,7 @@ public class PendingRepairManagerTest extends AbstractPendingRepairTest
     {
         PendingRepairManager prm = new PendingRepairManager(cfs, strategyFactory, cfs.getCompactionParams(), false);
         SSTableReader sstable = makeSSTable(true);
-        prm.getScanners(Collections.singleton(sstable), Collections.singleton(RANGE1));
+        prm.getScanners(Collections.singleton(sstable), Collections.singleton(RANGE1), ReadCtx.FOR_TEST);
     }
 
     /**

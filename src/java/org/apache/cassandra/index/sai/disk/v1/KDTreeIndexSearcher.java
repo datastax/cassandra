@@ -40,7 +40,9 @@ import org.apache.cassandra.index.sai.plan.Orderer;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.RowIdWithByteComparable;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
+import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.utils.AbstractGuavaIterator;
 import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
@@ -60,7 +62,8 @@ public class KDTreeIndexSearcher extends IndexSearcher
     KDTreeIndexSearcher(PrimaryKeyMap.Factory primaryKeyMapFactory,
                         PerIndexFiles perIndexFiles,
                         SegmentMetadata segmentMetadata,
-                        IndexContext indexContext) throws IOException
+                        IndexContext indexContext,
+                        ReadCtx searcherCreationContext) throws IOException
     {
         super(primaryKeyMapFactory, perIndexFiles, segmentMetadata, indexContext);
 
@@ -73,8 +76,9 @@ public class KDTreeIndexSearcher extends IndexSearcher
                                   indexFiles.kdtree(),
                                   bkdPosition,
                                   indexFiles.kdtreePostingLists(),
-                                  postingsPosition);
-        perColumnEventListener = (QueryEventListener.BKDIndexEventListener)indexContext.getColumnQueryMetrics();
+                                  postingsPosition,
+                                  searcherCreationContext);
+        perColumnEventListener = (QueryEventListener.BKDIndexEventListener) indexContext.getColumnQueryMetrics();
     }
 
     @Override
@@ -113,7 +117,7 @@ public class KDTreeIndexSearcher extends IndexSearcher
                     ? bkdQueryFrom(slice, bkdReader.getNumDimensions(), bkdReader.getBytesPerDimension())
                     : null;
         var direction = orderer.isAscending() ? BKDReader.Direction.FORWARD : BKDReader.Direction.BACKWARD;
-        var iter = new RowIdIterator(bkdReader.iteratorState(direction, query));
+        var iter = new RowIdIterator(bkdReader.iteratorState(direction, query, queryContext.readCtx()));
         return toMetaSortedIterator(iter, queryContext);
     }
 

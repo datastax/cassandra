@@ -38,6 +38,7 @@ import org.apache.cassandra.io.sstable.format.Version;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
@@ -171,7 +172,7 @@ public class BigFormat implements SSTableFormat
     static class ReaderFactory extends SSTableReader.AbstractBigTableReaderFactory
     {
         @Override
-        public PartitionIndexIterator indexIterator(Descriptor descriptor, TableMetadata metadata)
+        public PartitionIndexIterator indexIterator(Descriptor descriptor, TableMetadata metadata, ReadCtx ctx)
         {
             try (FileHandle iFile = defaultIndexHandleBuilder(descriptor, Component.PRIMARY_INDEX).complete()) {
                 SerializationHeader.Component headerComponent = (SerializationHeader.Component)
@@ -179,7 +180,7 @@ public class BigFormat implements SSTableFormat
                                                                           .deserialize(descriptor, MetadataType.HEADER);
                 SerializationHeader header = headerComponent.toHeader(descriptor, metadata);
                 BigTableRowIndexEntry.Serializer serializer = new BigTableRowIndexEntry.Serializer(descriptor.version, header);
-                return BigTablePartitionIndexIterator.create(iFile, serializer);
+                return BigTablePartitionIndexIterator.create(iFile, serializer, ctx);
             }
             catch (IOException ex)
             {

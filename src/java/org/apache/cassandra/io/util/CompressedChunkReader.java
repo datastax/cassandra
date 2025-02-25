@@ -87,9 +87,9 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
     }
 
     @Override
-    public Rebufferer instantiateRebufferer()
+    public Rebufferer instantiateRebufferer(ReadCtx ctx)
     {
-        return new BufferManagingRebufferer.Aligned(this);
+        return new BufferManagingRebufferer.Aligned(this, ctx);
     }
 
     public ReaderType type()
@@ -111,7 +111,7 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
         }
 
         @Override
-        public void readChunk(long position, ByteBuffer uncompressed)
+        public void readChunk(long position, ByteBuffer uncompressed, ReadCtx ctx)
         {
             try
             {
@@ -133,7 +133,7 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
                     try
                     {
                         compressed.limit(length);
-                        if (channel.read(compressed, chunkOffset) != length)
+                        if (channel.read(compressed, chunkOffset, ctx) != length)
                             throw new CorruptBlockException(channel.filePath(), chunk);
 
                         if (shouldCheckCrc)
@@ -171,7 +171,7 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
                 else
                 {
                     uncompressed.position(0).limit(chunk.length);
-                    if (channel.read(uncompressed, chunkOffset) != chunk.length)
+                    if (channel.read(uncompressed, chunkOffset, ctx) != chunk.length)
                         throw new CorruptBlockException(channel.filePath(), chunk);
                 }
                 uncompressed.flip();
@@ -208,7 +208,7 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
         }
 
         @Override
-        public void readChunk(long position, ByteBuffer uncompressed)
+        public void readChunk(long position, ByteBuffer uncompressed, ReadCtx ctx)
         {
             try
             {

@@ -26,6 +26,7 @@ import org.apache.cassandra.index.sai.disk.oldlucene.LuceneCompat;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.utils.ObjectSizes;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.lucene.index.CorruptIndexException;
@@ -56,11 +57,11 @@ public class TraversingBKDReader implements Closeable
     final int packedBytesLength;
 
     @SuppressWarnings("resource")
-    TraversingBKDReader(FileHandle indexFile, long root)
+    TraversingBKDReader(FileHandle indexFile, long root, ReadCtx ctx)
     {
         this.indexFile = indexFile;
 
-        try (final IndexInputReader in = IndexInputReader.create(indexFile.createReader()))
+        try (final IndexInputReader in = IndexInputReader.create(indexFile.createReader(ctx)))
         {
             SAICodecUtils.validate(in);
             in.seek(root);

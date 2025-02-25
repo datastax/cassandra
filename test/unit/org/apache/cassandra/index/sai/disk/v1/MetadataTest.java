@@ -40,6 +40,7 @@ import org.apache.cassandra.index.sai.disk.io.IndexOutputWriter;
 import org.apache.cassandra.index.sai.utils.SaiRandomizedTest;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.lucene.codecs.CodecUtil;
 import org.apache.lucene.index.CorruptIndexException;
 import org.apache.lucene.store.IndexInput;
@@ -84,7 +85,7 @@ public class MetadataTest extends SaiRandomizedTest
         }
         components.markComplete();
 
-        MetadataSource reader = MetadataSource.loadMetadata(indexDescriptor.perIndexComponents(indexContext));
+        MetadataSource reader = MetadataSource.loadMetadata(indexDescriptor.perIndexComponents(indexContext), ReadCtx.FOR_TEST);
 
         for (Map.Entry<String, byte[]> entry : data.entrySet())
         {
@@ -110,7 +111,7 @@ public class MetadataTest extends SaiRandomizedTest
 
         expectedException.expect(CorruptIndexException.class);
         expectedException.expectMessage("codec header mismatch");
-        MetadataSource.loadMetadata(components);
+        MetadataSource.loadMetadata(components, ReadCtx.FOR_TEST);
     }
 
     @Test
@@ -135,7 +136,7 @@ public class MetadataTest extends SaiRandomizedTest
 
         expectedException.expect(CorruptIndexException.class);
         expectedException.expectMessage("misplaced codec footer (file truncated?)");
-        MetadataSource.loadMetadata(components);
+        MetadataSource.loadMetadata(components, ReadCtx.FOR_TEST);
     }
 
     @Test
@@ -171,7 +172,7 @@ public class MetadataTest extends SaiRandomizedTest
 
         expectedException.expect(CorruptIndexException.class);
         expectedException.expectMessage("checksum failed");
-        MetadataSource.loadMetadata(components);
+        MetadataSource.loadMetadata(components, ReadCtx.FOR_TEST);
     }
 
     private IndexOutputWriter writeRandomBytes(IndexComponents.ForWrite components) throws IOException

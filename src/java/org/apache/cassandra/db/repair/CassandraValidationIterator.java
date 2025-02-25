@@ -51,6 +51,7 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
 import org.apache.cassandra.io.sstable.ScannerList;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.repair.ValidationPartitionIterator;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ActiveRepairService;
@@ -174,7 +175,7 @@ public class CassandraValidationIterator extends ValidationPartitionIterator
     private final long estimatedPartitions;
     private final Map<Range<Token>, Long> rangePartitionCounts;
 
-    public CassandraValidationIterator(ColumnFamilyStore cfs, Collection<Range<Token>> ranges, UUID parentId, UUID sessionID, boolean isIncremental, int nowInSec) throws IOException
+    public CassandraValidationIterator(ColumnFamilyStore cfs, Collection<Range<Token>> ranges, UUID parentId, UUID sessionID, boolean isIncremental, int nowInSec, ReadCtx ctx) throws IOException
     {
         this.cfs = cfs;
 
@@ -222,7 +223,7 @@ public class CassandraValidationIterator extends ValidationPartitionIterator
         }
 
         controller = new ValidationCompactionController(cfs, getDefaultGcBefore(cfs, nowInSec));
-        scanners = cfs.getCompactionStrategyContainer().getScanners(sstables, ranges);
+        scanners = cfs.getCompactionStrategyContainer().getScanners(sstables, ranges, ctx);
         ci = new ValidationCompactionIterator(scanners.scanners, controller, nowInSec);
 
         long allPartitions = 0;
@@ -231,7 +232,7 @@ public class CassandraValidationIterator extends ValidationPartitionIterator
         {
             long numPartitions = 0;
             for (SSTableReader sstable : sstables)
-                numPartitions += sstable.estimatedKeysForRanges(Collections.singleton(range));
+                numPartitions += sstable.estimatedKeysForRanges(Collections.singleton(range), ctx);
             rangePartitionCounts.put(range, numPartitions);
             allPartitions += numPartitions;
         }
@@ -240,7 +241,7 @@ public class CassandraValidationIterator extends ValidationPartitionIterator
         long estimatedTotalBytes = 0;
         for (SSTableReader sstable : sstables)
         {
-            for (SSTableReader.PartitionPositionBounds positionsForRanges : sstable.getPositionsForRanges(ranges))
+            for (SSTableReader.PartitionPositionBounds positionsForRanges : sstable.getPositionsForRanges(ranges, ctx))
                 estimatedTotalBytes += positionsForRanges.upperPosition - positionsForRanges.lowerPosition;
         }
         estimatedBytes = estimatedTotalBytes;

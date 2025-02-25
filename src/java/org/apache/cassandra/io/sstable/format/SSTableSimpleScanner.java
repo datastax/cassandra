@@ -31,6 +31,7 @@ import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
 import org.apache.cassandra.io.sstable.SSTableIdentityIterator;
 import org.apache.cassandra.io.util.RandomAccessReader;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.schema.TableMetadata;
 
 import static org.apache.cassandra.io.sstable.format.SSTableReader.PartitionPositionBounds;
@@ -67,11 +68,12 @@ implements ISSTableScanner
     /// The ranges can be constructed by [SSTableReader#getPositionsForRanges] and similar methods as done by the
     /// various [SSTableReader#getScanner] variations.
     public SSTableSimpleScanner(SSTableReader sstable,
-                                Collection<PartitionPositionBounds> boundsList)
+                                Collection<PartitionPositionBounds> boundsList,
+                                ReadCtx ctx)
     {
         assert sstable != null;
 
-        this.dfile = sstable.openDataReader();
+        this.dfile = sstable.openDataReader(ctx);
         this.sstable = sstable;
         this.sizeInBytes = boundsList.stream().mapToLong(ppb -> ppb.upperPosition - ppb.lowerPosition).sum();
         this.compressedSizeInBytes = sstable.compression ? sstable.onDiskSizeForPartitionPositions(boundsList) : sizeInBytes;

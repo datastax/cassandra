@@ -43,6 +43,7 @@ import org.apache.cassandra.io.sstable.compaction.SSTableCursor;
 import org.apache.cassandra.io.sstable.compaction.SSTableCursorMerger;
 import org.apache.cassandra.io.sstable.format.PartitionIndexIterator;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.utils.FBUtilities;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.infra.Blackhole;
@@ -65,7 +66,7 @@ public class CompactionBreakdownBenchmark extends BaseCompactionBenchmark
         Iterable<SSTableReader> ssTables = cfs.getSSTables(SSTableSet.LIVE);
         for (SSTableReader reader : ssTables)
         {
-            try (ISSTableScanner scanner = reader.getScanner())
+            try (ISSTableScanner scanner = reader.getScanner(ReadCtx.FOR_TEST))
             {
                 totalRows = consumePartitionIterator(scanner, bh, totalRows);
             }
@@ -81,7 +82,7 @@ public class CompactionBreakdownBenchmark extends BaseCompactionBenchmark
         Iterable<SSTableReader> ssTables = cfs.getSSTables(SSTableSet.LIVE);
         for (SSTableReader reader : ssTables)
         {
-            try (UnfilteredPartitionIterator iter = new IteratorFromCursor(reader.metadata(), new SortedStringTableCursor(reader)))
+            try (UnfilteredPartitionIterator iter = new IteratorFromCursor(reader.metadata(), new SortedStringTableCursor(reader, ReadCtx.FOR_TEST)))
             {
                 totalRows = consumePartitionIterator(iter, bh, totalRows);
             }
@@ -97,7 +98,7 @@ public class CompactionBreakdownBenchmark extends BaseCompactionBenchmark
         Iterable<SSTableReader> ssTables = cfs.getSSTables(SSTableSet.LIVE);
         for (SSTableReader reader : ssTables)
         {
-            try (SSTableCursor cursor = new SortedStringTableCursor(reader))
+            try (SSTableCursor cursor = new SortedStringTableCursor(reader, ReadCtx.FOR_TEST))
             {
                 totalRows = consumeCursor(cursor, bh, totalRows);
             }
@@ -112,7 +113,7 @@ public class CompactionBreakdownBenchmark extends BaseCompactionBenchmark
         long totalRows = 0;
         Set<SSTableReader> ssTables = cfs.getLiveSSTables();
         try (SSTableCursor cursor = new SSTableCursorMerger(ssTables.stream()
-                                                                    .map(SortedStringTableCursor::new)
+                                                                    .map(s -> new SortedStringTableCursor(s, ReadCtx.FOR_TEST))
                                                                     .collect(Collectors.toList()),
                                                             cfs.metadata());
         )
@@ -131,7 +132,7 @@ public class CompactionBreakdownBenchmark extends BaseCompactionBenchmark
         Iterable<SSTableReader> ssTables = cfs.getSSTables(SSTableSet.LIVE);
         for (SSTableReader reader : ssTables)
         {
-            try (PartitionIndexIterator partitionIndexIterator = reader.allKeysIterator())
+            try (PartitionIndexIterator partitionIndexIterator = reader.allKeysIterator(ReadCtx.FOR_TEST))
             {
 
                 long start = partitionIndexIterator.dataPosition();
@@ -156,7 +157,7 @@ public class CompactionBreakdownBenchmark extends BaseCompactionBenchmark
         Set<SSTableReader> ssTables = cfs.getLiveSSTables();
 
         try (UnfilteredPartitionIterator mergedScanner = UnfilteredPartitionIterators.merge(ssTables.stream()
-                                                                                                    .map(SSTableReader::getScanner)
+                                                                                                    .map(s -> s.getScanner(ReadCtx.FOR_TEST))
                                                                                                     .collect(Collectors.toList()),
                                                                                             UnfilteredPartitionIterators.MergeListener.NOOP))
         {
@@ -177,7 +178,7 @@ public class CompactionBreakdownBenchmark extends BaseCompactionBenchmark
         CompactionStrategy strategy = cfs.getCompactionStrategy();
         CompactionController controller = new CompactionController(cfs, compacting, CompactionManager.NO_GC);
 
-        try (ScannerList scanners = strategy.getScanners(compacting);
+        try (ScannerList scanners = strategy.getScanners(compacting, ReadCtx.FOR_TEST);
              CompactionIterator ci = new CompactionIterator(OperationType.COMPACTION, scanners.scanners, controller, FBUtilities.nowInSeconds(), UUID.randomUUID()))
         {
             totalRows = consumePartitionIterator(ci, bh, totalRows);
@@ -312,7 +313,7 @@ public class CompactionBreakdownBenchmark extends BaseCompactionBenchmark
         try (LifecycleTransaction transaction = cfs.getTracker().tryModify(compacting, OperationType.COMPACTION);
              CompactionAwareWriter writer = new DefaultCompactionWriter(cfs, cfs.getDirectories(), transaction, compacting);)
         {
-            try (final ISSTableScanner scanner = ssTableReader.getScanner())
+            try (final ISSTableScanner scanner = ssTableReader.getScanner(ReadCtx.FOR_TEST))
             {
                 while (scanner.hasNext())
                 {

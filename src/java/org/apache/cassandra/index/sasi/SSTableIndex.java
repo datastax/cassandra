@@ -174,7 +174,9 @@ public class SSTableIndex
 
         public DecoratedKey apply(Long offset)
         {
-            try (RandomAccessReader in = sstable.openKeyComponentReader())
+            // To pass the real context, it would to be passed to the method which triggers quite a few changes, and
+            // SASI is deprecated/largely unused, so we don't bother.
+            try (RandomAccessReader in = sstable.openKeyComponentReader(null))
             {
                 return sstable.keyAt(in, offset);
             }

@@ -61,9 +61,11 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
 import org.apache.cassandra.io.sstable.format.ScrubPartitionIterator;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
+import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.RandomAccessReader;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.utils.AbstractIterator;
@@ -84,6 +86,8 @@ public class Scrubber implements Closeable
     private final File destination;
     private final boolean skipCorrupted;
     private final boolean reinsertOverflowedTTLRows;
+
+    private final ReadCtx readCtx;
 
     private final boolean isCommutative;
     private final boolean isIndex;
@@ -151,14 +155,16 @@ public class Scrubber implements Closeable
         realm.metadata().params.minIndexInterval,
             hasIndexFile ? SSTableReader.getApproximateKeyCount(toScrub) : 0);
 
+        this.readCtx = StorageProvider.instance.readCtxFor(ReadCtx.Kind.SCRUB);
+
         this.fileAccessLock = new ReentrantReadWriteLock();
         // loop through each partition, deserializing to check for damage.
         // We'll also loop through the index at the same time, using the position from the index to recover if the
         // partition header (key or data size) is corrupt. (This means our position in the index file will be one
         // partition "ahead" of the data file.)
         this.dataFile = isOffline
-                        ? sstable.openDataReader()
-                        : sstable.openDataReader(CompactionManager.instance.getRateLimiter());
+                        ? sstable.openDataReader(readCtx)
+                        : sstable.openDataReader(readCtx, CompactionManager.instance.getRateLimiter());
 
         try
         {
@@ -181,7 +187,7 @@ public class Scrubber implements Closeable
     {
         try
         {
-            return sstable.scrubPartitionsIterator();
+            return sstable.scrubPartitionsIterator(readCtx);
         }
         catch (IOException e)
         {

@@ -25,6 +25,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.util.ChannelProxy;
 import org.apache.cassandra.io.util.ChunkReader;
 import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.io.util.RebuffererFactory;
 
@@ -61,7 +62,7 @@ public class ChunkCacheInterceptingTest
             RebuffererFactory rebuferrerFactory = ChunkCache.instance.maybeWrap(chunkReader);
             assertTrue("chunk cache didn't create our interceptor?", interceptor != null);
 
-            rebuferrerFactory.instantiateRebufferer();
+            rebuferrerFactory.instantiateRebufferer(ReadCtx.FOR_TEST);
             assertEquals("interceptor not used to create rebufferer?",1, interceptor.numInstantiations);
         }
         finally
@@ -111,10 +112,10 @@ public class ChunkCacheInterceptingTest
         }
 
         @Override
-        public Rebufferer instantiateRebufferer()
+        public Rebufferer instantiateRebufferer(ReadCtx ctx)
         {
             numInstantiations += 1;
-            return wrapped.instantiateRebufferer();
+            return wrapped.instantiateRebufferer(ctx);
         }
 
         @Override

@@ -219,7 +219,7 @@ public class ChecksummedDataInput extends RebufferingInputStream
     protected void readBuffer()
     {
         buffer.clear();
-        while ((channel.read(buffer, bufferOffset)) == 0) {}
+        while ((channel.read(buffer, bufferOffset, null)) == 0) {}
         buffer.flip();
     }
 

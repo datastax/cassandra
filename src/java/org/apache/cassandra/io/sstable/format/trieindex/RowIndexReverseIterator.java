@@ -23,6 +23,7 @@ import org.apache.cassandra.io.sstable.format.trieindex.RowIndexReader.IndexInfo
 import org.apache.cassandra.io.tries.ReverseValueIterator;
 import org.apache.cassandra.io.tries.ValueIterator;
 import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 /**
@@ -32,14 +33,14 @@ class RowIndexReverseIterator extends ReverseValueIterator<RowIndexReverseIterat
 {
     private long currentNode = -1;
 
-    public RowIndexReverseIterator(FileHandle file, long root, ByteComparable start, ByteComparable end, ByteComparable.Version version)
+    public RowIndexReverseIterator(FileHandle file, long root, ByteComparable start, ByteComparable end, ByteComparable.Version version, ReadCtx ctx)
     {
-        super(file.instantiateRebufferer(), root, start, end, ValueIterator.LeftBoundTreatment.ADMIT_PREFIXES, version);
+        super(file.instantiateRebufferer(ctx), root, start, end, ValueIterator.LeftBoundTreatment.ADMIT_PREFIXES, version);
     }
 
-    public RowIndexReverseIterator(FileHandle file, TrieIndexEntry entry, ByteComparable end, ByteComparable.Version version)
+    public RowIndexReverseIterator(FileHandle file, TrieIndexEntry entry, ByteComparable end, ByteComparable.Version version, ReadCtx ctx)
     {
-        this(file, entry.indexTrieRoot, ByteComparable.EMPTY, end, version);
+        this(file, entry.indexTrieRoot, ByteComparable.EMPTY, end, version, ctx);
     }
 
     /**

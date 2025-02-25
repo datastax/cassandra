@@ -23,6 +23,7 @@ import com.carrotsearch.hppc.IntLongHashMap;
 import com.carrotsearch.hppc.IntLongMap;
 import org.apache.cassandra.index.sai.disk.io.IndexInputReader;
 import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.github.jamm.MemoryLayoutSpecification;
 
 import static com.google.common.base.Preconditions.checkArgument;
@@ -38,9 +39,9 @@ class BKDPostingsIndex
     public final IntLongMap index = new IntLongHashMap();
 
     @SuppressWarnings("resource")
-    BKDPostingsIndex(FileHandle postingsFileHandle, long filePosition) throws IOException
+    BKDPostingsIndex(FileHandle postingsFileHandle, long filePosition, ReadCtx ctx) throws IOException
     {
-        try (final IndexInputReader input = IndexInputReader.create(postingsFileHandle.createReader()))
+        try (final IndexInputReader input = IndexInputReader.create(postingsFileHandle.createReader(ctx)))
         {
             validate(input);
             input.seek(filePosition);

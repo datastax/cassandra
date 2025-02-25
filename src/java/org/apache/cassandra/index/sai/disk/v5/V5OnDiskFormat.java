@@ -27,6 +27,7 @@ import org.apache.cassandra.index.sai.disk.v1.IndexSearcher;
 import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.v4.V4OnDiskFormat;
+import org.apache.cassandra.io.util.ReadCtx;
 
 public class V5OnDiskFormat extends V4OnDiskFormat
 {
@@ -41,10 +42,11 @@ public class V5OnDiskFormat extends V4OnDiskFormat
     public IndexSearcher newIndexSearcher(SSTableContext sstableContext,
                                           IndexContext indexContext,
                                           PerIndexFiles indexFiles,
-                                          SegmentMetadata segmentMetadata) throws IOException
+                                          SegmentMetadata segmentMetadata,
+                                          ReadCtx searcherCreationContext) throws IOException
     {
         if (indexContext.isVector())
-            return new V5VectorIndexSearcher(sstableContext, indexFiles, segmentMetadata, indexContext);
-        return super.newIndexSearcher(sstableContext, indexContext, indexFiles, segmentMetadata);
+            return new V5VectorIndexSearcher(sstableContext, indexFiles, segmentMetadata, indexContext, searcherCreationContext);
+        return super.newIndexSearcher(sstableContext, indexContext, indexFiles, segmentMetadata, searcherCreationContext);
     }
 }

@@ -41,7 +41,9 @@ import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.util.ChannelProxy;
 import org.apache.cassandra.io.util.ChunkReader;
 import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.io.util.Rebufferer;
+import org.apache.cassandra.io.util.RebuffererFactory;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.ObjectSizes;
 import org.apache.cassandra.utils.memory.BufferPool;
@@ -108,7 +110,7 @@ public class CachingRebuffererTest
 
         class EmptyAllocatingChunkReader implements ChunkReader
         {
-            public void readChunk(long chunkOffset, ByteBuffer toBuffer)
+            public void readChunk(long chunkOffset, ByteBuffer toBuffer, ReadCtx ctx)
             {
             }
 
@@ -122,7 +124,7 @@ public class CachingRebuffererTest
                 return BufferType.OFF_HEAP;
             }
 
-            public Rebufferer instantiateRebufferer()
+            public Rebufferer instantiateRebufferer(ReadCtx ctx)
             {
                 return null;
             }
@@ -158,7 +160,7 @@ public class CachingRebuffererTest
             }
         }
 
-        Rebufferer rebufferer = ChunkCache.instance.maybeWrap(new EmptyAllocatingChunkReader()).instantiateRebufferer();
+        Rebufferer rebufferer = ChunkCache.instance.maybeWrap(new EmptyAllocatingChunkReader()).instantiateRebufferer(ReadCtx.FOR_TEST);
         final MemoryMeter memoryMeter = new MemoryMeter().withGuessing(MemoryMeter.Guess.FALLBACK_UNSAFE);
         final long initialHeap = memoryMeter.measureDeep(ChunkCache.instance);
         System.out.println("initial deepSize = " + FBUtilities.prettyPrintMemory(initialHeap));
@@ -189,9 +191,9 @@ public class CachingRebuffererTest
     public void testRebufferInSamePage()
     {
         when(chunkReader.chunkSize()).thenReturn(PAGE_SIZE);
-        doNothing().when(chunkReader).readChunk(anyLong(), any());
+        doNothing().when(chunkReader).readChunk(anyLong(), any(), any());
 
-        Rebufferer rebufferer = ChunkCache.instance.maybeWrap(chunkReader).instantiateRebufferer();
+        Rebufferer rebufferer = ChunkCache.instance.maybeWrap(chunkReader).instantiateRebufferer(ReadCtx.FOR_TEST);
         assertNotNull(rebufferer);
 
         for (int i = 0; i < PAGE_SIZE; i++)
@@ -203,16 +205,16 @@ public class CachingRebuffererTest
             buffer.release();
         }
 
-        verify(chunkReader, times(1)).readChunk(anyLong(), any());
+        verify(chunkReader, times(1)).readChunk(anyLong(), any(), any());
     }
 
     @Test
     public void testRebufferSeveralPages()
     {
-        Rebufferer rebufferer = ChunkCache.instance.maybeWrap(chunkReader).instantiateRebufferer();
+        Rebufferer rebufferer = ChunkCache.instance.maybeWrap(chunkReader).instantiateRebufferer(ReadCtx.FOR_TEST);
         assertNotNull(rebufferer);
 
-        doNothing().when(chunkReader).readChunk(anyLong(), any());
+        doNothing().when(chunkReader).readChunk(anyLong(), any(), any());
 
         final int numPages = 10;
 
@@ -228,7 +230,7 @@ public class CachingRebuffererTest
             }
         }
 
-        verify(chunkReader, times(numPages)).readChunk(anyLong(), any());
+        verify(chunkReader, times(numPages)).readChunk(anyLong(), any(), any());
     }
 
     @Test
@@ -243,9 +245,10 @@ public class CachingRebuffererTest
         doAnswer(i -> {
             numBuffers.incrementAndGet();
             return null;
-        }).when(chunkReader).readChunk(anyLong(), any());
+        }).when(chunkReader).readChunk(anyLong(), any(), any());
 
-        Rebufferer rebufferer = ChunkCache.instance.maybeWrap(chunkReader).instantiateRebufferer();
+        RebuffererFactory factory = ChunkCache.instance.maybeWrap(chunkReader);
+        Rebufferer rebufferer = factory.instantiateRebufferer(ReadCtx.FOR_TEST);
         assertNotNull(rebufferer);
 
         // using NamedThreadFactory ensures that the threads are InlinedThreadLocalThread, which means the pool will cache buffers in a thread local stash
@@ -266,7 +269,7 @@ public class CachingRebuffererTest
 
                         // removes the buffer from the cache, other threads should still be able to create a new one and
                         // insert it into the cache thanks to the ref. counting mechanism
-                        ((ChunkCache.CachingRebufferer) rebufferer).invalidateIfCached(0);
+                        factory.invalidateIfCached(0);
                     }
                 }
                 catch (Throwable t)
@@ -289,9 +292,9 @@ public class CachingRebuffererTest
     @Test(expected = CorruptSSTableException.class)
     public void testExceptionInReadChunk()
     {
-        doThrow(CorruptSSTableException.class).when(chunkReader).readChunk(anyLong(), any());
+        doThrow(CorruptSSTableException.class).when(chunkReader).readChunk(anyLong(), any(), any());
 
-        Rebufferer rebufferer = ChunkCache.instance.maybeWrap(chunkReader).instantiateRebufferer();
+        Rebufferer rebufferer = ChunkCache.instance.maybeWrap(chunkReader).instantiateRebufferer(ReadCtx.FOR_TEST);
         assertNotNull(rebufferer);
 
         rebufferer.rebuffer(0);

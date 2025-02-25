@@ -46,6 +46,7 @@ import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.SaiRandomizedTest;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
@@ -88,7 +89,7 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
     @Test
     public void testPrimaryKeyMapFactoryCount()
     {
-        assertEquals(Long.MAX_VALUE, KDTreeIndexBuilder.TEST_PRIMARY_KEY_MAP_FACTORY.count());
+        assertEquals(Long.MAX_VALUE, KDTreeIndexBuilder.TEST_PRIMARY_KEY_MAP_FACTORY.count(ReadCtx.FOR_TEST));
     }
 
     @Test
@@ -206,7 +207,8 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
             final IndexSearcher searcher = version.onDiskFormat().newIndexSearcher(sstableContext,
                                                                                    indexContext,
                                                                                    indexFiles,
-                                                                                   segmentMetadata);
+                                                                                   segmentMetadata,
+                                                                                   ReadCtx.FOR_TEST);
             assertThat(searcher, is(instanceOf(InvertedIndexSearcher.class)));
             return searcher;
         }

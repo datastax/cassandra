@@ -52,6 +52,14 @@ public class EmptyRebufferer implements Rebufferer, RebuffererFactory
     }
 
     @Override
+    public ReadCtx readCtx()
+    {
+        // EmptyRebufferer is used for empty files, so we shouldn't read anything and not returning the ctx is fine
+        // (but to change it, we need to split that into factory and rebufferer).
+        return null;
+    }
+
+    @Override
     public BufferHolder rebuffer(long position)
     {
         return EMPTY;
@@ -64,7 +72,7 @@ public class EmptyRebufferer implements Rebufferer, RebuffererFactory
     }
 
     @Override
-    public Rebufferer instantiateRebufferer()
+    public Rebufferer instantiateRebufferer(ReadCtx ctx)
     {
         return this;
     }

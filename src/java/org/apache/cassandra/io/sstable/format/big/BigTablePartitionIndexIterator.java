@@ -26,6 +26,7 @@ import org.apache.cassandra.io.sstable.format.big.BigTableRowIndexEntry.IndexSer
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.RandomAccessReader;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
 @NotThreadSafe
@@ -68,7 +69,7 @@ public class BigTablePartitionIndexIterator implements PartitionIndexIterator
     }
 
     @SuppressWarnings({ "resource" })
-    public static BigTablePartitionIndexIterator create(FileHandle indexFile, IndexSerializer<IndexInfo> serializer)
+    public static BigTablePartitionIndexIterator create(FileHandle indexFile, IndexSerializer<IndexInfo> serializer, ReadCtx ctx)
     throws IOException
     {
         FileHandle iFile = null;
@@ -77,7 +78,7 @@ public class BigTablePartitionIndexIterator implements PartitionIndexIterator
         try
         {
             iFile = indexFile.sharedCopy();
-            reader = iFile.createReader();
+            reader = iFile.createReader(ctx);
             iterator = new BigTablePartitionIndexIterator(iFile, reader, serializer);
             iterator.advance();
             return iterator;

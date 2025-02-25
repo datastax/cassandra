@@ -37,6 +37,7 @@ import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
 import org.apache.cassandra.io.sstable.SSTableMultiWriter;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.schema.CompactionParams;
 import org.apache.cassandra.service.ActiveRepairService;
 
@@ -181,7 +182,7 @@ public class CompactionStrategyHolder extends AbstractStrategyHolder
 
     @Override
     @SuppressWarnings("resource")
-    public List<ISSTableScanner> getScanners(GroupedSSTableContainer<SSTableReader> sstables, Collection<Range<Token>> ranges)
+    public List<ISSTableScanner> getScanners(GroupedSSTableContainer<SSTableReader> sstables, Collection<Range<Token>> ranges, ReadCtx ctx)
     {
         List<ISSTableScanner> scanners = new ArrayList<>(strategies.size());
         for (int i = 0; i < strategies.size(); i++)
@@ -189,7 +190,7 @@ public class CompactionStrategyHolder extends AbstractStrategyHolder
             if (sstables.isGroupEmpty(i))
                 continue;
 
-            scanners.addAll(strategies.get(i).getScanners(sstables.getGroup(i), ranges).scanners);
+            scanners.addAll(strategies.get(i).getScanners(sstables.getGroup(i), ranges, ctx).scanners);
         }
         return scanners;
     }

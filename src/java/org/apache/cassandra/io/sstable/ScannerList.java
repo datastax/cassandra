@@ -28,6 +28,7 @@ import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
+import org.apache.cassandra.io.util.ReadCtx;
 
 public class ScannerList implements AutoCloseable
 {
@@ -79,13 +80,13 @@ public class ScannerList implements AutoCloseable
         ISSTableScanner.closeAllAndPropagate(scanners, null);
     }
 
-    public static ScannerList of(Collection<SSTableReader> sstables, Collection<Range<Token>> ranges)
+    public static ScannerList of(Collection<SSTableReader> sstables, Collection<Range<Token>> ranges, ReadCtx ctx)
     {
         ArrayList<ISSTableScanner> scanners = new ArrayList<>();
         try
         {
             for (SSTableReader sstable : sstables)
-                scanners.add(sstable.getScanner(ranges));
+                scanners.add(sstable.getScanner(ranges, ctx));
             return new ScannerList(scanners);
         }
         catch (Throwable t)

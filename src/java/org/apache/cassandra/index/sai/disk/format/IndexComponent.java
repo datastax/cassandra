@@ -26,6 +26,7 @@ import org.apache.cassandra.index.sai.disk.io.IndexOutputWriter;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.lucene.store.ChecksumIndexInput;
 
 public interface IndexComponent
@@ -62,9 +63,9 @@ public interface IndexComponent
          */
         FileHandle createIndexBuildTimeFileHandle();
 
-        IndexInput openInput();
+        IndexInput openInput(ReadCtx ctx);
 
-        ChecksumIndexInput openCheckSummedInput();
+        ChecksumIndexInput openCheckSummedInput(ReadCtx ctx);
     }
 
     interface ForWrite extends IndexComponent

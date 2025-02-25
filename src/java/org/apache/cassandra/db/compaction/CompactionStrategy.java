@@ -34,6 +34,7 @@ import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTableMultiWriter;
 import org.apache.cassandra.io.sstable.ScannerList;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.ReadCtx;
 
 /**
  * The common interface between legacy compaction strategies (those that extend {@link LegacyAbstractCompactionStrategy}
@@ -149,11 +150,11 @@ public interface CompactionStrategy extends CompactionObserver
      * allow for a more memory efficient solution if we know the sstable don't overlap (see
      * LeveledCompactionStrategy for instance).
      */
-    ScannerList getScanners(Collection<SSTableReader> sstables, Collection<Range<Token>> ranges);
+    ScannerList getScanners(Collection<SSTableReader> sstables, Collection<Range<Token>> ranges, ReadCtx ctx);
 
-    default ScannerList getScanners(Collection<SSTableReader> toCompact)
+    default ScannerList getScanners(Collection<SSTableReader> toCompact, ReadCtx ctx)
     {
-        return getScanners(toCompact, null);
+        return getScanners(toCompact, null, ctx);
     }
 
     /**

@@ -52,6 +52,7 @@ import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.RandomAccessReader;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.io.util.SequentialWriter;
 import org.apache.cassandra.io.util.SequentialWriterOption;
 import org.apache.cassandra.utils.Pair;
@@ -211,12 +212,12 @@ public class RowIndexTest
                                           .mmapped(accessMode == Config.DiskAccessMode.mmap))
         {
             fh = builder.complete();
-            try (RandomAccessReader rdr = fh.createReader())
+            try (RandomAccessReader rdr = fh.createReader(ReadCtx.FOR_TEST))
             {
                 assertEquals("JUNK", rdr.readUTF());
                 assertEquals("JUNK", rdr.readUTF());
             }
-            return new RowIndexReader(fh, root, VERSION);
+            return new RowIndexReader(fh, root, VERSION, ReadCtx.FOR_TEST);
         }
     }
 
@@ -337,7 +338,7 @@ public class RowIndexTest
                 exactRight = b;
             }
 
-            try (RowIndexReverseIterator iter = new RowIndexReverseIterator(fh, root, comparator.asByteComparable(left), comparator.asByteComparable(right), VERSION))
+            try (RowIndexReverseIterator iter = new RowIndexReverseIterator(fh, root, comparator.asByteComparable(left), comparator.asByteComparable(right), VERSION, ReadCtx.FOR_TEST))
             {
                 IndexInfo indexInfo = iter.nextIndexInfo();
                 if (indexInfo == null)
@@ -389,7 +390,7 @@ public class RowIndexTest
                                        .map(bc -> bc.byteComparableAsString(VERSION))
                                        .collect(Collectors.joining(", ")));
                 logger.info("Left {}{} Right {}{}", comparator.asByteComparable(left), exactLeft ? "#" : "", comparator.asByteComparable(right), exactRight ? "#" : "");
-                try (RowIndexReverseIterator iter2 = new RowIndexReverseIterator(fh, root, comparator.asByteComparable(left), comparator.asByteComparable(right), VERSION))
+                try (RowIndexReverseIterator iter2 = new RowIndexReverseIterator(fh, root, comparator.asByteComparable(left), comparator.asByteComparable(right), VERSION, ReadCtx.FOR_TEST))
                 {
                     IndexInfo ii;
                     while ((ii = iter2.nextIndexInfo()) != null)
@@ -414,7 +415,7 @@ public class RowIndexTest
             boolean exactRight = RANDOM.nextBoolean();
             ClusteringPrefix<?> right = exactRight ? keys.get(RANDOM.nextInt(keys.size())) : generateRandomKey();
 
-            try (RowIndexReverseIterator iter = new RowIndexReverseIterator(fh, root, ByteComparable.EMPTY, comparator.asByteComparable(right), VERSION))
+            try (RowIndexReverseIterator iter = new RowIndexReverseIterator(fh, root, ByteComparable.EMPTY, comparator.asByteComparable(right), VERSION, ReadCtx.FOR_TEST))
             {
                 IndexInfo indexInfo = iter.nextIndexInfo();
                 if (indexInfo == null)
@@ -457,7 +458,7 @@ public class RowIndexTest
                                        .map(bc -> bc.byteComparableAsString(VERSION))
                                        .collect(Collectors.joining(", ")));
                 logger.info("Right {}{}", comparator.asByteComparable(right), exactRight ? "#" : "");
-                try (RowIndexReverseIterator iter2 = new RowIndexReverseIterator(fh, root, ByteComparable.EMPTY, comparator.asByteComparable(right), VERSION))
+                try (RowIndexReverseIterator iter2 = new RowIndexReverseIterator(fh, root, ByteComparable.EMPTY, comparator.asByteComparable(right), VERSION, ReadCtx.FOR_TEST))
                 {
                     IndexInfo ii;
                     while ((ii = iter2.nextIndexInfo()) != null)

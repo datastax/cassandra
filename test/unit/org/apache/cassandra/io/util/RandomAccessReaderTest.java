@@ -148,7 +148,7 @@ public class RandomAccessReaderTest
              FileHandle.Builder builder = new FileHandle.Builder(channel)
                                           .bufferType(params.bufferType).bufferSize(params.bufferSize);
              FileHandle fh = builder.complete();
-             RandomAccessReader reader = fh.createReader())
+             RandomAccessReader reader = fh.createReader(ReadCtx.FOR_TEST))
         {
             assertEquals(channel.size(), reader.length());
             assertEquals(channel.size(), reader.bytesRemaining());
@@ -248,7 +248,7 @@ public class RandomAccessReaderTest
                                           .order(order)
                                           .bufferType(BufferType.OFF_HEAP).bufferSize(bufferSize);
              FileHandle fh = builder.complete();
-             RandomAccessReader reader = fh.createReader())
+             RandomAccessReader reader = fh.createReader(ReadCtx.FOR_TEST))
         {
             assertEquals(channel.size(), reader.length());
             assertEquals(channel.size(), reader.bytesRemaining());
@@ -356,7 +356,7 @@ public class RandomAccessReaderTest
                                           .order(order)
                                           .bufferType(BufferType.OFF_HEAP).bufferSize(bufferSize);
              FileHandle fh = builder.complete();
-             RandomAccessReader reader = fh.createReader())
+             RandomAccessReader reader = fh.createReader(ReadCtx.FOR_TEST))
         {
             assertEquals(channel.size(), reader.length());
             assertEquals(channel.size(), reader.bytesRemaining());
@@ -465,7 +465,7 @@ public class RandomAccessReaderTest
                                           .order(order)
                                           .bufferType(BufferType.OFF_HEAP).bufferSize(bufferSize);
              FileHandle fh = builder.complete();
-             RandomAccessReader reader = fh.createReader())
+             RandomAccessReader reader = fh.createReader(ReadCtx.FOR_TEST))
         {
             assertEquals(channel.size(), reader.length());
             assertEquals(channel.size(), reader.bytesRemaining());
@@ -664,7 +664,7 @@ public class RandomAccessReaderTest
         {
             builder.mmapped(params.mmappedRegions);
             try (FileHandle fh = builder.complete();
-                 RandomAccessReader reader = fh.createReader())
+                 RandomAccessReader reader = fh.createReader(ReadCtx.FOR_TEST))
             {
                 assertEquals(f.absolutePath(), reader.getFile().path());
                 assertEquals(f.length(), reader.length());
@@ -702,7 +702,7 @@ public class RandomAccessReaderTest
 
         try (FileHandle.Builder builder = new FileHandle.Builder(f);
              FileHandle fh = builder.complete();
-             RandomAccessReader reader = fh.createReader())
+             RandomAccessReader reader = fh.createReader(ReadCtx.FOR_TEST))
         {
             assertEquals(f.absolutePath(), reader.getFile().path());
             assertEquals(expected.length(), reader.length());
@@ -733,7 +733,7 @@ public class RandomAccessReaderTest
 
         try (FileHandle.Builder builder = new FileHandle.Builder(f);
              FileHandle fh = builder.complete();
-             RandomAccessReader reader = fh.createReader())
+             RandomAccessReader reader = fh.createReader(ReadCtx.FOR_TEST))
         {
             assertEquals(expected.length() * numIterations, reader.length());
 
@@ -816,7 +816,7 @@ public class RandomAccessReaderTest
             final Runnable worker = () ->
             {
                 try (FileHandle fh = builder.complete();
-                     RandomAccessReader reader = fh.createReader())
+                     RandomAccessReader reader = fh.createReader(ReadCtx.FOR_TEST))
                 {
                     assertEquals(expected.length, reader.length());
 
@@ -894,7 +894,7 @@ public class RandomAccessReaderTest
         {
             builder.mmapped(params.mmappedRegions);
             try (FileHandle fh = builder.complete();
-                 RandomAccessReader reader = fh.createReader())
+                 RandomAccessReader reader = fh.createReader(ReadCtx.FOR_TEST))
             {
                 assertEquals(0, reader.skipBytes(0));
                 assertEquals(0, reader.skipBytes(-1));
@@ -911,7 +911,7 @@ public class RandomAccessReaderTest
                                                      .bufferType(params.bufferType).bufferSize(params.bufferSize))
         {
             try (FileHandle fh = builder.complete();
-                 RandomAccessReader reader = fh.createReader())
+                 RandomAccessReader reader = fh.createReader(ReadCtx.FOR_TEST))
             {
                 reader.close();
                 reader.skipBytes(31415);
@@ -927,7 +927,7 @@ public class RandomAccessReaderTest
         {
             builder.mmapped(params.mmappedRegions);
             try (FileHandle fh = builder.complete();
-                 RandomAccessReader reader = fh.createReader())
+                 RandomAccessReader reader = fh.createReader(ReadCtx.FOR_TEST))
             {
                 int toSkip = expectationMultiples * params.expected.length;
                 byte[] b = new byte[params.expected.length];

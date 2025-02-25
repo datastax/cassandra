@@ -57,12 +57,14 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.metadata.MetadataComponent;
 import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.sstable.metadata.ValidationMetadata;
+import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.io.util.DataIntegrityMetadata;
 import org.apache.cassandra.io.util.DataIntegrityMetadata.FileDigestValidator;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileInputStreamPlus;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.RandomAccessReader;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.service.StorageService;
@@ -86,6 +88,9 @@ public class Verifier implements Closeable
     private final VerifyInfo verifyInfo;
     private final Options options;
     private final boolean isOffline;
+
+    private final ReadCtx readCtx;
+
     /**
      * Given a keyspace, return the set of local and pending token ranges.  By default {@link StorageService#getLocalAndPendingRanges(String)}
      * is expected, but for the standalone verifier case we can't use that, so this is here to allow the CLI to provide
@@ -138,9 +143,10 @@ public class Verifier implements Closeable
         this.outputHandler = outputHandler;
 
         this.fileAccessLock = new ReentrantReadWriteLock();
+        this.readCtx = StorageProvider.instance.readCtxFor(ReadCtx.Kind.SSTABLE_VERIFIER);
         this.dataFile = isOffline
-                        ? sstable.openDataReader()
-                        : sstable.openDataReader(CompactionManager.instance.getRateLimiter());
+                        ? sstable.openDataReader(readCtx)
+                        : sstable.openDataReader(readCtx, CompactionManager.instance.getRateLimiter());
         this.verifyInfo = new VerifyInfo(dataFile, sstable, fileAccessLock.readLock());
         this.options = options;
         this.isOffline = isOffline;
@@ -217,7 +223,7 @@ public class Verifier implements Closeable
         if (options.checkOwnsTokens && !isOffline && !(realm.getPartitioner() instanceof LocalPartitioner))
         {
             outputHandler.debug("Checking that all tokens are owned by the current node");
-            try (KeyIterator iter = KeyIterator.forSSTable(sstable))
+            try (KeyIterator iter = KeyIterator.forSSTable(sstable, readCtx))
             {
                 List<Range<Token>> ownedRanges = Range.normalize(tokenLookup.apply(realm.metadataRef().keyspace));
                 if (ownedRanges.isEmpty())
@@ -271,7 +277,7 @@ public class Verifier implements Closeable
 
         outputHandler.output("Extended Verify requested, proceeding to inspect values");
 
-        try(PartitionIndexIterator indexIterator = sstable.allKeysIterator())
+        try(PartitionIndexIterator indexIterator = sstable.allKeysIterator(readCtx))
         {
             if (indexIterator.dataPosition() != sstable.getDataFileSliceDescriptor().dataStart)
                 markAndThrow(new RuntimeException("First row position from index != 0: " + indexIterator.dataPosition()));
@@ -445,7 +451,7 @@ public class Verifier implements Closeable
 
     private void deserializeIndex(SSTableReader sstable) throws IOException
     {
-        try (PartitionIndexIterator it = sstable.allKeysIterator()) {
+        try (PartitionIndexIterator it = sstable.allKeysIterator(readCtx)) {
             //noinspection StatementWithEmptyBody
             ByteBuffer last = it.key();
             while (it.advance()) last = it.key(); // no-op, just check if index is readable
@@ -488,6 +494,7 @@ public class Verifier implements Closeable
         fileAccessLock.writeLock().lock();
         try
         {
+            readCtx.close();
             FileUtils.closeQuietly(dataFile);
         }
         finally

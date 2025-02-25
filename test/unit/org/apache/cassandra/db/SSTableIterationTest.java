@@ -40,6 +40,7 @@ import org.apache.cassandra.io.sstable.compaction.SSTableCursor;
 import org.apache.cassandra.io.sstable.compaction.SSTableCursorMerger;
 import org.apache.cassandra.io.sstable.compaction.SkipEmptyDataCursor;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.FBUtilities;
 
@@ -257,13 +258,13 @@ public class SSTableIterationTest extends CQLTester
         }
 
         SSTableCursor mergedCursor = new SSTableCursorMerger(sstables.stream()
-                                                                     .map(SortedStringTableCursor::new)
+                                                                     .map(s -> new SortedStringTableCursor(s, ReadCtx.FOR_TEST))
                                                                      .collect(Collectors.toList()),
                                                              cfs.metadata());
         mergedCursor = new SkipEmptyDataCursor(mergedCursor); // make sure we drop rows that end up empty
 
         UnfilteredPartitionIterator mergedScanner = UnfilteredPartitionIterators.merge(sstables.stream()
-                                                                                               .map(SSTableReader::getScanner)
+                                                                                               .map(s -> s.getScanner(ReadCtx.FOR_TEST))
                                                                                                .collect(Collectors.toList()),
                                                                                        UnfilteredPartitionIterators.MergeListener.NOOP);
         assertIteratorsEqual(mergedScanner, new IteratorFromCursor(cfs.metadata(), mergedCursor), true);
@@ -305,8 +306,8 @@ public class SSTableIterationTest extends CQLTester
     private void assertCursorMatchesScanner(SSTableReader reader) throws IOException
     {
         dumpSSTableCursor(reader);
-        try (UnfilteredPartitionIterator scanner = reader.getScanner();
-             UnfilteredPartitionIterator cursor = new IteratorFromCursor(reader.metadata(), new SortedStringTableCursor(reader)))
+        try (UnfilteredPartitionIterator scanner = reader.getScanner(ReadCtx.FOR_TEST);
+             UnfilteredPartitionIterator cursor = new IteratorFromCursor(reader.metadata(), new SortedStringTableCursor(reader, ReadCtx.FOR_TEST)))
         {
             assertIteratorsEqual(scanner, cursor, false);
         }
@@ -325,8 +326,8 @@ public class SSTableIterationTest extends CQLTester
         Range<Token> range = new Range<>(left, right);
         System.out.println(String.format("\nRange %.3f to %.3f: %s", cutLeft, 1 - cutRight, range));
         assert !range.isTrulyWrapAround();
-        try (var scanner = reader.getScanner(ImmutableList.of(range));
-             var cursor = new SortedStringTableCursor(reader, range))
+        try (var scanner = reader.getScanner(ImmutableList.of(range), ReadCtx.FOR_TEST);
+             var cursor = new SortedStringTableCursor(reader, ReadCtx.FOR_TEST, range))
         {
             System.out.println(String.format("Length %s vs %s", FBUtilities.prettyPrintMemory(scanner.getLengthInBytes()),
                                              FBUtilities.prettyPrintMemory(cursor.bytesTotal())));
@@ -345,7 +346,7 @@ public class SSTableIterationTest extends CQLTester
 
     private void dumpSSTableCursor(SSTableReader reader) throws IOException
     {
-        try (SSTableCursor cursor = new SortedStringTableCursor(reader))
+        try (SSTableCursor cursor = new SortedStringTableCursor(reader, ReadCtx.FOR_TEST))
         {
             dumpCursor(cursor, reader.metadata());
         }

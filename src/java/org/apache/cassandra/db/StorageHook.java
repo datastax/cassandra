@@ -25,6 +25,7 @@ import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.rows.UnfilteredRowIteratorWithLowerBound;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.utils.FBUtilities;
 
@@ -39,14 +40,16 @@ public interface StorageHook
                                                                       SSTableReader sstable,
                                                                       ClusteringIndexFilter filter,
                                                                       ColumnFilter selectedColumns,
-                                                                      SSTableReadsListener listener);
+                                                                      SSTableReadsListener listener,
+                                                                      ReadCtx ctx);
     public UnfilteredRowIterator makeRowIterator(ColumnFamilyStore cfs,
                                                  SSTableReader sstable,
                                                  DecoratedKey key,
                                                  Slices slices,
                                                  ColumnFilter selectedColumns,
                                                  boolean reversed,
-                                                 SSTableReadsListener listener);
+                                                 SSTableReadsListener listener,
+                                                 ReadCtx ctx);
 
     static StorageHook createHook()
     {
@@ -67,13 +70,15 @@ public interface StorageHook
                                                                                      SSTableReader sstable,
                                                                                      ClusteringIndexFilter filter,
                                                                                      ColumnFilter selectedColumns,
-                                                                                     SSTableReadsListener listener)
+                                                                                     SSTableReadsListener listener,
+                                                                                     ReadCtx ctx)
             {
                 return new UnfilteredRowIteratorWithLowerBound(partitionKey,
                                                                sstable,
                                                                filter,
                                                                selectedColumns,
-                                                               listener);
+                                                               listener,
+                                                               ctx);
             }
 
             public UnfilteredRowIterator makeRowIterator(ColumnFamilyStore cfs,
@@ -82,9 +87,10 @@ public interface StorageHook
                                                          Slices slices,
                                                          ColumnFilter selectedColumns,
                                                          boolean reversed,
-                                                         SSTableReadsListener listener)
+                                                         SSTableReadsListener listener,
+                                                         ReadCtx ctx)
             {
-                return sstable.iterator(key, slices, selectedColumns, reversed, listener);
+                return sstable.iterator(key, slices, selectedColumns, reversed, listener, ctx);
             }
         };
     }

@@ -41,6 +41,7 @@ import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.lifecycle.Tracker;
 import org.apache.cassandra.io.sstable.ScannerList;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
@@ -332,10 +333,10 @@ public class CompactionTaskTest
         CompactionLogger logger = new CompactionLogger(cfs.metadata());
         Mockito.when(mock.supportsCursorCompaction()).thenReturn(useCursors);
         Mockito.when(mock.getCompactionLogger()).thenReturn(logger);
-        Mockito.when(mock.getScanners(anyCollection()))
-               .thenAnswer(answ -> ScannerList.of(answ.getArgument(0), null));
-        Mockito.when(mock.getScanners(anyCollection(), any()))
-               .thenAnswer(answ -> ScannerList.of(answ.getArgument(0), answ.getArgument(1)));
+        when(mock.getScanners(anyCollection(), any(ReadCtx.class)))
+               .thenAnswer(answ -> ScannerList.of(answ.getArgument(0), null, ReadCtx.FOR_TEST));
+        Mockito.when(mock.getScanners(anyCollection(), any(), any(ReadCtx.class)))
+               .thenAnswer(answ -> ScannerList.of(answ.getArgument(0), answ.getArgument(1), ReadCtx.FOR_TEST));
         return mock;
     }
 }

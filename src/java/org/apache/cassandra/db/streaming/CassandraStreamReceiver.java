@@ -46,6 +46,8 @@ import org.apache.cassandra.io.sstable.ISSTableScanner;
 import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.sstable.SSTableMultiWriter;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.storage.StorageProvider;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.streaming.IncomingStream;
 import org.apache.cassandra.streaming.StreamReceiver;
 import org.apache.cassandra.streaming.StreamSession;
@@ -204,7 +206,8 @@ public class CassandraStreamReceiver implements StreamReceiver
                     hasCdc);
             // When doing mutation-based repair we split each partition into smaller batches
             // ({@link Stream MAX_ROWS_PER_BATCH}) to avoid OOMing and generating heap pressure
-            try (ISSTableScanner scanner = reader.getScanner();
+            try (ReadCtx ctx = StorageProvider.instance.readCtxFor(ReadCtx.Kind.STEAMING);
+                 ISSTableScanner scanner = reader.getScanner(ctx);
                  CloseableIterator<UnfilteredRowIterator> throttledPartitions = ThrottledUnfilteredIterator.throttle(scanner, MAX_ROWS_PER_BATCH))
             {
                 while (throttledPartitions.hasNext())

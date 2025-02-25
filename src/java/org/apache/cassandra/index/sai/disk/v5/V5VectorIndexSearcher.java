@@ -26,6 +26,7 @@ import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher;
 import org.apache.cassandra.index.sai.disk.vector.CassandraDiskAnn;
+import org.apache.cassandra.io.util.ReadCtx;
 
 /**
  * Executes ann search against the graph for an individual index segment.
@@ -35,13 +36,14 @@ public class V5VectorIndexSearcher extends V2VectorIndexSearcher
     public V5VectorIndexSearcher(SSTableContext sstableContext,
                                  PerIndexFiles perIndexFiles,
                                  SegmentMetadata segmentMetadata,
-                                 IndexContext indexContext) throws IOException
+                                 IndexContext indexContext,
+                                 ReadCtx searcherCreationContext) throws IOException
     {
         // inherits from V2 instead of V3 because the difference between V5 and V3 is the OnDiskOrdinalsMap that they use
         super(sstableContext.primaryKeyMapFactory(),
               perIndexFiles,
               segmentMetadata,
               indexContext,
-              new CassandraDiskAnn(sstableContext, segmentMetadata.componentMetadatas, perIndexFiles, indexContext, V5OnDiskOrdinalsMap::new));
+              new CassandraDiskAnn(sstableContext, segmentMetadata.componentMetadatas, perIndexFiles, indexContext, V5OnDiskOrdinalsMap::new, searcherCreationContext));
     }
 }

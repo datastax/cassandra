@@ -26,6 +26,7 @@ import com.google.common.annotations.VisibleForTesting;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.utils.MonotonicClock;
 
 import static java.lang.Math.max;
@@ -69,6 +70,8 @@ public class QueryContext
     // Null means the query execution order hasn't been decided yet.
     private FilterSortOrder filterSortOrder = null;
 
+    private ReadCtx readCtx;
+
     @VisibleForTesting
     public QueryContext()
     {
@@ -79,6 +82,27 @@ public class QueryContext
     {
         this.executionQuotaNano = TimeUnit.MILLISECONDS.toNanos(executionQuotaMs);
         this.queryStartTimeNanos = MonotonicClock.approxTime.now();
+    }
+
+    /**
+     * Sets the context of the query.
+     * <p>
+     * Technically, both {@link ReadCtx} and {@link QueryContext} are per-query, so in a perfect world, we would pass
+     * the read context to the ctor, but the code is currently organised in such a way that {@link QueryContext} is
+     * created before {@link ReadCtx}, so this is a work-around to avoid refactorings that aren't completely justified
+     * otherwise.
+     * <p>
+     * Aslo, we store the {@link ReadCtx} here in the first place as a convenience because {@link QueryContext} is
+     * already passed down the methods of the search path, where we want to pass {@link ReadCtx} too.
+     */
+    public void setReadCtx(ReadCtx readCtx)
+    {
+        this.readCtx = readCtx;
+    }
+
+    public ReadCtx readCtx()
+    {
+        return readCtx;
     }
 
     public long totalQueryTimeNs()

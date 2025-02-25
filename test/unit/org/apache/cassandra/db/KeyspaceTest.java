@@ -40,6 +40,7 @@ import org.apache.cassandra.exceptions.UncheckedInternalRequestExecutionExceptio
 import org.apache.cassandra.exceptions.UnknownKeyspaceException;
 import org.apache.cassandra.io.sstable.format.RowIndexEntry;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.metrics.ClearableHistogram;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -416,7 +417,7 @@ public class KeyspaceTest extends CQLTester
 
         // verify that we do indeed have multiple index entries
         SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
-        RowIndexEntry indexEntry = sstable.getPosition(Util.dk("0"), SSTableReader.Operator.EQ);
+        RowIndexEntry indexEntry = sstable.getPosition(Util.dk("0"), SSTableReader.Operator.EQ, ReadCtx.FOR_TEST);
         assert indexEntry.columnsIndexCount() > 2;
 
         validateSliceLarge(cfs);

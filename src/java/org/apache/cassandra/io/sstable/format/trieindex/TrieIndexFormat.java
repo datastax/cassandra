@@ -47,6 +47,7 @@ import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
@@ -192,7 +193,7 @@ public class TrieIndexFormat implements SSTableFormat
     {
         @SuppressWarnings("IOResourceOpenedButNotSafelyClosed")
         @Override
-        public PartitionIndexIterator indexIterator(Descriptor desc, TableMetadata metadata)
+        public PartitionIndexIterator indexIterator(Descriptor desc, TableMetadata metadata, ReadCtx ctx)
         {
             IPartitioner partitioner = metadata.partitioner;
             boolean compressedData = desc.fileFor(Component.COMPRESSION_INFO).exists();
@@ -203,14 +204,15 @@ public class TrieIndexFormat implements SSTableFormat
                 try (FileHandle.Builder piBuilder = defaultIndexHandleBuilder(desc, Component.PARTITION_INDEX);
                      FileHandle.Builder riBuilder = defaultIndexHandleBuilder(desc, Component.ROW_INDEX);
                      FileHandle.Builder dBuilder = defaultDataHandleBuilder(desc, stats.zeroCopyMetadata).compressed(compressedData);
-                     PartitionIndex index = PartitionIndex.load(piBuilder, partitioner, false, stats.zeroCopyMetadata, desc.version.getByteComparableVersion());
+                     PartitionIndex index = PartitionIndex.load(piBuilder, partitioner, false, stats.zeroCopyMetadata, desc.version.getByteComparableVersion(), ctx);
                      FileHandle dFile = dBuilder.complete();
                      FileHandle riFile = riBuilder.complete())
                 {
                     return new PartitionIterator(index.sharedCopy(),
                                                  partitioner,
                                                  riFile.sharedCopy(),
-                                                 dFile.sharedCopy())
+                                                 dFile.sharedCopy(),
+                                                 ctx)
                             .closeHandles();
                 }
             }

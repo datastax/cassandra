@@ -27,18 +27,19 @@ import io.github.jbellis.jvector.util.Bits;
 import io.github.jbellis.jvector.util.SparseBits;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
 import org.apache.cassandra.index.sai.utils.SingletonIntIterator;
+import org.apache.cassandra.io.util.ReadCtx;
 
 public interface OnDiskOrdinalsMap extends AutoCloseable
 {
     /** maps from vector ordinals returned by index search to rowids in the sstable */
-    RowIdsView getRowIdsView();
+    RowIdsView getRowIdsView(ReadCtx ctx);
 
     default Bits ignoringDeleted(Bits acceptBits) {
         return acceptBits;
     }
 
     /** maps from rowids to their associated ordinals, for setting up the ordinals-to-accept in a restricted search */
-    OrdinalsView getOrdinalsView();
+    OrdinalsView getOrdinalsView(ReadCtx ctx);
 
     void close();
 

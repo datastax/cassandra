@@ -50,6 +50,7 @@ import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.SSTableMultiWriter;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.AsyncStreamingInputPlus;
 import org.apache.cassandra.net.AsyncStreamingOutputPlus;
@@ -157,7 +158,7 @@ public class ZeroCopyStreamingBenchmark
                                  .withSSTableVersion(sstable.descriptor.version)
                                  .withSSTableLevel(0)
                                  .withEstimatedKeys(sstable.estimatedKeys())
-                                 .withSections(sstable.getPositionsForRanges(requestedRanges))
+                                 .withSections(sstable.getPositionsForRanges(requestedRanges, ReadCtx.FOR_TEST))
                                  .withSerializationHeader(sstable.header.toComponent())
                                  .withTableId(sstable.metadata().id)
                                  .build();

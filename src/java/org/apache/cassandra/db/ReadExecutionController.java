@@ -25,6 +25,8 @@ import com.google.common.annotations.VisibleForTesting;
 import com.codahale.metrics.Histogram;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.index.Index;
+import org.apache.cassandra.io.storage.StorageProvider;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.metrics.DecayingEstimatedHistogramReservoir;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.tracing.Tracing;
@@ -53,6 +55,8 @@ public class ReadExecutionController implements AutoCloseable
     private int oldestUnrepairedTombstone = Integer.MAX_VALUE;
 
     public final Histogram sstablesScannedPerRowRead;
+
+    private final ReadCtx readCtx;
 
     ReadExecutionController(ReadCommand command,
                             OpOrder.Group baseOp,
@@ -89,6 +93,13 @@ public class ReadExecutionController implements AutoCloseable
 
         if (Tracing.isTracing())
             Tracing.instance.setRangeQuery(isRangeCommand());
+
+        this.readCtx = StorageProvider.instance.readCtxFor(command);
+    }
+
+    public ReadCtx readCtx()
+    {
+        return readCtx;
     }
 
     public boolean isRangeCommand()

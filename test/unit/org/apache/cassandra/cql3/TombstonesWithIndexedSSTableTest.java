@@ -30,6 +30,7 @@ import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.big.BigTableRowIndexEntry;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
 import static org.hamcrest.Matchers.is;
@@ -88,10 +89,10 @@ public class TombstonesWithIndexedSSTableTest extends CQLTester
             {
                 // The line below failed with key caching off (CASSANDRA-11158)
                 @SuppressWarnings("unchecked")
-                BigTableRowIndexEntry indexEntry = (BigTableRowIndexEntry) sstable.getPosition(dk, SSTableReader.Operator.EQ);
+                BigTableRowIndexEntry indexEntry = (BigTableRowIndexEntry) sstable.getPosition(dk, SSTableReader.Operator.EQ, ReadCtx.FOR_TEST);
                 if (indexEntry != null && indexEntry.isIndexed())
                 {
-                    try (BigTableRowIndexEntry.IndexInfoRetriever infoRetriever = indexEntry.openWithIndex(sstable.getIndexFile()))
+                    try (BigTableRowIndexEntry.IndexInfoRetriever infoRetriever = indexEntry.openWithIndex(sstable.getIndexFile(), ReadCtx.FOR_TEST))
                     {
                         ClusteringPrefix<?> firstName = infoRetriever.columnsIndex(1).firstName;
                         if (firstName.kind().isBoundary())

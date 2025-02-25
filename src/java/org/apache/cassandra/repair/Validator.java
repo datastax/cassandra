@@ -41,6 +41,8 @@ import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.rows.UnfilteredRowIterators;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.io.storage.StorageProvider;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
@@ -108,7 +110,7 @@ public class Validator implements Runnable
         this.evenTreeDistribution = evenTreeDistribution;
     }
 
-    public void prepare(ColumnFamilyStore cfs, MerkleTrees tree)
+    public void prepare(ColumnFamilyStore cfs, MerkleTrees tree, ReadCtx ctx)
     {
         this.trees = tree;
 
@@ -124,7 +126,7 @@ public class Validator implements Runnable
 
             for (Range<Token> range : tree.ranges())
             {
-                for (DecoratedKey sample : cfs.keySamples(range))
+                for (DecoratedKey sample : cfs.keySamples(range, ctx))
                 {
                     assert range.contains(sample.getToken()) : "Token " + sample.getToken() + " is not within range " + desc.ranges;
                     keys.add(sample);

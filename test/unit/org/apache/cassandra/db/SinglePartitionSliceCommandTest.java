@@ -45,6 +45,7 @@ import org.apache.cassandra.db.lifecycle.View;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.Util;
@@ -716,7 +717,7 @@ public class SinglePartitionSliceCommandTest
     {
         public TestIteratorWithLowerBound(DecoratedKey partitionKey, SSTableReader sstable, Slices slices, boolean isReverseOrder, ColumnFilter selectedColumns, SSTableReadsListener listener)
         {
-            super(partitionKey, sstable, slices, isReverseOrder, selectedColumns, listener);
+            super(partitionKey, sstable, slices, isReverseOrder, selectedColumns, listener, ReadCtx.FOR_TEST);
         }
 
         boolean lowerBoundApplicable()

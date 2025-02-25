@@ -87,6 +87,7 @@ import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.MmappedRegions;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.schema.CachingParams;
 import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.schema.KeyspaceParams;
@@ -198,7 +199,7 @@ public class SSTableReaderTest
         // confirm that positions increase continuously
         SSTableReader sstable = store.getLiveSSTables().iterator().next();
         long previous = -1;
-        for (PartitionPositionBounds section : sstable.getPositionsForRanges(ranges))
+        for (PartitionPositionBounds section : sstable.getPositionsForRanges(ranges, ReadCtx.FOR_TEST))
         {
             assert previous <= section.lowerPosition : previous + " ! < " + section.lowerPosition;
             assert section.lowerPosition < section.upperPosition : section.lowerPosition + " ! < " + section.upperPosition;
@@ -247,7 +248,7 @@ public class SSTableReaderTest
     private void verifyEstimatedKeysAndKeySamples(SSTableReader sstable, Range<Token> range)
     {
         List<DecoratedKey> expectedKeys = new ArrayList<>();
-        try (ISSTableScanner scanner = sstable.getScanner())
+        try (ISSTableScanner scanner = sstable.getScanner(ReadCtx.FOR_TEST))
         {
             while (scanner.hasNext())
             {
@@ -260,13 +261,13 @@ public class SSTableReaderTest
         }
 
         // check estimated key
-        long estimated = sstable.estimatedKeysForRanges(Collections.singleton(range));
+        long estimated = sstable.estimatedKeysForRanges(Collections.singleton(range), ReadCtx.FOR_TEST);
         assertTrue("Range: " + range + " having " + expectedKeys.size() + " partitions, but estimated "
                    + estimated, closeEstimation(expectedKeys.size(), estimated));
 
         // check key samples
         List<DecoratedKey> sampledKeys = new ArrayList<>();
-        sstable.getKeySamples(range).forEach(sampledKeys::add);
+        sstable.getKeySamples(range, ReadCtx.FOR_TEST).forEach(sampledKeys::add);
 
         assertTrue("Range: " + range + " having " + expectedKeys + " keys, but keys sampled: "
                    + sampledKeys, expectedKeys.containsAll(sampledKeys));
@@ -458,7 +459,7 @@ public class SSTableReaderTest
 
     long onDiskSizeForRanges(SSTableReader sstable, Collection<Range<Token>> ranges)
     {
-        return sstable.onDiskSizeForPartitionPositions(sstable.getPositionsForRanges(ranges));
+        return sstable.onDiskSizeForPartitionPositions(sstable.getPositionsForRanges(ranges, ReadCtx.FOR_TEST));
     }
 
     private Token t(String key)
@@ -511,7 +512,7 @@ public class SSTableReaderTest
             for (int j = 0; j < 10000; j += 2)
             {
                 DecoratedKey dk = Util.dk(String.valueOf(j));
-                FileDataInput file = sstable.getFileDataInput(sstable.getPosition(dk, SSTableReader.Operator.EQ).position);
+                FileDataInput file = sstable.getFileDataInput(ReadCtx.FOR_TEST, sstable.getPosition(dk, SSTableReader.Operator.EQ, ReadCtx.FOR_TEST).position);
                 DecoratedKey keyInDisk = sstable.decorateKey(ByteBufferUtil.readWithShortLength(file));
                 assert keyInDisk.equals(dk) : String.format("%s != %s in %s", keyInDisk, dk, file.getFile());
             }
@@ -520,7 +521,7 @@ public class SSTableReaderTest
             for (int j = 1; j < 11000; j += 2)
             {
                 DecoratedKey dk = Util.dk(String.valueOf(j));
-                assert sstable.getPosition(dk, SSTableReader.Operator.EQ) == null;
+                assert sstable.getPosition(dk, SSTableReader.Operator.EQ, ReadCtx.FOR_TEST) == null;
             }
         }
         finally
@@ -606,12 +607,12 @@ public class SSTableReaderTest
         CompactionManager.instance.performMaximal(store, false);
 
         SSTableReader sstable = store.getLiveSSTables().iterator().next();
-        long p2 = sstable.getPosition(k(2), SSTableReader.Operator.EQ).position;
-        long p3 = sstable.getPosition(k(3), SSTableReader.Operator.EQ).position;
-        long p6 = sstable.getPosition(k(6), SSTableReader.Operator.EQ).position;
-        long p7 = sstable.getPosition(k(7), SSTableReader.Operator.EQ).position;
+        long p2 = sstable.getPosition(k(2), SSTableReader.Operator.EQ, ReadCtx.FOR_TEST).position;
+        long p3 = sstable.getPosition(k(3), SSTableReader.Operator.EQ, ReadCtx.FOR_TEST).position;
+        long p6 = sstable.getPosition(k(6), SSTableReader.Operator.EQ, ReadCtx.FOR_TEST).position;
+        long p7 = sstable.getPosition(k(7), SSTableReader.Operator.EQ, ReadCtx.FOR_TEST).position;
 
-        PartitionPositionBounds p = sstable.getPositionsForRanges(makeRanges(t(2), t(6))).get(0);
+        PartitionPositionBounds p = sstable.getPositionsForRanges(makeRanges(t(2), t(6)), ReadCtx.FOR_TEST).get(0);
 
         // range are start exclusive so we should start at 3
         assert p.lowerPosition == p3;
@@ -661,19 +662,19 @@ public class SSTableReaderTest
 
         SSTableReader sstable = store.getLiveSSTables().iterator().next();
         // existing, non-cached key
-        sstable.getPosition(k(2), SSTableReader.Operator.EQ);
+        sstable.getPosition(k(2), SSTableReader.Operator.EQ, ReadCtx.FOR_TEST);
         assertEquals(1, sstable.getKeyCacheRequest());
         assertEquals(0, sstable.getKeyCacheHit());
         // existing, cached key
         assertEquals(1, store.getBloomFilterTracker().getTruePositiveCount());
-        sstable.getPosition(k(2), SSTableReader.Operator.EQ);
+        sstable.getPosition(k(2), SSTableReader.Operator.EQ, ReadCtx.FOR_TEST);
         assertEquals(2, sstable.getKeyCacheRequest());
         assertEquals(1, sstable.getKeyCacheHit());
         // non-existing key (it is specifically chosen to not be rejected by Bloom Filter check)
-        sstable.getPosition(k(14), SSTableReader.Operator.EQ);
+        sstable.getPosition(k(14), SSTableReader.Operator.EQ, ReadCtx.FOR_TEST);
         assertEquals(3, sstable.getKeyCacheRequest());
         assertEquals(2, store.getBloomFilterTracker().getTruePositiveCount());
-        sstable.getPosition(k(15), SSTableReader.Operator.EQ);
+        sstable.getPosition(k(15), SSTableReader.Operator.EQ, ReadCtx.FOR_TEST);
         assertEquals(1, sstable.getKeyCacheHit());
     }
 
@@ -700,32 +701,32 @@ public class SSTableReaderTest
         SSTableReader sstable = store.getLiveSSTables().iterator().next();
         // the keys are specifically chosen to cover certain use cases
         // existing key is read from index
-        sstable.getPosition(k(2), SSTableReader.Operator.EQ);
+        sstable.getPosition(k(2), SSTableReader.Operator.EQ, ReadCtx.FOR_TEST);
         assertEquals(1, sstable.getBloomFilterTracker().getTruePositiveCount());
         assertEquals(0, sstable.getBloomFilterTracker().getTrueNegativeCount());
         assertEquals(0, sstable.getBloomFilterTracker().getFalsePositiveCount());
         // existing key is read from Cache Key
-        sstable.getPosition(k(2), SSTableReader.Operator.EQ);
+        sstable.getPosition(k(2), SSTableReader.Operator.EQ, ReadCtx.FOR_TEST);
         assertEquals(2, sstable.getBloomFilterTracker().getTruePositiveCount());
         assertEquals(0, sstable.getBloomFilterTracker().getTrueNegativeCount());
         assertEquals(0, sstable.getBloomFilterTracker().getFalsePositiveCount());
         // non-existing key is rejected by Bloom Filter check
-        sstable.getPosition(k(10), SSTableReader.Operator.EQ);
+        sstable.getPosition(k(10), SSTableReader.Operator.EQ, ReadCtx.FOR_TEST);
         assertEquals(2, sstable.getBloomFilterTracker().getTruePositiveCount());
         assertEquals(1, sstable.getBloomFilterTracker().getTrueNegativeCount());
         assertEquals(0, sstable.getBloomFilterTracker().getFalsePositiveCount());
         // non-existing key is rejected by sstable keys range check
-        sstable.getPosition(k(99), SSTableReader.Operator.EQ);
+        sstable.getPosition(k(99), SSTableReader.Operator.EQ, ReadCtx.FOR_TEST);
         assertEquals(2, sstable.getBloomFilterTracker().getTruePositiveCount());
         assertEquals(1, sstable.getBloomFilterTracker().getTrueNegativeCount());
         assertEquals(1, sstable.getBloomFilterTracker().getFalsePositiveCount());
         // non-existing key is rejected by index interval check
-        sstable.getPosition(k(14), SSTableReader.Operator.EQ);
+        sstable.getPosition(k(14), SSTableReader.Operator.EQ, ReadCtx.FOR_TEST);
         assertEquals(2, store.getBloomFilterTracker().getTruePositiveCount());
         assertEquals(1, sstable.getBloomFilterTracker().getTrueNegativeCount());
         assertEquals(2, sstable.getBloomFilterTracker().getFalsePositiveCount());
         // non-existing key is rejected by index lookup check
-        sstable.getPosition(k(807), SSTableReader.Operator.EQ);
+        sstable.getPosition(k(807), SSTableReader.Operator.EQ, ReadCtx.FOR_TEST);
         assertEquals(2, sstable.getBloomFilterTracker().getTruePositiveCount());
         assertEquals(1, sstable.getBloomFilterTracker().getTrueNegativeCount());
         assertEquals(3, sstable.getBloomFilterTracker().getFalsePositiveCount());
@@ -900,7 +901,7 @@ public class SSTableReaderTest
         Set<SSTableReader> liveSSTables = store.getLiveSSTables();
         assertEquals("The table should have only one sstable", 1, liveSSTables.size());
 
-        ISSTableScanner scanner = liveSSTables.iterator().next().getScanner(new Range<>(t(0), t(1)));
+        ISSTableScanner scanner = liveSSTables.iterator().next().getScanner(new Range<>(t(0), t(1)), ReadCtx.FOR_TEST);
         assertEquals(0, scanner.getLengthInBytes());
     }
 
@@ -932,7 +933,7 @@ public class SSTableReaderTest
         ranges.add(new Range<Token>(t(98), t(99)));
 
         SSTableReader sstable = store.getLiveSSTables().iterator().next();
-        List<PartitionPositionBounds> sections = sstable.getPositionsForRanges(ranges);
+        List<PartitionPositionBounds> sections = sstable.getPositionsForRanges(ranges, ReadCtx.FOR_TEST);
         assert sections.size() == 1 : "Expected to find range in sstable" ;
 
         // re-open the same sstable as it would be during bulk loading
@@ -940,7 +941,7 @@ public class SSTableReaderTest
         if (sstable.components().contains(Component.COMPRESSION_INFO))
             components.add(Component.COMPRESSION_INFO);
         SSTableReader bulkLoaded = sstable.descriptor.getFormat().getReaderFactory().openForBatch(sstable.descriptor, components, store.metadata);
-        sections = bulkLoaded.getPositionsForRanges(ranges);
+        sections = bulkLoaded.getPositionsForRanges(ranges, ReadCtx.FOR_TEST);
         assert sections.size() == 1 : "Expected to find range in sstable opened for bulk loading";
         bulkLoaded.selfRef().release();
     }
@@ -988,7 +989,7 @@ public class SSTableReaderTest
                 public void run()
                 {
                     Iterable<DecoratedKey> results = store.keySamples(
-                            new Range<>(sstable.getPartitioner().getMinimumToken(), sstable.getPartitioner().getToken(key)));
+                            new Range<>(sstable.getPartitioner().getMinimumToken(), sstable.getPartitioner().getToken(key)), ReadCtx.FOR_TEST);
                     assertTrue(results.iterator().hasNext());
                 }
             }));

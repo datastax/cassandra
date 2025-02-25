@@ -118,6 +118,12 @@ public class WrappingRebuffererTest
             return 0;
         }
 
+        @Override
+        public ReadCtx readCtx()
+        {
+            return ReadCtx.FOR_TEST;
+        }
+
         public BufferHolder rebuffer(long position)
         {
             offset = position;

@@ -31,6 +31,7 @@ import org.apache.cassandra.cache.ChunkCache;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.Directories;
+import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
@@ -41,6 +42,7 @@ import org.apache.cassandra.io.sstable.metadata.ZeroCopyMetadata;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.PathUtils;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
@@ -218,6 +220,13 @@ public interface StorageProvider
      */
     FileHandle.Builder indexBuildTimeFileHandleBuilderFor(IndexComponent.ForRead component);
 
+    ReadCtx readCtxFor(ReadCtx.Kind kind);
+
+    default ReadCtx readCtxFor(ReadCommand command)
+    {
+        return readCtxFor(ReadCtx.Kind.USER_REQUEST);
+    }
+
     class DefaultProvider implements StorageProvider
     {
         @Override
@@ -342,6 +351,12 @@ public interface StorageProvider
             // By default, no difference between accesses "at flush time" and "at query time", but subclasses may need
             // to differenciate both.
             return fileHandleBuilderFor(component);
+        }
+
+        @Override
+        public ReadCtx readCtxFor(ReadCtx.Kind kind)
+        {
+            return new ReadCtx.Default(kind);
         }
     }
 }

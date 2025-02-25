@@ -53,7 +53,9 @@ import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.sstable.SSTableIdFactory;
 import org.apache.cassandra.io.sstable.SSTableWatcher;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.utils.CloseableIterator;
 
 /**
@@ -96,7 +98,10 @@ public class SSTableIndex
             return new EmptyIndex();
         }
 
-        return perIndexComponents.onDiskFormat().newSearchableIndex(sstableContext, perIndexComponents);
+        try (ReadCtx ctx = StorageProvider.instance.readCtxFor(ReadCtx.Kind.INDEX_SEARCHER_CREATION))
+        {
+            return perIndexComponents.onDiskFormat().newSearchableIndex(sstableContext, perIndexComponents, ctx);
+        }
     }
 
     public IndexContext getIndexContext()
@@ -210,7 +215,7 @@ public class SSTableIndex
                                               QueryContext context,
                                               boolean defer) throws IOException
     {
-        KeyRangeIterator allKeys = allSSTableKeys(keyRange);
+        KeyRangeIterator allKeys = allSSTableKeys(keyRange, context.readCtx());
         if (TypeUtil.supportsRounding(expression.validator))
         {
             return allKeys;
@@ -346,8 +351,8 @@ public class SSTableIndex
                           .toString();
     }
 
-    protected final KeyRangeIterator allSSTableKeys(AbstractBounds<PartitionPosition> keyRange) throws IOException
+    protected final KeyRangeIterator allSSTableKeys(AbstractBounds<PartitionPosition> keyRange, ReadCtx readCtx) throws IOException
     {
-        return PrimaryKeyMapIterator.create(sstableContext, keyRange);
+        return PrimaryKeyMapIterator.create(sstableContext, keyRange, readCtx);
     }
 }

@@ -52,6 +52,7 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.lucene.store.BufferedChecksumIndexInput;
@@ -647,15 +648,15 @@ public class IndexDescriptor
             }
 
             @Override
-            public IndexInput openInput()
+            public IndexInput openInput(ReadCtx ctx)
             {
-                return IndexFileUtils.instance.openBlockingInput(createFileHandle());
+                return IndexFileUtils.instance.openBlockingInput(createFileHandle(), ctx);
             }
 
             @Override
-            public ChecksumIndexInput openCheckSummedInput()
+            public ChecksumIndexInput openCheckSummedInput(ReadCtx ctx)
             {
-                var indexInput = openInput();
+                var indexInput = openInput(ctx);
                 return checksumIndexInput(indexInput);
             }
 

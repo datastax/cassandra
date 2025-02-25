@@ -60,6 +60,7 @@ import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.TableMetadata;
@@ -118,8 +119,8 @@ public class ThrottledUnfilteredIteratorTest extends CQLTester
         assertEquals(1, cfs.getLiveSSTables().size());
         SSTableReader reader = cfs.getLiveSSTables().iterator().next();
 
-        try (ISSTableScanner scanner = reader.getScanner();
-                CloseableIterator<UnfilteredRowIterator> throttled = ThrottledUnfilteredIterator.throttle(scanner, 100))
+        try (ISSTableScanner scanner = reader.getScanner(ReadCtx.FOR_TEST);
+             CloseableIterator<UnfilteredRowIterator> throttled = ThrottledUnfilteredIterator.throttle(scanner, 100))
         {
             assertTrue(throttled.hasNext());
             UnfilteredRowIterator iterator = throttled.next();
@@ -129,7 +130,7 @@ public class ThrottledUnfilteredIteratorTest extends CQLTester
         }
 
         // test opt out
-        try (ISSTableScanner scanner = reader.getScanner();
+        try (ISSTableScanner scanner = reader.getScanner(ReadCtx.FOR_TEST);
                 CloseableIterator<UnfilteredRowIterator> throttled = ThrottledUnfilteredIterator.throttle(scanner, 0))
         {
             assertEquals(scanner, throttled);
@@ -153,7 +154,7 @@ public class ThrottledUnfilteredIteratorTest extends CQLTester
         assertEquals(1, cfs.getLiveSSTables().size());
         SSTableReader reader = cfs.getLiveSSTables().iterator().next();
 
-        try (ISSTableScanner scanner = reader.getScanner();
+        try (ISSTableScanner scanner = reader.getScanner(ReadCtx.FOR_TEST);
              CloseableIterator<UnfilteredRowIterator> throttled = ThrottledUnfilteredIterator.throttle(scanner, 100))
         {
             assertTrue(throttled.hasNext());
@@ -164,7 +165,7 @@ public class ThrottledUnfilteredIteratorTest extends CQLTester
         }
 
         // test opt out
-        try (ISSTableScanner scanner = reader.getScanner();
+        try (ISSTableScanner scanner = reader.getScanner(ReadCtx.FOR_TEST);
              CloseableIterator<UnfilteredRowIterator> throttled = ThrottledUnfilteredIterator.throttle(scanner, 0))
         {
             assertEquals(scanner, throttled);
@@ -211,7 +212,7 @@ public class ThrottledUnfilteredIteratorTest extends CQLTester
         assertEquals(1, cfs.getLiveSSTables().size());
         SSTableReader reader = cfs.getLiveSSTables().iterator().next();
 
-        try (ISSTableScanner scanner = reader.getScanner())
+        try (ISSTableScanner scanner = reader.getScanner(ReadCtx.FOR_TEST))
         {
             try (UnfilteredRowIterator rowIterator = scanner.next())
             {
@@ -223,7 +224,7 @@ public class ThrottledUnfilteredIteratorTest extends CQLTester
                 // test different throttle
                 for (Integer throttle : Arrays.asList(2, 3, 4, 5, 11, 41, 99, 1000, 10001))
                 {
-                    try (ISSTableScanner scannerForThrottle = reader.getScanner())
+                    try (ISSTableScanner scannerForThrottle = reader.getScanner(ReadCtx.FOR_TEST))
                     {
                         assertTrue(scannerForThrottle.hasNext());
                         try (UnfilteredRowIterator rowIteratorForThrottle = scannerForThrottle.next())

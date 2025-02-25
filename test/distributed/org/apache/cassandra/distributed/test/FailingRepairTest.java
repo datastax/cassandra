@@ -69,6 +69,7 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
 import org.apache.cassandra.io.sstable.format.ScrubPartitionIterator;
 import org.apache.cassandra.io.util.ChannelProxy;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.repair.RepairParallelism;
 import org.apache.cassandra.repair.messages.RepairOption;
@@ -287,27 +288,31 @@ public class FailingRepairTest extends TestBaseImpl implements Serializable
         }
 
         @Override
-        public PartitionIndexIterator allKeysIterator() throws IOException
+        public PartitionIndexIterator allKeysIterator(ReadCtx ctx) throws IOException
         {
             throw new IOException("Fail");
         }
 
-        public ISSTableScanner getScanner()
+        @Override
+        public ISSTableScanner getScanner(ReadCtx ctx)
         {
             return new FailingISSTableScanner();
         }
 
-        public ISSTableScanner getScanner(Collection<Range<Token>> ranges)
+        @Override
+        public ISSTableScanner getScanner(Collection<Range<Token>> ranges, ReadCtx ctx)
         {
             return new FailingISSTableScanner();
         }
 
-        public ISSTableScanner getScanner(Iterator<AbstractBounds<PartitionPosition>> rangeIterator)
+        @Override
+        public ISSTableScanner getScanner(Iterator<AbstractBounds<PartitionPosition>> rangeIterator, ReadCtx ctx)
         {
             return new FailingISSTableScanner();
         }
 
-        public ISSTableScanner getScanner(ColumnFilter columns, DataRange dataRange, SSTableReadsListener listener)
+        @Override
+        public ISSTableScanner getScanner(ColumnFilter columns, DataRange dataRange, SSTableReadsListener listener, ReadCtx ctx)
         {
             return new FailingISSTableScanner();
         }
@@ -324,7 +329,7 @@ public class FailingRepairTest extends TestBaseImpl implements Serializable
         }
 
         @Override
-        public ScrubPartitionIterator scrubPartitionsIterator() throws IOException
+        public ScrubPartitionIterator scrubPartitionsIterator(ReadCtx ctx) throws IOException
         {
             return null;
         }

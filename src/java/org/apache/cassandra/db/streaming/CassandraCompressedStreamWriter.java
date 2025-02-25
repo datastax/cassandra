@@ -94,7 +94,7 @@ public class CassandraCompressedStreamWriter extends CassandraStreamWriter
 
                     out.writeToChannel(bufferSupplier -> {
                         ByteBuffer outBuffer = bufferSupplier.get(toTransfer);
-                        long read = fc.read(outBuffer, position);
+                        long read = fc.read(outBuffer, position, null);
                         assert read == toTransfer : String.format("could not read required number of bytes from file to be streamed: read %d bytes, wanted %d bytes", read, toTransfer);
                         outBuffer.flip();
                     }, limiter);

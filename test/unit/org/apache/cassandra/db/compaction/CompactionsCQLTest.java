@@ -55,6 +55,7 @@ import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.schema.CompactionParams;
 import org.apache.cassandra.service.StorageService;
@@ -777,7 +778,7 @@ public class CompactionsCQLTest extends CQLTester
     private void assertTombstones(SSTableReader sstable, boolean expectTS)
     {
         boolean foundTombstone = false;
-        try(ISSTableScanner scanner = sstable.getScanner())
+        try(ISSTableScanner scanner = sstable.getScanner(ReadCtx.FOR_TEST))
         {
             while (scanner.hasNext())
             {

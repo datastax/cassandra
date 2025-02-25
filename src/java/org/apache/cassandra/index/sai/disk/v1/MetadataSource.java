@@ -30,6 +30,7 @@ import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.io.IndexInput;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.index.sai.disk.oldlucene.ByteArrayIndexInput;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.lucene.store.ChecksumIndexInput;
 
 @NotThreadSafe
@@ -44,10 +45,10 @@ public class MetadataSource
         this.components = components;
     }
 
-    public static MetadataSource loadMetadata(IndexComponents.ForRead components) throws IOException
+    public static MetadataSource loadMetadata(IndexComponents.ForRead components, ReadCtx ctx) throws IOException
     {
         IndexComponent.ForRead metadataComponent = components.get(components.metadataComponent());
-        try (var input = metadataComponent.openCheckSummedInput())
+        try (var input = metadataComponent.openCheckSummedInput(ctx))
         {
             return MetadataSource.load(input, components.version(), metadataComponent.byteOrder());
         }

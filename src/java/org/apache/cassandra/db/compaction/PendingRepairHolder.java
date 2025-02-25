@@ -39,6 +39,7 @@ import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
 import org.apache.cassandra.io.sstable.SSTableMultiWriter;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.schema.CompactionParams;
 import org.apache.cassandra.service.ActiveRepairService;
 
@@ -218,7 +219,7 @@ public class PendingRepairHolder extends AbstractStrategyHolder
     }
 
     @Override
-    public List<ISSTableScanner> getScanners(GroupedSSTableContainer<SSTableReader> sstables, Collection<Range<Token>> ranges)
+    public List<ISSTableScanner> getScanners(GroupedSSTableContainer<SSTableReader> sstables, Collection<Range<Token>> ranges, ReadCtx ctx)
     {
         List<ISSTableScanner> scanners = new ArrayList<>(managers.size());
         for (int i = 0; i < managers.size(); i++)
@@ -226,7 +227,7 @@ public class PendingRepairHolder extends AbstractStrategyHolder
             if (sstables.isGroupEmpty(i))
                 continue;
 
-            scanners.addAll(managers.get(i).getScanners(sstables.getGroup(i), ranges));
+            scanners.addAll(managers.get(i).getScanners(sstables.getGroup(i), ranges, ctx));
         }
         return scanners;
     }

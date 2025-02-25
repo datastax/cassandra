@@ -43,6 +43,7 @@ import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.SchemaTestUtil;
 import org.apache.cassandra.schema.TableMetadata;
@@ -249,7 +250,8 @@ public class TTLExpiryTest
         SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
         ISSTableScanner scanner = sstable.getScanner(ColumnFilter.all(cfs.metadata()),
                                                      DataRange.allData(cfs.getPartitioner()),
-                                                     SSTableReadsListener.NOOP_LISTENER);
+                                                     SSTableReadsListener.NOOP_LISTENER,
+                                                     ReadCtx.FOR_TEST);
         assertTrue(scanner.hasNext());
         while(scanner.hasNext())
         {

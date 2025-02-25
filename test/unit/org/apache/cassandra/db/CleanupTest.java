@@ -39,6 +39,7 @@ import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.schema.ColumnMetadata;
@@ -423,7 +424,7 @@ public class CleanupTest
         // check all test cases
         for (Map.Entry<Boolean, List<Range<Token>>> testCase : testCases)
         {
-            assertEquals(testCase.getKey(), CompactionManager.needsCleanup(ssTable, testCase.getValue()));
+            assertEquals(testCase.getKey(), CompactionManager.needsCleanup(ssTable, testCase.getValue(), ReadCtx.FOR_TEST));
         }
     }
     private static BytesToken token(byte ... value)

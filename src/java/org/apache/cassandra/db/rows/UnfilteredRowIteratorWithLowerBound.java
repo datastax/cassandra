@@ -35,6 +35,7 @@ import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
 import org.apache.cassandra.io.sstable.format.big.BigTableRowIndexEntry;
 import org.apache.cassandra.io.sstable.format.big.IndexInfo;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.schema.TableMetadata;
 
 /**
@@ -52,6 +53,7 @@ public class UnfilteredRowIteratorWithLowerBound extends LazilyInitializedUnfilt
     private final boolean isReverseOrder;
     private final ColumnFilter selectedColumns;
     private final SSTableReadsListener listener;
+    private final ReadCtx ctx;
     private Unfiltered lowerBoundMarker;
     enum State
     {
@@ -66,9 +68,10 @@ public class UnfilteredRowIteratorWithLowerBound extends LazilyInitializedUnfilt
                                                SSTableReader sstable,
                                                ClusteringIndexFilter filter,
                                                ColumnFilter selectedColumns,
-                                               SSTableReadsListener listener)
+                                               SSTableReadsListener listener,
+                                               ReadCtx ctx)
     {
-        this(partitionKey, sstable, filter.getSlices(sstable.metadata()), filter.isReversed(), selectedColumns, listener);
+        this(partitionKey, sstable, filter.getSlices(sstable.metadata()), filter.isReversed(), selectedColumns, listener, ctx);
     }
 
     public UnfilteredRowIteratorWithLowerBound(DecoratedKey partitionKey,
@@ -76,7 +79,8 @@ public class UnfilteredRowIteratorWithLowerBound extends LazilyInitializedUnfilt
                                                Slices slices,
                                                boolean isReverseOrder,
                                                ColumnFilter selectedColumns,
-                                               SSTableReadsListener listener)
+                                               SSTableReadsListener listener,
+                                               ReadCtx ctx)
     {
         super(partitionKey);
         this.sstable = sstable;
@@ -84,6 +88,7 @@ public class UnfilteredRowIteratorWithLowerBound extends LazilyInitializedUnfilt
         this.isReverseOrder = isReverseOrder;
         this.selectedColumns = selectedColumns;
         this.listener = listener;
+        this.ctx = ctx;
         state = State.LOWER_BOUND_NOT_REQUESTED;
     }
 
@@ -128,7 +133,7 @@ public class UnfilteredRowIteratorWithLowerBound extends LazilyInitializedUnfilt
     {
         @SuppressWarnings("resource") // 'iter' is added to iterators which is closed on exception, or through the closing of the final merged iterator
         UnfilteredRowIterator iter = RTBoundValidator.validate(
-            sstable.iterator(partitionKey(), slices, selectedColumns, isReverseOrder, listener),
+            sstable.iterator(partitionKey(), slices, selectedColumns, isReverseOrder, listener, ctx),
             RTBoundValidator.Stage.SSTABLE,
             false
         );
@@ -232,7 +237,7 @@ public class UnfilteredRowIteratorWithLowerBound extends LazilyInitializedUnfilt
         if (rowIndexEntry == null || !rowIndexEntry.indexOnHeap())
             return null;
 
-        try (BigTableRowIndexEntry.IndexInfoRetriever onHeapRetriever = rowIndexEntry.openWithIndex(null))
+        try (BigTableRowIndexEntry.IndexInfoRetriever onHeapRetriever = rowIndexEntry.openWithIndex(null, ctx))
         {
             IndexInfo column = onHeapRetriever.columnsIndex(isReverseOrder ? rowIndexEntry.columnsIndexCount() - 1 : 0);
             ClusteringPrefix<?> lowerBoundPrefix = isReverseOrder ? column.lastName : column.firstName;

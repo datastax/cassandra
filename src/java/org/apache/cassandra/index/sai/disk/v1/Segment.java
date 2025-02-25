@@ -43,6 +43,7 @@ import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.utils.CloseableIterator;
 
 /**
@@ -67,7 +68,7 @@ public class Segment implements Closeable
 
     private final IndexSearcher index;
 
-    public Segment(IndexContext indexContext, SSTableContext sstableContext, PerIndexFiles indexFiles, SegmentMetadata metadata) throws IOException
+    public Segment(IndexContext indexContext, SSTableContext sstableContext, PerIndexFiles indexFiles, SegmentMetadata metadata, ReadCtx searcherCreationContext) throws IOException
     {
         this.minKeyBound = metadata.minKey.token().minKeyBound();
         this.maxKeyBound = metadata.maxKey.token().maxKeyBound();
@@ -78,7 +79,7 @@ public class Segment implements Closeable
         this.metadata = metadata;
 
         var version = indexFiles.usedPerIndexComponents().version();
-        IndexSearcher searcher = version.onDiskFormat().newIndexSearcher(sstableContext, indexContext, indexFiles, metadata);
+        IndexSearcher searcher = version.onDiskFormat().newIndexSearcher(sstableContext, indexContext, indexFiles, metadata, searcherCreationContext);
         logger.info("Opened searcher {} for segment {} with row id meta ({},{},{},{}) for index [{}] on column [{}] at version {}",
                     searcher.getClass().getSimpleName(),
                     sstableContext.descriptor(),

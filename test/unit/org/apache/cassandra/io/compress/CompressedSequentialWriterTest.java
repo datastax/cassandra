@@ -43,6 +43,7 @@ import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.RandomAccessReader;
+import org.apache.cassandra.io.util.ReadCtx;
 import org.apache.cassandra.io.util.SequentialWriter;
 import org.apache.cassandra.io.util.SequentialWriterOption;
 import org.apache.cassandra.io.util.SequentialWriterTest;
@@ -163,7 +164,7 @@ public class CompressedSequentialWriterTest extends SequentialWriterTest
         assert f.exists();
         try (FileHandle.Builder builder = new FileHandle.Builder(f).withCompressionMetadata(new CompressionMetadata(new File(filename + ".metadata"), f.length(), true));
              FileHandle fh = builder.complete();
-             RandomAccessReader reader = fh.createReader())
+             RandomAccessReader reader = fh.createReader(ReadCtx.FOR_TEST))
         {
             assertEquals(dataPre.length + rawPost.length, reader.length());
             byte[] result = new byte[(int)reader.length()];
@@ -241,7 +242,7 @@ public class CompressedSequentialWriterTest extends SequentialWriterTest
         assert f.exists();
         try (FileHandle.Builder builder = new FileHandle.Builder(f).withCompressionMetadata(new CompressionMetadata(new File(filename + ".metadata"), f.length(), true));
              FileHandle fh = builder.complete();
-             RandomAccessReader reader = fh.createReader())
+             RandomAccessReader reader = fh.createReader(ReadCtx.FOR_TEST))
         {
             assertEquals(size, reader.length());
             byte[] result = new byte[(int)reader.length()];
