@@ -18,13 +18,17 @@
 package org.apache.cassandra.config;
 
 import java.lang.reflect.Constructor;
+import java.lang.reflect.InvocationTargetException;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import com.google.common.base.Objects;
 
 import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.utils.IntegerInterval;
 
 public class ParameterizedClass
 {
@@ -60,7 +64,7 @@ public class ParameterizedClass
 
     static public <K> K newInstance(ParameterizedClass parameterizedClass, List<String> searchPackages)
     {
-        Exception last = null;
+        Class<?> providerClass = null;
         if (searchPackages == null || searchPackages.isEmpty())
             searchPackages = Collections.singletonList("");
         for (String searchPackage : searchPackages)
@@ -70,32 +74,53 @@ public class ParameterizedClass
                 if (!searchPackage.isEmpty() && !searchPackage.endsWith("."))
                     searchPackage = searchPackage + '.';
                 String name = searchPackage + parameterizedClass.class_name;
-                Class<?> providerClass = Class.forName(name);
-                try
-                {
-                    Constructor<?> constructor = providerClass.getConstructor(Map.class);
-                    K instance = (K) constructor.newInstance(parameterizedClass.parameters);
-                    return instance;
-                }
-                catch (Exception constructorEx)
-                {
-                    //no-op
-                }
-                // fallback to no arg constructor if no params present
-                if (parameterizedClass.parameters == null || parameterizedClass.parameters.isEmpty())
-                {
-                    Constructor<?> constructor = providerClass.getConstructor();
-                    K instance = (K) constructor.newInstance();
-                    return instance;
-                }
+                providerClass = Class.forName(name);
             }
-            // there are about 5 checked exceptions that could be thrown here.
-            catch (Exception e)
+            catch (ClassNotFoundException e)
             {
-                last = e;
+                //no-op
             }
         }
-        throw new ConfigurationException("Unable to create parameterized class " + parameterizedClass.class_name, last);
+
+        if (providerClass == null)
+        {
+            String error = "Unable to find class " + parameterizedClass.class_name + " in packages [" +
+                           searchPackages.stream().map(p -> '"' + p + '"').collect(Collectors.joining(",")) + ']';
+            throw new ConfigurationException(error);
+        }
+
+        try
+        {
+            Constructor<?>[] declaredConstructors = providerClass.getDeclaredConstructors();
+
+            Constructor mapConstructor = Arrays.stream(declaredConstructors)
+                                               .filter(c -> c.getParameterTypes().length == 1 && c.getParameterTypes()[0].equals(Map.class))
+                                               .findFirst().orElse(null);
+            if (mapConstructor != null)
+                return (K) mapConstructor.newInstance(parameterizedClass.parameters);
+
+            // Falls-back to no-arg constructor if no parameters are present
+            if (parameterizedClass.parameters == null || parameterizedClass.parameters.isEmpty())
+            {
+                Constructor emptyConstructor = Arrays.stream(declaredConstructors)
+                                                     .filter(c -> c.getParameterTypes().length == 0)
+                                                     .findFirst().orElse(null);
+                if (emptyConstructor != null)
+                    return (K) emptyConstructor.newInstance();
+            }
+
+            throw new ConfigurationException("No valid constructor found for class " + parameterizedClass.class_name);
+        }
+        catch (IllegalAccessException|InstantiationException|ExceptionInInitializerError e)
+        {
+            throw new ConfigurationException("Unable to instantiate parameterized class " + parameterizedClass.class_name, e);
+        }
+        catch (InvocationTargetException e)
+        {
+            Throwable cause = e.getCause();
+            String error = "Failed to instantiate class " + parameterizedClass.class_name + ": " + cause.getMessage();
+            throw new ConfigurationException(error, cause);
+        }
     }
 
     @Override
