@@ -1301,10 +1301,15 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         int[] overlapsMap = new int[shardCount];
         shardManager.assignSSTablesToShardIndexes(sstables, null, shardCount,
                                                   (shardSSTables, shard) ->
-                                                  overlapsMap[shard] = Overlaps.maxOverlap(shardSSTables,
-                                                                                           CompactionSSTable.startsAfter,
-                                                                                           CompactionSSTable.firstKeyComparator,
-                                                                                           CompactionSSTable.lastKeyComparator));
+                                                  // Note: the shard index we are given is the global index, which includes
+                                                  // other arenas. The modulo below converts it to an index for the arena.
+                                                  // If an sstable extends outside a disk's region (because e.g. local
+                                                  // ownership changed and disk boundaries moved), it will be incorrectly
+                                                  // counted. This is not trivial to recognize here and is not corrected.
+                                                  overlapsMap[shard % shardCount] = Overlaps.maxOverlap(shardSSTables,
+                                                                                                        CompactionSSTable.startsAfter,
+                                                                                                        CompactionSSTable.firstKeyComparator,
+                                                                                                        CompactionSSTable.lastKeyComparator));
         // Indexes that do not have sstables are left with 0 overlaps.
         return overlapsMap;
     }
