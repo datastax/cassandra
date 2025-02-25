@@ -34,6 +34,9 @@ import com.datastax.driver.core.exceptions.AuthenticationException;
 import com.datastax.driver.core.exceptions.SyntaxError;
 import com.datastax.driver.core.exceptions.UnauthorizedException;
 import org.apache.cassandra.ServerTestUtils;
+import org.apache.cassandra.auth.CassandraAuthorizer;
+import org.apache.cassandra.auth.CassandraRoleManager;
+import org.apache.cassandra.auth.PasswordAuthenticator;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.OverrideConfigurationLoader;
 import org.apache.cassandra.config.ParameterizedClass;
@@ -69,11 +72,11 @@ public class AuditLoggerAuthTest
     public static void setup() throws Exception
     {
         OverrideConfigurationLoader.override((config) -> {
-            config.authenticator = new ParameterizedClass("PasswordAuthenticator");
-            config.role_manager = new ParameterizedClass("CassandraRoleManager");
-            config.authorizer = new ParameterizedClass("CassandraAuthorizer");
+            config.authenticator = new ParameterizedClass(PasswordAuthenticator.class.getName());
+            config.role_manager = new ParameterizedClass(CassandraRoleManager.class.getName());
+            config.authorizer = new ParameterizedClass(CassandraAuthorizer.class.getName());
             config.audit_logging_options.enabled = true;
-            config.audit_logging_options.logger = new ParameterizedClass("InMemoryAuditLogger", null);
+            config.audit_logging_options.logger = new ParameterizedClass(InMemoryAuditLogger.class.getName(), null);
         });
 
         SUPERUSER_SETUP_DELAY_MS.setLong(0);
