@@ -24,6 +24,9 @@ import java.util.concurrent.TimeUnit;
 import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
+
+import org.apache.cassandra.io.FSError;
+import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -207,6 +210,15 @@ public class AdaptiveController extends Controller
         {
             logger.warn("Unable to parse saved options. Using starting value instead:", e);
         }
+        catch (FSError e)
+        {
+            logger.warn("Unable to read controller config file. Using starting value instead:", e);
+        }
+        catch (Throwable e)
+        {
+            logger.warn("Unable to read controller config file. Using starting value instead:", e);
+            JVMStabilityInspector.inspectThrowable(e);
+        }
 
         if (scalingParameters == null)
         {
@@ -327,9 +339,6 @@ public class AdaptiveController extends Controller
             parseScalingParameters(staticScalingFactors);
         else if (staticScalingParameters != null)
             parseScalingParameters(staticScalingParameters);
-        String vectorScalingParameters = options.remove(VECTOR_SCALING_PARAMETERS_OPTION);
-        if (vectorScalingParameters != null)
-            throw new ConfigurationException(String.format("%s option is not supported with Adaptive UCS", VECTOR_SCALING_PARAMETERS_OPTION));
         s = options.remove(MIN_SCALING_PARAMETER);
         if (s != null)
             minScalingParameter = Integer.parseInt(s);

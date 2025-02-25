@@ -31,6 +31,7 @@ import java.util.UUID;
 import java.util.function.BiPredicate;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
@@ -215,14 +216,24 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
     /// same effect as compacting all of the sstables in the arena together in one operation.
     public synchronized List<CompactionAggregate.UnifiedAggregate> getMaximalAggregates()
     {
-        maybeUpdateSelector();
+        return getMaximalAggregates(realm.getLiveSSTables());
+    }
+
+    public synchronized List<CompactionAggregate.UnifiedAggregate> getMaximalAggregates(Collection<? extends CompactionSSTable> sstables)
+    {
+        maybeUpdateSelector(); // must be called before computing compaction arenas
+        return getMaximalAggregatesWithArenas(getCompactionArenas(sstables, UnifiedCompactionStrategy::isSuitableForCompaction));
+    }
+
+    private synchronized List<CompactionAggregate.UnifiedAggregate> getMaximalAggregatesWithArenas(Collection<Arena> compactionArenas)
+    {
         // The aggregates are split into arenas by repair status and disk, as well as in non-overlapping sections to
         // enable some parallelism and efficient use of extra space. The result will be split across shards according to
         // its density.
         // Depending on the parallelism, the operation may require up to 100% extra space to complete.
         List<CompactionAggregate.UnifiedAggregate> aggregates = new ArrayList<>();
 
-        for (Arena arena : getCompactionArenas(realm.getLiveSSTables(), UnifiedCompactionStrategy::isSuitableForCompaction))
+        for (Arena arena : compactionArenas)
         {
             // If possible, we want to issue separate compactions for non-overlapping sets of sstables, to allow
             // for smaller extra space requirements. However, if the sharding configuration has changed, a major
@@ -1301,10 +1312,15 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         int[] overlapsMap = new int[shardCount];
         shardManager.assignSSTablesToShardIndexes(sstables, null, shardCount,
                                                   (shardSSTables, shard) ->
-                                                  overlapsMap[shard] = Overlaps.maxOverlap(shardSSTables,
-                                                                                           CompactionSSTable.startsAfter,
-                                                                                           CompactionSSTable.firstKeyComparator,
-                                                                                           CompactionSSTable.lastKeyComparator));
+                                                  // Note: the shard index we are given is the global index, which includes
+                                                  // other arenas. The modulo below converts it to an index for the arena.
+                                                  // If an sstable extends outside a disk's region (because e.g. local
+                                                  // ownership changed and disk boundaries moved), it will be incorrectly
+                                                  // counted. This is not trivial to recognize here and is not corrected.
+                                                  overlapsMap[shard % shardCount] = Overlaps.maxOverlap(shardSSTables,
+                                                                                                        CompactionSSTable.startsAfter,
+                                                                                                        CompactionSSTable.firstKeyComparator,
+                                                                                                        CompactionSSTable.lastKeyComparator));
         // Indexes that do not have sstables are left with 0 overlaps.
         return overlapsMap;
     }

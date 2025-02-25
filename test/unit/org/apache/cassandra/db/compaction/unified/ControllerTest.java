@@ -111,6 +111,9 @@ public abstract class ControllerTest
     @BeforeClass
     public static void setUpClass()
     {
+        // The def below should match Controller.PREFIX + Controller.OVERRIDE_UCS_CONFIG_FOR_VECTOR_TABLES
+        // We can't reference these, because it would initialize Controller (and get the value before we modify it).
+        System.setProperty("unified_compaction.override_ucs_config_for_vector_tables", "true");
         DatabaseDescriptor.daemonInitialization();
     }
 

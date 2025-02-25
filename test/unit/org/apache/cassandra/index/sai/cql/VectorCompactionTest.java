@@ -19,9 +19,13 @@
 package org.apache.cassandra.index.sai.cql;
 
 import java.util.ArrayList;
+import java.util.stream.Collectors;
 
 import org.junit.Test;
 
+import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
+import org.apache.cassandra.db.marshal.FloatType;
+import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
 import org.apache.cassandra.index.sai.disk.vector.CompactionGraph;
 
@@ -59,13 +63,16 @@ public class VectorCompactionTest extends VectorTester.Versioned
         createTable();
         disableCompaction();
 
+        var vectors = new ArrayList<float[]>();
         // 3 sstables
         for (int j = 0; j < 3; j++)
         {
             for (int i = 0; i <= MIN_PQ_ROWS; i++)
             {
                 var pk = j * MIN_PQ_ROWS + i;
-                execute("INSERT INTO %s (pk, v) VALUES (?, ?)", pk, vector(pk, pk + 1));
+                var v = create2DVector();
+                vectors.add(v);
+                execute("INSERT INTO %s (pk, v) VALUES (?, ?)", pk, vector(v));
             }
             flush();
         }
@@ -73,8 +80,21 @@ public class VectorCompactionTest extends VectorTester.Versioned
         CompactionGraph.PQ_TRAINING_SIZE = 2 * MIN_PQ_ROWS;
         compact();
 
-        // Confirm we can query the data
-        assertRowCount(execute("SELECT * FROM %s ORDER BY v ANN OF [1,2] LIMIT 1"), 1);
+        // Confirm we can query the data with reasonable recall
+        double recall = 0;
+        int ITERS = 10;
+        for (int i = 0; i < ITERS; i++)
+        {
+            var q = create2DVector();
+            var result = execute("SELECT pk, v FROM %s ORDER BY v ANN OF ? LIMIT 20", vector(q));
+            var ann = result.stream().map(row -> {
+                var vList = row.getVector("v", FloatType.instance, 2);
+                return new float[]{ vList.get(0), vList.get(1) };
+            }).collect(Collectors.toList());
+            recall += computeRecall(vectors, q, ann, VectorSimilarityFunction.COSINE);
+        }
+        recall /= ITERS;
+        assert recall >= 0.9 : recall;
     }
 
     @Test
@@ -108,6 +128,69 @@ public class VectorCompactionTest extends VectorTester.Versioned
         int sstables = 2;
         testOneToManyCompactionInternal(10, sstables);
         testOneToManyCompactionHolesInternal(MIN_PQ_ROWS, sstables);
+    }
+
+    @Test
+    public void testZeroOrOneToManyCompaction()
+    {
+        for (int sstables = 2; sstables <= 3; sstables++)
+        {
+            testZeroOrOneToManyCompactionInternal(10, sstables);
+            testZeroOrOneToManyCompactionInternal(MIN_PQ_ROWS, sstables);
+        }
+    }
+
+    public void testZeroOrOneToManyCompactionInternal(int vectorsPerSstable, int sstables)
+    {
+        createTable();
+        disableCompaction();
+
+        insertZeroOrOneToManyRows(vectorsPerSstable, sstables);
+
+        validateQueries();
+        compact();
+        validateQueries();
+    }
+
+    private void insertZeroOrOneToManyRows(int vectorsPerSstable, int sstables)
+    {
+        var R = getRandom();
+        double duplicateChance = R.nextDouble() * 0.2;
+        int j = 0;
+        boolean nullInserted = false;
+        
+        for (int i = 0; i < sstables; i++)
+        {
+            var vectorsInserted = new ArrayList<Vector<Float>>();
+            var duplicateExists = false;
+            while (vectorsInserted.size() < vectorsPerSstable || !duplicateExists)
+            {
+                if (!nullInserted && vectorsInserted.size() == vectorsPerSstable/2)
+                {
+                    // Insert one null vector in the middle
+                    execute("INSERT INTO %s (pk, v) VALUES (?, null)", j++);
+                    nullInserted = true;
+                    continue;
+                }
+
+                Vector<Float> v;
+                if (R.nextDouble() < duplicateChance && !vectorsInserted.isEmpty())
+                {
+                    // insert a duplicate
+                    v = vectorsInserted.get(R.nextIntBetween(0, vectorsInserted.size() - 1));
+                    duplicateExists = true;
+                }
+                else
+                {
+                    // insert a new random vector
+                    v = randomVectorBoxed(2);
+                    vectorsInserted.add(v);
+                }
+                assert v != null;
+                execute("INSERT INTO %s (pk, v) VALUES (?, ?)", j++, v);
+            }
+            flush();
+        }
     }
 
     public void testOneToManyCompactionHolesInternal(int vectorsPerSstable, int sstables)
@@ -178,5 +261,10 @@ public class VectorCompactionTest extends VectorTester.Versioned
                 lastSimilarity = similarity;
             }
         }
+    }
+
+    private static float[] create2DVector() {
+        var R = getRandom();
+        return new float[] { R.nextFloatBetween(-100, 100), R.nextFloatBetween(-100, 100) };
     }
 }
