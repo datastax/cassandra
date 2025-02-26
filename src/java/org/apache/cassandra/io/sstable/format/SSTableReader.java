@@ -1557,8 +1557,12 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
             long lastEnd = 0;
             for (PartitionPositionBounds position : positionBounds)
             {
-                assert position.lowerPosition >= 0 : "the partition lower position has to be non-negative";
-                assert position.upperPosition > position.lowerPosition : "the partition upper position has to be greater than lower position";
+                assert position.lowerPosition >= 0 : "the partition lower cannot be negative";
+                if (position.upperPosition == position.lowerPosition)
+                {
+                    continue;
+                }
+                assert position.upperPosition >= position.lowerPosition : "the partition upper position cannot be lower than lower position";
 
                 long upperChunkEnd = compressionMetadata.chunkFor(position.upperPosition - 1).chunkEnd();
                 long lowerChunkStart = compressionMetadata.chunkFor(position.lowerPosition).offset;
