@@ -152,15 +152,15 @@ public class StaticController extends Controller
         {
             logger.warn("Unable to parse saved flush size. Using starting value instead:", e);
         }
-//        catch (FSError e)
-//        {
-//            logger.warn("Unable to read controller config file. Using starting value instead:", e);
-//        }
-//        catch (Throwable e)
-//        {
-//            logger.warn("Unable to read controller config file. Using starting value instead:", e);
-//            JVMStabilityInspector.inspectThrowable(e);
-//        }
+        catch (FSError e)
+        {
+            logger.warn("Unable to read controller config file. Using starting value instead:", e);
+        }
+        catch (Throwable e)
+        {
+            logger.warn("Unable to read controller config file. Using starting value instead:", e);
+            JVMStabilityInspector.inspectThrowable(e);
+        }
         return new StaticController(env,
                                     scalingParameters,
                                     survivalFactors,

@@ -210,15 +210,15 @@ public class AdaptiveController extends Controller
         {
             logger.warn("Unable to parse saved options. Using starting value instead:", e);
         }
-//        catch (FSError e)
-//        {
-//            logger.warn("Unable to read controller config file. Using starting value instead:", e);
-//        }
-//        catch (Throwable e)
-//        {
-//            logger.warn("Unable to read controller config file. Using starting value instead:", e);
-//            JVMStabilityInspector.inspectThrowable(e);
-//        }
+        catch (FSError e)
+        {
+            logger.warn("Unable to read controller config file. Using starting value instead:", e);
+        }
+        catch (Throwable e)
+        {
+            logger.warn("Unable to read controller config file. Using starting value instead:", e);
+            JVMStabilityInspector.inspectThrowable(e);
+        }
 
         if (scalingParameters == null)
         {
