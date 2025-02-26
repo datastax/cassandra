@@ -31,14 +31,9 @@ import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.Keyspace;
-import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.memory.SlabAllocator;
 import org.github.jamm.MemoryMeter;
-
-import static org.assertj.core.api.Assertions.assertThat;
 
 // Note: This test can be run in idea with the allocation type configured in the test yaml and memtable using the
 // value memtableClass is initialized with.
@@ -211,27 +206,6 @@ public abstract class MemtableSizeTestBase extends CQLTester
         {
             execute(String.format("DROP KEYSPACE IF EXISTS %s", keyspace));
         }
-    }
-
-    @Test
-    public void testRowCountInTrieMemtable() throws Throwable
-    {
-        buildAndFillTable("TrieMemtable");
-
-        String writeStatement = "INSERT INTO " + table + "(userid,picid,commentid)VALUES(?,?,?)";
-
-        Memtable memtable = cfs.getTracker().getView().getCurrentMemtable();
-        System.out.println("Writing " + partitions + " partitions of " + rowsPerPartition + " rows");
-        for (long i = 0; i < partitions; ++i)
-        {
-            for (long j = 0; j < rowsPerPartition; ++j)
-                execute(writeStatement, i, j, i + j);
-        }
-
-        assertThat(memtable).isExactlyInstanceOf(TrieMemtable.class);
-        ColumnFilter.Builder builder = ColumnFilter.allRegularColumnsBuilder(cfs.metadata(), true);
-        long rowCount = ((TrieMemtable)cfs.getTracker().getView().getCurrentMemtable()).rowCount(builder.build(), DataRange.allData(cfs.getPartitioner()));
-        Assert.assertEquals(rowCount, partitions*rowsPerPartition);
     }
 
     @Test
