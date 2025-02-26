@@ -20,6 +20,7 @@ package org.apache.cassandra.config;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -37,6 +38,7 @@ import org.apache.cassandra.audit.AuditLogOptions;
 import org.apache.cassandra.fql.FullQueryLoggerOptions;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.guardrails.GuardrailsConfig;
+import org.apache.cassandra.io.compress.AdaptiveCompressor;
 import org.apache.cassandra.utils.FBUtilities;
 
 /**
@@ -294,8 +296,9 @@ public class Config
     public double commitlog_sync_group_window_in_ms = Double.NaN;
     public int commitlog_sync_period_in_ms;
     public int commitlog_segment_size_in_mb = 32;
+
     public ParameterizedClass commitlog_compression;
-    public FlushCompression flush_compression = FlushCompression.fast;
+    public FlushCompression flush_compression;
     public int commitlog_max_compression_buffers_in_pool = 3;
     public Integer periodic_commitlog_sync_lag_block_in_ms;
     public TransparentDataEncryptionOptions transparent_data_encryption_options = new TransparentDataEncryptionOptions();
@@ -666,6 +669,7 @@ public class Config
     {
         none,
         fast,
+        adaptive,
         table
     }
 
