@@ -934,6 +934,13 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
             long lastEnd = 0;
             for (PartitionPositionBounds position : positionBounds)
             {
+                assert position.lowerPosition >= 0 : "the partition lower cannot be negative";
+                if (position.upperPosition == position.lowerPosition)
+                {
+                    continue;
+                }
+                assert position.upperPosition >= position.lowerPosition : "the partition upper position cannot be lower than lower position";
+
                 // The end of the chunk that contains the last required byte from the range.
                 long upperChunkEnd = compressionMetadata.chunkFor(position.upperPosition - 1).chunkEnd();
                 // The start of the chunk that contains the first required byte from the range.
