@@ -331,9 +331,10 @@ public class CompactionTask extends AbstractCompactionTask
         return new OperationTotals(inputDiskSize, inputUncompressedSize, (long) (overheadToDataRatio * inputDiskSize));
     }
 
-    public OperationTotals getTotals()
+    @Override
+    public long getSpaceOverhead()
     {
-        return totals;
+        return totals.spaceOverhead;
     }
 
     /**
