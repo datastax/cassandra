@@ -367,11 +367,14 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
     {
         for (Index index : queryPlan.getIndexes())
         {
-            if (isIndexBuilding(index))
-                throw new IndexBuildInProgressException(index);
-
             if (!isIndexQueryable(index))
+            {
+                // In Astra index can be queryable during index build, thus we need to check both not queryable and building
+                if (isIndexBuilding(index))
+                    throw new IndexBuildInProgressException(index);
+
                 throw new IndexNotAvailableException(index);
+            }
         }
     }
 
