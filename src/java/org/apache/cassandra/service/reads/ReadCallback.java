@@ -52,7 +52,7 @@ import org.apache.cassandra.transport.Dispatcher;
 import org.apache.cassandra.utils.concurrent.Condition;
 import org.apache.cassandra.utils.concurrent.UncheckedInterruptedException;
 
-import static java.util.concurrent.TimeUnit.NANOSECONDS;
+import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static java.util.concurrent.atomic.AtomicIntegerFieldUpdater.newUpdater;
 import static org.apache.cassandra.tracing.Tracing.isTracing;
 import static org.apache.cassandra.utils.concurrent.Condition.newOneTimeCondition;
@@ -149,7 +149,7 @@ public class ReadCallback<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<
 
     public void awaitResults() throws ReadFailureException, ReadTimeoutException
     {
-        boolean signaled = awaitUntil(requestTime.startedAtNanos() + command.getTimeout(NANOSECONDS));
+        boolean signaled = await(command.getTimeout(MILLISECONDS), TimeUnit.MILLISECONDS);
         /**
          * Here we are checking isDataPresent in addition to the responses size because there is a possibility
          * that an asynchronous speculative execution request could be returning after a local failure already
