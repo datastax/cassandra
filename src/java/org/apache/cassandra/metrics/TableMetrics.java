@@ -57,14 +57,11 @@ import com.codahale.metrics.Timer;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.compaction.OperationType;
-import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.lifecycle.View;
 import org.apache.cassandra.db.memtable.Memtable;
-import org.apache.cassandra.db.memtable.TrieMemtable;
 import org.apache.cassandra.index.SecondaryIndexManager;
 import org.apache.cassandra.io.compress.CompressionMetadata;
 import org.apache.cassandra.io.sstable.GaugeProvider;
@@ -80,6 +77,7 @@ import org.apache.cassandra.utils.ExpMovingAverage;
 import org.apache.cassandra.utils.Hex;
 import org.apache.cassandra.utils.MovingAverage;
 import org.apache.cassandra.utils.Pair;
+import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.utils.concurrent.Refs;
 
 import static java.util.concurrent.TimeUnit.MICROSECONDS;
@@ -711,28 +709,38 @@ public class TableMetrics
                                                          () -> combineHistograms(cfs.getSSTables(SSTableSet.CANONICAL), 
                                                                                  SSTableReader::getEstimatedCellPerPartitionCount), null);
 
-        estimatedRowCount = createTableGauge("EstimatedRowCount", "EstimatedRowCount", new Gauge<Long>()
+        estimatedRowCount = createTableGauge("EstimatedRowCount", "EstimatedRowCount", new CachedGauge<>(1, TimeUnit.SECONDS)
         {
-            public Long getValue()
+            public Long loadValue()
             {
                 long memtableRows = 0;
-                for (Memtable memtable : cfs.getTracker().getView().getAllMemtables())
+                OpOrder.Group readGroup = null;
+                try
                 {
-                    if (memtable instanceof TrieMemtable)
+                    for (Memtable memtable : cfs.getTracker().getView().getAllMemtables())
                     {
-                        ColumnFilter.Builder builder = ColumnFilter.allRegularColumnsBuilder(cfs.metadata(), true);
-                        memtableRows += ((TrieMemtable) memtable).rowCount(builder.build(), DataRange.allData(cfs.getPartitioner()));
+                        if (readGroup == null)
+                        {
+                            readGroup = memtable.readOrdering().start();
+                        }
+                        memtableRows += Memtable.estimateRowCount(memtable);
                     }
                 }
+                finally
+                {
+                    if (readGroup != null)
+                        readGroup.close();
+                }
+
+                long sstableRows = 0;
                 try(ColumnFamilyStore.RefViewFragment refViewFragment = cfs.selectAndReference(View.selectFunction(SSTableSet.CANONICAL)))
                 {
-                    long total = 0;
                     for (SSTableReader reader: refViewFragment.sstables)
                     {
-                        total += reader.getTotalRows();
+                        sstableRows += reader.getTotalRows();
                     }
-                    return total + memtableRows;
                 }
+                return sstableRows + memtableRows;
             }
         }, null);
         
