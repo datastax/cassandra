@@ -78,6 +78,7 @@ import org.apache.cassandra.utils.ExpMovingAverage;
 import org.apache.cassandra.utils.Hex;
 import org.apache.cassandra.utils.MovingAverage;
 import org.apache.cassandra.utils.Pair;
+import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.utils.concurrent.Refs;
 
 import static org.apache.cassandra.io.sstable.format.SSTableReader.selectOnlyBigTableReaders;
@@ -667,28 +668,38 @@ public class TableMetrics
                                                          () -> combineHistograms(cfs.getSSTables(SSTableSet.CANONICAL), 
                                                                                  SSTableReader::getEstimatedCellPerPartitionCount), null);
 
-        estimatedRowCount = createTableGauge("EstimatedRowCount", "EstimatedRowCount", new Gauge<Long>()
+        estimatedRowCount = createTableGauge("EstimatedRowCount", "EstimatedRowCount", new CachedGauge<>(1, TimeUnit.SECONDS)
         {
-            public Long getValue()
+            public Long loadValue()
             {
                 long memtableRows = 0;
-                for (Memtable memtable : cfs.getTracker().getView().getAllMemtables())
+                OpOrder.Group readGroup = null;
+                try
                 {
-                    if (memtable instanceof TrieMemtable)
+                    for (Memtable memtable : cfs.getTracker().getView().getAllMemtables())
                     {
-                        ColumnFilter.Builder builder = ColumnFilter.allRegularColumnsBuilder(cfs.metadata(), true);
-                        memtableRows += ((TrieMemtable) memtable).rowCount(builder.build(), DataRange.allData(cfs.getPartitioner()));
+                        if (readGroup == null)
+                        {
+                            readGroup = memtable.readOrdering().start();
+                        }
+                        memtableRows += Memtable.estimateRowCount(memtable);
                     }
                 }
+                finally
+                {
+                    if (readGroup != null)
+                        readGroup.close();
+                }
+
+                long sstableRows = 0;
                 try(ColumnFamilyStore.RefViewFragment refViewFragment = cfs.selectAndReference(View.selectFunction(SSTableSet.CANONICAL)))
                 {
-                    long total = 0;
                     for (SSTableReader reader: refViewFragment.sstables)
                     {
-                        total += reader.getTotalRows();
+                        sstableRows += reader.getTotalRows();
                     }
-                    return total + memtableRows;
                 }
+                return sstableRows + memtableRows;
             }
         }, null);
         
