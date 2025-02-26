@@ -53,7 +53,6 @@ import static org.apache.cassandra.distributed.test.sai.SAIUtil.waitForIndexQuer
 import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
 import static org.awaitility.Awaitility.await;
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
 
 public class IndexAvailabilityTest extends TestBaseImpl
 {
@@ -62,7 +61,7 @@ public class IndexAvailabilityTest extends TestBaseImpl
                                                "WITH compaction = {'class' : 'SizeTieredCompactionStrategy', 'enabled' : false }";
     private static final String CREATE_INDEX = "CREATE CUSTOM INDEX %s ON %s.%s(%s) USING 'StorageAttachedIndex'";
     
-    private static Map<NodeIndex, Index.Status> expectedNodeIndexQueryability = new ConcurrentHashMap<>();
+    private static final Map<NodeIndex, Index.Status> expectedNodeIndexQueryability = new ConcurrentHashMap<>();
     private List<String> keyspaces;
     private List<String> indexesPerKs;
 
@@ -135,7 +134,7 @@ public class IndexAvailabilityTest extends TestBaseImpl
             assertIndexingStatus(cluster);
 
             // drop ks2 index2, there should be no ks2 index2 status on all node
-            cluster.schemaChange("DROP INDEX " + ks2 + "." + index2);
+            cluster.schemaChange("DROP INDEX " + ks2 + '.' + index2);
             expectedNodeIndexQueryability.keySet().forEach(k -> {
                 if (k.keyspace.equals(ks2) && k.index.equals(index2))
                     expectedNodeIndexQueryability.put(k, Index.Status.UNKNOWN);
@@ -143,7 +142,7 @@ public class IndexAvailabilityTest extends TestBaseImpl
             assertIndexingStatus(cluster);
 
             // drop ks3 cf1, there should be no ks3 index1/index2 status
-            cluster.schemaChange("DROP TABLE " + ks3 + "." + cf1);
+            cluster.schemaChange("DROP TABLE " + ks3 + '.' + cf1);
             expectedNodeIndexQueryability.keySet().forEach(k -> {
                 if (k.keyspace.equals(ks3))
                     expectedNodeIndexQueryability.put(k, Index.Status.UNKNOWN);
@@ -182,21 +181,20 @@ public class IndexAvailabilityTest extends TestBaseImpl
             String cf1 = "cf1";
             String index1 = "cf1_idx1";
             String index2 = "cf1_idx2";
-            String index3 = "cf2_idx1";
 
             // Create keyspace, table with correct column types
             cluster.schemaChange(String.format(CREATE_KEYSPACE, ks2, 2));
-            cluster.schemaChange("CREATE TABLE " + ks2 + "." + cf1 + " (pk int PRIMARY KEY, v1 int, v2 int)");
+            cluster.schemaChange("CREATE TABLE " + ks2 + '.' + cf1 + " (pk int PRIMARY KEY, v1 int, v2 int)");
             executeOnAllCoordinators(cluster,
-                    "SELECT pk FROM " + ks2 + "." + cf1 + " WHERE v1=0 AND v2=0 ALLOW FILTERING",
+                                     "SELECT pk FROM " + ks2 + '.' + cf1 + " WHERE v1=0 AND v2=0 ALLOW FILTERING",
                     ConsistencyLevel.LOCAL_QUORUM,
                     0);
             executeOnAllCoordinators(cluster,
-                    "SELECT pk FROM " + ks2 + "." + cf1 + " WHERE v2=0 ALLOW FILTERING",
+                                     "SELECT pk FROM " + ks2 + '.' + cf1 + " WHERE v2=0 ALLOW FILTERING",
                     ConsistencyLevel.LOCAL_QUORUM,
                     0);
             executeOnAllCoordinators(cluster,
-                    "SELECT pk FROM " + ks2 + "." + cf1 + " WHERE v1=0 ALLOW FILTERING",
+                                     "SELECT pk FROM " + ks2 + '.' + cf1 + " WHERE v1=0 ALLOW FILTERING",
                     ConsistencyLevel.LOCAL_QUORUM,
                     0);
 
@@ -319,7 +317,7 @@ public class IndexAvailabilityTest extends TestBaseImpl
         }
     }
 
-    private void executeOnAllCoordinatorsAllConsistencies(Cluster cluster, String statement, int liveReplicas, int num) throws Exception
+    private void executeOnAllCoordinatorsAllConsistencies(Cluster cluster, String statement, int liveReplicas, int num)
     {
         int allReplicas = cluster.size();
 
@@ -330,29 +328,28 @@ public class IndexAvailabilityTest extends TestBaseImpl
         executeOnAllCoordinators(cluster, statement, ConsistencyLevel.ALL, liveReplicas >= allReplicas ? num : -1);
     }
 
-    private void executeOnAllCoordinators(Cluster cluster, String query, ConsistencyLevel level, int expected) throws Exception
+    private void executeOnAllCoordinators(Cluster cluster, String query, ConsistencyLevel level, int expected)
     {
         // test different coordinator
         for (int nodeId = 1; nodeId <= cluster.size(); nodeId++)
         {
-            final int node = nodeId;
             if (expected >= 0)
                 assertEquals(expected, cluster.coordinator(nodeId).execute(query, level).length);
             else
             {
                 try
                 {
-                    cluster.coordinator(node).execute(query, level);
+                    cluster.coordinator(nodeId).execute(query, level);
                 }
                 catch (Throwable e)
                 {
-                    assertTrue(e.getClass().getSimpleName().equals("ReadFailureException"));
+                    assertEquals("ReadFailureException", e.getClass().getSimpleName());
                 }
             }
         }
     }
 
-    private void markIndexNonQueryable(IInvokableInstance node, String keyspace, String table, String indexName) throws Exception
+    private void markIndexNonQueryable(IInvokableInstance node, String keyspace, String table, String indexName)
     {
         expectedNodeIndexQueryability.put(NodeIndex.create(keyspace, indexName, node), Index.Status.BUILD_FAILED);
 
@@ -363,7 +360,7 @@ public class IndexAvailabilityTest extends TestBaseImpl
         });
     }
 
-    private void markIndexQueryable(IInvokableInstance node, String keyspace, String table, String indexName) throws Exception
+    private void markIndexQueryable(IInvokableInstance node, String keyspace, String table, String indexName)
     {
         expectedNodeIndexQueryability.put(NodeIndex.create(keyspace, indexName, node), Index.Status.BUILD_SUCCEEDED);
 
@@ -374,7 +371,7 @@ public class IndexAvailabilityTest extends TestBaseImpl
         });
     }
 
-    private void markIndexBuilding(IInvokableInstance node, String keyspace, String table, String indexName) throws Exception
+    private void markIndexBuilding(IInvokableInstance node, String keyspace, String table, String indexName)
     {
         expectedNodeIndexQueryability.put(NodeIndex.create(keyspace, indexName, node), Index.Status.FULL_REBUILD_STARTED);
 
@@ -430,7 +427,7 @@ public class IndexAvailabilityTest extends TestBaseImpl
     {
         InetAddressAndPort replicaAddressAndPort = getFullAddress(replica);
         await().atMost(5, TimeUnit.SECONDS)
-               .until(() -> node.callOnInstance(() -> getIndexStatus(keyspace, index, replicaAddressAndPort) == status).booleanValue());
+               .until(() -> node.callOnInstance(() -> getIndexStatus(keyspace, index, replicaAddressAndPort) == status));
     }
 
     private static Index.Status getNodeIndexStatus(IInvokableInstance node, String keyspaceName, String indexName, InetAddressAndPort replica)
