@@ -27,7 +27,6 @@ import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.agrona.collections.IntArrayList;
 import org.agrona.collections.LongArrayList;
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
@@ -42,6 +41,7 @@ import org.apache.lucene.store.DataOutput;
 
 import static com.google.common.base.Preconditions.checkArgument;
 import static java.lang.Math.max;
+import static java.lang.Math.min;
 
 
 /**
@@ -65,7 +65,7 @@ import static java.lang.Math.max;
  * <p>
  * Each posting list ends with a meta section and a skip table, that are written right after all postings blocks. Skip
  * interval is the same as block size, and each skip entry points to the end of each block.  Skip table consist of
- * block offsets and last values of each block, compressed as two FoR blocks.
+ * block offsets and maximum rowids of each block, compressed as two FoR blocks.
  * </p>
  *
  * Visual representation of the disk format:
@@ -80,7 +80,7 @@ import static java.lang.Math.max;
  *                                                        | LIST SIZE     | SKIP TABLE |
  *                                                        +---------------+------------+
  *                                                                        | BLOCKS POS.|
- *                                                                        | MAX VALUES |
+ *                                                                        | MAX ROWIDS |
  *                                                                        +------------+
  *
  *  </pre>
@@ -91,13 +91,14 @@ public class PostingsWriter implements Closeable
     protected static final Logger logger = LoggerFactory.getLogger(PostingsWriter.class);
 
     // import static org.apache.lucene.codecs.lucene50.Lucene50PostingsFormat.BLOCK_SIZE;
-    private final static int BLOCK_SIZE = 128;
+    private final static int BLOCK_ENTRIES = 128;
 
     private static final String POSTINGS_MUST_BE_SORTED_ERROR_MSG = "Postings must be sorted ascending, got [%s] after [%s]";
 
     private final IndexOutput dataOutput;
-    private final int blockSize;
+    private final int blockEntries;
     private final long[] deltaBuffer;
+    private final int[] freqBuffer; // frequency is capped at 255
     private final LongArrayList blockOffsets = new LongArrayList();
     private final LongArrayList blockMaxIDs = new LongArrayList();
     private final ResettableByteBuffersIndexOutput inMemoryOutput;
@@ -106,35 +107,43 @@ public class PostingsWriter implements Closeable
 
     private int bufferUpto;
     private long lastSegmentRowId;
-    private long maxDelta;
     // This number is the count of row ids written to the postings for this segment. Because a segment row id can be in
     // multiple postings list for the segment, this number could exceed Integer.MAX_VALUE, so we use a long.
     private long totalPostings;
+    private final boolean writeFrequencies;
 
     public PostingsWriter(IndexComponents.ForWrite components) throws IOException
     {
-        this(components, BLOCK_SIZE);
+        this(components, BLOCK_ENTRIES);
     }
+
+    public PostingsWriter(IndexComponents.ForWrite components, boolean writeFrequencies) throws IOException
+    {
+        this(components.addOrGet(IndexComponentType.POSTING_LISTS).openOutput(true), BLOCK_ENTRIES, writeFrequencies);
+    }
+
 
     public PostingsWriter(IndexOutput dataOutput) throws IOException
     {
-        this(dataOutput, BLOCK_SIZE);
+        this(dataOutput, BLOCK_ENTRIES, false);
     }
 
     @VisibleForTesting
-    PostingsWriter(IndexComponents.ForWrite components, int blockSize) throws IOException
+    PostingsWriter(IndexComponents.ForWrite components, int blockEntries) throws IOException
     {
-        this(components.addOrGet(IndexComponentType.POSTING_LISTS).openOutput(true), blockSize);
+        this(components.addOrGet(IndexComponentType.POSTING_LISTS).openOutput(true), blockEntries, false);
     }
 
-    private PostingsWriter(IndexOutput dataOutput, int blockSize) throws IOException
+    private PostingsWriter(IndexOutput dataOutput, int blockEntries, boolean writeFrequencies) throws IOException
     {
         assert dataOutput instanceof IndexOutputWriter;
         logger.debug("Creating postings writer for output {}", dataOutput);
-        this.blockSize = blockSize;
+        this.writeFrequencies = writeFrequencies;
+        this.blockEntries = blockEntries;
         this.dataOutput = dataOutput;
         startOffset = dataOutput.getFilePointer();
-        deltaBuffer = new long[blockSize];
+        deltaBuffer = new long[blockEntries];
+        freqBuffer = new int[blockEntries];
         inMemoryOutput = LuceneCompat.getResettableByteBuffersIndexOutput(dataOutput.order(), 1024, "blockOffsets");
         SAICodecUtils.writeHeader(dataOutput);
     }
@@ -191,7 +200,7 @@ public class PostingsWriter implements Closeable
         int size = 0;
         while ((segmentRowId = postings.nextPosting()) != PostingList.END_OF_STREAM)
         {
-            writePosting(segmentRowId);
+            writePosting(segmentRowId, postings.frequency());
             size++;
             totalPostings++;
         }
@@ -210,19 +219,19 @@ public class PostingsWriter implements Closeable
         return totalPostings;
     }
 
-    private void writePosting(long segmentRowId) throws IOException
-    {
+    private void writePosting(long segmentRowId, int freq) throws IOException {
         if (!(segmentRowId >= lastSegmentRowId || lastSegmentRowId == 0))
             throw new IllegalArgumentException(String.format(POSTINGS_MUST_BE_SORTED_ERROR_MSG, segmentRowId, lastSegmentRowId));
 
+        assert freq > 0;
         final long delta = segmentRowId - lastSegmentRowId;
-        maxDelta = max(maxDelta, delta);
-        deltaBuffer[bufferUpto++] = delta;
+        deltaBuffer[bufferUpto] = delta;
+        freqBuffer[bufferUpto] = min(freq, 255);
+        bufferUpto++;
 
-        if (bufferUpto == blockSize)
-        {
+        if (bufferUpto == blockEntries) {
             addBlockToSkipTable(segmentRowId);
-            writePostingsBlock(maxDelta, bufferUpto);
+            writePostingsBlock(bufferUpto);
             resetBlockCounters();
         }
         lastSegmentRowId = segmentRowId;
@@ -234,7 +243,7 @@ public class PostingsWriter implements Closeable
         {
             addBlockToSkipTable(lastSegmentRowId);
 
-            writePostingsBlock(maxDelta, bufferUpto);
+            writePostingsBlock(bufferUpto);
         }
     }
 
@@ -242,7 +251,6 @@ public class PostingsWriter implements Closeable
     {
         bufferUpto = 0;
         lastSegmentRowId = 0;
-        maxDelta = 0;
     }
 
     private void addBlockToSkipTable(long maxSegmentRowID)
@@ -253,7 +261,7 @@ public class PostingsWriter implements Closeable
 
     private void writeSummary(int exactSize) throws IOException
     {
-        dataOutput.writeVInt(blockSize);
+        dataOutput.writeVInt(blockEntries);
         dataOutput.writeVInt(exactSize);
         writeSkipTable();
     }
@@ -272,19 +280,29 @@ public class PostingsWriter implements Closeable
         writeSortedFoRBlock(blockMaxIDs, dataOutput);
     }
 
-    private void writePostingsBlock(long maxValue, int blockSize) throws IOException
-    {
+    private void writePostingsBlock(int entries) throws IOException {
+        // Find max value to determine bits needed
+        long maxValue = 0;
+        for (int i = 0; i < entries; i++) {
+            maxValue = max(maxValue, deltaBuffer[i]);
+            if (writeFrequencies)
+                maxValue = max(maxValue, freqBuffer[i]);
+        }
+        
+        // Use the maximum bits needed for either value type
         final int bitsPerValue = maxValue == 0 ? 0 : LuceneCompat.directWriterUnsignedBitsRequired(dataOutput.order(), maxValue);
-
-        assert bitsPerValue < Byte.MAX_VALUE;
-
+        
         dataOutput.writeByte((byte) bitsPerValue);
-        if (bitsPerValue > 0)
-        {
-            final DirectWriterAdapter writer = LuceneCompat.directWriterGetInstance(dataOutput.order(), dataOutput, blockSize, bitsPerValue);
-            for (int i = 0; i < blockSize; ++i)
-            {
+        if (bitsPerValue > 0) {
+            // Write interleaved [delta][freq] pairs
+            final DirectWriterAdapter writer = LuceneCompat.directWriterGetInstance(dataOutput.order(),
+                                                                                    dataOutput,
+                                                                                    writeFrequencies ? entries * 2L : entries,
+                                                                                    bitsPerValue);
+            for (int i = 0; i < entries; ++i) {
                 writer.add(deltaBuffer[i]);
+                if (writeFrequencies)
+                    writer.add(freqBuffer[i]);
             }
             writer.finish();
         }
@@ -292,9 +310,9 @@ public class PostingsWriter implements Closeable
 
     private void writeSortedFoRBlock(LongArrayList values, IndexOutput output) throws IOException
     {
+        assert !values.isEmpty();
         final long maxValue = values.getLong(values.size() - 1);
 
-        assert values.size() > 0;
         final int bitsPerValue = maxValue == 0 ? 0 : LuceneCompat.directWriterUnsignedBitsRequired(output.order(), maxValue);
         output.writeByte((byte) bitsPerValue);
         if (bitsPerValue > 0)
@@ -303,24 +321,6 @@ public class PostingsWriter implements Closeable
             for (int i = 0; i < values.size(); ++i)
             {
                 writer.add(values.getLong(i));
-            }
-            writer.finish();
-        }
-    }
-
-    private void writeSortedFoRBlock(IntArrayList values, IndexOutput output) throws IOException
-    {
-        final int maxValue = values.getInt(values.size() - 1);
-
-        assert values.size() > 0;
-        final int bitsPerValue = maxValue == 0 ? 0 : LuceneCompat.directWriterUnsignedBitsRequired(output.order(), maxValue);
-        output.writeByte((byte) bitsPerValue);
-        if (bitsPerValue > 0)
-        {
-            final DirectWriterAdapter writer = LuceneCompat.directWriterGetInstance(output.order(), output, values.size(), bitsPerValue);
-            for (int i = 0; i < values.size(); ++i)
-            {
-                writer.add(values.getInt(i));
             }
             writer.finish();
         }

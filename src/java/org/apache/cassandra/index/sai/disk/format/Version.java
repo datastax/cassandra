@@ -34,6 +34,7 @@ import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.v4.V4OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.v5.V5OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.v6.V6OnDiskFormat;
+import org.apache.cassandra.index.sai.disk.v7.V7OnDiskFormat;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
@@ -43,7 +44,7 @@ import static com.google.common.base.Preconditions.checkArgument;
  * Format version of indexing component, denoted as [major][minor]. Same forward-compatibility rules apply as to
  * {@link org.apache.cassandra.io.sstable.format.Version}.
  */
-public class Version
+public class Version implements Comparable<Version>
 {
     // 6.8 formats
     public static final Version AA = new Version("aa", V1OnDiskFormat.instance, Version::aaFileNameFormat);
@@ -53,15 +54,17 @@ public class Version
     public static final Version CA = new Version("ca", V3OnDiskFormat.instance, (c, i, g) -> stargazerFileNameFormat(c, i, g, "ca"));
     // NOTE: use DB to prevent collisions with upstream file formats
     // Encode trie entries using their AbstractType to ensure trie entries are sorted for range queries and are prefix free.
-    public static final Version DB = new Version("db", V4OnDiskFormat.instance, (c, i, g) -> stargazerFileNameFormat(c, i, g,"db"));
+    public static final Version DB = new Version("db", V4OnDiskFormat.instance, (c, i, g) -> stargazerFileNameFormat(c, i, g, "db"));
     // revamps vector postings lists to cause fewer reads from disk
     public static final Version DC = new Version("dc", V5OnDiskFormat.instance, (c, i, g) -> stargazerFileNameFormat(c, i, g, "dc"));
     // histograms in index metadata
     public static final Version EB = new Version("eb", V6OnDiskFormat.instance, (c, i, g) -> stargazerFileNameFormat(c, i, g, "eb"));
+    // term frequencies index component
+    public static final Version EC = new Version("ec", V7OnDiskFormat.instance, (c, i, g) -> stargazerFileNameFormat(c, i, g, "ec"));
 
     // These are in reverse-chronological order so that the latest version is first. Version matching tests
     // are more likely to match the latest version so we want to test that one first.
-    public static final List<Version> ALL = Lists.newArrayList(EB, DC, DB, CA, BA, AA);
+    public static final List<Version> ALL = Lists.newArrayList(EC, EB, DC, DB, CA, BA, AA);
 
     public static final Version EARLIEST = AA;
     public static final Version VECTOR_EARLIEST = BA;
@@ -110,7 +113,7 @@ public class Version
     {
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
-        Version other = (Version)o;
+        Version other = (Version) o;
         return Objects.equal(version, other.version);
     }
 
@@ -143,6 +146,11 @@ public class Version
         return CassandraRelevantProperties.IMMUTABLE_SAI_COMPONENTS.getBoolean() && onOrAfter(Version.CA);
     }
 
+    @Override
+    public int compareTo(Version other)
+    {
+        return this.version.compareTo(other.version);
+    }
 
     public interface FileNameFormatter
     {
@@ -152,7 +160,7 @@ public class Version
          */
         default String format(IndexComponentType indexComponentType, IndexContext indexContext, int generation)
         {
-            return  format(indexComponentType, indexContext == null ? null : indexContext.getIndexName(), generation);
+            return format(indexComponentType, indexContext == null ? null : indexContext.getIndexName(), generation);
         }
 
         /**
@@ -160,8 +168,8 @@ public class Version
          * filename is returned (so the suffix of the full filename), not a full path.
          *
          * @param indexComponentType the type of the index component.
-         * @param indexName the name of the index, or {@code null} for a per-sstable component.
-         * @param generation the generation of the build of the component.
+         * @param indexName          the name of the index, or {@code null} for a per-sstable component.
+         * @param generation         the generation of the build of the component.
          */
         String format(IndexComponentType indexComponentType, @Nullable String indexName, int generation);
     }
@@ -191,7 +199,6 @@ public class Version
             return tryParseStargazerFileName(componentStr);
         else
             return Optional.empty();
-
     }
 
     public static class ParsedFileName
@@ -222,7 +229,7 @@ public class Version
         StringBuilder stringBuilder = new StringBuilder();
 
         stringBuilder.append(indexName == null ? String.format(VERSION_AA_PER_SSTABLE_FORMAT, indexComponentType.representation)
-                                                  : String.format(VERSION_AA_PER_INDEX_FORMAT, indexName, indexComponentType.representation));
+                                               : String.format(VERSION_AA_PER_INDEX_FORMAT, indexName, indexComponentType.representation));
 
         return stringBuilder.toString();
     }

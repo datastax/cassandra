@@ -37,6 +37,6 @@ class V4InvertedIndexSearcher extends InvertedIndexSearcher
                             SegmentMetadata segmentMetadata,
                             IndexContext indexContext) throws IOException
     {
-        super(sstableContext, perIndexFiles, segmentMetadata, indexContext, Version.DB, false);
+        super(sstableContext, perIndexFiles, segmentMetadata, indexContext, segmentMetadata.version, false);
     }
 }

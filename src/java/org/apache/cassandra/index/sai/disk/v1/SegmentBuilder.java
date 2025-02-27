@@ -28,6 +28,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.LongAdder;
+import java.util.stream.Collectors;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -39,6 +40,7 @@ import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
 import org.apache.cassandra.index.sai.analyzer.ByteLimitedMaterializer;
+import org.apache.cassandra.index.sai.analyzer.NoOpAnalyzer;
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.RAMStringIndexer;
 import org.apache.cassandra.index.sai.disk.TermsIterator;
@@ -153,9 +155,11 @@ public abstract class SegmentBuilder
             return kdTreeRamBuffer.numRows() == 0;
         }
 
-        protected long addInternal(ByteBuffer term, int segmentRowId)
+        @Override
+        protected long addInternal(List<ByteBuffer> terms, int segmentRowId)
         {
-            TypeUtil.toComparableBytes(term, termComparator, buffer);
+            assert terms.size() == 1;
+            TypeUtil.toComparableBytes(terms.get(0), termComparator, buffer);
             return kdTreeRamBuffer.addPackedValue(segmentRowId, new BytesRef(buffer));
         }
 
@@ -191,10 +195,14 @@ public abstract class SegmentBuilder
         {
             super(components, rowIdOffset, limiter);
             this.byteComparableVersion = components.byteComparableVersionFor(IndexComponentType.TERMS_DATA);
-            ramIndexer = new RAMStringIndexer();
+            ramIndexer = new RAMStringIndexer(writeFrequencies());
             totalBytesAllocated = ramIndexer.estimatedBytesUsed();
             totalBytesAllocatedConcurrent.add(totalBytesAllocated);
+        }
 
+        private boolean writeFrequencies()
+        {
+            return !(analyzer instanceof NoOpAnalyzer) && Version.latest().onOrAfter(Version.EC);
         }
 
         public boolean isEmpty()
@@ -202,21 +210,26 @@ public abstract class SegmentBuilder
             return ramIndexer.isEmpty();
         }
 
-        protected long addInternal(ByteBuffer term, int segmentRowId)
+        @Override
+        protected long addInternal(List<ByteBuffer> terms, int segmentRowId)
         {
-            var encodedTerm = components.onDiskFormat().encodeForTrie(term, termComparator);
-            var bytes = ByteSourceInverse.readBytes(encodedTerm.asComparableBytes(byteComparableVersion));
-            var bytesRef = new BytesRef(bytes);
-            return ramIndexer.add(bytesRef, segmentRowId);
+            var bytesRefs = terms.stream()
+                                 .map(term -> components.onDiskFormat().encodeForTrie(term, termComparator))
+                                 .map(encodedTerm -> ByteSourceInverse.readBytes(encodedTerm.asComparableBytes(byteComparableVersion)))
+                                 .map(BytesRef::new)
+                                 .collect(Collectors.toList());
+            // ramIndexer is responsible for merging duplicate (term, row) pairs
+            return ramIndexer.addAll(bytesRefs, segmentRowId);
         }
 
         @Override
         protected void flushInternal(SegmentMetadataBuilder metadataBuilder) throws IOException
         {
-            try (InvertedIndexWriter writer = new InvertedIndexWriter(components))
+            try (InvertedIndexWriter writer = new InvertedIndexWriter(components, writeFrequencies()))
             {
                 TermsIterator termsWithPostings = ramIndexer.getTermsWithPostings(minTerm, maxTerm, byteComparableVersion);
-                var metadataMap = writer.writeAll(metadataBuilder.intercept(termsWithPostings));
+                var docLengths = ramIndexer.getDocLengths();
+                var metadataMap = writer.writeAll(metadataBuilder.intercept(termsWithPostings), docLengths);
                 metadataBuilder.setComponentsMetadata(metadataMap);
             }
         }
@@ -260,21 +273,23 @@ public abstract class SegmentBuilder
         }
 
         @Override
-        protected long addInternal(ByteBuffer term, int segmentRowId)
+        protected long addInternal(List<ByteBuffer> terms, int segmentRowId)
         {
             throw new UnsupportedOperationException();
         }
 
         @Override
-        protected long addInternalAsync(ByteBuffer term, int segmentRowId)
+        protected long addInternalAsync(List<ByteBuffer> terms, int segmentRowId)
         {
+            assert terms.size() == 1;
+
             // CompactionGraph splits adding a node into two parts:
             // (1) maybeAddVector, which must be done serially because it writes to disk incrementally
             // (2) addGraphNode, which may be done asynchronously
             CompactionGraph.InsertionResult result;
             try
             {
-                result = graphIndex.maybeAddVector(term, segmentRowId);
+                result = graphIndex.maybeAddVector(terms.get(0), segmentRowId);
             }
             catch (IOException e)
             {
@@ -366,19 +381,20 @@ public abstract class SegmentBuilder
         }
 
         @Override
-        protected long addInternal(ByteBuffer term, int segmentRowId)
+        protected long addInternal(List<ByteBuffer> terms, int segmentRowId)
         {
-            return graphIndex.add(term, segmentRowId);
+            assert terms.size() == 1;
+            return graphIndex.add(terms.get(0), segmentRowId);
         }
 
         @Override
-        protected long addInternalAsync(ByteBuffer term, int segmentRowId)
+        protected long addInternalAsync(List<ByteBuffer> terms, int segmentRowId)
         {
             updatesInFlight.incrementAndGet();
             compactionExecutor.submit(() -> {
                 try
                 {
-                    long bytesAdded = addInternal(term, segmentRowId);
+                    long bytesAdded = addInternal(terms, segmentRowId);
                     totalBytesAllocatedConcurrent.add(bytesAdded);
                     termSizeReservoir.update(bytesAdded);
                 }
@@ -453,23 +469,22 @@ public abstract class SegmentBuilder
         return metadataBuilder.build();
     }
 
-    public long addAll(ByteBuffer term, AbstractType<?> type, PrimaryKey key, long sstableRowId)
+    public long analyzeAndAdd(ByteBuffer rawTerm, AbstractType<?> type, PrimaryKey key, long sstableRowId)
     {
         long totalSize = 0;
         if (TypeUtil.isLiteral(type))
         {
-            List<ByteBuffer> tokens = ByteLimitedMaterializer.materializeTokens(analyzer, term, components.context(), key);
-            for (ByteBuffer tokenTerm : tokens)
-                totalSize += add(tokenTerm, key, sstableRowId);
+            var terms = ByteLimitedMaterializer.materializeTokens(analyzer, rawTerm, components.context(), key);
+            totalSize += add(terms, key, sstableRowId);
         }
         else
         {
-            totalSize += add(term, key, sstableRowId);
+            totalSize += add(List.of(rawTerm), key, sstableRowId);
         }
         return totalSize;
     }
 
-    private long add(ByteBuffer term, PrimaryKey key, long sstableRowId)
+    private long add(List<ByteBuffer> terms, PrimaryKey key, long sstableRowId)
     {
         assert !flushed : "Cannot add to flushed segment.";
         assert sstableRowId >= maxSSTableRowId;
@@ -480,9 +495,12 @@ public abstract class SegmentBuilder
         minKey = minKey == null ? key : minKey;
         maxKey = key;
 
-        // Note that the min and max terms are not encoded.
-        minTerm = TypeUtil.min(term, minTerm, termComparator, Version.latest());
-        maxTerm = TypeUtil.max(term, maxTerm, termComparator, Version.latest());
+        // Update term boundaries for all terms in this row
+        for (ByteBuffer term : terms)
+        {
+            minTerm = TypeUtil.min(term, minTerm, termComparator, Version.latest());
+            maxTerm = TypeUtil.max(term, maxTerm, termComparator, Version.latest());
+        }
 
         rowCount++;
 
@@ -494,15 +512,23 @@ public abstract class SegmentBuilder
 
         maxSegmentRowId = Math.max(maxSegmentRowId, segmentRowId);
 
-        long bytesAllocated = supportsAsyncAdd()
-                              ? addInternalAsync(term, segmentRowId)
-                              : addInternal(term, segmentRowId);
-        totalBytesAllocated += bytesAllocated;
+        long bytesAllocated;
+        if (supportsAsyncAdd())
+        {
+            // only vector indexing is done async and there can only be one term
+            assert terms.size() == 1;
+            bytesAllocated = addInternalAsync(terms, segmentRowId);
+        }
+        else
+        {
+            bytesAllocated = addInternal(terms, segmentRowId);
+        }
 
+        totalBytesAllocated += bytesAllocated;
         return bytesAllocated;
     }
 
-    protected long addInternalAsync(ByteBuffer term, int segmentRowId)
+    protected long addInternalAsync(List<ByteBuffer> terms, int segmentRowId)
     {
         throw new UnsupportedOperationException();
     }
@@ -565,7 +591,7 @@ public abstract class SegmentBuilder
 
     public abstract boolean isEmpty();
 
-    protected abstract long addInternal(ByteBuffer term, int segmentRowId);
+    protected abstract long addInternal(List<ByteBuffer> terms, int segmentRowId);
 
     protected abstract void flushInternal(SegmentMetadataBuilder metadataBuilder) throws IOException;
 
