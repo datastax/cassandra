@@ -46,6 +46,7 @@ import com.google.common.base.Predicates;
 import com.google.common.collect.Sets;
 import org.junit.After;
 import org.junit.Assert;
+import org.junit.BeforeClass;
 import org.junit.Rule;
 import org.junit.rules.TestRule;
 
@@ -224,6 +225,17 @@ public class SAITester extends CQLTester
     public void removeAllInjections()
     {
         Injections.deleteAll();
+    }
+
+    /**
+     * Enable external execution of all queries because we want to use reconciliation in SELECT queries so that we can
+     * simulate the application of the entire row filter in the coordinator node, even if unit tests are not multinode.
+     */
+    @BeforeClass
+    public static void setUpClass()
+    {
+        CQLTester.setUpClass();
+        CQLTester.enableCoordinatorExecution();
     }
 
     public static IndexContext createIndexContext(String name, AbstractType<?> validator, ColumnFamilyStore cfs)

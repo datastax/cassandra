@@ -28,6 +28,7 @@ import org.apache.cassandra.inject.InvokePointBuilder;
 import org.junit.Test;
 
 import static org.apache.cassandra.inject.InvokePointBuilder.newInvokePoint;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertTrue;
 
 public class DropIndexWhileQueryingTest extends SAITester
@@ -47,8 +48,8 @@ public class DropIndexWhileQueryingTest extends SAITester
 
         execute("INSERT INTO %s (k, x, y, z) VALUES (?, ?, ?, ?)", "car", 0, "y0", "z0");
         String query = "SELECT * FROM %s WHERE x IN (0, 1) OR (y IN ('Y0', 'Y1' ) OR z IN ('z1', 'z2'))";
-        assertInvalidMessage(QueryController.INDEX_MAY_HAVE_BEEN_DROPPED, query);
-        assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE, query);
+        assertThatThrownBy(() -> executeInternal(query)).hasMessage(QueryController.INDEX_MAY_HAVE_BEEN_DROPPED);
+        assertThatThrownBy(() -> executeInternal(query)).hasMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE);
     }
 
     @Test
@@ -84,8 +85,8 @@ public class DropIndexWhileQueryingTest extends SAITester
         execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', [1.0, 2.0, 3.0])");
 
         String query = "SELECT pk FROM %s ORDER BY val ann of [0.5, 1.5, 2.5] LIMIT 2";
-        assertInvalidMessage(TopKProcessor.INDEX_MAY_HAVE_BEEN_DROPPED, query);
-        assertInvalidMessage(String.format(StatementRestrictions.NON_CLUSTER_ORDERING_REQUIRES_INDEX_MESSAGE, "val"), query);
+        assertThatThrownBy(() -> executeInternal(query)).hasMessage(TopKProcessor.INDEX_MAY_HAVE_BEEN_DROPPED);
+        assertThatThrownBy(() -> executeInternal(query)).hasMessage(String.format(StatementRestrictions.NON_CLUSTER_ORDERING_REQUIRES_INDEX_MESSAGE, "val"));
     }
 
     private static void injectIndexDrop(String injectionName, String indexName, String methodName, boolean atEntry) throws Throwable

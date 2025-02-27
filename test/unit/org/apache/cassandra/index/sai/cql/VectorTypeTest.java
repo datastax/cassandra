@@ -844,7 +844,7 @@ public class VectorTypeTest extends VectorTester.VersionedWithChecksums
         // Ensure that we fail, as expected, and that a subsequent call to search is successful.
         beforeAndAfterFlush(() -> {
             injection.enable();
-            assertThatThrownBy(() -> execute("SELECT pk FROM %s ORDER BY vec ANN OF [1,1] LIMIT 2")).hasMessageContaining("Injected failure!");
+            assertThatThrownBy(() -> executeInternal("SELECT pk FROM %s ORDER BY vec ANN OF [1,1] LIMIT 2")).hasMessageContaining("Injected failure!");
             injection.disable();
             assertRows(execute("SELECT pk FROM %s ORDER BY vec ANN OF [1,1] LIMIT 2"), row(1));
         });

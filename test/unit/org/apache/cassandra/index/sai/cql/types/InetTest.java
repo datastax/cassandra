@@ -19,15 +19,26 @@ package org.apache.cassandra.index.sai.cql.types;
 
 import java.util.Collection;
 
+import org.junit.BeforeClass;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
+import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.index.sai.disk.format.Version;
 
 @RunWith(Parameterized.class)
 public class InetTest extends IndexingTypeSupport
 {
+    // TODO: Disables coordinator execution because we know SAI indexing for inet works differently than RowFilter,
+    //  which can wrongly discard rows in the coordinator. This is reported in CNDB-12978, and we should enable
+    //  distributed execution again once we have a fix.
+    @BeforeClass
+    public static void disableCoordinatorExecution()
+    {
+        CQLTester.disableCoordinatorExecution();
+    }
+
     @Parameterized.Parameters(name = "version={0},dataset={1},wide={2},scenario={3}")
     public static Collection<Object[]> generateParameters()
     {
