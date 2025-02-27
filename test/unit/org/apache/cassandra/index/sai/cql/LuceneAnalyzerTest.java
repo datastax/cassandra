@@ -64,6 +64,32 @@ public class LuceneAnalyzerTest extends SAITester
         assertEquals(0, execute("SELECT * FROM %s WHERE val = 'query'").size());
     }
 
+    /**
+     * See CNDB-12739 for more details.
+     */
+    @Test
+    public void testQueryAnalyzerWithExtraData() throws Throwable
+    {
+        createTable("CREATE TABLE %s (c1 int PRIMARY KEY , c2 text)");
+
+        createIndex("CREATE CUSTOM INDEX ON %s(c2) USING 'StorageAttachedIndex' WITH OPTIONS = {" +
+                "'index_analyzer': '{" +
+                "  \"tokenizer\" : { \"name\" : \"whitespace\", \"args\" : {} }," +
+                "  \"filters\" : [ { \"name\" : \"lowercase\", \"args\": {} }, " +
+                "                  { \"name\" : \"edgengram\", \"args\": { \"minGramSize\":\"1\", \"maxGramSize\":\"30\" } }]," +
+                "  \"charFilters\" : []}', " +
+                "'query_analyzer': '{" +
+                "  \"tokenizer\" : { \"name\" : \"whitespace\", \"args\" : {} }," +
+                "  \"filters\" : [ {\"name\" : \"lowercase\",\"args\": {}} ]}'}");
+
+        execute("INSERT INTO %s(c1,c2) VALUES (1, 'astra quick fox')");
+        execute("INSERT INTO %s(c1,c2) VALUES (2, 'astra quick foxes')");
+        execute("INSERT INTO %s(c1,c2) VALUES (3, 'astra1')");
+        execute("INSERT INTO %s(c1,c2) VALUES (4, 'astra4 -1@a#')");
+
+        beforeAndAfterFlush(() -> assertEquals(4, execute("SELECT * FROM %s WHERE c2 :'ast' ").size()));
+    }
+
     @Test
     public void testStandardQueryAnalyzer()
     {
