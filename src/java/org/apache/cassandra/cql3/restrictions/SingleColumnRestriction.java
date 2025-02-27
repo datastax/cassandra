@@ -28,7 +28,11 @@ import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.filter.ANNOptions;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.serializers.ListSerializer;
-import org.apache.cassandra.cql3.*;
+import org.apache.cassandra.cql3.MarkerOrTerms;
+import org.apache.cassandra.cql3.Operator;
+import org.apache.cassandra.cql3.QueryOptions;
+import org.apache.cassandra.cql3.Term;
+import org.apache.cassandra.cql3.Terms;
 import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.cql3.statements.Bound;
 import org.apache.cassandra.db.MultiClusteringBuilder;
@@ -76,11 +80,16 @@ public abstract class SingleColumnRestriction implements SingleRestriction
     @Override
     public boolean hasSupportingIndex(IndexRegistry indexRegistry)
     {
+        return findSupportingIndex(indexRegistry) != null;
+    }
+
+    public Index findSupportingIndex(IndexRegistry indexRegistry)
+    {
         for (Index index : indexRegistry.listIndexes())
             if (isSupportedBy(index))
-                return true;
+                return index;
 
-        return false;
+        return null;
     }
 
     @Override
@@ -187,24 +196,6 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         public String toString()
         {
             return String.format("EQ(%s)", term);
-        }
-
-        @Override
-        public boolean skipMerge(IndexRegistry indexRegistry)
-        {
-            // We should skip merging this EQ if there is an analyzed index for this column that supports EQ,
-            // so there can be multiple EQs for the same column.
-
-            if (indexRegistry == null)
-                return false;
-
-            for (Index index : indexRegistry.listIndexes())
-            {
-                if (index.supportsExpression(columnDef, Operator.ANALYZER_MATCHES) &&
-                    index.supportsExpression(columnDef, Operator.EQ))
-                    return true;
-            }
-            return false;
         }
 
         @Override
@@ -1202,6 +1193,86 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         }
     }
 
+    public static final class Bm25Restriction extends SingleColumnRestriction
+    {
+        private final Term value;
+
+        public Bm25Restriction(ColumnMetadata columnDef, Term value)
+        {
+            super(columnDef);
+            this.value = value;
+        }
+
+        public ByteBuffer value(QueryOptions options)
+        {
+            return value.bindAndGet(options);
+        }
+
+        @Override
+        public void addFunctionsTo(List<Function> functions)
+        {
+            value.addFunctionsTo(functions);
+        }
+
+        @Override
+        MultiColumnRestriction toMultiColumnRestriction()
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void addToRowFilter(RowFilter.Builder filter, IndexRegistry indexRegistry, QueryOptions options, ANNOptions annOptions)
+        {
+            var index = findSupportingIndex(indexRegistry);
+            var valueBytes = value.bindAndGet(options);
+            var terms = index.getQueryAnalyzer().get().analyze(valueBytes);
+            if (terms.isEmpty())
+                throw invalidRequest("BM25 query must contain at least one term (perhaps your analyzer is discarding tokens you didn't expect)");
+            filter.add(columnDef, Operator.BM25, valueBytes);
+        }
+
+        @Override
+        public MultiClusteringBuilder appendTo(MultiClusteringBuilder builder, QueryOptions options)
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public String toString()
+        {
+            return String.format("BM25(%s)", value);
+        }
+
+        @Override
+        public SingleRestriction doMergeWith(SingleRestriction otherRestriction)
+        {
+            throw invalidRequest("%s cannot be restricted by both BM25 and %s", columnDef.name, otherRestriction.toString());
+        }
+
+        @Override
+        protected boolean isSupportedBy(Index index)
+        {
+            return index.supportsExpression(columnDef, Operator.BM25);
+        }
+
+        @Override
+        public boolean isIndexBasedOrdering()
+        {
+            return true;
+        }
+
+        @Override
+        public boolean shouldMerge(SingleRestriction other)
+        {
+            // we don't want to merge MATCH restrictions with ORDER BY BM25
+            // so shouldMerge = false for that scenario, and true for others
+            // (because even though we can't meaningfully merge with others, we want doMergeWith to be called to throw)
+            //
+            // (Note that because ORDER BY is processed before WHERE, we only need this check in the BM25 class)
+            return !other.isAnalyzerMatches();
+        }
+    }
+
     /**
      * A Bounded ANN Restriction is one that uses a similarity score as the limiting factor for ANN instead of a number
      * of results.
@@ -1349,10 +1420,12 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         @Override
         public SingleRestriction doMergeWith(SingleRestriction otherRestriction)
         {
-            if (!(otherRestriction.isAnalyzerMatches()))
+            if (!otherRestriction.isAnalyzerMatches())
                 throw invalidRequest(CANNOT_BE_MERGED_ERROR, columnDef.name);
 
-            List<Term> otherValues = ((AnalyzerMatchesRestriction) otherRestriction).getValues();
+            List<Term> otherValues = otherRestriction instanceof AnalyzerMatchesRestriction
+                                   ? ((AnalyzerMatchesRestriction) otherRestriction).getValues()
+                                   : List.of(((EQRestriction) otherRestriction).term);
             List<Term> newValues = new ArrayList<>(values.size() + otherValues.size());
             newValues.addAll(values);
             newValues.addAll(otherValues);

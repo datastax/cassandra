@@ -104,6 +104,12 @@ public class PerIndexFiles implements Closeable
         return getFile(IndexComponentType.PQ).sharedCopy();
     }
 
+    /** It is the caller's responsibility to close the returned file handle. */
+    public FileHandle docLengths()
+    {
+        return getFile(IndexComponentType.DOC_LENGTHS).sharedCopy();
+    }
+
     public FileHandle getFile(IndexComponentType indexComponentType)
     {
         FileHandle file = files.get(indexComponentType);

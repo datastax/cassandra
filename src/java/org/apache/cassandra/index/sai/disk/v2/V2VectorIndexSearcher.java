@@ -49,7 +49,7 @@ import org.apache.cassandra.index.sai.disk.PrimaryKeyWithSource;
 import org.apache.cassandra.index.sai.disk.v1.IndexSearcher;
 import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
-import org.apache.cassandra.index.sai.disk.v1.postings.VectorPostingList;
+import org.apache.cassandra.index.sai.disk.v1.postings.ReorderingPostingList;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
 import org.apache.cassandra.index.sai.disk.vector.BruteForceRowIdIterator;
 import org.apache.cassandra.index.sai.disk.vector.CassandraDiskAnn;
@@ -64,8 +64,8 @@ import org.apache.cassandra.index.sai.utils.IntIntPairArray;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
+import org.apache.cassandra.index.sai.utils.RowIdWithMeta;
 import org.apache.cassandra.index.sai.utils.RowIdWithScore;
-import org.apache.cassandra.index.sai.utils.SegmentOrdering;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.metrics.LinearFit;
 import org.apache.cassandra.metrics.PairedSlidingWindowReservoir;
@@ -81,7 +81,7 @@ import static org.apache.cassandra.index.sai.plan.Plan.hrs;
 /**
  * Executes ann search against the graph for an individual index segment.
  */
-public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrdering
+public class V2VectorIndexSearcher extends IndexSearcher
 {
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
     private static final VectorTypeSupport vts = VectorizationProvider.getInstance().getVectorTypeSupport();
@@ -133,13 +133,13 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
     }
 
     @Override
-    public KeyRangeIterator search(Expression exp, AbstractBounds<PartitionPosition> keyRange, QueryContext context, boolean defer, int limit) throws IOException
+    public KeyRangeIterator search(Expression exp, AbstractBounds<PartitionPosition> keyRange, QueryContext context, boolean defer) throws IOException
     {
-        PostingList results = searchPosting(context, exp, keyRange, limit);
+        PostingList results = searchPosting(context, exp, keyRange);
         return toPrimaryKeyIterator(results, context);
     }
 
-    private PostingList searchPosting(QueryContext context, Expression exp, AbstractBounds<PartitionPosition> keyRange, int limit) throws IOException
+    private PostingList searchPosting(QueryContext context, Expression exp, AbstractBounds<PartitionPosition> keyRange) throws IOException
     {
         if (logger.isTraceEnabled())
             logger.trace(indexContext.logMessage("Searching on expression '{}'..."), exp);
@@ -151,7 +151,7 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
 
         // this is a thresholded query, so pass graph.size() as top k to get all results satisfying the threshold
         var result = searchInternal(keyRange, context, queryVector, graph.size(), graph.size(), exp.getEuclideanSearchThreshold());
-        return new VectorPostingList(result);
+        return new ReorderingPostingList(result, RowIdWithMeta::getSegmentRowId);
     }
 
     @Override
@@ -160,11 +160,11 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         if (logger.isTraceEnabled())
             logger.trace(indexContext.logMessage("Searching on expression '{}'..."), orderer);
 
-        if (orderer.vector == null)
+        if (!orderer.isANN())
             throw new IllegalArgumentException(indexContext.logMessage("Unsupported expression during ANN index query: " + orderer));
 
         int rerankK = indexContext.getIndexWriterConfig().getSourceModel().rerankKFor(limit, graph.getCompression());
-        var queryVector = vts.createFloatVector(orderer.vector);
+        var queryVector = vts.createFloatVector(orderer.getVectorTerm());
 
         var result = searchInternal(keyRange, context, queryVector, limit, rerankK, 0);
         return toMetaSortedIterator(result, context);
@@ -485,14 +485,14 @@ public class V2VectorIndexSearcher extends IndexSearcher implements SegmentOrder
         if (cost.shouldUseBruteForce())
         {
             // brute force using the in-memory compressed vectors to cut down the number of results returned
-            var queryVector = vts.createFloatVector(orderer.vector);
+            var queryVector = vts.createFloatVector(orderer.getVectorTerm());
             return toMetaSortedIterator(this.orderByBruteForce(queryVector, segmentOrdinalPairs, limit, rerankK), context);
         }
         // Create bits from the mapping
         var bits = bitSetForSearch();
         segmentOrdinalPairs.forEachRightInt(bits::set);
         // else ask the index to perform a search limited to the bits we created
-        var queryVector = vts.createFloatVector(orderer.vector);
+        var queryVector = vts.createFloatVector(orderer.getVectorTerm());
         var results = graph.search(queryVector, limit, rerankK, 0, bits, context, cost::updateStatistics);
         return toMetaSortedIterator(results, context);
     }

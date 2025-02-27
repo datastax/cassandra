@@ -31,12 +31,10 @@ import java.util.PriorityQueue;
 import java.util.Queue;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
-
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import com.google.common.base.Preconditions;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -48,8 +46,12 @@ import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.ReadExecutionController;
 import org.apache.cassandra.db.guardrails.Guardrails;
+import org.apache.cassandra.db.marshal.FloatType;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.AbstractUnfilteredRowIterator;
+import org.apache.cassandra.db.rows.BTreeRow;
+import org.apache.cassandra.db.rows.BufferCell;
+import org.apache.cassandra.db.rows.ColumnData;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
@@ -63,16 +65,19 @@ import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.metrics.TableQueryMetrics;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
-import org.apache.cassandra.index.sai.utils.RangeUtil;
+import org.apache.cassandra.index.sai.utils.PrimaryKeyWithScore;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
+import org.apache.cassandra.index.sai.utils.RangeUtil;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.net.ParamType;
+import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.Clock;
 import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.btree.BTree;
 
 public class StorageAttachedIndexSearcher implements Index.Searcher
 {
@@ -119,19 +124,17 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
 
                 // Can't check for `command.isTopK()` because the planner could optimize sorting out
                 Orderer ordering = plan.ordering();
-                if (ordering != null)
-                {
-                    assert !(keysIterator instanceof KeyRangeIterator);
-                    var scoredKeysIterator = (CloseableIterator<PrimaryKeyWithSortKey>) keysIterator;
-                    var result = new ScoreOrderedResultRetriever(scoredKeysIterator, filterTree, executionController,
-                                                                 command.limits().count());
-                    return new TopKProcessor(command).filter(result);
-                }
-                else
+                if (ordering == null)
                 {
                     assert keysIterator instanceof KeyRangeIterator;
                     return new ResultRetriever((KeyRangeIterator) keysIterator, filterTree, executionController);
                 }
+
+                assert !(keysIterator instanceof KeyRangeIterator);
+                var scoredKeysIterator = (CloseableIterator<PrimaryKeyWithSortKey>) keysIterator;
+                var result = new ScoreOrderedResultRetriever(scoredKeysIterator, filterTree, executionController,
+                                                             command.limits().count());
+                return new TopKProcessor(command).filter(result);
             }
             catch (QueryView.Builder.MissingIndexException e)
             {
@@ -551,48 +554,50 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
          */
         private void fillPendingRows()
         {
+            // Group PKs by source sstable/memtable
+            var groupedKeys = new HashMap<PrimaryKey, List<PrimaryKeyWithSortKey>>();
             // We always want to get at least 1.
             int rowsToRetrieve = Math.max(1, softLimit - returnedRowCount);
-            var keys = new HashMap<PrimaryKey, List<PrimaryKeyWithSortKey>>();
             // We want to get the first unique `rowsToRetrieve` keys to materialize
             // Don't pass the priority queue here because it is more efficient to add keys in bulk
-            fillKeys(keys, rowsToRetrieve, null);
+            fillKeys(groupedKeys, rowsToRetrieve, null);
             // Sort the primary keys by PrK order, just in case that helps with cache and disk efficiency
-            var primaryKeyPriorityQueue = new PriorityQueue<>(keys.keySet());
+            var primaryKeyPriorityQueue = new PriorityQueue<>(groupedKeys.keySet());
 
-            while (!keys.isEmpty())
+            // drain groupedKeys into pendingRows
+            while (!groupedKeys.isEmpty())
             {
-                var primaryKey = primaryKeyPriorityQueue.poll();
-                var primaryKeyWithSortKeys = keys.remove(primaryKey);
-                var partitionIterator = readAndValidatePartition(primaryKey, primaryKeyWithSortKeys);
+                var pk = primaryKeyPriorityQueue.poll();
+                var sourceKeys = groupedKeys.remove(pk);
+                var partitionIterator = readAndValidatePartition(pk, sourceKeys);
                 if (partitionIterator != null)
                     pendingRows.add(partitionIterator);
                 else
                     // The current primaryKey did not produce a partition iterator. We know the caller will need
                     // `rowsToRetrieve` rows, so we get the next unique key and add it to the queue.
-                    fillKeys(keys, 1, primaryKeyPriorityQueue);
+                    fillKeys(groupedKeys, 1, primaryKeyPriorityQueue);
             }
         }
 
         /**
-         * Fills the keys map with the next `count` unique primary keys that are in the keys produced by calling
+         * Fills the `groupedKeys` Map with the next `count` unique primary keys that are in the keys produced by calling
          * {@link #nextSelectedKeyInRange()}. We map PrimaryKey to {@literal List<PrimaryKeyWithSortKey>} because the same
          * primary key can be in the result set multiple times, but with different source tables.
-         * @param keys the map to fill
+         * @param groupedKeys the map to fill
          * @param count the number of unique PrimaryKeys to consume from the iterator
          * @param primaryKeyPriorityQueue the priority queue to add new keys to. If the queue is null, we do not add
          *                                keys to the queue.
          */
-        private void fillKeys(Map<PrimaryKey, List<PrimaryKeyWithSortKey>> keys, int count, PriorityQueue<PrimaryKey> primaryKeyPriorityQueue)
+        private void fillKeys(Map<PrimaryKey, List<PrimaryKeyWithSortKey>> groupedKeys, int count, PriorityQueue<PrimaryKey> primaryKeyPriorityQueue)
         {
-            int initialSize = keys.size();
-            while (keys.size() - initialSize < count)
+            int initialSize = groupedKeys.size();
+            while (groupedKeys.size() - initialSize < count)
             {
                 var primaryKeyWithSortKey = nextSelectedKeyInRange();
                 if (primaryKeyWithSortKey == null)
                     return;
                 var nextPrimaryKey = primaryKeyWithSortKey.primaryKey();
-                var accumulator = keys.computeIfAbsent(nextPrimaryKey, k -> new ArrayList<>());
+                var accumulator = groupedKeys.computeIfAbsent(nextPrimaryKey, k -> new ArrayList<>());
                 if (primaryKeyPriorityQueue != null && accumulator.isEmpty())
                     primaryKeyPriorityQueue.add(nextPrimaryKey);
                 accumulator.add(primaryKeyWithSortKey);
@@ -633,15 +638,29 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             return null;
         }
 
-        public UnfilteredRowIterator readAndValidatePartition(PrimaryKey key, List<PrimaryKeyWithSortKey> primaryKeys)
+        /**
+         * Reads and validates a partition for a given primary key against its sources.
+         * <p>
+         * @param pk The primary key of the partition to read and validate
+         * @param sourceKeys A list of PrimaryKeyWithSortKey objects associated with the primary key.
+         *                   Multiple sort keys can exist for the same primary key when data comes from different
+         *                   sstables or memtables.
+         *
+         * @return An UnfilteredRowIterator containing the validated partition data, or null if:
+         *         - The key has already been processed
+         *         - The partition does not pass index filters
+         *         - The partition contains no valid rows
+         *         - The row data does not match the index metadata for any of the provided primary keys
+         */
+        public UnfilteredRowIterator readAndValidatePartition(PrimaryKey pk, List<PrimaryKeyWithSortKey> sourceKeys)
         {
             // If we've already processed the key, we can skip it. Because the score ordered iterator does not
             // deduplicate rows, we could see dupes if a row is in the ordering index multiple times. This happens
             // in the case of dupes and of overwrites.
-            if (processedKeys.contains(key))
+            if (processedKeys.contains(pk))
                 return null;
 
-            try (UnfilteredRowIterator partition = controller.getPartition(key, view, executionController))
+            try (UnfilteredRowIterator partition = controller.getPartition(pk, view, executionController))
             {
                 queryContext.addPartitionsRead(1);
                 queryContext.checkpoint();
@@ -650,7 +669,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
 
                 if (clusters == null || !clusters.hasNext())
                 {
-                    processedKeys.add(key);
+                    processedKeys.add(pk);
                     return null;
                 }
 
@@ -660,49 +679,21 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                 assert !clusters.hasNext() : "Expected only one row per partition";
                 if (!row.isRangeTombstoneMarker())
                 {
-                    for (PrimaryKeyWithSortKey primaryKeyWithSortKey : primaryKeys)
+                    for (PrimaryKeyWithSortKey sourceKey : sourceKeys)
                     {
                         // Each of these primary keys are equal, but they have different source tables. Therefore,
                         // we check to see if the row is valid for any of them, and if it is, we return the row.
-                        if (primaryKeyWithSortKey.isIndexDataValid((Row) row, now))
+                        if (sourceKey.isIndexDataValid((Row) row, now))
                         {
                             isRowValid = true;
-                            // We can only count the key as processed once we know it was valid for one of the
-                            // primary keys.
-                            processedKeys.add(key);
+                            // We can only count the pk as processed once we know it was valid for one of the
+                            // scored keys.
+                            processedKeys.add(pk);
                             break;
                         }
                     }
                 }
-                return isRowValid ? new PrimaryKeyIterator(partition, staticRow, row) : null;
-            }
-        }
-
-        public class PrimaryKeyIterator extends AbstractUnfilteredRowIterator
-        {
-            private boolean consumed = false;
-            private final Unfiltered row;
-
-            public PrimaryKeyIterator(UnfilteredRowIterator partition, Row staticRow, Unfiltered content)
-            {
-                super(partition.metadata(),
-                      partition.partitionKey(),
-                      partition.partitionLevelDeletion(),
-                      partition.columns(),
-                      staticRow,
-                      partition.isReverseOrder(),
-                      partition.stats());
-
-                row = content;
-            }
-
-            @Override
-            protected Unfiltered computeNext()
-            {
-                if (consumed)
-                    return endOfData();
-                consumed = true;
-                return row;
+                return isRowValid ? new PrimaryKeyIterator(partition, staticRow, row, sourceKeys, controller.command()) : null;
             }
         }
 
@@ -719,6 +710,74 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             controller.finish();
             if (tableQueryMetrics != null)
                 tableQueryMetrics.record(queryContext);
+        }
+
+        public class PrimaryKeyIterator extends AbstractUnfilteredRowIterator
+        {
+            private boolean consumed = false;
+            private final Unfiltered row;
+
+            public PrimaryKeyIterator(UnfilteredRowIterator partition, Row staticRow, Unfiltered content, List<PrimaryKeyWithSortKey> primaryKeysWithScore, ReadCommand command)
+            {
+                super(partition.metadata(),
+                      partition.partitionKey(),
+                      partition.partitionLevelDeletion(),
+                      partition.columns(),
+                      staticRow,
+                      partition.isReverseOrder(),
+                      partition.stats());
+
+                assert !primaryKeysWithScore.isEmpty();
+                var isScoredRow = primaryKeysWithScore.get(0) instanceof PrimaryKeyWithScore;
+                if (!content.isRow() || !isScoredRow)
+                {
+                    this.row = content;
+                    return;
+                }
+
+                // When +score is added on the coordinator side, it's represented as a PrecomputedColumnFilter
+                // even in a 'SELECT *' because WCF is not capable of representing synthetic columns.
+                // This can be simplified when we remove ANN_USE_SYNTHETIC_SCORE
+                var tm = metadata();
+                var scoreColumn = ColumnMetadata.syntheticColumn(tm.keyspace,
+                                                                 tm.name,
+                                                                 ColumnMetadata.SYNTHETIC_SCORE_ID,
+                                                                 FloatType.instance);
+                var isScoreFetched = command.columnFilter().fetchesExplicitly(scoreColumn);
+                if (!isScoreFetched)
+                {
+                    this.row = content;
+                    return;
+                }
+
+                // Clone the original Row
+                Row originalRow = (Row) content;
+                ArrayList<ColumnData> columnData = new ArrayList<>(originalRow.columnCount() + 1);
+                columnData.addAll(originalRow.columnData());
+
+                // inject +score as a new column
+                var pkWithScore = (PrimaryKeyWithScore) primaryKeysWithScore.get(0);
+                columnData.add(BufferCell.live(scoreColumn,
+                                               FBUtilities.nowInSeconds(),
+                                               FloatType.instance.decompose(pkWithScore.indexScore)));
+
+                this.row = BTreeRow.create(originalRow.clustering(),
+                                           originalRow.primaryKeyLivenessInfo(),
+                                           originalRow.deletion(),
+                                           BTree.builder(ColumnData.comparator)
+                                                .auto(true)
+                                                .addAll(columnData)
+                                                .build());
+            }
+
+            @Override
+            protected Unfiltered computeNext()
+            {
+                if (consumed)
+                    return endOfData();
+                consumed = true;
+                return row;
+            }
         }
     }
 

@@ -74,9 +74,9 @@ public final class ColumnMetadata extends ColumnSpecification implements Selecta
 
     /**
      * The type of CQL3 column this definition represents.
-     * There is 4 main type of CQL3 columns: those parts of the partition key,
-     * those parts of the clustering columns and amongst the others, regular and
-     * static ones.
+     * There are 5 types of columns: those parts of the partition key,
+     * those parts of the clustering columns and amongst the others, regular,
+     * static, and synthetic ones.
      *
      * IMPORTANT: this enum is serialized as toString() and deserialized by calling
      * Kind.valueOf(), so do not override toString() or rename existing values.
@@ -84,17 +84,21 @@ public final class ColumnMetadata extends ColumnSpecification implements Selecta
     public enum Kind
     {
         // NOTE: if adding a new type, must modify comparisonOrder
+        SYNTHETIC,
         PARTITION_KEY,
         CLUSTERING,
         REGULAR,
         STATIC;
+        // it is not possible to add new Kinds after Synthetic without invasive changes to BTreeRow, which
+        // assumes that complex regulr/static columns are the last ones
 
         public boolean isPrimaryKeyKind()
         {
             return this == PARTITION_KEY || this == CLUSTERING;
         }
-
     }
+
+    public static final ColumnIdentifier SYNTHETIC_SCORE_ID = ColumnIdentifier.getInterned("+:!score", true);
 
     /**
      * Whether this is a dropped column.
@@ -130,10 +134,18 @@ public final class ColumnMetadata extends ColumnSpecification implements Selecta
     @Nullable
     private final ColumnMask mask;
 
+    /**
+     * The type of CQL3 column this definition represents.
+     * Bit layout (from most to least significant):
+     * - Bits 61-63: Kind ordinal (3 bits, supporting up to 8 Kind values)
+     * - Bit 60: isComplex flag
+     * - Bits 48-59: position (12 bits, see assert)
+     * - Bits 0-47: name.prefixComparison (shifted right by 16)
+     */
     private static long comparisonOrder(Kind kind, boolean isComplex, long position, ColumnIdentifier name)
     {
         assert position >= 0 && position < 1 << 12;
-        return   (((long) kind.ordinal()) << 61)
+        return (((long) kind.ordinal()) << 61)
                | (isComplex ? 1L << 60 : 0)
                | (position << 48)
                | (name.prefixComparison >>> 16);
@@ -177,6 +189,14 @@ public final class ColumnMetadata extends ColumnSpecification implements Selecta
     public static ColumnMetadata staticColumn(String keyspace, String table, String name, AbstractType<?> type)
     {
         return new ColumnMetadata(keyspace, table, ColumnIdentifier.getInterned(name, true), type, NO_POSITION, Kind.STATIC, null);
+    }
+
+    /**
+     * Creates a new synthetic column metadata instance.
+     */
+    public static ColumnMetadata syntheticColumn(String keyspace, String table, ColumnIdentifier id, AbstractType<?> type)
+    {
+        return new ColumnMetadata(keyspace, table, id, type, NO_POSITION, Kind.SYNTHETIC, null);
     }
 
     /**
@@ -249,6 +269,7 @@ public final class ColumnMetadata extends ColumnSpecification implements Selecta
         this.kind = kind;
         this.position = position;
         this.cellPathComparator = makeCellPathComparator(kind, type);
+        assert kind != Kind.SYNTHETIC || cellPathComparator == null;
         this.cellComparator = cellPathComparator == null ? ColumnData.comparator : new Comparator<Cell<?>>()
         {
             @Override
@@ -507,7 +528,7 @@ public final class ColumnMetadata extends ColumnSpecification implements Selecta
             return 0;
 
         if (comparisonOrder != other.comparisonOrder)
-            return Long.compare(comparisonOrder, other.comparisonOrder);
+            return Long.compareUnsigned(comparisonOrder, other.comparisonOrder);
 
         return this.name.compareTo(other.name);
     }
@@ -640,6 +661,11 @@ public final class ColumnMetadata extends ColumnSpecification implements Selecta
         if (type instanceof CollectionType) // Possible with, for example, supercolumns
             return ((CollectionType) type).valueComparator().isCounter();
         return type.isCounter();
+    }
+
+    public boolean isSynthetic()
+    {
+        return kind == Kind.SYNTHETIC;
     }
 
     public Selector.Factory newSelectorFactory(TableMetadata table, AbstractType<?> expectedType, List<ColumnMetadata> defs, VariableSpecifications boundNames) throws InvalidRequestException

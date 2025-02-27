@@ -659,9 +659,9 @@ public class NativeIndexDDLTest extends SAITester
         .hasMessageContaining(String.format(CreateIndexStatement.INDEX_DUPLICATE_OF_EXISTING, "index_2", "index_1"));
 
         // different name, different option, same target.
-        assertThatThrownBy(() -> executeNet("CREATE INDEX ON %s(v1) USING 'sai' WITH OPTIONS = { 'case_sensitive' : true }"))
-        .isInstanceOf(InvalidQueryException.class)
-        .hasMessageContaining("Cannot create more than one storage-attached index on the same column: v1" );
+        assertThatThrownBy(() -> executeNet("CREATE CUSTOM INDEX ON %s(v1) USING 'StorageAttachedIndex' WITH OPTIONS = { 'case_sensitive' : true }"))
+                .isInstanceOf(InvalidQueryException.class)
+                .hasMessageContaining("Cannot create duplicate storage-attached index on column: v1" );
 
         ResultSet rows = executeNet("SELECT id FROM %s WHERE v1 = '1'");
         assertEquals(1, rows.all().size());
