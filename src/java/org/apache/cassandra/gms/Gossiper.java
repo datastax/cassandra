@@ -17,6 +17,9 @@
  */
 package org.apache.cassandra.gms;
 
+import java.io.ByteArrayInputStream;
+import java.io.DataInputStream;
+import java.io.IOException;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -64,6 +67,7 @@ import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.SystemKeyspace;
+import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.locator.InetAddressAndPort;
@@ -935,6 +939,78 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
             Uninterruptibles.sleepUninterruptibly(intervalInMillis * 4, TimeUnit.MILLISECONDS);
             logger.warn("Finished assassinating {}", endpoint);
         });
+    }
+
+    public void reviveEndpoint(String address) throws UnknownHostException
+    {
+        InetAddressAndPort endpoint = InetAddressAndPort.getByName(address);
+        EndpointState epState = endpointStateMap.get(endpoint);
+        logger.warn("Reviving {} via gossip", endpoint);
+
+        if (epState == null)
+            throw new RuntimeException("Cannot revive endpoint " + endpoint + ": no endpoint-state");
+
+        int generation = epState.getHeartBeatState().getGeneration();
+        int heartbeat = epState.getHeartBeatState().getHeartBeatVersion();
+
+        logger.info("Have endpoint-state for {}: status={}, generation={}, heartbeat={}",
+                endpoint, epState.getStatus(), generation, heartbeat);
+
+        if (!isSilentShutdownState(epState))
+            throw new RuntimeException("Cannot revive endpoint " + endpoint + ": not in a (silent) shutdown state: " + epState.getStatus());
+
+        if (FailureDetector.instance.isAlive(endpoint))
+            throw new RuntimeException("Cannot revive endpoint " + endpoint + ": still alive (failure-detector)");
+
+        logger.info("Sleeping for {}ms to ensure {} does not change", StorageService.RING_DELAY_MILLIS, endpoint);
+        Uninterruptibles.sleepUninterruptibly(StorageService.RING_DELAY_MILLIS, TimeUnit.MILLISECONDS);
+        // make sure the endpoint state did not change
+        EndpointState newState = endpointStateMap.get(endpoint);
+        if (newState == null)
+            throw new RuntimeException("Cannot revive endpoint " + endpoint + ": endpoint-state disappeared");
+        if (newState.getHeartBeatState().getGeneration() != generation)
+            throw new RuntimeException("Cannot revive endpoint " + endpoint + ": still alive, generation changed while trying to reviving it");
+        if (newState.getHeartBeatState().getHeartBeatVersion() != heartbeat)
+            throw new RuntimeException("Cannot revive endpoint " + endpoint + ": still alive, heartbeat changed while trying to reviving it");
+
+        epState.updateTimestamp(); // make sure we don't evict it too soon
+        epState.getHeartBeatState().forceNewerGenerationUnsafe();
+
+        // using the tokens from the endpoint-state as that is the real source of truth
+        Collection<Token> tokens = getTokensFromEndpointState(epState, DatabaseDescriptor.getPartitioner());
+        if (tokens == null || tokens.isEmpty())
+            throw new RuntimeException("Cannot revive endpoint " + endpoint + ": no tokens from TokenMetadata");
+
+        epState.addApplicationState(ApplicationState.STATUS, StorageService.instance.valueFactory.normal(tokens));
+        handleMajorStateChange(endpoint, epState);
+        Uninterruptibles.sleepUninterruptibly(intervalInMillis * 4, TimeUnit.MILLISECONDS);
+        logger.warn("Finished reviving {}, status={}, generation={}, heartbeat={}",
+                endpoint, epState.getStatus(), generation, heartbeat);
+    }
+
+    public Collection<Token> getTokensFor(InetAddressAndPort endpoint, IPartitioner partitioner)
+    {
+        EndpointState state = getEndpointStateForEndpoint(endpoint);
+        if (state == null)
+            return Collections.emptyList();
+
+        return getTokensFromEndpointState(state, partitioner);
+    }
+
+    private Collection<Token> getTokensFromEndpointState(EndpointState state, IPartitioner partitioner)
+    {
+        try
+        {
+            VersionedValue versionedValue = state.getApplicationState(ApplicationState.TOKENS);
+            if (versionedValue == null)
+                return Collections.emptyList();
+
+            return TokenSerializer.deserialize(partitioner, new DataInputStream(new ByteArrayInputStream(versionedValue.toBytes())));
+        }
+        catch (IOException e)
+        {
+            throw new RuntimeException(e);
+        }
     }
 
     public boolean isKnownEndpoint(InetAddressAndPort endpoint)
