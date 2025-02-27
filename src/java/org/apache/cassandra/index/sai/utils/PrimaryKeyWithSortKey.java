@@ -20,11 +20,14 @@ package org.apache.cassandra.index.sai.utils;
 
 import java.nio.ByteBuffer;
 
+import io.github.jbellis.jvector.util.RamUsageEstimator;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.sai.IndexContext;
+import org.apache.cassandra.io.sstable.SSTableId;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 
@@ -41,7 +44,14 @@ public abstract class PrimaryKeyWithSortKey implements PrimaryKey
     // Either a Memtable reference or an SSTableId reference
     private final Object sourceTable;
 
-    protected PrimaryKeyWithSortKey(IndexContext context, Object sourceTable, PrimaryKey primaryKey)
+    protected PrimaryKeyWithSortKey(IndexContext context, Memtable sourceTable, PrimaryKey primaryKey)
+    {
+        this.context = context;
+        this.sourceTable = sourceTable;
+        this.primaryKey = primaryKey;
+    }
+
+    protected PrimaryKeyWithSortKey(IndexContext context, SSTableId sourceTable, PrimaryKey primaryKey)
     {
         this.context = context;
         this.sourceTable = sourceTable;
@@ -135,6 +145,15 @@ public abstract class PrimaryKeyWithSortKey implements PrimaryKey
     public ByteSource asComparableBytesMaxPrefix(ByteComparable.Version version)
     {
         return primaryKey.asComparableBytesMaxPrefix(version);
+    }
+
+    @Override
+    public long ramBytesUsed()
+    {
+        // Object header + 3 references (context, primaryKey, sourceTable)
+        return RamUsageEstimator.NUM_BYTES_OBJECT_HEADER +
+               3L * RamUsageEstimator.NUM_BYTES_OBJECT_REF +
+               primaryKey.ramBytesUsed();
     }
 
 }

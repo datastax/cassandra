@@ -104,12 +104,6 @@ public interface IndexRegistry
         public void validate(PartitionUpdate update, ClientState state)
         {
         }
-
-        @Override
-        public void validate(RowFilter filter)
-        {
-            // no-op since it's an empty registry
-        }
     };
 
     /**
@@ -308,12 +302,6 @@ public interface IndexRegistry
         public void validate(PartitionUpdate update, ClientState state)
         {
         }
-
-        @Override
-        public void validate(RowFilter filter)
-        {
-            // no-op since it's an empty registry
-        }
     };
 
     default void registerIndex(Index index)
@@ -367,8 +355,6 @@ public interface IndexRegistry
      */
     void validate(PartitionUpdate update, ClientState state);
 
-    void validate(RowFilter filter);
-
     /**
      * Returns the {@code IndexRegistry} associated to the specified table.
      *
@@ -381,5 +367,75 @@ public interface IndexRegistry
             return NON_DAEMON;
 
         return table.isVirtual() ? EMPTY : Keyspace.openAndGetStore(table).indexManager;
+    }
+
+    enum EqBehavior
+    {
+        EQ,
+        MATCH,
+        AMBIGUOUS
+    }
+
+    class EqBehaviorIndexes
+    {
+        public EqBehavior behavior;
+        public final Index eqIndex;
+        public final Index matchIndex;
+
+        private EqBehaviorIndexes(Index eqIndex, Index matchIndex, EqBehavior behavior)
+        {
+            this.eqIndex = eqIndex;
+            this.matchIndex = matchIndex;
+            this.behavior = behavior;
+        }
+
+        public static EqBehaviorIndexes eq(Index eqIndex)
+        {
+            return new EqBehaviorIndexes(eqIndex, null, EqBehavior.EQ);
+        }
+
+        public static EqBehaviorIndexes match(Index eqAndMatchIndex)
+        {
+            return new EqBehaviorIndexes(eqAndMatchIndex, eqAndMatchIndex, EqBehavior.MATCH);
+        }
+
+        public static EqBehaviorIndexes ambiguous(Index firstEqIndex, Index secondEqIndex)
+        {
+            return new EqBehaviorIndexes(firstEqIndex, secondEqIndex, EqBehavior.AMBIGUOUS);
+        }
+    }
+
+    /**
+     * @return
+     * - AMBIGUOUS if an index supports EQ and a different one supports both EQ and ANALYZER_MATCHES
+     * - MATCHES if an index supports both EQ and ANALYZER_MATCHES
+     * - otherwise EQ
+     */
+    default EqBehaviorIndexes getEqBehavior(ColumnMetadata cm)
+    {
+        Index eqOnlyIndex = null;
+        Index bothIndex = null;
+
+        for (Index index : listIndexes())
+        {
+            boolean supportsEq = index.supportsExpression(cm, Operator.EQ);
+            boolean supportsMatches = index.supportsExpression(cm, Operator.ANALYZER_MATCHES);
+
+            if (supportsEq && supportsMatches)
+                bothIndex = index;
+            else if (supportsEq)
+                eqOnlyIndex = index;
+        }
+
+        // If we have one index supporting only EQ and another supporting both, return AMBIGUOUS
+        if (eqOnlyIndex != null && bothIndex != null)
+            return EqBehaviorIndexes.ambiguous(eqOnlyIndex, bothIndex);
+
+        // If we have an index supporting both EQ and MATCHES, return MATCHES
+        if (bothIndex != null)
+            return EqBehaviorIndexes.match(bothIndex);
+
+        // Otherwise return EQ
+        return EqBehaviorIndexes.eq(eqOnlyIndex == null ? bothIndex : eqOnlyIndex);
     }
 }

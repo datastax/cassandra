@@ -140,6 +140,12 @@ public class GeoDistanceRelation extends Relation
     }
 
     @Override
+    protected Restriction newBm25Restriction(TableMetadata table, VariableSpecifications boundNames)
+    {
+        throw invalidRequest("%s cannot be used with the GEO_DISTANCE function", operator());
+    }
+
+    @Override
     protected Restriction newAnalyzerMatchesRestriction(TableMetadata table, VariableSpecifications boundNames)
     {
         throw invalidRequest("%s cannot be used with the GEO_DISTANCE function", operator());

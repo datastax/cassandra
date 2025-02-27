@@ -29,7 +29,6 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.NavigableMap;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.SortedMap;
@@ -300,20 +299,26 @@ public class StorageAttachedIndex implements Index
             throw new InvalidRequestException("Failed to retrieve target column for: " + targetColumn);
         }
 
-        // In order to support different index target on non-frozen map, ie. KEYS, VALUE, ENTRIES, we need to put index
-        // name as part of index file name instead of column name. We only need to check that the target is different
-        // between indexes. This will only allow indexes in the same column with a different IndexTarget.Type.
-        //
-        // Note that: "metadata.indexes" already includes current index
-        if (metadata.indexes.stream().filter(index -> index.getIndexClassName().equals(StorageAttachedIndex.class.getName()))
-                            .map(index -> TargetParser.parse(metadata, index.options.get(IndexTarget.TARGET_OPTION_NAME)))
-                            .filter(Objects::nonNull).filter(t -> t.equals(target)).count() > 1)
-        {
-            throw new InvalidRequestException("Cannot create more than one storage-attached index on the same column: " + target.left);
-        }
+        // Check for duplicate indexes considering both target and analyzer configuration
+        boolean isAnalyzed = AbstractAnalyzer.isAnalyzed(options);
+        long duplicateCount = metadata.indexes.stream()
+                                              .filter(index -> index.getIndexClassName().equals(StorageAttachedIndex.class.getName()))
+                                              .filter(index -> {
+                                                  // Indexes on the same column with different target (KEYS, VALUES, ENTRIES)
+                                                  // are allowed on non-frozen Maps
+                                                  var existingTarget = TargetParser.parse(metadata, index.options.get(IndexTarget.TARGET_OPTION_NAME));
+                                                  if (existingTarget == null || !existingTarget.equals(target))
+                                                      return false;
+                                                  // Also allow different indexes if one is analyzed and the other isn't
+                                                  return isAnalyzed == AbstractAnalyzer.isAnalyzed(index.options);
+                                              })
+                                              .count();
+        // >1 because "metadata.indexes" already includes current index
+        if (duplicateCount > 1)
+            throw new InvalidRequestException(String.format("Cannot create duplicate storage-attached index on column: %s", target.left));
 
         // Analyzer is not supported against PK columns
-        if (AbstractAnalyzer.isAnalyzed(options))
+        if (isAnalyzed)
         {
             for (ColumnMetadata column : metadata.primaryKeyColumns())
             {

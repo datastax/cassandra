@@ -324,7 +324,7 @@ public enum Operator
                                      @Nullable Index.Analyzer indexAnalyzer,
                                      @Nullable Index.Analyzer queryAnalyzer)
         {
-            return true;
+            throw new UnsupportedOperationException();
         }
     },
     NOT_IN(16)
@@ -523,6 +523,7 @@ public enum Operator
             return false;
         }
     },
+
     /**
      * An operator that performs a distance bounded approximate nearest neighbor search against a vector column such
      * that all result vectors are within a given distance of the query vector. The notable difference between this
@@ -579,6 +580,24 @@ public enum Operator
         public boolean isSatisfiedBy(AbstractType<?> type, 
                                      ByteBuffer leftOperand, 
                                      ByteBuffer rightOperand, 
+                                     @Nullable Index.Analyzer indexAnalyzer,
+                                     @Nullable Index.Analyzer queryAnalyzer)
+        {
+            throw new UnsupportedOperationException();
+        }
+    },
+    BM25(104)
+    {
+        @Override
+        public String toString()
+        {
+            return "BM25";
+        }
+
+        @Override
+        public boolean isSatisfiedBy(AbstractType<?> type,
+                                     ByteBuffer leftOperand,
+                                     ByteBuffer rightOperand,
                                      @Nullable Index.Analyzer indexAnalyzer,
                                      @Nullable Index.Analyzer queryAnalyzer)
         {
