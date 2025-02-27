@@ -20,7 +20,6 @@ package org.apache.cassandra.cql3.restrictions;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.statements.Bound;
 import org.apache.cassandra.db.MultiClusteringBuilder;
-import org.apache.cassandra.index.IndexRegistry;
 
 /**
  * A single restriction/clause on one or multiple column.
@@ -106,17 +105,6 @@ public interface SingleRestriction extends Restriction
     }
 
     /**
-     * Checks if this restriction shouldn't be merged with other restrictions.
-     *
-     * @param indexRegistry the index registry
-     * @return {@code true} if this shouldn't be merged with other restrictions
-     */
-    default boolean skipMerge(IndexRegistry indexRegistry)
-    {
-        return false;
-    }
-
-    /**
      * Merges this restriction with the specified one.
      *
      * <p>Restriction are immutable. Therefore merging two restrictions result in a new one.
@@ -148,5 +136,17 @@ public interface SingleRestriction extends Restriction
     public default MultiClusteringBuilder appendBoundTo(MultiClusteringBuilder builder, Bound bound, QueryOptions options)
     {
         return appendTo(builder, options);
+    }
+
+    /**
+     * @return true if the other restriction should be merged with this one.
+     * This is NOT for preventing illegal combinations of restrictions, e.g.
+     * a=1 AND a=2; that is handled by mergeWith.  Instead, this is for the case
+     * where we want two completely different semantics against the same column.
+     * Currently the only such case is BM25 with MATCH.
+     */
+    default boolean shouldMerge(SingleRestriction other)
+    {
+        return true;
     }
 }
