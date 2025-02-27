@@ -18,6 +18,8 @@
 
 package org.apache.cassandra.db.monitoring;
 
+import org.apache.cassandra.index.sai.QueryContext;
+
 import static org.apache.cassandra.utils.MonotonicClock.Global.approxTime;
 
 public abstract class MonitorableImpl implements Monitorable
@@ -123,6 +125,9 @@ public abstract class MonitorableImpl implements Monitorable
 
     private void check()
     {
+        if (QueryContext.DISABLE_TIMEOUT)
+            return;
+
         if (approxCreationTimeNanos < 0 || state != MonitoringState.IN_PROGRESS)
             return;
 

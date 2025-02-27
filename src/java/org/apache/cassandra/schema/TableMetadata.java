@@ -1219,8 +1219,7 @@ public class TableMetadata implements SchemaElement
 
         public Builder addColumn(ColumnMetadata column)
         {
-            if (columns.containsKey(column.name.bytes))
-                throw new IllegalArgumentException();
+            assert !columns.containsKey(column.name.bytes) : column.name + " is already present";
 
             switch (column.kind)
             {

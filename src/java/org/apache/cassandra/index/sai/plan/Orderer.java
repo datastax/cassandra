@@ -19,9 +19,12 @@
 package org.apache.cassandra.index.sai.plan;
 
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.EnumSet;
+import java.util.HashSet;
+import java.util.List;
 import java.util.stream.Collectors;
 
 import javax.annotation.Nullable;
@@ -41,12 +44,15 @@ public class Orderer
 {
     // The list of operators that are valid for order by clauses.
     static final EnumSet<Operator> ORDER_BY_OPERATORS = EnumSet.of(Operator.ANN,
+                                                                   Operator.BM25,
                                                                    Operator.ORDER_BY_ASC,
                                                                    Operator.ORDER_BY_DESC);
 
     public final IndexContext context;
     public final Operator operator;
-    public final float[] vector;
+    public final ByteBuffer term;
+    private float[] vector;
+    private List<ByteBuffer> queryTerms;
 
     /**
      * Create an orderer for the given index context, operator, and term.
@@ -59,7 +65,7 @@ public class Orderer
         this.context = context;
         assert ORDER_BY_OPERATORS.contains(operator) : "Invalid operator for order by clause " + operator;
         this.operator = operator;
-        this.vector = context.getValidator().isVector() ? TypeUtil.decomposeVector(context.getValidator(), term) : null;
+        this.term = term;
     }
 
     public String getIndexName()
@@ -75,8 +81,8 @@ public class Orderer
 
     public Comparator<? super PrimaryKeyWithSortKey> getComparator()
     {
-        // ANN's PrimaryKeyWithSortKey is always descending, so we use the natural order for the priority queue
-        return isAscending() || isANN() ? Comparator.naturalOrder() : Comparator.reverseOrder();
+        // ANN/BM25's PrimaryKeyWithSortKey is always descending, so we use the natural order for the priority queue
+        return (isAscending() || isANN() || isBM25()) ? Comparator.naturalOrder() : Comparator.reverseOrder();
     }
 
     public boolean isLiteral()
@@ -87,6 +93,11 @@ public class Orderer
     public boolean isANN()
     {
         return operator == Operator.ANN;
+    }
+
+    public boolean isBM25()
+    {
+        return operator == Operator.BM25;
     }
 
     @Nullable
@@ -110,8 +121,38 @@ public class Orderer
     public String toString()
     {
         String direction = isAscending() ? "ASC" : "DESC";
-        return isANN()
-               ? context.getColumnName() + " ANN OF " + Arrays.toString(vector) + ' ' + direction
-               : context.getColumnName() + ' ' + direction;
+        if (isANN())
+            return context.getColumnName() + " ANN OF " + Arrays.toString(getVectorTerm()) + ' ' + direction;
+        if (isBM25())
+            return context.getColumnName() + " BM25 OF " + TypeUtil.getString(term, context.getValidator()) + ' ' + direction;
+        return context.getColumnName() + ' ' + direction;
+    }
+
+    public float[] getVectorTerm()
+    {
+        if (vector == null)
+            vector = TypeUtil.decomposeVector(context.getValidator(), term);
+        return vector;
+    }
+
+    public List<ByteBuffer> getQueryTerms()
+    {
+        if (queryTerms != null)
+            return queryTerms;
+
+        var queryAnalyzer = context.getQueryAnalyzerFactory().create();
+        // Split query into terms
+        var uniqueTerms = new HashSet<ByteBuffer>();
+        queryAnalyzer.reset(term);
+        try
+        {
+            queryAnalyzer.forEachRemaining(uniqueTerms::add);
+        }
+        finally
+        {
+            queryAnalyzer.end();
+        }
+        queryTerms = new ArrayList<>(uniqueTerms);
+        return queryTerms;
     }
 }
