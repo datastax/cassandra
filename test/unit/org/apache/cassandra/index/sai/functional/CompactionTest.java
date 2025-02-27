@@ -184,7 +184,7 @@ public class CompactionTest extends AbstractMetricsTest
             verifySSTableIndexes(v2IndexName, 1);
 
             // But index queries should not be allowed.
-            assertThrows(IndexNotAvailableException.class, () -> execute("SELECT id1 FROM %s WHERE v1>=0"));
+            assertThrows(IndexNotAvailableException.class, () -> executeInternal("SELECT id1 FROM %s WHERE v1>=0"));
         }
         finally
         {
