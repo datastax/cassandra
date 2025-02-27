@@ -22,7 +22,6 @@ import java.io.IOException;
 import java.lang.reflect.InvocationTargetException;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import com.google.common.base.Objects;
@@ -46,6 +45,7 @@ import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.UUIDSerializer;
 
+import static org.apache.cassandra.schema.SchemaConstants.PATTERN_NON_WORD_CHAR;
 import static org.apache.cassandra.schema.SchemaConstants.isValidCharsName;
 
 /**
@@ -54,10 +54,6 @@ import static org.apache.cassandra.schema.SchemaConstants.isValidCharsName;
 public final class IndexMetadata
 {
     private static final Logger logger = LoggerFactory.getLogger(IndexMetadata.class);
-
-    private static final Pattern PATTERN_NON_WORD_CHAR = Pattern.compile("\\W");
-    private static final Pattern PATTERN_WORD_CHARS = Pattern.compile("\\w+");
-
 
     public static final Serializer serializer = new Serializer();
 
@@ -105,19 +101,19 @@ public final class IndexMetadata
     {
         Map<String, String> newOptions = new HashMap<>(options);
         newOptions.put(IndexTarget.TARGET_OPTION_NAME, targets.stream()
-                                                              .map(target -> target.asCqlString())
+                                                              .map(IndexTarget::asCqlString)
                                                               .collect(Collectors.joining(", ")));
         return new IndexMetadata(name, newOptions, kind);
     }
 
     public static String generateDefaultIndexName(String table, ColumnIdentifier column)
     {
-        return PATTERN_NON_WORD_CHAR.matcher(table + "_" + column.toString() + "_idx").replaceAll("");
+        return PATTERN_NON_WORD_CHAR.matcher(table + '_' + column.toString() + "_idx").replaceAll("");
     }
 
     public static String generateDefaultIndexName(String table)
     {
-        return PATTERN_NON_WORD_CHAR.matcher(table + "_" + "idx").replaceAll("");
+        return PATTERN_NON_WORD_CHAR.matcher(table + '_' + "idx").replaceAll("");
     }
 
     public void validate(TableMetadata table)
