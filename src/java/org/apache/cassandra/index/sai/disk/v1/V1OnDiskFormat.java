@@ -85,10 +85,11 @@ public class V1OnDiskFormat implements OnDiskFormat
                                                                                  IndexComponentType.META,
                                                                                  IndexComponentType.TERMS_DATA,
                                                                                  IndexComponentType.POSTING_LISTS);
-    private static final Set<IndexComponentType> NUMERIC_COMPONENTS = EnumSet.of(IndexComponentType.COLUMN_COMPLETION_MARKER,
-                                                                                 IndexComponentType.META,
-                                                                                 IndexComponentType.KD_TREE,
-                                                                                 IndexComponentType.KD_TREE_POSTING_LISTS);
+
+    public static final Set<IndexComponentType> NUMERIC_COMPONENTS = EnumSet.of(IndexComponentType.COLUMN_COMPLETION_MARKER,
+                                                                                IndexComponentType.META,
+                                                                                IndexComponentType.KD_TREE,
+                                                                                IndexComponentType.KD_TREE_POSTING_LISTS);
 
     /**
      * Global limit on heap consumed by all index segment building that occurs outside the context of Memtable flush.

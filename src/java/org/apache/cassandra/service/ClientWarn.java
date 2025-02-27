@@ -17,8 +17,14 @@
  */
 package org.apache.cassandra.service;
 
+//<<<<<<< HEAD
 import java.util.concurrent.CopyOnWriteArrayList;
+//=======
+//import java.util.ArrayList;
+import java.util.HashSet;
+//>>>>>>> b0cdc37bc2 (Implement synthetic columns and ORDER BY BM25 (#1434))
 import java.util.List;
+import java.util.Set;
 
 import org.apache.cassandra.concurrent.ExecutorLocals;
 import org.apache.cassandra.utils.FBUtilities;
@@ -45,9 +51,22 @@ public class ClientWarn extends ExecutorLocals.Impl
 
     public void warn(String text)
     {
+//<<<<<<< HEAD
+//        State state = get();
+//=======
+        warn(text, null);
+    }
+
+    /**
+     * Issue the given warning if this is the first time `key` is seen.
+     */
+    public void warn(String text, Object key)
+    {
+//        State state = warnLocal.get();
+//>>>>>>> b0cdc37bc2 (Implement synthetic columns and ORDER BY BM25 (#1434))
         State state = get();
         if (state != null)
-            state.add(text);
+            state.add(text, key);
     }
 
     public void captureWarnings()
@@ -70,14 +89,23 @@ public class ClientWarn extends ExecutorLocals.Impl
 
     public static class State
     {
+//<<<<<<< HEAD
         // This must be a thread-safe list. Even though it's wrapped in a ThreadLocal, it's propagated to each thread
         // from shared state, so multiple threads can reference the same State.
         private final List<String> warnings = new CopyOnWriteArrayList<>();
+//=======
+//        private final List<String> warnings = new ArrayList<>();
+        private final Set<Object> keysAdded = new HashSet<>();
+//>>>>>>> b0cdc37bc2 (Implement synthetic columns and ORDER BY BM25 (#1434))
 
-        private void add(String warning)
+        private void add(String warning, Object key)
         {
             if (warnings.size() < FBUtilities.MAX_UNSIGNED_SHORT)
+            {
+                if (key != null && !keysAdded.add(key))
+                    return;
                 warnings.add(maybeTruncate(warning));
+            }
         }
 
         private static String maybeTruncate(String warning)

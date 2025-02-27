@@ -149,7 +149,7 @@ public class VectorMemtableIndexTest extends SAITester
     {
         IntStream.range(0, 1_000).parallel().forEach(i ->
         {
-            var orderer = generateRandomOrderer();
+            var orderer = randomVectorOrderer();
             AbstractBounds<PartitionPosition> keyRange = generateRandomBounds(keys);
             // compute keys in range of the bounds
             Set<Integer> keysInRange = keys.stream().filter(keyRange::contains)
@@ -198,7 +198,7 @@ public class VectorMemtableIndexTest extends SAITester
         // VSTODO
     }
 
-    private Orderer generateRandomOrderer()
+    private Orderer randomVectorOrderer()
     {
         return new Orderer(indexContext, Operator.ANN, randomVectorSerialized());
     }
