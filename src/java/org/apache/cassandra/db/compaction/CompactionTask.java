@@ -259,7 +259,7 @@ public class CompactionTask extends AbstractCompactionTask
 
         // Calculate the operation total sizes if not already set
         if (totals == null)
-            totals = getOperationTotals(actuallyCompact, tokenRange(), 1.0);
+            totals = getOperationTotals(actuallyCompact, tokenRange());
 
         // sanity check: sstables to compact is a subset of the transaction originals
         assert transaction.originals().containsAll(actuallyCompact);
@@ -295,17 +295,15 @@ public class CompactionTask extends AbstractCompactionTask
     {
         public final long inputDiskSize;
         public final long inputUncompressedSize;
-        public final long spaceOverhead;
 
-        OperationTotals(long inputDiskSize, long inputUncompressedSize, long spaceOverhead)
+        OperationTotals(long inputDiskSize, long inputUncompressedSize)
         {
             this.inputDiskSize = inputDiskSize;
             this.inputUncompressedSize = inputUncompressedSize;
-            this.spaceOverhead = spaceOverhead;
         }
     }
 
-    public static OperationTotals getOperationTotals(Collection<SSTableReader> sstables, Range<Token> tokenRange, double overheadToDataRatio)
+    public static OperationTotals getOperationTotals(Collection<SSTableReader> sstables, Range<Token> tokenRange)
     {
         long inputDiskSize = 0;
         long inputUncompressedSize = 0;
@@ -328,13 +326,17 @@ public class CompactionTask extends AbstractCompactionTask
                 inputDiskSize += rdr.onDiskSizeForPartitionPositions(positionsForRanges);
             }
         }
-        return new OperationTotals(inputDiskSize, inputUncompressedSize, (long) (overheadToDataRatio * inputDiskSize));
+        return new OperationTotals(inputDiskSize, inputUncompressedSize);
     }
 
     @Override
     public long getSpaceOverhead()
     {
-        return totals.spaceOverhead;
+        // This value should be quick to return and never change.
+        // We can calculate the total number of bytes in the inputSSTables, but that's something that can change if
+        // we remove sstable because expired sstables or fitting under the available disk space.
+        // So we throw instead and let UnifiedCompactionStrategy override this method.
+        throw new UnsupportedOperationException("Unimplemented in base class.");
     }
 
     /**

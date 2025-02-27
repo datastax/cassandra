@@ -77,7 +77,7 @@ public class UnifiedCompactionTask extends CompactionTask
               // - there are no expired sstables in the compaction (UCS processes them separately)
               // - sstable exclusion for lack of space does not apply (shared progress is only use when an operation
               //   range applies, which disables this)
-              sharedProgress != null ? getOperationTotals(actuallyCompact, operationRange, shardingStats.overheadToDataRatio) : null,
+              sharedProgress != null ? getOperationTotals(actuallyCompact, operationRange) : null,
               gcBefore,
               keepOriginals,
               strategy,
@@ -155,5 +155,20 @@ public class UnifiedCompactionTask extends CompactionTask
         if (sharedOperation != null)
             opObserver = sharedOperation.wrapObserver(opObserver);
         return super.setOpObserver(opObserver);
+    }
+
+    @Override
+    public long getSpaceOverhead()
+    {
+        if (operationRange != null)
+        {
+            // totals must be precalculated for ranged tasks
+            return (long) (totals.inputDiskSize * shardingStats.overheadToDataRatio);
+        }
+        else
+        {
+            // if we don't have a range, the sharding stats have precise total disk space
+            return (long) (shardingStats.totalOnDiskSize * shardingStats.overheadToDataRatio);
+        }
     }
 }
