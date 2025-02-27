@@ -19,6 +19,7 @@ package org.apache.cassandra.index.sai.disk.v1;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.function.IntSupplier;
 import java.util.function.Supplier;
@@ -28,6 +29,7 @@ import java.util.stream.Stream;
 import com.carrotsearch.hppc.IntArrayList;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.index.sai.disk.format.Version;
+import org.apache.cassandra.index.sai.memory.RowMapping;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
@@ -83,10 +85,15 @@ public class InvertedIndexBuilder
             this.byteComparableBytes = byteComparableBytes;
             this.postings = postings;
         }
+    }
 
-        public Pair<ByteComparable, IntArrayList> toPair()
-        {
-            return Pair.create(byteComparableBytes, postings);
-        }
+    /**
+     * Adds default frequency of 1 to postings
+     */
+    static Pair<ByteComparable, List<RowMapping.RowIdWithFrequency>> toTermWithFrequency(TermsEnum te)
+    {
+        return Pair.create(te.byteComparableBytes, Arrays.stream(te.postings.toArray()).boxed()
+                                                         .map(p -> new RowMapping.RowIdWithFrequency(p, 1))
+                                                         .collect(toList()));
     }
 }

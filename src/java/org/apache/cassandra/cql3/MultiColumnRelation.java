@@ -251,6 +251,12 @@ public class MultiColumnRelation extends Relation
     }
 
     @Override
+    protected Restriction newBm25Restriction(TableMetadata table, VariableSpecifications boundNames)
+    {
+        throw invalidRequest("%s cannot be used for multi-column relations", operator());
+    }
+
+    @Override
     protected Restriction newAnalyzerMatchesRestriction(TableMetadata table, VariableSpecifications boundNames)
     {
         throw invalidRequest("%s cannot be used for multi-column relations", operator());
