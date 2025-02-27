@@ -376,6 +376,11 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
             return metas.get(indexComponentType);
         }
 
+        public ComponentMetadata getOptional(IndexComponentType indexComponentType)
+        {
+            return metas.get(indexComponentType);
+        }
+
         public Map<String, Map<String, String>> asMap()
         {
             Map<String, Map<String, String>> metaAttributes = new HashMap<>();

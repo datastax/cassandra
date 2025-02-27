@@ -19,31 +19,29 @@
 package org.apache.cassandra.index.sai.disk.v1.postings;
 
 import java.io.IOException;
+import java.util.function.ToIntFunction;
 
 import org.apache.cassandra.index.sai.disk.PostingList;
-import org.apache.cassandra.index.sai.utils.RowIdWithMeta;
 import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.lucene.util.LongHeap;
 
 /**
  * A posting list for ANN search results.  Transforms results from similarity order to rowId order.
  */
-public class VectorPostingList implements PostingList
+public class ReorderingPostingList implements PostingList
 {
     private final LongHeap segmentRowIds;
     private final int size;
 
-    public VectorPostingList(CloseableIterator<? extends RowIdWithMeta> source)
+    public <T> ReorderingPostingList(CloseableIterator<T> source, ToIntFunction<T> rowIdTransformer)
     {
-        // TODO find int specific data structure?
         segmentRowIds = new LongHeap(32);
         int n = 0;
-        // Once the source is consumed, we have to close it.
         try (source)
         {
             while (source.hasNext())
             {
-                segmentRowIds.push(source.next().getSegmentRowId());
+                segmentRowIds.push(rowIdTransformer.applyAsInt(source.next()));
                 n++;
             }
         }

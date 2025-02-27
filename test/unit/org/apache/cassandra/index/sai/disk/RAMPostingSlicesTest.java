@@ -31,7 +31,7 @@ public class RAMPostingSlicesTest extends SaiRandomizedTest
     @Test
     public void testRAMPostingSlices() throws Exception
     {
-        RAMPostingSlices slices = new RAMPostingSlices(Counter.newCounter());
+        RAMPostingSlices slices = new RAMPostingSlices(Counter.newCounter(), false);
 
         int[] segmentRowIdUpto = new int[1024];
         Arrays.fill(segmentRowIdUpto, -1);
@@ -56,7 +56,7 @@ public class RAMPostingSlicesTest extends SaiRandomizedTest
 
             bitSets[termID].set(segmentRowIdUpto[termID]);
 
-            slices.writeVInt(termID, segmentRowIdUpto[termID]);
+            slices.writePosting(termID, segmentRowIdUpto[termID], 1);
         }
 
         for (int termID = 0; termID < segmentRowIdUpto.length; termID++)
@@ -72,6 +72,38 @@ public class RAMPostingSlicesTest extends SaiRandomizedTest
                 assertTrue("termID=" + termID + " segmentRowId=" + segmentRowId, bitSets[termID].get(segmentRowId));
             }
             assertEquals(segmentRowId, segmentRowIdUpto[termID]);
+        }
+    }
+
+    @Test
+    public void testRAMPostingSlicesWithFrequencies() throws Exception {
+        RAMPostingSlices slices = new RAMPostingSlices(Counter.newCounter(), true);
+
+        // Test with just 3 terms and known frequencies
+        for (int termId = 0; termId < 3; termId++) {
+            slices.createNewSlice(termId);
+
+            // Write a sequence of rows with different frequencies for each term
+            slices.writePosting(termId, 5, 1);    // first posting at row 5
+            slices.writePosting(termId, 3, 2);    // next at row 8 (delta=3)
+            slices.writePosting(termId, 2, 3);    // next at row 10 (delta=2)
+        }
+
+        // Verify each term's postings
+        for (int termId = 0; termId < 3; termId++) {
+            ByteSliceReader reader = new ByteSliceReader();
+            PostingList postings = slices.postingList(termId, reader, 10);
+
+            assertEquals(5, postings.nextPosting());
+            assertEquals(1, postings.frequency());
+
+            assertEquals(8, postings.nextPosting());
+            assertEquals(2, postings.frequency());
+
+            assertEquals(10, postings.nextPosting());
+            assertEquals(3, postings.frequency());
+
+            assertEquals(PostingList.END_OF_STREAM, postings.nextPosting());
         }
     }
 }

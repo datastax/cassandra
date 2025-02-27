@@ -38,9 +38,21 @@ abstract class ColumnFilterFactory
      */
     abstract ColumnFilter newInstance(List<Selector> selectors);
 
-    public static ColumnFilterFactory wildcard(TableMetadata table)
+    public static ColumnFilterFactory wildcard(TableMetadata table, Set<ColumnMetadata> orderingColumns)
     {
-        return new PrecomputedColumnFilter(ColumnFilter.all(table));
+        ColumnFilter cf;
+        if (orderingColumns.isEmpty())
+        {
+            cf = ColumnFilter.all(table);
+        }
+        else
+        {
+            ColumnFilter.Builder builder = ColumnFilter.selectionBuilder();
+            builder.addAll(table.regularAndStaticColumns());
+            builder.addAll(orderingColumns);
+            cf = builder.build();
+        }
+        return new PrecomputedColumnFilter(cf);
     }
 
     public static ColumnFilterFactory fromColumns(TableMetadata table,
