@@ -23,6 +23,7 @@ import java.util.Objects;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
+import io.github.jbellis.jvector.util.RamUsageEstimator;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.DecoratedKey;
@@ -211,6 +212,23 @@ public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
                                  clustering == null ? null :String.join(",", Arrays.stream(clustering.getBufferArray())
                                                                                    .map(ByteBufferUtil::bytesToHex)
                                                                                    .collect(Collectors.toList())));
+        }
+
+        @Override
+        public long ramBytesUsed()
+        {
+            // Object header + 4 references (token, partitionKey, clustering, primaryKeySupplier) + implicit outer reference
+            long size = RamUsageEstimator.NUM_BYTES_OBJECT_HEADER +
+                       5L * RamUsageEstimator.NUM_BYTES_OBJECT_REF;
+            
+            if (token != null)
+                size += token.getHeapSize();
+            if (partitionKey != null)
+                size += RamUsageEstimator.NUM_BYTES_OBJECT_HEADER + 
+                       2L * RamUsageEstimator.NUM_BYTES_OBJECT_REF + // token and key references  
+                       2L * Long.BYTES;
+            // We don't count clustering size here as it's managed elsewhere
+            return size;
         }
     }
 }

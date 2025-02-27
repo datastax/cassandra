@@ -659,7 +659,7 @@ public class SelectOrderByTest extends CQLTester
         assertInvalidMessage("Cannot combine clustering column ordering with non-clustering column ordering",
                              "SELECT * FROM %s WHERE a=? ORDER BY b ASC, c ASC, d ASC", 0);
 
-        String errorMsg = "Order by currently only supports the ordering of columns following their declared order in the PRIMARY KEY";
+        String errorMsg = "Ordering by clustered columns must follow the declared order in the PRIMARY KEY";
 
         assertRows(execute("SELECT * FROM %s WHERE a=? AND b=? ORDER BY c", 0, 0),
                    row(0, 0, 0, 0),

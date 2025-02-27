@@ -19,11 +19,11 @@ package org.apache.cassandra.index.sai.disk;
 
 import java.nio.ByteBuffer;
 import java.util.Iterator;
+import java.util.List;
 
 import com.google.common.base.Preconditions;
 
-import com.carrotsearch.hppc.IntArrayList;
-import com.carrotsearch.hppc.cursors.IntCursor;
+import org.apache.cassandra.index.sai.memory.RowMapping;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
@@ -34,16 +34,16 @@ public class MemtableTermsIterator implements TermsIterator
 {
     private final ByteBuffer minTerm;
     private final ByteBuffer maxTerm;
-    private final Iterator<Pair<ByteComparable, IntArrayList>> iterator;
+    private final Iterator<Pair<ByteComparable, List<RowMapping.RowIdWithFrequency>>> iterator;
 
-    private Pair<ByteComparable, IntArrayList> current;
+    private Pair<ByteComparable, List<RowMapping.RowIdWithFrequency>> current;
 
     private int maxSSTableRowId = -1;
     private int minSSTableRowId = Integer.MAX_VALUE;
 
     public MemtableTermsIterator(ByteBuffer minTerm,
                                  ByteBuffer maxTerm,
-                                 Iterator<Pair<ByteComparable, IntArrayList>> iterator)
+                                 Iterator<Pair<ByteComparable, List<RowMapping.RowIdWithFrequency>>> iterator)
     {
         Preconditions.checkArgument(iterator != null);
         this.minTerm = minTerm;
@@ -69,22 +69,24 @@ public class MemtableTermsIterator implements TermsIterator
     @Override
     public PostingList postings()
     {
-        final IntArrayList list = current.right;
+        var list = current.right;
 
         assert list.size() > 0;
 
-        final int minSegmentRowID = list.get(0);
-        final int maxSegmentRowID = list.get(list.size() - 1);
+        final int minSegmentRowID = list.get(0).rowId;
+        final int maxSegmentRowID = list.get(list.size() - 1).rowId;
 
         // Because we are working with postings from the memtable, there is only one segment, so segment row ids
         // and sstable row ids are the same.
         minSSTableRowId = Math.min(minSSTableRowId, minSegmentRowID);
         maxSSTableRowId = Math.max(maxSSTableRowId, maxSegmentRowID);
 
-        final Iterator<IntCursor> it = list.iterator();
+        var it = list.iterator();
 
         return new PostingList()
         {
+            int frequency;
+
             @Override
             public int nextPosting()
             {
@@ -93,13 +95,21 @@ public class MemtableTermsIterator implements TermsIterator
                     return END_OF_STREAM;
                 }
 
-                return it.next().value;
+                var rowIdWithFrequency = it.next();
+                frequency = rowIdWithFrequency.frequency;
+                return rowIdWithFrequency.rowId;
             }
 
             @Override
             public int size()
             {
                 return list.size();
+            }
+
+            @Override
+            public int frequency()
+            {
+                return frequency;
             }
 
             @Override

@@ -942,6 +942,11 @@ public abstract class CQLTester
         return indexes.get(indexes.size() - 1);
     }
 
+    protected String getIndex(int i)
+    {
+        return indexes.get(i);
+    }
+
     protected Collection<String> currentTables()
     {
         if (tables == null || tables.isEmpty())

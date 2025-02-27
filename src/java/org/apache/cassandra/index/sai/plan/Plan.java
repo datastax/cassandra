@@ -1257,10 +1257,12 @@ abstract public class Plan
         @Override
         protected KeysIterationCost estimateCost()
         {
-            return ordering.isANN()
-                   ? estimateAnnSortCost()
-                   : estimateGlobalSortCost();
-
+            if (ordering.isANN())
+                return estimateAnnSortCost();
+            else if (ordering.isBM25())
+                return estimateBm25SortCost();
+            else
+                return estimateGlobalSortCost();
         }
 
         private KeysIterationCost estimateAnnSortCost()
@@ -1275,6 +1277,21 @@ abstract public class Plan
                                                                             expectedKeysInt,
                                                                             expectedSourceKeysInt);
             return new KeysIterationCost(expectedKeys, initCost, searchCost);
+        }
+
+        private KeysIterationCost estimateBm25SortCost()
+        {
+            double expectedKeys = access.expectedAccessCount(source.expectedKeys());
+
+            int termCount = ordering.getQueryTerms().size();
+            // all of the cost for BM25 is up front since the index doesn't give us the information we need
+            // to return results in order, in isolation.  The big cost is reading the indexed cells out of
+            // the sstables.
+            // VSTODO if we had stats on cell size _per column_ we could usefully include ROW_BYTE_COST
+            double initCost = source.fullCost()
+                              + source.expectedKeys() * (hrs(ROW_CELL_COST) + ROW_CELL_COST)
+                              + termCount * BM25_SCORE_COST;
+            return new KeysIterationCost(expectedKeys, initCost, 0);
         }
 
         private KeysIterationCost estimateGlobalSortCost()
@@ -1310,17 +1327,49 @@ abstract public class Plan
     }
 
     /**
-     * Returns all keys in ANN order.
-     * Contrary to {@link KeysSort}, there is no input node here and the output is generated lazily.
+     * Base class for index scans that return results in a computed order (ANN, BM25)
+     * rather than the natural index order.
      */
-    final static class AnnIndexScan extends Leaf
+    abstract static class ScoredIndexScan extends Leaf
     {
         final Orderer ordering;
 
-        AnnIndexScan(Factory factory, int id, Access access, Orderer ordering)
+        protected ScoredIndexScan(Factory factory, int id, Access access, Orderer ordering)
         {
             super(factory, id, access);
             this.ordering = ordering;
+        }
+
+        @Nullable
+        @Override
+        protected Orderer ordering()
+        {
+            return ordering;
+        }
+
+        @Override
+        protected double estimateSelectivity()
+        {
+            return 1.0;
+        }
+
+        @Override
+        protected Iterator<? extends PrimaryKey> execute(Executor executor)
+        {
+            int softLimit = max(1, round((float) access.expectedAccessCount(factory.tableMetrics.rows)));
+            return executor.getTopKRows((Expression) null, softLimit);
+        }
+    }
+
+    /**
+     * Returns all keys in ANN order.
+     * Contrary to {@link KeysSort}, there is no input node here and the output is generated lazily.
+     */
+    final static class AnnIndexScan extends ScoredIndexScan
+    {
+        protected AnnIndexScan(Factory factory, int id, Access access, Orderer ordering)
+        {
+            super(factory, id, access, ordering);
         }
 
         @Override
@@ -1335,20 +1384,6 @@ abstract public class Plan
             return new KeysIterationCost(expectedKeys, initCost, searchCost);
         }
 
-        @Nullable
-        @Override
-        protected Orderer ordering()
-        {
-            return ordering;
-        }
-
-        @Override
-        protected Iterator<? extends PrimaryKey> execute(Executor executor)
-        {
-            int softLimit = max(1, round((float) access.expectedAccessCount(factory.tableMetrics.rows)));
-            return executor.getTopKRows((Expression) null, softLimit);
-        }
-
         @Override
         protected KeysIteration withAccess(Access access)
         {
@@ -1357,10 +1392,45 @@ abstract public class Plan
                    : new AnnIndexScan(factory, id, access, ordering);
         }
 
+        @Nullable
         @Override
-        protected double estimateSelectivity()
+        protected IndexContext getIndexContext()
         {
-            return 1.0;
+            return ordering.context;
+        }
+    }
+
+    /**
+     * Returns all keys in BM25 order.
+     * Like AnnIndexScan, this generates results lazily without an input node.
+     */
+    final static class Bm25IndexScan extends ScoredIndexScan
+    {
+        protected Bm25IndexScan(Factory factory, int id, Access access, Orderer ordering)
+        {
+            super(factory, id, access, ordering);
+        }
+
+        @Nonnull
+        @Override
+        protected KeysIterationCost estimateCost()
+        {
+            double expectedKeys = access.expectedAccessCount(factory.tableMetrics.rows);
+            int expectedKeysInt = Math.max(1, (int) Math.ceil(expectedKeys));
+
+            int termCount = ordering.getQueryTerms().size();
+            double initCost = expectedKeysInt * (hrs(ROW_CELL_COST) + ROW_CELL_COST)
+                              + termCount * BM25_SCORE_COST;
+
+            return new KeysIterationCost(expectedKeys, initCost, 0);
+        }
+
+        @Override
+        protected KeysIteration withAccess(Access access)
+        {
+            return Objects.equals(access, this.access)
+                   ? this
+                   : new Bm25IndexScan(factory, id, access, ordering);
         }
 
         @Override
@@ -1684,6 +1754,8 @@ abstract public class Plan
             if (ordering != null)
                 if (ordering.isANN())
                     return new AnnIndexScan(this, id, defaultAccess, ordering);
+                else if (ordering.isBM25())
+                    return new Bm25IndexScan(this, id, defaultAccess, ordering);
                 else if (ordering.isLiteral())
                     return new LiteralIndexScan(this, id, predicate, matchingKeysCount, defaultAccess, ordering);
                 else
@@ -1938,6 +2010,9 @@ abstract public class Plan
 
         /** Additional cost added to row fetch cost per each serialized byte of the row */
         public final static double ROW_BYTE_COST = 0.005;
+
+        /** Cost to perform BM25 scoring, per query term */
+        public final static double BM25_SCORE_COST = 0.5;
     }
 
     /** Convenience builder for building intersection and union nodes */

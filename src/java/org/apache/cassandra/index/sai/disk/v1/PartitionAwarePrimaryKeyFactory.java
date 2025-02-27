@@ -21,6 +21,7 @@ package org.apache.cassandra.index.sai.disk.v1;
 import java.util.Objects;
 import java.util.function.Supplier;
 
+import io.github.jbellis.jvector.util.RamUsageEstimator;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.dht.Token;
@@ -134,6 +135,19 @@ public class PartitionAwarePrimaryKeyFactory implements PrimaryKey.Factory
                     return ByteSource.withTerminator(terminator, tokenComparable, keyComparable);
             }
             return ByteSource.withTerminator(terminator, tokenComparable, keyComparable, null);
+        }
+
+        @Override
+        public long ramBytesUsed()
+        {
+            // Compute shallow size: object header + 4 references (3 declared + 1 implicit outer reference)
+            long shallowSize = RamUsageEstimator.NUM_BYTES_OBJECT_HEADER + 4L * RamUsageEstimator.NUM_BYTES_OBJECT_REF;
+            long preHashedDecoratedKeySize = partitionKey == null
+                                           ? 0
+                                           : RamUsageEstimator.NUM_BYTES_OBJECT_HEADER
+                                             + 2L * RamUsageEstimator.NUM_BYTES_OBJECT_REF // token and key references
+                                             + 2L * Long.BYTES;
+            return shallowSize + token.getHeapSize() + preHashedDecoratedKeySize;
         }
 
         @Override
