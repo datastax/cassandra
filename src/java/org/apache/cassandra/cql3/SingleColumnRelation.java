@@ -200,23 +200,21 @@ public final class SingleColumnRelation extends Relation
                 return new SingleColumnRestriction.EQRestriction(columnDef, term);
 
             // the index is configured to transform EQ into MATCH for backwards compatibility
-            var matchIndexName = ebi.matchIndex.getIndexMetadata() == null ? "Unknown" : ebi.matchIndex.getIndexMetadata().name;
             if (ebi.behavior == IndexRegistry.EqBehavior.MATCH)
             {
                 ClientWarn.instance.warn(String.format(AnalyzerEqOperatorSupport.EQ_RESTRICTION_ON_ANALYZED_WARNING,
                                                        columnDef.toString(),
-                                                       matchIndexName),
+                                                       ebi.matchIndex.getIndexMetadata().name),
                                          columnDef);
                 return new SingleColumnRestriction.AnalyzerMatchesRestriction(columnDef, term);
             }
 
             // multiple indexes support EQ, this is unsupported
             assert ebi.behavior == IndexRegistry.EqBehavior.AMBIGUOUS;
-            var eqIndexName = ebi.eqIndex.getIndexMetadata() == null ? "Unknown" : ebi.eqIndex.getIndexMetadata().name;
             throw invalidRequest(AnalyzerEqOperatorSupport.EQ_AMBIGUOUS_ERROR,
                                  columnDef.toString(),
-                                 matchIndexName,
-                                 eqIndexName);
+                                 ebi.matchIndex.getIndexMetadata().name,
+                                 ebi.eqIndex.getIndexMetadata().name);
         }
         List<? extends ColumnSpecification> receivers = toReceivers(columnDef);
         Term entryKey = toTerm(Collections.singletonList(receivers.get(0)), mapKey, table.keyspace, boundNames);
