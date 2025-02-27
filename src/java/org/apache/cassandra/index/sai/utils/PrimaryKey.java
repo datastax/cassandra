@@ -19,6 +19,7 @@ package org.apache.cassandra.index.sai.utils;
 
 import java.util.function.Supplier;
 
+import io.github.jbellis.jvector.util.Accountable;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.DecoratedKey;
@@ -38,7 +39,7 @@ import org.apache.cassandra.utils.bytecomparable.ByteSource;
  * For the V2 on-disk format the {@link DecoratedKey} and {@link Clustering} are supported.
  *
  */
-public interface PrimaryKey extends Comparable<PrimaryKey>
+public interface PrimaryKey extends Comparable<PrimaryKey>, Accountable
 {
     /**
      * A factory for creating {@link PrimaryKey} instances

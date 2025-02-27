@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.index.sai.disk;
 
+import io.github.jbellis.jvector.util.RamUsageEstimator;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.dht.Token;
@@ -126,5 +127,15 @@ public class PrimaryKeyWithSource implements PrimaryKey
     public String toString()
     {
         return String.format("%s (source sstable: %s, %s)", primaryKey, sourceSstableId, sourceRowId);
+    }
+
+    @Override
+    public long ramBytesUsed()
+    {
+        // Object header + 3 references (primaryKey, sourceSstableId) + long value
+        return RamUsageEstimator.NUM_BYTES_OBJECT_HEADER +
+               2L * RamUsageEstimator.NUM_BYTES_OBJECT_REF +
+               Long.BYTES +
+               primaryKey.ramBytesUsed();
     }
 }
