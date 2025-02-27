@@ -19,6 +19,7 @@
 package org.apache.cassandra.index.sai.memory;
 
 import org.apache.cassandra.config.Config;
+import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.memtable.TrieMemtable;
 import org.apache.cassandra.io.compress.BufferType;
 import org.junit.BeforeClass;
@@ -32,8 +33,9 @@ import static org.junit.Assert.assertEquals;
 public abstract class TrieMemtableIndexTest extends TrieMemtableIndexTestBase
 {
     @BeforeClass
-    public static void setShardCount()
+    public static void setUpClass()
     {
+        CQLTester.setUpClass();
         MEMTABLE_SHARD_COUNT.setInt(8);
         setup(Config.MemtableAllocationType.offheap_buffers);
         assertEquals(TrieMemtable.BUFFER_TYPE, BufferType.OFF_HEAP);
