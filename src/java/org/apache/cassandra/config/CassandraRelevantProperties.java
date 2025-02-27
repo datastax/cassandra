@@ -589,7 +589,14 @@ public enum CassandraRelevantProperties
      * Which compression algorithm to use for SSTable compression when not specified explicitly in the sstable options.
      * Can be "fast", which selects {@link LZ4Compressor}, or "adaptive" which selects {@link AdaptiveCompressor}.
      */
-    DEFAULT_SSTABLE_COMPRESSION("cassandra.default_sstable_compression", "fast");
+    DEFAULT_SSTABLE_COMPRESSION("cassandra.default_sstable_compression", "fast"),
+
+    /**
+     * Do not try to calculate optimal streaming candidates. This can take a lot of time in some configs specially
+     * with vnodes.
+     */
+    SKIP_OPTIMAL_STREAMING_CANDIDATES_CALCULATION("cassandra.skip_optimal_streaming_candidates_calculation", "false");
+
 
     CassandraRelevantProperties(String key, String defaultVal)
     {
