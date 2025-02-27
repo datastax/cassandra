@@ -420,8 +420,11 @@ public interface IndexRegistry
         {
             boolean supportsEq = index.supportsExpression(cm, Operator.EQ);
             boolean supportsMatches = index.supportsExpression(cm, Operator.ANALYZER_MATCHES);
+            // This is an edge case due to the NON_DAEMON IndexRegistry, which doesn't have index metadata and
+            // which uses regular equality by convention.
+            boolean hasIndexMetadata = index.getIndexMetadata() != null;
 
-            if (supportsEq && supportsMatches)
+            if (supportsEq && supportsMatches && hasIndexMetadata)
                 bothIndex = index;
             else if (supportsEq)
                 eqOnlyIndex = index;
