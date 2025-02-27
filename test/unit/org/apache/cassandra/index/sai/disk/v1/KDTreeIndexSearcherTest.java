@@ -151,7 +151,7 @@ public class KDTreeIndexSearcherTest extends SaiRandomizedTest
             {{
                 operation = Op.NOT_EQ;
                 lower = upper = new Bound(ShortType.instance.decompose((short) 0), Int32Type.instance, true);
-            }}, null, new QueryContext(), false, LIMIT);
+            }}, null, new QueryContext(), false);
 
             fail("Expect IllegalArgumentException thrown, but didn't");
         }
@@ -169,7 +169,7 @@ public class KDTreeIndexSearcherTest extends SaiRandomizedTest
         {{
             operation = Op.EQ;
             lower = upper = new Bound(rawType.decompose(rawValueProducer.apply(EQ_TEST_LOWER_BOUND_INCLUSIVE)), encodedType, true);
-        }}, null, new QueryContext(), false, LIMIT))
+        }}, null, new QueryContext(), false))
         {
             assertTrue(results.hasNext());
 
@@ -180,7 +180,7 @@ public class KDTreeIndexSearcherTest extends SaiRandomizedTest
         {{
             operation = Op.EQ;
             lower = upper = new Bound(rawType.decompose(rawValueProducer.apply(EQ_TEST_UPPER_BOUND_EXCLUSIVE)), encodedType, true);
-        }}, null, new QueryContext(), false, LIMIT))
+        }}, null, new QueryContext(), false))
         {
             assertFalse(results.hasNext());
             indexSearcher.close();
@@ -206,7 +206,7 @@ public class KDTreeIndexSearcherTest extends SaiRandomizedTest
 
             lower = new Bound(rawType.decompose(rawValueProducer.apply((short)2)), encodedType, false);
             upper = new Bound(rawType.decompose(rawValueProducer.apply((short)7)), encodedType, true);
-        }}, null, new QueryContext(), false, LIMIT))
+        }}, null, new QueryContext(), false))
         {
             assertTrue(results.hasNext());
 
@@ -218,7 +218,7 @@ public class KDTreeIndexSearcherTest extends SaiRandomizedTest
         {{
             operation = Op.RANGE;
             lower = new Bound(rawType.decompose(rawValueProducer.apply(RANGE_TEST_UPPER_BOUND_EXCLUSIVE)), encodedType, true);
-        }}, null, new QueryContext(), false, LIMIT))
+        }}, null, new QueryContext(), false))
         {
             assertFalse(results.hasNext());
         }
@@ -227,7 +227,7 @@ public class KDTreeIndexSearcherTest extends SaiRandomizedTest
         {{
             operation = Op.RANGE;
             upper = new Bound(rawType.decompose(rawValueProducer.apply(RANGE_TEST_LOWER_BOUND_INCLUSIVE)), encodedType, false);
-        }}, null, new QueryContext(), false, LIMIT))
+        }}, null, new QueryContext(), false))
         {
             assertFalse(results.hasNext());
             indexSearcher.close();

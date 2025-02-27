@@ -68,9 +68,7 @@ public abstract class IndexSearcher implements Closeable, SegmentOrdering
     protected final SegmentMetadata metadata;
     protected final IndexContext indexContext;
 
-    private static final SSTableReadsListener NOOP_LISTENER = new SSTableReadsListener() {};
-
-    private final ColumnFilter columnFilter;
+    protected final ColumnFilter columnFilter;
 
     protected IndexSearcher(PrimaryKeyMap.Factory primaryKeyMapFactory,
                             PerIndexFiles perIndexFiles,
@@ -90,30 +88,36 @@ public abstract class IndexSearcher implements Closeable, SegmentOrdering
     public abstract long indexFileCacheSize();
 
     /**
-     * Search on-disk index synchronously
+     * Search on-disk index synchronously.  Used for WHERE clause predicates, including BOUNDED_ANN.
      *
      * @param expression   to filter on disk index
      * @param keyRange     key range specific in read command, used by ANN index
      * @param queryContext to track per sstable cache and per query metrics
      * @param defer        create the iterator in a deferred state
-     * @param limit        the num of rows to returned, used by ANN index
      * @return {@link KeyRangeIterator} that matches given expression
      */
-    public abstract KeyRangeIterator search(Expression expression, AbstractBounds<PartitionPosition> keyRange, QueryContext queryContext, boolean defer, int limit) throws IOException;
+    public abstract KeyRangeIterator search(Expression expression, AbstractBounds<PartitionPosition> keyRange, QueryContext queryContext, boolean defer) throws IOException;
 
     /**
-     * Order the on-disk index synchronously and produce an iterator in score order
+     * Order the rows by the given Orderer.  Used for ORDER BY clause when
+     * (1) the WHERE predicate is either a partition restriction or a range restriction on the index,
+     * (2) there is no WHERE predicate, or
+     * (3) the planner determines it is better to post-filter the ordered results by the predicate.
      *
      * @param orderer      the object containing the ordering logic
      * @param slice        optional predicate to get a slice of the index
      * @param keyRange     key range specific in read command, used by ANN index
      * @param queryContext to track per sstable cache and per query metrics
-     * @param limit        the num of rows to returned, used by ANN index
+     * @param limit        the initial num of rows to returned, used by ANN index. More rows may be requested if filtering throws away more than expected!
      * @return an iterator of {@link PrimaryKeyWithSortKey} in score order
      */
     public abstract CloseableIterator<PrimaryKeyWithSortKey> orderBy(Orderer orderer, Expression slice, AbstractBounds<PartitionPosition> keyRange, QueryContext queryContext, int limit) throws IOException;
 
-
+    /**
+     * Order the rows by the given Orderer.  Used for ORDER BY clause when the WHERE predicates
+     * have been applied first, yielding a list of primary keys.  Again, `limit` is a planner hint for ANN to determine
+     * the initial number of results returned, not a maximum.
+     */
     @Override
     public CloseableIterator<PrimaryKeyWithSortKey> orderResultsBy(SSTableReader reader, QueryContext context, List<PrimaryKey> keys, Orderer orderer, int limit) throws IOException
     {
@@ -124,7 +128,7 @@ public abstract class IndexSearcher implements Closeable, SegmentOrdering
             {
                 var slices = Slices.with(indexContext.comparator(), Slice.make(key.clustering()));
                 // TODO if we end up needing to read the row still, is it better to store offset and use reader.unfilteredAt?
-                try (var iter = reader.rowIterator(key.partitionKey(), slices, columnFilter, false, NOOP_LISTENER))
+                try (var iter = reader.rowIterator(key.partitionKey(), slices, columnFilter, false, SSTableReadsListener.NOOP_LISTENER))
                 {
                     if (iter.hasNext())
                     {

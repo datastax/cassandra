@@ -49,7 +49,7 @@ public class AnalyzerEqOperatorSupport
                                                            OPTION, Arrays.toString(Value.values()));
 
     public static final String EQ_RESTRICTION_ON_ANALYZED_WARNING =
-    String.format("Columns [%%s] are restricted by '=' and have analyzed indexes [%%s] able to process those restrictions. " +
+    String.format("Column [%%s] is restricted by '=' and has an analyzed index [%%s] able to process those restrictions. " +
                   "Analyzed indexes might process '=' restrictions in a way that is inconsistent with non-indexed queries. " +
                   "While '=' is still supported on analyzed indexes for backwards compatibility, " +
                   "it is recommended to use the ':' operator instead to prevent the ambiguity. " +
@@ -57,6 +57,13 @@ public class AnalyzerEqOperatorSupport
                   "If you want to forbid the use of '=' on analyzed indexes now, " +
                   "please use '%s':'%s' in the index options.",
                   OPTION, Value.UNSUPPORTED.toString().toLowerCase());
+
+    public static final String EQ_AMBIGUOUS_ERROR =
+    String.format("Column [%%s] equality predicate is ambiguous.  It has both an analyzed index [%%s] configured with '%s':'%s', " +
+                  "and an un-analyzed index [%%s].  " +
+                  "To avoid ambiguity, drop the analyzed index and recreate it with option '%s':'%s'.",
+                  OPTION, Value.MATCH.toString().toLowerCase(), OPTION, Value.UNSUPPORTED.toString().toLowerCase());
+
 
     public static final String LWT_CONDITION_ON_ANALYZED_WARNING =
     "Index analyzers not applied to LWT conditions on columns [%s].";

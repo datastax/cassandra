@@ -31,9 +31,9 @@ import org.apache.cassandra.index.sai.metrics.QueryEventListener;
  */
 public class ScanningPostingsReader extends PostingsReader
 {
-    public ScanningPostingsReader(IndexInput input, BlocksSummary summary) throws IOException
+    public ScanningPostingsReader(IndexInput input, BlocksSummary summary, boolean readFrequencies) throws IOException
     {
-        super(input, summary, QueryEventListener.PostingListEventListener.NO_OP, InputCloser.NOOP);
+        super(input, summary, readFrequencies, QueryEventListener.PostingListEventListener.NO_OP, InputCloser.NOOP);
     }
 
     @Override
