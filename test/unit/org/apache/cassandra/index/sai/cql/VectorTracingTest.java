@@ -18,7 +18,6 @@
 
 package org.apache.cassandra.index.sai.cql;
 
-import org.apache.cassandra.cql3.CQLTester;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -35,7 +34,7 @@ public class VectorTracingTest extends VectorTester.VersionedWithChecksums
     public static void setUpClass()
     {
         CUSTOM_TRACING_CLASS.setString("org.apache.cassandra.tracing.TracingTestImpl");
-        CQLTester.setUpClass();
+        VectorTester.setUpClass();
     }
 
     @Test
