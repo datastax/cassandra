@@ -230,7 +230,7 @@ public class TermsReader implements Closeable
         {
             PostingsReader.BlocksSummary header = new PostingsReader.BlocksSummary(postingsSummaryInput, offset);
 
-            return new PostingsReader(postingsInput, header, listener.postingListEventListener());
+            return new PostingsReader(postingsInput, header, readFrequencies(), listener.postingListEventListener());
         }
     }
 
@@ -365,9 +365,15 @@ public class TermsReader implements Closeable
                                                                  PostingsReader.InputCloser.NOOP);
             return new PostingsReader(postingsInput,
                                       blocksSummary,
+                                      readFrequencies(),
                                       listener.postingListEventListener(),
                                       PostingsReader.InputCloser.NOOP);
         }
+    }
+
+    private boolean readFrequencies()
+    {
+        return indexContext.isAnalyzed() && version.onOrAfter(Version.EC);
     }
 
     private class TermsScanner implements TermsIterator
@@ -402,7 +408,7 @@ public class TermsReader implements Closeable
         {
             assert entry != null;
             var blockSummary = new PostingsReader.BlocksSummary(postingsSummaryInput, entry.right, PostingsReader.InputCloser.NOOP);
-            return new ScanningPostingsReader(postingsInput, blockSummary);
+            return new ScanningPostingsReader(postingsInput, blockSummary, readFrequencies());
         }
 
         @Override
@@ -463,7 +469,7 @@ public class TermsReader implements Closeable
         {
             assert entry != null;
             var blockSummary = new PostingsReader.BlocksSummary(postingsSummaryInput, entry.right, PostingsReader.InputCloser.NOOP);
-            return new ScanningPostingsReader(postingsInput, blockSummary);
+            return new ScanningPostingsReader(postingsInput, blockSummary, readFrequencies());
         }
 
         @Override

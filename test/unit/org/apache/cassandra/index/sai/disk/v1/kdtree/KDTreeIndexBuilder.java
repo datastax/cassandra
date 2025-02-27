@@ -21,7 +21,9 @@ import java.io.IOException;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.Iterator;
+import java.util.List;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -31,6 +33,7 @@ import java.util.stream.Stream;
 import org.junit.Assert;
 
 import com.carrotsearch.hppc.IntArrayList;
+import org.apache.cassandra.index.sai.memory.RowMapping;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.DecimalType;
 import org.apache.cassandra.db.marshal.Int32Type;
@@ -142,7 +145,22 @@ public class KDTreeIndexBuilder
 
     KDTreeIndexSearcher flushAndOpen() throws IOException
     {
-        final TermsIterator termEnum = new MemtableTermsIterator(null, null, terms);
+        // Wrap postings with RowIdWithFrequency using default frequency of 1
+        final TermsIterator termEnum = new MemtableTermsIterator(null, null, new AbstractGuavaIterator<>()
+        {
+            @Override
+            protected Pair<ByteComparable, List<RowMapping.RowIdWithFrequency>> computeNext()
+            {
+                if (!terms.hasNext())
+                    return endOfData();
+
+                Pair<ByteComparable, IntArrayList> pair = terms.next();
+                List<RowMapping.RowIdWithFrequency> postings = new ArrayList<>(pair.right.size());
+                for (int i = 0; i < pair.right.size(); i++)
+                    postings.add(new RowMapping.RowIdWithFrequency(pair.right.get(i), 1));
+                return Pair.create(pair.left, postings);
+            }
+        });
         final ImmutableOneDimPointValues pointValues = ImmutableOneDimPointValues.fromTermEnum(termEnum, type);
 
         final SegmentMetadata metadata;

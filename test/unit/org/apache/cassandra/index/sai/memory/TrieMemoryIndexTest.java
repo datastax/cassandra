@@ -20,7 +20,6 @@ package org.apache.cassandra.index.sai.memory;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.Map;
 import java.util.function.IntFunction;
 
@@ -40,7 +39,6 @@ import org.apache.cassandra.index.TargetParser;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
-import org.apache.cassandra.index.sai.utils.PrimaryKeys;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.schema.CachingParams;
 import org.apache.cassandra.schema.ColumnMetadata;
@@ -82,17 +80,16 @@ public class TrieMemoryIndexTest
             index.add(makeKey(table, Integer.toString(row)), Clustering.EMPTY, Int32Type.instance.decompose(row / 10), allocatedBytes -> {}, allocatesBytes -> {});
         }
 
-        Iterator<Pair<ByteComparable, PrimaryKeys>> iterator = index.iterator();
+        var iterator = index.iterator();
         int valueCount = 0;
         while(iterator.hasNext())
         {
-            Pair<ByteComparable, PrimaryKeys> pair = iterator.next();
+            var pair = iterator.next();
             int value = ByteSourceInverse.getSignedInt(pair.left.asComparableBytes(TypeUtil.BYTE_COMPARABLE_VERSION));
             int idCount = 0;
-            Iterator<PrimaryKey> primaryKeyIterator = pair.right.iterator();
-            while (primaryKeyIterator.hasNext())
+            for (var pkf : pair.right)
             {
-                PrimaryKey primaryKey = primaryKeyIterator.next();
+                PrimaryKey primaryKey = pkf.pk;
                 int id = Int32Type.instance.compose(primaryKey.partitionKey().getKey());
                 assertEquals(id/10, value);
                 idCount++;
@@ -113,17 +110,16 @@ public class TrieMemoryIndexTest
             index.add(makeKey(table, Integer.toString(row)), Clustering.EMPTY, UTF8Type.instance.decompose(Integer.toString(row / 10)), allocatedBytes -> {}, allocatesBytes -> {});
         }
 
-        Iterator<Pair<ByteComparable, PrimaryKeys>> iterator = index.iterator();
+        var iterator = index.iterator();
         int valueCount = 0;
         while(iterator.hasNext())
         {
-            Pair<ByteComparable, PrimaryKeys> pair = iterator.next();
+            var pair = iterator.next();
             String value = new String(ByteSourceInverse.readBytes(ByteSource.peekable(pair.left.asComparableBytes(TypeUtil.BYTE_COMPARABLE_VERSION))), StandardCharsets.UTF_8);
             int idCount = 0;
-            Iterator<PrimaryKey> primaryKeyIterator = pair.right.iterator();
-            while (primaryKeyIterator.hasNext())
+            for (var pkf : pair.right)
             {
-                PrimaryKey primaryKey = primaryKeyIterator.next();
+                PrimaryKey primaryKey = pkf.pk;
                 String id = UTF8Type.instance.compose(primaryKey.partitionKey().getKey());
                 assertEquals(Integer.toString(Integer.parseInt(id) / 10), value);
                 idCount++;
@@ -149,11 +145,11 @@ public class TrieMemoryIndexTest
             index.add(key, Clustering.EMPTY, decompose.apply(i), allocatedBytes -> {}, allocatesBytes -> {});
         }
 
-        final Iterator<Pair<ByteComparable, PrimaryKeys>> iterator = index.iterator();
+        final var iterator = index.iterator();
         int i = 0;
         while (iterator.hasNext())
         {
-            Pair<ByteComparable, PrimaryKeys> pair = iterator.next();
+            var pair = iterator.next();
             assertEquals(1, pair.right.size());
 
             final int rowId = i;
