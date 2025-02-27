@@ -161,14 +161,35 @@ public class Component
         }
     }
 
+    /**
+     * @return file that uses the resolved file system as provided absolutePath URI
+     */
     public File getFile(String absolutePath)
     {
+        // new file will have the default file open options from file system
         File ret;
         if (absolutePath.lastIndexOf(separator) != (absolutePath.length() - 1))
             ret = new File(PathUtils.getPath(absolutePath + separator + name));
         else
             ret = new File(PathUtils.getPath(absolutePath + name));
 
+        // update open options
+        return StorageProvider.instance.withOpenOptions(ret, this);
+    }
+
+    /**
+     * @return file that uses the same file system as provided directory and resolved from provided directory
+     */
+    public File getFile(File directory, String filenamePart)
+    {
+        // new file will have the same file open options as provided directory
+        File ret;
+        if (filenamePart.lastIndexOf(separator) != (filenamePart.length() - 1))
+            ret = directory.resolve(filenamePart + separator + name);
+        else
+            ret = directory.resolve(filenamePart + name);
+
+        // update open options
         return StorageProvider.instance.withOpenOptions(ret, this);
     }
 
