@@ -28,13 +28,15 @@ import java.io.IOException;
 import java.math.BigDecimal;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
-
 import java.util.Collection;
-
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.SortedSet;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.function.LongConsumer;
 import javax.annotation.Nullable;
@@ -43,6 +45,8 @@ import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.github.jbellis.jvector.util.Accountable;
+import io.github.jbellis.jvector.util.RamUsageEstimator;
 import io.netty.util.concurrent.FastThreadLocal;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.DecoratedKey;
@@ -57,6 +61,7 @@ import org.apache.cassandra.db.tries.TrieSpaceExhaustedException;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
+import org.apache.cassandra.index.sai.analyzer.NoOpAnalyzer;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.disk.v6.TermsDistribution;
@@ -83,6 +88,8 @@ public class TrieMemoryIndex extends MemoryIndex
 
     private final InMemoryTrie<PrimaryKeys> data;
     private final PrimaryKeysReducer primaryKeysReducer;
+    private final Map<PkWithTerm, Integer> termFrequencies;
+    private final Map<PrimaryKey, Integer> docLengths = new HashMap<>();
 
     private final Memtable memtable;
     private AbstractBounds<PartitionPosition> keyBounds;
@@ -111,6 +118,48 @@ public class TrieMemoryIndex extends MemoryIndex
         this.data = InMemoryTrie.longLived(TypeUtil.BYTE_COMPARABLE_VERSION, TrieMemtable.BUFFER_TYPE, indexContext.columnFamilyStore().readOrdering());
         this.primaryKeysReducer = new PrimaryKeysReducer();
         this.memtable = memtable;
+        termFrequencies = new ConcurrentHashMap<>();
+    }
+
+    public synchronized Map<PrimaryKey, Integer> getDocLengths()
+    {
+        return docLengths;
+    }
+
+    private static class PkWithTerm implements Accountable
+    {
+        private final PrimaryKey pk;
+        private final ByteComparable term;
+
+        private PkWithTerm(PrimaryKey pk, ByteComparable term)
+        {
+            this.pk = pk;
+            this.term = term;
+        }
+
+        @Override
+        public long ramBytesUsed()
+        {
+            return RamUsageEstimator.NUM_BYTES_OBJECT_HEADER + 
+                   2L * RamUsageEstimator.NUM_BYTES_OBJECT_REF + 
+                   pk.ramBytesUsed() +
+                   ByteComparable.length(term, TypeUtil.BYTE_COMPARABLE_VERSION);
+        }
+
+        @Override
+        public int hashCode()
+        {
+            return Objects.hash(pk, ByteComparable.length(term, TypeUtil.BYTE_COMPARABLE_VERSION));
+        }
+
+        @Override
+        public boolean equals(Object o)
+        {
+            if (o == null || getClass() != o.getClass()) return false;
+            PkWithTerm that = (PkWithTerm) o;
+            return Objects.equals(pk, that.pk)
+                   && ByteComparable.compare(term, that.term, TypeUtil.BYTE_COMPARABLE_VERSION) == 0;
+        }
     }
 
     @Override
@@ -126,11 +175,32 @@ public class TrieMemoryIndex extends MemoryIndex
             final long initialSizeOffHeap = data.usedSizeOffHeap();
             final long reducerHeapSize = primaryKeysReducer.heapAllocations();
 
+            if (docLengths.containsKey(primaryKey) && !(analyzer instanceof NoOpAnalyzer))
+            {
+                AtomicLong heapReclaimed = new AtomicLong();
+                // we're overwriting an existing cell, clear out the old term counts
+                for (Map.Entry<ByteComparable, PrimaryKeys> entry : data.entrySet())
+                {
+                    var termInTrie = entry.getKey();
+                    entry.getValue().forEach(pkInTrie -> {
+                        if (pkInTrie.equals(primaryKey))
+                        {
+                            var t = new PkWithTerm(pkInTrie, termInTrie);
+                            termFrequencies.remove(t);
+                            heapReclaimed.addAndGet(RamUsageEstimator.HASHTABLE_RAM_BYTES_PER_ENTRY + t.ramBytesUsed() + Integer.BYTES);
+                        }
+                    });
+                }
+            }
+
+            int tokenCount = 0;
             while (analyzer.hasNext())
             {
                 final ByteBuffer term = analyzer.next();
                 if (!indexContext.validateMaxTermSize(key, term))
                     continue;
+
+                tokenCount++;
 
                 // Note that this term is already encoded once by the TypeUtil.encode call above.
                 setMinMaxTerm(term.duplicate());
@@ -139,7 +209,25 @@ public class TrieMemoryIndex extends MemoryIndex
 
                 try
                 {
-                    data.putSingleton(encodedTerm, primaryKey, primaryKeysReducer, term.limit() <= MAX_RECURSIVE_KEY_LENGTH);
+                    data.putSingleton(encodedTerm, primaryKey, (existing, update) -> {
+                        // First do the normal primary keys reduction
+                        PrimaryKeys result = primaryKeysReducer.apply(existing, update);
+                        if (analyzer instanceof NoOpAnalyzer)
+                            return result;
+
+                        // Then update term frequency
+                        var pkbc = new PkWithTerm(update, encodedTerm);
+                        termFrequencies.compute(pkbc, (k, oldValue) -> {
+                            if (oldValue == null) {
+                                // New key added, track heap allocation 
+                                onHeapAllocationsTracker.accept(RamUsageEstimator.HASHTABLE_RAM_BYTES_PER_ENTRY + k.ramBytesUsed() + Integer.BYTES);
+                                return 1;
+                            }
+                            return oldValue + 1;
+                        });
+
+                        return result;
+                    }, term.limit() <= MAX_RECURSIVE_KEY_LENGTH);
                 }
                 catch (TrieSpaceExhaustedException e)
                 {
@@ -147,6 +235,14 @@ public class TrieMemoryIndex extends MemoryIndex
                 }
             }
 
+            docLengths.put(primaryKey, tokenCount);
+            // heap used for term frequencies and doc lengths
+            long heapUsed = RamUsageEstimator.HASHTABLE_RAM_BYTES_PER_ENTRY
+                            + primaryKey.ramBytesUsed()
+                            + Integer.BYTES;
+            onHeapAllocationsTracker.accept(heapUsed);
+
+            // memory used by the trie
             onHeapAllocationsTracker.accept((data.usedSizeOnHeap() - initialSizeOnHeap) +
                                             (primaryKeysReducer.heapAllocations() - reducerHeapSize));
             offHeapAllocationsTracker.accept(data.usedSizeOffHeap() - initialSizeOffHeap);
@@ -178,10 +274,10 @@ public class TrieMemoryIndex extends MemoryIndex
     }
 
     @Override
-    public Iterator<Pair<ByteComparable, PrimaryKeys>> iterator()
+    public Iterator<Pair<ByteComparable, List<PkWithFrequency>>> iterator()
     {
         Iterator<Map.Entry<ByteComparable, PrimaryKeys>> iterator = data.entrySet().iterator();
-        return new Iterator<Pair<ByteComparable, PrimaryKeys>>()
+        return new Iterator<>()
         {
             @Override
             public boolean hasNext()
@@ -190,10 +286,17 @@ public class TrieMemoryIndex extends MemoryIndex
             }
 
             @Override
-            public Pair<ByteComparable, PrimaryKeys> next()
+            public Pair<ByteComparable, List<PkWithFrequency>> next()
             {
                 Map.Entry<ByteComparable, PrimaryKeys> entry = iterator.next();
-                return Pair.create(entry.getKey(), entry.getValue());
+                var pairs = new ArrayList<PkWithFrequency>(entry.getValue().size());
+                for (PrimaryKey pk : entry.getValue().keys())
+                {
+                    var frequencyRaw = termFrequencies.get(new PkWithTerm(pk, entry.getKey()));
+                    int frequency = frequencyRaw == null ? 1 : frequencyRaw;
+                    pairs.add(new PkWithFrequency(pk, frequency));
+                }
+                return Pair.create(entry.getKey(), pairs);
             }
         };
     }
@@ -660,6 +763,13 @@ public class TrieMemoryIndex extends MemoryIndex
         maxTerm = TypeUtil.max(term, maxTerm, indexContext.getValidator(), Version.latest());
     }
 
+    /**
+     * Iterator that provides ordered access to all indexed terms and their associated primary keys
+     * in the TrieMemoryIndex. For each term in the index, yields PrimaryKeyWithSortKey objects that
+     * combine a primary key with its associated term.
+     * <p>
+     * A more verbose name could be KeysMatchingTermsByTermIterator.
+     */
     private class AllTermsIterator extends AbstractIterator<PrimaryKeyWithSortKey>
     {
         private final Iterator<Map.Entry<ByteComparable, PrimaryKeys>> iterator;

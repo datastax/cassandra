@@ -24,8 +24,8 @@ import java.util.stream.Collectors;
 
 import org.junit.Test;
 
-import com.carrotsearch.hppc.IntArrayList;
 import com.carrotsearch.randomizedtesting.annotations.ParametersFactory;
+import org.agrona.collections.Int2IntHashMap;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.index.sai.IndexContext;
@@ -39,6 +39,7 @@ import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.trie.InvertedIndexWriter;
+import org.apache.cassandra.index.sai.memory.RowMapping;
 import org.apache.cassandra.index.sai.metrics.QueryEventListener;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.index.sai.utils.SaiRandomizedTest;
@@ -53,7 +54,6 @@ import static org.apache.cassandra.index.sai.metrics.QueryEventListeners.NO_OP_T
 
 public class TermsReaderTest extends SaiRandomizedTest
 {
-
     public static final ByteComparable.Version VERSION = TypeUtil.BYTE_COMPARABLE_VERSION;
 
     @ParametersFactory()
@@ -102,8 +102,11 @@ public class TermsReaderTest extends SaiRandomizedTest
         IndexComponents.ForWrite components = indexDescriptor.newPerIndexComponentsForWrite(indexContext);
         try (InvertedIndexWriter writer = new InvertedIndexWriter(components))
         {
-            var iter = termsEnum.stream().map(InvertedIndexBuilder.TermsEnum::toPair).iterator();
-            indexMetas = writer.writeAll(new MemtableTermsIterator(null, null, iter));
+            var iter = termsEnum.stream()
+                    .map(InvertedIndexBuilder::toTermWithFrequency)
+                    .iterator();
+            Int2IntHashMap docLengths = createMockDocLengths(termsEnum);
+            indexMetas = writer.writeAll(new MemtableTermsIterator(null, null, iter), docLengths);
         }
 
         FileHandle termsData = components.get(IndexComponentType.TERMS_DATA).createFileHandle();
@@ -142,8 +145,11 @@ public class TermsReaderTest extends SaiRandomizedTest
         IndexComponents.ForWrite components = indexDescriptor.newPerIndexComponentsForWrite(indexContext);
         try (InvertedIndexWriter writer = new InvertedIndexWriter(components))
         {
-            var iter = termsEnum.stream().map(InvertedIndexBuilder.TermsEnum::toPair).iterator();
-            indexMetas = writer.writeAll(new MemtableTermsIterator(null, null, iter));
+            var iter = termsEnum.stream()
+                    .map(InvertedIndexBuilder::toTermWithFrequency)
+                    .iterator();
+            Int2IntHashMap docLengths = createMockDocLengths(termsEnum);
+            indexMetas = writer.writeAll(new MemtableTermsIterator(null, null, iter), docLengths);
         }
 
         FileHandle termsData = components.get(IndexComponentType.TERMS_DATA).createFileHandle();
@@ -159,22 +165,24 @@ public class TermsReaderTest extends SaiRandomizedTest
                                                   termsFooterPointer,
                                                   version))
         {
-            var iter = termsEnum.stream().map(InvertedIndexBuilder.TermsEnum::toPair).collect(Collectors.toList());
-            for (Pair<ByteComparable, IntArrayList> pair : iter)
+            var iter = termsEnum.stream()
+                    .map(InvertedIndexBuilder::toTermWithFrequency)
+                    .collect(Collectors.toList());
+            for (Pair<ByteComparable, List<RowMapping.RowIdWithFrequency>> pair : iter)
             {
                 final byte[] bytes = ByteSourceInverse.readBytes(pair.left.asComparableBytes(VERSION));
                 try (PostingList actualPostingList = reader.exactMatch(ByteComparable.preencoded(VERSION, bytes),
                                                                        (QueryEventListener.TrieIndexEventListener)NO_OP_TRIE_LISTENER,
                                                                        new QueryContext()))
                 {
-                    final IntArrayList expectedPostingList = pair.right;
+                    final List<RowMapping.RowIdWithFrequency> expectedPostingList = pair.right;
 
                     assertNotNull(actualPostingList);
                     assertEquals(expectedPostingList.size(), actualPostingList.size());
 
                     for (int i = 0; i < expectedPostingList.size(); ++i)
                     {
-                        final long expectedRowID = expectedPostingList.get(i);
+                        final long expectedRowID = expectedPostingList.get(i).rowId;
                         long result = actualPostingList.nextPosting();
                         assertEquals(String.format("row %d mismatch of %d in enum %d", i, expectedPostingList.size(), termsEnum.indexOf(pair)), expectedRowID, result);
                     }
@@ -188,18 +196,18 @@ public class TermsReaderTest extends SaiRandomizedTest
                                                                        (QueryEventListener.TrieIndexEventListener)NO_OP_TRIE_LISTENER,
                                                                        new QueryContext()))
                 {
-                    final IntArrayList expectedPostingList = pair.right;
+                    final List<RowMapping.RowIdWithFrequency> expectedPostingList = pair.right;
                     // test skipping to the last block
                     final int idxToSkip = numPostings - 2;
                     // tokens are equal to their corresponding row IDs
-                    final int tokenToSkip = expectedPostingList.get(idxToSkip);
+                    final int tokenToSkip = expectedPostingList.get(idxToSkip).rowId;
 
                     long advanceResult = actualPostingList.advance(tokenToSkip);
                     assertEquals(tokenToSkip, advanceResult);
 
                     for (int i = idxToSkip + 1; i < expectedPostingList.size(); ++i)
                     {
-                        final long expectedRowID = expectedPostingList.get(i);
+                        final long expectedRowID = expectedPostingList.get(i).rowId;
                         long result = actualPostingList.nextPosting();
                         assertEquals(expectedRowID, result);
                     }
@@ -209,6 +217,17 @@ public class TermsReaderTest extends SaiRandomizedTest
                 }
             }
         }
+    }
+
+    private Int2IntHashMap createMockDocLengths(List<InvertedIndexBuilder.TermsEnum> termsEnum)
+    {
+        Int2IntHashMap docLengths = new Int2IntHashMap(Integer.MIN_VALUE);
+        for (InvertedIndexBuilder.TermsEnum term : termsEnum)
+        {
+            for (var cursor : term.postings)
+                docLengths.put(cursor.value, 1);
+        }
+        return docLengths;
     }
 
     private List<InvertedIndexBuilder.TermsEnum> buildTermsEnum(Version version, int terms, int postings)

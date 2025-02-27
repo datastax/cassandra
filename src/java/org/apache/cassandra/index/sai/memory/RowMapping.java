@@ -17,10 +17,11 @@
  */
 package org.apache.cassandra.index.sai.memory;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Iterator;
+import java.util.List;
 
-import com.carrotsearch.hppc.IntArrayList;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.rows.RangeTombstoneMarker;
 import org.apache.cassandra.db.rows.Row;
@@ -44,7 +45,7 @@ public class RowMapping
     public static final RowMapping DUMMY = new RowMapping()
     {
         @Override
-        public Iterator<Pair<ByteComparable, IntArrayList>> merge(MemtableIndex index) { return Collections.emptyIterator(); }
+        public Iterator<Pair<ByteComparable, List<RowIdWithFrequency>>> merge(MemtableIndex index) { return Collections.emptyIterator(); }
 
         @Override
         public void complete() {}
@@ -89,6 +90,16 @@ public class RowMapping
         return DUMMY;
     }
 
+    public static class RowIdWithFrequency {
+        public final int rowId;
+        public final int frequency;
+
+        public RowIdWithFrequency(int rowId, int frequency) {
+            this.rowId = rowId;
+            this.frequency = frequency;
+        }
+    }
+    
     /**
      * Merge IndexMemtable(index term to PrimaryKeys mappings) with row mapping of a sstable
      * (PrimaryKey to RowId mappings).
@@ -97,33 +108,32 @@ public class RowMapping
      *
      * @return iterator of index term to postings mapping exists in the sstable
      */
-    public Iterator<Pair<ByteComparable, IntArrayList>> merge(MemtableIndex index)
+    public Iterator<Pair<ByteComparable, List<RowIdWithFrequency>>> merge(MemtableIndex index)
     {
         assert complete : "RowMapping is not built.";
 
-        Iterator<Pair<ByteComparable, Iterator<PrimaryKey>>> iterator = index.iterator(minKey.partitionKey(), maxKey.partitionKey());
-        return new AbstractGuavaIterator<Pair<ByteComparable, IntArrayList>>()
+        var it = index.iterator(minKey.partitionKey(), maxKey.partitionKey());
+        return new AbstractGuavaIterator<>()
         {
             @Override
-            protected Pair<ByteComparable, IntArrayList> computeNext()
+            protected Pair<ByteComparable, List<RowIdWithFrequency>> computeNext()
             {
-                while (iterator.hasNext())
+                while (it.hasNext())
                 {
-                    Pair<ByteComparable, Iterator<PrimaryKey>> pair = iterator.next();
+                    var pair = it.next();
 
-                    IntArrayList postings = null;
-                    Iterator<PrimaryKey> primaryKeys = pair.right;
+                    List<RowIdWithFrequency> postings = null;
+                    var primaryKeysWithFreq = pair.right;
 
-                    while (primaryKeys.hasNext())
+                    for (var pkWithFreq : primaryKeysWithFreq)
                     {
-                        PrimaryKey primaryKey = primaryKeys.next();
-                        ByteComparable byteComparable = primaryKey::asComparableBytes;
+                        ByteComparable byteComparable = pkWithFreq.pk::asComparableBytes;
                         Integer segmentRowId = rowMapping.get(byteComparable);
 
                         if (segmentRowId != null)
                         {
-                            postings = postings == null ? new IntArrayList() : postings;
-                            postings.add(segmentRowId);
+                            postings = postings == null ? new ArrayList<>() : postings;
+                            postings.add(new RowIdWithFrequency(segmentRowId, pkWithFreq.frequency));
                         }
                     }
                     if (postings != null && !postings.isEmpty())

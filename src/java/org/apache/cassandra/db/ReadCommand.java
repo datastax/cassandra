@@ -72,7 +72,6 @@ import org.apache.cassandra.db.transform.StoppingTransformation;
 import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.exceptions.UnknownIndexException;
 import org.apache.cassandra.index.Index;
-import org.apache.cassandra.index.IndexRegistry;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.DataInputPlus;
@@ -80,6 +79,7 @@ import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.locator.Replica;
 import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.net.Message;
+import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
@@ -447,8 +447,6 @@ public abstract class ReadCommand extends AbstractReadQuery
     @Override
     public void maybeValidateIndexes()
     {
-        IndexRegistry.obtain(metadata()).validate(rowFilter());
-
         if (null != indexQueryPlan)
         {
             indexQueryPlan.validate(this);
@@ -490,8 +488,9 @@ public abstract class ReadCommand extends AbstractReadQuery
             }
 
             Context context = Context.from(this);
-            UnfilteredPartitionIterator iterator = (null == searcher) ? Transformation.apply(queryStorage(cfs, executionController), new TrackingRowIterator(context))
-                                                                      : Transformation.apply(searchStorage(searcher, executionController), new TrackingRowIterator(context));
+            var storageTarget = (null == searcher) ? queryStorage(cfs, executionController)
+                                                   : searchStorage(searcher, executionController);
+            UnfilteredPartitionIterator iterator = Transformation.apply(storageTarget, new TrackingRowIterator(context));
             iterator = RTBoundValidator.validate(iterator, Stage.MERGED, false);
 
             try
@@ -1306,6 +1305,19 @@ public abstract class ReadCommand extends AbstractReadQuery
             TableMetadata metadata = schema.getExistingTableMetadata(TableId.deserialize(in));
             long nowInSec = MessagingService.Version.supportsExtendedDeletionTime(version) ? CassandraUInt.toLong(in.readInt()) : in.readInt();
             ColumnFilter columnFilter = ColumnFilter.serializer.deserialize(in, version, metadata);
+
+            // add synthetic columns to the tablemetadata so we can serialize them in our response
+            var tmb = metadata.unbuild();
+            for (var it = columnFilter.fetchedColumns().regulars.simpleColumns(); it.hasNext(); )
+            {
+                var c = it.next();
+                // synthetic columns sort first, so when we hit the first non-synthetic, we're done
+                if (!c.isSynthetic())
+                    break;
+                tmb.addColumn(ColumnMetadata.syntheticColumn(c.ksName, c.cfName, c.name, c.type));
+            }
+            metadata = tmb.build();
+
             RowFilter rowFilter = RowFilter.serializer.deserialize(in, version, metadata, needsReconciliation);
             DataLimits limits = DataLimits.serializer.deserialize(in, version,  metadata);
 
