@@ -18,11 +18,12 @@
 package org.apache.cassandra.index.sai.disk.v1.kdtree;
 
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
+import java.util.List;
 
 import org.junit.Before;
 import org.junit.Test;
 
-import com.carrotsearch.hppc.IntArrayList;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
@@ -35,6 +36,7 @@ import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
+import org.apache.cassandra.index.sai.memory.RowMapping;
 import org.apache.cassandra.index.sai.metrics.QueryEventListener;
 import org.apache.cassandra.index.sai.metrics.QueryEventListeners;
 import org.apache.cassandra.index.sai.utils.SaiRandomizedTest;
@@ -190,21 +192,21 @@ public class NumericIndexWriterTest extends SaiRandomizedTest
         final ByteBuffer minTerm = Int32Type.instance.decompose(startTermInclusive);
         final ByteBuffer maxTerm = Int32Type.instance.decompose(endTermExclusive);
 
-        final AbstractGuavaIterator<Pair<ByteComparable, IntArrayList>> iterator = new AbstractGuavaIterator<Pair<ByteComparable, IntArrayList>>()
+        final AbstractGuavaIterator<Pair<ByteComparable, List<RowMapping.RowIdWithFrequency>>> iterator = new AbstractGuavaIterator<>()
         {
             private int currentTerm = startTermInclusive;
             private int currentRowId = 0;
 
             @Override
-            protected Pair<ByteComparable, IntArrayList> computeNext()
+            protected Pair<ByteComparable, List<RowMapping.RowIdWithFrequency>> computeNext()
             {
                 if (currentTerm >= endTermExclusive)
                 {
                     return endOfData();
                 }
                 final ByteBuffer term = Int32Type.instance.decompose(currentTerm++);
-                final IntArrayList postings = new IntArrayList();
-                postings.add(currentRowId++);
+                final List<RowMapping.RowIdWithFrequency> postings = new ArrayList<>();
+                postings.add(new RowMapping.RowIdWithFrequency(currentRowId++, 1));
                 final ByteSource encoded = Int32Type.instance.asComparableBytes(term, TypeUtil.BYTE_COMPARABLE_VERSION);
                 return Pair.create(v -> encoded, postings);
             }

@@ -45,10 +45,24 @@ public abstract class Selection
     private static final Predicate<ColumnMetadata> STATIC_COLUMN_FILTER = (column) -> column.isStatic();
 
     private final TableMetadata table;
+
+    // Full list of columns needed for processing the query, including selected columns, ordering columns,
+    // and columns needed for restrictions.  Wildcard columns are fully materialized here.
+    //
+    // This also includes synthetic columns, because unlike all the other not-physical-columns selectables, they are
+    // computed on the replica instead of the coordinator and so, like physical columns, they need to be sent back
+    // as part of the result.
     private final List<ColumnMetadata> columns;
+
+    // maps ColumnSpecifications (columns, function calls, aliases) to the columns backing them
     private final SelectionColumnMapping columnMapping;
+
+    // metadata matching the ColumnSpcifications
     protected final ResultSet.ResultMetadata metadata;
+
+    // creates a ColumnFilter that breaks columns into `queried` and `fetched`
     protected final ColumnFilterFactory columnFilterFactory;
+
     protected final boolean isJson;
 
     // Columns used to order the result set for JSON queries with post ordering.
@@ -134,9 +148,14 @@ public abstract class Selection
 
     public static Selection wildcard(TableMetadata table, boolean isJson, boolean returnStaticContentOnPartitionWithNoRows)
     {
+        return wildcard(table, Collections.emptySet(), isJson, returnStaticContentOnPartitionWithNoRows);
+    }
+
+    public static Selection wildcard(TableMetadata table, Set<ColumnMetadata> orderingColumns, boolean isJson, boolean returnStaticContentOnPartitionWithNoRows)
+    {
         List<ColumnMetadata> all = new ArrayList<>(table.columns().size());
         Iterators.addAll(all, table.allColumnsInSelectOrder());
-        return new SimpleSelection(table, all, Collections.emptySet(), true, isJson, returnStaticContentOnPartitionWithNoRows);
+        return new SimpleSelection(table, all, orderingColumns, true, isJson, returnStaticContentOnPartitionWithNoRows);
     }
 
     public static Selection wildcardWithGroupByOrMaskedColumns(TableMetadata table,
@@ -411,7 +430,7 @@ public abstract class Selection
                  selectedColumns,
                  orderingColumns,
                  SelectionColumnMapping.simpleMapping(selectedColumns),
-                 isWildcard ? ColumnFilterFactory.wildcard(table)
+                 isWildcard ? ColumnFilterFactory.wildcard(table, orderingColumns)
                             : ColumnFilterFactory.fromColumns(table, selectedColumns, orderingColumns, Collections.emptySet(), returnStaticContentOnPartitionWithNoRows),
                  isWildcard,
                  isJson);
