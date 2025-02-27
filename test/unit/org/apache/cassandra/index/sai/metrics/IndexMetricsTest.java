@@ -33,6 +33,7 @@ import static org.junit.Assert.assertTrue;
 
 public class IndexMetricsTest extends AbstractMetricsTest
 {
+
     private static final String TABLE = "table_name";
     private static final String INDEX = "table_name_index";
 
@@ -163,7 +164,7 @@ public class IndexMetricsTest extends AbstractMetricsTest
 
         int rowCount = 10;
         for (int i = 0; i < rowCount; i++)
-            execute("INSERT INTO %s (id1, v1, v2, v3) VALUES (?, ?, '0', [?, 0.0])", Integer.toString(i), i, i);
+            execute("INSERT INTO %s (id1, v1, v2, v3) VALUES (?, ?, '0', ?)", Integer.toString(i), i, vector(i, i));
 
         assertIndexQueryCount(indexV1, 0L);
 
@@ -188,7 +189,7 @@ public class IndexMetricsTest extends AbstractMetricsTest
         assertIndexQueryCount(indexV1, 4L);
         assertIndexQueryCount(indexV2, 2L);
 
-        String indexV3 = createIndex("CREATE CUSTOM INDEX ON %s (v3) USING 'StorageAttachedIndex'");
+        String indexV3 = createIndex("CREATE CUSTOM INDEX ON %s (v3) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function': 'euclidean'}");
         assertIndexQueryCount(indexV3, 0L);
         executeNet("SELECT id1 FROM %s WHERE v2 = '2' ORDER BY v3 ANN OF [5,0] LIMIT 10");
         assertIndexQueryCount(indexV1, 4L);

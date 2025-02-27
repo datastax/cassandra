@@ -406,45 +406,36 @@ public abstract class RestrictionSet implements Restrictions
         {
         }
 
-        public void addRestriction(SingleRestriction restriction, boolean isDisjunction, IndexRegistry indexRegistry)
+        public void addRestriction(SingleRestriction restriction, boolean isDisjunction)
         {
             List<ColumnMetadata> columnDefs = restriction.getColumnDefs();
 
             if (isDisjunction)
             {
                 // If this restriction is part of a disjunction query then we don't want
-                // to merge the restrictions (if that is possible), we just add the
-                // restriction to the set of restrictions for the column.
+                // to merge the restrictions, we just add the new restriction
                 addRestrictionForColumns(columnDefs, restriction, null);
             }
             else
             {
-                // In some special cases such as EQ in analyzed index we need to skip merging the restriction,
-                // so we can send multiple EQ restrictions to the index.
-                if (restriction.skipMerge(indexRegistry))
-                {
-                    addRestrictionForColumns(columnDefs, restriction, null);
-                    return;
-                }
-
-                // If this restriction isn't part of a disjunction then we need to get
-                // the set of existing restrictions for the column and merge them with the
-                // new restriction
+                // ANDed together restrictions against the same columns should be merged.
                 Set<SingleRestriction> existingRestrictions = getRestrictions(newRestrictions, columnDefs);
 
-                SingleRestriction merged = restriction;
-                Set<SingleRestriction> replacedRestrictions = new HashSet<>();
-
-                for (SingleRestriction existing : existingRestrictions)
+                // merge the new restriction into an existing one.  note that there is only ever a single
+                // restriction (per column), UNLESS one is ORDER BY BM25 and the other is MATCH.
+                for (var existing : existingRestrictions)
                 {
-                    if (!existing.skipMerge(indexRegistry))
+                    // shouldMerge exists for the BM25/MATCH case
+                    if (existing.shouldMerge(restriction))
                     {
-                        merged = existing.mergeWith(merged);
-                        replacedRestrictions.add(existing);
+                        var merged = existing.mergeWith(restriction);
+                        addRestrictionForColumns(merged.getColumnDefs(), merged, Set.of(existing));
+                        return;
                     }
                 }
 
-                addRestrictionForColumns(merged.getColumnDefs(), merged, replacedRestrictions);
+                // no existing restrictions that we should merge the new one with, add a new one
+                addRestrictionForColumns(columnDefs, restriction, null);
             }
         }
 
