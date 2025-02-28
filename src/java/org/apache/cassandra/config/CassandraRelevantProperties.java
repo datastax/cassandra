@@ -531,7 +531,13 @@ public enum CassandraRelevantProperties
      * If provided, this custom factory class will be used to create stage executor for a couple of stages.
      * @see Stage for details
      */
-    CUSTOM_STAGE_EXECUTOR_FACTORY_PROPERTY("cassandra.custom_stage_executor_factory_class");
+    CUSTOM_STAGE_EXECUTOR_FACTORY_PROPERTY("cassandra.custom_stage_executor_factory_class"),
+
+    /**
+     * Do not try to calculate optimal streaming candidates. This can take a lot of time in some configs specially
+     * with vnodes.
+     */
+    SKIP_OPTIMAL_STREAMING_CANDIDATES_CALCULATION("cassandra.skip_optimal_streaming_candidates_calculation", "false");
 
     CassandraRelevantProperties(String key, String defaultVal)
     {
