@@ -58,6 +58,8 @@ public interface CounterLockManager
 
     /**
      * Grab locks for the given keys. The returned handles must be released by calling {@link LockHandle#release()}.
+     * The returned list is re-ordered in order to prevent deadlocks.
+     * It is expected that the caller will release the locks in the inverse order they were acquired.
      *
      * @param keys list of keys, the Iterable is scanned only once in order to prevent side effects.
      * @return a list of lock handles. The List can be iterated multiple times without side effects.
