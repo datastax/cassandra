@@ -322,23 +322,6 @@ public class StorageProxy implements StorageProxyMBean
             }
         }
 
-        private static List<WriteResponseHandlerWrapper> wrapBatchResponseHandlers(Collection<Mutation> mutations, ConsistencyLevel consistencyLevel, ConsistencyLevel batchConsistencyLevel, BatchlogCleanup cleanup, long queryStartNanoTime)
-        {
-            List<WriteResponseHandlerWrapper> wrappers = new ArrayList<>(mutations.size());
-            for (Mutation mutation : mutations)
-            {
-                WriteResponseHandlerWrapper wrapper = wrapBatchResponseHandler(mutation,
-                                                                               consistencyLevel,
-                                                                               batchConsistencyLevel,
-                                                                               WriteType.BATCH,
-                                                                               cleanup,
-                                                                               queryStartNanoTime);
-                // exit early if we can't fulfill the CL at this time.
-                wrappers.add(wrapper);
-            }
-            return wrappers;
-        }
-
         @Override
         public void clearBatchlog(String keyspace, ReplicaPlan.ForWrite replicaPlan, TimeUUID batchUUID)
         {
