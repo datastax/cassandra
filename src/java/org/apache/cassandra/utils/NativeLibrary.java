@@ -179,6 +179,10 @@ public class NativeLibrary implements INativeLibrary
             jnaLockable = true;
             logger.info("JNA mlockall successful");
         }
+        catch (UnsatisfiedLinkError e)
+        {
+            // this will have already been logged by CLibrary, no need to repeat it
+        }
         catch (NativeError e)
         {
             if (e.getErrno() == ENOMEM && osType == LINUX)
@@ -236,6 +240,11 @@ public class NativeLibrary implements INativeLibrary
         {
             wrappedLibrary.callPosixFadvise(fd, offset, len, POSIX_FADV_DONTNEED);
         }
+        catch (UnsatisfiedLinkError e)
+        {
+            // if JNA is unavailable just skipping Direct I/O
+            // instance of this class will act like normal RandomAccessFile
+        }
         catch (NativeError e)
         {
             NoSpamLogger.log(logger,
@@ -269,6 +278,11 @@ public class NativeLibrary implements INativeLibrary
         try
         {
             wrappedLibrary.callPosixMadvise(alignedAddress, length, MADV_RANDOM);
+        }
+        catch (UnsatisfiedLinkError e)
+        {
+            // if JNA is unavailable just skipping Direct I/O
+            // instance of this class will act like normal RandomAccessFile
         }
         catch (NativeError e)
         {
@@ -335,6 +349,10 @@ public class NativeLibrary implements INativeLibrary
         {
             wrappedLibrary.callFsync(fd);
         }
+        catch (UnsatisfiedLinkError e)
+        {
+            // JNA is unavailable just skipping Direct I/O
+        }
         catch (NativeError e)
         {
             if (REQUIRE)
@@ -355,6 +373,10 @@ public class NativeLibrary implements INativeLibrary
         try
         {
             wrappedLibrary.callClose(fd);
+        }
+        catch (UnsatisfiedLinkError e)
+        {
+            // JNA is unavailable just skipping Direct I/O
         }
         catch (NativeError e)
         {
