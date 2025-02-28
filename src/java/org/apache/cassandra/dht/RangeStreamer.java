@@ -359,7 +359,7 @@ public class RangeStreamer
 
         Multimap<InetAddressAndPort, FetchReplica> workMap;
         //Only use the optimized strategy if we don't care about strict sources, have a replication factor > 1, and no
-        //transient replicas or it is intentionally skipped.
+        //transient replicas or it is intentionally skipped or HCD-84
         if (CassandraRelevantProperties.SKIP_OPTIMAL_STREAMING_CANDIDATES_CALCULATION.getBoolean() ||
             useStrictSource ||
             strat == null ||
