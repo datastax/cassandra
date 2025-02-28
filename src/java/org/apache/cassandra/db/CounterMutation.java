@@ -23,9 +23,6 @@ import java.util.Collection;
 import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.locks.Lock;
-import java.lang.reflect.Method;
-import java.util.concurrent.locks.ReentrantLock;
 import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -35,7 +32,7 @@ import com.google.common.base.Supplier;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Iterators;
 import com.google.common.collect.PeekingIterator;
-import com.google.common.util.concurrent.Striped;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -43,10 +40,11 @@ import com.codahale.metrics.Counter;
 import com.codahale.metrics.Histogram;
 import org.apache.cassandra.cache.CounterCacheKey;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.counters.CounterLockManager;
+import org.apache.cassandra.db.marshal.ByteBufferAccessor;
 import org.apache.cassandra.db.context.CounterContext;
 import org.apache.cassandra.db.filter.ClusteringIndexNamesFilter;
 import org.apache.cassandra.db.filter.ColumnFilter;
-import org.apache.cassandra.db.marshal.ByteBufferAccessor;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.ColumnData;
@@ -73,8 +71,6 @@ import org.apache.cassandra.utils.concurrent.Future;
 
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
-import static org.apache.cassandra.config.CassandraRelevantProperties.COUNTER_LOCK_FAIR_LOCK;
-import static org.apache.cassandra.config.CassandraRelevantProperties.COUNTER_LOCK_NUM_STRIPES_PER_THREAD;
 import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
 import static org.apache.cassandra.net.MessagingService.VERSION_DS_10;
 import static org.apache.cassandra.net.MessagingService.VERSION_DS_11;
@@ -120,37 +116,9 @@ public class CounterMutation implements IMutation
     private static final String LOCK_TIMEOUT_MESSAGE = "Failed to acquire locks for counter mutation on keyspace {} for longer than {} millis, giving up";
     private static final String LOCK_TIMEOUT_TRACE = "Failed to acquire locks for counter mutation for longer than {} millis, giving up";
 
-    private static final Striped<Lock> LOCKS;
-
     private final Mutation mutation;
     private final ConsistencyLevel consistency;
 
-    static
-    {
-        int numStripes = COUNTER_LOCK_NUM_STRIPES_PER_THREAD.getInt() * DatabaseDescriptor.getConcurrentCounterWriters();
-        if (COUNTER_LOCK_FAIR_LOCK.getBoolean())
-        {
-            try
-            {
-                Class<?> stripedClass = Striped.class;
-
-                // Get the custom method Striped.custom
-                Method customMethod = stripedClass.getDeclaredMethod("custom", int.class, Supplier.class);
-                customMethod.setAccessible(true);
-
-                Supplier<Lock> lockSupplier = () -> new ReentrantLock(true);
-                LOCKS = (Striped<Lock>) customMethod.invoke(null, numStripes, lockSupplier);
-            }
-            catch (Exception e)
-            {
-                throw new RuntimeException(e);
-            }
-        }
-        else
-        {
-            LOCKS = Striped.lock(numStripes);
-        }
-    }
 
     public CounterMutation(Mutation mutation, ConsistencyLevel consistency)
     {
@@ -227,7 +195,7 @@ public class CounterMutation implements IMutation
         Mutation.PartitionUpdateCollector resultBuilder = new Mutation.PartitionUpdateCollector(getKeyspaceName(), key());
         Keyspace keyspace = Keyspace.open(getKeyspaceName());
 
-        ArrayList<Lock> locks = new ArrayList<>();
+        List<CounterLockManager.LockHandle> lockHandles = new ArrayList<>();
         Tracing.trace("Acquiring counter locks");
 
         long clock = FBUtilities.timestampMicros();
@@ -235,7 +203,7 @@ public class CounterMutation implements IMutation
 
         try
         {
-            grabCounterLocks(keyspace, locks);
+            grabCounterLocks(keyspace, lockHandles);
             for (PartitionUpdate upd : getPartitionUpdates())
                 resultBuilder.add(processModifications(upd, clock, counterId));
 
@@ -246,8 +214,8 @@ public class CounterMutation implements IMutation
         finally
         {
             // iterate over all locks in reverse order and unlock them
-            for (int i = locks.size() - 1; i >= 0; i--)
-                locks.get(i).unlock();
+            for (int i = lockHandles.size() - 1; i >= 0; i--)
+                lockHandles.get(i).release();
         }
     }
 
@@ -276,11 +244,11 @@ public class CounterMutation implements IMutation
         applyCounterMutation();
     }
 
-    private int countDistinctLocks(Iterable<Lock> sortedLocks)
+    private int countDistinctLocks(Iterable<CounterLockManager.LockHandle> sortedLocks)
     {
-        Lock prev = null;
+        CounterLockManager.LockHandle prev = null;
         int counter = 0;
-        for(Lock l: sortedLocks)
+        for(CounterLockManager.LockHandle l: sortedLocks)
         {
             if (prev != l)
                 counter++;
@@ -290,24 +258,26 @@ public class CounterMutation implements IMutation
     }
 
     @VisibleForTesting
-    public void grabCounterLocks(Keyspace keyspace, List<Lock> locks) throws WriteTimeoutException
+    public void grabCounterLocks(Keyspace keyspace, List<CounterLockManager.LockHandle> lockHandles) throws WriteTimeoutException
     {
+        assert lockHandles.isEmpty();
         long startTime = nanoTime();
 
         AbstractReplicationStrategy replicationStrategy = keyspace.getReplicationStrategy();
-        Iterable<Lock> sortedLocks = LOCKS.bulkGet(getCounterLockKeys());
-        locksPerUpdate.update(countDistinctLocks(sortedLocks));
-
+        List<CounterLockManager.LockHandle> sortedLockHandles = CounterLockManager.instance.grabLocks(getCounterLockKeys());
+        // always return all the locks to the caller, this way they can be released even in case of errors
+        lockHandles.addAll(sortedLockHandles);
+        locksPerUpdate.update(countDistinctLocks(sortedLockHandles));
         try
         {
-            for (Lock lock : sortedLocks)
+            for (CounterLockManager.LockHandle lockHandle : sortedLockHandles)
             {
             long timeout = getTimeout(NANOSECONDS) - (nanoTime() - startTime);
                 try
                 {
-                    if (!lock.tryLock(timeout, NANOSECONDS))
+                    if (!lockHandle.tryLock(timeout, NANOSECONDS))
                         handleLockTimeoutAndThrow(replicationStrategy);
-                    locks.add(lock);
+
                 }
                 catch (InterruptedException e)
                 {
@@ -338,19 +308,19 @@ public class CounterMutation implements IMutation
      * Striped#bulkGet() depends on Object#hashCode(), so here we make sure that the cf id and the partition key
      * all get to be part of the hashCode() calculation.
      */
-    private Iterable<Object> getCounterLockKeys()
+    private Iterable<Integer> getCounterLockKeys()
     {
-        return Iterables.concat(Iterables.transform(getPartitionUpdates(), new Function<PartitionUpdate, Iterable<Object>>()
+        return Iterables.concat(Iterables.transform(getPartitionUpdates(), new Function<PartitionUpdate, Iterable<Integer>>()
         {
-            public Iterable<Object> apply(final PartitionUpdate update)
+            public Iterable<Integer> apply(final PartitionUpdate update)
             {
-                return Iterables.concat(Iterables.transform(update.rows(), new Function<Row, Iterable<Object>>()
+                return Iterables.concat(Iterables.transform(update.rows(), new Function<Row, Iterable<Integer>>()
                 {
-                    public Iterable<Object> apply(final Row row)
+                    public Iterable<Integer> apply(final Row row)
                     {
-                        return Iterables.concat(Iterables.transform(row, new Function<ColumnData, Object>()
+                        return Iterables.concat(Iterables.transform(row, new Function<ColumnData, Integer>()
                         {
-                            public Object apply(final ColumnData data)
+                            public Integer apply(final ColumnData data)
                             {
                                 return Objects.hashCode(update.metadata().id, key(), row.clustering(), data.column());
                             }
