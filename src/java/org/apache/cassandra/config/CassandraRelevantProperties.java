@@ -580,6 +580,16 @@ public enum CassandraRelevantProperties
     SENSORS_VIA_NATIVE_PROTOCOL("cassandra.sensors_via_native_protocol", "false"),
 
     /**
+     * Set the number of rows from all replicas individual index and filtering queries that can materialize on-heap before warning
+     */
+    CACHED_REPLICA_ROWS_WARN_THRESHOLD("cassandra.cached_replica_rows_warn_threshold"),
+
+    /**
+     * Set the number of rows from all replicas individual index and filtering queries that can materialize on-heap before failing
+     */
+    CACHED_REPLICA_ROWS_FAIL_THRESHOLD("cassandra.cached_replica_rows_fail_threshold"),
+
+    /**
      * The current messaging version. This is used when we add new messaging versions without adopting them immediately,
      * or to force the node to use a specific version for testing purposes.
      */
@@ -596,6 +606,7 @@ public enum CassandraRelevantProperties
      * with vnodes.
      */
     SKIP_OPTIMAL_STREAMING_CANDIDATES_CALCULATION("cassandra.skip_optimal_streaming_candidates_calculation", "false");
+
 
 
     CassandraRelevantProperties(String key, String defaultVal)

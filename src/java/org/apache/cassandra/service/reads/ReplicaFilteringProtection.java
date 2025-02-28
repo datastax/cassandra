@@ -75,6 +75,9 @@ import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.utils.btree.BTreeSet;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.CACHED_REPLICA_ROWS_FAIL_THRESHOLD;
+import static org.apache.cassandra.config.CassandraRelevantProperties.CACHED_REPLICA_ROWS_WARN_THRESHOLD;
+
 /**
  * Helper in charge of collecting additional queries to be done on the coordinator to protect against invalid results
  * being included due to replica-side filtering (secondary indexes or {@code ALLOW * FILTERING}).
@@ -137,8 +140,9 @@ public class ReplicaFilteringProtection<E extends Endpoints<E>>
 
         tableMetrics = ColumnFamilyStore.metricsFor(command.metadata().id);
 
-        this.cachedRowsWarnThreshold = cachedRowsWarnThreshold;
-        this.cachedRowsFailThreshold = cachedRowsFailThreshold;
+        this.cachedRowsWarnThreshold = CACHED_REPLICA_ROWS_WARN_THRESHOLD.getInt(cachedRowsWarnThreshold);
+        this.cachedRowsFailThreshold = CACHED_REPLICA_ROWS_FAIL_THRESHOLD.getInt(cachedRowsFailThreshold);
+
     }
 
     private UnfilteredPartitionIterator executeReadCommand(ReadCommand cmd, Replica source, ReplicaPlan.Shared<EndpointsForToken, ReplicaPlan.ForTokenRead> replicaPlan)
