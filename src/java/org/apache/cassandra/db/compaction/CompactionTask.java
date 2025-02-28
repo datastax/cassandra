@@ -329,6 +329,16 @@ public class CompactionTask extends AbstractCompactionTask
         return new OperationTotals(inputDiskSize, inputUncompressedSize);
     }
 
+    @Override
+    public long getSpaceOverhead()
+    {
+        // This value should be quick to return and never change.
+        // We can calculate the total number of bytes in the inputSSTables, but that's something that can change if
+        // we remove sstable because expired sstables or fitting under the available disk space.
+        // So we throw instead and let UnifiedCompactionStrategy override this method.
+        throw new UnsupportedOperationException("Unimplemented in base class.");
+    }
+
     /**
      *  The compaction operation is a special case of an {@link AbstractTableOperation} and takes care of executing the
      *  actual compaction and releasing any resources when the compaction is finished.

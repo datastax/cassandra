@@ -91,4 +91,10 @@ public class SingleSSTableLCSTask extends AbstractCompactionTask
         transaction.prepareToCommit();
         transaction.commit();
     }
+
+    @Override
+    public long getSpaceOverhead()
+    {
+        return 0;   // This is just metadata modification, no overhead.
+    }
 }

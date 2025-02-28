@@ -77,6 +77,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.when;
 
 /**
@@ -762,7 +763,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         when(controller.getDataSetSizeBytes()).thenReturn(topBucketMaxCompactionSize * numShards);
         when(controller.random()).thenCallRealMethod();
 
-        when(controller.getOverheadSizeInBytes(any(CompactionPick.class))).thenAnswer(inv -> ((CompactionPick)inv.getArgument(0)).totSizeInBytes());
+        when(controller.getOverheadSizeInBytes(any(), anyLong())).thenAnswer(inv -> ((Long)inv.getArgument(1)).longValue());
 
         UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(strategyFactory, controller);
         List<SSTableReader> allSstables = new ArrayList<>();
@@ -1225,6 +1226,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         when(compaction.hasExpiredOnly()).thenReturn(false);
         List<SSTableReader> nonExpiredSSTables = createSStables(realm.getPartitioner());
         when(compaction.sstables()).thenReturn(ImmutableSet.copyOf(nonExpiredSSTables));
+        when(compaction.totalOverheadInBytes()).thenReturn(minimalSizeBytes);   // doesn't really matter
 
         CompactionAggregate.UnifiedAggregate aggregate = Mockito.mock(CompactionAggregate.UnifiedAggregate.class);
         when(aggregate.getSelected()).thenReturn(compaction);

@@ -23,7 +23,6 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
-import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
@@ -208,6 +207,12 @@ public abstract class AbstractCompactionTask extends WrappedRunnable
     {
         compObservers.add(compObserver);
     }
+
+    /**
+     * Returns the space overhead of this compaction. This can be used to limit running compactions to they fit under
+     * a given space budget. Used by CNDB.
+     */
+    public abstract long getSpaceOverhead();
 
     /**
      * @return The compaction observers for this task. Used by CNDB.
