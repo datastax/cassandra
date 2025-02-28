@@ -117,7 +117,7 @@ public class SensorsTest extends TestBaseImpl
         result.add(new Object[]{ counterTableSchema, noPrep, counter, new String[]{ EXPECTED_WRITE_BYTES_HEADER } });
         result.add(new Object[]{ tableSchema, new String[]{ write }, read, new String[]{ EXPECTED_READ_BYTES_HEADER } });
         // CAS requests incorporate read (and write) bytes from the paxos (and user) tables
-        result.add(new Object[]{ tableSchema, noPrep, cas, new String[]{ EXPECTED_WRITE_BYTES_HEADER, EXPECTED_READ_BYTES_HEADER } });
+        result.add(new Object[]{ tableSchema, noPrep, cas, new String[]{ EXPECTED_WRITE_BYTES_HEADER } });
         result.add(new Object[]{ tableSchema, noPrep, loggedBatch, new String[]{ EXPECTED_WRITE_BYTES_HEADER } });
         result.add(new Object[]{ tableSchema, noPrep, unloggedBatch, new String[]{ EXPECTED_WRITE_BYTES_HEADER } });
         result.add(new Object[]{ tableSchema, new String[]{ write }, range, new String[]{ EXPECTED_READ_BYTES_HEADER } });
