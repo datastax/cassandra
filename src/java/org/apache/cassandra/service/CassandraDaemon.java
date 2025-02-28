@@ -292,7 +292,7 @@ public class CassandraDaemon
 
         LegacySystemKeyspaceToNodes.convertToNodesFilesIfNecessary();
 
-        SSTableHeaderFix.fixNonFrozenUDTIfUpgradeFrom30();
+        SSTableHeaderFix.fixDroppedNonFrozenUDTIfUpgradeFrom30();
 
         // clean up debris in the rest of the keyspaces
         for (String keyspaceName : Schema.instance.getKeyspaces())
