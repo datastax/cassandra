@@ -43,7 +43,6 @@ import java.util.Optional;
 import java.util.Random;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -99,7 +98,6 @@ import org.apache.cassandra.ServerTestUtils;
 import org.apache.cassandra.auth.CassandraAuthorizer;
 import org.apache.cassandra.auth.CassandraRoleManager;
 import org.apache.cassandra.auth.PasswordAuthenticator;
-import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.EncryptionOptions;
@@ -107,6 +105,7 @@ import org.apache.cassandra.cql3.functions.FunctionName;
 import org.apache.cassandra.cql3.functions.types.ParseUtils;
 import org.apache.cassandra.cql3.statements.SelectStatement;
 import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.ReadCommand;
@@ -203,6 +202,16 @@ public abstract class CQLTester
     public static final String RACK1 = ServerTestUtils.RACK1;
     private static final int ASSERTION_TIMEOUT_SECONDS = 15;
     private static final User SUPER_USER = new User("cassandra", "cassandra");
+
+    /**
+     * Whether to use coorfinator execution in {@link #execute(String, Object...)}, so queries get full validation and
+     * go through reconciliation. When enabled, calls to {@link #execute(String, Object...)} will behave as calls to
+     * {@link #executeWithCoordinator(String, Object...)}. Otherwise, they will behave as calls to
+     * {@link #executeInternal(String, Object...)}.
+     *
+     * @see #execute
+     */
+    private static boolean coordinatorExecution = false;
 
     private static org.apache.cassandra.transport.Server server;
     private static JMXConnectorServer jmxServer;
@@ -506,6 +515,9 @@ public abstract class CQLTester
 
     protected static void requireNetworkWithoutDriver()
     {
+        if (server != null)
+            return;
+
         startServices();
         startServer(server -> {});
     }
@@ -766,6 +778,11 @@ public abstract class CQLTester
         if (indexes.isEmpty())
             return null;
         return indexes.get(indexes.size() - 1);
+    }
+
+    protected String getIndex(int i)
+    {
+        return indexes.get(i);
     }
 
     protected Collection<String> currentTables()
@@ -1520,21 +1537,101 @@ public abstract class CQLTester
         return QueryProcessor.instance.prepare(formatQuery(query), ClientState.forInternalCalls());
     }
 
+    /**
+     * Enables coordinator execution in {@link #execute(String, Object...)}, so queries get full validation and go
+     * through reconciliation. This makes calling {@link #execute(String, Object...)} equivalent to calling
+     * {@link #executeWithCoordinator(String, Object...)}.
+     */
+    protected static void enableCoordinatorExecution()
+    {
+        requireNetworkWithoutDriver();
+        coordinatorExecution = true;
+    }
+
+    /**
+     * Disables coordinator execution in {@link #execute(String, Object...)}, so queries won't get full validation nor
+     * go through reconciliation.This makes calling {@link #execute(String, Object...)} equivalent to calling
+     * {@link #executeInternal(String, Object...)}.
+     */
+    protected static void disableCoordinatorExecution()
+    {
+        coordinatorExecution = false;
+    }
+
+    /**
+     * Execute the specified query as either an internal query or a coordinator query depending on the value of
+     * {@link #coordinatorExecution}.
+     *
+     * @param query a CQL query
+     * @param values the values to bind to the query
+     * @return the query results
+     * @see #execute
+     * @see #executeInternal
+     */
     public UntypedResultSet execute(String query, Object... values)
     {
-        return executeFormattedQuery(formatQuery(query), values);
+        return coordinatorExecution
+               ? executeWithCoordinator(query, values)
+               : executeInternal(query, values);
+    }
+
+    /**
+     * Execute the specified query as an internal query only for the local node. This will skip reconciliation and some
+     * validation.
+     * </p>
+     * For the particular case of {@code SELECT} queries using secondary indexes, the skipping of reconciliation means
+     * that the query {@link org.apache.cassandra.db.filter.RowFilter} might not be fully applied to the index results.
+     *
+     * @param query a CQL query
+     * @param values the values to bind to the query
+     * @return the query results
+     * @see CQLStatement#executeLocally
+     */
+    public UntypedResultSet executeInternal(String query, Object... values)
+    {
+        return executeFormattedQuery(formatQuery(query), false, values);
+    }
+
+    /**
+     * Execute the specified query as an coordinator-side query meant for all the relevant nodes in the cluster, even if
+     * {@link CQLTester} tests are single-node. This won't skip reconciliation and will do full validation.
+     * </p>
+     * For the particular case of {@code SELECT} queries using secondary indexes, applying reconciliation means that the
+     * query {@link org.apache.cassandra.db.filter.RowFilter} will be fully applied to the index results.
+     *
+     * @param query a CQL query
+     * @param values the values to bind to the query
+     * @return the query results
+     * @see CQLStatement#execute
+     */
+    public UntypedResultSet executeWithCoordinator(String query, Object... values)
+    {
+        return executeFormattedQuery(formatQuery(query), true, values);
     }
 
     public UntypedResultSet executeFormattedQuery(String query, Object... values)
     {
+        return executeFormattedQuery(query, coordinatorExecution, values);
+    }
+
+    private UntypedResultSet executeFormattedQuery(String query, boolean useCoordinator, Object... values)
+    {        
+        if (useCoordinator)
+            requireNetworkWithoutDriver();
+        
         UntypedResultSet rs;
         if (usePrepared)
         {
             if (logger.isTraceEnabled())
                 logger.trace("Executing: {} with values {}", query, formatAllValues(values));
+
+            Object[] transformedValues = transformValues(values);
+
             if (reusePrepared)
             {
-                rs = QueryProcessor.executeInternal(query, transformValues(values));
+                rs = useCoordinator
+                     ? QueryProcessor.execute(query, ConsistencyLevel.ONE, transformedValues)
+                     : QueryProcessor.executeInternal(query, transformedValues);
 
                 // If a test uses a "USE ...", then presumably its statements use relative table. In that case, a USE
                 // change the meaning of the current keyspace, so we don't want a following statement to reuse a previously
@@ -1545,15 +1642,21 @@ public abstract class CQLTester
             }
             else
             {
-                rs = QueryProcessor.executeOnceInternal(query, transformValues(values));
+                rs = useCoordinator
+                     ? QueryProcessor.executeOnce(query, ConsistencyLevel.ONE, transformedValues)
+                     : QueryProcessor.executeOnceInternal(query, transformedValues);
             }
         }
         else
         {
             query = replaceValues(query, values);
+
             if (logger.isTraceEnabled())
                 logger.trace("Executing: {}", query);
-            rs = QueryProcessor.executeOnceInternal(query);
+
+            rs = useCoordinator
+                 ? QueryProcessor.executeOnce(query, ConsistencyLevel.ONE)
+                 : QueryProcessor.executeOnceInternal(query);
         }
         if (rs != null)
         {

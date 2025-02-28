@@ -21,8 +21,11 @@ import java.util.Collections;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.stream.Collectors;
 
 import org.apache.cassandra.db.marshal.VectorType;
+import org.apache.cassandra.index.IndexRegistry;
+import org.apache.cassandra.index.sai.analyzer.AnalyzerEqOperatorSupport;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.cql3.Term.Raw;
@@ -33,6 +36,7 @@ import org.apache.cassandra.db.marshal.CollectionType;
 import org.apache.cassandra.db.marshal.ListType;
 import org.apache.cassandra.db.marshal.MapType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.service.ClientWarn;
 
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkFalse;
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkTrue;
@@ -191,7 +195,27 @@ public final class SingleColumnRelation extends Relation
         if (mapKey == null)
         {
             Term term = toTerm(toReceivers(columnDef), value, table.keyspace, boundNames);
-            return new SingleColumnRestriction.EQRestriction(columnDef, term);
+            // Leave the restriction as EQ if no analyzed index in backwards compatibility mode is present
+            var ebi = IndexRegistry.obtain(table).getEqBehavior(columnDef);
+            if (ebi.behavior == IndexRegistry.EqBehavior.EQ)
+                return new SingleColumnRestriction.EQRestriction(columnDef, term);
+
+            // the index is configured to transform EQ into MATCH for backwards compatibility
+            if (ebi.behavior == IndexRegistry.EqBehavior.MATCH)
+            {
+                ClientWarn.instance.warn(String.format(AnalyzerEqOperatorSupport.EQ_RESTRICTION_ON_ANALYZED_WARNING,
+                                                       columnDef.toString(),
+                                                       ebi.matchIndex.getIndexMetadata().name),
+                                         columnDef);
+                return new SingleColumnRestriction.AnalyzerMatchesRestriction(columnDef, term);
+            }
+
+            // multiple indexes support EQ, this is unsupported
+            assert ebi.behavior == IndexRegistry.EqBehavior.AMBIGUOUS;
+            throw invalidRequest(AnalyzerEqOperatorSupport.EQ_AMBIGUOUS_ERROR,
+                                 columnDef.toString(),
+                                 ebi.matchIndex.getIndexMetadata().name,
+                                 ebi.eqIndex.getIndexMetadata().name);
         }
         List<? extends ColumnSpecification> receivers = toReceivers(columnDef);
         Term entryKey = toTerm(Collections.singletonList(receivers.get(0)), mapKey, table.keyspace, boundNames);
@@ -331,6 +355,14 @@ public final class SingleColumnRelation extends Relation
             throw invalidRequest("ANN is only supported against DENSE FLOAT32 columns");
         Term term = toTerm(toReceivers(columnDef), value, table.keyspace, boundNames);
         return new SingleColumnRestriction.AnnRestriction(columnDef, term);
+    }
+
+    @Override
+    protected Restriction newBm25Restriction(TableMetadata table, VariableSpecifications boundNames)
+    {
+        ColumnMetadata columnDef = table.getExistingColumn(entity);
+        Term term = toTerm(toReceivers(columnDef), value, table.keyspace, boundNames);
+        return new SingleColumnRestriction.Bm25Restriction(columnDef, term);
     }
 
     @Override

@@ -28,6 +28,7 @@ import org.slf4j.Logger;
 
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
 
@@ -102,6 +103,12 @@ public class PerIndexFiles implements Closeable
     public FileHandle pq()
     {
         return getFile(IndexComponentType.PQ).sharedCopy();
+    }
+
+    /** It is the caller's responsibility to close the returned file handle. */
+    public FileHandle docLengths()
+    {
+        return getFile(IndexComponentType.DOC_LENGTHS).sharedCopy();
     }
 
     public FileHandle getFile(IndexComponentType indexComponentType)

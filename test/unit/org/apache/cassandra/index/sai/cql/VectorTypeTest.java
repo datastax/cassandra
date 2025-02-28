@@ -79,9 +79,10 @@ public class VectorTypeTest extends VectorTester
     private static final IPartitioner partitioner = Murmur3Partitioner.instance;
 
     @BeforeClass
-    public static void setupClass()
+    public static void setUpClass()
     {
         System.setProperty("cassandra.custom_tracing_class", "org.apache.cassandra.tracing.TracingTestImpl");
+        VectorTester.setUpClass();
     }
 
     @Before
@@ -1012,7 +1013,7 @@ public class VectorTypeTest extends VectorTester
         // Ensure that we fail, as expected, and that a subsequent call to search is successful.
         beforeAndAfterFlush(() -> {
             injection.enable();
-            assertThatThrownBy(() -> execute("SELECT pk FROM %s ORDER BY vec ANN OF [1,1] LIMIT 2")).hasMessageContaining("Injected failure!");
+            assertThatThrownBy(() -> executeInternal("SELECT pk FROM %s ORDER BY vec ANN OF [1,1] LIMIT 2")).hasMessageContaining("Injected failure!");
             injection.disable();
             assertRows(execute("SELECT pk FROM %s ORDER BY vec ANN OF [1,1] LIMIT 2"), row(1));
         });

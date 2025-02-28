@@ -67,7 +67,6 @@ import org.apache.cassandra.utils.FBUtilities;
 
 import static java.lang.String.format;
 import static java.util.Collections.singletonMap;
-import static org.apache.cassandra.cql3.QueryProcessor.executeInternal;
 import static org.apache.cassandra.cql3.QueryProcessor.executeOnceInternal;
 import static org.apache.cassandra.nodes.virtual.NodeConstants.LEGACY_PEERS;
 import static org.apache.cassandra.nodes.virtual.NodeConstants.LOCAL;
@@ -163,8 +162,8 @@ public class LegacySystemKeyspaceToNodesTest extends CQLTester
             removeTruncated(SystemKeyspace.BATCHES);
 
             umappedViews(() -> {
-                assertEquals(1, executeInternal("SELECT * FROM system.local").size());
-                assertTrue(executeInternal("SELECT * FROM system.peers").isEmpty());
+                assertEquals(1, QueryProcessor.executeInternal("SELECT * FROM system.local").size());
+                assertTrue(QueryProcessor.executeInternal("SELECT * FROM system.peers").isEmpty());
             });
 
             LegacySystemKeyspaceToNodes legacySystemKeyspaceToNodes = new LegacySystemKeyspaceToNodes(nodes);
@@ -179,8 +178,8 @@ public class LegacySystemKeyspaceToNodesTest extends CQLTester
             assertEquals(0, legacySystemKeyspaceToNodes2.peersMigrated);
 
             umappedViews(() -> {
-                assertTrue(executeInternal("SELECT * FROM system.local").isEmpty());
-                assertTrue(executeInternal("SELECT * FROM system.peers").isEmpty());
+                assertTrue(QueryProcessor.executeInternal("SELECT * FROM system.local").isEmpty());
+                assertTrue(QueryProcessor.executeInternal("SELECT * FROM system.peers").isEmpty());
             });
 
             assertEquals(1, Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME)
@@ -247,8 +246,8 @@ public class LegacySystemKeyspaceToNodesTest extends CQLTester
                 tokens.add(i, persistPeerMetadata(i));
 
             umappedViews(() -> {
-                assertEquals(1, executeInternal("SELECT * FROM system.local").size());
-                assertEquals(peersCount, executeInternal("SELECT * FROM system.peers").size());
+                assertEquals(1, QueryProcessor.executeInternal("SELECT * FROM system.local").size());
+                assertEquals(peersCount, QueryProcessor.executeInternal("SELECT * FROM system.peers").size());
             });
 
             LegacySystemKeyspaceToNodes legacySystemKeyspaceToNodes = new LegacySystemKeyspaceToNodes(nodes);
@@ -257,8 +256,8 @@ public class LegacySystemKeyspaceToNodesTest extends CQLTester
             assertEquals(1000, legacySystemKeyspaceToNodes.peersMigrated);
 
             umappedViews(() -> {
-                assertTrue(executeInternal("SELECT * FROM system.local").isEmpty());
-                assertTrue(executeInternal("SELECT * FROM system.peers").isEmpty());
+                assertTrue(QueryProcessor.executeInternal("SELECT * FROM system.local").isEmpty());
+                assertTrue(QueryProcessor.executeInternal("SELECT * FROM system.peers").isEmpty());
             });
 
             // a following upgrade must not do anything
@@ -367,7 +366,7 @@ public class LegacySystemKeyspaceToNodesTest extends CQLTester
                      ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
         IEndpointSnitch snitch = DatabaseDescriptor.getEndpointSnitch();
         Collection<Token> tokens = makeTokens();
-        umappedViews(() -> executeInternal(format(req, LOCAL),
+        umappedViews(() -> QueryProcessor.executeInternal(format(req, LOCAL),
                                                      LOCAL,
                                                      DatabaseDescriptor.getClusterName(),
                                                      releaseVersion,
@@ -415,7 +414,7 @@ public class LegacySystemKeyspaceToNodesTest extends CQLTester
         UUID tableId = tableId(table);
 
         String req = "DELETE truncated_at[?] from system.%s WHERE key = '%s'";
-        umappedViews(() -> executeInternal(format(req, LOCAL, LOCAL), tableId));
+        umappedViews(() -> QueryProcessor.executeInternal(format(req, LOCAL, LOCAL), tableId));
     }
 
     private static UUID tableId(String table)
@@ -435,7 +434,7 @@ public class LegacySystemKeyspaceToNodesTest extends CQLTester
         Random r = new Random();
         CommitLogPosition position = new CommitLogPosition(r.nextLong(), r.nextInt(Integer.MAX_VALUE - 1) + 1);
         long truncatedAt = System.currentTimeMillis();
-        umappedViews(() -> executeInternal(format(req, LOCAL, LOCAL), truncationAsMapEntry(cfs, truncatedAt, position)));
+        umappedViews(() -> QueryProcessor.executeInternal(format(req, LOCAL, LOCAL), truncationAsMapEntry(cfs, truncatedAt, position)));
         return new LocalInfo.TruncationRecord(position, truncatedAt);
     }
 

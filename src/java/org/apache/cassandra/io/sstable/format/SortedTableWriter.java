@@ -21,6 +21,7 @@ package org.apache.cassandra.io.sstable.format;
 import java.io.IOException;
 import java.util.Collection;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
@@ -43,6 +44,7 @@ import org.apache.cassandra.db.rows.Rows;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.guardrails.Guardrails;
 import org.apache.cassandra.io.FSWriteError;
+import org.apache.cassandra.io.compress.AdaptiveCompressor;
 import org.apache.cassandra.io.compress.CompressedSequentialWriter;
 import org.apache.cassandra.io.compress.ICompressor;
 import org.apache.cassandra.io.sstable.Component;
@@ -153,13 +155,21 @@ public abstract class SortedTableWriter extends SSTableWriter
                 case fast:
                     if (!compressor.recommendedUses().contains(ICompressor.Uses.FAST_COMPRESSION))
                     {
-                        // The default compressor is generally fast (LZ4 with 16KiB block size)
-                        compressionParams = CompressionParams.DEFAULT;
+                        compressionParams = CompressionParams.FAST;
+                        break;
+                    }
+                    // else fall through
+                case adaptive:
+                    if (!compressor.recommendedUses().contains(ICompressor.Uses.FAST_COMPRESSION))
+                    {
+                        compressionParams = CompressionParams.FAST_ADAPTIVE;
                         break;
                     }
                     // else fall through
                 case table:
                 default:
+                    compressionParams = Optional.ofNullable(compressionParams.forUse(ICompressor.Uses.FAST_COMPRESSION))
+                                                .orElse(compressionParams);
                     break;
             }
         }

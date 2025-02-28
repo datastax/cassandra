@@ -17,17 +17,24 @@
  */
 package org.apache.cassandra.tools.nodetool;
 
+import java.util.Map;
+
 import io.airlift.airline.Command;
 
 import org.apache.cassandra.tools.NodeProbe;
 import org.apache.cassandra.tools.NodeTool.NodeToolCmd;
 
-@Command(name = "getcompactionthroughput", description = "Print the MB/s throughput cap for compaction in the system")
+@Command(name = "getcompactionthroughput", description = "Print the MiB/s throughput cap for compaction in the system")
 public class GetCompactionThroughput extends NodeToolCmd
 {
     @Override
     public void execute(NodeProbe probe)
     {
-        probe.output().out.println("Current compaction throughput: " + probe.getCompactionThroughput() + " MB/s");
+        probe.output().out.println("Current compaction throughput: " + probe.getCompactionThroughput() + " MiB/s");
+
+        Map<String, String> currentCompactionThroughputMetricsMap = probe.getCurrentCompactionThroughputMiBPerSec();
+        probe.output().out.println("Current compaction throughput (1 minute): " + currentCompactionThroughputMetricsMap.get("1minute") + " MiB/s");
+        probe.output().out.println("Current compaction throughput (5 minute): " + currentCompactionThroughputMetricsMap.get("5minute") + " MiB/s");
+        probe.output().out.println("Current compaction throughput (15 minute): " + currentCompactionThroughputMetricsMap.get("15minute") + " MiB/s");
     }
 }
