@@ -122,6 +122,14 @@ public class CreateTableValidationTest extends CQLTester
         assertThat(result.size()).isEqualTo(1);
     }
 
+    @Test
+    public void testNonAlphanummericTableName()
+    {
+        assertThatExceptionOfType(ConfigurationException.class)
+            .isThrownBy(() -> createTableMayThrow(String.format("CREATE TABLE %s.\"d-3\" (key int PRIMARY KEY, val int)", KEYSPACE)))
+            .withMessageContaining("Table name must not be empty or contain non-alphanumeric-underscore characters (got \"d-3\")");
+    }
+
     private void expectedFailure(String statement, String errorMsg)
     {
 
