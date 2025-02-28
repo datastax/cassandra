@@ -57,8 +57,8 @@ public class BootStrapperTest
 {
     static IPartitioner oldPartitioner;
     static Predicate<Replica> originalAlivePredicate = RangeStreamer.ALIVE_PREDICATE;
-    public static AtomicBoolean nonOptimizationHit = new AtomicBoolean(false);
-    public static AtomicBoolean optimizationHit = new AtomicBoolean(false);
+    private static AtomicBoolean nonOptimizationHit = new AtomicBoolean(false);
+    private static AtomicBoolean optimizationHit = new AtomicBoolean(false);
     private static final IFailureDetector mockFailureDetector = new IFailureDetector()
     {
         public boolean isAlive(InetAddressAndPort ep)
@@ -109,11 +109,11 @@ public class BootStrapperTest
     @BMRules(rules = { @BMRule(name = "Make sure the non-optimized path is picked up for some operations",
                                targetClass = "org.apache.cassandra.dht.RangeStreamer",
                                targetMethod = "convertPreferredEndpointsToWorkMap(EndpointsByReplica)",
-                               action = "org.apache.cassandra.dht.BootStrapperTest.nonOptimizationHit.set(true)"),
+                               action = "org.apache.cassandra.dht.BootStrapperTest.nonOptimizationHit()"),
                        @BMRule(name = "Make sure the optimized path is picked up for some operations",
                                targetClass = "org.apache.cassandra.dht.RangeStreamer",
                                targetMethod = "getOptimizedWorkMap(EndpointsByReplica,Collection,String)",
-                               action = "org.apache.cassandra.dht.BootStrapperTest.optimizationHit.set(true)") })
+                               action = "org.apache.cassandra.dht.BootStrapperTest.optimizationHit()") })
     public void testStreamingCandidatesOptmizationSkip() throws UnknownHostException
     {
         testSkipStreamingCandidatesOptmizationFeatureFlag(true, true, false);
@@ -128,7 +128,7 @@ public class BootStrapperTest
             optimizationHit.set(false);
             CassandraRelevantProperties.SKIP_OPTIMAL_STREAMING_CANDIDATES_CALCULATION.setBoolean(disableOptimization);
 
-            for (String keyspaceName : Schema.instance.getUserKeyspaces())
+            for (String keyspaceName : Schema.instance.distributedKeyspaces().names())
             {
                 StorageService ss = StorageService.instance;
                 TokenMetadata tmd = ss.getTokenMetadata();
@@ -149,6 +149,17 @@ public class BootStrapperTest
         {
             CassandraRelevantProperties.SKIP_OPTIMAL_STREAMING_CANDIDATES_CALCULATION.reset();
         }
+    }
+
+    // used by byteman
+    private static void nonOptimizationHit()
+    {
+        nonOptimizationHit.set(true);
+    }
+
+    private static void optimizationHit()
+    {
+        optimizationHit.set(true);
     }
 
     private RangeStreamer testSourceTargetComputation(String keyspaceName, int numOldNodes, int replicationFactor) throws UnknownHostException
