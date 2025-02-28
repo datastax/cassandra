@@ -51,7 +51,7 @@ import static com.google.common.collect.Maps.transformValues;
 import static java.lang.String.format;
 import static java.util.stream.Collectors.toList;
 import static java.util.stream.Collectors.toSet;
-import static org.apache.cassandra.schema.IndexMetadata.isNameValid;
+import static org.apache.cassandra.schema.SchemaConstants.isNameSafeForFilename;
 
 @Unmetered
 public class TableMetadata implements SchemaElement
@@ -439,10 +439,10 @@ public class TableMetadata implements SchemaElement
 
     public void validate(boolean durationLegacyMode)
     {
-        if (!isNameValid(keyspace))
+        if (!isNameSafeForFilename(keyspace))
             except("Keyspace name must not be empty, more than %s characters long, or contain non-alphanumeric-underscore characters (got \"%s\")", SchemaConstants.NAME_LENGTH, keyspace);
 
-        if (!isNameValid(name))
+        if (!isNameSafeForFilename(name))
             except("Table name must not be empty, more than %s characters long, or contain non-alphanumeric-underscore characters (got \"%s\")", SchemaConstants.NAME_LENGTH, name);
 
         params.validate();
@@ -728,7 +728,7 @@ public class TableMetadata implements SchemaElement
 
     protected void except(String format, Object... args)
     {
-        throw new ConfigurationException(keyspace + "." + name + ": " + format(format, args));
+        throw new ConfigurationException(keyspace + '.' + name + ": " + format(format, args));
     }
 
     public PartitionUpdate.Factory partitionUpdateFactory()
