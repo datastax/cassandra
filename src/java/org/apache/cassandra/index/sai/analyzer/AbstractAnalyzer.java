@@ -206,6 +206,9 @@ public abstract class AbstractAnalyzer implements Iterator<ByteBuffer>
                                               " combination of case_sensitive, normalize, or ascii options. options=" + options);
         }
 
+        if ((containsIndexAnalyzer || containsNonTokenizingOptions) && type.isCollection() && !type.isMultiCell())
+            throw new InvalidRequestException("Cannot use an analyzer on a frozen collection.");
+
         if (containsIndexAnalyzer)
         {
             String json = options.get(LuceneAnalyzer.INDEX_ANALYZER);
