@@ -111,7 +111,7 @@ public final class SchemaConstants
      *                         to support legacy behaviour
      * @return true if the name is valid, false otherwise
      */
-    public static boolean isValidName(String name, Boolean doNotCheckLength)
+    public static boolean isValidName(String name, boolean doNotCheckLength)
     {
         return name != null && !name.isEmpty() && PATTERN_WORD_CHARS.matcher(name).matches() &&
                (doNotCheckLength || isSafeLengthForFilename(name));
