@@ -161,6 +161,9 @@ public class Component
         }
     }
 
+    /**
+     * @return file that uses the resolved file system as provided absolutePath URI
+     */
     public File getFile(String absolutePath)
     {
         File ret;
@@ -168,6 +171,20 @@ public class Component
             ret = new File(PathUtils.getPath(absolutePath + separator + name));
         else
             ret = new File(PathUtils.getPath(absolutePath + name));
+
+        return StorageProvider.instance.withOpenOptions(ret, this);
+    }
+
+    /**
+     * @return file that uses the same file system as provided directory
+     */
+    public File getFile(File directory, String filenamePart)
+    {
+        File ret;
+        if (filenamePart.lastIndexOf(separator) != (filenamePart.length() - 1))
+            ret = directory.resolve(filenamePart + separator + name);
+        else
+            ret = directory.resolve(filenamePart + name);
 
         return StorageProvider.instance.withOpenOptions(ret, this);
     }
