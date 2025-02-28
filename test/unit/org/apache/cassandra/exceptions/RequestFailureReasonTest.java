@@ -18,8 +18,12 @@
 
 package org.apache.cassandra.exceptions;
 import org.junit.Test;
+
+import org.apache.cassandra.schema.TableId;
+
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertThrows;
+import static org.junit.Assert.assertTrue;
 
 public class RequestFailureReasonTest
 {
@@ -68,5 +72,39 @@ public class RequestFailureReasonTest
         assertEquals(RequestFailureReason.UNKNOWN, RequestFailureReason.fromCode(200));
         assertEquals(RequestFailureReason.UNKNOWN, RequestFailureReason.fromCode(999));
         assertThrows(IllegalArgumentException.class, () -> RequestFailureReason.fromCode(-1));
+
+        // Below codes will map to UKNOWN until we rebase on the newer Apache Cassandra version, where they are not UNKNOWN.
+        // We leave them UNKNOWN for now to prevent future conflicts with Apache
+        assertEquals(RequestFailureReason.UNKNOWN, RequestFailureReason.fromCode(4));
+        assertEquals(RequestFailureReason.UNKNOWN, RequestFailureReason.fromCode(5));
+        assertEquals(RequestFailureReason.UNKNOWN, RequestFailureReason.fromCode(7));
+    }
+
+    @Test
+    public void testExceptionSubclassMapping()
+    {
+        // Create a subclass of UnknownTableException
+        class CustomUnknownTableException extends UnknownTableException 
+        {
+            public CustomUnknownTableException()
+            {
+                super("ks", TableId.generate());
+            }
+        }
+
+        // Verify the subclass maps correctly
+        // `UnknownTableException` extends` IncompatibleSchemaException`
+        RequestFailureReason result = RequestFailureReason.forException(new CustomUnknownTableException());
+        assertTrue("Expected either UNKNOWN_TABLE or INCOMPATIBLE_SCHEMA but got " + result,
+                   result == RequestFailureReason.UNKNOWN_TABLE || 
+                   result == RequestFailureReason.INCOMPATIBLE_SCHEMA);
+        
+        // Verify the parent class still maps correctly
+        assertEquals(RequestFailureReason.UNKNOWN_TABLE,
+                    RequestFailureReason.forException(new UnknownTableException("ks", TableId.generate())));
+        
+        // Test unmapped exception returns UNKNOWN
+        assertEquals(RequestFailureReason.UNKNOWN, 
+                    RequestFailureReason.forException(new RuntimeException("test")));
     }
 }

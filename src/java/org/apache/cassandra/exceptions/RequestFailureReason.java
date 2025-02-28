@@ -32,7 +32,6 @@ import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.utils.vint.VIntCoding;
 
-import static java.lang.Math.max;
 import static org.apache.cassandra.net.MessagingService.VERSION_40;
 
 public enum RequestFailureReason
@@ -101,7 +100,15 @@ public enum RequestFailureReason
 
     public static RequestFailureReason forException(Throwable t)
     {
-        return exceptionToReasonMap.getOrDefault(t.getClass(), UNKNOWN);
+        RequestFailureReason r = exceptionToReasonMap.get(t.getClass());
+        if (r != null)
+            return r;
+
+        for (Map.Entry<Class<? extends Throwable>, RequestFailureReason> entry : exceptionToReasonMap.entrySet())
+            if (entry.getKey().isInstance(t))
+                return entry.getValue();
+
+        return UNKNOWN;
     }
 
     public static final class Serializer implements IVersionedSerializer<RequestFailureReason>
