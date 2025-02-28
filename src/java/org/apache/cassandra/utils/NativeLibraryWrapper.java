@@ -39,14 +39,14 @@ public interface NativeLibraryWrapper
      */
     boolean isAvailable();
 
-    int callMlockall(int flags) throws NativeError;
-    int callMunlockall() throws NativeError;
-    int callFcntl(int fd, int command, long flags) throws NativeError;
-    int callPosixFadvise(int fd, long offset, int len, int flag) throws NativeError;
-    int callPosixMadvise(Pointer addr, long length, int advice) throws NativeError;
-    int callOpen(String path, int flags) throws NativeError;
-    int callFsync(int fd) throws NativeError;
-    int callClose(int fd) throws NativeError;
+    int callMlockall(int flags) throws UnsatisfiedLinkError, NativeError;
+    int callMunlockall() throws UnsatisfiedLinkError, NativeError;
+    int callFcntl(int fd, int command, long flags) throws UnsatisfiedLinkError, NativeError;
+    int callPosixFadvise(int fd, long offset, int len, int flag) throws UnsatisfiedLinkError, NativeError;
+    int callPosixMadvise(Pointer addr, long length, int advice) throws UnsatisfiedLinkError, NativeError;
+    int callOpen(String path, int flags) throws UnsatisfiedLinkError, NativeError;
+    int callFsync(int fd) throws UnsatisfiedLinkError, NativeError;
+    int callClose(int fd) throws UnsatisfiedLinkError, NativeError;
     long callGetpid() throws NativeError;
 
     /**
