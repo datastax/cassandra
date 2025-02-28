@@ -138,11 +138,11 @@ public class MigrationManagerTest
     {
         String[] valid = {"1", "a", "_1", "b_", "__", "1_a"};
         for (String s : valid)
-            assertTrue(SchemaConstants.isNameSafeForFilename(s));
+            assertTrue(SchemaConstants.isValidName(s));
 
         String[] invalid = {"b@t", "dash-y", "", " ", "dot.s", ".hidden"};
         for (String s : invalid)
-            assertFalse(SchemaConstants.isNameSafeForFilename(s));
+            assertFalse(SchemaConstants.isValidName(s));
     }
 
     @Test

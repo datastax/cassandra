@@ -146,7 +146,7 @@ public abstract class AlterSchemaStatement implements CQLStatement.SingleKeyspac
 
     private void validateKeyspaceName()
     {
-        if (!SchemaConstants.isNameSafeForFilename(keyspaceName))
+        if (!SchemaConstants.isValidName(keyspaceName))
         {
             throw ire("Keyspace name must not be empty, more than %d characters long, " +
                       "or contain non-alphanumeric-underscore characters (got '%s')",

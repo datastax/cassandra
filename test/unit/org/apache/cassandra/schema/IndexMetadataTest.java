@@ -25,30 +25,8 @@ import org.junit.Test;
 
 import org.apache.cassandra.cql3.ColumnIdentifier;
 
-import static org.apache.cassandra.schema.SchemaConstants.isValidCharsName;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
-
-public class IndexMetadataTest {
-    
-    @Test
-    public void testIsValidCharsNamePositive()
-    {
-        assertTrue(isValidCharsName("abcdefghijklmnopqrstuvwxyz"));
-        assertTrue(isValidCharsName("ABCDEFGHIJKLMNOPQRSTUVWXYZ"));
-        assertTrue(isValidCharsName("_01234567890"));
-    }
-    
-    @Test
-    public void testIsValidCharsNameNegative()
-    {
-        assertFalse(isValidCharsName(null));
-        assertFalse(isValidCharsName(""));
-        assertFalse(isValidCharsName(" "));
-        assertFalse(isValidCharsName("@"));
-        assertFalse(isValidCharsName("!"));
-    }
-    
+public class IndexMetadataTest
+{
     @Test
     public void testGetDefaultIndexName()
     {

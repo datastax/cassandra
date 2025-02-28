@@ -363,7 +363,7 @@ public final class KeyspaceMetadata implements SchemaElement
 
     public void validate()
     {
-        if (!SchemaConstants.isNameSafeForFilename(name))
+        if (!SchemaConstants.isValidName(name))
         {
             throw new ConfigurationException(format("Keyspace name must not be empty, more than %s characters long, "
                                                     + "or contain non-alphanumeric-underscore characters (got \"%s\")",

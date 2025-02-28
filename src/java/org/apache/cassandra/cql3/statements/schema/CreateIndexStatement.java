@@ -224,7 +224,7 @@ public final class CreateIndexStatement extends AlterSchemaStatement
         if (null == column)
             throw ire("Column '%s' doesn't exist", target.column);
 
-        if ((kind == IndexMetadata.Kind.CUSTOM) && !SchemaConstants.isNameSafeForFilename(target.column.toString()))
+        if ((kind == IndexMetadata.Kind.CUSTOM) && !SchemaConstants.isValidName(target.column.toString()))
             throw ire("Column '%s' is longer than the permissible name length of %d characters or" +
                       " contains non-alphanumeric-underscore characters", target.column, SchemaConstants.NAME_LENGTH);
 

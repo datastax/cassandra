@@ -46,7 +46,7 @@ import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.UUIDSerializer;
 
 import static org.apache.cassandra.schema.SchemaConstants.PATTERN_NON_WORD_CHAR;
-import static org.apache.cassandra.schema.SchemaConstants.isValidCharsName;
+import static org.apache.cassandra.schema.SchemaConstants.isValidName;
 
 /**
  * An immutable representation of secondary index metadata.
@@ -118,7 +118,7 @@ public final class IndexMetadata
 
     public void validate(TableMetadata table)
     {
-        if (!isValidCharsName(name))
+        if (!isValidName(name, true))
             throw new ConfigurationException("Illegal index name " + name);
 
         if (kind == null)

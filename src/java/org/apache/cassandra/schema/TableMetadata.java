@@ -51,7 +51,7 @@ import static com.google.common.collect.Maps.transformValues;
 import static java.lang.String.format;
 import static java.util.stream.Collectors.toList;
 import static java.util.stream.Collectors.toSet;
-import static org.apache.cassandra.schema.SchemaConstants.isValidCharsName;
+import static org.apache.cassandra.schema.SchemaConstants.isValidName;
 
 @Unmetered
 public class TableMetadata implements SchemaElement
@@ -439,10 +439,10 @@ public class TableMetadata implements SchemaElement
 
     public void validate(boolean durationLegacyMode)
     {
-        if (!isValidCharsName(keyspace))
+        if (!isValidName(keyspace, true))
             except("Keyspace name must not be empty or contain non-alphanumeric-underscore characters (got \"%s\")", keyspace);
 
-        if (!isValidCharsName(name))
+        if (!isValidName(name, true))
             except("Table name must not be empty or contain non-alphanumeric-underscore characters (got \"%s\")", name);
 
         params.validate();

@@ -74,6 +74,13 @@ public final class SchemaConstants
 
     public static final List<String> LEGACY_AUTH_TABLES = Arrays.asList("credentials", "users", "permissions");
 
+    /**
+     * Checks if the length of the given name will be suitable to be used
+     * in constructed file names.
+     *
+     * @param name the name to check
+     * @return true if the name is short enough to be safe to use, otherwise false
+     */
     public static boolean isSafeLengthForFilename(String name)
     {
         return name.length() <= NAME_LENGTH;
@@ -83,22 +90,31 @@ public final class SchemaConstants
      * Names such as keyspace, table, index names are used in file paths and file names,
      * so, they need to be safe for the use there, i.e., short enough and
      * containing only alphanumeric characters and underscores.
+     *
      * @param name the name to check
      * @return whether the name is safe for use in file paths and file names
      */
-    public static boolean isNameSafeForFilename(String name)
+    public static boolean isValidName(String name)
     {
-        return name != null && !name.isEmpty() && isSafeLengthForFilename(name) && PATTERN_WORD_CHARS.matcher(name).matches();
+        return isValidName(name, false);
     }
 
     /**
-     * Checks if the name contains only alphanumeric characters and underscores and is not empty.
-     * @param name the name to check
+     * Names such as keyspace, table, index names are used in file paths and file names,
+     * so, they need to be safe for the use there, i.e., short enough and
+     * containing only alphanumeric characters and underscores.
+     * However, historically not all names were checked for their length.
+     * Such legacy behaviour is supported through passing true for doNotCheckLength.
+     *
+     * @param name             the name to check
+     * @param doNotCheckLength specifies if no check on the name length should be done
+     *                         to support legacy behaviour
      * @return true if the name is valid, false otherwise
      */
-    public static boolean isValidCharsName(String name)
+    public static boolean isValidName(String name, Boolean doNotCheckLength)
     {
-        return name != null && !name.isEmpty() && PATTERN_WORD_CHARS.matcher(name).matches();
+        return name != null && !name.isEmpty() && PATTERN_WORD_CHARS.matcher(name).matches() &&
+               (doNotCheckLength || isSafeLengthForFilename(name));
     }
 
     static
