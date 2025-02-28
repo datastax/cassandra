@@ -15,16 +15,27 @@
  */
 package org.apache.cassandra.db.counters;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Random;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
-
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -34,6 +45,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  */
 public class CounterLockManagerTest
 {
+    private static final Logger logger = LoggerFactory.getLogger(CounterLockManagerTest.class);
+
     @BeforeClass
     public static void setUpClass()
     {
@@ -56,13 +69,14 @@ public class CounterLockManagerTest
 
     private static void basicTest(CounterLockManager manager) throws Exception
     {
-        List<Integer> keys = List.of(1, 2, 3, 4, 5);
+        // please note that keys are not sorted and there is one duplicate
+        List<Integer> keys = List.of(1, 2, 3, 4, 5, 4);
         List<CounterLockManager.LockHandle> lockHandleHandles = manager.grabLocks(keys);
         for (CounterLockManager.LockHandle l : lockHandleHandles)
             assertThat(l.tryLock(1, TimeUnit.SECONDS)).isTrue();
 
         if (manager.hasNumKeys())
-            assertThat(manager.getNumKeys()).isEqualTo(keys.size());
+            assertThat(manager.getNumKeys()).isEqualTo(keys.size() - 1); // one key is duplicated
 
         lockHandleHandles.forEach(CounterLockManager.LockHandle::release);
 
@@ -219,5 +233,90 @@ public class CounterLockManagerTest
 
         if (manager.hasNumKeys())
             assertThat(manager.getNumKeys()).isZero();
+    }
+
+
+    @Test
+    public void stressTestCachedCounterLockManager() throws Exception
+    {
+        stressTest(new CachedCounterLockManager());
+    }
+
+    @Test
+    public void stressTestStripedCounterLockManager() throws Exception
+    {
+        stressTest(new StripedCounterLockManager());
+    }
+
+    private static void stressTest(CounterLockManager manager) throws Exception
+    {
+        Random randon = new Random(12313);
+        int numThreads = 40;
+        int numKeys = 20;
+        int numIterations = 1000;
+        AtomicReference<Throwable> oneError = new AtomicReference<>();
+        CountDownLatch allDone = new CountDownLatch(numIterations);
+        ExecutorService threadPool = Executors.newFixedThreadPool(numThreads);
+        AtomicInteger threadId = new AtomicInteger();
+        try
+        {
+            for (int i = 0; i < numIterations; i++)
+            {
+                threadPool.submit(() -> {
+                    String id = "t" + threadId.incrementAndGet();
+                    int numKeysToLock = randon.nextInt(numKeys);
+
+                    List<Integer> keys = new ArrayList<>(numKeysToLock);
+                    try
+                    {
+                        for (int k = 0; k < numKeysToLock; k++)
+                            keys.add(randon.nextInt(numKeys));
+
+                        //logger.info("Thread {} grabbing locks for  {} keys, {}", id, numKeysToLock, keys);
+
+                        List<CounterLockManager.LockHandle> lockHandles = manager.grabLocks(keys);
+                        //logger.info("Thread {} got locks {}", id, lockHandles);
+                        try
+                        {
+                            for (CounterLockManager.LockHandle l : lockHandles)
+                                assertThat(l.tryLock(1, TimeUnit.MINUTES)).isTrue();
+
+                            //logger.info("Thread {} locked {}", id, lockHandles);
+
+                            // simlate some work
+                            Thread.sleep(randon.nextInt(10));
+                        }
+                        finally
+                        {
+                            // release in inverse order, like Cassandra does
+                            // iterate over all locks in reverse order and unlock them
+                            for (int j = lockHandles.size() - 1; j >= 0; j--)
+                                lockHandles.get(j).release();
+
+                            //logger.info("Thread {} released {} lockHandles, {}", id, numKeysToLock, lockHandles);
+                        }
+                    }
+                    catch (Throwable error)
+                    {
+                        logger.error("Iteration {} failed to acquire {}", id, keys, error);
+                        oneError.set(error);
+                    }
+                    finally
+                    {
+                        allDone.countDown();
+                    }
+                });
+            }
+            assertThat(allDone.await(10, TimeUnit.MINUTES)).isTrue();
+            assertThat(oneError.get()).isNull();
+
+            // the number of keys is zero in the end
+            if (manager.hasNumKeys())
+                assertThat(manager.getNumKeys()).isZero();
+        }
+        finally
+        {
+            threadPool.shutdown();
+        }
     }
 }

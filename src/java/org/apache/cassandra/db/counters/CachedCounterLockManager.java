@@ -21,9 +21,10 @@ package org.apache.cassandra.db.counters;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.locks.StampedLock;
+import java.util.concurrent.locks.ReentrantLock;
+import java.util.stream.Collectors;
+import java.util.stream.StreamSupport;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 
@@ -32,33 +33,37 @@ import org.apache.cassandra.config.DatabaseDescriptor;
  * Note: this implemetation tries to reduce the chance of having two counters lock each other, but as the counters
  * are identified by the hash of the primary key of the row, it is still possible to
  * have some cross-counter contention for counters with different primary keys but the same hash.
- *
+ * <p>
  * This code is copied from
  * <a href="https://github.com/diennea/herddb/blob/master/herddb-utils/src/main/java/herddb/utils/LocalLockManager.java">LocalLockManager</a> from the HerdDB project (Apache 2 licensed).
- *
  */
 public class CachedCounterLockManager implements CounterLockManager
 {
     private final static int EXPECTED_CONCURRENCY = DatabaseDescriptor.getConcurrentCounterWriters() * 16;
-    private final ConcurrentMap<Integer, RefCountedStampedLock> locks = new ConcurrentHashMap<>(EXPECTED_CONCURRENCY);
+    /**
+     * The mapping function in {@link #makeLockForKey(Integer)} relies on the ConcurrentHashMap guarantee that the remapping function is run only once per compute, and that it is run atomically
+     */
+    private final ConcurrentHashMap<Integer, RefCountedLock> locks = new ConcurrentHashMap<>(EXPECTED_CONCURRENCY);
 
     @Override
     public List<LockHandle> grabLocks(Iterable<Integer> keys)
     {
-        List<LockHandle> result = new ArrayList<>();
-        for (Integer key : keys)
-            result.add(makeLockForKey(key));
-        return result;
+        // we must return the locks in order to avoid deadlocks
+        // please note that the list may contain duplicates
+        return StreamSupport.stream(keys.spliterator(), false)
+                            .sorted()
+                            .map(this::makeLockForKey)
+                            .collect(Collectors.toList());
     }
 
-    private StampedLock makeLock()
+    private ReentrantLock makeLock()
     {
-        return new StampedLock();
+        return new ReentrantLock();
     }
 
     private LockHandleImpl makeLockForKey(Integer key)
     {
-        RefCountedStampedLock instance = locks.compute(key, (k, existing) -> {
+        RefCountedLock instance = locks.compute(key, (k, existing) -> {
             if (existing != null)
             {
                 existing.count++;
@@ -66,15 +71,15 @@ public class CachedCounterLockManager implements CounterLockManager
             }
             else
             {
-                return new RefCountedStampedLock(makeLock(), 1);
+                return new RefCountedLock(makeLock(), 1);
             }
         });
         return new LockHandleImpl(key, instance);
     }
 
-    private void returnLockForKey(RefCountedStampedLock instance, Integer key) throws IllegalStateException
+    private void releaseLockForKey(RefCountedLock instance, Integer key) throws IllegalStateException
     {
-        locks.compute(key, (Integer t, RefCountedStampedLock u) -> {
+        locks.compute(key, (Integer t, RefCountedLock u) -> {
             if (instance != u)
             {
                 throw new IllegalStateException("trying to release un-owned lock");
@@ -107,11 +112,11 @@ public class CachedCounterLockManager implements CounterLockManager
      */
     private class LockHandleImpl implements LockHandle
     {
-        public long stamp;
-        public final Integer key;
-        public final RefCountedStampedLock handle;
+        private boolean acquired;
+        private final Integer key;
+        private final RefCountedLock handle;
 
-        public LockHandleImpl(Integer key, RefCountedStampedLock handle)
+        private LockHandleImpl(Integer key, RefCountedLock handle)
         {
             this.key = key;
             this.handle = handle;
@@ -120,26 +125,31 @@ public class CachedCounterLockManager implements CounterLockManager
         @Override
         public void release()
         {
-            if (stamp != 0)
-                handle.lock.unlockWrite(stamp);
-            returnLockForKey(handle, key);
+            if (acquired)
+                handle.lock.unlock();
+            releaseLockForKey(handle, key);
         }
 
         @Override
         public boolean tryLock(long timeout, TimeUnit timeUnit) throws InterruptedException
         {
-            stamp = handle.lock.tryWriteLock(timeout, timeUnit);
-            return stamp != 0;
+            return acquired = handle.lock.tryLock(timeout, timeUnit);
+        }
+
+        @Override
+        public String toString()
+        {
+            return "{key=" + key + '}';
         }
     }
 
-    private static class RefCountedStampedLock
+    private static class RefCountedLock
     {
 
-        private final StampedLock lock;
+        private final ReentrantLock lock;
         private int count;
 
-        public RefCountedStampedLock(StampedLock lock, int count)
+        private RefCountedLock(ReentrantLock lock, int count)
         {
             this.lock = lock;
             this.count = count;
