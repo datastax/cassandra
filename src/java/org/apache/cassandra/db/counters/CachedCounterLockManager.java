@@ -29,9 +29,13 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 
 /**
  * Implemetation of {@link CounterLockManager} that uses a cache of locks.
- * Note: this implemetation tries to reduce the change of having two counters lock each other, but as the counters
+ * Note: this implemetation tries to reduce the chance of having two counters lock each other, but as the counters
  * are identified by the hash of the primary key of the row, it is still possible to
  * have some cross-counter contention for counters with different primary keys but the same hash.
+ *
+ * This code is copied from
+ * <a href="https://github.com/diennea/herddb/blob/master/herddb-utils/src/main/java/herddb/utils/LocalLockManager.java">LocalLockManager</a> from the HerdDB project (Apache 2 licensed).
+ *
  */
 public class CachedCounterLockManager implements CounterLockManager
 {

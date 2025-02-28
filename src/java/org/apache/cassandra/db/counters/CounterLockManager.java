@@ -58,6 +58,7 @@ public interface CounterLockManager
 
     /**
      * Grab locks for the given keys. The returned handles must be released by calling {@link LockHandle#release()}.
+     *
      * @param keys list of keys, the Iterable is scanned only once in order to prevent side effects.
      * @return a list of lock handles. The List can be iterated multiple times without side effects.
      */
@@ -66,6 +67,7 @@ public interface CounterLockManager
     /**
      * Check if the implementation can return the number of keys that are handled by the lock manager.
      * This method is useful only for testing.
+     *
      * @return true if the implementation can return the number of keys.
      */
     boolean hasNumKeys();
@@ -73,11 +75,11 @@ public interface CounterLockManager
     /**
      * Get the number of keys that are handled by the lock manager.
      * This method is useful only for testing.
+     *
      * @return the number of keys.
      */
     default int getNumKeys()
     {
         throw new UnsupportedOperationException();
     }
-
 }

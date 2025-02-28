@@ -32,14 +32,15 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import static org.apache.cassandra.config.CassandraRelevantProperties.COUNTER_LOCK_FAIR_LOCK;
 import static org.apache.cassandra.config.CassandraRelevantProperties.COUNTER_LOCK_NUM_STRIPES_PER_THREAD;
 /**
- * Legacy implemetation of {@link CounterLockManager} that uses a fixes set of locks.
+ * Legacy implementation of {@link CounterLockManager} that uses a fixed set of locks.
  * On a workload with many different counters it is likely to see two counters sharing the same lock.
  */
 public class StripedCounterLockManager implements CounterLockManager
 {
     private final Striped<java.util.concurrent.locks.Lock> locks;
 
-    StripedCounterLockManager () {
+    StripedCounterLockManager()
+    {
         int numStripes = COUNTER_LOCK_NUM_STRIPES_PER_THREAD.getInt() * DatabaseDescriptor.getConcurrentCounterWriters();
         if (COUNTER_LOCK_FAIR_LOCK.getBoolean())
         {
