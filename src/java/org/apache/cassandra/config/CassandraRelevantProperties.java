@@ -717,6 +717,11 @@ public enum CassandraRelevantProperties
     SIZE_RECORDER_INTERVAL("cassandra.size_recorder_interval", "300"),
     SKIP_DEFAULT_ROLE_SETUP("cassandra.skip_default_role_setup"),
     SKIP_MUTATING_STATS_AFTER_ZCS("cassandra.skip_mutating_stats_after_zcs"),
+    /**
+     * Do not try to calculate optimal streaming candidates. This can take a lot of time in some configs specially
+     * with vnodes.
+     */
+    SKIP_OPTIMAL_STREAMING_CANDIDATES_CALCULATION("cassandra.skip_optimal_streaming_candidates_calculation", "false"),
     SKIP_PAXOS_REPAIR_ON_TOPOLOGY_CHANGE("cassandra.skip_paxos_repair_on_topology_change"),
     /** If necessary for operational purposes, permit certain keyspaces to be ignored for paxos topology repairs. */
     SKIP_PAXOS_REPAIR_ON_TOPOLOGY_CHANGE_KEYSPACES("cassandra.skip_paxos_repair_on_topology_change_keyspaces"),
