@@ -44,20 +44,22 @@ public class SelectOptions extends PropertyDefinitions
     public void validate(QueryState state, String keyspace, int limit) throws RequestValidationException
     {
         validate(keywords, Collections.emptySet());
-        parseANNOptions(keyspace).validate(state, limit);
+        parseANNOptions().validate(state, keyspace, limit);
     }
 
     /**
+     * Parse the ANN Options. Does not validate values of the options or whether peers will be able to process them.
+     *
      * @return the ANN options within these options, or {@link ANNOptions#NONE} if no options are present
      * @throws InvalidRequestException if the ANN options are invalid
      */
-    public ANNOptions parseANNOptions(String keyspace) throws RequestValidationException
+    public ANNOptions parseANNOptions() throws RequestValidationException
     {
         Map<String, String> options = getMap(ANN_OPTIONS);
 
         return options == null
                ? ANNOptions.NONE
-               : ANNOptions.fromMap(keyspace, options);
+               : ANNOptions.fromMap(options);
     }
 
     /**

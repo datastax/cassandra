@@ -62,7 +62,10 @@ public class ANNOptions
         return rerankK == null ? NONE : new ANNOptions(rerankK);
     }
 
-    public void validate(QueryState state, int limit)
+    /**
+     * Validates the ANN options by checking that they are within the guardrails and that peers support the options.
+     */
+    public void validate(QueryState state, String keyspace, int limit)
     {
         if (rerankK == null)
             return;
@@ -71,6 +74,14 @@ public class ANNOptions
             throw new InvalidRequestException(String.format("Invalid rerank_k value %d lesser than limit %d", rerankK, limit));
 
         Guardrails.annRerankKMaxValue.guard(rerankK, "ANN options", false, state);
+
+        // Ensure that all nodes in the cluster are in a version that supports ANN options, including this one
+        assert keyspace != null;
+        Set<InetAddressAndPort> badNodes = MessagingService.instance().endpointsWithVersionBelow(keyspace, MessagingService.VERSION_DS_11);
+        if (MessagingService.current_version < MessagingService.VERSION_DS_11)
+            badNodes.add(FBUtilities.getBroadcastAddressAndPort());
+        if (!badNodes.isEmpty())
+            throw new InvalidRequestException("ANN options are not supported in clusters below DS 11.");
     }
 
     /**
@@ -79,16 +90,8 @@ public class ANNOptions
      * @param map the map of options in the {@code WITH ANN_OPTION} of a {@code SELECT} query
      * @return the ANN options in the specified {@code SELECT} options, or {@link #NONE} if no options are present
      */
-    public static ANNOptions fromMap(String keyspace, Map<String, String> map)
+    public static ANNOptions fromMap(Map<String, String> map)
     {
-        assert keyspace != null;
-        // ensure that all nodes in the cluster are in a version that supports ANN options, including this one
-        Set<InetAddressAndPort> badNodes = MessagingService.instance().endpointsWithVersionBelow(keyspace, MessagingService.VERSION_DS_11);
-        if (MessagingService.current_version < MessagingService.VERSION_DS_11)
-            badNodes.add(FBUtilities.getBroadcastAddressAndPort());
-        if (!badNodes.isEmpty())
-            throw new InvalidRequestException("ANN options are not supported in clusters below DS 11.");
-
         Integer rerankK = null;
 
         for (Map.Entry<String, String> entry : map.entrySet())
