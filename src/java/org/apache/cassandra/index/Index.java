@@ -1041,6 +1041,7 @@ public interface Index
     enum Status
     {
         UNKNOWN,
+        INITIALIZED,
         FULL_REBUILD_STARTED,
         BUILD_FAILED,
         BUILD_SUCCEEDED,

@@ -20,7 +20,6 @@ package org.apache.cassandra.index.sai.cql;
 import java.util.Arrays;
 
 import org.apache.cassandra.cql3.CQLTester;
-import org.apache.cassandra.db.filter.ANNOptions;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.junit.Test;
 

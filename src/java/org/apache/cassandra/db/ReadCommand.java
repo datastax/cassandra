@@ -1097,7 +1097,7 @@ public abstract class ReadCommand extends AbstractReadQuery
                 Index.Status status = getIndexStatus(FBUtilities.getBroadcastAddressAndPort(),
                                                      metadata.keyspace,
                                                      indexName);
-                if (status != Index.Status.FULL_REBUILD_STARTED)
+                if (status != Index.Status.INITIALIZED)
                     availableIndexes.add(plannedIndex);
                 else
                 {
