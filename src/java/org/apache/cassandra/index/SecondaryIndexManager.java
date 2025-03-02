@@ -290,7 +290,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         if (writableIndexes.put(index.getIndexMetadata().name, index) == null)
             logger.info("Index [{}] registered and writable.", index.getIndexMetadata().name);
 
-        markIndexesBuilding(ImmutableSet.of(index), true, isNewCF);
+        markIndexesBuilding(ImmutableSet.of(index), true, isNewCF, true);
 
         return buildIndex(index);
     }
@@ -636,7 +636,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
 
         // Mark all indexes as building: this step must happen first, because if any index can't be marked, the whole
         // process needs to abort
-        markIndexesBuilding(indexes, isFullRebuild, false);
+        markIndexesBuilding(indexes, isFullRebuild, false, false);
 
         // Build indexes in a try/catch, so that any index not marked as either built or failed will be marked as failed:
         final Set<Index> builtIndexes = Sets.newConcurrentHashSet();
@@ -775,6 +775,9 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
      * the SecondaryIndexManager instance, it means all invocations for all different indexes will go through the same
      * lock, but this is fine as the work done while holding such lock is trivial.
      * <p>
+     * isCreateIndex is used to differentiate whether a full rebuild is invoked when user is creating a new index or
+     * full rebuild is started by failed scrub or nodetool rebuild command. It matters as we want to fall back to ALLOW FILTERING
+     * (for queries with ALLOW FILTERING) only in the case a user creates a new index.
      * {@link #markIndexBuilt(Index, boolean)} or {@link #markIndexFailed(Index, boolean)} should be always called after
      * the rebuilding has finished, so that the index build state can be correctly managed and the index rebuilt.
      *
@@ -782,9 +785,10 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
      * @param isFullRebuild {@code true} if this method is invoked as a full index rebuild, {@code false} otherwise
      * @param isNewCF {@code true} if this method is invoked when initializing a new table/columnfamily (i.e. loading a CF at startup),
      * {@code false} for all other cases (i.e. newly added index)
+     * @param isCreateIndex {@code true} if this method is invoked when creating a new index, {@code false} otherwise
      */
     @VisibleForTesting
-    public synchronized void markIndexesBuilding(Set<Index> indexes, boolean isFullRebuild, boolean isNewCF)
+    public synchronized void markIndexesBuilding(Set<Index> indexes, boolean isFullRebuild, boolean isNewCF, boolean isCreateIndex)
     {
         String keyspaceName = baseCfs.keyspace.getName();
 
@@ -809,7 +813,10 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
                             if (isFullRebuild)
                             {
                                 needsFullRebuild.remove(indexName);
-                                makeIndexNonQueryable(index, Index.Status.FULL_REBUILD_STARTED);
+                                if (!isCreateIndex)
+                                    makeIndexNonQueryable(index, Index.Status.FULL_REBUILD_STARTED);
+                                else if (!isNewCF)
+                                    makeIndexNonQueryable(index, Index.Status.INITIALIZED);
                             }
 
                             if (counter.getAndIncrement() == 0 && DatabaseDescriptor.isDaemonInitialized() && !isNewCF)
@@ -819,7 +826,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
 
     /**
      * Marks the specified index as built if there are no in progress index builds and the index is not failed.
-     * {@link #markIndexesBuilding(Set, boolean, boolean)} should always be invoked before this method.
+     * {@link #markIndexesBuilding(Set, boolean, boolean, boolean)} should always be invoked before this method.
      *
      * @param index the index to be marked as built
      * @param isFullRebuild {@code true} if this method is invoked as a full index rebuild, {@code false} otherwise
@@ -845,7 +852,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
 
     /**
      * Marks the specified index as failed.
-     * {@link #markIndexesBuilding(Set, boolean, boolean)} should always be invoked before this method.
+     * {@link #markIndexesBuilding(Set, boolean, boolean, boolean)} should always be invoked before this method.
      *
      * @param index the index to be marked as built
      * @param isInitialBuild {@code true} if the index failed during its initial build, {@code false} otherwise
@@ -1853,15 +1860,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
 
         assert liveEndpoints.endpoints().containsAll(badNodes);
 
-        boolean considerAllowFiltering;
-        if (initial == badNodes.size())
-            considerAllowFiltering = false;
-        else
-        {
-            considerAllowFiltering = true;
-            if (badNodes.size() < initial && !badNodes.isEmpty())
-                throw new InvalidRequestException(REQUIRES_HIGHER_MESSAGING_VERSION);
-        }
+        boolean considerAllowFiltering = badNodes.isEmpty();
 
         E queryableEndpoints = liveEndpoints.filter(replica -> {
             for (Index index : indexQueryPlan.getIndexes())
@@ -1869,7 +1868,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
                 Index.Status status = getIndexStatus(replica.endpoint(), keyspace.getName(), index.getIndexMetadata().name);
 
                 // if the status of the index is building and there is allow filtering - that is ok too
-                if (considerAllowFiltering && status == Index.Status.FULL_REBUILD_STARTED && allowFiltering)
+                if (considerAllowFiltering && status == Index.Status.INITIALIZED && allowFiltering)
                     continue;
 
                 if (!index.isQueryable(status))

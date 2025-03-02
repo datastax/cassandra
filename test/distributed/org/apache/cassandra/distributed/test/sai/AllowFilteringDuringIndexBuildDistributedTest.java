@@ -52,76 +52,167 @@ import static org.apache.cassandra.distributed.api.Feature.NETWORK;
 import static org.awaitility.Awaitility.await;
 
 /**
- * Distributed tests for ANN options.
+ * Distributed tests for ALLOW FILTERING during index build.
  */
 public class AllowFilteringDuringIndexBuildDistributedTest extends TestBaseImpl
 {
+    private static final String INDEX_NOT_AVAILABLE_MESSAGE = "^Operation failed - received 0 responses" +
+                                                              " and 2 failures: INDEX_NOT_AVAILABLE from .+" +
+                                                              " INDEX_NOT_AVAILABLE from .+$";
     private static final int NUM_REPLICAS = 2;
     private static final int RF = 2;
 
-    /**
-     * Test that ALLOW FILTERING during index builds is accepted in clusters with all nodes in DS 11.
-     */
     @Test
-    public void testAllowFilteringDuringIndexBuildWithAllDS11() throws Throwable
+    public void testAllowFilteringDuringInitialIndexBuildWithAllDS11() throws Throwable
     {
         CassandraRelevantProperties.DS_CURRENT_MESSAGING_VERSION.setInt(MessagingService.VERSION_DS_11);
 
         try (Cluster cluster = init(Cluster.build(NUM_REPLICAS)
-                                           .withConfig(config -> config.with(GOSSIP).with(NETWORK))
-                                           .start(), RF))
+                                         .withConfig(config -> config.with(GOSSIP).with(NETWORK))
+                                         .start(), RF))
         {
-            testSelectWithAllowFilteringDuringIndexBuilding(cluster, null);
+            testSelectWithAllowFilteringDuringIndexBuilding(cluster, null, true, false);
         }
     }
 
-    /**
-     * Test that ALLOW FILTERING during index builds is rejected in clusters with all nodes below DS 11.
-     */
     @Test
-    public void testAllowFilteringDuringIndexBuildWithAllDS10() throws Throwable
+    public void testAllowFilteringDuringIndexRebuildWithAllDS11NewCF() throws Throwable
+    {
+        CassandraRelevantProperties.DS_CURRENT_MESSAGING_VERSION.setInt(MessagingService.VERSION_DS_11);
+
+        try (Cluster cluster = init(Cluster.build(NUM_REPLICAS)
+                                         .withConfig(config -> config.with(GOSSIP).with(NETWORK))
+                                         .start(), RF))
+        {
+            testSelectWithAllowFilteringDuringIndexBuilding(cluster, INDEX_NOT_AVAILABLE_MESSAGE, false, true);
+        }
+    }
+
+    @Test
+    public void testAllowFilteringDuringIndexRebuildWithAllDS11ExistingCF() throws Throwable
+    {
+        CassandraRelevantProperties.DS_CURRENT_MESSAGING_VERSION.setInt(MessagingService.VERSION_DS_11);
+
+        try (Cluster cluster = init(Cluster.build(NUM_REPLICAS)
+                                         .withConfig(config -> config.with(GOSSIP).with(NETWORK))
+                                         .start(), RF))
+        {
+            testSelectWithAllowFilteringDuringIndexBuilding(cluster, INDEX_NOT_AVAILABLE_MESSAGE, false, false);
+        }
+    }
+
+    @Test
+    public void testAllowFilteringDuringInitialIndexBuildWithAllDS10() throws Throwable
     {
         CassandraRelevantProperties.DS_CURRENT_MESSAGING_VERSION.setInt(MessagingService.VERSION_DS_10);
 
         try (Cluster cluster = init(Cluster.build(NUM_REPLICAS)
-                                           .withConfig(config -> config.with(GOSSIP).with(NETWORK))
-                                           .start(), RF))
+                                         .withConfig(config -> config.with(GOSSIP).with(NETWORK))
+                                         .start(), RF))
         {
-            testSelectWithAllowFilteringDuringIndexBuilding(cluster,
-                                                            "^Operation failed - received 0 responses" +
-                                                            " and 2 failures: INDEX_NOT_AVAILABLE from .+, " +
-                                                            "INDEX_NOT_AVAILABLE from .+$");
+            testSelectWithAllowFilteringDuringIndexBuilding(cluster, INDEX_NOT_AVAILABLE_MESSAGE, true, false);
         }
     }
 
-    /**
-     * Test that ALLOW FILTERING during index builds are rejected in clusters with some nodes below DS 11.
-     */
     @Test
-    public void testAllowFIlteringDuringIndxBuildWithMixedDS10AndDS11() throws Throwable
+    public void testAllowFilteringDuringIndexRebuildWithAllDS10NewCF() throws Throwable
+    {
+        CassandraRelevantProperties.DS_CURRENT_MESSAGING_VERSION.setInt(MessagingService.VERSION_DS_10);
+
+        try (Cluster cluster = init(Cluster.build(NUM_REPLICAS)
+                                         .withConfig(config -> config.with(GOSSIP).with(NETWORK))
+                                         .start(), RF))
+        {
+            testSelectWithAllowFilteringDuringIndexBuilding(cluster, INDEX_NOT_AVAILABLE_MESSAGE, false, true);
+        }
+    }
+
+    @Test
+    public void testAllowFilteringDuringIndexRebuildWithAllDS10ExistingCF() throws Throwable
+    {
+        CassandraRelevantProperties.DS_CURRENT_MESSAGING_VERSION.setInt(MessagingService.VERSION_DS_10);
+
+        try (Cluster cluster = init(Cluster.build(NUM_REPLICAS)
+                                         .withConfig(config -> config.with(GOSSIP).with(NETWORK))
+                                         .start(), RF))
+        {
+            testSelectWithAllowFilteringDuringIndexBuilding(cluster, INDEX_NOT_AVAILABLE_MESSAGE, false, false);
+        }
+    }
+
+    @Test
+    public void testAllowFilteringDuringInitialIndexBuildWithMixedDS10AndDS11() throws Throwable
     {
         assert CassandraRelevantProperties.DS_CURRENT_MESSAGING_VERSION.getInt() >= MessagingService.VERSION_DS_11;
 
         try (Cluster cluster = init(Cluster.build(NUM_REPLICAS)
-                                           .withInstanceInitializer(AllowFilteringDuringIndexBuildDistributedTest.BB::install)
-                                           .withConfig(config -> config.with(GOSSIP).with(NETWORK).with(NATIVE_PROTOCOL))
-                                           .start(), RF))
+                                         .withInstanceInitializer(BB::install)
+                                         .withConfig(config -> config.with(GOSSIP).with(NETWORK).with(NATIVE_PROTOCOL))
+                                         .start(), RF))
         {
-            testSelectWithAllowFilteringDuringIndexBuilding(cluster, SecondaryIndexManager.REQUIRES_HIGHER_MESSAGING_VERSION);
+            testSelectWithAllowFilteringDuringIndexBuilding(cluster, INDEX_NOT_AVAILABLE_MESSAGE, true, false);
         }
     }
 
-    private static void testSelectWithAllowFilteringDuringIndexBuilding(Cluster cluster, String expectedErrorMessage)
+    @Test
+    public void testAllowFilteringDuringIndexRebuildWithMixedDS10AndDS11NewCF() throws Throwable
     {
+        assert CassandraRelevantProperties.DS_CURRENT_MESSAGING_VERSION.getInt() >= MessagingService.VERSION_DS_11;
+
+        try (Cluster cluster = init(Cluster.build(NUM_REPLICAS)
+                                         .withInstanceInitializer(BB::install)
+                                         .withConfig(config -> config.with(GOSSIP).with(NETWORK).with(NATIVE_PROTOCOL))
+                                         .start(), RF))
+        {
+            testSelectWithAllowFilteringDuringIndexBuilding(cluster, INDEX_NOT_AVAILABLE_MESSAGE, false, true);
+        }
+    }
+
+    @Test
+    public void testAllowFilteringDuringIndexRebuildWithMixedDS10AndDS11ExistingCF() throws Throwable
+    {
+        assert CassandraRelevantProperties.DS_CURRENT_MESSAGING_VERSION.getInt() >= MessagingService.VERSION_DS_11;
+
+        try (Cluster cluster = init(Cluster.build(NUM_REPLICAS)
+                                         .withInstanceInitializer(BB::install)
+                                         .withConfig(config -> config.with(GOSSIP).with(NETWORK).with(NATIVE_PROTOCOL))
+                                         .start(), RF))
+        {
+            testSelectWithAllowFilteringDuringIndexBuilding(cluster, INDEX_NOT_AVAILABLE_MESSAGE, false, false);
+        }
+    }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void testInitialBuildWithNewCFShouldFail() throws Throwable
+    {
+        try (Cluster cluster = init(Cluster.build(NUM_REPLICAS)
+                                         .withConfig(config -> config.with(GOSSIP).with(NETWORK))
+                                         .start(), RF))
+        {
+            testSelectWithAllowFilteringDuringIndexBuilding(cluster, null, true, true);
+        }
+    }
+
+    private static void testSelectWithAllowFilteringDuringIndexBuilding(Cluster cluster, 
+                                                                      String expectedErrorMessage, 
+                                                                      boolean isInitialBuild,
+                                                                      boolean isNewCF)
+    {
+        if (isInitialBuild && isNewCF) {
+            throw new IllegalArgumentException("Initial build cannot happen with a new CF");
+        }
+
         cluster.schemaChange(withKeyspace("CREATE TABLE %s.t (k int PRIMARY KEY, n int, v vector<float, 2>)"));
         cluster.schemaChange(withKeyspace("CREATE CUSTOM INDEX ON %s.t(n) USING 'StorageAttachedIndex'"));
 
+        Index.Status expectedStatus = isInitialBuild ? Index.Status.INITIALIZED : Index.Status.FULL_REBUILD_STARTED;
+
         for (int i = 1; i <= cluster.size(); i++)
-            markIndexBuilding(cluster.get(i), KEYSPACE, "t", "t_n_idx");
+            markIndexBuilding(cluster.get(i), KEYSPACE, "t", "t_n_idx", isInitialBuild, isNewCF);
 
         for (int i = 1; i <= cluster.size(); i++)
             for (int j = 1; j <= cluster.size(); j++)
-                waitForIndexingStatus(cluster.get(i), KEYSPACE, "t_n_idx", cluster.get(j), Index.Status.FULL_REBUILD_STARTED);
+                waitForIndexingStatus(cluster.get(i), KEYSPACE, "t_n_idx", cluster.get(j), expectedStatus);
 
         String select = withKeyspace("SELECT * FROM %s.t WHERE n = 1 ALLOW FILTERING");
 
@@ -132,7 +223,7 @@ public class AllowFilteringDuringIndexBuildDistributedTest extends TestBaseImpl
                 coordinator.execute(select, ConsistencyLevel.ONE);
             else
                 Assertions.assertThatThrownBy(() -> coordinator.execute(select, ConsistencyLevel.ONE))
-                          .hasMessageMatching(expectedErrorMessage);
+                         .hasMessageMatching(expectedErrorMessage);
         }
     }
 
@@ -158,16 +249,21 @@ public class AllowFilteringDuringIndexBuildDistributedTest extends TestBaseImpl
         {
             return MessagingService.VERSION_DS_10;
         }
-        }
+    }
 
-    private static void markIndexBuilding(IInvokableInstance node, String keyspace, String table, String indexName)
+    private static void markIndexBuilding(IInvokableInstance node, 
+                                        String keyspace, 
+                                        String table, 
+                                        String indexName, 
+                                        boolean isInitialBuild,
+                                        boolean isNewCF)
     {
         node.runOnInstance(() -> {
             SecondaryIndexManager sim = Schema.instance.getKeyspaceInstance(keyspace)
-                                                       .getColumnFamilyStore(table)
-                                        .indexManager;
+                                                     .getColumnFamilyStore(table)
+                                                     .indexManager;
             Index index = sim.getIndexByName(indexName);
-            sim.markIndexesBuilding(Collections.singleton(index), true, false);
+            sim.markIndexesBuilding(Collections.singleton(index), true, isNewCF, isInitialBuild);
         });
     }
 

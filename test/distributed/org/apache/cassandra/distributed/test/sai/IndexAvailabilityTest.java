@@ -123,7 +123,21 @@ public class IndexAvailabilityTest extends TestBaseImpl
             assertIndexingStatus(cluster);
 
             // mark ks2 index2 as indexing on node1
-            markIndexBuilding(cluster.get(1), ks2, cf1, index2);
+            markIndexBuilding(cluster.get(1), ks2, cf1, index2, true);
+            // on node2, it observes that node1 ks2.index2 is not queryable
+            waitForIndexingStatus(cluster.get(2), ks2, index2, cluster.get(1), Index.Status.INITIALIZED);
+            // other indexes or keyspaces should not be affected
+            assertIndexingStatus(cluster);
+
+            // mark ks2 index2 as queryable on node1
+            markIndexQueryable(cluster.get(1), ks2, cf1, index2);
+            // on node2, it observes that node1 ks2.index2 is queryable
+            waitForIndexingStatus(cluster.get(2), ks2, index2, cluster.get(1), Index.Status.BUILD_SUCCEEDED);
+            // other indexes or keyspaces should not be affected
+            assertIndexingStatus(cluster);
+
+            // mark ks2 index2 as indexing on node1
+            markIndexBuilding(cluster.get(1), ks2, cf1, index2, false);
             // on node2, it observes that node1 ks2.index2 is not queryable
             waitForIndexingStatus(cluster.get(2), ks2, index2, cluster.get(1), Index.Status.FULL_REBUILD_STARTED);
             // other indexes or keyspaces should not be affected
@@ -239,7 +253,18 @@ public class IndexAvailabilityTest extends TestBaseImpl
     }
 
     @Test
-    public void testAllowFilteringDuringIndexBuildsOn3NodeCluster() throws Exception
+    public void testAllowFilteringDuringIndexInitialBuildOn3NodeCluster() throws Exception
+    {
+        testAllowFilteringDuringIndexBuildsOn3NodeCluster(true, Index.Status.INITIALIZED);
+    }
+
+    @Test
+    public void testAllowFilteringDuringIndexFullRebuildOn3NodeCluster() throws Exception
+    {
+        testAllowFilteringDuringIndexBuildsOn3NodeCluster(false, Index.Status.FULL_REBUILD_STARTED);
+    }
+
+    public void testAllowFilteringDuringIndexBuildsOn3NodeCluster(boolean isCreateIndex, Index.Status buildStatus) throws Exception
     {
         try (Cluster cluster = init(Cluster.build(3)
                                            .withConfig(config -> config.with(GOSSIP)
@@ -324,24 +349,36 @@ public class IndexAvailabilityTest extends TestBaseImpl
             cluster.schemaChange(String.format(CREATE_INDEX, index1, ks2, table, "v1"));
             waitForIndexQueryable(cluster, ks2);
             cluster.forEach(node -> expectedNodeIndexQueryability.put(NodeIndex.create(ks2, index1, node), Index.Status.BUILD_SUCCEEDED));
-            markIndexBuilding(cluster.get(1), ks2, table, index1);
-            waitForIndexingStatus(cluster.get(2), ks2, index1, cluster.get(1), Index.Status.FULL_REBUILD_STARTED);
-            waitForIndexingStatus(cluster.get(3), ks2, index1, cluster.get(1), Index.Status.FULL_REBUILD_STARTED);
-            waitForIndexingStatus(cluster.get(1), ks2, index1, cluster.get(1), Index.Status.FULL_REBUILD_STARTED);
-            markIndexBuilding(cluster.get(2), ks2, table, index1);
-            waitForIndexingStatus(cluster.get(2), ks2, index1, cluster.get(2), Index.Status.FULL_REBUILD_STARTED);
-            waitForIndexingStatus(cluster.get(3), ks2, index1, cluster.get(2), Index.Status.FULL_REBUILD_STARTED);
-            waitForIndexingStatus(cluster.get(1), ks2, index1, cluster.get(2), Index.Status.FULL_REBUILD_STARTED);
-            markIndexBuilding(cluster.get(3), ks2, table, index1);
-            waitForIndexingStatus(cluster.get(2), ks2, index1, cluster.get(3), Index.Status.FULL_REBUILD_STARTED);
-            waitForIndexingStatus(cluster.get(3), ks2, index1, cluster.get(3), Index.Status.FULL_REBUILD_STARTED);
-            waitForIndexingStatus(cluster.get(1), ks2, index1, cluster.get(3), Index.Status.FULL_REBUILD_STARTED);
+            markIndexBuilding(cluster.get(1), ks2, table, index1, isCreateIndex);
+            waitForIndexingStatus(cluster.get(2), ks2, index1, cluster.get(1), buildStatus);
+            waitForIndexingStatus(cluster.get(3), ks2, index1, cluster.get(1), buildStatus);
+            waitForIndexingStatus(cluster.get(1), ks2, index1, cluster.get(1), buildStatus);
+            markIndexBuilding(cluster.get(2), ks2, table, index1, isCreateIndex);
+            waitForIndexingStatus(cluster.get(2), ks2, index1, cluster.get(2), buildStatus);
+            waitForIndexingStatus(cluster.get(3), ks2, index1, cluster.get(2), buildStatus);
+            waitForIndexingStatus(cluster.get(1), ks2, index1, cluster.get(2), buildStatus);
+            markIndexBuilding(cluster.get(3), ks2, table, index1, isCreateIndex);
+            waitForIndexingStatus(cluster.get(2), ks2, index1, cluster.get(3), buildStatus);
+            waitForIndexingStatus(cluster.get(3), ks2, index1, cluster.get(3), buildStatus);
+            waitForIndexingStatus(cluster.get(1), ks2, index1, cluster.get(3), buildStatus);
             assertIndexingStatus(cluster, ks2, index1);
 
-            executeOnAllCoordinators(cluster,
-                                     "SELECT pk FROM " + ks2 + '.' + table + " WHERE v1=0 ALLOW FILTERING",
-                                     ConsistencyLevel.LOCAL_QUORUM,
-                                     3);
+            if (isCreateIndex)
+            {
+                executeOnAllCoordinators(cluster,
+                                         "SELECT pk FROM " + ks2 + '.' + table + " WHERE v1=0 ALLOW FILTERING",
+                                         ConsistencyLevel.LOCAL_QUORUM,
+                                         3);
+            }
+            else
+            {
+                assertThatThrownBy(() -> executeOnAllCoordinators(cluster,
+                                                                  "SELECT pk FROM " + ks2 + '.' + table + " WHERE v1=0 ALLOW FILTERING",
+                                                                  ConsistencyLevel.LOCAL_QUORUM,
+                                                                  3)).hasMessageMatching("^Operation failed - received 0 responses" +
+                                                                                           " and 2 failures: INDEX_NOT_AVAILABLE from .+" +
+                                                                                           " INDEX_NOT_AVAILABLE from .+$");
+            }
 
             markIndexQueryable(cluster.get(1), ks2, table, index1);
             waitForIndexingStatus(cluster.get(2), ks2, index1, cluster.get(1), Index.Status.BUILD_SUCCEEDED);
@@ -353,6 +390,12 @@ public class IndexAvailabilityTest extends TestBaseImpl
             waitForIndexingStatus(cluster.get(1), ks2, index1, cluster.get(3), Index.Status.BUILD_SUCCEEDED);
             waitForIndexingStatus(cluster.get(2), ks2, index1, cluster.get(3), Index.Status.BUILD_SUCCEEDED);
             assertIndexingStatus(cluster, ks2, index1);
+
+            executeOnAllCoordinators(cluster,
+                                     "SELECT pk FROM " + ks2 + '.' + table + " WHERE v1=0 ALLOW FILTERING",
+                                     ConsistencyLevel.LOCAL_QUORUM,
+                                     3);
+
             cluster.schemaChange(String.format("CREATE CUSTOM INDEX %s ON %s.%s(vec) USING 'StorageAttachedIndex'",
                                                vectorIndex, ks2, table));
             cluster.forEach(node -> expectedNodeIndexQueryability.put(NodeIndex.create(ks2, vectorIndex, node), Index.Status.BUILD_SUCCEEDED));
@@ -376,18 +419,18 @@ public class IndexAvailabilityTest extends TestBaseImpl
 
             // Create one more index but mark it as building
             cluster.schemaChange(String.format(CREATE_INDEX, index2, ks2, table, "v2"));
-            markIndexBuilding(cluster.get(1), ks2, table, index2);
-            waitForIndexingStatus(cluster.get(2), ks2, index2, cluster.get(1), Index.Status.FULL_REBUILD_STARTED);
-            waitForIndexingStatus(cluster.get(3), ks2, index2, cluster.get(1), Index.Status.FULL_REBUILD_STARTED);
-            waitForIndexingStatus(cluster.get(1), ks2, index2, cluster.get(1), Index.Status.FULL_REBUILD_STARTED);
-            markIndexBuilding(cluster.get(2), ks2, table, index2);
-            waitForIndexingStatus(cluster.get(2), ks2, index2, cluster.get(2), Index.Status.FULL_REBUILD_STARTED);
-            waitForIndexingStatus(cluster.get(3), ks2, index2, cluster.get(2), Index.Status.FULL_REBUILD_STARTED);
-            waitForIndexingStatus(cluster.get(1), ks2, index2, cluster.get(2), Index.Status.FULL_REBUILD_STARTED);
-            markIndexBuilding(cluster.get(3), ks2, table, index2);
-            waitForIndexingStatus(cluster.get(2), ks2, index2, cluster.get(3), Index.Status.FULL_REBUILD_STARTED);
-            waitForIndexingStatus(cluster.get(3), ks2, index2, cluster.get(3), Index.Status.FULL_REBUILD_STARTED);
-            waitForIndexingStatus(cluster.get(1), ks2, index2, cluster.get(3), Index.Status.FULL_REBUILD_STARTED);
+            markIndexBuilding(cluster.get(1), ks2, table, index2, isCreateIndex);
+            waitForIndexingStatus(cluster.get(2), ks2, index2, cluster.get(1), buildStatus);
+            waitForIndexingStatus(cluster.get(3), ks2, index2, cluster.get(1), buildStatus);
+            waitForIndexingStatus(cluster.get(1), ks2, index2, cluster.get(1), buildStatus);
+            markIndexBuilding(cluster.get(2), ks2, table, index2, isCreateIndex);
+            waitForIndexingStatus(cluster.get(2), ks2, index2, cluster.get(2), buildStatus);
+            waitForIndexingStatus(cluster.get(3), ks2, index2, cluster.get(2), buildStatus);
+            waitForIndexingStatus(cluster.get(1), ks2, index2, cluster.get(2), buildStatus);
+            markIndexBuilding(cluster.get(3), ks2, table, index2, isCreateIndex);
+            waitForIndexingStatus(cluster.get(2), ks2, index2, cluster.get(3), buildStatus);
+            waitForIndexingStatus(cluster.get(3), ks2, index2, cluster.get(3), buildStatus);
+            waitForIndexingStatus(cluster.get(1), ks2, index2, cluster.get(3), buildStatus);
             assertIndexingStatus(cluster);
 
             assertThatThrownBy(() ->
@@ -398,27 +441,40 @@ public class IndexAvailabilityTest extends TestBaseImpl
                                                         0))
             .hasMessageContaining(StatementRestrictions.NON_CLUSTER_ORDERING_REQUIRES_ALL_RESTRICTED_NON_PARTITION_KEY_COLUMNS_INDEXED_MESSAGE);
 
-            // Verify that the query works with ALLOW FILTERING
-            executeOnAllCoordinators(cluster,
-                                     "SELECT pk FROM " + ks2 + '.' + table + " WHERE v1=0 AND v2=0 ALLOW FILTERING",
-                                     ConsistencyLevel.LOCAL_QUORUM,
-                                     2);
+            // Verify that the query works or not with ALLOW FILTERING or not
 
-            // Verify actual results using a direct query
-            results = cluster.coordinator(1)
-                                        .execute("SELECT pk FROM " + ks2 + '.' + table + " WHERE v1=0 AND v2=0 ALLOW FILTERING",
-                                                 ConsistencyLevel.LOCAL_QUORUM);
-            assertResultContains(results, Arrays.asList("partition1", "partition5"));
+            if (isCreateIndex)
+            {
+                executeOnAllCoordinators(cluster,
+                                         "SELECT pk FROM " + ks2 + '.' + table + " WHERE v1=0 AND v2=0 ALLOW FILTERING",
+                                         ConsistencyLevel.LOCAL_QUORUM,
+                                         2);
+
+                // Verify actual results using a direct query
+                results = cluster.coordinator(1)
+                                 .execute("SELECT pk FROM " + ks2 + '.' + table + " WHERE v1=0 AND v2=0 ALLOW FILTERING",
+                                          ConsistencyLevel.LOCAL_QUORUM);
+                assertResultContains(results, Arrays.asList("partition1", "partition5"));
+            }
+            else
+            {
+                assertThatThrownBy(() -> executeOnAllCoordinators(cluster,
+                                                                  "SELECT pk FROM " + ks2 + '.' + table + " WHERE v1=0 AND v2=0 ALLOW FILTERING",
+                                                                  ConsistencyLevel.LOCAL_QUORUM,
+                                                                  2)).hasMessageMatching("^Operation failed - received 0 responses" +
+                                                                                         " and 2 failures: INDEX_NOT_AVAILABLE from .+" +
+                                                                                         " INDEX_NOT_AVAILABLE from .+$");
+            }
 
             // mark the vector index as building, we should not be able to query it yet
-            markIndexBuilding(cluster.get(1), ks2, table, vectorIndex);
-            waitForIndexingStatus(cluster.get(2), ks2, vectorIndex, cluster.get(1), Index.Status.FULL_REBUILD_STARTED);
-            waitForIndexingStatus(cluster.get(3), ks2, vectorIndex, cluster.get(1), Index.Status.FULL_REBUILD_STARTED);
-            waitForIndexingStatus(cluster.get(1), ks2, vectorIndex, cluster.get(1), Index.Status.FULL_REBUILD_STARTED);
-            markIndexBuilding(cluster.get(2), ks2, table, vectorIndex);
-            waitForIndexingStatus(cluster.get(2), ks2, vectorIndex, cluster.get(2), Index.Status.FULL_REBUILD_STARTED);
-            waitForIndexingStatus(cluster.get(3), ks2, vectorIndex, cluster.get(2), Index.Status.FULL_REBUILD_STARTED);
-            waitForIndexingStatus(cluster.get(1), ks2, vectorIndex, cluster.get(2), Index.Status.FULL_REBUILD_STARTED);
+            markIndexBuilding(cluster.get(1), ks2, table, vectorIndex, isCreateIndex);
+            waitForIndexingStatus(cluster.get(2), ks2, vectorIndex, cluster.get(1), buildStatus);
+            waitForIndexingStatus(cluster.get(3), ks2, vectorIndex, cluster.get(1), buildStatus);
+            waitForIndexingStatus(cluster.get(1), ks2, vectorIndex, cluster.get(1), buildStatus);
+            markIndexBuilding(cluster.get(2), ks2, table, vectorIndex,isCreateIndex);
+            waitForIndexingStatus(cluster.get(2), ks2, vectorIndex, cluster.get(2), buildStatus);
+            waitForIndexingStatus(cluster.get(3), ks2, vectorIndex, cluster.get(2), buildStatus);
+            waitForIndexingStatus(cluster.get(1), ks2, vectorIndex, cluster.get(2), buildStatus);
             assertIndexingStatus(cluster);
 
             assertThatThrownBy(() ->
@@ -502,9 +558,9 @@ public class IndexAvailabilityTest extends TestBaseImpl
             executeOnAllCoordinators(cluster, "SELECT pk FROM ks2.cf1 WHERE v2='0' ALLOW FILTERING", ConsistencyLevel.LOCAL_QUORUM, 0);
 
             // mark ks2 index2 as indexing on node1
-            markIndexBuilding(cluster.get(1), ks2, cf1, index2);
+            markIndexBuilding(cluster.get(1), ks2, cf1, index2, true);
             // on node2, it observes that node1 ks2.index2 is not queryable
-            waitForIndexingStatus(cluster.get(1), ks2, index2, cluster.get(1), Index.Status.FULL_REBUILD_STARTED);
+            waitForIndexingStatus(cluster.get(1), ks2, index2, cluster.get(1), Index.Status.INITIALIZED);
             // other indexes or keyspaces should not be affected
             assertIndexingStatus(cluster, ks2, index2);
 
@@ -564,18 +620,23 @@ public class IndexAvailabilityTest extends TestBaseImpl
         node.runOnInstance(() -> {
             SecondaryIndexManager sim = Schema.instance.getKeyspaceInstance(keyspace).getColumnFamilyStore(table).indexManager;
             Index index = sim.getIndexByName(indexName);
-            sim.makeIndexNonQueryable(index, Index.Status.BUILD_SUCCEEDED);
+            //sim.makeIndexQueryable(index, Index.Status.BUILD_SUCCEEDED);
+            sim.markIndexBuilt(index, true);
         });
     }
 
-    private void markIndexBuilding(IInvokableInstance node, String keyspace, String table, String indexName)
+    private void markIndexBuilding(IInvokableInstance node, String keyspace, String table, String indexName, boolean isCreateIndex)
     {
-        expectedNodeIndexQueryability.put(NodeIndex.create(keyspace, indexName, node), Index.Status.FULL_REBUILD_STARTED);
+        if (isCreateIndex)
+            expectedNodeIndexQueryability.put(NodeIndex.create(keyspace, indexName, node), Index.Status.INITIALIZED);
+        else
+            expectedNodeIndexQueryability.put(NodeIndex.create(keyspace, indexName, node), Index.Status.FULL_REBUILD_STARTED);
 
         node.runOnInstance(() -> {
             SecondaryIndexManager sim = Schema.instance.getKeyspaceInstance(keyspace).getColumnFamilyStore(table).indexManager;
             Index index = sim.getIndexByName(indexName);
-            sim.markIndexesBuilding(Collections.singleton(index), true, false);
+            // KATE double-check this later...
+            sim.markIndexesBuilding(Collections.singleton(index), true, false, isCreateIndex);
         });
     }
 
