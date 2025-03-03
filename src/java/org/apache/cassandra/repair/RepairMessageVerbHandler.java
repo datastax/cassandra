@@ -256,7 +256,8 @@ public class RepairMessageVerbHandler implements IVerbHandler<RepairMessage>
                                                         isIncremental(desc.parentSessionId), previewKind);
                     if (acceptMessage(ctx, validationRequest, message.from()))
                     {
-                        ctx.validationManager().submitValidation(store, validator);
+                        Future<?> validationFuture = ctx.validationManager().submitValidation(store, validator);
+                        ParentRepairSessionListener.instance.onValidation(desc, validationFuture);
                     }
                     else
                     {
