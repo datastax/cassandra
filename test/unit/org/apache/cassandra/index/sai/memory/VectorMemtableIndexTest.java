@@ -200,7 +200,7 @@ public class VectorMemtableIndexTest extends SAITester
 
     private Orderer randomVectorOrderer()
     {
-        return new Orderer(indexContext, Operator.ANN, randomVectorSerialized());
+        return new Orderer(indexContext, Operator.ANN, randomVectorSerialized(), null);
     }
 
     private ByteBuffer randomVectorSerialized() {
