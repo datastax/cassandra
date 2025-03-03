@@ -588,7 +588,7 @@ public enum CassandraRelevantProperties
      * The current messaging version. This is used when we add new messaging versions without adopting them immediately,
      * or to force the node to use a specific version for testing purposes.
      */
-    DS_CURRENT_MESSAGING_VERSION("ds.current_messaging_version", Integer.toString(MessagingService.VERSION_DS_10)),
+    DS_CURRENT_MESSAGING_VERSION("ds.current_messaging_version", Integer.toString(MessagingService.VERSION_DS_11)),
 
     /**
      * Which compression algorithm to use for SSTable compression when not specified explicitly in the sstable options.
@@ -601,7 +601,6 @@ public enum CassandraRelevantProperties
      * with vnodes.
      */
     SKIP_OPTIMAL_STREAMING_CANDIDATES_CALCULATION("cassandra.skip_optimal_streaming_candidates_calculation", "false");
-
 
     CassandraRelevantProperties(String key, String defaultVal)
     {

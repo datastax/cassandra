@@ -194,7 +194,7 @@ public class VectorMemtableIndex implements MemtableIndex
         float threshold = expr.getEuclideanSearchThreshold();
 
         SortingIterator.Builder<PrimaryKey> keyQueue;
-        try (var pkIterator = searchInternal(context, qv, keyRange, graph.size(), threshold))
+        try (var pkIterator = searchInternal(context, qv, keyRange, graph.size(), graph.size(), threshold))
         {
             keyQueue = new SortingIterator.Builder<>();
             while (pkIterator.hasNext())
@@ -224,14 +224,16 @@ public class VectorMemtableIndex implements MemtableIndex
         assert orderer.isANN() : "Only ANN is supported for vector search, received " + orderer.operator;
 
         var qv = vts.createFloatVector(orderer.getVectorTerm());
+        var rerankK = orderer.rerankKFor(limit, VectorCompression.NO_COMPRESSION);
 
-        return List.of(searchInternal(context, qv, keyRange, limit, 0));
+        return List.of(searchInternal(context, qv, keyRange, limit, rerankK, 0));
     }
 
     private CloseableIterator<PrimaryKeyWithSortKey> searchInternal(QueryContext context,
                                                                   VectorFloat<?> queryVector,
                                                                   AbstractBounds<PartitionPosition> keyRange,
                                                                   int limit,
+                                                                  int rerankK,
                                                                   float threshold)
     {
         Bits bits;
@@ -257,11 +259,11 @@ public class VectorMemtableIndex implements MemtableIndex
             if (resultKeys.isEmpty())
                 return CloseableIterator.emptyIterator();
 
-            int bruteForceRows = maxBruteForceRows(limit, resultKeys.size(), graph.size());
-            logger.trace("Search range covers {} rows; max brute force rows is {} for memtable index with {} nodes, LIMIT {}",
-                         resultKeys.size(), bruteForceRows, graph.size(), limit);
-            Tracing.trace("Search range covers {} rows; max brute force rows is {} for memtable index with {} nodes, LIMIT {}",
-                          resultKeys.size(), bruteForceRows, graph.size(), limit);
+            int bruteForceRows = maxBruteForceRows(rerankK, resultKeys.size(), graph.size());
+            logger.trace("Search range covers {} rows; max brute force rows is {} for memtable index with {} nodes, rerankK {}, LIMIT {}",
+                         resultKeys.size(), bruteForceRows, graph.size(), rerankK, limit);
+            Tracing.trace("Search range covers {} rows; max brute force rows is {} for memtable index with {} nodes, rerankK {}, LIMIT {}",
+                          resultKeys.size(), bruteForceRows, graph.size(), rerankK, limit);
             if (resultKeys.size() <= bruteForceRows)
                 // When we have a threshold, we only need to filter the results, not order them, because it means we're
                 // evaluating a boolean predicate in the SAI pipeline that wants to collate by PK
@@ -273,7 +275,7 @@ public class VectorMemtableIndex implements MemtableIndex
                 bits = new KeyRangeFilteringBits(keyRange);
         }
 
-        var nodeScoreIterator = graph.search(context, queryVector, limit, threshold, bits);
+        var nodeScoreIterator = graph.search(context, queryVector, limit, rerankK, threshold, bits);
         return new NodeScoreToScoredPrimaryKeyIterator(nodeScoreIterator);
     }
 
@@ -306,9 +308,10 @@ public class VectorMemtableIndex implements MemtableIndex
             relevantOrdinals.add(i);
         });
 
-        int maxBruteForceRows = maxBruteForceRows(limit, relevantOrdinals.size(), graph.size());
-        Tracing.logAndTrace(logger, "{} rows relevant to current memtable out of {} materialized by SAI; max brute force rows is {} for memtable index with {} nodes, LIMIT {}",
-                            relevantOrdinals.size(), keys.size(), maxBruteForceRows, graph.size(), limit);
+        int rerankK = orderer.rerankKFor(limit, VectorCompression.NO_COMPRESSION);
+        int maxBruteForceRows = maxBruteForceRows(rerankK, relevantOrdinals.size(), graph.size());
+        Tracing.logAndTrace(logger, "{} rows relevant to current memtable out of {} materialized by SAI; max brute force rows is {} for memtable index with {} nodes, rerankK {}",
+                            relevantOrdinals.size(), keys.size(), maxBruteForceRows, graph.size(), rerankK);
 
         // convert the expression value to query vector
         var qv = vts.createFloatVector(orderer.getVectorTerm());
@@ -320,7 +323,7 @@ public class VectorMemtableIndex implements MemtableIndex
             return orderByBruteForce(qv, keysInGraph);
         }
         // indexed path
-        var nodeScoreIterator = graph.search(context, qv, limit, 0, relevantOrdinals::contains);
+        var nodeScoreIterator = graph.search(context, qv, limit, rerankK, 0, relevantOrdinals::contains);
         return new NodeScoreToScoredPrimaryKeyIterator(nodeScoreIterator);
     }
 
@@ -376,15 +379,15 @@ public class VectorMemtableIndex implements MemtableIndex
         return new PrimaryKeyWithScore(indexContext, mt, key, score);
     }
 
-    private int maxBruteForceRows(int limit, int nPermittedOrdinals, int graphSize)
+    private int maxBruteForceRows(int rerankK, int nPermittedOrdinals, int graphSize)
     {
-        int expectedNodesVisited = expectedNodesVisited(limit, nPermittedOrdinals, graphSize);
-        return min(max(limit, expectedNodesVisited), GLOBAL_BRUTE_FORCE_ROWS);
+        int expectedNodesVisited = expectedNodesVisited(rerankK, nPermittedOrdinals, graphSize);
+        return min(max(rerankK, expectedNodesVisited), GLOBAL_BRUTE_FORCE_ROWS);
     }
 
-    public int estimateAnnNodesVisited(int limit, int nPermittedOrdinals)
+    public int estimateAnnNodesVisited(int rerankK, int nPermittedOrdinals)
     {
-        return expectedNodesVisited(limit, nPermittedOrdinals, graph.size());
+        return expectedNodesVisited(rerankK, nPermittedOrdinals, graph.size());
     }
 
     /**
@@ -396,9 +399,9 @@ public class VectorMemtableIndex implements MemtableIndex
      * !!! roughly `degree` times larger than the number of nodes whose edge lists we load!
      * !!!
      */
-    public static int expectedNodesVisited(int limit, int nPermittedOrdinals, int graphSize)
+    public static int expectedNodesVisited(int rerankK, int nPermittedOrdinals, int graphSize)
     {
-        var K = limit;
+        var K = rerankK;
         var B = min(nPermittedOrdinals, graphSize);
         var N = graphSize;
         // These constants come from running many searches on a variety of datasets and graph sizes.
@@ -413,7 +416,7 @@ public class VectorMemtableIndex implements MemtableIndex
         // If we need to make this even more accurate, the relationship to B and to log(N) may be the best
         // places to start.
         var raw = (int) (100 + 0.025 * pow(log(N), 2) * pow(K, 0.95) * ((double) N / B));
-        return ensureSaneEstimate(raw, limit, graphSize);
+        return ensureSaneEstimate(raw, rerankK, graphSize);
     }
 
     public static int ensureSaneEstimate(int rawEstimate, int rerankK, int graphSize)
