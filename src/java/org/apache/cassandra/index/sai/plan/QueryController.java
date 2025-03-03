@@ -72,6 +72,7 @@ import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
 import org.apache.cassandra.index.sai.disk.v1.Segment;
+import org.apache.cassandra.index.sai.disk.vector.VectorCompression;
 import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIntersectionIterator;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
@@ -952,20 +953,21 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
 
 
     @Override
-    public double estimateAnnSearchCost(Orderer ordering, int limit, long candidates)
+    public double estimateAnnSearchCost(Orderer orderer, int limit, long candidates)
     {
         Preconditions.checkArgument(limit > 0, "limit must be > 0");
 
-        IndexContext context = ordering.context;
+        IndexContext context = orderer.context;
         Collection<MemtableIndex> memtables = context.getLiveMemtables().values();
         View queryView = context.getView();
 
+        int memoryRerankK = orderer.rerankKFor(limit, VectorCompression.NO_COMPRESSION);
         double cost = 0;
         for (MemtableIndex index : memtables)
         {
             // FIXME convert nodes visited to search cost
             int memtableCandidates = (int) Math.min(Integer.MAX_VALUE, candidates);
-            cost += ((VectorMemtableIndex) index).estimateAnnNodesVisited(limit, memtableCandidates);
+            cost += ((VectorMemtableIndex) index).estimateAnnNodesVisited(memoryRerankK, memtableCandidates);
         }
 
         long totalRows = 0;
@@ -980,7 +982,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
                     continue;
                 int segmentLimit = segment.proportionalAnnLimit(limit, totalRows);
                 int segmentCandidates = max(1, (int) (candidates * (double) segment.metadata.numRows / totalRows));
-                cost += segment.estimateAnnSearchCost(segmentLimit, segmentCandidates);
+                cost += segment.estimateAnnSearchCost(orderer, segmentLimit, segmentCandidates);
             }
         }
         return cost;

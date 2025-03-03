@@ -22,6 +22,7 @@ import java.util.Set;
 import org.apache.cassandra.db.filter.ANNOptions;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.RequestValidationException;
+import org.apache.cassandra.service.ClientState;
 
 /**
  * {@code WITH option1=... AND option2=...} options for SELECT statements.
@@ -36,16 +37,19 @@ public class SelectOptions extends PropertyDefinitions
     /**
      * Validates all the {@code SELECT} options.
      *
+     * @param state the query state
      * @param limit the {@code SELECT} query user-provided limit
      * @throws InvalidRequestException if any of the options are invalid
      */
-    public void validate(int limit) throws RequestValidationException
+    public void validate(ClientState state, String keyspace, int limit) throws RequestValidationException
     {
         validate(keywords, Collections.emptySet());
-        parseANNOptions().validate(limit);
+        parseANNOptions().validate(state, keyspace, limit);
     }
 
     /**
+     * Parse the ANN Options. Does not validate values of the options or whether peers will be able to process them.
+     *
      * @return the ANN options within these options, or {@link ANNOptions#NONE} if no options are present
      * @throws InvalidRequestException if the ANN options are invalid
      */

@@ -488,6 +488,18 @@ public final class Guardrails implements GuardrailsMBean
                             what, value, isWarning ? "warning" : "failure", threshold));
 
     /**
+     * Guardrail on the maximum value for the rerank_k parameter, an ANN query option.
+     */
+    public static final MaxThreshold annRerankKMaxValue =
+    new MaxThreshold("sai_ann_rerank_k_max_value",
+                     null,
+                     state -> CONFIG_PROVIDER.getOrCreate(state).getSaiAnnRerankKWarnThreshold(),
+                     state -> CONFIG_PROVIDER.getOrCreate(state).getSaiAnnRerankKFailThreshold(),
+                      (isWarning, what, value, threshold) ->
+                      format("%s specifies rerank_k=%s, this exceeds the %s threshold of %s.",
+                             what, value, isWarning ? "warning" : "failure", threshold));
+
+    /**
      * Guardrail on the data disk usage on the local node, used by a periodic task to calculate and propagate that status.
      * See {@link org.apache.cassandra.service.disk.usage.DiskUsageMonitor} and {@link DiskUsageBroadcaster}.
      */
@@ -1334,6 +1346,24 @@ public final class Guardrails implements GuardrailsMBean
     public void setVectorDimensionsThreshold(int warn, int fail)
     {
         DEFAULT_CONFIG.setVectorDimensionsThreshold(warn, fail);
+    }
+
+    @Override
+    public int getSaiAnnRerankKWarnThreshold()
+    {
+        return DEFAULT_CONFIG.getSaiAnnRerankKWarnThreshold();
+    }
+
+    @Override
+    public int getSaiAnnRerankKFailThreshold()
+    {
+        return DEFAULT_CONFIG.getSaiAnnRerankKFailThreshold();
+    }
+
+    @Override
+    public void setSaiAnnRerankKThreshold(int warn, int fail)
+    {
+        DEFAULT_CONFIG.setSaiAnnRerankKThreshold(warn, fail);
     }
 
     @Override

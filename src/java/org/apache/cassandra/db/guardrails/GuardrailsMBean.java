@@ -683,6 +683,22 @@ public interface GuardrailsMBean
     void setVectorDimensionsThreshold(int warn, int fail);
 
     /**
+     * @return The threshold to warn for the rerank_k parameter, an ANN query option.
+     */
+    int getSaiAnnRerankKWarnThreshold();
+
+    /**
+     * @return The threshold to fail for the rerank_k parameter, an ANN query option.
+     */
+    int getSaiAnnRerankKFailThreshold();
+
+    /**
+     * @param warn The threshold to warn for the rerank_k parameter, an ANN query option.
+     * @param fail The threshold to prevent setting the rerank_k parameter, an ANN query option.
+     */
+    void setSaiAnnRerankKThreshold(int warn, int fail);
+
+    /**
      * @param enabled {@code true} if vector type usage is enabled.
      */
     void setVectorTypeEnabled(boolean enabled);
