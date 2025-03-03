@@ -1099,7 +1099,7 @@ public abstract class ReadCommand extends AbstractReadQuery
                                                      indexName);
                 if (status != Index.Status.INITIALIZED)
                     availableIndexes.add(plannedIndex);
-                else
+                else if (!plannedIndex.isQueryable(status))
                 {
                     ClientWarn.instance.warn(format(SecondaryIndexManager.FELL_BACK_TO_ALLOW_FILTERING, indexName));
                     logger.warn(format(SecondaryIndexManager.FELL_BACK_TO_ALLOW_FILTERING, indexName));

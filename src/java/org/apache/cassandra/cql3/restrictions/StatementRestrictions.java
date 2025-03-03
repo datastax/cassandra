@@ -41,7 +41,6 @@ import org.apache.cassandra.dht.*;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.IndexRegistry;
-import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.QueryState;
@@ -781,7 +780,13 @@ public class StatementRestrictions
 
     public boolean hasIndxBasedBoundedAnn()
     {
-        return nonPrimaryKeyRestrictions.restrictions().stream().anyMatch(SingleRestriction::isBoundedAnn);
+        for (SingleRestriction restriction : nonPrimaryKeyRestrictions.restrictions())
+        {
+            if (restriction.isBoundedAnn())
+                return true;
+        }
+
+        return false;
     }
 
     public void throwRequiresAllowFilteringError(TableMetadata table)
