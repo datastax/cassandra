@@ -247,11 +247,9 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
         for (Index index : indexes)
         {
             assert index instanceof StorageAttachedIndex : "Index is not a StorageAttachedIndex";
+            assert indices.contains(index) : "Index does not belong to this group";
             saiIndexes.add((StorageAttachedIndex) index);
         }
-
-        // Verify that all provided indexes belong to this group
-        assert indexes.size() < indices.size() && indices.containsAll(saiIndexes);
 
         return StorageAttachedIndexQueryPlan.create(baseCfs, queryMetrics, saiIndexes, rowFilter);
     }

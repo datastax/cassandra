@@ -18,7 +18,6 @@
 
 package org.apache.cassandra.distributed.test.sai;
 
-import java.net.InetAddress;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
@@ -26,43 +25,37 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.function.IntFunction;
 
 import com.google.common.base.Objects;
+import org.apache.cassandra.distributed.test.index.IndexTestBase;
 import org.junit.Test;
 
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.distributed.api.ConsistencyLevel;
 import org.apache.cassandra.distributed.api.IInvokableInstance;
-import org.apache.cassandra.distributed.test.TestBaseImpl;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.SecondaryIndexManager;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.schema.IndexMetadata;
-import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.Schema;
-import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.utils.FBUtilities;
 
 import static org.apache.cassandra.distributed.api.Feature.GOSSIP;
 import static org.apache.cassandra.distributed.api.Feature.NETWORK;
 import static org.apache.cassandra.distributed.test.sai.SAIUtil.waitForIndexQueryable;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
-import static org.awaitility.Awaitility.await;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
-public class IndexAvailabilityTest extends TestBaseImpl
+public class IndexAvailabilityTest extends IndexTestBase
 {
     private static final String CREATE_KEYSPACE = "CREATE KEYSPACE %s WITH replication = {'class': 'SimpleStrategy', 'replication_factor': %d}";
     private static final String CREATE_TABLE = "CREATE TABLE %s.%s (pk text primary key, v1 int, v2 text) " +
-                                               "WITH compaction = {'class' : 'SizeTieredCompactionStrategy', 'enabled' : false }";
+                                             "WITH compaction = {'class' : 'SizeTieredCompactionStrategy', 'enabled' : false }";
     private static final String CREATE_INDEX = "CREATE CUSTOM INDEX %s ON %s.%s(%s) USING 'StorageAttachedIndex'";
     
     private static final Map<NodeIndex, Index.Status> expectedNodeIndexQueryability = new ConcurrentHashMap<>();
@@ -125,7 +118,7 @@ public class IndexAvailabilityTest extends TestBaseImpl
             // mark ks2 index2 as indexing on node1
             markIndexBuilding(cluster.get(1), ks2, cf1, index2, true);
             // on node2, it observes that node1 ks2.index2 is not queryable
-            waitForIndexingStatus(cluster.get(2), ks2, index2, cluster.get(1), Index.Status.INITIALIZED);
+            waitForIndexingStatus(cluster.get(2), ks2, index2, cluster.get(1), Index.Status.INITIAL_BUILD_STARTED);
             // other indexes or keyspaces should not be affected
             assertIndexingStatus(cluster);
 
@@ -255,7 +248,7 @@ public class IndexAvailabilityTest extends TestBaseImpl
     @Test
     public void testAllowFilteringDuringIndexInitialBuildOn3NodeCluster() throws Exception
     {
-        testAllowFilteringDuringIndexBuildsOn3NodeCluster(true, Index.Status.INITIALIZED);
+        testAllowFilteringDuringIndexBuildsOn3NodeCluster(true, Index.Status.INITIAL_BUILD_STARTED);
     }
 
     @Test
@@ -560,7 +553,7 @@ public class IndexAvailabilityTest extends TestBaseImpl
             // mark ks2 index2 as indexing on node1
             markIndexBuilding(cluster.get(1), ks2, cf1, index2, true);
             // on node2, it observes that node1 ks2.index2 is not queryable
-            waitForIndexingStatus(cluster.get(1), ks2, index2, cluster.get(1), Index.Status.INITIALIZED);
+            waitForIndexingStatus(cluster.get(1), ks2, index2, cluster.get(1), Index.Status.INITIAL_BUILD_STARTED);
             // other indexes or keyspaces should not be affected
             assertIndexingStatus(cluster, ks2, index2);
 
@@ -585,14 +578,13 @@ public class IndexAvailabilityTest extends TestBaseImpl
         // test different coordinator
         for (int nodeId = 1; nodeId <= cluster.size(); nodeId++)
         {
-            final int node = nodeId;
             if (expected >= 0)
                 assertEquals(expected, cluster.coordinator(nodeId).execute(query, level).length);
             else
             {
                 try
                 {
-                    cluster.coordinator(node).execute(query, level);
+                    cluster.coordinator(nodeId).execute(query, level);
                 }
                 catch (Throwable e)
                 {
@@ -607,7 +599,7 @@ public class IndexAvailabilityTest extends TestBaseImpl
         expectedNodeIndexQueryability.put(NodeIndex.create(keyspace, indexName, node), Index.Status.BUILD_FAILED);
 
         node.runOnInstance(() -> {
-            SecondaryIndexManager sim = Schema.instance.getKeyspaceInstance(keyspace).getColumnFamilyStore(table).indexManager;
+            SecondaryIndexManager sim = java.util.Objects.requireNonNull(Schema.instance.getKeyspaceInstance(keyspace)).getColumnFamilyStore(table).indexManager;
             Index index = sim.getIndexByName(indexName);
             sim.makeIndexNonQueryable(index, Index.Status.BUILD_FAILED);
         });
@@ -618,7 +610,7 @@ public class IndexAvailabilityTest extends TestBaseImpl
         expectedNodeIndexQueryability.put(NodeIndex.create(keyspace, indexName, node), Index.Status.BUILD_SUCCEEDED);
 
         node.runOnInstance(() -> {
-            SecondaryIndexManager sim = Schema.instance.getKeyspaceInstance(keyspace).getColumnFamilyStore(table).indexManager;
+            SecondaryIndexManager sim = java.util.Objects.requireNonNull(Schema.instance.getKeyspaceInstance(keyspace)).getColumnFamilyStore(table).indexManager;
             Index index = sim.getIndexByName(indexName);
             //sim.makeIndexQueryable(index, Index.Status.BUILD_SUCCEEDED);
             sim.markIndexBuilt(index, true);
@@ -628,12 +620,12 @@ public class IndexAvailabilityTest extends TestBaseImpl
     private void markIndexBuilding(IInvokableInstance node, String keyspace, String table, String indexName, boolean isCreateIndex)
     {
         if (isCreateIndex)
-            expectedNodeIndexQueryability.put(NodeIndex.create(keyspace, indexName, node), Index.Status.INITIALIZED);
+            expectedNodeIndexQueryability.put(NodeIndex.create(keyspace, indexName, node), Index.Status.INITIAL_BUILD_STARTED);
         else
             expectedNodeIndexQueryability.put(NodeIndex.create(keyspace, indexName, node), Index.Status.FULL_REBUILD_STARTED);
 
         node.runOnInstance(() -> {
-            SecondaryIndexManager sim = Schema.instance.getKeyspaceInstance(keyspace).getColumnFamilyStore(table).indexManager;
+            SecondaryIndexManager sim = java.util.Objects.requireNonNull(Schema.instance.getKeyspaceInstance(keyspace)).getColumnFamilyStore(table).indexManager;
             Index index = sim.getIndexByName(indexName);
             // KATE double-check this later...
             sim.markIndexesBuilding(Collections.singleton(index), true, false, isCreateIndex);
@@ -681,38 +673,9 @@ public class IndexAvailabilityTest extends TestBaseImpl
         }
     }
 
-    private static void waitForIndexingStatus(IInvokableInstance node, String keyspace, String index, IInvokableInstance replica, Index.Status status)
-    {
-        InetAddressAndPort replicaAddressAndPort = getFullAddress(replica);
-        await().atMost(5, TimeUnit.SECONDS)
-               .until(() -> node.callOnInstance(() -> getIndexStatus(keyspace, index, replicaAddressAndPort) == status));
-    }
-
     private static Index.Status getNodeIndexStatus(IInvokableInstance node, String keyspaceName, String indexName, InetAddressAndPort replica)
     {
         return Index.Status.values()[node.callsOnInstance(() -> getIndexStatus(keyspaceName, indexName, replica).ordinal()).call()];
-    }
-    
-    private static Index.Status getIndexStatus(String keyspaceName, String indexName, InetAddressAndPort replica)
-    {
-        KeyspaceMetadata keyspace = Schema.instance.getKeyspaceMetadata(keyspaceName);
-        if (keyspace == null)
-            return Index.Status.UNKNOWN;
-
-        TableMetadata table = keyspace.findIndexedTable(indexName).orElse(null);
-        if (table == null)
-            return Index.Status.UNKNOWN;
-
-        SecondaryIndexManager indexManager = Keyspace.openAndGetStore(table).indexManager;
-        
-        return indexManager.getIndexStatus(replica, keyspaceName, indexName);
-    }
-
-    private static InetAddressAndPort getFullAddress(IInvokableInstance node)
-    {
-        InetAddress address = node.broadcastAddress().getAddress();
-        int port = node.callOnInstance(() -> FBUtilities.getBroadcastAddressAndPort().port);
-        return InetAddressAndPort.getByAddressOverrideDefaults(address, port);
     }
 
     private void assertResultContains(Object[][] results, List<String> expectedValues)

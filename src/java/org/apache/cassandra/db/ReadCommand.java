@@ -59,7 +59,6 @@ import org.apache.cassandra.guardrails.DefaultGuardrail;
 import org.apache.cassandra.guardrails.Guardrails;
 import org.apache.cassandra.guardrails.Threshold;
 import org.apache.cassandra.index.Index;
-import org.apache.cassandra.index.IndexRegistry;
 import org.apache.cassandra.index.SecondaryIndexManager;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
@@ -80,7 +79,6 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.sensors.Context;
 import org.apache.cassandra.sensors.read.TrackingRowIterator;
 import org.apache.cassandra.service.ActiveRepairService;
-import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.FBUtilities;
 
@@ -406,9 +404,9 @@ public abstract class ReadCommand extends AbstractReadQuery
         Index.Searcher searcher = null;
         if (indexQueryPlan != null && cfs.indexManager.isQueryableThroughIndex(indexQueryPlan, rowFilter().allowFiltering))
         {
-                searcher = indexSearcher();
-                Index index = indexQueryPlan.getFirst();
-                Tracing.trace("Executing read on {}.{} using index {}", cfs.metadata.keyspace, cfs.metadata.name, index.getIndexMetadata().name);
+            searcher = indexSearcher();
+            Index index = indexQueryPlan.getFirst();
+            Tracing.trace("Executing read on {}.{} using index {}", cfs.metadata.keyspace, cfs.metadata.name, index.getIndexMetadata().name);
         }
 
         Context context = Context.from(this);
@@ -1076,7 +1074,22 @@ public abstract class ReadCommand extends AbstractReadQuery
             return kind.selectionDeserializer.deserialize(in, version, isDigest, digestVersion, acceptsTransient, metadata, nowInSec, columnFilter, rowFilter, limits, indexQueryPlan);
         }
 
-        private Index.QueryPlan buildIndexQueryPlan(IndexMetadata index, TableMetadata metadata, RowFilter rowFilter)
+        /**
+         * Builds a query plan for the specified index, considering index availability and status.
+         * 
+         * @param index The index metadata to build the plan for
+         * @param metadata The table metadata that contains the index
+         * @param rowFilter The row filter to be applied in the query
+         * @return A query plan that uses available indexes, or null if:
+         *         - the provided index is null
+         *         - no index group is found for the index
+         *         - no query plan could be created for the row filter
+         *         - all indexes are in INITIAL_BUILD_STARTED state and not queryable
+         * <p>
+         * If some indexes are in INITIAL_BUILD_STARTED state but others are available, 
+         * returns a new query plan using only the available indexes.
+         */
+        private static Index.QueryPlan buildIndexQueryPlan(IndexMetadata index, TableMetadata metadata, RowFilter rowFilter)
         {
             if (index == null)
                 return null;
@@ -1097,19 +1110,17 @@ public abstract class ReadCommand extends AbstractReadQuery
                 Index.Status status = getIndexStatus(FBUtilities.getBroadcastAddressAndPort(),
                                                      metadata.keyspace,
                                                      indexName);
-                if (status != Index.Status.INITIALIZED)
+                if (status != Index.Status.INITIAL_BUILD_STARTED)
                     availableIndexes.add(plannedIndex);
                 else if (!plannedIndex.isQueryable(status))
-                {
-                    ClientWarn.instance.warn(format(SecondaryIndexManager.FELL_BACK_TO_ALLOW_FILTERING, indexName));
                     logger.warn(format(SecondaryIndexManager.FELL_BACK_TO_ALLOW_FILTERING, indexName));
-                }
+
             }
 
             if (availableIndexes.isEmpty())
                 return null;
 
-            return availableIndexes.size() < queryPlan.getIndexes().size()
+            return availableIndexes.size() < allIndexes.size()
                    ? indexGroup.queryPlanForIndices(rowFilter, availableIndexes)
                    : queryPlan;
         }
