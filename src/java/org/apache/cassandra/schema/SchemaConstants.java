@@ -38,6 +38,8 @@ import org.apache.cassandra.tracing.TraceKeyspace;
 public final class SchemaConstants
 {
     public static final Pattern PATTERN_WORD_CHARS = Pattern.compile("\\w+");
+    public static final Pattern PATTERN_NON_WORD_CHAR = Pattern.compile("\\W");
+
 
     public static final String SYSTEM_KEYSPACE_NAME = "system";
     public static final String SCHEMA_KEYSPACE_NAME = "system_schema";
@@ -82,9 +84,47 @@ public final class SchemaConstants
 
     public static final List<String> LEGACY_AUTH_TABLES = Arrays.asList("credentials", "users", "permissions");
 
+    /**
+     * Checks if the length of the given name will be suitable to be used
+     * in constructed file names.
+     *
+     * @param name the name to check
+     * @return true if the name is short enough to be safe to use, otherwise false
+     */
+    public static boolean isSafeLengthForFilename(String name)
+    {
+        return name.length() <= NAME_LENGTH;
+    }
+
+    /**
+     * Names such as keyspace, table, index names are used in file paths and file names,
+     * so, they need to be safe for the use there, i.e., short enough and
+     * containing only alphanumeric characters and underscores.
+     *
+     * @param name the name to check
+     * @return whether the name is safe for use in file paths and file names
+     */
     public static boolean isValidName(String name)
     {
-        return name != null && !name.isEmpty() && name.length() <= NAME_LENGTH && PATTERN_WORD_CHARS.matcher(name).matches();
+        return isValidName(name, false);
+    }
+
+    /**
+     * Names such as keyspace, table, index names are used in file paths and file names,
+     * so, they need to be safe for the use there, i.e., short enough and
+     * containing only alphanumeric characters and underscores.
+     * However, historically not all names were checked for their length.
+     * Such legacy behaviour is supported through passing true for doNotCheckLength.
+     *
+     * @param name             the name to check
+     * @param doNotCheckLength specifies if no check on the name length should be done
+     *                         to support legacy behaviour
+     * @return true if the name is valid, false otherwise
+     */
+    public static boolean isValidName(String name, boolean doNotCheckLength)
+    {
+        return name != null && !name.isEmpty() && PATTERN_WORD_CHARS.matcher(name).matches() &&
+               (doNotCheckLength || isSafeLengthForFilename(name));
     }
 
     static
