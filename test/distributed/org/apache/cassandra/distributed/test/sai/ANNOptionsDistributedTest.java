@@ -54,7 +54,8 @@ public class ANNOptionsDistributedTest extends TestBaseImpl
                                            .withConfig(config -> config.with(GOSSIP).with(NETWORK))
                                            .start(), RF))
         {
-            test(cluster, "SAI doesn't support ANN options yet.");
+            // null indicates that the query should succeed
+            testSelectWithAnnOptions(cluster, null);
         }
     }
 
@@ -70,7 +71,7 @@ public class ANNOptionsDistributedTest extends TestBaseImpl
                                            .withConfig(config -> config.with(GOSSIP).with(NETWORK))
                                            .start(), RF))
         {
-            test(cluster, "ANN options are not supported in clusters below DS 11.");
+            testSelectWithAnnOptions(cluster, "ANN options are not supported in clusters below DS 11.");
         }
     }
 
@@ -80,16 +81,18 @@ public class ANNOptionsDistributedTest extends TestBaseImpl
     @Test
     public void testANNOptionsWithMixedDS10AndDS11() throws Throwable
     {
+        assert CassandraRelevantProperties.DS_CURRENT_MESSAGING_VERSION.getInt() >= MessagingService.VERSION_DS_11;
+
         try (Cluster cluster = init(Cluster.build(NUM_REPLICAS)
                                            .withInstanceInitializer(BB::install)
                                            .withConfig(config -> config.with(GOSSIP).with(NETWORK).with(NATIVE_PROTOCOL))
                                            .start(), RF))
         {
-            test(cluster, "ANN options are not supported in clusters below DS 11.");
+            testSelectWithAnnOptions(cluster, "ANN options are not supported in clusters below DS 11.");
         }
     }
 
-    private static void test(Cluster cluster, String expectedErrorMessage)
+    private static void testSelectWithAnnOptions(Cluster cluster, String expectedErrorMessage)
     {
         cluster.schemaChange(withKeyspace("CREATE TABLE %s.t (k int PRIMARY KEY, n int, v vector<float, 2>)"));
         cluster.schemaChange(withKeyspace("CREATE CUSTOM INDEX ON %s.t(v) USING 'StorageAttachedIndex'"));
@@ -100,22 +103,23 @@ public class ANNOptionsDistributedTest extends TestBaseImpl
         for (int i = 1; i <= cluster.size(); i++)
         {
             ICoordinator coordinator = cluster.coordinator(i);
-            Assertions.assertThatThrownBy(() -> coordinator.execute(select, ConsistencyLevel.ONE))
-                      .hasMessageContaining(expectedErrorMessage);
+            if (expectedErrorMessage == null)
+                coordinator.execute(select, ConsistencyLevel.ONE);
+            else
+                Assertions.assertThatThrownBy(() -> coordinator.execute(select, ConsistencyLevel.ONE))
+                          .hasMessageContaining(expectedErrorMessage);
         }
     }
 
     /**
-     * Injection to set the current version of the first cluster node to DS 11.
+     * Injection to set the current version of the first cluster node to DS 10.
      */
     public static class BB
     {
         public static void install(ClassLoader classLoader, int node)
         {
-            if (node > 1)
+            if (node == 1)
             {
-                // Relies on CassandraRelevantProperties.DS_CURRENT_MESSAGING_VERSION set to DS_11 or higher
-                // set the current verson to DS 10, which does NOT support ANN options
                 new ByteBuddy().rebase(MessagingService.class)
                                .method(named("currentVersion"))
                                .intercept(MethodDelegation.to(BB.class))
