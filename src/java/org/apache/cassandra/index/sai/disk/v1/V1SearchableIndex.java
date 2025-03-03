@@ -207,6 +207,8 @@ public class V1SearchableIndex implements SearchableIndex
             {
                 if (segment.intersects(keyRange))
                 {
+                    // Note that the proportionality is not used when the user supplies a rerank_k value in the
+                    // ANN_OPTIONS map.
                     var segmentLimit = segment.proportionalAnnLimit(limit, totalRows);
                     iterators.add(segment.orderBy(orderer, slice, keyRange, context, segmentLimit));
                 }

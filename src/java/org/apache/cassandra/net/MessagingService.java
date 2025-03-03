@@ -763,15 +763,17 @@ public class MessagingService extends MessagingServiceMBeanImpl implements Messa
     }
 
     /**
-     * Returns the endpoints that are known to be alive and are using a messaging version older than the given version.
+     * Returns the endpoints for the given keyspace that are known to be alive and are using a messaging version older
+     * than the given version.
      *
+     * @param keyspace a keyspace
      * @param version a messaging version
-     * @return a set of alive endpoints with messaging version below the given version
+     * @return a set of alive endpoints in the given keyspace with messaging version below the given version
      */
-    public Set<InetAddressAndPort> endpointsWithVersionBelow(int version)
+    public Set<InetAddressAndPort> endpointsWithVersionBelow(String keyspace, int version)
     {
         Set<InetAddressAndPort> nodes = new HashSet<>();
-        for (InetAddressAndPort node : StorageService.instance.getTokenMetadata().getAllEndpoints())
+        for (InetAddressAndPort node : StorageService.instance.getTokenMetadataForKeyspace(keyspace).getAllEndpoints())
         {
             if (versions.knows(node) && versions.getRaw(node) < version)
                 nodes.add(node);
