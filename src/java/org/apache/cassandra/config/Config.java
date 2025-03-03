@@ -939,6 +939,8 @@ public class Config
     public volatile boolean vector_type_enabled = true;
     public volatile int vector_dimensions_warn_threshold = -1;
     public volatile int vector_dimensions_fail_threshold = -1;
+    public volatile int sai_ann_rerank_k_warn_threshold = -1;
+    public volatile int sai_ann_rerank_k_fail_threshold = 4 * CassandraRelevantProperties.SAI_VECTOR_SEARCH_MAX_TOP_K.getInt();
     public volatile int data_disk_usage_percentage_warn_threshold = -1;
     public volatile int data_disk_usage_percentage_fail_threshold = -1;
     public volatile DataStorageSpec.LongBytesBound data_disk_usage_max_disk_size = null;

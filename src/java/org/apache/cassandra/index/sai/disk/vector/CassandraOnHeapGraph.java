@@ -313,7 +313,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
     /**
      * @return an itererator over {@link PrimaryKeyWithSortKey} in the graph's {@link SearchResult} order
      */
-    public CloseableIterator<SearchResult.NodeScore> search(QueryContext context, VectorFloat<?> queryVector, int limit, float threshold, Bits toAccept)
+    public CloseableIterator<SearchResult.NodeScore> search(QueryContext context, VectorFloat<?> queryVector, int limit, int rerankK, float threshold, Bits toAccept)
     {
         VectorValidation.validateIndexable(queryVector, similarityFunction);
 
@@ -327,7 +327,6 @@ public class CassandraOnHeapGraph<T> implements Accountable
         try
         {
             var ssf = SearchScoreProvider.exact(queryVector, similarityFunction, vectorValues);
-            var rerankK = sourceModel.rerankKFor(limit, VectorCompression.NO_COMPRESSION);
             var result = searcher.search(ssf, limit, rerankK, threshold, 0.0f, bits);
             Tracing.trace("ANN search for {}/{} visited {} nodes, reranked {} to return {} results from {}",
                           limit, rerankK, result.getVisitedCount(), result.getRerankedCount(), result.getNodes().length, source);
