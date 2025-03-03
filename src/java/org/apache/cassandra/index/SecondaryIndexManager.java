@@ -368,7 +368,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
      */
     public boolean isQueryableThroughIndex(Index.QueryPlan queryPlan, boolean allowFiltering)
     {
-        Set<InetAddressAndPort> badNodes = MessagingService.instance().endpointsWithVersionBelow(MessagingService.VERSION_DS_11);
+        Set<InetAddressAndPort> badNodes = MessagingService.instance().endpointsWithVersionBelow(keyspace.getName(), MessagingService.VERSION_DS_11);
         if (MessagingService.current_version < MessagingService.VERSION_DS_11)
             badNodes.add(FBUtilities.getBroadcastAddressAndPort());
 
@@ -1843,7 +1843,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
                                                             boolean allowFiltering)
     {
         int initial = liveEndpoints.size();
-        Set<InetAddressAndPort> badNodes = MessagingService.instance().endpointsWithVersionBelow(MessagingService.VERSION_DS_11);
+        Set<InetAddressAndPort> badNodes = MessagingService.instance().endpointsWithVersionBelow(keyspace.getName(), MessagingService.VERSION_DS_11);
         if (MessagingService.current_version < MessagingService.VERSION_DS_11)
             badNodes.add(FBUtilities.getBroadcastAddressAndPort());
 

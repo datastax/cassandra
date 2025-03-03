@@ -27,8 +27,19 @@ import static net.bytebuddy.matcher.ElementMatchers.named;
 
 public class ByteBuddyUtils
 {
+    /**
+     * Utility class for modifying the messaging protocol version during tests.
+     * Uses ByteBuddy to intercept and override the messaging version specifically for node 1.
+     */
     public static class MessagingVersionSetter
     {
+        /**
+         * Forces node 1 to use Messaging Service version DS_10 by intercepting the currentVersion() method.
+         * This is useful for testing backward compatibility and version-specific behavior.
+         *
+         * @param classLoader The classloader to use for loading the modified class
+         * @param node The node number to apply this modification to (only applies to node 1)
+         */
         public static void setDS10OnNode1(ClassLoader classLoader, int node)
         {
             if (node == 1)
@@ -41,6 +52,12 @@ public class ByteBuddyUtils
             }
         }
 
+        /**
+         * Replacement implementation for MessagingService.currentVersion()
+         * Always returns VERSION_DS_10 when called.
+         *
+         * @return MessagingService.VERSION_DS_10
+         */
         @SuppressWarnings("unused")
         public static int currentVersion()
         {
