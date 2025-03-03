@@ -20,6 +20,7 @@ package org.apache.cassandra.schema;
 
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.UntypedResultSet;
+import org.apache.cassandra.cql3.functions.types.ParseUtils;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 
@@ -105,7 +106,7 @@ public class CreateTableValidationTest extends CQLTester
     @Test
     public void testCreatingTableWithLongName() throws Throwable
     {
-        String keyspace = "g38373639353166362d356631322d343864652d393063362d653862616534343165333764_tpch";
+        String keyspace = "\"38373639353166362d356631322d343864652d393063362d653862616534343165333764_tpch\"";
         String table = "test_create_k8yq1r75bpzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz";
 
         execute(String.format("CREATE KEYSPACE %s with replication = " +
@@ -116,9 +117,17 @@ public class CreateTableValidationTest extends CQLTester
                                            "val int)", keyspace, table));
 
         execute(String.format("INSERT INTO %s.%s (key,val) VALUES (1,1)", keyspace, table));
-        flush(keyspace, table);
+        flush(ParseUtils.unDoubleQuote(keyspace), table);
         UntypedResultSet result = execute(String.format("SELECT * from %s.%s", keyspace, table));
         assertThat(result.size()).isEqualTo(1);
+    }
+
+    @Test
+    public void testNonAlphanummericTableName()
+    {
+        assertThatExceptionOfType(ConfigurationException.class)
+            .isThrownBy(() -> createTableMayThrow(String.format("CREATE TABLE %s.\"d-3\" (key int PRIMARY KEY, val int)", KEYSPACE)))
+            .withMessageContaining("Table name must not be empty or contain non-alphanumeric-underscore characters (got \"d-3\")");
     }
 
     private void expectedFailure(String statement, String errorMsg)
