@@ -382,6 +382,16 @@ public interface GuardrailsConfig
     int getVectorDimensionsFailThreshold();
 
     /**
+     * @return The threshold to warn when creating a vector with more dimensions than threshold.
+     */
+    int getSaiAnnRerankKWarnThreshold();
+
+    /**
+     * @return The threshold to fail when creating a vector with more dimensions than threshold.
+     */
+    int getSaiAnnRerankKFailThreshold();
+
+    /**
      * @return The threshold to warn when local disk usage percentage exceeds that threshold.
      * Allowed values are in the range {@code [1, 100]}, and -1 means disabled.
      */
