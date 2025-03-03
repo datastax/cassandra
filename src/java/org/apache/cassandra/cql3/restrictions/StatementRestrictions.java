@@ -1019,6 +1019,9 @@ public class StatementRestrictions
 
         ANNOptions annOptions = selectOptions.parseANNOptions();
 
+        // Ordering on non-clustering column requires each restricted column to be indexed except for
+        // fully-specified partition keys. ANN queries do not currently work correctly when filtering is required, so we
+        // fail even though ALLOW FILTERING was passed.
         if (allowFiltering && (hasIndxBasedOrdering() || hasIndxBasedBoundedAnn()))
             allowFiltering = false;
 

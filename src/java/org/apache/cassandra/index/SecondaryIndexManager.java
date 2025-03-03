@@ -374,10 +374,12 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
 
         for (Index index : queryPlan.getIndexes())
         {
+            boolean isInitialBuilding = SecondaryIndexManager.getIndexStatus(FBUtilities.getBroadcastAddressAndPort(),
+                    keyspace.getName(),
+                    index.getIndexMetadata().name) == Index.Status.INITIAL_BUILD_STARTED;
             // CNDB-12425: support for ALLOW FILTERING while building an index
-            if (badNodes.isEmpty() && isIndexBuilding(index) && allowFiltering)
+            if (badNodes.isEmpty() && isInitialBuilding && allowFiltering)
             {
-                ClientWarn.instance.warn(format(SecondaryIndexManager.FELL_BACK_TO_ALLOW_FILTERING, index.getIndexMetadata().name));
                 logger.warn(format(SecondaryIndexManager.FELL_BACK_TO_ALLOW_FILTERING, index.getIndexMetadata().name));
                 return false;
             }
@@ -399,17 +401,6 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
     public boolean isIndexQueryable(Index index)
     {
         return isIndexQueryable(index.getIndexMetadata().name);
-    }
-
-    /**
-     * Checks if the specified index is building.
-     *
-     * @param index the index
-     * @return <code>true</code> if the specified index is building, <code>false</code> otherwise
-     */
-    public boolean isIndexBuilding(Index index)
-    {
-        return isIndexBuilding(index.getIndexMetadata().name);
     }
 
     /**
@@ -814,7 +805,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
                                 if (!isCreateIndex)
                                     makeIndexNonQueryable(index, Index.Status.FULL_REBUILD_STARTED);
                                 else if (!isNewCF)
-                                    makeIndexNonQueryable(index, Index.Status.INITIALIZED);
+                                    makeIndexNonQueryable(index, Index.Status.INITIAL_BUILD_STARTED);
                             }
 
                             if (counter.getAndIncrement() == 0 && DatabaseDescriptor.isDaemonInitialized() && !isNewCF)
@@ -1861,13 +1852,17 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         boolean considerAllowFiltering = badNodes.isEmpty();
 
         E queryableEndpoints = liveEndpoints.filter(replica -> {
-            for (Index index : indexQueryPlan.getIndexes())
-            {
+            for (Index index : indexQueryPlan.getIndexes()) {
                 Index.Status status = getIndexStatus(replica.endpoint(), keyspace.getName(), index.getIndexMetadata().name);
 
                 // if the status of the index is building and there is allow filtering - that is ok too
-                if (considerAllowFiltering && status == Index.Status.INITIALIZED && !index.isQueryable(status) && allowFiltering)
+                if (considerAllowFiltering && status == Index.Status.INITIAL_BUILD_STARTED && !index.isQueryable(status) && allowFiltering)
+                {
+                    ClientWarn.instance.warn(String.format("Query fell back to ALLOW FILTERING because index %s is still building on endpoint %s", 
+                                                         index.getIndexMetadata().name, 
+                                                         replica.endpoint()));
                     continue;
+                }
 
                 if (!index.isQueryable(status))
                     return false;
