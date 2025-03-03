@@ -598,6 +598,10 @@ public enum CassandraRelevantProperties
     PAXOS_REPAIR_ON_TOPOLOGY_CHANGE_RETRY_DELAY_SECONDS("cassandra.paxos_repair_on_topology_change_retry_delay_seconds", "10"),
     PAXOS_REPAIR_RETRY_TIMEOUT_IN_MS("cassandra.paxos_repair_retry_timeout_millis", "60000"),
     PAXOS_USE_SELF_EXECUTION("cassandra.paxos.use_self_execution", "true"),
+    /**
+     * whether to persist prepared statements in the system table
+     */
+    PERSIST_PREPARED_STATEMENTS("cassandra.persist_prepared_statements", "true"),
     PRINT_HEAP_HISTOGRAM_ON_OUT_OF_MEMORY_ERROR("cassandra.printHeapHistogramOnOutOfMemoryError"),
     /**
      * Whether to enable the use of {@link EndpointGroupingRangeCommandIterator}
