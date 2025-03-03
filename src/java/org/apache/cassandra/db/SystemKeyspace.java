@@ -128,6 +128,7 @@ import static java.lang.String.format;
 import static java.util.Collections.emptyMap;
 import static java.util.Collections.singletonMap;
 import static java.util.concurrent.TimeUnit.MICROSECONDS;
+import static org.apache.cassandra.config.CassandraRelevantProperties.PERSIST_PREPARED_STATEMENTS;
 import static org.apache.cassandra.config.CassandraRelevantProperties.UNSAFE_SYSTEM;
 import static org.apache.cassandra.config.Config.PaxosStatePurging.legacy;
 import static org.apache.cassandra.config.DatabaseDescriptor.paxosStatePurging;
@@ -1705,10 +1706,15 @@ public final class SystemKeyspace
 
     public static void writePreparedStatement(String loggedKeyspace, MD5Digest key, String cql, long timestamp)
     {
-        executeInternal(format("INSERT INTO %s (logged_keyspace, prepared_id, query_string) VALUES (?, ?, ?) USING TIMESTAMP ?",
-                               PreparedStatements.toString()),
-                        loggedKeyspace, key.byteBuffer(), cql, timestamp);
-        logger.debug("stored prepared statement for logged keyspace '{}': '{}'", loggedKeyspace, cql);
+        if (PERSIST_PREPARED_STATEMENTS.getBoolean())
+        {
+            executeInternal(format("INSERT INTO %s (logged_keyspace, prepared_id, query_string) VALUES (?, ?, ?) USING TIMESTAMP ?",
+                                   PreparedStatements.toString()),
+                            loggedKeyspace, key.byteBuffer(), cql, timestamp);
+            logger.debug("stored prepared statement for logged keyspace '{}': '{}'", loggedKeyspace, cql);
+        }
+        else
+            logger.debug("not persisting prepared statement for logged keyspace '{}': '{}'", loggedKeyspace, cql);
     }
 
     public static void removePreparedStatement(MD5Digest key)
