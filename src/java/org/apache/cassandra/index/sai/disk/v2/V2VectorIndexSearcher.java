@@ -163,7 +163,7 @@ public class V2VectorIndexSearcher extends IndexSearcher
         if (!orderer.isANN())
             throw new IllegalArgumentException(indexContext.logMessage("Unsupported expression during ANN index query: " + orderer));
 
-        int rerankK = indexContext.getIndexWriterConfig().getSourceModel().rerankKFor(limit, graph.getCompression());
+        int rerankK = orderer.rerankKFor(limit, graph.getCompression());
         var queryVector = vts.createFloatVector(orderer.getVectorTerm());
 
         var result = searchInternal(keyRange, context, queryVector, limit, rerankK, 0);
@@ -428,9 +428,8 @@ public class V2VectorIndexSearcher extends IndexSearcher
         }
     }
 
-    public double estimateAnnSearchCost(int limit, int candidates)
+    public double estimateAnnSearchCost(int rerankK, int candidates)
     {
-        int rerankK = indexContext.getIndexWriterConfig().getSourceModel().rerankKFor(limit, graph.getCompression());
         var estimate = estimateCost(rerankK, candidates);
         return estimate.cost();
     }
@@ -472,7 +471,7 @@ public class V2VectorIndexSearcher extends IndexSearcher
         if (keys.isEmpty())
             return CloseableIterator.emptyIterator();
 
-        int rerankK = indexContext.getIndexWriterConfig().getSourceModel().rerankKFor(limit, graph.getCompression());
+        int rerankK = orderer.rerankKFor(limit, graph.getCompression());
         // Convert PKs to segment row ids and map to ordinals, skipping any that don't exist in this segment
         var segmentOrdinalPairs = flatmapPrimaryKeysToBitsAndRows(keys);
         var numRows = segmentOrdinalPairs.size();
@@ -611,9 +610,9 @@ public class V2VectorIndexSearcher extends IndexSearcher
         return Math.log(number) / Math.log(2);
     }
 
-    private int getRawExpectedNodes(int limit, int nPermittedOrdinals)
+    private int getRawExpectedNodes(int rerankK, int nPermittedOrdinals)
     {
-        return VectorMemtableIndex.expectedNodesVisited(limit, nPermittedOrdinals, graph.size());
+        return VectorMemtableIndex.expectedNodesVisited(rerankK, nPermittedOrdinals, graph.size());
     }
 
     @Override
