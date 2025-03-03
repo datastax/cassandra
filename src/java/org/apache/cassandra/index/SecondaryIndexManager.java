@@ -189,8 +189,6 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
 {
     private static final Logger logger = LoggerFactory.getLogger(SecondaryIndexManager.class);
     public static final String FELL_BACK_TO_ALLOW_FILTERING = "Query fell back to ALLOW FILTERING because index %s is still building.";
-    public static final String REQUIRES_HIGHER_MESSAGING_VERSION =
-    "ALLOW FILTERING queries during building an index are not supported in clusters below DS 11.";
 
     // default page size (in rows) when rebuilding the index for a whole partition
     public static final int DEFAULT_PAGE_SIZE = 10000;
@@ -1868,7 +1866,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
                 Index.Status status = getIndexStatus(replica.endpoint(), keyspace.getName(), index.getIndexMetadata().name);
 
                 // if the status of the index is building and there is allow filtering - that is ok too
-                if (considerAllowFiltering && status == Index.Status.INITIALIZED && allowFiltering)
+                if (considerAllowFiltering && status == Index.Status.INITIALIZED && !index.isQueryable(status) && allowFiltering)
                     continue;
 
                 if (!index.isQueryable(status))
