@@ -68,9 +68,38 @@ public class VectorSiftSmallTest extends VectorTester
         double memoryRecall = testRecall(100, queryVectors, groundTruth);
         assertTrue("Memory recall is " + memoryRecall, memoryRecall > 0.975);
 
+        // Run a few queries with increasing rerank_k to validate that recall increases
+        ensureIncreasingRerankKIncreasesRecall(queryVectors, groundTruth);
+
         flush();
         var diskRecall = testRecall(100, queryVectors, groundTruth);
         assertTrue("Disk recall is " + diskRecall, diskRecall > 0.975);
+
+        // Run a few queries with increasing rerank_k to validate that recall increases
+        ensureIncreasingRerankKIncreasesRecall(queryVectors, groundTruth);
+    }
+
+    private void ensureIncreasingRerankKIncreasesRecall(List<float[]> queryVectors, List<List<Integer>> groundTruth)
+    {
+        // Validate that the recall increases as we increase the rerank_k parameter
+        double previousRecall = 0;
+        int limit = 10;
+        int strictlyIncreasedCount = 0;
+        // Testing shows that we acheive 100% recall at about rerank_k = 45, so no need to go higher
+        for (int rerankK = limit; rerankK <= 50; rerankK += 5)
+        {
+            var recall = testRecall(limit, queryVectors, groundTruth, rerankK);
+            // Recall varies, so we can only assert that it does not get worse on a per-run basis. However, it should
+            // get better strictly at least some of the time
+            assertTrue("Recall for rerank_k = " + rerankK + " is " + recall, recall >= previousRecall);
+            if (recall > previousRecall)
+                strictlyIncreasedCount++;
+            previousRecall = recall;
+        }
+        // This is a conservative assertion to prevent it from being too fragile. At the time of writing this test,
+        // we observed a strict increase of 6 times for in memory and 5 times for on disk.
+        assertTrue("Recall should have strictly increased at least 4 times but only increased " + strictlyIncreasedCount + " times",
+                   strictlyIncreasedCount > 3);
     }
 
     @Test
@@ -199,6 +228,11 @@ public class VectorSiftSmallTest extends VectorTester
 
     public double testRecall(int topK, List<float[]> queryVectors, List<List<Integer>> groundTruth)
     {
+        return testRecall(topK, queryVectors, groundTruth, null);
+    }
+
+    public double testRecall(int topK, List<float[]> queryVectors, List<List<Integer>> groundTruth, Integer rerankK)
+    {
         AtomicInteger topKfound = new AtomicInteger(0);
 
         // Perform query and compute recall
@@ -208,7 +242,11 @@ public class VectorSiftSmallTest extends VectorTester
             String queryVectorAsString = Arrays.toString(queryVector);
 
             try {
-                UntypedResultSet result = execute("SELECT pk FROM %s ORDER BY val ANN OF " + queryVectorAsString + " LIMIT " + topK);
+                String query = "SELECT pk FROM %s ORDER BY val ANN OF " + queryVectorAsString + " LIMIT " + topK;
+                if (rerankK != null)
+                    query += " with ann_options = {'rerank_k': " + rerankK + '}';
+
+                UntypedResultSet result = execute(query);
                 var gt = groundTruth.get(i);
                 assert topK <= gt.size();
                 // we don't care about order within the topK but we do need to restrict the size first
