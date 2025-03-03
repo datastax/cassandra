@@ -254,8 +254,14 @@ public class RepairMessageVerbHandler implements IVerbHandler<RepairMessage>
 
                     Validator validator = new Validator(ctx, vState, validationRequest.nowInSec,
                                                         isIncremental(desc.parentSessionId), previewKind);
-                    Future<?> validationFuture = ctx.validationManager().submitValidation(store, validator);
-                    ParentRepairSessionListener.instance.onValidation(desc, validationFuture);
+                    if (acceptMessage(ctx, validationRequest, message.from()))
+                    {
+                        ctx.validationManager().submitValidation(store, validator);
+                    }
+                    else
+                    {
+                        validator.fail(new RepairOutOfTokenRangeException(validationRequest.desc.ranges));
+                    }
                 }
                 catch (Throwable t)
                 {
