@@ -180,7 +180,7 @@ public final class CreateIndexStatement extends AlterSchemaStatement
             long indexesOnAllTables = StreamSupport.stream(Keyspace.all().spliterator(), false).flatMap(ks -> ks.getColumnFamilyStores().stream())
                                                    .flatMap(ks -> ks.indexManager.listIndexes().stream())
                                                    .map(i -> i.getIndexMetadata().getIndexClassName())
-                                                   .filter(otherClassName -> className.equals(otherClassName)).count();
+                                                   .filter(className::equals).count();
             guardRails.totalThreshold.guard(indexesOnAllTables + 1, indexDescription, false, state);
         }
 
