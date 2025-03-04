@@ -540,7 +540,9 @@ public enum CassandraRelevantProperties
      * Do not try to calculate optimal streaming candidates. This can take a lot of time in some configs specially
      * with vnodes.
      */
-    SKIP_OPTIMAL_STREAMING_CANDIDATES_CALCULATION("cassandra.skip_optimal_streaming_candidates_calculation", "false");
+    SKIP_OPTIMAL_STREAMING_CANDIDATES_CALCULATION("cassandra.skip_optimal_streaming_candidates_calculation", "false"),
+
+    TEST_INTERVAL_TREE_EXPENSIVE_CHECKS("cassandra.test.interval_tree_expensive_checks");
 
     CassandraRelevantProperties(String key, String defaultVal)
     {
