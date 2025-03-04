@@ -603,7 +603,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
     static double getOverheadToDataRatio(Collection<? extends CompactionSSTable> sstables, Controller controller)
     {
         final long totSizeBytes = CompactionAggregate.getTotSizeBytes(sstables);
-        return controller.getOverheadSizeInBytes(sstables, totSizeBytes) / totSizeBytes;
+        return controller.getOverheadSizeInBytes(sstables, totSizeBytes) * 1.0 / totSizeBytes;
     }
 
     void createAndAddTasks(int gcBefore,

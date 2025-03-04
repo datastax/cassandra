@@ -200,7 +200,7 @@ public class CompactionPick
 
     public double overheadToDataRatio()
     {
-        return totalOverheadInBytes / Math.max(totSizeInBytes, 1);
+        return totalOverheadInBytes / Math.max(totSizeInBytes, 1.0);
     }
 
     public long parent()
