@@ -312,8 +312,7 @@ public class Operation
                                                                                                         ByteBufferAccessor.instance,
                                                                                                         offset,
                                                                                                         ProtocolVersion.V3),
-                                                                               expression.indexAnalyzer(),
-                                                                               expression.queryAnalyzer(),
+                                                                               expression.analyzer(),
                                                                                expression.annOptions())));
                     offset += TypeSizes.INT_SIZE + ByteBufferAccessor.instance.getInt(expression.getIndexValue(), offset);
                 }
