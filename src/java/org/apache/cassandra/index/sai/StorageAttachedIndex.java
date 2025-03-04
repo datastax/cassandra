@@ -29,7 +29,6 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.NavigableMap;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.SortedMap;
@@ -78,7 +77,6 @@ import org.apache.cassandra.dht.LocalPartitioner;
 import org.apache.cassandra.dht.OrderPreservingPartitioner;
 import org.apache.cassandra.dht.RandomPartitioner;
 import org.apache.cassandra.exceptions.InvalidRequestException;
-import org.apache.cassandra.db.filter.ANNOptions;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.IndexBuildDecider;
 import org.apache.cassandra.index.IndexRegistry;
@@ -666,23 +664,34 @@ public class StorageAttachedIndex implements Index
     }
 
     @Override
-    public Optional<Analyzer> getIndexAnalyzer()
+    public Optional<Analyzer> getAnalyzer(ByteBuffer queriedValue)
     {
-        return indexContext.isAnalyzed()
-               ? Optional.of(value -> analyze(indexContext.getAnalyzerFactory(), value))
-               : Optional.empty();
-    }
+        if (!indexContext.isAnalyzed())
+            return Optional.empty();
 
-    @Override
-    public Optional<Analyzer> getQueryAnalyzer()
-    {
-        return indexContext.isAnalyzed()
-               ? Optional.of(value -> analyze(indexContext.getQueryAnalyzerFactory(), value))
-               : Optional.empty();
+        // memoize the analyzed queried value, so we don't have to re-analyze it for every evaluated column value
+        List<ByteBuffer> queriedTokens = analyze(indexContext.getQueryAnalyzerFactory(), queriedValue);
+
+        return Optional.of(new Analyzer() {
+            @Override
+            public List<ByteBuffer> indexedTokens(ByteBuffer value)
+            {
+                return analyze(indexContext.getAnalyzerFactory(), value);
+            }
+
+            @Override
+            public List<ByteBuffer> queriedTokens()
+            {
+                return queriedTokens;
+            }
+        });
     }
 
     private static List<ByteBuffer> analyze(AbstractAnalyzer.AnalyzerFactory factory, ByteBuffer value)
     {
+        if (value == null)
+            return null;
+
         List<ByteBuffer> tokens = new ArrayList<>();
         AbstractAnalyzer analyzer = factory.create();
         try
