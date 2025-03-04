@@ -27,7 +27,6 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
-import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Objects;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Maps;
@@ -44,15 +43,12 @@ import org.apache.cassandra.exceptions.UnknownIndexException;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.internal.CassandraIndex;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
-import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.Version;
-import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.UUIDSerializer;
 
-import static org.apache.cassandra.index.sai.disk.format.Version.SAI_DESCRIPTOR;
 import static org.apache.cassandra.schema.SchemaConstants.PATTERN_NON_WORD_CHAR;
 import static org.apache.cassandra.schema.SchemaConstants.isValidName;
 
@@ -119,121 +115,38 @@ public final class IndexMetadata
      * Generates a default index name from the table and column names. Characters other than
      * alphanumeric and underscore are removed. Long index names are truncated to fit the allowed length.
      *
-     * @param keyspaceNameLength the length of the keyspace name to calculate the allowed index name length
-     * @param table              the table name
-     * @param column             the column identifier
+     * @param table  the table name
+     * @param column the column identifier
      * @return the generated index name
      */
-    public static String generateDefaultIndexName(int keyspaceNameLength, String table, ColumnIdentifier column)
+    public static String generateDefaultIndexName(String table, ColumnIdentifier column)
     {
         String indexNameUntrimmed = PATTERN_NON_WORD_CHAR.matcher(table + '_' + column.toString()).replaceAll("");
         String indexNameTrimmed = indexNameUntrimmed
                                   .substring(0,
-                                             Math.min(calculateGeneratedIndexNameMaxLength(keyspaceNameLength, table.length()),
+                                             Math.min(calculateGeneratedIndexNameMaxLength(),
                                                       indexNameUntrimmed.length()));
         return indexNameTrimmed + INDEX_POSTFIX;
-    }
-
-    /**
-     * Calculates the allowed length of the index name to fit file names,
-     * so it is guaranteed to fit the file name length specified by name length constant.
-     *
-     * @param keyspaceNameLength the length of the keyspace name
-     * @param tableNameLength    the length of the table name
-     * @return the allowed length of the index name
-     */
-    private static int calculateIndexAllowedLength(int keyspaceNameLength, int tableNameLength)
-    {
-
-        int addedLength1 = getAddedLengthFromIndexContextFullName(keyspaceNameLength, tableNameLength);
-        int addedLength2 = getAddedLengthFromDescriptorAndVersion();
-
-        int maxAddedLength = Math.max(addedLength1, addedLength2);
-
-        assert maxAddedLength <= SchemaConstants.NAME_LENGTH : "Index name additions are too long";
-
-        return SchemaConstants.NAME_LENGTH - maxAddedLength;
     }
 
     /**
      * Calculates the maximum length of the generated index name to fit file names.
      * It includes the generated suffixes in account.
      *
-     * @param keyspaceNameLength the length of the keyspace name
-     * @param tableNameLength    the length of the table name
      * @return the allowed length of the generated index name
      */
-    private static int calculateGeneratedIndexNameMaxLength(int keyspaceNameLength, int tableNameLength)
+    private static int calculateGeneratedIndexNameMaxLength()
     {
-        // Speculative assumption that uniqueness breaker will fit into 99.
+        // Speculative assumption that uniqueness breaker will fit into 999.
         // The value is used for trimming the index name if needed.
-        // There is a hard control for the total size of a full index name in IndexContext.
-        int uniquenessSuffixLength = 3;
+        // Introducing validation of index name length is TODO for CNDB-13198.
+        int uniquenessSuffixLength = 4;
         int indexNameAddition = uniquenessSuffixLength + INDEX_POSTFIX.length();
-        int allowedIndexNameLength = calculateIndexAllowedLength(keyspaceNameLength, tableNameLength);
-        if (allowedIndexNameLength < indexNameAddition)
-            throw new ConfigurationException(String.format("Cannot generate index name to fit file names, since the addition take the allowed length %s.", SchemaConstants.NAME_LENGTH));
+        int allowedIndexNameLength = Version.calculateIndexNameAllowedLength();
+
+        assert allowedIndexNameLength >= indexNameAddition : "cannot happen with current implementation as allowedIndexNameLength is approximately 255 - ~76. However, allowedIndexNameLength was " + allowedIndexNameLength + " and  indexNameAddition was " + indexNameAddition;
+
         return allowedIndexNameLength - indexNameAddition;
-    }
-
-    /**
-     * Calculates the length of the added prefixes and suffixes from Descriptor constructor
-     * and Version.stargazerFileNameFormat.
-     *
-     * @return the length of the added prefixes and suffixes
-     */
-    private static int getAddedLengthFromDescriptorAndVersion()
-    {
-        int separatorLength = 1;
-        // Prefixes and suffixes constructed by Version.stargazerFileNameFormat
-        int versionNameLength = Version.latest().toString().length();
-        int generationLength = 1;
-        int addedLength = SAI_DESCRIPTOR.length()
-                           + versionNameLength
-                           + generationLength
-                           + IndexComponentType.KD_TREE_POSTING_LISTS.representation.length()
-                           + separatorLength * 4;
-        // Prefixes from Descriptor constructor
-        int indexVersionLength = 2;
-        int tableIdLength = 32;
-        addedLength += indexVersionLength
-                        + SSTableFormat.Type.BTI.name().length()
-                        + tableIdLength
-                        + separatorLength * 2;
-        return addedLength;
-    }
-
-    /**
-     * Lengths of prefixes and suffixes from IndexContext.getFullName for constructing index file names.
-     * If keyspace and table names are too long, so no space is left for adding index name,
-     * it throws an exception.
-     *
-     * @param keyspaceNameLength the length of the keyspace name
-     * @param tableNameLength    the length of the table name
-     * @return the length of the added prefixes and suffixes
-     */
-    private static int getAddedLengthFromIndexContextFullName(int keyspaceNameLength, int tableNameLength)
-    {
-        int separatorLength = 1;
-        int addedLength = keyspaceNameLength + tableNameLength + separatorLength * 2;
-        if (addedLength > SchemaConstants.NAME_LENGTH)
-            throw new ConfigurationException(String.format("Prefix of keyspace and table names together are too long for an index file name: %s. Max length is %s",
-                                                          addedLength,
-                                                          SchemaConstants.NAME_LENGTH));
-        return addedLength;
-    }
-
-    /**
-     * This is legacy function kept for existing tests.
-     *
-     * @param table  table name
-     * @param column column identifier
-     * @return generated index name for the givne table and column
-     */
-    @VisibleForTesting
-    public static String generateDefaultIndexName(String table, ColumnIdentifier column)
-    {
-        return generateDefaultIndexName(0, table, column);
     }
 
     public static String generateDefaultIndexName(String table)
@@ -243,13 +156,9 @@ public final class IndexMetadata
 
     public void validate(TableMetadata table)
     {
-        if (!isValidName(name))
-            throw new ConfigurationException(String.format("Keyspace name must not be empty, more than %s characters long, or contain non-alphanumeric-underscore characters (got \"%s\")",
-                                                           SchemaConstants.NAME_LENGTH, name));
-
-        if (name.length() > calculateIndexAllowedLength(table.keyspace.length(), table.name.length()))
-            throw new ConfigurationException(String.format("Index name %s is too long to be part of constructed file names. Together with added prefixes and suffixes it must fit %s characters.",
-                                                           name, SchemaConstants.NAME_LENGTH));
+        if (!isValidName(name, true))
+            throw new ConfigurationException(String.format("Index name must not be empty, or contain non-alphanumeric-underscore characters (got \"%s\")",
+                                                           name));
 
         if (kind == null)
             throw new ConfigurationException("Index kind is null for index " + name);
