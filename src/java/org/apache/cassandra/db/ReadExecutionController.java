@@ -27,6 +27,8 @@ import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.metrics.DecayingEstimatedHistogramReservoir;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.service.context.OperationContext;
+import org.apache.cassandra.service.context.OperationContextTracker;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.MonotonicClock;
 import org.apache.cassandra.utils.concurrent.OpOrder;
@@ -143,6 +145,8 @@ public class ReadExecutionController implements AutoCloseable
 
         long createdAtNanos = baseCfs.metric.topLocalReadQueryTime.isEnabled() ? clock.now() : NO_SAMPLING;
 
+        OperationContextTracker.start(OperationContext.FACTORY.forRead(command, baseCfs));
+
         if (indexCfs == null)
             return new ReadExecutionController(command, baseCfs.readOrdering.start(), baseCfs.metadata(), null, null, createdAtNanos, trackRepairedStatus);
 
@@ -176,6 +180,7 @@ public class ReadExecutionController implements AutoCloseable
                 if (indexController != null)
                     indexController.close();
             }
+            OperationContextTracker.endCurrent();
             throw e;
         }
     }
@@ -216,6 +221,8 @@ public class ReadExecutionController implements AutoCloseable
                 }
             }
         }
+
+        OperationContextTracker.endCurrent();
 
         if (createdAtNanos != NO_SAMPLING)
             addSample();
