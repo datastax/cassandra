@@ -270,8 +270,8 @@ public final class CreateIndexStatement extends AlterSchemaStatement
     private String generateIndexName(KeyspaceMetadata keyspace, List<IndexTarget> targets)
     {
         String baseName = targets.size() == 1
-                        ? IndexMetadata.generateDefaultIndexName(keyspace.name.length(), tableName, targets.get(0).column)
-                        : IndexMetadata.generateDefaultIndexName(tableName);
+                          ? IndexMetadata.generateDefaultIndexName(tableName, targets.get(0).column)
+                          : IndexMetadata.generateDefaultIndexName(tableName);
         return keyspace.findAvailableIndexName(baseName);
     }
 

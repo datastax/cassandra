@@ -1074,7 +1074,7 @@ public abstract class CQLTester
 
             String baseName = Strings.isNullOrEmpty(column)
                               ? IndexMetadata.generateDefaultIndexName(table)
-                              : IndexMetadata.generateDefaultIndexName(keyspace.length(), table, new ColumnIdentifier(column, true));
+                              : IndexMetadata.generateDefaultIndexName(table, new ColumnIdentifier(column, true));
 
             KeyspaceMetadata ks = Schema.instance.getKeyspaceMetadata(keyspace);
             assertNotNull(ks);

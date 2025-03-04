@@ -36,8 +36,6 @@ import javax.annotation.Nullable;
 import com.google.common.base.MoreObjects;
 import com.google.common.collect.ImmutableSet;
 
-import org.apache.cassandra.exceptions.ConfigurationException;
-import org.apache.cassandra.schema.SchemaConstants;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -182,7 +180,7 @@ public class IndexContext
 
         if (config != null)
         {
-            String fullIndexName = getFullIndexName();
+            String fullIndexName = String.format("%s.%s.%s", this.keyspace, this.table, this.config.name);
             this.indexWriterConfig = IndexWriterConfig.fromOptions(fullIndexName, validator, config.options);
             this.isAnalyzed = AbstractAnalyzer.isAnalyzed(config.options);
             this.analyzerFactory = AbstractAnalyzer.fromOptions(getValidator(), config.options);
@@ -218,16 +216,6 @@ public class IndexContext
 
 
         logger.debug(logMessage("Initialized index context with index writer config: {}"), indexWriterConfig);
-    }
-
-    private String getFullIndexName()
-    {
-        String fullIndexName = String.format("%s.%s.%s", this.keyspace, this.table, this.config.name);
-        if (fullIndexName.length() > SchemaConstants.NAME_LENGTH)
-        {
-            throw new ConfigurationException(String.format("The prepared index name %s of length %s is too long for use in file paths and file names. Max length is %s.", fullIndexName, fullIndexName.length(), SchemaConstants.NAME_LENGTH));
-        }
-        return fullIndexName;
     }
 
     public AbstractType<?> keyValidator()

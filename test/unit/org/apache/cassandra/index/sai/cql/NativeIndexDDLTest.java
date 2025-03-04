@@ -23,6 +23,7 @@ package org.apache.cassandra.index.sai.cql;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.file.FileSystemException;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -86,6 +87,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.Mockito.when;
 
@@ -275,6 +277,26 @@ public class NativeIndexDDLTest extends SAITester
         assertRows(execute("SELECT * FROM %s WHERE \"value\" = 'value2'"), row(2, "value2"));
     }
 
+    @Test
+    public void testLongTableName()
+    {
+        String keyspaceName = "abcdsxcvsdfhgnrwe4rlkopm2342354asdfsdfwbbd3063362d653862616534343165333764_tpch";
+        String longTableName = "test_create_k8yq1r75bpzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz";
+        String columnName = "value";
+        execute(String.format("CREATE KEYSPACE %s with replication = " +
+                              "{ 'class' : 'SimpleStrategy', 'replication_factor' : 1 }",
+                              keyspaceName));
+        createTable(String.format("CREATE TABLE %s.%s (\"key\" int PRIMARY KEY, %s text)", keyspaceName, longTableName, columnName));
+        createIndex(String.format("CREATE CUSTOM INDEX ON %s.%s(%s) USING 'StorageAttachedIndex'", keyspaceName, longTableName, columnName));
+
+        execute(String.format("INSERT INTO %s.%s (\"key\", %s) VALUES (1, 'value1')", keyspaceName, longTableName, columnName));
+        execute(String.format("INSERT INTO %s.%s (\"key\", %s) VALUES (2, 'value2')", keyspaceName, longTableName, columnName));
+
+        assertRows(execute(String.format("SELECT * FROM %s.%s WHERE %s = 'value1'", keyspaceName, longTableName, columnName)), row(1, "value1"));
+        assertRows(execute(String.format("SELECT * FROM %s.%s WHERE %s = 'value2'", keyspaceName, longTableName, columnName)), row(2, "value2"));
+        flush(keyspaceName, longTableName);
+    }
+
     private String intoColumnDefs(String[] columnNames)
     {
         StringBuilder sb = new StringBuilder();
@@ -286,7 +308,7 @@ public class NativeIndexDDLTest extends SAITester
     }
 
     @Test
-    public void testQuotedIdentifierWithSpecialCharsAndLong()
+    public void testQuotedAndLongColumnNames()
     {
         String[] columnNames
         = new String[]{ "\"user name\"",
@@ -300,7 +322,8 @@ public class NativeIndexDDLTest extends SAITester
                         + "very_very_very_very(very)very_very "
                         + "_very_very_very_very_very_very_very_"
                         + "very_very_very_very_very_very_very_very_"
-                        + "very_very_very_very_very_very_very_very_very \""
+                        + "very_very_very_very_very_very_very_very_very \"",
+                        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab"
         };
 
         createTable("CREATE TABLE %s (key int,"
@@ -320,63 +343,36 @@ public class NativeIndexDDLTest extends SAITester
     }
 
     @Test
-    public void shouldFailOnLongKeyspaceOrTableName()
+    public void testAllLongNames()
     {
-        String longName = "very_very_very_very_very_very_very_very_very_" +
-                          "very_very_very_very_very_very_very_very_very_very_very_" +
-                          "very_very_very_very_very_very_very_very_very_very_very_" +
-                          "very_very_very_very_very_very_very_very_long_table_name";
-        String shortTableName = "table_name";
-        String qualifiedColumnName = "\"qualified column name\"";
-        String explicitIndexName = "thisIsLongerIndexName";
-
-        createTable(String.format("CREATE TABLE %s.%s (" +
-                                  "  key int PRIMARY KEY," +
-                                  "  %s int)",
-                                  KEYSPACE, longName, qualifiedColumnName));
-        assertInvalidMessage("Prefix of keyspace and table names together are too long for an index file name: 229. Max length is 222",
-                             String.format("CREATE CUSTOM INDEX ON %s.%s (%s) USING 'StorageAttachedIndex'",
-                                           KEYSPACE, longName, qualifiedColumnName));
-
-        assertInvalidMessage("Prefix of keyspace and table names together are too long for an index file name: 229. Max length is 222",
-                             String.format("CREATE CUSTOM INDEX %s ON %s.%s (%s) USING 'StorageAttachedIndex'",
-                                           explicitIndexName, KEYSPACE, longName, qualifiedColumnName));
+        String longName = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
         execute(String.format("CREATE KEYSPACE %s with replication = " +
                               "{ 'class' : 'SimpleStrategy', 'replication_factor' : 1 }",
                               longName));
-        createTable(String.format("CREATE TABLE %s.%s (" +
+        createTable(String.format("CREATE TABLE %s.%<s (" +
                                   "key int PRIMARY KEY," +
-                                  "%s int)",
-                                  longName, shortTableName, qualifiedColumnName));
-        assertInvalidMessage("Cannot generate index name to fit file names, since the addition take the allowed length 222.",
-                             String.format("CREATE CUSTOM INDEX ON %s.%s (%s) USING 'StorageAttachedIndex'",
-                                           longName, shortTableName, qualifiedColumnName));
-        assertInvalidMessage(String.format("Index name %s is too long to be part of constructed file names. Together with added prefixes and suffixes it must fit 222 characters.",
-                                           explicitIndexName.toLowerCase()),
-                             String.format("CREATE CUSTOM INDEX %s ON %s.%s (%s) USING 'StorageAttachedIndex'",
-                                           explicitIndexName,
-                                           longName, shortTableName, qualifiedColumnName));
+                                  "%<s int)",
+                                  longName));
+        createIndex(String.format("CREATE CUSTOM INDEX ON %s.%<s (%<s) USING 'StorageAttachedIndex'",
+                                  longName));
+        execute(String.format("INSERT INTO %s.%<s (\"key\", %<s) VALUES (1, 1)",
+                              longName));
+
+        flush(longName, longName);
     }
 
     @Test
-    public void shouldFailOnLongIndexName()
+    public void reproFailOnLongIndexName()
     {
-        String longIndexName = "very_very_very_very_very_very_very_very_very_" +
-                               "very_very_very_very_very_very_very_very_very_very_very_" +
-                               "very_very_very_very_very_very_very_very_very_very_very_" +
-                               "very_very_very_very_very_very_very_very_long_index_name";
-        String longerIndexName = "extremely_very_very_very_very_very_very_very_very_very_" +
-                                 "very_very_very_very_very_very_very_very_very_very_very_" +
-                                 "very_very_very_very_very_very_very_very_very_very_very_" +
-                                 "very_very_very_very_very_very_very_very_very_very_very_" +
-                                 "very_very_very_very_very_very_very_very_long_index_name";
-        createTable("CREATE TABLE %s (key int PRIMARY KEY, value int)");
-        assertInvalidMessage(String.format("Index name %s is too long to be part of constructed file names. Together with added prefixes and suffixes it must fit 222 characters.", longIndexName),
-                             String.format("CREATE CUSTOM INDEX %s ON %%s(value) USING 'StorageAttachedIndex'", longIndexName));
+        String longIndexName = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab";
+        createTable("CREATE TABLE %s (key int PRIMARY KEY, value1 int, value2 int)");
+        createIndex(String.format("CREATE CUSTOM INDEX %s ON %%s(value1) USING 'StorageAttachedIndex'", longIndexName));
+        execute("INSERT INTO %s (\"key\", value1) VALUES (1, 1)");
+        execute("INSERT INTO %s (\"key\", value2) VALUES (2, 2)");
 
-        assertInvalidMessage(String.format("Keyspace name must not be empty, more than 222 characters long, or contain non-alphanumeric-underscore characters (got \"%s\")", longerIndexName),
-                             String.format("CREATE CUSTOM INDEX %s ON %%s(value) USING 'StorageAttachedIndex'", longerIndexName));
+        RuntimeException e = assertThrows(RuntimeException.class, this::flush);
+        assertTrue(e.getCause() instanceof FileSystemException);
     }
 
     @Test
