@@ -40,7 +40,7 @@ import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.utils.concurrent.Ref;
 
-public class SSTableIndex
+public class SSTableIndex implements Comparable<SSTableIndex>
 {
     private final ColumnIndex columnIndex;
     private final Ref<? extends SSTableReader> sstableRef;
@@ -161,6 +161,13 @@ public class SSTableIndex
     public String toString()
     {
         return String.format("SSTableIndex(column: %s, SSTable: %s)", columnIndex.getColumnName(), sstable.descriptor);
+    }
+
+    @Override
+    public int compareTo(SSTableIndex o)
+    {
+        // Relied on in IntervalTree to be unique
+        return sstable.compareTo(o.sstable);
     }
 
     private static class DecoratedKeyFetcher implements Function<Long, DecoratedKey>
