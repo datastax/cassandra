@@ -20,6 +20,7 @@ package org.apache.cassandra.gms;
 import java.io.ByteArrayInputStream;
 import java.io.DataInputStream;
 import java.io.IOException;
+import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -982,10 +983,62 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
             throw new RuntimeException("Cannot revive endpoint " + endpoint + ": no tokens from TokenMetadata");
 
         epState.addApplicationState(ApplicationState.STATUS, StorageService.instance.valueFactory.normal(tokens));
+        epState.addApplicationState(ApplicationState.STATUS_WITH_PORT, StorageService.instance.valueFactory.normal(tokens));
         handleMajorStateChange(endpoint, epState);
         Uninterruptibles.sleepUninterruptibly(intervalInMillis * 4, TimeUnit.MILLISECONDS);
         logger.warn("Finished reviving {}, status={}, generation={}, heartbeat={}",
                 endpoint, epState.getStatus(), generation, heartbeat);
+    }
+
+    public void unsafeSetEndpointState(String address, String status) throws UnknownHostException
+    {
+        logger.warn("Forcibly changing gossip status of " + address + " to " + status);
+
+        InetAddressAndPort endpoint = InetAddressAndPort.getByName(address);
+        EndpointState epState = endpointStateMap.get(endpoint);
+
+        if (epState == null)
+            throw new RuntimeException("No state for endpoint " + endpoint);
+
+        int generation = epState.getHeartBeatState().getGeneration();
+        int heartbeat = epState.getHeartBeatState().getHeartBeatVersion();
+
+        logger.info("Have endpoint-state for {}: status={}, generation={}, heartbeat={}",
+                endpoint, epState.getStatus(), generation, heartbeat);
+
+        if (FailureDetector.instance.isAlive(endpoint))
+            throw new RuntimeException("Cannot update status for endpoint " + endpoint + ": still alive (failure-detector)");
+
+        Collection<Token> tokens = getTokensFromEndpointState(epState, DatabaseDescriptor.getPartitioner());
+
+        VersionedValue newStatus;
+        switch (status.toLowerCase())
+        {
+            case "hibernate":
+                newStatus = StorageService.instance.valueFactory.hibernate(true);
+                break;
+            case "normal":
+                newStatus = StorageService.instance.valueFactory.normal(tokens);
+                break;
+            case "left":
+                newStatus = StorageService.instance.valueFactory.left(tokens, computeExpireTime());
+                break;
+            case "shutdown":
+                newStatus = StorageService.instance.valueFactory.shutdown(true);
+                break;
+            default:
+                throw new IllegalArgumentException("Unknown status '" + status + '\'');
+        }
+
+        epState.updateTimestamp(); // make sure we don't evict it too soon
+        epState.getHeartBeatState().forceNewerGenerationUnsafe();
+
+        epState.addApplicationState(ApplicationState.STATUS, newStatus);
+        epState.addApplicationState(ApplicationState.STATUS_WITH_PORT, newStatus);
+
+        handleMajorStateChange(endpoint, epState);
+
+        logger.warn("Forcibly changed gossip status of " + endpoint + " to " + newStatus);
     }
 
     public Collection<Token> getTokensFor(InetAddressAndPort endpoint, IPartitioner partitioner)
