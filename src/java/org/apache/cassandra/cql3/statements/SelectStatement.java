@@ -494,23 +494,17 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                               int userOffset,
                               AggregationSpecification aggregationSpec)
     {
+        boolean isPartitionRangeQuery = restrictions.isKeyRange() || restrictions.usesSecondaryIndexing() || restrictions.isDisjunction();
+
         RowFilter rowFilter = getRowFilter(options, state);
         DataLimits limit = getDataLimits(state, userLimit, perPartitionLimit, userOffset, aggregationSpec);
 
         ReadQuery query;
-        if (restrictions.isKeyRange())
+        if (isPartitionRangeQuery)
         {
-            if (restrictions.usesSecondaryIndexing() && !SchemaConstants.isLocalSystemKeyspace(table.keyspace))
+            if (restrictions.isKeyRange() && restrictions.usesSecondaryIndexing() && !SchemaConstants.isLocalSystemKeyspace(table.keyspace))
                 Guardrails.nonPartitionRestrictedIndexQueryEnabled.ensureEnabled(state);
 
-            query = getRangeCommand(options, state, columnFilter, rowFilter, limit, nowInSec);
-        }
-        else if (restrictions.usesSecondaryIndexing() && !rowFilter.isStrict())
-        {
-            query = getRangeCommand(options, state, columnFilter, rowFilter, limit, nowInSec);
-        }
-        else if (restrictions.isDisjunction())
-        {
             query = getRangeCommand(options, state, columnFilter, rowFilter, limit, nowInSec);
         }
         else
