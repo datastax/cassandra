@@ -112,8 +112,9 @@ public final class IndexMetadata
     }
 
     /**
-     * Generates a default index name from the table and column names. Characters other than
-     * alphanumeric and underscore are removed. Long index names are truncated to fit the allowed length.
+     * Generates a default index name from the table and column names.
+     * Characters other than alphanumeric and underscore are removed.
+     * Long index names are truncated to fit the length allowing constructing filenames.
      *
      * @param table  the table name
      * @param column the column identifier

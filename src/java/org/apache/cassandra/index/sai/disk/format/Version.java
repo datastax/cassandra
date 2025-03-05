@@ -108,15 +108,14 @@ public class Version implements Comparable<Version>
     /**
      * Calculates the maximum allowed length for SAI index names to ensure generated filenames
      * do not exceed the system's filename length limit (defined in SchemaConstants.FILENAME_LENGTH).
-     * This accounts for all additional components in the filename such as prefixes, suffixes,
-     * separators and version information.
+     * This accounts for all additional components in the filename.
      */
     public static int calculateIndexNameAllowedLength()
     {
 
-        int addedLength2 = getAddedLengthFromDescriptorAndVersion();
-        assert addedLength2 < SchemaConstants.FILENAME_LENGTH;
-        return SchemaConstants.FILENAME_LENGTH - addedLength2;
+        int addedLength = getAddedLengthFromDescriptorAndVersion();
+        assert addedLength < SchemaConstants.FILENAME_LENGTH;
+        return SchemaConstants.FILENAME_LENGTH - addedLength;
     }
 
     /**

@@ -59,7 +59,7 @@ public final class SchemaConstants
     public static final Set<String> VIRTUAL_KEYSPACE_NAMES = ImmutableSet.of(SCHEMA_VIRTUAL_KEYSPACE_NAME, SYSTEM_VIEWS_KEYSPACE_NAME);
 
     /**
-     * Longest acceptable file name. Longer names lead to file write or read error.
+     * Longest acceptable file name. Longer names lead to file write or read errors.
      */
     public static final int FILENAME_LENGTH = 255;
 
