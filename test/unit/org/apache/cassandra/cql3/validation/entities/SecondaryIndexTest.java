@@ -24,6 +24,7 @@ import java.util.concurrent.CountDownLatch;
 
 import com.google.common.collect.ImmutableSet;
 
+import org.apache.cassandra.index.IndexBuildInProgressException;
 import org.apache.commons.lang3.StringUtils;
 import org.junit.Test;
 
@@ -1148,7 +1149,7 @@ public class SecondaryIndexTest extends CQLTester
             execute("SELECT value FROM %s WHERE value = 2");
             fail();
         }
-        catch (IndexNotAvailableException e)
+        catch (IndexBuildInProgressException e)
         {
             assertTrue(true);
         }
