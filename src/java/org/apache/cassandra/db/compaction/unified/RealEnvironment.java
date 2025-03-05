@@ -141,18 +141,18 @@ public class RealEnvironment implements Environment
     }
 
     @Override
-    public long getOverheadSizeInBytes(CompactionPick compactionPick)
+    public long getOverheadSizeInBytes(Iterable<? extends CompactionSSTable> sstables, long totalDataSize)
     {
         if (CassandraRelevantProperties.UCS_COMPACTION_INCLUDE_NON_DATA_FILES_SIZE.getBoolean())
         {
             // The estimate the compaction overhead to be the same as the size of the input sstables
             long total = 0;
-            for (CompactionSSTable sstable : compactionPick.sstables())
+            for (CompactionSSTable sstable : sstables)
                 total += sstable.onDiskComponentsSize();
             return total;
         }
         // only includes data file size
-        return compactionPick.totSizeInBytes();
+        return totalDataSize;
     }
 
     @Override
