@@ -118,6 +118,7 @@ import org.apache.cassandra.index.transactions.UpdateTransaction;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.locator.Endpoints;
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.notifications.INotification;
 import org.apache.cassandra.notifications.INotificationConsumer;
 import org.apache.cassandra.notifications.SSTableAddedNotification;
@@ -125,6 +126,7 @@ import org.apache.cassandra.notifications.SSTableListChangedNotification;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.Indexes;
+import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.service.pager.SinglePartitionPager;
 import org.apache.cassandra.tracing.Tracing;
@@ -134,6 +136,7 @@ import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.concurrent.Refs;
 import org.json.simple.JSONValue;
 
+import static java.lang.String.format;
 import static org.apache.cassandra.utils.ExecutorUtils.awaitTermination;
 import static org.apache.cassandra.utils.ExecutorUtils.shutdown;
 
@@ -172,7 +175,7 @@ import static org.apache.cassandra.utils.ExecutorUtils.shutdown;
  * <br><br>
  * Finally, this class provides a clear and safe lifecycle to manage index builds, either full rebuilds via
  * {@link this#rebuildIndexesBlocking(Set)} or builds of new sstables
- * added via {@link org.apache.cassandra.notifications.SSTableAddedNotification}s, guaranteeing
+ * added via {@link SSTableAddedNotification}s, guaranteeing
  * the following:
  * <ul>
  * <li>The initialization task and any subsequent successful (re)build mark the index as built.</li>
@@ -185,6 +188,7 @@ import static org.apache.cassandra.utils.ExecutorUtils.shutdown;
 public class SecondaryIndexManager implements IndexRegistry, INotificationConsumer
 {
     private static final Logger logger = LoggerFactory.getLogger(SecondaryIndexManager.class);
+    public static final String FELL_BACK_TO_ALLOW_FILTERING = "Query fell back to ALLOW FILTERING because index %s is still building.";
 
     // default page size (in rows) when rebuilding the index for a whole partition
     public static final int DEFAULT_PAGE_SIZE = 10000;
@@ -284,7 +288,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         if (writableIndexes.put(index.getIndexMetadata().name, index) == null)
             logger.info("Index [{}] registered and writable.", index.getIndexMetadata().name);
 
-        markIndexesBuilding(ImmutableSet.of(index), true, isNewCF);
+        markIndexesBuilding(ImmutableSet.of(index), true, isNewCF, true);
 
         return buildIndex(index);
     }
@@ -362,13 +366,30 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
      * @param queryPlan a query plan
      * @throws IndexNotAvailableException if the query plan has any index that is not queryable
      */
-    public void checkQueryability(Index.QueryPlan queryPlan)
+    public boolean isQueryableThroughIndex(Index.QueryPlan queryPlan, boolean allowFiltering)
     {
+        Set<InetAddressAndPort> badNodes = MessagingService.instance().endpointsWithVersionBelow(keyspace.getName(), MessagingService.VERSION_DS_11);
+        if (MessagingService.current_version < MessagingService.VERSION_DS_11)
+            badNodes.add(FBUtilities.getBroadcastAddressAndPort());
+
         for (Index index : queryPlan.getIndexes())
         {
+            boolean isInitialBuilding = SecondaryIndexManager.getIndexStatus(FBUtilities.getBroadcastAddressAndPort(),
+                    keyspace.getName(),
+                    index.getIndexMetadata().name) == Index.Status.INITIAL_BUILD_STARTED;
+            // CNDB-12425: support for ALLOW FILTERING while building an index
+            if (badNodes.isEmpty() && isInitialBuilding && allowFiltering)
+            {
+                logger.warn(format(SecondaryIndexManager.FELL_BACK_TO_ALLOW_FILTERING, index.getIndexMetadata().name));
+                return false;
+            }
+
+            // We will reject the query here if the index is building and ALLOW FILTERING is not allowed
             if (!isIndexQueryable(index))
                 throw new IndexNotAvailableException(index);
         }
+
+        return true;
     }
 
     /**
@@ -604,7 +625,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
 
         // Mark all indexes as building: this step must happen first, because if any index can't be marked, the whole
         // process needs to abort
-        markIndexesBuilding(indexes, isFullRebuild, false);
+        markIndexesBuilding(indexes, isFullRebuild, false, false);
 
         // Build indexes in a try/catch, so that any index not marked as either built or failed will be marked as failed:
         final Set<Index> builtIndexes = Sets.newConcurrentHashSet();
@@ -616,7 +637,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
                     sstables.stream().map(SSTableReader::toString).collect(Collectors.joining(",")));
 
         // Group all building tasks
-        Map<Index.IndexBuildingSupport, Set<Index>> byType = new HashMap<>();
+        Map<IndexBuildingSupport, Set<Index>> byType = new HashMap<>();
         for (Index index : indexes)
         {
             IndexBuildingSupport buildOrRecoveryTask = isFullRebuild
@@ -743,6 +764,9 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
      * the SecondaryIndexManager instance, it means all invocations for all different indexes will go through the same
      * lock, but this is fine as the work done while holding such lock is trivial.
      * <p>
+     * isCreateIndex is used to differentiate whether a full rebuild is invoked when user is creating a new index or
+     * full rebuild is started by failed scrub or nodetool rebuild command. It matters as we want to fall back to ALLOW FILTERING
+     * (for queries with ALLOW FILTERING) only in the case a user creates a new index.
      * {@link #markIndexBuilt(Index, boolean)} or {@link #markIndexFailed(Index, boolean)} should be always called after
      * the rebuilding has finished, so that the index build state can be correctly managed and the index rebuilt.
      *
@@ -750,9 +774,10 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
      * @param isFullRebuild {@code true} if this method is invoked as a full index rebuild, {@code false} otherwise
      * @param isNewCF {@code true} if this method is invoked when initializing a new table/columnfamily (i.e. loading a CF at startup),
      * {@code false} for all other cases (i.e. newly added index)
+     * @param isCreateIndex {@code true} if this method is invoked when creating a new index, {@code false} otherwise
      */
     @VisibleForTesting
-    public synchronized void markIndexesBuilding(Set<Index> indexes, boolean isFullRebuild, boolean isNewCF)
+    public synchronized void markIndexesBuilding(Set<Index> indexes, boolean isFullRebuild, boolean isNewCF, boolean isCreateIndex)
     {
         String keyspaceName = baseCfs.keyspace.getName();
 
@@ -777,7 +802,10 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
                             if (isFullRebuild)
                             {
                                 needsFullRebuild.remove(indexName);
-                                makeIndexNonQueryable(index, Index.Status.FULL_REBUILD_STARTED);
+                                if (!isCreateIndex)
+                                    makeIndexNonQueryable(index, Index.Status.FULL_REBUILD_STARTED);
+                                else if (!isNewCF)
+                                    makeIndexNonQueryable(index, Index.Status.INITIAL_BUILD_STARTED);
                             }
 
                             if (counter.getAndIncrement() == 0 && DatabaseDescriptor.isDaemonInitialized() && !isNewCF)
@@ -787,7 +815,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
 
     /**
      * Marks the specified index as built if there are no in progress index builds and the index is not failed.
-     * {@link #markIndexesBuilding(Set, boolean, boolean)} should always be invoked before this method.
+     * {@link #markIndexesBuilding(Set, boolean, boolean, boolean)} should always be invoked before this method.
      *
      * @param index the index to be marked as built
      * @param isFullRebuild {@code true} if this method is invoked as a full index rebuild, {@code false} otherwise
@@ -813,7 +841,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
 
     /**
      * Marks the specified index as failed.
-     * {@link #markIndexesBuilding(Set, boolean, boolean)} should always be invoked before this method.
+     * {@link #markIndexesBuilding(Set, boolean, boolean, boolean)} should always be invoked before this method.
      *
      * @param index the index to be marked as built
      * @param isInitialBuild {@code true} if the index failed during its initial build, {@code false} otherwise
@@ -1168,7 +1196,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
     /**
      * Called at query time to choose which (if any) of the registered index implementations to use for a given query.
      * <p>
-     * This is a two step processes, firstly compiling the set of searchable indexes then choosing the one which reduces
+     * This is a two-step processes, firstly compiling the set of searchable indexes then choosing the one which reduces
      * the search space the most.
      * <p>
      * In the first phase, if the command's RowFilter contains any custom index expressions, the indexes that they
@@ -1808,13 +1836,34 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
      * @param indexQueryPlan index query plan used in the read command
      * @param level consistency level of read command
      */
-    public static <E extends Endpoints<E>> E filterForQuery(E liveEndpoints, Keyspace keyspace, Index.QueryPlan indexQueryPlan, ConsistencyLevel level)
+    public static <E extends Endpoints<E>> E filterForQuery(E liveEndpoints,
+                                                            Keyspace keyspace,
+                                                            Index.QueryPlan indexQueryPlan,
+                                                            ConsistencyLevel level,
+                                                            boolean allowFiltering)
     {
-        E queryableEndpoints = liveEndpoints.filter(replica -> {
+        int initial = liveEndpoints.size();
+        Set<InetAddressAndPort> badNodes = MessagingService.instance().endpointsWithVersionBelow(keyspace.getName(), MessagingService.VERSION_DS_11);
+        if (MessagingService.current_version < MessagingService.VERSION_DS_11)
+            badNodes.add(FBUtilities.getBroadcastAddressAndPort());
 
-            for (Index index : indexQueryPlan.getIndexes())
-            {
+        assert liveEndpoints.endpoints().containsAll(badNodes);
+
+        boolean considerAllowFiltering = badNodes.isEmpty();
+
+        E queryableEndpoints = liveEndpoints.filter(replica -> {
+            for (Index index : indexQueryPlan.getIndexes()) {
                 Index.Status status = getIndexStatus(replica.endpoint(), keyspace.getName(), index.getIndexMetadata().name);
+
+                // if the status of the index is building and there is allow filtering - that is ok too
+                if (considerAllowFiltering && status == Index.Status.INITIAL_BUILD_STARTED && !index.isQueryable(status) && allowFiltering)
+                {
+                    ClientWarn.instance.warn(String.format("Query fell back to ALLOW FILTERING because index %s is still building on endpoint %s", 
+                                                         index.getIndexMetadata().name, 
+                                                         replica.endpoint()));
+                    continue;
+                }
+
                 if (!index.isQueryable(status))
                     return false;
             }
@@ -1822,7 +1871,6 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
             return true;
         });
 
-        int initial = liveEndpoints.size();
         int filtered = queryableEndpoints.size();
 
         // Throw ReadFailureException if read request cannot satisfy Consistency Level due to non-queryable indexes.

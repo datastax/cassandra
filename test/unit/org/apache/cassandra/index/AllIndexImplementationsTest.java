@@ -29,9 +29,14 @@ import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.internal.CassandraIndex;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sasi.SASIIndex;
+import org.apache.cassandra.inject.Injections;
+import org.apache.cassandra.inject.InvokePointBuilder;
+import org.apache.cassandra.service.ClientWarn;
+import org.assertj.core.api.Assertions;
 
 import static org.apache.cassandra.cql3.restrictions.StatementRestrictions.INDEX_DOES_NOT_SUPPORT_DISJUNCTION;
 import static org.apache.cassandra.cql3.restrictions.StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE;
+import static org.junit.Assert.assertFalse;
 
 /**
  * Tests common functionality across all included index implementations.
@@ -153,5 +158,62 @@ public class AllIndexImplementationsTest extends CQLTester
         // verify whether the indexes are used
         Index.QueryPlan plan = parseReadCommand(query).indexQueryPlan();
         Assert.assertEquals(shouldUseIndexes, plan != null);
+    }
+
+    @Test
+    public void testAllowFilteringDuringIndexBuild() throws Throwable
+    {
+        // Skip if no index implementation (for "none" parameter case)
+        if (indexClass == null)
+            return;
+
+        // This injection won't have any effect on SASI
+        final Injections.Barrier blockIndexBuild = Injections.newBarrier("block_index_build", 2, false)
+                                                                     .add(InvokePointBuilder.newInvokePoint().onClass(StorageAttachedIndex.class)
+                                                                                            .onMethod("startInitialBuild"))
+                                                                     .build();
+
+        Injections.inject(blockIndexBuild);
+
+        createTable("CREATE TABLE %s (pk text, i int, j int, k int, v1 float, PRIMARY KEY((pk, i), j))");
+        executeNet("INSERT INTO %s (pk, i, j, k, v1) VALUES ('partition1', 1, 100, 200, 0.5)");
+        executeNet("INSERT INTO %s (pk, i, j, k, v1) VALUES ('partition2', 2, 200, 300, 0.6)");
+
+        assertRows(execute("SELECT * FROM %s WHERE k=200 ALLOW FILTERING"),
+                   row("partition1", 1, 100, 200, 0.5f));
+        assertRows(execute("SELECT * FROM %s WHERE k=300 ALLOW FILTERING"),
+                   row("partition2", 2, 200, 300, 0.6f));
+
+        logger.info("Testing index implementation: {}", indexClass.getSimpleName());
+
+        String idx = createIndexAsync(String.format(createIndexQuery, 'k'));
+
+        executeNet("SELECT * FROM %s WHERE k=200 ALLOW FILTERING");
+        if (!indexClass.equals(SASIIndex.class))
+        {
+            assertFalse("Index should not be queryable during build", isIndexQueryable(KEYSPACE, idx));
+            ClientWarn.instance.captureWarnings();
+            execute("SELECT * FROM %s WHERE k=200 ALLOW FILTERING");
+            Assertions.assertThat(ClientWarn.instance.getWarnings())
+                      .hasSize(1)
+                      .contains(String.format(SecondaryIndexManager.FELL_BACK_TO_ALLOW_FILTERING, idx));
+            ClientWarn.instance.resetWarnings();
+        }
+        else
+        {
+            // there is a known bug in SASI during index build - CNDB-12931
+            execute("SELECT * FROM %s WHERE k=200");
+        }
+
+        execute("SELECT * FROM %s WHERE k=200 ALLOW FILTERING");
+
+        blockIndexBuild.countDown();
+        blockIndexBuild.disable();
+        waitForIndexQueryable(idx);
+
+        assertRows(execute("SELECT * FROM %s WHERE k=200"),
+                   row("partition1", 1, 100, 200, 0.5f));
+        assertRows(execute("SELECT * FROM %s WHERE k=200 ALLOW FILTERING"),
+                   row("partition1", 1, 100, 200, 0.5f));
     }
 }
