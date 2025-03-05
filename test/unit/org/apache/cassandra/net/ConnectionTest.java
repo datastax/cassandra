@@ -74,6 +74,9 @@ import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.apache.cassandra.net.MessagingService.VERSION_30;
 import static org.apache.cassandra.net.MessagingService.VERSION_3014;
 import static org.apache.cassandra.net.MessagingService.VERSION_40;
+import static org.apache.cassandra.net.MessagingService.VERSION_DS_10;
+import static org.apache.cassandra.net.MessagingService.VERSION_DS_11;
+import static org.apache.cassandra.net.MessagingService.minimum_version;
 import static org.apache.cassandra.net.NoPayload.noPayload;
 import static org.apache.cassandra.net.MessagingService.current_version;
 import static org.apache.cassandra.net.ConnectionUtils.*;
@@ -193,12 +196,28 @@ public class ConnectionTest
     // 30 is used for CNDB compatibility
     static final AcceptVersions legacy = new AcceptVersions(VERSION_3014, VERSION_3014);
 
+    // Force outbound to guess a future version, while inbound is “stuck” at current_version
+    private static final Function<Settings, Settings> VERSION_MISMATCH = s ->
+    {
+        return s.outbound(o -> {
+                    // Overwrite the acceptVersions so outbound *thinks* it should connect at future_version
+                    return o.withAcceptVersions(new AcceptVersions(minimum_version, VERSION_DS_11));
+                })
+                .inbound(i -> {
+                    // Inbound side only allows exactly current_version
+                    return i.withAcceptMessaging(new AcceptVersions(minimum_version, VERSION_DS_10));
+                });
+    };
+
     static final List<Function<Settings, Settings>> MODIFIERS = ImmutableList.of(
         settings -> settings.outbound(outbound -> outbound.withAcceptVersions(legacy))
                             .inbound(inbound -> inbound.withAcceptMessaging(legacy)),
         settings -> settings.outbound(outbound -> outbound.withEncryption(encryptionOptions))
                             .inbound(inbound -> inbound.withEncryption(encryptionOptions)),
-        settings -> settings.outbound(outbound -> outbound.withFraming(LZ4))
+        settings -> settings.outbound(outbound -> outbound.withFraming(LZ4)),
+        // Mismatched versions to ensure both peers will still agree on the same version
+        settings -> settings.outbound(o -> o.withAcceptVersions(new AcceptVersions(minimum_version, VERSION_DS_11)))
+                             .inbound(i -> i.withAcceptMessaging(new AcceptVersions(minimum_version, VERSION_DS_10)))
     );
 
     static final List<Settings> SETTINGS = applyPowerSet(
@@ -306,6 +325,9 @@ public class ConnectionTest
                            .expired  ( 0,  0)
                            .error    ( 0,  0)
                            .check();
+
+            // Ensure version is the same
+            inbound.assertHandlersMessagingVersion(outbound.messagingVersion());
         });
     }
 
@@ -360,6 +382,9 @@ public class ConnectionTest
                            .expired  ( 0,  0)
                            .error    ( 0,  0)
                            .check();
+
+            // Ensure version is the same
+            inbound.assertHandlersMessagingVersion(outbound.messagingVersion());
         });
     }
 
