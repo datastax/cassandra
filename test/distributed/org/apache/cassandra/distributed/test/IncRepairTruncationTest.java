@@ -53,6 +53,9 @@ public class IncRepairTruncationTest extends TestBaseImpl
                                                                       .with(NETWORK))
                                           .start()))
         {
+            cluster.setUncaughtExceptionsFilter(t -> t.getMessage() != null &&
+                                                t.getMessage().contains("Parent repair session with id") &&
+                                                t.getMessage().contains("has failed"));
             cluster.schemaChange("create table " + KEYSPACE + ".tbl (id int primary key, t int)");
 
             insert(cluster.coordinator(1), 0, 100);
