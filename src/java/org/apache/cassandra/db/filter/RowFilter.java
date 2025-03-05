@@ -362,9 +362,9 @@ public class RowFilter
         return new Builder(null, false);
     }
 
-    public static Builder builder(IndexRegistry indexRegistry, boolean allowFitlering)
+    public static Builder builder(IndexRegistry indexRegistry, boolean allowFiltering)
     {
-        return new Builder(indexRegistry, allowFitlering);
+        return new Builder(indexRegistry, allowFiltering);
     }
 
     public static class Builder

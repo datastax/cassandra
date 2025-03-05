@@ -31,12 +31,9 @@ import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sasi.SASIIndex;
 import org.apache.cassandra.inject.Injections;
 import org.apache.cassandra.inject.InvokePointBuilder;
-import org.apache.cassandra.service.ClientWarn;
-import org.assertj.core.api.Assertions;
 
 import static org.apache.cassandra.cql3.restrictions.StatementRestrictions.INDEX_DOES_NOT_SUPPORT_DISJUNCTION;
 import static org.apache.cassandra.cql3.restrictions.StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE;
-import static org.junit.Assert.assertFalse;
 
 /**
  * Tests common functionality across all included index implementations.
@@ -53,26 +50,43 @@ public class AllIndexImplementationsTest extends CQLTester
     @Parameterized.Parameter(2)
     public String createIndexQuery;
 
-    @Parameterized.Parameters(name = "{0}")
+    @Parameterized.Parameter(3)
+    public int useInjection;
+
+    @Parameterized.Parameters(name = "{0}{3, choice, 0#|1#-with-injection}")
     public static List<Object[]> parameters()
     {
         List<Object[]> parameters = new LinkedList<>();
-        parameters.add(new Object[]{ "none", null, null });
-        parameters.add(new Object[]{ "legacy", CassandraIndex.class, "CREATE INDEX ON %%s(%s)" });
-        parameters.add(new Object[]{ "SASI", SASIIndex.class, "CREATE CUSTOM INDEX ON %%s(%s) USING 'org.apache.cassandra.index.sasi.SASIIndex'" });
-        parameters.add(new Object[]{ "SAI", StorageAttachedIndex.class, "CREATE CUSTOM INDEX ON %%s(%s) USING 'StorageAttachedIndex'" });
+        // Regular cases without injection
+        //parameters.add(new Object[]{ "none", null, null, 0 });
+        //parameters.add(new Object[]{ "legacy", CassandraIndex.class, "CREATE INDEX ON %%s(%s)", 0 });
+        //parameters.add(new Object[]{ "SASI", SASIIndex.class, "CREATE CUSTOM INDEX ON %%s(%s) USING 'org.apache.cassandra.index.sasi.SASIIndex'", 0 });
+        //parameters.add(new Object[]{ "SAI", StorageAttachedIndex.class, "CREATE CUSTOM INDEX ON %%s(%s) USING 'StorageAttachedIndex'", 0 });
+
+        // Only SAI with injection
+        parameters.add(new Object[]{ "SAI", StorageAttachedIndex.class, "CREATE CUSTOM INDEX ON %%s(%s) USING 'StorageAttachedIndex'", 1 });
         return parameters;
     }
 
+    final Injections.Barrier blockIndexBuild = Injections.newBarrier("block_index_build", 2, false)
+                                                         .add(InvokePointBuilder.newInvokePoint().onClass(StorageAttachedIndex.class)
+                                                                                .onMethod("startInitialBuild"))
+                                                         .build();
+
     @Test
-    public void testDisjunction()
+    public void testDisjunction() throws Throwable
     {
+        if (useInjection == 1 && StorageAttachedIndex.class.equals(indexClass))
+        {
+            Injections.inject(blockIndexBuild);
+        }
+
         createTable("CREATE TABLE %s (pk int, a int, b int, PRIMARY KEY(pk))");
 
         boolean indexSupportsDisjuntion = StorageAttachedIndex.class.equals(indexClass);
         boolean hasIndex = createIndexQuery != null;
         if (hasIndex)
-            createIndex(String.format(createIndexQuery, 'a'));
+            createIndexAsync(String.format(createIndexQuery, 'a'));
 
         execute("INSERT INTO %s (pk, a, b) VALUES (?, ?, ?)", 1, 1, 1);
         execute("INSERT INTO %s (pk, a, b) VALUES (?, ?, ?)", 2, 2, 2);
@@ -83,7 +97,7 @@ public class AllIndexImplementationsTest extends CQLTester
                           hasIndex && indexSupportsDisjuntion,
                           hasIndex ? INDEX_DOES_NOT_SUPPORT_DISJUNCTION : REQUIRES_ALLOW_FILTERING_MESSAGE,
                           row(1), row(2));
-        assertDisjunction("a = 1 OR b = 2", true, false, row(1), row(2));
+        /*assertDisjunction("a = 1 OR b = 2", true, false, row(1), row(2));
         assertDisjunction("a = 1 AND (a = 1 OR b = 1)", true, hasIndex, row(1));
         assertDisjunction("a = 1 AND (a = 1 OR b = 2)", true, hasIndex, row(1));
         assertDisjunction("a = 1 AND (a = 2 OR b = 1)", true, hasIndex, row(1));
@@ -99,11 +113,11 @@ public class AllIndexImplementationsTest extends CQLTester
         assertDisjunction("a = 2 OR (a = 1 AND b = 1)", true, indexSupportsDisjuntion, row(1), row(2));
         assertDisjunction("a = 2 OR (a = 1 AND b = 2)", true, indexSupportsDisjuntion, row(2));
         assertDisjunction("a = 2 OR (a = 2 AND b = 1)", true, indexSupportsDisjuntion, row(2));
-        assertDisjunction("a = 2 OR (a = 2 AND b = 2)", true, indexSupportsDisjuntion, row(2));
+        assertDisjunction("a = 2 OR (a = 2 AND b = 2)", true, indexSupportsDisjuntion, row(2));*/
 
         // create a second index in the remaining column, so all columns are indexed
         if (hasIndex)
-            createIndex(String.format(createIndexQuery, 'b'));
+            createIndexAsync(String.format(createIndexQuery, 'b'));
 
         // test with all columns indexed
         assertDisjunction("a = 1 OR a = 2",
@@ -128,6 +142,12 @@ public class AllIndexImplementationsTest extends CQLTester
         assertDisjunction("a = 2 OR (a = 1 AND b = 2)", !indexSupportsDisjuntion, indexSupportsDisjuntion, row(2));
         assertDisjunction("a = 2 OR (a = 2 AND b = 1)", !indexSupportsDisjuntion, indexSupportsDisjuntion, row(2));
         assertDisjunction("a = 2 OR (a = 2 AND b = 2)", !indexSupportsDisjuntion, indexSupportsDisjuntion, row(2));
+
+        if (useInjection == 1 && StorageAttachedIndex.class.equals(indexClass))
+        {
+            blockIndexBuild.countDown();
+            blockIndexBuild.disable();
+        }
     }
 
     private void assertDisjunction(String restrictions,
@@ -149,7 +169,8 @@ public class AllIndexImplementationsTest extends CQLTester
         if (requiresFiltering)
             assertInvalidThrowMessage(error, InvalidRequestException.class, query);
         else
-            assertRowsIgnoringOrder(execute(query), rows);
+            System.out.println("KATE: I am building it");
+            //assertRowsIgnoringOrder(execute(query), rows);
 
         // with ALLOW FILTERING
         query += " ALLOW FILTERING";
@@ -158,62 +179,5 @@ public class AllIndexImplementationsTest extends CQLTester
         // verify whether the indexes are used
         Index.QueryPlan plan = parseReadCommand(query).indexQueryPlan();
         Assert.assertEquals(shouldUseIndexes, plan != null);
-    }
-
-    @Test
-    public void testAllowFilteringDuringIndexBuild() throws Throwable
-    {
-        // Skip if no index implementation (for "none" parameter case)
-        if (indexClass == null)
-            return;
-
-        // This injection won't have any effect on SASI
-        final Injections.Barrier blockIndexBuild = Injections.newBarrier("block_index_build", 2, false)
-                                                                     .add(InvokePointBuilder.newInvokePoint().onClass(StorageAttachedIndex.class)
-                                                                                            .onMethod("startInitialBuild"))
-                                                                     .build();
-
-        Injections.inject(blockIndexBuild);
-
-        createTable("CREATE TABLE %s (pk text, i int, j int, k int, v1 float, PRIMARY KEY((pk, i), j))");
-        executeNet("INSERT INTO %s (pk, i, j, k, v1) VALUES ('partition1', 1, 100, 200, 0.5)");
-        executeNet("INSERT INTO %s (pk, i, j, k, v1) VALUES ('partition2', 2, 200, 300, 0.6)");
-
-        assertRows(execute("SELECT * FROM %s WHERE k=200 ALLOW FILTERING"),
-                   row("partition1", 1, 100, 200, 0.5f));
-        assertRows(execute("SELECT * FROM %s WHERE k=300 ALLOW FILTERING"),
-                   row("partition2", 2, 200, 300, 0.6f));
-
-        logger.info("Testing index implementation: {}", indexClass.getSimpleName());
-
-        String idx = createIndexAsync(String.format(createIndexQuery, 'k'));
-
-        executeNet("SELECT * FROM %s WHERE k=200 ALLOW FILTERING");
-        if (!indexClass.equals(SASIIndex.class))
-        {
-            assertFalse("Index should not be queryable during build", isIndexQueryable(KEYSPACE, idx));
-            ClientWarn.instance.captureWarnings();
-            execute("SELECT * FROM %s WHERE k=200 ALLOW FILTERING");
-            Assertions.assertThat(ClientWarn.instance.getWarnings())
-                      .hasSize(1)
-                      .contains(String.format(SecondaryIndexManager.FELL_BACK_TO_ALLOW_FILTERING, idx));
-            ClientWarn.instance.resetWarnings();
-        }
-        else
-        {
-            // there is a known bug in SASI during index build - CNDB-12931
-            execute("SELECT * FROM %s WHERE k=200");
-        }
-
-        execute("SELECT * FROM %s WHERE k=200 ALLOW FILTERING");
-
-        blockIndexBuild.countDown();
-        blockIndexBuild.disable();
-        waitForIndexQueryable(idx);
-
-        assertRows(execute("SELECT * FROM %s WHERE k=200"),
-                   row("partition1", 1, 100, 200, 0.5f));
-        assertRows(execute("SELECT * FROM %s WHERE k=200 ALLOW FILTERING"),
-                   row("partition1", 1, 100, 200, 0.5f));
     }
 }

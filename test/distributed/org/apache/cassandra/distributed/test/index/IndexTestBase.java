@@ -1,13 +1,11 @@
 /*
- * Licensed to the Apache Software Foundation (ASF) under one
- * or more contributor license agreements.  See the NOTICE file
- * distributed with this work for additional information
- * regarding copyright ownership.  The ASF licenses this file
- * to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance
- * with the License.  You may obtain a copy of the License at
+ * Copyright DataStax, Inc.
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -42,23 +40,22 @@ import static org.awaitility.Awaitility.await;
  */
 public class IndexTestBase extends TestBaseImpl
 {
-    protected static void markIndexBuilding(IInvokableInstance node, 
-                                          String keyspace, 
-                                          String table, 
-                                          String indexName, 
-                                          boolean isInitialBuild,
-                                          boolean isNewCF)
+    protected static void markIndexBuilding(IInvokableInstance node,
+                                            String keyspace,
+                                            String table,
+                                            String indexName,
+                                            boolean isInitialBuild,
+                                            boolean isNewCF)
     {
         node.runOnInstance(() -> {
             SecondaryIndexManager sim = Objects.requireNonNull(Schema.instance.getKeyspaceInstance(keyspace))
-                                                     .getColumnFamilyStore(table)
-                                                     .indexManager;
+                                               .getColumnFamilyStore(table).indexManager;
             Index index = sim.getIndexByName(indexName);
             sim.markIndexesBuilding(Collections.singleton(index), true, isNewCF, isInitialBuild);
         });
     }
 
-    protected static void waitForIndexingStatus(IInvokableInstance node, String keyspace, String index, IInvokableInstance replica, Index.Status status)
+    public static void waitForIndexingStatus(IInvokableInstance node, String keyspace, String index, IInvokableInstance replica, Index.Status status)
     {
         InetAddressAndPort replicaAddressAndPort = getFullAddress(replica);
         await().atMost(5, TimeUnit.SECONDS)

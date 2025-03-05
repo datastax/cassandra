@@ -63,6 +63,8 @@ import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.ListeningExecutorService;
 import com.google.common.util.concurrent.MoreExecutors;
 import com.google.common.util.concurrent.SettableFuture;
+import org.apache.cassandra.locator.TokenMetadataProvider;
+import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -136,7 +138,6 @@ import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.concurrent.Refs;
 import org.json.simple.JSONValue;
 
-import static java.lang.String.format;
 import static org.apache.cassandra.utils.ExecutorUtils.awaitTermination;
 import static org.apache.cassandra.utils.ExecutorUtils.shutdown;
 
@@ -188,7 +189,8 @@ import static org.apache.cassandra.utils.ExecutorUtils.shutdown;
 public class SecondaryIndexManager implements IndexRegistry, INotificationConsumer
 {
     private static final Logger logger = LoggerFactory.getLogger(SecondaryIndexManager.class);
-    public static final String FELL_BACK_TO_ALLOW_FILTERING = "Query fell back to ALLOW FILTERING because index %s is still building.";
+    public static final String FELL_BACK_TO_ALLOW_FILTERING = "The query won't use the indexes [%s] on endpoints [%s] while the " +
+                                                              "indexes are still building on those nodes.";
 
     // default page size (in rows) when rebuilding the index for a whole partition
     public static final int DEFAULT_PAGE_SIZE = 10000;
@@ -360,36 +362,77 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
     }
 
     /**
-     * Throws an {@link IndexNotAvailableException} if any of the indexes in the specified {@link Index.QueryPlan} is
-     * not queryable, as it's defined by {@link #isIndexQueryable(Index)}.
-     *
-     * @param queryPlan a query plan
-     * @throws IndexNotAvailableException if the query plan has any index that is not queryable
+     * Validates if all indexes in the specified {@link Index.QueryPlan} are available for querying.
+     * 
+     * @param queryPlan the query plan containing indexes to validate
+     * @param allowFiltering if true, allows querying with indexes that are in initial build state
+     * @return true if the query plan can be executed, false if falling back to ALLOW FILTERING
+     * @throws IndexNotAvailableException if any index is not queryable and ALLOW FILTERING is not enabled
      */
-    public boolean isQueryableThroughIndex(Index.QueryPlan queryPlan, boolean allowFiltering)
+    public boolean searcherFor(Index.QueryPlan queryPlan, boolean allowFiltering)
     {
-        Set<InetAddressAndPort> badNodes = MessagingService.instance().endpointsWithVersionBelow(keyspace.getName(), MessagingService.VERSION_DS_11);
-        if (MessagingService.current_version < MessagingService.VERSION_DS_11)
-            badNodes.add(FBUtilities.getBroadcastAddressAndPort());
+        InetAddressAndPort endpoint = FBUtilities.getBroadcastAddressAndPort();
+        // KATE: We can (maybe?) use the commented lines here and line 389 if we do not want to allow filtering with executeInternal on a bootstrapping node
+        //Set<InetAddressAndPort> bootstrappingNodes = new HashSet<>(TokenMetadataProvider.instance.getTokenMetadata()
+        //                                                                                         .getBootstrapTokens()
+        //                                                                                         .valueSet());
 
         for (Index index : queryPlan.getIndexes())
         {
-            boolean isInitialBuilding = SecondaryIndexManager.getIndexStatus(FBUtilities.getBroadcastAddressAndPort(),
-                    keyspace.getName(),
-                    index.getIndexMetadata().name) == Index.Status.INITIAL_BUILD_STARTED;
-            // CNDB-12425: support for ALLOW FILTERING while building an index
-            if (badNodes.isEmpty() && isInitialBuilding && allowFiltering)
-            {
-                logger.warn(format(SecondaryIndexManager.FELL_BACK_TO_ALLOW_FILTERING, index.getIndexMetadata().name));
-                return false;
-            }
-
-            // We will reject the query here if the index is building and ALLOW FILTERING is not allowed
+            String indexName = index.getIndexMetadata().name;
+            Index.Status indexStatus = getIndexStatus(endpoint, keyspace.getName(), indexName);
+            boolean isInitialBuilding = (indexStatus == Index.Status.INITIAL_BUILD_STARTED);
+            // CNDB-12425: support for ALLOW FILTERING during initial index build
             if (!isIndexQueryable(index))
+            {
+                if (allNodesOnDS11() && isInitialBuilding && allowFiltering)
+                //if (allNodesOnDS11() && isInitialBuilding && allowFiltering && !bootstrappingNodes.contains(endpoint))
+                {
+                    warnAboutAllowFilteringFallback(Collections.singleton(indexName), Collections.singleton(endpoint));
+                    return false;
+                }
+
+                // We will reject the query here if the index is building and ALLOW FILTERING is not allowed
                 throw new IndexNotAvailableException(index);
+            }
         }
 
         return true;
+    }
+
+    /**
+     * Logs a warning about falling back to ALLOW FILTERING in the case of:
+     *      - indexes being under initial build.
+     *      - ALLOW FILTERING specified in the query.
+     *      - the type of query allows the query to be executed with ALLOW FILTERING.
+     *
+     * @param indexesNames names of the indexes being built
+     * @param endpoints node endpoints where the indexes are being built
+     */
+    private static void warnAboutAllowFilteringFallback(Set<String> indexesNames, Set<InetAddressAndPort> endpoints)
+    {
+        NoSpamLogger.log(logger, NoSpamLogger.Level.WARN, 1, TimeUnit.MINUTES,
+                         SecondaryIndexManager.FELL_BACK_TO_ALLOW_FILTERING, indexesNames, endpoints);
+        ClientWarn.instance.warn(String.format(SecondaryIndexManager.FELL_BACK_TO_ALLOW_FILTERING, indexesNames, endpoints),
+                                 indexesNames);
+    }
+
+    /**
+     * Checks if all nodes in the keyspace are on VERSION_DS_11 messaging version.
+     *
+     * @return true if all nodes are on VERSION_DS_11, false if any node (including this one) is on a lower version
+     */
+    private boolean allNodesOnDS11()
+    {
+        InetAddressAndPort endpoint = FBUtilities.getBroadcastAddressAndPort();
+        Set<InetAddressAndPort> badNodes = MessagingService.instance()
+                                                           .endpointsWithConnectionsOnVersionBelow(keyspace.getName(),
+                                                                                                   MessagingService.VERSION_DS_11);
+
+        if (MessagingService.current_version < MessagingService.VERSION_DS_11)
+            badNodes.add(endpoint);
+
+        return badNodes.isEmpty();
     }
 
     /**
@@ -597,7 +640,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
 
     /**
      * Performs a blocking (re)indexing/recovery of the specified SSTables for the specified indexes.
-     *
+     * <p>
      * If the index doesn't support ALL {@link Index.LoadType} it performs a recovery {@link Index#getRecoveryTaskSupport()}
      * instead of a build {@link Index#getBuildTaskSupport()}
      * 
@@ -1843,7 +1886,9 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
                                                             boolean allowFiltering)
     {
         int initial = liveEndpoints.size();
-        Set<InetAddressAndPort> badNodes = MessagingService.instance().endpointsWithVersionBelow(keyspace.getName(), MessagingService.VERSION_DS_11);
+        Set<InetAddressAndPort> badNodes = MessagingService.instance().
+                                                           endpointsWithConnectionsOnVersionBelow(keyspace.getName(),
+                                                                                                  MessagingService.VERSION_DS_11);
         if (MessagingService.current_version < MessagingService.VERSION_DS_11)
             badNodes.add(FBUtilities.getBroadcastAddressAndPort());
 
@@ -1851,25 +1896,40 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
 
         boolean considerAllowFiltering = badNodes.isEmpty();
 
+        Set<InetAddressAndPort> filteringEndpoints = new HashSet<>();
+        Set<String> indexesNames = new HashSet<>();
+
         E queryableEndpoints = liveEndpoints.filter(replica -> {
-            for (Index index : indexQueryPlan.getIndexes()) {
+            for (Index index : indexQueryPlan.getIndexes())
+            {
                 Index.Status status = getIndexStatus(replica.endpoint(), keyspace.getName(), index.getIndexMetadata().name);
-
-                // if the status of the index is building and there is allow filtering - that is ok too
-                if (considerAllowFiltering && status == Index.Status.INITIAL_BUILD_STARTED && !index.isQueryable(status) && allowFiltering)
-                {
-                    ClientWarn.instance.warn(String.format("Query fell back to ALLOW FILTERING because index %s is still building on endpoint %s", 
-                                                         index.getIndexMetadata().name, 
-                                                         replica.endpoint()));
-                    continue;
-                }
-
+                
                 if (!index.isQueryable(status))
-                    return false;
+                {
+                    // CNDB-12425: During initial index build, replicas determine whether to use the index or fall back to filtering.
+                    // This decision depends on:
+                    // 1. Index build status on the replica
+                    // 2. ALLOW FILTERING flag in the query
+                    // Note: Not all queries support ALLOW FILTERING even when specified
+                    // Implementation detail: indexQueryPlan is not serialized, only the allowFiltering flag is sent to replicas.
+                    if (considerAllowFiltering && status == Index.Status.INITIAL_BUILD_STARTED && allowFiltering)
+                    {
+                        filteringEndpoints.add(replica.endpoint());
+                        indexesNames.add(index.getIndexMetadata().name);
+                    }
+                    else
+                    {
+                        return false;
+                    }
+                }
             }
 
             return true;
         });
+
+        // Emit a single warning for all building indexes and their endpoints
+        if (!indexesNames.isEmpty())
+            warnAboutAllowFilteringFallback(indexesNames, filteringEndpoints);
 
         int filtered = queryableEndpoints.size();
 

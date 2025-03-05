@@ -59,7 +59,6 @@ import org.apache.cassandra.guardrails.DefaultGuardrail;
 import org.apache.cassandra.guardrails.Guardrails;
 import org.apache.cassandra.guardrails.Threshold;
 import org.apache.cassandra.index.Index;
-import org.apache.cassandra.index.SecondaryIndexManager;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.DataInputPlus;
@@ -84,7 +83,6 @@ import org.apache.cassandra.utils.FBUtilities;
 
 import static com.google.common.collect.Iterables.any;
 import static com.google.common.collect.Iterables.filter;
-import static java.lang.String.format;
 import static org.apache.cassandra.db.partitions.UnfilteredPartitionIterators.MergeListener.NOOP;
 import static org.apache.cassandra.index.SecondaryIndexManager.getIndexStatus;
 import static org.apache.cassandra.utils.MonotonicClock.approxTime;
@@ -402,7 +400,7 @@ public abstract class ReadCommand extends AbstractReadQuery
         ColumnFamilyStore cfs = Keyspace.openAndGetStore(metadata());
 
         Index.Searcher searcher = null;
-        if (indexQueryPlan != null && cfs.indexManager.isQueryableThroughIndex(indexQueryPlan, rowFilter().allowFiltering))
+        if (indexQueryPlan != null && cfs.indexManager.searcherFor(indexQueryPlan, rowFilter().allowFiltering))
         {
             searcher = indexSearcher();
             Index index = indexQueryPlan.getFirst();
@@ -1104,17 +1102,16 @@ public abstract class ReadCommand extends AbstractReadQuery
 
             Set<Index> allIndexes = queryPlan.getIndexes();
             Set<Index> availableIndexes = new HashSet<>();
+
             for (Index plannedIndex : allIndexes)
             {
                 String indexName = plannedIndex.getIndexMetadata().name;
                 Index.Status status = getIndexStatus(FBUtilities.getBroadcastAddressAndPort(),
                                                      metadata.keyspace,
                                                      indexName);
-                if (status != Index.Status.INITIAL_BUILD_STARTED)
-                    availableIndexes.add(plannedIndex);
-                else if (!plannedIndex.isQueryable(status))
-                    logger.warn(format(SecondaryIndexManager.FELL_BACK_TO_ALLOW_FILTERING, indexName));
 
+                if (status != Index.Status.INITIAL_BUILD_STARTED && plannedIndex.isQueryable(status))
+                    availableIndexes.add(plannedIndex);
             }
 
             if (availableIndexes.isEmpty())

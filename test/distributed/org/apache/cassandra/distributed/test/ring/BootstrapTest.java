@@ -23,6 +23,7 @@ import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
+import org.apache.cassandra.distributed.test.TestBaseImpl;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
@@ -36,7 +37,6 @@ import org.apache.cassandra.distributed.api.IInstanceConfig;
 import org.apache.cassandra.distributed.api.IInvokableInstance;
 import org.apache.cassandra.distributed.api.TokenSupplier;
 import org.apache.cassandra.distributed.shared.NetworkTopology;
-import org.apache.cassandra.distributed.test.TestBaseImpl;
 
 import static java.util.Arrays.asList;
 import static org.apache.cassandra.distributed.action.GossipHelper.bootstrap;
@@ -76,7 +76,7 @@ public class BootstrapTest extends TestBaseImpl
         int expandedNodeCount = originalNodeCount + 1;
 
         try (Cluster cluster = builder().withNodes(originalNodeCount)
-                                        .withTokenSupplier(TokenSupplier.evenlyDistributedTokens(expandedNodeCount))
+                                        .withTokenSupplier(TokenSupplier.evenlyDistributedTokens(expandedNodeCount, 1))
                                         .withNodeIdTopology(NetworkTopology.singleDcNetworkTopology(expandedNodeCount, "dc0", "rack0"))
                                         .withConfig(config -> config.with(NETWORK, GOSSIP))
                                         .start())
@@ -102,13 +102,13 @@ public class BootstrapTest extends TestBaseImpl
     }
 
     @Test
-    public void readWriteDuringBootstrapTest() throws Throwable
+    public void  readWriteDuringBootstrapTest() throws Throwable
     {
         int originalNodeCount = 2;
         int expandedNodeCount = originalNodeCount + 1;
 
         try (Cluster cluster = builder().withNodes(originalNodeCount)
-                                        .withTokenSupplier(TokenSupplier.evenlyDistributedTokens(expandedNodeCount))
+                                        .withTokenSupplier(TokenSupplier.evenlyDistributedTokens(expandedNodeCount, 1))
                                         .withNodeIdTopology(NetworkTopology.singleDcNetworkTopology(expandedNodeCount, "dc0", "rack0"))
                                         .withConfig(config -> config.with(NETWORK, GOSSIP))
                                         .start())
@@ -150,5 +150,4 @@ public class BootstrapTest extends TestBaseImpl
                         .collect(Collectors.toMap(nodeId -> nodeId,
                                                   nodeId -> (Long) cluster.get(nodeId).executeInternal("SELECT count(*) FROM " + KEYSPACE + ".tbl")[0][0]));
     }
-
 }

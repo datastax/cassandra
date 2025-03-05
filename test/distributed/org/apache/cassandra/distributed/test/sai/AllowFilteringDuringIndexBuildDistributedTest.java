@@ -50,8 +50,8 @@ public class AllowFilteringDuringIndexBuildDistributedTest extends IndexTestBase
         CassandraRelevantProperties.DS_CURRENT_MESSAGING_VERSION.setInt(MessagingService.VERSION_DS_11);
 
         try (Cluster cluster = init(Cluster.build(NUM_REPLICAS)
-                                         .withConfig(config -> config.with(GOSSIP).with(NETWORK))
-                                         .start(), RF))
+                                           .withConfig(config -> config.with(GOSSIP).with(NETWORK))
+                                           .start(), RF))
         {
             testSelectWithAllowFilteringDuringIndexBuilding(cluster, null, true, false);
         }
@@ -63,8 +63,8 @@ public class AllowFilteringDuringIndexBuildDistributedTest extends IndexTestBase
         CassandraRelevantProperties.DS_CURRENT_MESSAGING_VERSION.setInt(MessagingService.VERSION_DS_11);
 
         try (Cluster cluster = init(Cluster.build(NUM_REPLICAS)
-                                         .withConfig(config -> config.with(GOSSIP).with(NETWORK))
-                                         .start(), RF))
+                                           .withConfig(config -> config.with(GOSSIP).with(NETWORK))
+                                           .start(), RF))
         {
             testSelectWithAllowFilteringDuringIndexBuilding(cluster, INDEX_NOT_AVAILABLE_MESSAGE, false, true);
         }
@@ -76,8 +76,8 @@ public class AllowFilteringDuringIndexBuildDistributedTest extends IndexTestBase
         CassandraRelevantProperties.DS_CURRENT_MESSAGING_VERSION.setInt(MessagingService.VERSION_DS_11);
 
         try (Cluster cluster = init(Cluster.build(NUM_REPLICAS)
-                                         .withConfig(config -> config.with(GOSSIP).with(NETWORK))
-                                         .start(), RF))
+                                           .withConfig(config -> config.with(GOSSIP).with(NETWORK))
+                                           .start(), RF))
         {
             testSelectWithAllowFilteringDuringIndexBuilding(cluster, INDEX_NOT_AVAILABLE_MESSAGE, false, false);
         }
@@ -89,8 +89,8 @@ public class AllowFilteringDuringIndexBuildDistributedTest extends IndexTestBase
         CassandraRelevantProperties.DS_CURRENT_MESSAGING_VERSION.setInt(MessagingService.VERSION_DS_10);
 
         try (Cluster cluster = init(Cluster.build(NUM_REPLICAS)
-                                         .withConfig(config -> config.with(GOSSIP).with(NETWORK))
-                                         .start(), RF))
+                                           .withConfig(config -> config.with(GOSSIP).with(NETWORK))
+                                           .start(), RF))
         {
             testSelectWithAllowFilteringDuringIndexBuilding(cluster, INDEX_NOT_AVAILABLE_MESSAGE, true, false);
         }
@@ -102,8 +102,8 @@ public class AllowFilteringDuringIndexBuildDistributedTest extends IndexTestBase
         CassandraRelevantProperties.DS_CURRENT_MESSAGING_VERSION.setInt(MessagingService.VERSION_DS_10);
 
         try (Cluster cluster = init(Cluster.build(NUM_REPLICAS)
-                                         .withConfig(config -> config.with(GOSSIP).with(NETWORK))
-                                         .start(), RF))
+                                           .withConfig(config -> config.with(GOSSIP).with(NETWORK))
+                                           .start(), RF))
         {
             testSelectWithAllowFilteringDuringIndexBuilding(cluster, INDEX_NOT_AVAILABLE_MESSAGE, false, true);
         }
@@ -115,8 +115,8 @@ public class AllowFilteringDuringIndexBuildDistributedTest extends IndexTestBase
         CassandraRelevantProperties.DS_CURRENT_MESSAGING_VERSION.setInt(MessagingService.VERSION_DS_10);
 
         try (Cluster cluster = init(Cluster.build(NUM_REPLICAS)
-                                         .withConfig(config -> config.with(GOSSIP).with(NETWORK))
-                                         .start(), RF))
+                                           .withConfig(config -> config.with(GOSSIP).with(NETWORK))
+                                           .start(), RF))
         {
             testSelectWithAllowFilteringDuringIndexBuilding(cluster, INDEX_NOT_AVAILABLE_MESSAGE, false, false);
         }
@@ -128,9 +128,9 @@ public class AllowFilteringDuringIndexBuildDistributedTest extends IndexTestBase
         assert CassandraRelevantProperties.DS_CURRENT_MESSAGING_VERSION.getInt() >= MessagingService.VERSION_DS_11;
 
         try (Cluster cluster = init(Cluster.build(NUM_REPLICAS)
-                                         .withInstanceInitializer(ByteBuddyUtils.MessagingVersionSetter::setDS10OnNode1)
-                                         .withConfig(config -> config.with(GOSSIP).with(NETWORK).with(NATIVE_PROTOCOL))
-                                         .start(), RF))
+                                           .withInstanceInitializer(ByteBuddyUtils.BB::install)
+                                           .withConfig(config -> config.with(GOSSIP).with(NETWORK).with(NATIVE_PROTOCOL))
+                                           .start(), RF))
         {
             testSelectWithAllowFilteringDuringIndexBuilding(cluster, INDEX_NOT_AVAILABLE_MESSAGE, true, false);
         }
@@ -142,9 +142,9 @@ public class AllowFilteringDuringIndexBuildDistributedTest extends IndexTestBase
         assert CassandraRelevantProperties.DS_CURRENT_MESSAGING_VERSION.getInt() >= MessagingService.VERSION_DS_11;
 
         try (Cluster cluster = init(Cluster.build(NUM_REPLICAS)
-                                         .withInstanceInitializer(ByteBuddyUtils.MessagingVersionSetter::setDS10OnNode1)
-                                         .withConfig(config -> config.with(GOSSIP).with(NETWORK).with(NATIVE_PROTOCOL))
-                                         .start(), RF))
+                                           .withInstanceInitializer(ByteBuddyUtils.BB::install)
+                                           .withConfig(config -> config.with(GOSSIP).with(NETWORK).with(NATIVE_PROTOCOL))
+                                           .start(), RF))
         {
             testSelectWithAllowFilteringDuringIndexBuilding(cluster, INDEX_NOT_AVAILABLE_MESSAGE, false, true);
         }
@@ -156,9 +156,9 @@ public class AllowFilteringDuringIndexBuildDistributedTest extends IndexTestBase
         assert CassandraRelevantProperties.DS_CURRENT_MESSAGING_VERSION.getInt() >= MessagingService.VERSION_DS_11;
 
         try (Cluster cluster = init(Cluster.build(NUM_REPLICAS)
-                                         .withInstanceInitializer(ByteBuddyUtils.MessagingVersionSetter::setDS10OnNode1)
-                                         .withConfig(config -> config.with(GOSSIP).with(NETWORK).with(NATIVE_PROTOCOL))
-                                         .start(), RF))
+                                           .withInstanceInitializer(ByteBuddyUtils.BB::install)
+                                           .withConfig(config -> config.with(GOSSIP).with(NETWORK).with(NATIVE_PROTOCOL))
+                                           .start(), RF))
         {
             testSelectWithAllowFilteringDuringIndexBuilding(cluster, INDEX_NOT_AVAILABLE_MESSAGE, false, false);
         }
@@ -168,17 +168,17 @@ public class AllowFilteringDuringIndexBuildDistributedTest extends IndexTestBase
     public void testInitialBuildWithNewCFShouldFail() throws Throwable
     {
         try (Cluster cluster = init(Cluster.build(NUM_REPLICAS)
-                                         .withConfig(config -> config.with(GOSSIP).with(NETWORK))
-                                         .start(), RF))
+                                           .withConfig(config -> config.with(GOSSIP).with(NETWORK))
+                                           .start(), RF))
         {
             testSelectWithAllowFilteringDuringIndexBuilding(cluster, null, true, true);
         }
     }
 
     private static void testSelectWithAllowFilteringDuringIndexBuilding(Cluster cluster, 
-                                                                      String expectedErrorMessage, 
-                                                                      boolean isInitialBuild,
-                                                                      boolean isNewCF)
+                                                                        String expectedErrorMessage,
+                                                                        boolean isInitialBuild,
+                                                                        boolean isNewCF)
     {
         if (isInitialBuild && isNewCF) {
             throw new IllegalArgumentException("Initial build cannot happen with a new CF");

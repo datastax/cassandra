@@ -16,8 +16,6 @@
 
 package org.apache.cassandra.distributed.test.sai;
 
-import java.util.concurrent.ThreadLocalRandom;
-
 import org.apache.cassandra.distributed.test.ByteBuddyUtils;
 import org.junit.Test;
 
@@ -84,7 +82,7 @@ public class ANNOptionsDistributedTest extends TestBaseImpl
         assert CassandraRelevantProperties.DS_CURRENT_MESSAGING_VERSION.getInt() >= MessagingService.VERSION_DS_11;
 
         try (Cluster cluster = init(Cluster.build(NUM_REPLICAS)
-                                           .withInstanceInitializer(ByteBuddyUtils.MessagingVersionSetter::setDS10OnNode1)
+                                           .withInstanceInitializer(ByteBuddyUtils.BB::install)
                                            .withConfig(config -> config.with(GOSSIP).with(NETWORK).with(NATIVE_PROTOCOL))
                                            .start(), RF))
         {
@@ -110,33 +108,5 @@ public class ANNOptionsDistributedTest extends TestBaseImpl
                           .hasMessageContaining(expectedErrorMessage);
         }
     }
-<<<<<<< HEAD
-
-    /**
-     * Injection to set the current version of the first cluster node to DS 10.
-     */
-    public static class BB
-    {
-        public static void install(ClassLoader classLoader, int node)
-        {
-            // inject randomly first or second node to make sure it works if the node is a coordinator or replica
-            if (node == ThreadLocalRandom.current().nextInt(1, 3))
-            {
-                new ByteBuddy().rebase(MessagingService.class)
-                               .method(named("currentVersion"))
-                               .intercept(MethodDelegation.to(BB.class))
-                               .make()
-                               .load(classLoader, ClassLoadingStrategy.Default.INJECTION);
-            }
-        }
-
-        @SuppressWarnings("unused")
-        public static int currentVersion()
-        {
-            return MessagingService.VERSION_DS_10;
-        }
-    }
 }
-=======
-}
->>>>>>> 550df2b23a (Address review comments)
+

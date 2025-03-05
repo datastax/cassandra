@@ -55,9 +55,9 @@ public class IndexAvailabilityTest extends IndexTestBase
 {
     private static final String CREATE_KEYSPACE = "CREATE KEYSPACE %s WITH replication = {'class': 'SimpleStrategy', 'replication_factor': %d}";
     private static final String CREATE_TABLE = "CREATE TABLE %s.%s (pk text primary key, v1 int, v2 text) " +
-                                             "WITH compaction = {'class' : 'SizeTieredCompactionStrategy', 'enabled' : false }";
+                                               "WITH compaction = {'class' : 'SizeTieredCompactionStrategy', 'enabled' : false }";
     private static final String CREATE_INDEX = "CREATE CUSTOM INDEX %s ON %s.%s(%s) USING 'StorageAttachedIndex'";
-    
+
     private static final Map<NodeIndex, Index.Status> expectedNodeIndexQueryability = new ConcurrentHashMap<>();
     private List<String> keyspaces;
     private List<String> indexesPerKs;
@@ -115,7 +115,7 @@ public class IndexAvailabilityTest extends IndexTestBase
             // other indexes or keyspaces should not be affected
             assertIndexingStatus(cluster);
 
-            // mark ks2 index2 as indexing on node1
+            // mark ks2 index2 as building on node1
             markIndexBuilding(cluster.get(1), ks2, cf1, index2, true);
             // on node2, it observes that node1 ks2.index2 is not queryable
             waitForIndexingStatus(cluster.get(2), ks2, index2, cluster.get(1), Index.Status.INITIAL_BUILD_STARTED);
@@ -129,7 +129,7 @@ public class IndexAvailabilityTest extends IndexTestBase
             // other indexes or keyspaces should not be affected
             assertIndexingStatus(cluster);
 
-            // mark ks2 index2 as indexing on node1
+            // mark ks2 index2 as building on node1
             markIndexBuilding(cluster.get(1), ks2, cf1, index2, false);
             // on node2, it observes that node1 ks2.index2 is not queryable
             waitForIndexingStatus(cluster.get(2), ks2, index2, cluster.get(1), Index.Status.FULL_REBUILD_STARTED);
@@ -261,7 +261,7 @@ public class IndexAvailabilityTest extends IndexTestBase
     {
         try (Cluster cluster = init(Cluster.build(3)
                                            .withConfig(config -> config.with(GOSSIP)
-                                                                       .with(NETWORK))
+                                                                                     .with(NETWORK))
                                            .start()))
         {
             String ks2 = "ks2";
@@ -280,24 +280,19 @@ public class IndexAvailabilityTest extends IndexTestBase
             // Insert test data
             cluster.coordinator(1).execute(String.format("INSERT INTO %s.%s(pk, i, j, k, v1, v2, vec) VALUES " +
                                                          "('partition1', 1, 100, 200, 0, 0, [0.5, 1.5])",
-                                                         ks2, table),
-                                           ConsistencyLevel.QUORUM);
+                                                         ks2, table), ConsistencyLevel.QUORUM);
             cluster.coordinator(1).execute(String.format("INSERT INTO %s.%s(pk, i, j, k, v1, v2, vec) VALUES " +
                                                          "('partition2', 2, 101, 201, 1, 1, [1.5, 2.5])",
-                                                         ks2, table),
-                                           ConsistencyLevel.QUORUM);
+                                                         ks2, table), ConsistencyLevel.QUORUM);
             cluster.coordinator(1).execute(String.format("INSERT INTO %s.%s(pk, i, j, k, v1, v2, vec) VALUES " +
                                                          "('partition3', 1, 102, 202, 0, 1, [2.5, 3.5])",
-                                                         ks2, table),
-                                           ConsistencyLevel.QUORUM);
+                                                         ks2, table), ConsistencyLevel.QUORUM);
             cluster.coordinator(1).execute(String.format("INSERT INTO %s.%s(pk, i, j, k, v1, v2, vec) VALUES " +
                                                          "('partition4', 2, 103, 203, 1, 0, [3.5, 4.5])",
-                                                         ks2, table),
-                                           ConsistencyLevel.QUORUM);
+                                                         ks2, table), ConsistencyLevel.QUORUM);
             cluster.coordinator(1).execute(String.format("INSERT INTO %s.%s(pk, i, j, k, v1, v2, vec) VALUES " +
                                                          "('partition5', 1, 104, 204, 0, 0, [4.5, 5.5])",
-                                                         ks2, table),
-                                           ConsistencyLevel.QUORUM);
+                                                         ks2, table), ConsistencyLevel.QUORUM);
 
             // Test queries before any index exists
             executeOnAllCoordinators(cluster,
@@ -368,9 +363,10 @@ public class IndexAvailabilityTest extends IndexTestBase
                 assertThatThrownBy(() -> executeOnAllCoordinators(cluster,
                                                                   "SELECT pk FROM " + ks2 + '.' + table + " WHERE v1=0 ALLOW FILTERING",
                                                                   ConsistencyLevel.LOCAL_QUORUM,
-                                                                  3)).hasMessageMatching("^Operation failed - received 0 responses" +
-                                                                                           " and 2 failures: INDEX_NOT_AVAILABLE from .+" +
-                                                                                           " INDEX_NOT_AVAILABLE from .+$");
+                                                                  3))
+                        .hasMessageMatching("^Operation failed - received 0 responses" +
+                                            " and 2 failures: INDEX_NOT_AVAILABLE from .+" +
+                                            " INDEX_NOT_AVAILABLE from .+$");
             }
 
             markIndexQueryable(cluster.get(1), ks2, table, index1);
@@ -401,8 +397,8 @@ public class IndexAvailabilityTest extends IndexTestBase
 
             // Verify actual results using a direct query
             results = cluster.coordinator(1)
-                                        .execute("SELECT pk FROM " + ks2 + '.' + table + " WHERE v1=0 AND v2=0 ALLOW FILTERING",
-                                                 ConsistencyLevel.LOCAL_QUORUM);
+                             .execute("SELECT pk FROM " + ks2 + '.' + table + " WHERE v1=0 AND v2=0 ALLOW FILTERING",
+                                      ConsistencyLevel.LOCAL_QUORUM);
             assertResultContains(results, Arrays.asList("partition1", "partition5"));
 
             executeOnAllCoordinators(cluster,
@@ -550,7 +546,7 @@ public class IndexAvailabilityTest extends IndexTestBase
             executeOnAllCoordinators(cluster, "SELECT pk FROM ks2.cf1 WHERE v2='0'", ConsistencyLevel.LOCAL_QUORUM, 0);
             executeOnAllCoordinators(cluster, "SELECT pk FROM ks2.cf1 WHERE v2='0' ALLOW FILTERING", ConsistencyLevel.LOCAL_QUORUM, 0);
 
-            // mark ks2 index2 as indexing on node1
+            // mark ks2 index2 as building on node1
             markIndexBuilding(cluster.get(1), ks2, cf1, index2, true);
             // on node2, it observes that node1 ks2.index2 is not queryable
             waitForIndexingStatus(cluster.get(1), ks2, index2, cluster.get(1), Index.Status.INITIAL_BUILD_STARTED);
@@ -690,7 +686,7 @@ public class IndexAvailabilityTest extends IndexTestBase
                    "Expected=" + expectedValues + ", Actual=" + actualValues,
                    actualValues.containsAll(expectedValues));
     }
-    
+
     private static class NodeIndex
     {
         private final String keyspace;
@@ -727,3 +723,5 @@ public class IndexAvailabilityTest extends IndexTestBase
         }
     }
 }
+
+

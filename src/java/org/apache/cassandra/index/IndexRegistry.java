@@ -21,7 +21,6 @@
 package org.apache.cassandra.index;
 
 import java.util.Collection;
-import java.util.HashSet;
 import java.util.Collections;
 import java.util.Optional;
 import java.util.Set;
