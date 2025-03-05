@@ -87,6 +87,7 @@ import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.utils.CloseableIterator;
@@ -136,7 +137,7 @@ public class IndexContext
     private final ColumnFamilyStore cfs;
 
     // Config can be null if the column context is "fake" (i.e. created for a filtering expression).
-    private final IndexMetadata config;
+    private volatile IndexMetadata config;
     private final VectorSimilarityFunction vectorSimilarityFunction;
 
     private final ConcurrentMap<Memtable, MemtableIndex> liveMemtables = new ConcurrentHashMap<>();
@@ -217,6 +218,16 @@ public class IndexContext
 
 
         logger.debug(logMessage("Initialized index context with index writer config: {}"), indexWriterConfig);
+    }
+
+    public IndexMetadata getConfig()
+    {
+        return config;
+    }
+
+    public void setConfig(IndexMetadata config)
+    {
+        this.config = config;
     }
 
     public AbstractType<?> keyValidator()
@@ -609,6 +620,11 @@ public class IndexContext
         return this.config == null ? null : config.name;
     }
 
+    public CompressionParams getValueCompression()
+    {
+        return config.valueCompression;
+    }
+
     public int getIntOption(String name, int defaultValue)
     {
         String value = this.config.options.get(name);
@@ -998,4 +1014,5 @@ public class IndexContext
         getView().getIndexes().stream().map(SSTableIndex::indexFeatureSet).forEach(set -> accumulator.accumulate(set));
         return accumulator.complete();
     }
+
 }

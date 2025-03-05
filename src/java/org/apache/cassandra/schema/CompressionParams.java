@@ -20,11 +20,9 @@ package org.apache.cassandra.schema;
 import java.io.IOException;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.Properties;
 import java.util.concurrent.ThreadLocalRandom;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -60,6 +58,7 @@ public final class CompressionParams
     private static volatile boolean hasLoggedCrcCheckChanceWarning;
 
     public static final int DEFAULT_CHUNK_LENGTH = 1024 * 16;
+    public static final int DEFAULT_INDEX_CHUNK_LENGTH = 1024 * 4;
     public static final double DEFAULT_MIN_COMPRESS_RATIO = 0.0;        // Since pre-4.0 versions do not understand the
                                                                         // new compression parameter we can't use a
                                                                         // different default value.
@@ -254,6 +253,14 @@ public final class CompressionParams
     }
 
     public CompressionParams copy()
+    {
+        return new CompressionParams(sstableCompressor, chunkLength, maxCompressedLength, minCompressRatio, otherOptions);
+    }
+
+    /**
+     * Returns a copy of CompressionParams with a modified chunk length
+     */
+    public CompressionParams withChunkLength(int chunkLength)
     {
         return new CompressionParams(sstableCompressor, chunkLength, maxCompressedLength, minCompressRatio, otherOptions);
     }
