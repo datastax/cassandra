@@ -193,6 +193,7 @@ public class IndexContext
             this.indexMetrics = new IndexMetrics(this);
             this.columnQueryMetrics = isLiteral() ? new ColumnQueryMetrics.TrieIndexMetrics(keyspace, table, getIndexName())
                                                   : new ColumnQueryMetrics.BKDIndexMetrics(keyspace, table, getIndexName());
+
         }
         else
         {
