@@ -72,7 +72,7 @@ public final class SchemaConstants
      * Note: This extended to 222 for CNDB tenant specific keyspaces. The windows restriction is not valid here
      * because CNDB does not support windows.
      * 222 is maximum filename length of 255 chars minus a separator char and
-     * 32 chars for table id.
+     * 32 chars for table UUID.
      */
     public static final int NAME_LENGTH = FILENAME_LENGTH - 32 - 1;
 

@@ -264,6 +264,9 @@ public class NativeIndexDDLTest extends SAITester
         assertTrue(tuple.isTuple());
     }
 
+    /**
+     * The test reproduces CNDB-13198
+     */
     @Test
     public void reproFailOnLongIndexName()
     {

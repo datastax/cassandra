@@ -107,12 +107,11 @@ public class Version implements Comparable<Version>
 
     /**
      * Calculates the maximum allowed length for SAI index names to ensure generated filenames
-     * do not exceed the system's filename length limit (defined in SchemaConstants.FILENAME_LENGTH).
+     * do not exceed the system's filename length limit (defined in {@link SchemaConstants#FILENAME_LENGTH}).
      * This accounts for all additional components in the filename.
      */
     public static int calculateIndexNameAllowedLength()
     {
-
         int addedLength = getAddedLengthFromDescriptorAndVersion();
         assert addedLength < SchemaConstants.FILENAME_LENGTH;
         return SchemaConstants.FILENAME_LENGTH - addedLength;
@@ -120,7 +119,7 @@ public class Version implements Comparable<Version>
 
     /**
      * Calculates the length of the added prefixes and suffixes from Descriptor constructor
-     * and Version.stargazerFileNameFormat.
+     * and {@link Version#stargazerFileNameFormat}.
      *
      * @return the length of the added prefixes and suffixes
      */
