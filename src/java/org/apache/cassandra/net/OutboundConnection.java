@@ -1118,6 +1118,11 @@ public class OutboundConnection
 
                         MessagingSuccess success = result.success();
                         messagingVersion = success.messagingVersion;
+                        // We store the peer's endpoint version, not the version we connect on, which might
+                        // be lower due to our own preferred version. This is indicated in the `InboundConnectionInitator`.
+                        // We assert here to ensure that this assumption holds.
+                        int endpointVersion = settings.endpointToVersion.get(settings.to);
+                        assert messagingVersion <= endpointVersion : "Found " + messagingVersion + " > " + endpointVersion;
                         debug.onConnect(success.messagingVersion, settings);
                         state.disconnected().maintenance.cancel(false);
 
