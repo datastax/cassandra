@@ -29,7 +29,36 @@ public interface GossiperMBean
 
     public void unsafeAssassinateEndpoint(String address) throws UnknownHostException;
 
+    /**
+     * Do not call this method unless you know what you are doing.
+     * It will try extremely hard to obliterate any endpoint from the ring,
+     * even if it does not know about it. Sets gossip status to {@code left}.
+     *
+     * @param address endpoint to assassinate
+     */
     public void assassinateEndpoint(String address) throws UnknownHostException;
+
+    /**
+     * Do not call this method unless you know what you are doing.
+     * In case a node went into a hibernate state - i.e. replacing a node with the <em>same</em> address
+     * or bootstrapping a node without letting join the ring - and it's required to bring that node back
+     * to a normal status (e.g. for a failed replace operation), use this method.
+     * It can be called on any node, prefer a seed node, to set the status back to {@code normal}.
+     *
+     * @param address endpoint to revive
+     */
+    public void reviveEndpoint(String address) throws UnknownHostException;
+
+    /**
+     * Completely unsafe method to set the Gossip status of an endpoint.
+     * Primary intention is for testing only.
+     * The method will refuse the request if (and only if) {@link FailureDetector} - no further
+     * lifetime checks nor gossip state change safety barrier.
+     *
+     * @param address endpoint address
+     * @param status One of {@code hibernate}, {@code normal}, {@code left}, {@code shutdown}
+     */
+    public void unsafeSetEndpointState(String address, String status) throws UnknownHostException;
 
     public List<String> reloadSeeds();
 
