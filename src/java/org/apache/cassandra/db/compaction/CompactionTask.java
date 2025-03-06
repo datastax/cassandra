@@ -110,28 +110,41 @@ public class CompactionTask extends AbstractCompactionTask
         logger.debug("Created compaction task with id {} and strategy {}", txn.opIdString(), strategy);
     }
 
+
     /**
      * Create a compaction task for deleted data collection.
      */
-    public static AbstractCompactionTask forGarbageCollection(CompactionRealm realm, ILifecycleTransaction txn, int gcBefore, CompactionParams.TombstoneOption tombstoneOption)
+    public static AbstractCompactionTask forGarbageCollection(CompactionRealm realm,
+                                                              ILifecycleTransaction txn,
+                                                              int gcBefore,
+                                                              CompactionParams.TombstoneOption tombstoneOption)
     {
-        AbstractCompactionTask task = new CompactionTask(realm, txn, gcBefore, false, null)
-        {
-            @Override
-            protected CompactionController getCompactionController(Set<SSTableReader> toCompact)
-            {
-                return new CompactionController(realm, toCompact, gcBefore, null, tombstoneOption);
-            }
+        return new GarbageCollectionTask(realm, txn, gcBefore, tombstoneOption);
+    }
 
-            @Override
-            protected int getLevel()
-            {
-                return txn.onlyOne().getSSTableLevel();
-            }
-        };
-        task.setUserDefined(true);
-        task.setCompactionType(OperationType.GARBAGE_COLLECT);
-        return task;
+    public static class GarbageCollectionTask extends CompactionTask
+    {
+        private final CompactionParams.TombstoneOption tombstoneOption;
+
+        public GarbageCollectionTask(CompactionRealm realm, ILifecycleTransaction txn, int gcBefore, CompactionParams.TombstoneOption tombstoneOption)
+        {
+            super(realm, txn, gcBefore, false, null);
+            this.tombstoneOption = tombstoneOption;
+            setCompactionType(OperationType.GARBAGE_COLLECT);
+            setUserDefined(true);
+        }
+
+        @Override
+        protected CompactionController getCompactionController(Set<SSTableReader> toCompact)
+        {
+            return new CompactionController(realm, toCompact, gcBefore, null, tombstoneOption);
+        }
+
+        @Override
+        protected int getLevel()
+        {
+            return transaction.onlyOne().getSSTableLevel();
+        }
     }
 
     private static long addToTotalBytesCompacted(long bytesCompacted)

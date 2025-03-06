@@ -145,6 +145,20 @@ public class RealEnvironment implements Environment
      * compactions we can run without exceeding the available space.
      * This is configurable via {@link CassandraRelevantProperties#UCS_COMPACTION_INCLUDE_NON_DATA_FILES_SIZE} to
      * either report only the data file size, or the total size of all sstable components on disk.
+     */
+    public static long getCompactionOverheadSizeInBytes(Iterable<? extends CompactionSSTable> sstables)
+    {
+        if (CassandraRelevantProperties.UCS_COMPACTION_INCLUDE_NON_DATA_FILES_SIZE.getBoolean())
+            return CompactionSSTable.getTotalOnDiskComponentsBytes(sstables);
+        else
+            return CompactionSSTable.getTotalDataBytes(sstables); // only includes data file size
+    }
+
+    /**
+     * @return the compaction overhead size in bytes of the given sstables, i.e. the value used to determine how many
+     * compactions we can run without exceeding the available space.
+     * This is configurable via {@link CassandraRelevantProperties#UCS_COMPACTION_INCLUDE_NON_DATA_FILES_SIZE} to
+     * either report only the data file size, or the total size of all sstable components on disk.
      * This variation of the method uses a pre-calculated total data size.
      */
     public static long getCompactionOverheadSizeInBytes(Iterable<? extends CompactionSSTable> sstables, long totalDataSize)
