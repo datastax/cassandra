@@ -195,46 +195,54 @@ public class ConnectionTest
 
     // 30 is used for CNDB compatibility
     static final AcceptVersions legacy = new AcceptVersions(VERSION_3014, VERSION_3014);
+    static final AcceptVersions ds10 = new AcceptVersions(minimum_version, VERSION_DS_10);
+    static final AcceptVersions ds11 = new AcceptVersions(minimum_version, VERSION_DS_11);
+    static final AcceptVersions current = new AcceptVersions(current_version, current_version);
 
-    // Force outbound to guess a future version, while inbound is “stuck” at current_version
-    private static final Function<Settings, Settings> VERSION_MISMATCH = s ->
-    {
-        return s.outbound(o -> {
-                    // Overwrite the acceptVersions so outbound *thinks* it should connect at future_version
-                    return o.withAcceptVersions(new AcceptVersions(minimum_version, VERSION_DS_11));
-                })
-                .inbound(i -> {
-                    // Inbound side only allows exactly current_version
-                    return i.withAcceptMessaging(new AcceptVersions(minimum_version, VERSION_DS_10));
-                });
-    };
-
-    static final List<Function<Settings, Settings>> MODIFIERS = ImmutableList.of(
+    static final List<Function<Settings, Settings>> MESSAGGING_VERSIONS = ImmutableList.of(
         settings -> settings.outbound(outbound -> outbound.withAcceptVersions(legacy))
                             .inbound(inbound -> inbound.withAcceptMessaging(legacy)),
-        settings -> settings.outbound(outbound -> outbound.withEncryption(encryptionOptions))
-                            .inbound(inbound -> inbound.withEncryption(encryptionOptions)),
-        settings -> settings.outbound(outbound -> outbound.withFraming(LZ4)),
-        // Mismatched versions to ensure both peers will still agree on the same version
-        settings -> settings.outbound(o -> o.withAcceptVersions(new AcceptVersions(minimum_version, VERSION_DS_11)))
-                             .inbound(i -> i.withAcceptMessaging(new AcceptVersions(minimum_version, VERSION_DS_10)))
+        // Mismatched versions (in both directions) to ensure both peers will still agree on the same version.
+        settings -> settings.outbound(outbound -> outbound.withAcceptVersions(ds11))
+                            .inbound(inbound -> inbound.withAcceptMessaging(ds10)),
+        settings -> settings.outbound(outbound -> outbound.withAcceptVersions(ds10))
+                            .inbound(inbound -> inbound.withAcceptMessaging(ds11)),
+        // This setting ensures that we cover the current case for the power set where no versions are overridden.
+        settings -> settings.outbound(outbound -> outbound.withAcceptVersions(current))
+                            .inbound(inbound -> inbound.withAcceptMessaging(current))
     );
 
+
+    static final List<Function<Settings, Settings>> MODIFIERS = ImmutableList.of(
+        settings -> settings.outbound(outbound -> outbound.withEncryption(encryptionOptions))
+                            .inbound(inbound -> inbound.withEncryption(encryptionOptions)),
+        settings -> settings.outbound(outbound -> outbound.withFraming(LZ4))
+    );
+
+    // Messaging versions are a kind of modifier, but they can only be applied once per setting, so they are broken
+    // out into a separate list.
     static final List<Settings> SETTINGS = applyPowerSet(
-        ImmutableList.of(Settings.SMALL, Settings.LARGE),
+        ImmutableList.of(ConnectionTest.Settings.SMALL, ConnectionTest.Settings.LARGE),
+        MESSAGGING_VERSIONS,
         MODIFIERS
     );
 
-    private static <T> List<T> applyPowerSet(List<T> settings, List<Function<T, T>> modifiers)
+    private static List<Settings> applyPowerSet(List<ConnectionTest.Settings> settings,
+                                                List<Function<ConnectionTest.Settings, ConnectionTest.Settings>> messagingVersions,
+                                                List<Function<ConnectionTest.Settings, ConnectionTest.Settings>> modifiers)
     {
-        List<T> result = new ArrayList<>();
-        for (Set<Function<T, T>> set : Sets.powerSet(new HashSet<>(modifiers)))
+        List<Settings> result = new ArrayList<>();
+        for (Function<ConnectionTest.Settings, ConnectionTest.Settings> messagingVersion : messagingVersions)
         {
-            for (T s : settings)
+            for (Set<Function<Settings, ConnectionTest.Settings>> set : Sets.powerSet(new HashSet<>(modifiers)))
             {
-                for (Function<T, T> f : set)
-                    s = f.apply(s);
-                result.add(s);
+                for (ConnectionTest.Settings s : settings)
+                {
+                    for (Function<Settings, ConnectionTest.Settings> f : set)
+                        s = f.apply(s);
+                    s = messagingVersion.apply(s);
+                    result.add(s);
+                }
             }
         }
         return result;
