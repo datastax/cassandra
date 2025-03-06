@@ -159,20 +159,6 @@ public final class Indexes implements Iterable<IndexMetadata>
         return without(index.name).with(index);
     }
 
-    /**
-     * Creates an Indexes instance with key_compression on all indexes set to a new value
-     */
-    public Indexes withKeyCompression(CompressionParams keyCompression)
-    {
-        var builder = builder();
-        for (IndexMetadata index : this)
-        {
-            builder.add(index.keyCompression.equals(keyCompression)
-                        ? index
-                        : IndexMetadata.fromSchemaMetadata(index.name, index.kind, index.options, keyCompression, index.valueCompression));
-        }
-        return builder.build();
-    }
 
     @Override
     public boolean equals(Object o)

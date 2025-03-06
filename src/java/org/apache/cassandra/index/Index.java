@@ -713,6 +713,64 @@ public interface Index
      */
     interface Group
     {
+        Group EMPTY = new Group()
+        {
+            @Override
+            public Set<? extends Index> getIndexes()
+            {
+                return Set.of();
+            }
+
+            @Override
+            public void addIndex(Index index)
+            {
+
+            }
+
+            @Override
+            public void removeIndex(Index index)
+            {
+
+            }
+
+            @Override
+            public boolean containsIndex(Index index)
+            {
+                return false;
+            }
+
+            @Override
+            public Indexer indexerFor(Predicate<Index> indexSelector, DecoratedKey key, RegularAndStaticColumns columns, int nowInSec, WriteContext ctx, IndexTransaction.Type transactionType, Memtable memtable)
+            {
+                return null;
+            }
+
+            @Nullable
+            @Override
+            public QueryPlan queryPlanFor(RowFilter rowFilter)
+            {
+                return null;
+            }
+
+            @Override
+            public SSTableFlushObserver getFlushObserver(Descriptor descriptor, LifecycleNewTracker tracker, TableMetadata tableMetadata, long keyCount)
+            {
+                return null;
+            }
+
+            @Override
+            public Set<Component> componentsForNewSSTable()
+            {
+                return Set.of();
+            }
+
+            @Override
+            public Set<Component> activeComponents(SSTableReader sstable)
+            {
+                return Set.of();
+            }
+        };
+
         /**
          * Group key is used to uniquely identify a {@link Group} within a table
          */

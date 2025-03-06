@@ -154,6 +154,14 @@ public final class IndexMetadata
         return PATTERN_NON_WORD_CHAR.matcher(table + '_' + "idx").replaceAll("");
     }
 
+    /**
+     * Creates a copy IndexMetadata with keyCompression parameter set to given value
+     */
+    public IndexMetadata withKeyCompression(CompressionParams keyCompression)
+    {
+        return fromSchemaMetadata(name, kind, options, keyCompression, valueCompression);
+    }
+
     public void validate(TableMetadata table)
     {
         if (!isValidName(name, true))
@@ -173,7 +181,7 @@ public final class IndexMetadata
             Class<Index> indexerClass = FBUtilities.classForName(className, "custom indexer");
             if (!Index.class.isAssignableFrom(indexerClass))
                 throw new ConfigurationException(String.format("Specified Indexer class (%s) does not implement the Indexer interface", className));
-            validateCustomIndexOptions(table, indexerClass, options);
+            validateCustomIndexOptions(table, indexerClass);
         }
     }
 
@@ -189,7 +197,7 @@ public final class IndexMetadata
         return indexNameAliases.getOrDefault(className, className);
     }
 
-    private void validateCustomIndexOptions(TableMetadata table, Class<? extends Index> indexerClass, Map<String, String> options)
+    private void validateCustomIndexOptions(TableMetadata table, Class<? extends Index> indexerClass)
     {
         try
         {
@@ -201,13 +209,21 @@ public final class IndexMetadata
             Map<?, ?> unknownOptions;
             try
             {
-                unknownOptions = (Map) indexerClass.getMethod("validateOptions", Map.class, TableMetadata.class).invoke(null, filteredOptions, table);
+                unknownOptions = (Map) indexerClass.getMethod("validateOptions", IndexMetadata.class, TableMetadata.class).invoke(null, this, table);
             }
             catch (NoSuchMethodException e)
             {
-                unknownOptions = (Map) indexerClass.getMethod("validateOptions", Map.class).invoke(null, filteredOptions);
+                try
+                {
+                    unknownOptions = (Map) indexerClass.getMethod("validateOptions", Map.class, TableMetadata.class).invoke(null, filteredOptions, table);
+                }
+                catch (NoSuchMethodException e2)
+                {
+                    unknownOptions = (Map) indexerClass.getMethod("validateOptions", Map.class).invoke(null, filteredOptions);
+                }
             }
 
+            unknownOptions.remove(IndexTarget.CUSTOM_INDEX_OPTION_NAME);
             if (!unknownOptions.isEmpty())
                 throw new ConfigurationException(String.format("Properties specified %s are not understood by %s", unknownOptions.keySet(), indexerClass.getSimpleName()));
         }

@@ -29,7 +29,6 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.NavigableMap;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.SortedMap;
@@ -78,7 +77,6 @@ import org.apache.cassandra.dht.LocalPartitioner;
 import org.apache.cassandra.dht.OrderPreservingPartitioner;
 import org.apache.cassandra.dht.RandomPartitioner;
 import org.apache.cassandra.exceptions.InvalidRequestException;
-import org.apache.cassandra.db.filter.ANNOptions;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.IndexBuildDecider;
 import org.apache.cassandra.index.IndexRegistry;
@@ -99,7 +97,9 @@ import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableFlushObserver;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.schema.IndexMetadata;
+import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.service.StorageService;
@@ -261,8 +261,9 @@ public class StorageAttachedIndex implements Index
      * Used via reflection in {@link IndexMetadata}
      */
     @SuppressWarnings({ "unused" })
-    public static Map<String, String> validateOptions(Map<String, String> options, TableMetadata metadata)
+    public static Map<String, String> validateOptions(IndexMetadata indexMetadata, TableMetadata tableMetadata)
     {
+        Map<String, String> options = indexMetadata.options;
         Map<String, String> unknown = new HashMap<>(2);
 
         for (Map.Entry<String, String> option : options.entrySet())
@@ -273,12 +274,7 @@ public class StorageAttachedIndex implements Index
             }
         }
 
-        if (!unknown.isEmpty())
-        {
-            return unknown;
-        }
-
-        if (ILLEGAL_PARTITIONERS.contains(metadata.partitioner.getClass()))
+        if (ILLEGAL_PARTITIONERS.contains(tableMetadata.partitioner.getClass()))
         {
             throw new InvalidRequestException("Storage-attached index does not support the following IPartitioner implementations: " + ILLEGAL_PARTITIONERS);
         }
@@ -295,7 +291,7 @@ public class StorageAttachedIndex implements Index
             throw new InvalidRequestException("A storage-attached index cannot be created over multiple columns: " + targetColumn);
         }
 
-        Pair<ColumnMetadata, IndexTarget.Type> target = TargetParser.parse(metadata, targetColumn);
+        Pair<ColumnMetadata, IndexTarget.Type> target = TargetParser.parse(tableMetadata, targetColumn);
 
         if (target == null)
         {
@@ -304,12 +300,12 @@ public class StorageAttachedIndex implements Index
 
         // Check for duplicate indexes considering both target and analyzer configuration
         boolean isAnalyzed = AbstractAnalyzer.isAnalyzed(options);
-        long duplicateCount = metadata.indexes.stream()
+        long duplicateCount = tableMetadata.indexes.stream()
                                               .filter(index -> index.getIndexClassName().equals(StorageAttachedIndex.class.getName()))
                                               .filter(index -> {
                                                   // Indexes on the same column with different target (KEYS, VALUES, ENTRIES)
                                                   // are allowed on non-frozen Maps
-                                                  var existingTarget = TargetParser.parse(metadata, index.options.get(IndexTarget.TARGET_OPTION_NAME));
+                                                  var existingTarget = TargetParser.parse(tableMetadata, index.options.get(IndexTarget.TARGET_OPTION_NAME));
                                                   if (existingTarget == null || !existingTarget.equals(target))
                                                       return false;
                                                   // Also allow different indexes if one is analyzed and the other isn't
@@ -320,10 +316,21 @@ public class StorageAttachedIndex implements Index
         if (duplicateCount > 1)
             throw new InvalidRequestException(String.format("Cannot create duplicate storage-attached index on column: %s", target.left));
 
+        // Check for existence of other indexes with different key_compression:
+        for (IndexMetadata other : tableMetadata.indexes)
+        {
+            if (other.getIndexClassName().equals(StorageAttachedIndex.class.getName())
+                && !other.keyCompression.equals(indexMetadata.keyCompression))
+            {
+                throw new InvalidRequestException(String.format("Cannot create storage-attached index on column %s with different key_compression than existing index %s",
+                                                                 target.left, other.name));
+            }
+        }
+
         // Analyzer is not supported against PK columns
         if (isAnalyzed)
         {
-            for (ColumnMetadata column : metadata.primaryKeyColumns())
+            for (ColumnMetadata column : tableMetadata.primaryKeyColumns())
             {
                 if (column.name.equals(target.left.name))
                     logger.warn("Schema contains an invalid index analyzer on primary key column, allowed for backwards compatibility: " + target.left);
@@ -380,7 +387,7 @@ public class StorageAttachedIndex implements Index
             throw new InvalidRequestException("Unsupported type for SAI: " + type.asCQL3Type());
         }
 
-        return Collections.emptyMap();
+        return unknown;
     }
 
     @Override

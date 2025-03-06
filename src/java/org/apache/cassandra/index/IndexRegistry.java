@@ -95,6 +95,12 @@ public interface IndexRegistry
         }
 
         @Override
+        public Index.Group getIndexGroup(Index.Group.Key groupKey)
+        {
+            return Index.Group.EMPTY;
+        }
+
+        @Override
         public Optional<Index> getBestIndexFor(RowFilter.Expression expression)
         {
             return Optional.empty();
@@ -291,6 +297,12 @@ public interface IndexRegistry
         public void validate(PartitionUpdate update)
         {
         }
+
+        @Override
+        public Index.Group getIndexGroup(Index.Group.Key groupKey)
+        {
+            return group;
+        }
     };
 
     default void registerIndex(Index index)
@@ -356,6 +368,8 @@ public interface IndexRegistry
 
         return table.isVirtual() ? EMPTY : Keyspace.openAndGetStore(table).indexManager;
     }
+
+    Index.Group getIndexGroup(Index.Group.Key groupKey);
 
     enum EqBehavior
     {

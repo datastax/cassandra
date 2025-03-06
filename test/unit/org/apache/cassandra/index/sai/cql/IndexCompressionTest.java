@@ -23,6 +23,7 @@ import org.junit.Test;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
@@ -38,6 +39,7 @@ import org.apache.cassandra.service.ClientWarn;
 import org.assertj.core.api.Assertions;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
 public class IndexCompressionTest extends SAITester
@@ -75,25 +77,14 @@ public class IndexCompressionTest extends SAITester
     }
 
     @Test
-    public void testKeyCompressionIsCommonForAllIndexes()
+    public void testKeyCompressionMustMatchOnAllIndexes()
     {
         // When creating another index with different key compression, the key compression of the first index
         // gets overwritten by the compression settings of the second index.
         // This is beacuse both indexes share the same primary key map, and it can be compressed in one way only.
         createTable("CREATE TABLE %s (pk int, c text, val1 text, val2 text, PRIMARY KEY(pk, c))");
-        ClientWarn.instance.captureWarnings();
-        String index1 = createIndex("CREATE CUSTOM INDEX ON %s(val1) USING 'StorageAttachedIndex' WITH key_compression = {'class': 'LZ4Compressor'}");
-        Assertions.assertThat(ClientWarn.instance.getWarnings()).isNull();
-
-        String index2 = createIndex("CREATE CUSTOM INDEX ON %s(val2) USING 'StorageAttachedIndex' WITH key_compression = {'class': 'ZstdCompressor'}");
-        Assertions.assertThat(ClientWarn.instance.getWarnings()).hasSize(1).allMatch(e -> e.contains(index1));
-
-        ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
-        IndexMetadata index1Metadata = cfs.indexManager.getIndexByName(index1).getIndexMetadata();
-        IndexMetadata index2Metadata = cfs.indexManager.getIndexByName(index2).getIndexMetadata();
-
-        assertTrue(index2Metadata.keyCompression.getSstableCompressor() instanceof ZstdCompressor);
-        assertTrue(index1Metadata.keyCompression.getSstableCompressor() instanceof ZstdCompressor);
+        createIndex("CREATE CUSTOM INDEX ON %s(val1) USING 'StorageAttachedIndex' WITH key_compression = {'class': 'LZ4Compressor'}");
+        assertThrows(InvalidRequestException.class, () -> createIndex("CREATE CUSTOM INDEX ON %s(val2) USING 'StorageAttachedIndex' WITH key_compression = {'class': 'ZstdCompressor'}"));
     }
 
     @Test
