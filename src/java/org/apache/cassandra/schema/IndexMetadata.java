@@ -155,19 +155,6 @@ public final class IndexMetadata
         return allowedIndexNameLength - indexNameAddition;
     }
 
-    /**
-     * Generates a default index name for primary key from the table name.
-     * Characters other than alphanumeric and underscore are removed.
-     * Long index names are truncated to fit the length allowing constructing filenames.
-     *
-     * @param table  the table name
-     * @return the generated index name
-     */
-    public static String generateDefaultIndexName(String table)
-    {
-        return generateDefaultIndexName(table, null);
-    }
-
     public void validate(TableMetadata table)
     {
         if (!isValidName(name, true))

@@ -271,7 +271,7 @@ public final class CreateIndexStatement extends AlterSchemaStatement
     {
         String baseName = targets.size() == 1
                         ? IndexMetadata.generateDefaultIndexName(tableName, targets.get(0).column)
-                        : IndexMetadata.generateDefaultIndexName(tableName);
+                        : IndexMetadata.generateDefaultIndexName(tableName, null);
         return keyspace.findAvailableIndexName(baseName);
     }
 
