@@ -124,10 +124,10 @@ public final class IndexMetadata
      */
     public static String generateDefaultIndexName(String table, @Nullable ColumnIdentifier column)
     {
-        String indexUncleanedName = table;
+        String indexNameUncleaned = table;
         if (column != null)
-            indexUncleanedName += '_' + column.toString();
-        String indexNameUntrimmed = PATTERN_NON_WORD_CHAR.matcher(indexUncleanedName).replaceAll("");
+            indexNameUncleaned += '_' + column.toString();
+        String indexNameUntrimmed = PATTERN_NON_WORD_CHAR.matcher(indexNameUncleaned).replaceAll("");
         String indexNameTrimmed = indexNameUntrimmed
                                   .substring(0,
                                              Math.min(calculateGeneratedIndexNameMaxLength(),
