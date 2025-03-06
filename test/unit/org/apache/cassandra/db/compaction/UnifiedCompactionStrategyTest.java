@@ -1438,6 +1438,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
             {
                 assertTrue(task instanceof ExpirationTask);
                 assertEquals(4, task.transaction.originals().size());
+                assertEquals(0L, task.getSpaceOverhead());
             }
             Collection<CompactionPick> picks = strategy.backgroundCompactions.getCompactionsInProgress();
             assertEquals(0, picks.size()); // expiration tasks are not tracked

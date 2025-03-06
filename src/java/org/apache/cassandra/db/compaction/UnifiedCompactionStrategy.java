@@ -603,7 +603,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
     static double getOverheadToDataRatio(Collection<? extends CompactionSSTable> sstables, Controller controller)
     {
         final long totSizeBytes = CompactionAggregate.getTotSizeBytes(sstables);
-        return controller.getOverheadSizeInBytes(sstables, totSizeBytes) * 1.0 / totSizeBytes;
+        return controller.getOverheadSizeInBytes(sstables, totSizeBytes) / Math.max(1.0, totSizeBytes);
     }
 
     void createAndAddTasks(int gcBefore,
@@ -1358,7 +1358,14 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
     {
         long totalDataSize = CompactionAggregate.getTotSizeBytes(sstables);
         long totalSpaceOverhead = controller.getOverheadSizeInBytes(sstables, totalDataSize);
-        return CompactionPick.create(id, parent, sstables, Collections.emptyList(), 0, totalDataSize / Math.max(sstables.size(), 1), totalDataSize, totalSpaceOverhead);
+        return CompactionPick.create(id,
+                                     parent,
+                                     sstables,
+                                     Collections.emptyList(),
+                                     0,
+                                     totalDataSize / Math.max(sstables.size(), 1),
+                                     totalDataSize,
+                                     totalSpaceOverhead);
     }
 
     /// A compaction arena contains the list of sstables that belong to this arena as well as the arena

@@ -102,6 +102,8 @@ public class CompactionPick
 
     /**
      * Create a pending compaction candidate with the given id, and average hotness and size.
+     * This method will use the data file size as the space overhead and should not be used by the unified compaction
+     * strategy where the overhead can be configurable.
      */
     public static CompactionPick create(UUID id,
                                         long parent,
@@ -149,6 +151,8 @@ public class CompactionPick
 
     /**
      * Create a pending compaction candidate calculating avg and total size.
+     * This method will use the data file size as the space overhead and should not be used by the unified compaction
+     * strategy where the overhead can be configurable.
      */
     static CompactionPick create(long parent, Collection<? extends CompactionSSTable> sstables, double hotness)
     {
