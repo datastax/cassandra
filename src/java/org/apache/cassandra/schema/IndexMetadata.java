@@ -49,6 +49,8 @@ import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.UUIDSerializer;
 
+import javax.annotation.Nullable;
+
 import static org.apache.cassandra.schema.SchemaConstants.PATTERN_NON_WORD_CHAR;
 import static org.apache.cassandra.schema.SchemaConstants.isValidName;
 
@@ -117,12 +119,15 @@ public final class IndexMetadata
      * Long index names are truncated to fit the length allowing constructing filenames.
      *
      * @param table  the table name
-     * @param column the column identifier
+     * @param column the column identifier. Can be null if the index is for the primary key.
      * @return the generated index name
      */
-    public static String generateDefaultIndexName(String table, ColumnIdentifier column)
+    public static String generateDefaultIndexName(String table, @Nullable ColumnIdentifier column)
     {
-        String indexNameUntrimmed = PATTERN_NON_WORD_CHAR.matcher(table + '_' + column.toString()).replaceAll("");
+        String indexUncleanedName = table;
+        if (column != null)
+            indexUncleanedName += '_' + column.toString();
+        String indexNameUntrimmed = PATTERN_NON_WORD_CHAR.matcher(indexUncleanedName).replaceAll("");
         String indexNameTrimmed = indexNameUntrimmed
                                   .substring(0,
                                              Math.min(calculateGeneratedIndexNameMaxLength(),
@@ -150,9 +155,17 @@ public final class IndexMetadata
         return allowedIndexNameLength - indexNameAddition;
     }
 
+    /**
+     * Generates a default index name for primary key from the table name.
+     * Characters other than alphanumeric and underscore are removed.
+     * Long index names are truncated to fit the length allowing constructing filenames.
+     *
+     * @param table  the table name
+     * @return the generated index name
+     */
     public static String generateDefaultIndexName(String table)
     {
-        return PATTERN_NON_WORD_CHAR.matcher(table + INDEX_POSTFIX).replaceAll("");
+        return generateDefaultIndexName(table, null);
     }
 
     public void validate(TableMetadata table)
