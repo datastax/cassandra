@@ -1712,7 +1712,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
                 if (t != q)
                     assertFalse("Subranges " + t.tokenRange() + " and " + q.tokenRange() + "intersect", t.tokenRange().intersects(q.tokenRange()));
             }
-            long compactionSize = t.totals != null ? t.totals.inputDiskSize : CompactionSSTable.getTotalBytes(t.inputSSTables());
+            long compactionSize = t.totals != null ? t.totals.inputDiskSize : CompactionSSTable.getTotalDataBytes(t.inputSSTables());
             assertEquals(4.0/3 * compactionSize, t.getSpaceOverhead(), 0.001 * compactionSize);
         }
 

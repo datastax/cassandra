@@ -658,7 +658,7 @@ public class CompactionTask extends AbstractCompactionTask
         @Override
         public long outputDiskSize()
         {
-            return CompactionSSTable.getTotalBytes(newSStables);
+            return CompactionSSTable.getTotalDataBytes(newSStables);
         }
 
         @Override
