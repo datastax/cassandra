@@ -2975,7 +2975,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     public Collection<Token> getTokensFor(InetAddressAndPort endpoint)
     {
-        return Nodes.getTokens(endpoint, Collections.emptyList());
+        return Gossiper.instance.getTokensFor(endpoint, getTokenMetadata().partitioner);
     }
 
     /**
