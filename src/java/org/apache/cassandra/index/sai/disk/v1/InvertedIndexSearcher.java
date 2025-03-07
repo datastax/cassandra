@@ -61,6 +61,7 @@ import org.apache.cassandra.index.sai.utils.RowIdWithByteComparable;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.io.sstable.SSTableReadsListener;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.CloseableIterator;
@@ -80,7 +81,8 @@ public class InvertedIndexSearcher extends IndexSearcher
     private final Version version;
     private final boolean filterRangeResults;
     private final SSTableReader sstable;
-    private final DocLengthsReader docLengthsReader;
+    private final SegmentMetadata.ComponentMetadata docLengthsMeta;
+    private final FileHandle docLengths;
     private final long segmentRowIdOffset;
 
     protected InvertedIndexSearcher(SSTableContext sstableContext,
@@ -99,9 +101,9 @@ public class InvertedIndexSearcher extends IndexSearcher
         this.version = version;
         this.filterRangeResults = filterRangeResults;
         perColumnEventListener = (QueryEventListener.TrieIndexEventListener)indexContext.getColumnQueryMetrics();
-        var docLengthsMeta = segmentMetadata.componentMetadatas.getOptional(IndexComponentType.DOC_LENGTHS);
         this.segmentRowIdOffset = segmentMetadata.segmentRowIdOffset;
-        this.docLengthsReader = docLengthsMeta == null ? null : new DocLengthsReader(indexFiles.docLengths(), docLengthsMeta);
+        this.docLengthsMeta = segmentMetadata.componentMetadatas.getOptional(IndexComponentType.DOC_LENGTHS);
+        this.docLengths = docLengthsMeta == null ? null : indexFiles.docLengths();
 
         Map<String,String> map = metadata.componentMetadatas.get(IndexComponentType.TERMS_DATA).attributes;
         String footerPointerString = map.get(SAICodecUtils.FOOTER_POINTER);
@@ -176,7 +178,7 @@ public class InvertedIndexSearcher extends IndexSearcher
             var iter = new RowIdWithTermsIterator(reader.allTerms(orderer.isAscending()));
             return toMetaSortedIterator(iter, queryContext);
         }
-        if (docLengthsReader == null)
+        if (docLengthsMeta == null)
             throw new InvalidRequestException(indexContext.getIndexName() + " does not support BM25 scoring until it is rebuilt");
 
         // find documents that match each term
@@ -194,11 +196,12 @@ public class InvertedIndexSearcher extends IndexSearcher
 
         var pkm = primaryKeyMapFactory.newPerSSTablePrimaryKeyMap();
         var merged = IntersectingPostingList.intersect(postingLists);
-        
+        var docLengthsReader = new DocLengthsReader(docLengths, docLengthsMeta);
+
         // Wrap the iterator with resource management
         var it = new AbstractIterator<DocTF>() { // Anonymous class extends AbstractIterator
             private boolean closed;
-            
+
             @Override
             protected DocTF computeNext()
             {
@@ -222,7 +225,7 @@ public class InvertedIndexSearcher extends IndexSearcher
             {
                 if (closed) return;
                 closed = true;
-                FileUtils.closeQuietly(pkm, merged);
+                FileUtils.closeQuietly(pkm, merged, docLengthsReader);
             }
         };
         return bm25Internal(it, queryTerms, documentFrequencies);
@@ -250,7 +253,7 @@ public class InvertedIndexSearcher extends IndexSearcher
     {
         if (!orderer.isBM25())
             return super.orderResultsBy(reader, queryContext, keys, orderer, limit);
-        if (docLengthsReader == null)
+        if (docLengthsMeta == null)
             throw new InvalidRequestException(indexContext.getIndexName() + " does not support BM25 scoring until it is rebuilt");
 
         var queryTerms = orderer.getQueryTerms();
@@ -279,7 +282,7 @@ public class InvertedIndexSearcher extends IndexSearcher
     @Override
     public void close()
     {
-        FileUtils.closeQuietly(reader, docLengthsReader);
+        FileUtils.closeQuietly(reader, docLengths);
     }
 
     /**
