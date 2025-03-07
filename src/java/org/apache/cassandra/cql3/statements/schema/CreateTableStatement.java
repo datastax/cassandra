@@ -41,6 +41,7 @@ import org.apache.cassandra.exceptions.AlreadyExistsException;
 import org.apache.cassandra.guardrails.Guardrails;
 import org.apache.cassandra.guardrails.UserKeyspaceFilter;
 import org.apache.cassandra.guardrails.UserKeyspaceFilterProvider;
+import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.schema.*;
 import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
 import org.apache.cassandra.service.ClientState;
@@ -108,6 +109,12 @@ public final class CreateTableStatement extends AlterSchemaStatement
     public void validate(QueryState state)
     {
         super.validate(state);
+        logger.debug("Table {}, internal state {}", tableName, state.getClientState().isInternal);
+
+        int separatorLength = 1;
+        if (!state.getClientState().isInternal && tableName.length() > SchemaConstants.NAME_LENGTH - keyspaceName.length() - separatorLength)
+            throw ire("Keyspace and table names combined shouldn't be more than %s characters long (got keyspace of %s chars and table of %s chars for %s)",
+                      SchemaConstants.NAME_LENGTH - separatorLength, keyspaceName.length(), tableName.length(), tableName);
 
         // Some tools use CreateTableStatement, and the guardrails below both don't make too much sense for tools and
         // require the server to be initialized, so skipping them if it isn't.
