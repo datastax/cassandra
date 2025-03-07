@@ -336,6 +336,7 @@ public class ConnectionTest
 
             // Ensure version is the same
             inbound.assertHandlersMessagingVersion(outbound.messagingVersion());
+            Assert.assertEquals(outbound.settings().endpointToVersion.get(endpoint), outbound.messagingVersion());
         });
     }
 
@@ -393,6 +394,7 @@ public class ConnectionTest
 
             // Ensure version is the same
             inbound.assertHandlersMessagingVersion(outbound.messagingVersion());
+            Assert.assertEquals(outbound.settings().endpointToVersion.get(endpoint), outbound.messagingVersion());
         });
     }
 
