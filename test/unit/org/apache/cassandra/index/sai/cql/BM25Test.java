@@ -23,7 +23,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
-import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -31,11 +30,8 @@ import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.SAIUtil;
 import org.apache.cassandra.index.sai.disk.format.Version;
-import org.apache.cassandra.index.sai.disk.v1.DocLengthsReader;
 import org.apache.cassandra.index.sai.disk.v1.SegmentBuilder;
 import org.apache.cassandra.index.sai.plan.QueryController;
-import org.apache.cassandra.inject.Injections;
-import org.apache.cassandra.inject.InvokePointBuilder;
 
 import static org.apache.cassandra.index.sai.analyzer.AnalyzerEqOperatorSupport.EQ_AMBIGUOUS_ERROR;
 import static org.assertj.core.api.AssertionsForInterfaceTypes.assertThat;
@@ -531,7 +527,7 @@ public class BM25Test extends SAITester
         execute("INSERT INTO %s (pk, v) VALUES (3, 'apple apple apple')");
 
         // Now insert a lot of docs that will hit the query, but will be lower in frequency and therefore in score
-        for (int i = 4; i < 1000; i++)
+        for (int i = 4; i < 10000; i++)
             execute("INSERT INTO %s (pk, v) VALUES (?, 'apple apple')", i);
 
         // Bug only present in sstable
@@ -541,7 +537,7 @@ public class BM25Test extends SAITester
         final ExecutorService executor = Executors.newFixedThreadPool(10);
         String select = "SELECT pk FROM %s ORDER BY v BM25 OF 'apple' LIMIT 3";
         var futures = new ArrayList<Future<UntypedResultSet>>();
-        for (int i = 0; i < 100; i++)
+        for (int i = 0; i < 1000; i++)
             futures.add(executor.submit(() -> execute(select)));
 
         // The top results are always the same rows
