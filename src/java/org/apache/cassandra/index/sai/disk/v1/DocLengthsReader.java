@@ -20,6 +20,8 @@ package org.apache.cassandra.index.sai.disk.v1;
 import java.io.Closeable;
 import java.io.IOException;
 
+import javax.annotation.concurrent.NotThreadSafe;
+
 import org.apache.cassandra.index.sai.disk.io.IndexInputReader;
 import org.apache.cassandra.index.sai.utils.IndexFileUtils;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
@@ -27,15 +29,14 @@ import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.lucene.codecs.CodecUtil;
 
+@NotThreadSafe
 public class DocLengthsReader implements Closeable
 {
-    private final FileHandle fileHandle;
     private final IndexInputReader input;
     private final SegmentMetadata.ComponentMetadata componentMetadata;
 
     public DocLengthsReader(FileHandle fileHandle, SegmentMetadata.ComponentMetadata componentMetadata)
     {
-        this.fileHandle = fileHandle;
         this.input = IndexFileUtils.instance.openInput(fileHandle);
         this.componentMetadata = componentMetadata;
     }
@@ -53,7 +54,7 @@ public class DocLengthsReader implements Closeable
     @Override
     public void close() throws IOException
     {
-        FileUtils.close(fileHandle, input);
+        FileUtils.close(input);
     }
 }
 
