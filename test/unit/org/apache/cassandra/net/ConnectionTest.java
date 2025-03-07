@@ -124,17 +124,24 @@ public class ConnectionTest
         timeouts.clear();
     }
 
+    private static volatile long originalRpcTimeout = 0;
+
     @BeforeClass
     public static void startup()
     {
         DatabaseDescriptor.daemonInitialization();
         CommitLog.instance.start();
+        // At the time of this commit, the default is 20 seconds and leads to significant delays
+        // in this test class, especially in testMessagePurging and testCloseIfEndpointDown.
+        originalRpcTimeout = DatabaseDescriptor.getRpcTimeout(TimeUnit.MILLISECONDS);
+        DatabaseDescriptor.setRpcTimeout(5000L);
     }
 
     @AfterClass
     public static void cleanup() throws InterruptedException
     {
         factory.shutdownNow();
+        DatabaseDescriptor.setRpcTimeout(originalRpcTimeout);
     }
 
     interface SendTest
