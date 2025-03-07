@@ -18,9 +18,15 @@
 
 package org.apache.cassandra.index.sai.cql;
 
+import java.util.ArrayList;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+
 import org.junit.Before;
 import org.junit.Test;
 
+import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.SAIUtil;
 import org.apache.cassandra.index.sai.disk.format.Version;
@@ -29,6 +35,7 @@ import org.apache.cassandra.index.sai.plan.QueryController;
 
 import static org.apache.cassandra.index.sai.analyzer.AnalyzerEqOperatorSupport.EQ_AMBIGUOUS_ERROR;
 import static org.assertj.core.api.AssertionsForInterfaceTypes.assertThat;
+import static org.junit.Assert.assertEquals;
 
 public class BM25Test extends SAITester
 {
@@ -506,5 +513,38 @@ public class BM25Test extends SAITester
         createSimpleTable();
         var result = execute("SELECT k FROM %s ORDER BY v BM25 OF 'test' LIMIT 1");
         assertThat(result).hasSize(0);
+    }
+
+    @Test
+    public void testBM25RaceConditionConcurrentQueriesInInvertedIndexSearcher() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int, v text, PRIMARY KEY (pk))");
+        analyzeIndex();
+
+        // Create 3 docs that have the same BM25 score and will be our top docs
+        execute("INSERT INTO %s (pk, v) VALUES (1, 'apple apple apple')");
+        execute("INSERT INTO %s (pk, v) VALUES (2, 'apple apple apple')");
+        execute("INSERT INTO %s (pk, v) VALUES (3, 'apple apple apple')");
+
+        // Now insert a lot of docs that will hit the query, but will be lower in frequency and therefore in score
+        for (int i = 4; i < 10000; i++)
+            execute("INSERT INTO %s (pk, v) VALUES (?, 'apple apple')", i);
+
+        // Bug only present in sstable
+        flush();
+
+        // Trigger many concurrent queries
+        final ExecutorService executor = Executors.newFixedThreadPool(10);
+        String select = "SELECT pk FROM %s ORDER BY v BM25 OF 'apple' LIMIT 3";
+        var futures = new ArrayList<Future<UntypedResultSet>>();
+        for (int i = 0; i < 1000; i++)
+            futures.add(executor.submit(() -> execute(select)));
+
+        // The top results are always the same rows
+        for (Future<UntypedResultSet> future : futures)
+            assertRowsIgnoringOrder(future.get(), row(1), row(2), row(3));
+
+        // Shutdown executor
+        assertEquals(0, executor.shutdownNow().size());
     }
 }
