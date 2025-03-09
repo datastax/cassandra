@@ -138,6 +138,8 @@ public final class IndexMetadata
     /**
      * Calculates the maximum length of the generated index name to fit file names.
      * It includes the generated suffixes in account.
+     * The calculation depends on how index implements file names construciton from index names.
+     * This needs to be addressed, see CNDB-13240.
      *
      * @return the allowed length of the generated index name
      */
