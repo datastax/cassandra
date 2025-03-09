@@ -119,7 +119,7 @@ public final class IndexMetadata
      * Long index names are truncated to fit the length allowing constructing filenames.
      *
      * @param table  the table name
-     * @param column the column identifier. Can be null if the index is for the primary key.
+     * @param column the column identifier. Can be null if the index is not column specific.
      * @return the generated index name
      */
     public static String generateDefaultIndexName(String table, @Nullable ColumnIdentifier column)
