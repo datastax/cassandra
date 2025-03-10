@@ -531,11 +531,11 @@ public class AllowFilteringTest extends SAITester
         Injections.inject(blockIndexBuild);
         String idx = createIndexAsync(String.format("CREATE CUSTOM INDEX ON %%s(v) USING '%s'", StorageAttachedIndex.class.getName()));
 
-        assertThatThrownBy(() -> execute("SELECT * FROM %s WHERE v=0"))
+        assertThatThrownBy(() -> executeInternal("SELECT * FROM %s WHERE v=0"))
                 .hasMessage("The secondary index '" + idx + "' is not yet available as it is building")
                 .isInstanceOf(IndexBuildInProgressException.class);
 
-        assertThatThrownBy(() -> execute("SELECT * FROM %s WHERE v=0 ALLOW FILTERING"))
+        assertThatThrownBy(() -> executeInternal("SELECT * FROM %s WHERE v=0 ALLOW FILTERING"))
                 .hasMessage("The secondary index '" + idx + "' is not yet available as it is building")
                 .isInstanceOf(IndexBuildInProgressException.class);
 
