@@ -131,7 +131,7 @@ public class Version implements Comparable<Version>
         int addedLength = SAI_DESCRIPTOR.length()
                           + versionNameLength
                           + generationLength
-                          + IndexComponentType.KD_TREE_POSTING_LISTS.representation.length()
+                          + IndexComponentType.PRIMARY_KEY_BLOCK_OFFSETS.representation.length()
                           + SAI_SEPARATOR.length() * 4
                           + EXTENSION.length();
         // Prefixes from Descriptor constructor
