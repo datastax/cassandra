@@ -127,17 +127,19 @@ public class Version implements Comparable<Version>
     {
         // Prefixes and suffixes constructed by Version.stargazerFileNameFormat
         int versionNameLength = latest().toString().length();
-        int generationLength = 1;
+        // room for up to 999 generations
+        int generationLength = 3 + SAI_SEPARATOR.length();
         int addedLength = SAI_DESCRIPTOR.length()
                           + versionNameLength
                           + generationLength
                           + IndexComponentType.PRIMARY_KEY_BLOCK_OFFSETS.representation.length()
-                          + SAI_SEPARATOR.length() * 4
+                          + SAI_SEPARATOR.length() * 3
                           + EXTENSION.length();
+
         // Prefixes from Descriptor constructor
         int separatorLength = 1;
         int indexVersionLength = 2;
-        int tableIdLength = 32;
+        int tableIdLength = 28;
         addedLength += indexVersionLength
                        + SSTableFormat.Type.BTI.name().length()
                        + tableIdLength
