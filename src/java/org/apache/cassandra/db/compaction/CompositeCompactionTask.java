@@ -106,6 +106,12 @@ public class CompositeCompactionTask extends AbstractCompactionTask
         return "Composite " + tasks;
     }
 
+    @Override
+    public long getSpaceOverhead()
+    {
+        throw new UnsupportedOperationException("Cannot calculate space overhead for composite tasks");
+    }
+
     /// Limit the parallelism of a list of compaction tasks by combining them into a smaller number of composite tasks.
     /// This method assumes that the caller has preference for the tasks to be executed in order close to the order of
     /// the input list. See [UnifiedCompactionStrategy#getMaximalTasks] for an example of how to use this method.

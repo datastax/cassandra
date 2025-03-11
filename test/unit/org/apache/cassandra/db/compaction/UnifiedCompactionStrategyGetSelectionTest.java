@@ -135,6 +135,7 @@ public class UnifiedCompactionStrategyGetSelectionTest extends BaseCompactionStr
                                                             Collections.emptySet(),
                                                             random.nextInt(20) == 0 ? -1 : 1,
                                                             size,
+                                                            size,
                                                             size);
                 CompactionAggregate.UnifiedAggregate aggregate = Mockito.mock(CompactionAggregate.UnifiedAggregate.class, Mockito.withSettings().stubOnly());
                 when(aggregate.getSelected()).thenReturn(pick);
@@ -179,12 +180,12 @@ public class UnifiedCompactionStrategyGetSelectionTest extends BaseCompactionStr
         when(controller.prioritize(anyList())).thenCallRealMethod();
         when(controller.getReservedThreads()).thenReturn(reservations);
         when(controller.getReservationsType()).thenReturn(reservationType);
-        when(controller.getOverheadSizeInBytes(any())).thenAnswer(inv -> ((CompactionPick) inv.getArgument(0)).totSizeInBytes());
+        when(controller.getOverheadSizeInBytes(any(), anyLong())).thenAnswer(inv -> ((Long)inv.getArgument(1)).longValue());
         when(controller.isRecentAdaptive(any())).thenAnswer(inv -> ((CompactionPick) inv.getArgument(0)).hotness() < 0);  // hotness is used to mock adaptive
         when(controller.overlapInclusionMethod()).thenReturn(ignoreRepeats ? Overlaps.InclusionMethod.TRANSITIVE : Overlaps.InclusionMethod.NONE);
         when(controller.parallelizeOutputShards()).thenReturn(true);
 
-        UnifiedCompactionStrategy.ShardingStats stats = new UnifiedCompactionStrategy.ShardingStats(null, null, 0, 0, 0, 0, requestedParallelism);
+        UnifiedCompactionStrategy.ShardingStats stats = new UnifiedCompactionStrategy.ShardingStats(null, null, 0, 1.0, 0, 0, 0, requestedParallelism);
         UnifiedCompactionStrategy strategy = Mockito.mock(UnifiedCompactionStrategy.class, Mockito.withSettings().stubOnly());
         when(strategy.getController()).thenReturn(controller);
         when(strategy.getShardingStats(any())).thenReturn(stats);

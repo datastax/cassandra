@@ -278,7 +278,7 @@ public class LeveledManifest
             // we want to calculate score excluding compacting ones
             Set<CompactionSSTable> sstablesInLevel = Sets.newHashSet(sstables);
             Set<CompactionSSTable> remaining = Sets.difference(sstablesInLevel, realm.getCompactingSSTables());
-            long remainingBytesForLevel = CompactionSSTable.getTotalBytes(remaining);
+            long remainingBytesForLevel = CompactionSSTable.getTotalDataBytes(remaining);
             long maxBytesForLevel = maxBytesForLevel(i, maxSSTableSizeInBytes);
             double score = (double) remainingBytesForLevel / (double) maxBytesForLevel;
             logger.trace("Compaction score for level {} is {}", i, score);
@@ -330,7 +330,7 @@ public class LeveledManifest
             // small in L0.
             return l0Compactions;
         }
-        double l0Score = (double) CompactionSSTable.getTotalBytes(sstables) / (double) maxBytesForLevel(0, maxSSTableSizeInBytes);
+        double l0Score = (double) CompactionSSTable.getTotalDataBytes(sstables) / (double) maxBytesForLevel(0, maxSSTableSizeInBytes);
         int l0PendingCompactions = Math.max(0, getEstimatedPendingTasks(0) - 1);
         return CompactionAggregate.createLeveled(sstables, candidates, l0PendingCompactions, maxSSTableSizeInBytes, 0, getNextLevel(candidates), l0Score, levelFanoutSize);
     }
@@ -353,7 +353,7 @@ public class LeveledManifest
     private CompactionAggregate.Leveled getSTCSAggregate(CompactionPick compaction)
     {
         Set<CompactionSSTable> sstables = getLevel(0);
-        double score = (double) CompactionSSTable.getTotalBytes(sstables) / (double) maxBytesForLevel(0, maxSSTableSizeInBytes);
+        double score = (double) CompactionSSTable.getTotalDataBytes(sstables) / (double) maxBytesForLevel(0, maxSSTableSizeInBytes);
         int remainingSSTables = sstables.size() - compaction.sstables().size();
         int pendingTasks = remainingSSTables > realm.getMinimumCompactionThreshold()
                            ? (int) Math.ceil(remainingSSTables / realm.getMaximumCompactionThreshold())
@@ -616,7 +616,7 @@ public class LeveledManifest
             }
 
             // leave everything in L0 if we didn't end up with a full sstable's worth of data
-            if (CompactionSSTable.getTotalBytes(candidates) > maxSSTableSizeInBytes)
+            if (CompactionSSTable.getTotalDataBytes(candidates) > maxSSTableSizeInBytes)
             {
                 // add sstables from L1 that overlap candidates
                 // if the overlapping ones are already busy in a compaction, leave it out.
@@ -721,7 +721,7 @@ public class LeveledManifest
             }
 
             int pendingTasks = getEstimatedPendingTasks(i);
-            double score = (double) CompactionSSTable.getTotalBytes(sstables) / (double) maxBytesForLevel(i, maxSSTableSizeInBytes);
+            double score = (double) CompactionSSTable.getTotalDataBytes(sstables) / (double) maxBytesForLevel(i, maxSSTableSizeInBytes);
             ret.add(CompactionAggregate.createLeveled(sstables, pendingTasks, maxSSTableSizeInBytes, i, score, levelFanoutSize));
         }
 
@@ -749,7 +749,7 @@ public class LeveledManifest
             return remaining.size() / realm.getMaximumCompactionThreshold();
 
         // If there is 1 byte over TBL - (MBL * 1.001), there is still a task left, so we need to round up.
-        return Math.toIntExact((long) Math.ceil((Math.max(0L, CompactionSSTable.getTotalBytes(remaining) -
+        return Math.toIntExact((long) Math.ceil((Math.max(0L, CompactionSSTable.getTotalDataBytes(remaining) -
                                                               (maxBytesForLevel(level, maxSSTableSizeInBytes) * 1.001)) / (double) maxSSTableSizeInBytes)));
     }
 
@@ -764,7 +764,7 @@ public class LeveledManifest
         }
 
         int newLevel;
-        if (minimumLevel == 0 && minimumLevel == maximumLevel && CompactionSSTable.getTotalBytes(sstables) < maxSSTableSizeInBytes)
+        if (minimumLevel == 0 && minimumLevel == maximumLevel && CompactionSSTable.getTotalDataBytes(sstables) < maxSSTableSizeInBytes)
         {
             newLevel = 0;
         }
