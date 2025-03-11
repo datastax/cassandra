@@ -101,4 +101,10 @@ public class RepairFinishedCompactionTask extends AbstractCompactionTask
             }
         }
     }
+
+    @Override
+    public long getSpaceOverhead()
+    {
+        return 0;   // This is just metadata modification, no overhead.
+    }
 }

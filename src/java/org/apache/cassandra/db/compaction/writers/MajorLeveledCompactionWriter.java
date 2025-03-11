@@ -64,7 +64,7 @@ public class MajorLeveledCompactionWriter extends CompactionAwareWriter
         super(realm, directories, txn, nonExpiredSSTables, keepOriginals);
         this.maxSSTableSize = maxSSTableSize;
         this.levelFanoutSize = realm.getLevelFanoutSize();
-        long estimatedSSTables = Math.max(1, CompactionSSTable.getTotalBytes(nonExpiredSSTables) / maxSSTableSize);
+        long estimatedSSTables = Math.max(1, CompactionSSTable.getTotalDataBytes(nonExpiredSSTables) / maxSSTableSize);
         keysPerSSTable = estimatedTotalKeys / estimatedSSTables;
     }
 
