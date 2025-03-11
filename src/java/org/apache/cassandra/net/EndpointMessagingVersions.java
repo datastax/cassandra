@@ -39,6 +39,15 @@ public class EndpointMessagingVersions
     // protocol versions of the other nodes in the cluster
     private final ConcurrentMap<InetAddressAndPort, Integer> versions = new NonBlockingHashMap<>();
 
+    public EndpointMessagingVersions()
+    {
+    }
+
+    private EndpointMessagingVersions(EndpointMessagingVersions versions)
+    {
+        this.versions.putAll(versions.versions);
+    }
+
     /**
      * @return the last version associated with address, or @param version if this is the first such version
      */
@@ -95,5 +104,10 @@ public class EndpointMessagingVersions
     public boolean knows(InetAddressAndPort endpoint)
     {
         return versions.containsKey(endpoint);
+    }
+
+    public EndpointMessagingVersions copy()
+    {
+        return new EndpointMessagingVersions(this);
     }
 }
