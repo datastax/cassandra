@@ -115,28 +115,41 @@ public class CompactionTask extends AbstractCompactionTask
         logger.debug("Created compaction task with id {} and strategy {}", txn.opIdString(), strategy);
     }
 
+
     /**
      * Create a compaction task for deleted data collection.
      */
-    public static AbstractCompactionTask forGarbageCollection(CompactionRealm realm, ILifecycleTransaction txn, long gcBefore, CompactionParams.TombstoneOption tombstoneOption)
+    public static AbstractCompactionTask forGarbageCollection(CompactionRealm realm,
+                                                              ILifecycleTransaction txn,
+                                                              long gcBefore,
+                                                              CompactionParams.TombstoneOption tombstoneOption)
     {
-        AbstractCompactionTask task = new CompactionTask(realm, txn, gcBefore, false, null)
-        {
-            @Override
-            protected CompactionController getCompactionController(Set<SSTableReader> toCompact)
-            {
-                return new CompactionController(realm, toCompact, gcBefore, null, tombstoneOption);
-            }
+        return new GarbageCollectionTask(realm, txn, gcBefore, tombstoneOption);
+    }
 
-            @Override
-            protected int getLevel()
-            {
-                return txn.onlyOne().getSSTableLevel();
-            }
-        };
-        task.setUserDefined(true);
-        task.setCompactionType(OperationType.GARBAGE_COLLECT);
-        return task;
+    public static class GarbageCollectionTask extends CompactionTask
+    {
+        private final CompactionParams.TombstoneOption tombstoneOption;
+
+        public GarbageCollectionTask(CompactionRealm realm, ILifecycleTransaction txn, long gcBefore, CompactionParams.TombstoneOption tombstoneOption)
+        {
+            super(realm, txn, gcBefore, false, null);
+            this.tombstoneOption = tombstoneOption;
+            setCompactionType(OperationType.GARBAGE_COLLECT);
+            setUserDefined(true);
+        }
+
+        @Override
+        protected CompactionController getCompactionController(Set<SSTableReader> toCompact)
+        {
+            return new CompactionController(realm, toCompact, gcBefore, null, tombstoneOption);
+        }
+
+        @Override
+        protected int getLevel()
+        {
+            return transaction.onlyOne().getSSTableLevel();
+        }
     }
 
     private static long addToTotalBytesCompacted(long bytesCompacted)
@@ -335,6 +348,16 @@ public class CompactionTask extends AbstractCompactionTask
             }
         }
         return new OperationTotals(inputDiskSize, inputUncompressedSize);
+    }
+
+    @Override
+    public long getSpaceOverhead()
+    {
+        // This value should be quick to return and never change.
+        // We can calculate the total number of bytes in the inputSSTables, but that's something that can change if
+        // we remove sstable because expired sstables or fitting under the available disk space.
+        // So we throw instead and let UnifiedCompactionStrategy override this method.
+        throw new UnsupportedOperationException("Unimplemented in base class.");
     }
 
     /**
@@ -656,7 +679,7 @@ public class CompactionTask extends AbstractCompactionTask
         @Override
         public long outputDiskSize()
         {
-            return CompactionSSTable.getTotalBytes(newSStables);
+            return CompactionSSTable.getTotalDataBytes(newSStables);
         }
 
         @Override

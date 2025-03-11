@@ -108,12 +108,29 @@ public interface CompactionSSTable
     /**
      * @return the sum of the on-disk size of the given sstables.
      */
-    static long getTotalBytes(Iterable<? extends CompactionSSTable> sstables)
+    static long getTotalDataBytes(Iterable<? extends CompactionSSTable> sstables)
     {
         long sum = 0;
         for (CompactionSSTable sstable : sstables)
             sum += sstable.onDiskLength();
         return sum;
+    }
+
+    /*
+     * @return the total number of bytes in all on-disk components of the given sstables.
+     */
+    static long getTotalOnDiskComponentsBytes(Iterable<? extends CompactionSSTable> sstables)
+    {
+        long total = 0;
+        for (CompactionSSTable sstable : sstables)
+            total += sstable.onDiskComponentsSize();
+
+        // We estimate the compaction overhead to be the same as the all components size of the input sstables including SAI files
+        // This is because even though we have a cache, the output sstable data files will be on disk
+        // first, and only added to the cache at the end. We could improve flushed sstables, since we know that
+        // the output will be 1 / RF of the input size, but we don't have this information handy, and normally
+        // L0 sstables have a small overhead, the overhead is mostly significant for the sstables at the higher levels.
+        return total;
     }
 
     /**

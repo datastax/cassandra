@@ -40,4 +40,10 @@ public class ExpirationTask extends AbstractCompactionTask
         transaction.commit();
         CompactionManager.instance.incrementDeleteOnlyCompactions();
     }
+
+    @Override
+    public long getSpaceOverhead()
+    {
+        return 0;   // This is just deleting files, no overhead.
+    }
 }
