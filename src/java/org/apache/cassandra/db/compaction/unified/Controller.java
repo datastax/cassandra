@@ -34,6 +34,7 @@ import java.util.stream.Collectors;
 import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -44,6 +45,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.compaction.CompactionAggregate;
 import org.apache.cassandra.db.compaction.CompactionPick;
 import org.apache.cassandra.db.compaction.CompactionRealm;
+import org.apache.cassandra.db.compaction.CompactionSSTable;
 import org.apache.cassandra.db.compaction.CompactionStrategy;
 import org.apache.cassandra.db.compaction.UnifiedCompactionStrategy;
 import org.apache.cassandra.db.marshal.VectorType;
@@ -1420,9 +1422,9 @@ public abstract class Controller
         return env.maxThroughput();
     }
 
-    public long getOverheadSizeInBytes(CompactionPick compactionPick)
+    public long getOverheadSizeInBytes(Iterable<? extends CompactionSSTable> sstables, long totalDataSize)
     {
-        return env.getOverheadSizeInBytes(compactionPick);
+        return env.getOverheadSizeInBytes(sstables, totalDataSize);
     }
 
     public int maxConcurrentCompactions()
