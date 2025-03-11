@@ -241,13 +241,26 @@ public class ANNOptionsTest extends CQLTester
 
             // ...with a version that doesn't support ANN options
             out = new DataOutputBuffer();
-            ReadCommand.serializer.serialize(command, out, MessagingService.VERSION_DS_10);
-            Assertions.assertThat(ReadCommand.serializer.serializedSize(command, MessagingService.VERSION_DS_10))
-                      .isEqualTo(out.buffer().remaining());
-            in = new DataInputBuffer(out.buffer(), true);
-            command = ReadCommand.serializer.deserialize(in, MessagingService.VERSION_DS_10);
-            actualOptions = command.rowFilter().annOptions();
-            Assertions.assertThat(actualOptions).isEqualTo(ANNOptions.NONE);
+            if (expectedOptions != ANNOptions.NONE) {
+                try
+                {
+                    ReadCommand.serializer.serialize(command, out, MessagingService.VERSION_DS_10);
+                }
+                catch (IllegalStateException e)
+                {
+                    // expected
+                    Assertions.assertThat(e)
+                              .hasMessageContaining("Unable to serialize ANN options with messaging version: " + MessagingService.VERSION_DS_10);
+                }
+            } else {
+                ReadCommand.serializer.serialize(command, out, MessagingService.VERSION_DS_10);
+                Assertions.assertThat(ReadCommand.serializer.serializedSize(command, MessagingService.VERSION_DS_10))
+                          .isEqualTo(out.buffer().remaining());
+                in = new DataInputBuffer(out.buffer(), true);
+                command = ReadCommand.serializer.deserialize(in, MessagingService.VERSION_DS_10);
+                actualOptions = command.rowFilter().annOptions();
+                Assertions.assertThat(actualOptions).isEqualTo(ANNOptions.NONE);
+            }
         }
         catch (IOException e)
         {

@@ -437,6 +437,13 @@ public final class InboundMessageHandlers
              + mapping.applyAsLong(legacyCounters);
     }
 
+    @VisibleForTesting
+    public void assertHandlersMessagingVersion(int expectedVersion)
+    {
+        for (InboundMessageHandler handler : handlers)
+            assert handler.version == expectedVersion : "Expected all handlers to be at version " + expectedVersion + " but found " + handler.version;
+    }
+
     interface HandlerProvider
     {
         InboundMessageHandler provide(FrameDecoder decoder,

@@ -179,7 +179,11 @@ public class ANNOptions
         {
             // ANN options are only supported in DS 11 and above, so don't serialize anything if the messaging version is lower
             if (version < MessagingService.VERSION_DS_11)
+            {
+                if (options != NONE)
+                    throw new IllegalStateException("Unable to serialize ANN options with messaging version: " + version);
                 return;
+            }
 
             int flags = flags(options);
             out.writeInt(flags);
