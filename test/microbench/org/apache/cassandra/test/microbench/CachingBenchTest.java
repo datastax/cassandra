@@ -237,7 +237,7 @@ public class CachingBenchTest extends CQLTester
         int startTombCount = countTombstoneMarkers(cfs);
         int startRowDeletions = countRowDeletions(cfs);
         int startTableCount = cfs.getLiveSSTables().size();
-        long startSize = CompactionSSTable.getTotalBytes(cfs.getLiveSSTables());
+        long startSize = CompactionSSTable.getTotalDataBytes(cfs.getLiveSSTables());
         System.out.println("\nCompession: " + cfs.getCompressionParameters().toString());
         System.out.println("Reader " + cfs.getLiveSSTables().iterator().next().getFileDataInput(0).toString());
         if (cacheEnabled)
@@ -270,7 +270,7 @@ public class CachingBenchTest extends CQLTester
         int endTombCount = countTombstoneMarkers(cfs);
         int endRowDeletions = countRowDeletions(cfs);
         int endTableCount = cfs.getLiveSSTables().size();
-        long endSize = CompactionSSTable.getTotalBytes(cfs.getLiveSSTables());
+        long endSize = CompactionSSTable.getTotalDataBytes(cfs.getLiveSSTables());
 
         System.out.println(String.format("Major compaction completed in %.3fs",
                 (endTime - startTime) * 1e-3));

@@ -240,9 +240,8 @@ public class BackgroundCompactions
         TimeUUID id = progress.operationId();
         CompactionPick compaction = compactions.computeIfAbsent(id,
                                                                 uuid ->
-                                                                CompactionPick.create(id,
-                                                                                      -1,
-                                                                                      progress.inSSTables()));
+                                                                CompactionPick.createWithUnknownParent(id,
+                                                                                                       progress.inSSTables()));
 
         logger.debug("Setting background compaction {} as in progress", id);
         compaction.setProgress(progress);
