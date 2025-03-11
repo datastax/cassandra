@@ -16,7 +16,7 @@
 
 package org.apache.cassandra.db.compaction.unified;
 
-import org.apache.cassandra.db.compaction.CompactionPick;
+import org.apache.cassandra.db.compaction.CompactionSSTable;
 import org.apache.cassandra.utils.MovingAverage;
 
 /**
@@ -97,13 +97,19 @@ public interface Environment
      * are in progress, both input and output sstables need to be present, since
      * the input sstables can only be deleted after compaction has completed.
      * <p/>
-     * The default implementation looks at the size of the data files of the
-     * input compaction, assuming that the output compaction will
-     * be just as large. A future improvement could be to consider the size of
-     * metadata components too, especially when SAI indexes are present.
-     * <p/>
-     * @return the overhead size in bytes that results from compacting the sstables
-     * in the compaction pick passed in.
+     * The default implementation looks at the size of the input data files of the
+     * compaction, assuming that the output compaction will be just as large.
+     * This does not take into account indexes, and thus may underestimate the
+     * total required space. This method is used to evaluate the actual space
+     * that may be required.
+     *
+     * @param sstables set of sstables to be compacted
+     * @param totalDataSize precalculated data size, to use when total space
+     *                      adjustment is not required
+     * @return the expecte overhead size in bytes for compacting the given sstables
      */
-    long getOverheadSizeInBytes(CompactionPick compactionPick);
+    default long getOverheadSizeInBytes(Iterable<? extends CompactionSSTable> sstables, long totalDataSize)
+    {
+        return totalDataSize;
+    }
 }
