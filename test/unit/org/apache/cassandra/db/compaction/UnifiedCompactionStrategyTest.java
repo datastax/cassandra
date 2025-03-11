@@ -79,6 +79,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.when;
 
 /**
@@ -764,7 +765,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         when(controller.getDataSetSizeBytes()).thenReturn(topBucketMaxCompactionSize * numShards);
         when(controller.random()).thenCallRealMethod();
 
-        when(controller.getOverheadSizeInBytes(any(CompactionPick.class))).thenAnswer(inv -> ((CompactionPick)inv.getArgument(0)).totSizeInBytes());
+        when(controller.getOverheadSizeInBytes(any(), anyLong())).thenAnswer(inv -> ((Long)inv.getArgument(1)).longValue());
 
         UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(strategyFactory, controller);
         List<SSTableReader> allSstables = new ArrayList<>();
@@ -1227,6 +1228,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         when(compaction.hasExpiredOnly()).thenReturn(false);
         List<SSTableReader> nonExpiredSSTables = createSStables(realm.getPartitioner());
         when(compaction.sstables()).thenReturn(ImmutableSet.copyOf(nonExpiredSSTables));
+        when(compaction.totalOverheadInBytes()).thenReturn(minimalSizeBytes);   // doesn't really matter
 
         CompactionAggregate.UnifiedAggregate aggregate = Mockito.mock(CompactionAggregate.UnifiedAggregate.class);
         when(aggregate.getSelected()).thenReturn(compaction);
@@ -1438,6 +1440,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
             {
                 assertTrue(task instanceof ExpirationTask);
                 assertEquals(4, task.transaction.originals().size());
+                assertEquals(0L, task.getSpaceOverhead());
             }
             Collection<CompactionPick> picks = strategy.backgroundCompactions.getCompactionsInProgress();
             assertEquals(0, picks.size()); // expiration tasks are not tracked
@@ -1680,6 +1683,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         Controller controller = Mockito.mock(Controller.class);
         when(controller.getNumShards(anyDouble())).thenReturn(numShards);
         when(controller.parallelizeOutputShards()).thenReturn(true);
+        when(controller.getOverheadSizeInBytes(any(), anyLong())).thenAnswer(inv -> (long) (inv.getArgument(1)) * 4 / 3);
         UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(strategyFactory, controller);
         strategy.startup();
         LifecycleTransaction txn = dataTracker.tryModify(allSSTables, OperationType.COMPACTION);
@@ -1704,9 +1708,15 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         assertThat(tasks.size()).isLessThanOrEqualTo(concurrencyLimit);
         assertEquals(allSSTables, tasks.stream().map(CompactionTask::inputSSTables).flatMap(Set::stream).collect(Collectors.toSet()));
         for (var t : tasks)
+        {
             for (var q : tasks)
+            {
                 if (t != q)
                     assertFalse("Subranges " + t.tokenRange() + " and " + q.tokenRange() + "intersect", t.tokenRange().intersects(q.tokenRange()));
+            }
+            long compactionSize = t.totals != null ? t.totals.inputDiskSize : CompactionSSTable.getTotalDataBytes(t.inputSSTables());
+            assertEquals(4.0/3 * compactionSize, t.getSpaceOverhead(), 0.001 * compactionSize);
+        }
 
         // make sure the composite transaction has the correct number of tasks
         assertEquals(Transactional.AbstractTransactional.State.ABORTED, txn.state());
@@ -1934,6 +1944,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         when(controller.getBaseSstableSize(anyInt())).thenReturn((double) (90 << 20));
         when(controller.overlapInclusionMethod()).thenReturn(overlapInclusionMethod);
         when(controller.parallelizeOutputShards()).thenReturn(true);
+        when(controller.getOverheadSizeInBytes(any(), anyLong())).thenAnswer(inv -> (long) (inv.getArgument(1)) * 4 / 3);
         Random randomMock = Mockito.mock(Random.class);
         when(randomMock.nextInt(anyInt())).thenReturn(0);
         when(controller.random()).thenReturn(randomMock);
@@ -1983,6 +1994,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
                             assertTrue(r1 + " intersects " + r2, r1.getFirst().compareTo(r2.getLast()) > 0 || r1.getLast().compareTo(r2.getFirst()) < 0);
                 }
             }
+            assertEquals(1.3333, pick.overheadToDataRatio(), 0.0001);
         }
 
         Mockito.when(controller.getNumShards(anyDouble())).thenReturn(16);  // co-prime with counts to ensure multiple sstables fall in each shard
