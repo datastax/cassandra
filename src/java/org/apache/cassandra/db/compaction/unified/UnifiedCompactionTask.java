@@ -156,4 +156,19 @@ public class UnifiedCompactionTask extends CompactionTask
             opObserver = sharedOperation.wrapObserver(opObserver);
         return super.setOpObserver(opObserver);
     }
+
+    @Override
+    public long getSpaceOverhead()
+    {
+        if (operationRange != null)
+        {
+            // totals must be precalculated for ranged tasks
+            return (long) (totals.inputDiskSize * shardingStats.overheadToDataRatio);
+        }
+        else
+        {
+            // if we don't have a range, the sharding stats have precise total disk space
+            return (long) (shardingStats.totalOnDiskSize * shardingStats.overheadToDataRatio);
+        }
+    }
 }

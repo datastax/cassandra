@@ -1904,7 +1904,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     {
         if (operation != OperationType.CLEANUP || isIndex())
         {
-            return CompactionSSTable.getTotalBytes(sstables);
+            return CompactionSSTable.getTotalDataBytes(sstables);
         }
 
         // cleanup size estimation only counts bytes for keys local to this node
