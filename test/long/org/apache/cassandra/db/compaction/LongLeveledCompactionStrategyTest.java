@@ -127,7 +127,7 @@ public class LongLeveledCompactionStrategyTest
         {
             Set<CompactionSSTable> sstables = manifest.getLevel(level);
             // score check
-            assert (double) CompactionSSTable.getTotalBytes(sstables) / manifest.maxBytesForLevel(level, 1 * 1024 * 1024) < 1.00;
+            assert (double) CompactionSSTable.getTotalDataBytes(sstables) / manifest.maxBytesForLevel(level, 1 * 1024 * 1024) < 1.00;
             // overlap check for levels greater than 0
             for (CompactionSSTable sstable : sstables)
             {
