@@ -107,19 +107,14 @@ public class CreateTableValidationTest extends CQLTester
     @Test
     public void failCreatingNewTableWithLongName()
     {
-        String keyspace = "38373639353166362d356631322d343864652d393063362d653862616534343165333764_tpch";
         String table = "test_create_k8yq1r75bpzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz";
-
-        execute(String.format("CREATE KEYSPACE \"%s\" with replication = " +
-                              "{ 'class' : 'SimpleStrategy', 'replication_factor' : 1 }",
-                              keyspace));
         assertThatExceptionOfType(InvalidQueryException.class)
         .isThrownBy(() -> executeNet(String.format("CREATE TABLE \"%s\".%s (" +
                                                    "key int PRIMARY KEY," +
                                                    "val int)",
-                                                   keyspace, table)))
+                                                   KEYSPACE, table)))
         .withMessageContaining(String.format("Keyspace and table names combined shouldn't be more than 221 characters long (got keyspace of %s chars and table of %s chars for %s.%s)",
-                                             keyspace.length(), table.length(), keyspace, table));
+                                             KEYSPACE.length(), table.length(), KEYSPACE, table));
     }
 
     @Test
