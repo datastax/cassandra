@@ -237,7 +237,7 @@ public class GcCompactionBenchTest extends CQLTester
         int startRowDeletions = countRowDeletions(cfs);
         int startTableCount = cfs.getLiveSSTables().size();
         int startTableMaxLevel = cfs.getLiveSSTables().stream().mapToInt(SSTableReader::getSSTableLevel).max().orElseGet(() -> 0);
-        long startSize = CompactionSSTable.getTotalBytes(cfs.getLiveSSTables());
+        long startSize = CompactionSSTable.getTotalDataBytes(cfs.getLiveSSTables());
         System.out.println();
 
         String hashesBefore = getHashes();
@@ -251,7 +251,7 @@ public class GcCompactionBenchTest extends CQLTester
         int endRowDeletions = countRowDeletions(cfs);
         int endTableCount = cfs.getLiveSSTables().size();
         int endTableMaxLevel = cfs.getLiveSSTables().stream().mapToInt(SSTableReader::getSSTableLevel).max().orElseGet(() -> 0);
-        long endSize = CompactionSSTable.getTotalBytes(cfs.getLiveSSTables());
+        long endSize = CompactionSSTable.getTotalDataBytes(cfs.getLiveSSTables());
 
         System.out.println(cfs.getCompactionParametersJson());
         System.out.println(String.format("%s compactions completed in %.3fs",

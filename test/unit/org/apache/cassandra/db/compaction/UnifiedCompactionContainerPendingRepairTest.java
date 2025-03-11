@@ -345,6 +345,7 @@ public class UnifiedCompactionContainerPendingRepairTest extends AbstractPending
         AbstractCompactionTask compactionTask = compactionTasks.iterator().next();
         assertNotNull(compactionTask);
         assertSame(RepairFinishedCompactionTask.class, compactionTask.getClass());
+        assertEquals(0L, compactionTask.getSpaceOverhead());
         compactionTask.execute();
 
         // Compact any remaining sstables
