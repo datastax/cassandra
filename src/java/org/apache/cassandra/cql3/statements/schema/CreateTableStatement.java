@@ -111,7 +111,7 @@ public final class CreateTableStatement extends AlterSchemaStatement
         logger.debug("Table {}, internal state {}", tableName, state.getClientState().isInternal);
 
         int separatorLength = 1;
-        if (tableName.length() > SchemaConstants.NAME_LENGTH - keyspaceName.length() - separatorLength)
+        if (!state.getClientState().isInternal && tableName.length() > SchemaConstants.NAME_LENGTH - keyspaceName.length() - separatorLength)
             throw ire("Keyspace and table names combined shouldn't be more than %s characters long (got keyspace of %s chars and table of %s chars for %s.%s)",
                       SchemaConstants.NAME_LENGTH - separatorLength, keyspaceName.length(), tableName.length(), keyspaceName, tableName);
 
