@@ -662,4 +662,28 @@ public class MessagingService extends MessagingServiceMBeanImpl
         }
         return nodes;
     }
+
+    /**
+     * Returns the endpoints for the given keyspace that are known to be alive and have a connection whose
+     * messaging version is older than the given version. To be used for example when we want to be sure a message
+     * can be serialized to all endpoints, according to their negotiated version at connection time.
+     *
+     * @param keyspace a keyspace
+     * @param version a messaging version
+     * @return a set of alive endpoints in the given keyspace with messaging version below the given version
+     */
+    public Set<InetAddressAndPort> connectionsWithVersionBelow(String keyspace, int version)
+    {
+        Set<InetAddressAndPort> nodes = new HashSet<>();
+        for (InetAddressAndPort node : StorageService.instance.getTokenMetadataForKeyspace(keyspace).getAllEndpoints())
+        {
+            ConnectionType.MESSAGING_TYPES.stream().forEach(type -> {
+                OutboundConnections connections = getOutbound(node);
+                OutboundConnection connection = connections.connectionFor(type);
+                if (connection != null && connection.messagingVersion() < version)
+                    nodes.add(node);
+            });
+        }
+        return nodes;
+    }
 }
