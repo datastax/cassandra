@@ -291,7 +291,7 @@ class LeveledGenerations
                     logger.trace("L{} contains {} SSTables ({}) in {}",
                                  i,
                                  level.size(),
-                                 FBUtilities.prettyPrintMemory(CompactionSSTable.getTotalBytes(level)),
+                                 FBUtilities.prettyPrintMemory(CompactionSSTable.getTotalDataBytes(level)),
                                  this);
                 }
             }
