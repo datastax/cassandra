@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.index.sai;
 
+import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -99,7 +100,6 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.schema.IndexMetadata;
-import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.service.StorageService;
@@ -200,6 +200,8 @@ public class StorageAttachedIndex implements Index
                                                                      NonTokenizingOptions.ASCII,
                                                                      // For now, we leave this for backward compatibility even though it's not used
                                                                      IndexContext.ENABLE_SEGMENT_COMPACTION_OPTION_NAME,
+                                                                     IndexContext.KEY_COMPRESSION_OPTION_NAME,
+                                                                     IndexContext.VALUE_COMPRESSION_OPTION_NAME,
                                                                      IndexTarget.TARGET_OPTION_NAME,
                                                                      IndexTarget.CUSTOM_INDEX_OPTION_NAME,
                                                                      IndexWriterConfig.POSTING_LIST_LVL_MIN_LEAVES,
@@ -261,9 +263,8 @@ public class StorageAttachedIndex implements Index
      * Used via reflection in {@link IndexMetadata}
      */
     @SuppressWarnings({ "unused" })
-    public static Map<String, String> validateOptions(IndexMetadata indexMetadata, TableMetadata tableMetadata)
+    public static Map<String, String> validateOptions(Map<String, String> options, TableMetadata metadata)
     {
-        Map<String, String> options = indexMetadata.options;
         Map<String, String> unknown = new HashMap<>(2);
 
         for (Map.Entry<String, String> option : options.entrySet())
@@ -274,7 +275,12 @@ public class StorageAttachedIndex implements Index
             }
         }
 
-        if (ILLEGAL_PARTITIONERS.contains(tableMetadata.partitioner.getClass()))
+        if (!unknown.isEmpty())
+        {
+            return unknown;
+        }
+
+        if (ILLEGAL_PARTITIONERS.contains(metadata.partitioner.getClass()))
         {
             throw new InvalidRequestException("Storage-attached index does not support the following IPartitioner implementations: " + ILLEGAL_PARTITIONERS);
         }
@@ -291,7 +297,7 @@ public class StorageAttachedIndex implements Index
             throw new InvalidRequestException("A storage-attached index cannot be created over multiple columns: " + targetColumn);
         }
 
-        Pair<ColumnMetadata, IndexTarget.Type> target = TargetParser.parse(tableMetadata, targetColumn);
+        Pair<ColumnMetadata, IndexTarget.Type> target = TargetParser.parse(metadata, targetColumn);
 
         if (target == null)
         {
@@ -300,12 +306,12 @@ public class StorageAttachedIndex implements Index
 
         // Check for duplicate indexes considering both target and analyzer configuration
         boolean isAnalyzed = AbstractAnalyzer.isAnalyzed(options);
-        long duplicateCount = tableMetadata.indexes.stream()
+        long duplicateCount = metadata.indexes.stream()
                                               .filter(index -> index.getIndexClassName().equals(StorageAttachedIndex.class.getName()))
                                               .filter(index -> {
                                                   // Indexes on the same column with different target (KEYS, VALUES, ENTRIES)
                                                   // are allowed on non-frozen Maps
-                                                  var existingTarget = TargetParser.parse(tableMetadata, index.options.get(IndexTarget.TARGET_OPTION_NAME));
+                                                  var existingTarget = TargetParser.parse(metadata, index.options.get(IndexTarget.TARGET_OPTION_NAME));
                                                   if (existingTarget == null || !existingTarget.equals(target))
                                                       return false;
                                                   // Also allow different indexes if one is analyzed and the other isn't
@@ -316,11 +322,16 @@ public class StorageAttachedIndex implements Index
         if (duplicateCount > 1)
             throw new InvalidRequestException(String.format("Cannot create duplicate storage-attached index on column: %s", target.left));
 
+        // Get to validate only; will throw IRE if option is invalid
+        getCompressionOption(options, IndexContext.VALUE_COMPRESSION_OPTION_NAME);
+
         // Check for existence of other indexes with different key_compression:
-        for (IndexMetadata other : tableMetadata.indexes)
+        CompressionParams keyCompression = getCompressionOption(options, IndexContext.KEY_COMPRESSION_OPTION_NAME);
+        for (IndexMetadata other : metadata.indexes)
         {
+            CompressionParams otherCompression = getCompressionOptionUnchecked(other.options, IndexContext.KEY_COMPRESSION_OPTION_NAME);
             if (other.getIndexClassName().equals(StorageAttachedIndex.class.getName())
-                && !other.keyCompression.equals(indexMetadata.keyCompression))
+                && !otherCompression.equals(keyCompression))
             {
                 throw new InvalidRequestException(String.format("Cannot create storage-attached index on column %s with different key_compression than existing index %s",
                                                                  target.left, other.name));
@@ -330,7 +341,7 @@ public class StorageAttachedIndex implements Index
         // Analyzer is not supported against PK columns
         if (isAnalyzed)
         {
-            for (ColumnMetadata column : tableMetadata.primaryKeyColumns())
+            for (ColumnMetadata column : metadata.primaryKeyColumns())
             {
                 if (column.name.equals(target.left.name))
                     logger.warn("Schema contains an invalid index analyzer on primary key column, allowed for backwards compatibility: " + target.left);
@@ -388,6 +399,53 @@ public class StorageAttachedIndex implements Index
         }
 
         return unknown;
+    }
+
+    /**
+     * Gets compression params from index metadata option.
+     * Throws InvalidRequestException if the option contents is invalid.
+     * Returns no compression if the compression option is missing.
+     *
+     * @param options index options
+     * @param optionName index option key containing compression params map in JSON format
+     */
+    private static CompressionParams getCompressionOption(Map<String, String> options, String optionName)
+    {
+        String compression = options.get(optionName);
+        if (compression == null)
+            return CompressionParams.noCompression();
+
+        try
+        {
+            return CompressionParams.fromJson(compression);
+        }
+        catch (IOException e)
+        {
+            throw new InvalidRequestException("Invalid value of " + optionName + ": " + e.getMessage());
+        }
+    }
+
+    /**
+     * Gets compression params from index metadata option. Does not throw exception if the option is invalid,
+     * but returns no compression instead.
+     *
+     * @param options index options
+     * @param optionName index option key containing compression params map in JSON format
+     */
+    public static CompressionParams getCompressionOptionUnchecked(Map<String, String> options, String optionName)
+    {
+        String compression = options.get(optionName);
+        if (compression == null)
+            return CompressionParams.noCompression();
+        try
+        {
+            return CompressionParams.fromJson(compression);
+        }
+        catch (IOException e)
+        {
+            logger.error("Invalid value of {}: {} ({}). Falling back to no compression.", optionName, compression, e.getMessage());
+            return CompressionParams.noCompression();
+        }
     }
 
     @Override

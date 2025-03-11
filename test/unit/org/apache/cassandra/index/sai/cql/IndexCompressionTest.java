@@ -44,17 +44,11 @@ import static org.junit.Assert.assertTrue;
 
 public class IndexCompressionTest extends SAITester
 {
-    @BeforeClass
-    public static void setup()
-    {
-        CassandraRelevantProperties.INDEX_COMPRESSION_ENABLED.setBoolean(true);
-    }
-
     @Test
     public void testKeyCompression()
     {
         createTable("CREATE TABLE %s (pk int, c text, val text, PRIMARY KEY(pk, c))");
-        String indexName = createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH key_compression = {'class': 'LZ4Compressor'}");
+        String indexName = createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH options = { 'key_compression': '{\"class\": \"LZ4Compressor\"}' };");
         for (int i = 0; i < 1000; i++)
             execute("INSERT INTO %s(pk, c, val) VALUES (?, ?, ?)", i, "key", "value" + i);
 
@@ -83,15 +77,15 @@ public class IndexCompressionTest extends SAITester
         // gets overwritten by the compression settings of the second index.
         // This is beacuse both indexes share the same primary key map, and it can be compressed in one way only.
         createTable("CREATE TABLE %s (pk int, c text, val1 text, val2 text, PRIMARY KEY(pk, c))");
-        createIndex("CREATE CUSTOM INDEX ON %s(val1) USING 'StorageAttachedIndex' WITH key_compression = {'class': 'LZ4Compressor'}");
-        assertThrows(InvalidRequestException.class, () -> createIndex("CREATE CUSTOM INDEX ON %s(val2) USING 'StorageAttachedIndex' WITH key_compression = {'class': 'ZstdCompressor'}"));
+        createIndex("CREATE CUSTOM INDEX ON %s(val1) USING 'StorageAttachedIndex' WITH options = { 'key_compression': '{\"class\": \"LZ4Compressor\"}' }");
+        assertThrows(InvalidRequestException.class, () -> createIndex("CREATE CUSTOM INDEX ON %s(val2) USING 'StorageAttachedIndex' WITH options = { 'key_compression': '{\"class\": \"ZstdCompressor\"}' }"));
     }
 
     @Test
     public void testLiteralValueCompression()
     {
         createTable("CREATE TABLE %s (pk int, c text, val text, PRIMARY KEY(pk, c))");
-        String indexName = createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH value_compression = {'class': 'LZ4Compressor'}");
+        String indexName = createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH options = { 'value_compression': '{\"class\": \"LZ4Compressor\"}' };");
         for (int i = 0; i < 1000; i++)
             execute("INSERT INTO %s(pk, c, val) VALUES (?, ?, ?)", i, "key", "value" + i);
 
@@ -118,7 +112,7 @@ public class IndexCompressionTest extends SAITester
     public void testNumericValueCompression()
     {
         createTable("CREATE TABLE %s (pk int, c text, val int, PRIMARY KEY(pk, c))");
-        String indexName = createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH value_compression = {'class': 'LZ4Compressor'}");
+        String indexName = createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH options = { 'value_compression': '{\"class\": \"LZ4Compressor\"}' };");
         for (int i = 0; i < 1000; i++)
             execute("INSERT INTO %s(pk, c, val) VALUES (?, ?, ?)", i, "key", i);
 

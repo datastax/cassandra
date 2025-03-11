@@ -34,6 +34,8 @@ import org.apache.commons.lang3.builder.HashCodeBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.cassandra.cache.ChunkCache;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.ParameterizedClass;
@@ -140,6 +142,13 @@ public final class CompressionParams
         cp.validate();
 
         return cp;
+    }
+
+    public static CompressionParams fromJson(String json) throws IOException
+    {
+        ObjectMapper objectMapper = new ObjectMapper();
+        Map<String, String> map = objectMapper.readValue(json, new TypeReference<>() {});
+        return fromMap(map);
     }
 
     public Class<? extends ICompressor> klass()

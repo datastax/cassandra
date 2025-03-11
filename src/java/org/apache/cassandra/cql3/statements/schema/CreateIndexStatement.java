@@ -28,7 +28,6 @@ import com.google.common.collect.Lists;
 import org.apache.cassandra.audit.AuditLogContext;
 import org.apache.cassandra.audit.AuditLogEntryType;
 import org.apache.cassandra.auth.Permission;
-import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.QualifiedName;
@@ -43,7 +42,6 @@ import org.apache.cassandra.index.sasi.SASIIndex;
 import org.apache.cassandra.schema.*;
 import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
 import org.apache.cassandra.service.ClientState;
-import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.Event.SchemaChange;
 import org.apache.cassandra.transport.Event.SchemaChange.Change;
@@ -51,8 +49,6 @@ import org.apache.cassandra.transport.Event.SchemaChange.Target;
 
 import static com.google.common.collect.Iterables.transform;
 import static com.google.common.collect.Iterables.tryFind;
-import static org.apache.cassandra.cql3.statements.schema.IndexAttributes.KW_KEY_COMPRESSION;
-import static org.apache.cassandra.cql3.statements.schema.IndexAttributes.KW_VALUE_COMPRESSION;
 
 public final class CreateIndexStatement extends AlterSchemaStatement
 {
@@ -165,21 +161,7 @@ public final class CreateIndexStatement extends AlterSchemaStatement
 
         Map<String, String> options = attrs.isCustom ? attrs.getOptions() : Collections.emptyMap();
 
-        Map<String, String> keyCompressionOptions = attrs.getMap(KW_KEY_COMPRESSION);
-        CompressionParams keyCompression = keyCompressionOptions != null
-                                        ? CompressionParams.fromMap(keyCompressionOptions)
-                                        : CompressionParams.noCompression();
-
-        Map<String, String> valueCompressionOptions = attrs.getMap(KW_VALUE_COMPRESSION);
-        CompressionParams valueCompression = valueCompressionOptions != null
-                                           ? CompressionParams.fromMap(valueCompressionOptions)
-                                           : CompressionParams.noCompression();
-
-        if ((keyCompression.isEnabled() || valueCompression.isEnabled()) && !CassandraRelevantProperties.INDEX_COMPRESSION_ENABLED.getBoolean())
-            throw ire("Cannot create a compressed index, because index compression is disabled. " +
-                      "Please set " + CassandraRelevantProperties.INDEX_COMPRESSION_ENABLED.getKey() + " property to enable it.");
-
-        IndexMetadata index = IndexMetadata.fromIndexTargets(indexTargets, name, kind, options, keyCompression, valueCompression);
+        IndexMetadata index = IndexMetadata.fromIndexTargets(indexTargets, name, kind, options);
 
         String className = index.getIndexClassName();
         IndexGuardrails guardRails = IndexGuardrails.forClassName(className);

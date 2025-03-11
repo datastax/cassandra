@@ -41,7 +41,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.antlr.runtime.RecognitionException;
-import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.ColumnIdentifier;
@@ -91,8 +90,6 @@ import static org.apache.cassandra.config.CassandraRelevantProperties.DURATION_I
 import static org.apache.cassandra.config.CassandraRelevantProperties.UNSAFE_SYSTEM;
 import static org.apache.cassandra.cql3.QueryProcessor.executeInternal;
 import static org.apache.cassandra.cql3.QueryProcessor.executeOnceInternal;
-import static org.apache.cassandra.cql3.statements.schema.IndexAttributes.KW_KEY_COMPRESSION;
-import static org.apache.cassandra.cql3.statements.schema.IndexAttributes.KW_VALUE_COMPRESSION;
 import static org.apache.cassandra.schema.SchemaKeyspaceTables.AGGREGATES;
 import static org.apache.cassandra.schema.SchemaKeyspaceTables.ALL;
 import static org.apache.cassandra.schema.SchemaKeyspaceTables.COLUMNS;
@@ -247,8 +244,6 @@ public final class SchemaKeyspace
               + "table_name text,"
               + "index_name text,"
               + "kind text,"
-              + "key_compression frozen<map<text, text>>,"
-              + "value_compression frozen<map<text, text>>,"
               + "options frozen<map<text, text>>,"
               + "PRIMARY KEY ((keyspace_name), table_name, index_name))");
 
@@ -819,18 +814,10 @@ public final class SchemaKeyspace
 
     private static void addIndexToSchemaMutation(TableMetadata table, IndexMetadata index, Mutation.SimpleBuilder builder)
     {
-        var rowBuilder = builder.update(Indexes)
+        builder.update(Indexes)
                .row(table.name, index.name)
                .add("kind", index.kind.toString())
                .add("options", index.options);
-
-        // We must not write those properties when index compression is disabled,
-        // in order to allow rolling back to the previous release that doesn't recognize those schema columns.
-        if (CassandraRelevantProperties.INDEX_COMPRESSION_ENABLED.getBoolean())
-        {
-            rowBuilder.add(KW_KEY_COMPRESSION, index.keyCompression.asMap());
-            rowBuilder.add(KW_VALUE_COMPRESSION, index.valueCompression.asMap());
-        }
     }
 
     private static void dropIndexFromSchemaMutation(TableMetadata table, IndexMetadata index, Mutation.SimpleBuilder builder)
@@ -1137,17 +1124,7 @@ public final class SchemaKeyspace
         IndexMetadata.Kind type = IndexMetadata.Kind.valueOf(row.getString("kind"));
         Map<String, String> options = row.getFrozenTextMap("options");
 
-        Map<String, String> keyCompressionOptions = row.getFrozenTextMap(KW_KEY_COMPRESSION);
-        CompressionParams keyCompression = keyCompressionOptions != null
-                                        ? CompressionParams.fromMap(keyCompressionOptions)
-                                        : CompressionParams.noCompression();
-
-        Map<String, String> valueCompressionOptions = row.getFrozenTextMap(KW_VALUE_COMPRESSION);
-        CompressionParams valueCompression =valueCompressionOptions != null
-                                           ? CompressionParams.fromMap(valueCompressionOptions)
-                                           : CompressionParams.noCompression();
-
-        return IndexMetadata.fromSchemaMetadata(name, type, options, keyCompression, valueCompression);
+        return IndexMetadata.fromSchemaMetadata(name, type, options);
     }
 
     private static Triggers fetchTriggers(String keyspace, String table)
