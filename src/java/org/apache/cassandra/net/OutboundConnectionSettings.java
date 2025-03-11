@@ -485,7 +485,10 @@ public class OutboundConnectionSettings
                                               applicationSendQueueReserveGlobalCapacityInBytes(),
                                               tcpNoDelay(), flushLowWaterMark, flushHighWaterMark,
                                               tcpConnectTimeoutInMS(), tcpUserTimeoutInMS(category), acceptVersions(category),
-                                              from(), socketFactory(), callbacks(), debug(), endpointToVersion());
+                                              from(), socketFactory(), callbacks(), debug(),
+                                              // If a set of versions is passed, make sure we do a copy of it, as the version might be later updated
+                                              // depending on the handshake result (i.e. nodes might handshake a different version)
+                                              endpointToVersion().copy());
     }
 
     private static boolean isInLocalDC(IEndpointSnitch snitch, InetAddressAndPort localHost, InetAddressAndPort remoteHost)
