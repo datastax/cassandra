@@ -209,6 +209,13 @@ public abstract class AbstractCompactionTask extends WrappedRunnable
     }
 
     /**
+     * Returns the space overhead of this compaction. This can be used to limit running compactions to they fit under
+     * a given space budget. Only implemented for the types of tasks used by the unified compaction strategy and used
+     * by CNDB.
+     */
+    public abstract long getSpaceOverhead();
+
+    /**
      * @return The compaction observers for this task. Used by CNDB.
      */
     public List<CompactionObserver> getCompObservers()
