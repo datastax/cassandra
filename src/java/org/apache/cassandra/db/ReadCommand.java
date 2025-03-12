@@ -37,7 +37,6 @@ import org.slf4j.LoggerFactory;
 
 import io.netty.util.concurrent.FastThreadLocal;
 import org.apache.cassandra.config.*;
-import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.db.filter.*;
 import org.apache.cassandra.db.transform.BasePartitions;
 import org.apache.cassandra.db.transform.BaseRows;
@@ -50,8 +49,6 @@ import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.ParamType;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.db.rows.*;
-import org.apache.cassandra.cql3.statements.SelectOptions;
-import org.apache.cassandra.db.filter.ANNOptions;
 import org.apache.cassandra.db.filter.ClusteringIndexFilter;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.filter.DataLimits;
@@ -1004,26 +1001,6 @@ public abstract class ReadCommand extends AbstractReadQuery
      * Return the queried token(s) for logging
      */
     public abstract String loggableTokens();
-
-    public String toCQLString()
-    {
-        StringBuilder sb = new StringBuilder();
-        sb.append("SELECT ").append(columnFilter().toCQLString());
-        sb.append(" FROM ").append(ColumnIdentifier.maybeQuote(metadata().keyspace)).append('.').append(ColumnIdentifier.maybeQuote(metadata().name));
-        appendCQLWhereClause(sb);
-
-        if (limits() != DataLimits.NONE)
-            sb.append(' ').append(limits());
-
-        ANNOptions annOptions = rowFilter().annOptions();
-        if (annOptions != ANNOptions.NONE)
-            sb.append(" WITH ").append(SelectOptions.ANN_OPTIONS).append(" = ").append(annOptions.toCQLString());
-
-        // ALLOW FILTERING might not be strictly necessary
-        sb.append(" ALLOW FILTERING");
-
-        return sb.toString();
-    }
 
     // Monitorable interface
     public String name()
