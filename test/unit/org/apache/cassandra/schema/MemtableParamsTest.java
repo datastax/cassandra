@@ -26,7 +26,7 @@ import org.junit.Test;
 
 import org.apache.cassandra.config.InheritingClass;
 import org.apache.cassandra.config.ParameterizedClass;
-import org.apache.cassandra.db.memtable.SkipListMemtableFactory;
+import org.apache.cassandra.db.memtable.TrieMemtableFactory;
 import org.apache.cassandra.exceptions.ConfigurationException;
 
 import static org.junit.Assert.assertEquals;
@@ -35,7 +35,7 @@ import static org.junit.Assert.fail;
 
 public class MemtableParamsTest
 {
-    static final ParameterizedClass DEFAULT = SkipListMemtableFactory.CONFIGURATION;
+    static final ParameterizedClass DEFAULT = TrieMemtableFactory.CONFIGURATION;
 
     @Test
     public void testDefault()
