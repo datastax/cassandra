@@ -108,12 +108,10 @@ public final class CreateTableStatement extends AlterSchemaStatement
     public void validate(QueryState state)
     {
         super.validate(state);
-        logger.debug("Table {}, internal state {}", tableName, state.getClientState().isInternal);
 
-        int separatorLength = 1;
-        if (!state.getClientState().isInternal && tableName.length() > SchemaConstants.NAME_LENGTH - keyspaceName.length() - separatorLength)
+        if (!state.getClientState().isInternal && tableName.length() > SchemaConstants.NAME_LENGTH - keyspaceName.length())
             throw ire("Keyspace and table names combined shouldn't be more than %s characters long (got keyspace of %s chars and table of %s chars for %s.%s)",
-                      SchemaConstants.NAME_LENGTH - separatorLength, keyspaceName.length(), tableName.length(), keyspaceName, tableName);
+                      SchemaConstants.NAME_LENGTH, keyspaceName.length(), tableName.length(), keyspaceName, tableName);
 
         // Some tools use CreateTableStatement, and the guardrails below both don't make too much sense for tools and
         // require the server to be initialized, so skipping them if it isn't.

@@ -113,8 +113,8 @@ public class CreateTableValidationTest extends CQLTester
                                                    "key int PRIMARY KEY," +
                                                    "val int)",
                                                    KEYSPACE, table)))
-        .withMessageContaining(String.format("Keyspace and table names combined shouldn't be more than 221 characters long (got keyspace of %s chars and table of %s chars for %s.%s)",
-                                             KEYSPACE.length(), table.length(), KEYSPACE, table));
+        .withMessageContaining(String.format("Keyspace and table names combined shouldn't be more than %s characters long (got keyspace of %s chars and table of %s chars for %s.%s)",
+                                             SchemaConstants.NAME_LENGTH, KEYSPACE.length(), table.length(), KEYSPACE, table));
     }
 
     @Test
