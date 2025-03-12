@@ -44,9 +44,9 @@ public enum Operator
         }
 
         @Override
-        public boolean isSatisfiedBy(AbstractType<?> type, List<ByteBuffer> leftTokens, List<ByteBuffer> rightTokens)
+        public boolean isSatisfiedByAnalyzed(AbstractType<?> type, List<ByteBuffer> leftTokens, List<ByteBuffer> rightTokens)
         {
-            return ANALYZER_MATCHES.isSatisfiedBy(type, leftTokens, rightTokens);
+            return ANALYZER_MATCHES.isSatisfiedByAnalyzed(type, leftTokens, rightTokens);
         }
     },
     LT(4)
@@ -394,7 +394,7 @@ public enum Operator
         }
 
         @Override
-        public boolean isSatisfiedBy(AbstractType<?> type, List<ByteBuffer> leftTokens, List<ByteBuffer> rightTokens)
+        public boolean isSatisfiedByAnalyzed(AbstractType<?> type, List<ByteBuffer> leftTokens, List<ByteBuffer> rightTokens)
         {
             Iterator<ByteBuffer> it = rightTokens.iterator();
 
@@ -547,7 +547,7 @@ public enum Operator
      * @param leftTokens the left operand of the comparison, decomposed as index-analyzed tokens.
      * @param rightTokens the right operand of the comparison, decomposed as index-analyzed tokens.
      */
-    public boolean isSatisfiedBy(AbstractType<?> type, List<ByteBuffer> leftTokens, List<ByteBuffer> rightTokens)
+    public boolean isSatisfiedByAnalyzed(AbstractType<?> type, List<ByteBuffer> leftTokens, List<ByteBuffer> rightTokens)
     {
         throw new UnsupportedOperationException(this + " operation does not support analyzers");
     }

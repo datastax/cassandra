@@ -888,7 +888,7 @@ public class RowFilter
             // Note that CQL expression are always of the form 'x < 4', i.e. the tested value is on the left.
             return analyzer == null
                    ? operator.isSatisfiedBy(type, foundValue, value)
-                   : operator.isSatisfiedBy(type, analyzer.indexedTokens(foundValue), analyzer.queriedTokens());
+                   : operator.isSatisfiedByAnalyzed(type, analyzer.indexedTokens(foundValue), analyzer.queriedTokens());
         }
 
         @Nullable
@@ -1254,7 +1254,7 @@ public class RowFilter
                         {
                             List<ByteBuffer> elementTokens = analyzer.indexedTokens(elementValue);
                             List<ByteBuffer> queriedTokens = analyzer.queriedTokens();
-                            if (Operator.ANALYZER_MATCHES.isSatisfiedBy(elementType, elementTokens, queriedTokens))
+                            if (Operator.ANALYZER_MATCHES.isSatisfiedByAnalyzed(elementType, elementTokens, queriedTokens))
                                 return true;
                         }
                         else
@@ -1288,7 +1288,7 @@ public class RowFilter
                         ByteBuffer elementValue = cell.path().get(0);
                         List<ByteBuffer> elementTokens = analyzer.indexedTokens(elementValue);
                         List<ByteBuffer> queriedTokens = analyzer.queriedTokens();
-                        if (Operator.ANALYZER_MATCHES.isSatisfiedBy(elementType, elementTokens, queriedTokens))
+                        if (Operator.ANALYZER_MATCHES.isSatisfiedByAnalyzed(elementType, elementTokens, queriedTokens))
                             return true;
                     }
                     return false;

@@ -97,7 +97,7 @@ public class OperatorTest
 
         // test that EQ and ANALYZER_MATCHES are satisfied by the same value with an analyzer
         for (Operator operator : Arrays.asList(Operator.EQ, Operator.ANALYZER_MATCHES))
-            Assertions.assertThat(operator.isSatisfiedBy(type, indexedTokens, queriedTokens)).isEqualTo(shouldBeSatisfied);
+            Assertions.assertThat(operator.isSatisfiedByAnalyzed(type, indexedTokens, queriedTokens)).isEqualTo(shouldBeSatisfied);
 
         // test that EQ without an analyzer behaves as type-based identity
         Assertions.assertThat(Operator.EQ.isSatisfiedBy(type, leftOperand, rightOperand))
@@ -120,7 +120,7 @@ public class OperatorTest
             }
             catch (Exception e)
             {
-                Assertions.assertThatThrownBy(() -> operator.isSatisfiedBy(type, indexedTokens, queriedTokens))
+                Assertions.assertThatThrownBy(() -> operator.isSatisfiedByAnalyzed(type, indexedTokens, queriedTokens))
                           .isInstanceOf(UnsupportedOperationException.class)
                           .hasMessageContaining(operator + " operation does not support analyzers");
             }
