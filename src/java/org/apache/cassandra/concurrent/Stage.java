@@ -54,6 +54,7 @@ import org.apache.cassandra.utils.concurrent.Future;
 import static java.util.stream.Collectors.toMap;
 import static org.apache.cassandra.concurrent.ExecutorFactory.Global.executorFactory;
 import static org.apache.cassandra.config.CassandraRelevantProperties.CUSTOM_STAGE_EXECUTOR_FACTORY_PROPERTY;
+import static org.apache.cassandra.config.CassandraRelevantProperties.CUSTOM_TASK_EXECUTION_CALLBACK_CLASS;
 
 public enum Stage
 {
@@ -167,18 +168,33 @@ public enum Stage
     // Convenience functions to execute on this stage
     public void execute(Runnable command)
     {
+        if (!CUSTOM_TASK_EXECUTION_CALLBACK_CLASS.isPresent())
+        {
+            executor.execute(command);
+            return;
+        }
         long enqueueStartTime = Clock.Global.nanoTime();
         executor().execute(withTimeMeasurement(command, enqueueStartTime));
     }
 
     public void execute(Runnable command, ExecutorLocals locals)
     {
+        if (!CUSTOM_TASK_EXECUTION_CALLBACK_CLASS.isPresent())
+        {
+            executor.execute(locals, command);
+            return;
+        }
         long enqueueStartTime = Clock.Global.nanoTime();
         executor().execute(locals, withTimeMeasurement(command, enqueueStartTime));
     }
 
     public void maybeExecuteImmediately(Runnable command)
     {
+        if (!CUSTOM_TASK_EXECUTION_CALLBACK_CLASS.isPresent())
+        {
+            executor.execute(command);
+            return;
+        }
         long enqueueStartTime = Clock.Global.nanoTime();
         executor().maybeExecuteImmediately(withTimeMeasurement(command, enqueueStartTime));
     }
@@ -189,6 +205,8 @@ public enum Stage
         return executor().submit(() -> {
             try
             {
+                if (!CUSTOM_TASK_EXECUTION_CALLBACK_CLASS.isPresent())
+                    return task.call();
                 return withTimeMeasurement(task, enqueueStartTime).call();
             }
             catch (Exception e)
@@ -200,12 +218,22 @@ public enum Stage
 
     public Future<?> submit(Runnable task)
     {
+        if (!CUSTOM_TASK_EXECUTION_CALLBACK_CLASS.isPresent())
+           return executor().submit(task, executor());
         long enqueueStartTime = Clock.Global.nanoTime();
         return executor().submit(withTimeMeasurement(task, enqueueStartTime), executor());
     }
 
     public <T> Future<T> submit(Runnable task, T result)
     {
+
+        if (!CUSTOM_TASK_EXECUTION_CALLBACK_CLASS.isPresent())
+        {
+            return executor().submit(() -> {
+                task.run();
+                return result;
+            });
+        }
         long enqueueStartTime = Clock.Global.nanoTime();
         return executor().submit(() -> {
             withTimeMeasurement(task, enqueueStartTime).run();
