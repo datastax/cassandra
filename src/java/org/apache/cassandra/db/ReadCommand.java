@@ -37,6 +37,7 @@ import org.slf4j.LoggerFactory;
 
 import io.netty.util.concurrent.FastThreadLocal;
 import org.apache.cassandra.config.*;
+import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.db.filter.*;
 import org.apache.cassandra.db.guardrails.Threshold;
 import org.apache.cassandra.exceptions.QueryCancelledException;
@@ -990,7 +991,7 @@ public abstract class ReadCommand extends AbstractReadQuery
     {
         StringBuilder sb = new StringBuilder();
         sb.append("SELECT ").append(columnFilter().toCQLString());
-        sb.append(" FROM ").append(metadata().keyspace).append('.').append(metadata().name);
+        sb.append(" FROM ").append(ColumnIdentifier.maybeQuote(metadata().keyspace)).append('.').append(ColumnIdentifier.maybeQuote(metadata().name));
         appendCQLWhereClause(sb);
 
         if (limits() != DataLimits.NONE)
@@ -999,6 +1000,9 @@ public abstract class ReadCommand extends AbstractReadQuery
         ANNOptions annOptions = rowFilter().annOptions();
         if (annOptions != ANNOptions.NONE)
             sb.append(" WITH ").append(SelectOptions.ANN_OPTIONS).append(" = ").append(annOptions.toCQLString());
+
+        // ALLOW FILTERING might not be strictly necessary
+        sb.append(" ALLOW FILTERING");
 
         return sb.toString();
     }
