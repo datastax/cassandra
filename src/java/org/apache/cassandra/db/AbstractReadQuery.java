@@ -18,6 +18,8 @@
 package org.apache.cassandra.db;
 
 import org.apache.cassandra.cql3.ColumnIdentifier;
+import org.apache.cassandra.cql3.statements.SelectOptions;
+import org.apache.cassandra.db.filter.ANNOptions;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.filter.RowFilter;
@@ -110,6 +112,10 @@ abstract class AbstractReadQuery extends MonitorableImpl implements ReadQuery
 
         if (limits() != DataLimits.NONE)
             sb.append(' ').append(limits());
+
+        ANNOptions annOptions = rowFilter().annOptions();
+        if (annOptions != ANNOptions.NONE)
+            sb.append(" WITH ").append(SelectOptions.ANN_OPTIONS).append(" = ").append(annOptions.toCQLString());
 
         // ALLOW FILTERING might not be strictly necessary
         sb.append(" ALLOW FILTERING");
