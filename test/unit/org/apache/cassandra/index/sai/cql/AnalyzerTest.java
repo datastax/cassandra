@@ -68,7 +68,7 @@ public class AnalyzerTest extends SAITester
         for (String column : Arrays.asList("l", "s", "m"))
         {
             assertRejectsNonFullIndexCreationOnFrozenCollection(column);
-            column = String.format("FULL(%s)", column);
+            column = String.format("full(%s)", column);
 
             // non-tokenizing options that produce an analyzer should be rejected
             assertRejectsAnalyzerOnFrozenCollection(column, String.format("{'%s': %s}", NonTokenizingOptions.CASE_SENSITIVE, false));
@@ -122,6 +122,6 @@ public class AnalyzerTest extends SAITester
     {
         Assertions.assertThatThrownBy(() -> createSAIIndex(column, options))
                   .isInstanceOf(InvalidRequestException.class)
-                  .hasMessageContaining("Cannot use an analyzer on a frozen collection.");
+                  .hasMessageContaining("Cannot use an analyzer on " + column + " because it's a frozen collection.");
     }
 }
