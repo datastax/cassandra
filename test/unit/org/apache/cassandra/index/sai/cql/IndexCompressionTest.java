@@ -18,10 +18,8 @@ package org.apache.cassandra.index.sai.cql;
 
 import java.util.Set;
 
-import org.junit.BeforeClass;
 import org.junit.Test;
 
-import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.IndexContext;
@@ -31,12 +29,8 @@ import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.io.compress.CompressionMetadata;
-import org.apache.cassandra.io.compress.ZstdCompressor;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.File;
-import org.apache.cassandra.schema.IndexMetadata;
-import org.apache.cassandra.service.ClientWarn;
-import org.assertj.core.api.Assertions;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertThrows;
@@ -73,12 +67,18 @@ public class IndexCompressionTest extends SAITester
     @Test
     public void testKeyCompressionMustMatchOnAllIndexes()
     {
-        // When creating another index with different key compression, the key compression of the first index
-        // gets overwritten by the compression settings of the second index.
+        // Check if we reject creating an index with a different key compression than the one already created.
         // This is beacuse both indexes share the same primary key map, and it can be compressed in one way only.
         createTable("CREATE TABLE %s (pk int, c text, val1 text, val2 text, PRIMARY KEY(pk, c))");
         createIndex("CREATE CUSTOM INDEX ON %s(val1) USING 'StorageAttachedIndex' WITH options = { 'key_compression': '{\"class\": \"LZ4Compressor\"}' }");
-        assertThrows(InvalidRequestException.class, () -> createIndex("CREATE CUSTOM INDEX ON %s(val2) USING 'StorageAttachedIndex' WITH options = { 'key_compression': '{\"class\": \"ZstdCompressor\"}' }"));
+
+        InvalidRequestException ex = assertThrows(InvalidRequestException.class,
+                     () -> createIndex("CREATE CUSTOM INDEX ON %s(val2) USING 'StorageAttachedIndex' WITH options = { 'key_compression': '{\"class\": \"ZstdCompressor\"}' }"));
+        assertTrue(ex.getMessage().contains("Cannot create storage-attached index"));
+        assertTrue(ex.getMessage().contains("val2"));
+        assertTrue(ex.getMessage().contains("val1"));
+        assertTrue(ex.getMessage().contains("key_compression"));
+        assertTrue(ex.getMessage().contains("LZ4Compressor"));
     }
 
     @Test

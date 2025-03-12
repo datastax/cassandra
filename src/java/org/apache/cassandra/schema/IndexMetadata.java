@@ -280,12 +280,8 @@ public final class IndexMetadata
                    .append(" (")
                    .append(copyOptions.remove(IndexTarget.TARGET_OPTION_NAME))
                    .append(") USING ")
-                   .appendWithSingleQuotes(copyOptions.remove(IndexTarget.CUSTOM_INDEX_OPTION_NAME));
-
-
-            builder.appendOptions(b -> {
-                b.append("options", copyOptions);
-            });
+                   .appendWithSingleQuotes(copyOptions.remove(IndexTarget.CUSTOM_INDEX_OPTION_NAME))
+                   .appendOptions(b -> b.append("options", copyOptions));
         }
         else
         {

@@ -333,8 +333,8 @@ public class StorageAttachedIndex implements Index
             if (other.getIndexClassName().equals(StorageAttachedIndex.class.getName())
                 && !otherCompression.equals(keyCompression))
             {
-                throw new InvalidRequestException(String.format("Cannot create storage-attached index on column %s with different key_compression than existing index %s",
-                                                                 target.left, other.name));
+                throw new InvalidRequestException(String.format("Cannot create storage-attached index on column %s with different key_compression than existing index %s. Expected: %s",
+                                                                 target.left, other.name, keyCompression.asMap()));
             }
         }
 
