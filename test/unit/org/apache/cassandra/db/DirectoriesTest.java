@@ -880,7 +880,7 @@ public class DirectoriesTest
         for (TableMetadata tm : CFM)
         {
             Path keyspacedir = Files.createDirectories(ddir2.resolve(tm.keyspace));
-            String tabledir = tm.name + (oldStyle ? "" : Component.separator + tm.id.toHexString());
+            String tabledir = tm.name + (oldStyle ? "" : Component.SEPARATOR + tm.id.toHexString());
             Files.createSymbolicLink(keyspacedir.resolve(tabledir), symlinktarget);
         }
 
@@ -1147,7 +1147,7 @@ public class DirectoriesTest
 
     private String getNewFilename(TableMetadata tm, boolean oldStyle)
     {
-        return tm.keyspace + File.pathSeparator() + tm.name + (oldStyle ? "" : Component.separator + tm.id.toHexString()) + "/na-1-big-Data.db";
+        return tm.keyspace + File.pathSeparator() + tm.name + (oldStyle ? "" : Component.SEPARATOR + tm.id.toHexString()) + "/na-1-big-Data.db";
     }
 
     private List<Directories.DataDirectoryCandidate> getWriteableDirectories(DataDirectory[] dataDirectories, long writeSize)
