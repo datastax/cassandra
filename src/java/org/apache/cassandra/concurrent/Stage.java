@@ -170,7 +170,7 @@ public enum Stage
     {
         if (!CUSTOM_TASK_EXECUTION_CALLBACK_CLASS.isPresent())
         {
-            executor.execute(command);
+            executor().execute(command);
             return;
         }
         long enqueueStartTime = Clock.Global.nanoTime();
@@ -181,7 +181,7 @@ public enum Stage
     {
         if (!CUSTOM_TASK_EXECUTION_CALLBACK_CLASS.isPresent())
         {
-            executor.execute(locals, command);
+            executor().execute(locals, command);
             return;
         }
         long enqueueStartTime = Clock.Global.nanoTime();
@@ -192,7 +192,7 @@ public enum Stage
     {
         if (!CUSTOM_TASK_EXECUTION_CALLBACK_CLASS.isPresent())
         {
-            executor.execute(command);
+            executor().execute(command);
             return;
         }
         long enqueueStartTime = Clock.Global.nanoTime();
