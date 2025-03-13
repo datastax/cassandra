@@ -58,15 +58,12 @@ public class RequestFailureReasonTest
     public void testFromCode()
     {
         // Test valid codes
-        assertEquals(RequestFailureReason.UNKNOWN, RequestFailureReason.fromCode(0));
-        assertEquals(RequestFailureReason.READ_TOO_MANY_TOMBSTONES, RequestFailureReason.fromCode(1));
-        assertEquals(RequestFailureReason.TIMEOUT, RequestFailureReason.fromCode(2));
-        assertEquals(RequestFailureReason.INCOMPATIBLE_SCHEMA, RequestFailureReason.fromCode(3));
-        assertEquals(RequestFailureReason.INDEX_NOT_AVAILABLE, RequestFailureReason.fromCode(6));
-        assertEquals(RequestFailureReason.UNKNOWN_COLUMN, RequestFailureReason.fromCode(500));
-        assertEquals(RequestFailureReason.UNKNOWN_TABLE, RequestFailureReason.fromCode(501));
-        assertEquals(RequestFailureReason.REMOTE_STORAGE_FAILURE, RequestFailureReason.fromCode(502));
-        assertEquals(RequestFailureReason.INDEX_BUILD_IN_PROGRESS, RequestFailureReason.fromCode(503));
+        for (Object[] expected : EXPECTED_VALUES)
+        {
+            int code = (Integer) expected[0];
+            RequestFailureReason expectedReason = RequestFailureReason.valueOf((String) expected[1]);
+            assertEquals(expectedReason, RequestFailureReason.fromCode(code));
+        }
 
         // Test invalid codes
         assertEquals(RequestFailureReason.UNKNOWN, RequestFailureReason.fromCode(200));

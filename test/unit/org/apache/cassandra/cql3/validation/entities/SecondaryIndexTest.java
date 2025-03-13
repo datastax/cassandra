@@ -24,7 +24,6 @@ import java.util.concurrent.CountDownLatch;
 
 import com.google.common.collect.ImmutableSet;
 
-import org.apache.cassandra.index.IndexBuildInProgressException;
 import org.apache.commons.lang3.StringUtils;
 import org.junit.Test;
 
@@ -49,6 +48,7 @@ import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.exceptions.SyntaxException;
+import org.apache.cassandra.index.IndexBuildInProgressException;
 import org.apache.cassandra.index.IndexNotAvailableException;
 import org.apache.cassandra.index.SecondaryIndexManager;
 import org.apache.cassandra.index.StubIndex;

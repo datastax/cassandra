@@ -17,14 +17,14 @@
  */
 package org.apache.cassandra.index.sai.cql;
 
-import org.apache.cassandra.index.IndexBuildInProgressException;
-import org.apache.cassandra.inject.Injections;
-import org.apache.cassandra.inject.InvokePointBuilder;
 import org.junit.Test;
 
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
+import org.apache.cassandra.index.IndexBuildInProgressException;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
+import org.apache.cassandra.inject.Injections;
+import org.apache.cassandra.inject.InvokePointBuilder;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertNotNull;
@@ -521,7 +521,7 @@ public class AllowFilteringTest extends SAITester
 
     private final Injections.Barrier blockIndexBuild = Injections.newBarrier("block_index_build", 2, false)
                                                                  .add(InvokePointBuilder.newInvokePoint().onClass(StorageAttachedIndex.class)
-                    .onMethod("startInitialBuild"))
+                                                                 .onMethod("startInitialBuild"))
                                                                  .build();
 
     @Test

@@ -365,12 +365,18 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
      */
     public void checkQueryability(Index.QueryPlan queryPlan)
     {
+        InetAddressAndPort endpoint = FBUtilities.getBroadcastAddressAndPort();
+
         for (Index index : queryPlan.getIndexes())
         {
+            String indexName = index.getIndexMetadata().name;
+            Index.Status indexStatus = getIndexStatus(endpoint, keyspace.getName(), indexName);
+
             if (!isIndexQueryable(index))
             {
                 // In Astra index can be queryable during index build, thus we need to check both not queryable and building
-                if (isIndexBuilding(index))
+                // Plus isQueryable is always true for non-SAI index implementations
+                if (indexStatus == Index.Status.FULL_REBUILD_STARTED)
                     throw new IndexBuildInProgressException(index);
 
                 throw new IndexNotAvailableException(index);
@@ -409,18 +415,6 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
     public boolean isIndexWritable(Index index)
     {
         return writableIndexes.containsKey(index.getIndexMetadata().name);
-    }
-
-    /**
-     * Checks if the specified index has any running build task.
-     *
-     * @param index the index
-     * @return {@code true} if the index is building, {@code false} otherwise
-     */
-    @VisibleForTesting
-    public synchronized boolean isIndexBuilding(Index index)
-    {
-        return isIndexBuilding(index.getIndexMetadata().name);
     }
 
     /**
