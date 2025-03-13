@@ -223,7 +223,7 @@ public final class CreateIndexStatement extends AlterSchemaStatement
             long indexesOnAllTables = StreamSupport.stream(Keyspace.all().spliterator(), false).flatMap(ks -> ks.getColumnFamilyStores().stream())
                                                    .flatMap(ks -> ks.indexManager.listIndexes().stream())
                                                    .map(i -> i.getIndexMetadata().getIndexClassName())
-                                                   .filter(otherClassName -> className.equals(otherClassName)).count();
+                                                   .filter(className::equals).count();
             guardRails.totalThreshold.guard(indexesOnAllTables + 1, indexDescription, false, state);
         }
 
@@ -272,10 +272,6 @@ public final class CreateIndexStatement extends AlterSchemaStatement
         if ((kind == IndexMetadata.Kind.CUSTOM) && !SchemaConstants.isValidName(target.column.toString()))
             throw ire(INVALID_CUSTOM_INDEX_TARGET, target.column, SchemaConstants.NAME_LENGTH);
 
-        if ((kind == IndexMetadata.Kind.CUSTOM) && !SchemaConstants.isValidName(target.column.toString()))
-            throw ire("Column '%s' is longer than the permissible name length of %d characters or" +
-                      " contains non-alphanumeric-underscore characters", target.column, SchemaConstants.NAME_LENGTH);
-
         if (column.type.referencesDuration())
         {
             if (column.type.isCollection())
@@ -322,7 +318,7 @@ public final class CreateIndexStatement extends AlterSchemaStatement
     {
         String baseName = targets.size() == 1
                         ? IndexMetadata.generateDefaultIndexName(tableName, targets.get(0).column)
-                        : IndexMetadata.generateDefaultIndexName(tableName);
+                        : IndexMetadata.generateDefaultIndexName(tableName, null);
         return keyspace.findAvailableIndexName(baseName);
     }
 
