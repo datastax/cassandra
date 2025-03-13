@@ -77,7 +77,7 @@ public class ANNOptions
 
         // Ensure that all nodes in the cluster are in a version that supports ANN options, including this one
         assert keyspace != null;
-        Set<InetAddressAndPort> badNodes = MessagingService.instance().endpointsWithVersionBelow(keyspace, MessagingService.VERSION_DS_11);
+        Set<InetAddressAndPort> badNodes = MessagingService.instance().endpointsWithConnectionsOnVersionBelow(keyspace, MessagingService.VERSION_DS_11);
         if (MessagingService.current_version < MessagingService.VERSION_DS_11)
             badNodes.add(FBUtilities.getBroadcastAddressAndPort());
         if (!badNodes.isEmpty())
