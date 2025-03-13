@@ -225,6 +225,18 @@ public class ComplexColumnData extends ColumnData implements Iterable<Cell<?>>
         });
     }
 
+    public ComplexColumnData delete(DeletionTime activeDeletion)
+    {
+        // Assuming this column does not keep any shadowed data, there's nothing to change if we already apply the same
+        // deletion or newer.
+        if (activeDeletion.isLive() || !activeDeletion.supersedes(complexDeletion))
+            return this;
+
+        // The new deletion supersedes the existing, thus we can drop the complex deletion (the assumption is that the
+        // deletion that is being applied here will be stored at a higher level of the hierarchy (e.g. row/partition)).
+        return transformAndFilter(DeletionTime.LIVE, (cell) -> activeDeletion.deletes(cell) ? null : cell);
+    }
+
     public ComplexColumnData purge(DeletionPurger purger, long nowInSec)
     {
         DeletionTime newDeletion = complexDeletion.isLive() || purger.shouldPurge(complexDeletion) ? DeletionTime.LIVE : complexDeletion;
