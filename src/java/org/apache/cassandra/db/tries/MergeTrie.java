@@ -21,18 +21,16 @@ import com.google.common.collect.Iterables;
 
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
-/**
- * A merged view of two tries.
- *
- * This is accomplished by walking the two cursors in parallel; the merged cursor takes the position and features of the
- * smaller and advances with it; when the two cursors are equal, both are advanced.
- *
- * Crucial for the efficiency of this is the fact that when they are advanced like this, we can compare cursors'
- * positions by their depth descending and then incomingTransition ascending.
- *
- * See Trie.md for further details.
- */
-class MergeTrie<T> extends Trie<T>
+/// A merged view of two tries.
+///
+/// This is accomplished by walking the two cursors in parallel; the merged cursor takes the position and features of the
+/// smaller and advances with it; when the two cursors are equal, both are advanced.
+///
+/// Crucial for the efficiency of this is the fact that when they are advanced like this, we can compare cursors'
+/// positions by their depth descending and then incomingTransition ascending.
+///
+/// See [Trie.md](./Trie.md) for further details.
+class MergeTrie<T> implements Trie<T>
 {
     private final MergeResolver<T> resolver;
     protected final Trie<T> t1;
@@ -46,9 +44,9 @@ class MergeTrie<T> extends Trie<T>
     }
 
     @Override
-    protected Cursor<T> cursor(Direction direction)
+    public Cursor<T> cursor(Direction direction)
     {
-        return new MergeCursor<>(resolver, direction, t1, t2);
+        return new MergeCursor<>(resolver, t1.cursor(direction), t2.cursor(direction));
     }
 
     static class MergeCursor<T> implements Cursor<T>
@@ -61,12 +59,12 @@ class MergeTrie<T> extends Trie<T>
         boolean atC1;
         boolean atC2;
 
-        MergeCursor(MergeResolver<T> resolver, Direction direction, Trie<T> t1, Trie<T> t2)
+        MergeCursor(MergeResolver<T> resolver, Cursor<T> c1, Cursor<T> c2)
         {
             this.resolver = resolver;
-            this.direction = direction;
-            this.c1 = t1.cursor(direction);
-            this.c2 = t2.cursor(direction);
+            this.direction = c1.direction();
+            this.c1 = c1;
+            this.c2 = c2;
             assert c1.depth() == 0;
             assert c2.depth() == 0;
             atC1 = atC2 = true;
@@ -173,28 +171,26 @@ class MergeTrie<T> extends Trie<T>
         }
 
         @Override
-        public Trie<T> tailTrie()
+        public Cursor<T> tailCursor(Direction dir)
         {
             if (atC1 && atC2)
-                return new MergeTrie<>(resolver, c1.tailTrie(), c2.tailTrie());
+                return new MergeCursor<>(resolver, c1.tailCursor(dir), c2.tailCursor(dir));
             else if (atC1)
-                return c1.tailTrie();
+                return c1.tailCursor(dir);
             else if (atC2)
-                return c2.tailTrie();
+                return c2.tailCursor(dir);
             else
                 throw new AssertionError();
         }
     }
 
-    /**
-     * Special instance for sources that are guaranteed (by the caller) distinct. The main difference is that we can
-     * form unordered value list by concatenating sources.
-     */
+    /// Special instance for sources that are guaranteed (by the caller) distinct. The main difference is that we can
+    /// form unordered value list by concatenating sources.
     static class Distinct<T> extends MergeTrie<T>
     {
         Distinct(Trie<T> input1, Trie<T> input2)
         {
-            super(throwingResolver(), input1, input2);
+            super(Trie.throwingResolver(), input1, input2);
         }
 
         @Override

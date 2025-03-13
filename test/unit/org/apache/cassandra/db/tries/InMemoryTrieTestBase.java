@@ -219,7 +219,7 @@ public abstract class InMemoryTrieTestBase
         }
     }
 
-    public static class CursorFromSpec implements Trie.Cursor<ByteBuffer>
+    public static class CursorFromSpec implements Cursor<ByteBuffer>
     {
         SpecStackEntry stack;
         int depth;
@@ -305,9 +305,9 @@ public abstract class InMemoryTrieTestBase
         }
 
         @Override
-        public Trie<ByteBuffer> tailTrie()
+        public Cursor<ByteBuffer> tailCursor(Direction dir)
         {
-            throw new UnsupportedOperationException("tailTrie on test cursor");
+            throw new UnsupportedOperationException("tailCursor on test cursor");
         }
     }
 
@@ -316,7 +316,7 @@ public abstract class InMemoryTrieTestBase
         return new Trie<ByteBuffer>()
         {
             @Override
-            protected Cursor<ByteBuffer> cursor(Direction direction)
+            public Cursor<ByteBuffer> cursor(Direction direction)
             {
                 return new CursorFromSpec(nodeDef, direction);
             }

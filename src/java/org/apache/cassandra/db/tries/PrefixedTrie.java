@@ -21,10 +21,8 @@ package org.apache.cassandra.db.tries;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 
-/**
- * Prefixed trie. Represents the content of the given trie with the prefix prepended to all keys.
- */
-public class PrefixedTrie<T> extends Trie<T>
+/// Prefixed trie. Represents the content of the given trie with the prefix prepended to all keys.
+public class PrefixedTrie<T> implements Trie<T>
 {
     final ByteComparable prefix;
     final Trie<T> trie;
@@ -36,21 +34,21 @@ public class PrefixedTrie<T> extends Trie<T>
     }
 
     @Override
-    protected Trie.Cursor<T> cursor(Direction direction)
+    public Cursor<T> cursor(Direction direction)
     {
-        Trie.Cursor<T> sourceCursor = trie.cursor(direction);
-        return new Cursor<>(prefix.asComparableBytes(sourceCursor.byteComparableVersion()), sourceCursor);
+        Cursor<T> sourceCursor = trie.cursor(direction);
+        return new PrefixedCursor<>(prefix.asComparableBytes(sourceCursor.byteComparableVersion()), sourceCursor);
     }
 
-    private static class Cursor<T> implements Trie.Cursor<T>
+    private static class PrefixedCursor<T> implements Cursor<T>
     {
-        final Trie.Cursor<T> tail;
+        final Cursor<T> tail;
         ByteSource prefixBytes;
         int nextPrefixByte;
         int incomingTransition;
         int depthOfPrefix;
 
-        Cursor(ByteSource prefix, Trie.Cursor<T> tail)
+        PrefixedCursor(ByteSource prefix, Cursor<T> tail)
         {
             this.tail = tail;
             prefixBytes = prefix;
@@ -101,7 +99,7 @@ public class PrefixedTrie<T> extends Trie<T>
         }
 
         @Override
-        public int advanceMultiple(Trie.TransitionsReceiver receiver)
+        public int advanceMultiple(TransitionsReceiver receiver)
         {
             if (prefixDone())
                 return completeAdvanceInTail(tail.advanceMultiple(receiver));
@@ -155,10 +153,10 @@ public class PrefixedTrie<T> extends Trie<T>
         }
 
         @Override
-        public Trie<T> tailTrie()
+        public Cursor<T> tailCursor(Direction direction)
         {
             if (prefixDone())
-                return tail.tailTrie();
+                return tail.tailCursor(direction);
             else
             {
                 assert depthOfPrefix >= 0 : "tailTrie called on exhausted cursor";
@@ -166,7 +164,7 @@ public class PrefixedTrie<T> extends Trie<T>
                     prefixBytes = ByteSource.duplicatable(prefixBytes);
                 ByteSource.Duplicatable duplicatableSource = (ByteSource.Duplicatable) prefixBytes;
 
-                return new PrefixedTrie<>(v -> duplicatableSource.duplicate(), tail.tailTrie());
+                return new PrefixedCursor<>(duplicatableSource.duplicate(), tail.tailCursor(direction));
             }
         }
     }

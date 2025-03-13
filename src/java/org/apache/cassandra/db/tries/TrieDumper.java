@@ -21,10 +21,8 @@ import java.util.function.Function;
 
 import org.agrona.DirectBuffer;
 
-/**
- * Simple utility class for dumping the structure of a trie to string.
- */
-class TrieDumper<T> implements Trie.Walker<T, String>
+/// Simple utility class for dumping the structure of a trie to string.
+class TrieDumper<T> implements Cursor.Walker<T, String>
 {
     private final StringBuilder b;
     private final Function<T, String> contentToString;

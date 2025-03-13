@@ -24,13 +24,11 @@ import java.util.function.Predicate;
 
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
-/**
- * Iterator of trie entries that constructs tail tries for the content-bearing branches that satisfy the given predicate
- * and skips over the returned branches.
- */
+/// Iterator of trie entries that constructs tail tries for the content-bearing branches that satisfy the given predicate
+/// and skips over the returned branches.
 public abstract class TrieTailsIterator<T, V> extends TriePathReconstructor implements Iterator<V>
 {
-    final Trie.Cursor<T> cursor;
+    final Cursor<T> cursor;
     private final Predicate<T> predicate;
     private T next;
     private boolean gotNext;
@@ -42,7 +40,7 @@ public abstract class TrieTailsIterator<T, V> extends TriePathReconstructor impl
         assert cursor.depth() == 0;
     }
 
-    TrieTailsIterator(Trie.Cursor<T> cursor, Predicate<T> predicate)
+    TrieTailsIterator(Cursor<T> cursor, Predicate<T> predicate)
     {
         this.cursor = cursor;
         this.predicate = predicate;
@@ -86,7 +84,7 @@ public abstract class TrieTailsIterator<T, V> extends TriePathReconstructor impl
         gotNext = false;
         T v = next;
         next = null;
-        return mapContent(v, cursor.tailTrie(), keyBytes, keyPos);
+        return mapContent(v, dir -> cursor.tailCursor(dir), keyBytes, keyPos);
     }
 
     ByteComparable.Version byteComparableVersion()
@@ -96,14 +94,12 @@ public abstract class TrieTailsIterator<T, V> extends TriePathReconstructor impl
 
     protected abstract V mapContent(T value, Trie<T> tailTrie, byte[] bytes, int byteLength);
 
-    /**
-     * Iterator representing the selected content of the trie a sequence of {@code (path, tail)} pairs, where
-     * {@code tail} is the branch of the trie rooted at the selected content node (reachable by following
-     * {@code path}). The tail trie will have the selected content at its root.
-     */
+    /// Iterator representing the selected content of the trie a sequence of `(path, tail)` pairs, where
+    /// `tail` is the branch of the trie rooted at the selected content node (reachable by following
+    /// `path`). The tail trie will have the selected content at its root.
     static class AsEntries<T> extends TrieTailsIterator<T, Map.Entry<ByteComparable.Preencoded, Trie<T>>>
     {
-        public AsEntries(Trie.Cursor<T> cursor, Class<? extends T> clazz)
+        public AsEntries(Cursor<T> cursor, Class<? extends T> clazz)
         {
             super(cursor, clazz::isInstance);
         }

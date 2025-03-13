@@ -296,7 +296,7 @@ public class SlicedTrieTest
         return new Trie<Integer>()
         {
             @Override
-            protected Cursor<Integer> cursor(Direction direction)
+            public Cursor<Integer> cursor(Direction direction)
             {
                 return new singleLevelCursor(direction);
             }
@@ -370,7 +370,7 @@ public class SlicedTrieTest
                 }
 
                 @Override
-                public Trie<Integer> tailTrie()
+                public Cursor<Integer> tailCursor(Direction d)
                 {
                     throw new UnsupportedOperationException("tailTrie on test cursor");
                 }

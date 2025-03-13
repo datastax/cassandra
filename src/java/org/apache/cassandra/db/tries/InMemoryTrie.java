@@ -38,49 +38,43 @@ import org.apache.cassandra.utils.ObjectSizes;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.github.jamm.MemoryLayoutSpecification;
 
-/**
- * In-memory trie built for fast modification and reads executing concurrently with writes from a single mutator thread.
- * <p>
- * The main method for performing writes is {@link #apply(Trie, UpsertTransformer, Predicate)} which takes a trie as
- * an argument and merges it into the current trie using the methods supplied by the given {@link UpsertTransformer},
- * force copying anything below the points where the third argument returns true.
- * </p><p>
- * The predicate can be used to implement several forms of atomicity and consistency guarantees:
- * <list>
- * <li> if the predicate is {@code nf -> false}, neither atomicity nor sequential consistency is guaranteed - readers
- *      can see any mixture of old and modified content
- * <li> if the predicate is {@code nf -> true}, full sequential consistency will be provided, i.e. if a reader sees any
- *      part of a modification, it will see all of it, and all the results of all previous modifications
- * <li> if the predicate is {@code nf -> nf.isBranching()} the write will be atomic, i.e. either none or all of the
- *      content of the merged trie will be visible by concurrent readers, but not sequentially consistent, i.e. there
- *      may be writes that are not visible to a reader even when they precede writes that are visible.
- * <li> if the predicate is {@code nf -> <some_test>(nf.content())} the write will be consistent below the identified
- *      point (used e.g. by Memtable to ensure partition-level consistency)
- * </list>
- * </p><p>
- * Additionally, the class provides several simpler write methods for efficiency and convenience:
- * <list>
- * <li> {@link #putRecursive(ByteComparable, Object, UpsertTransformer)} inserts a single value using a recursive walk.
- *      It cannot provide consistency (single-path writes are always atomic). This is more efficient as it stores the
- *      walk state in the stack rather than on the heap but can cause a {@code StackOverflowException}.
- * <li> {@link #putSingleton(ByteComparable, Object, UpsertTransformer)} is a non-recursive version of the above, using
- *      the {@code apply} machinery.
- * <li> {@link #putSingleton(ByteComparable, Object, UpsertTransformer, boolean)} uses the fourth argument to choose
- *      between the two methods above, where some external property can be used to decide if the keys are short enough
- *      to permit recursive execution.
- * </list>
- * </p><p>
- * Because it uses 32-bit pointers in byte buffers, this trie has a fixed size limit of 2GB.
- */
+/// In-memory trie built for fast modification and reads executing concurrently with writes from a single mutator thread.
+///
+/// The main method for performing writes is [#apply(Trie,UpsertTransformer,Predicate)] which takes a trie as
+/// an argument and merges it into the current trie using the methods supplied by the given [UpsertTransformer],
+/// force copying anything below the points where the third argument returns true.
+///
+///
+/// The predicate can be used to implement several forms of atomicity and consistency guarantees:
+///   -  if the predicate is `nf -> false`, neither atomicity nor sequential consistency is guaranteed - readers
+///     can see any mixture of old and modified content
+///   -  if the predicate is `nf -> true`, full sequential consistency will be provided, i.e. if a reader sees any
+///     part of a modification, it will see all of it, and all the results of all previous modifications
+///   -  if the predicate is `nf -> nf.isBranching()` the write will be atomic, i.e. either none or all of the
+///     content of the merged trie will be visible by concurrent readers, but not sequentially consistent, i.e. there
+///     may be writes that are not visible to a reader even when they precede writes that are visible.
+///   -  if the predicate is `nf -> <some_test>(nf.content())` the write will be consistent below the identified
+///     point (used e.g. by Memtable to ensure partition-level consistency)
+///
+///
+///     Additionally, the class provides several simpler write methods for efficiency and convenience:
+///   -  [#putRecursive(ByteComparable,Object,UpsertTransformer)] inserts a single value using a recursive walk.
+///     It cannot provide consistency (single-path writes are always atomic). This is more efficient as it stores the
+///     walk state in the stack rather than on the heap but can cause a `StackOverflowException`.
+///   -  [#putSingleton(ByteComparable,Object,UpsertTransformer)] is a non-recursive version of the above, using
+///     the `apply` machinery.
+///   -  [#putSingleton(ByteComparable,Object,UpsertTransformer,boolean)] uses the fourth argument to choose
+///     between the two methods above, where some external property can be used to decide if the keys are short enough
+///     to permit recursive execution.
+///
+///     Because it uses 32-bit pointers in byte buffers, this trie has a fixed size limit of 2GB.
 public class InMemoryTrie<T> extends InMemoryReadTrie<T>
 {
     // See the trie format description in InMemoryReadTrie.
 
-    /**
-     * Trie size limit. This is not enforced, but users must check from time to time that it is not exceeded (using
-     * {@link #reachedAllocatedSizeThreshold()}) and start switching to a new trie if it is.
-     * This must be done to avoid tries growing beyond their hard 2GB size limit (due to the 32-bit pointers).
-     */
+    /// Trie size limit. This is not enforced, but users must check from time to time that it is not exceeded (using
+    /// [#reachedAllocatedSizeThreshold()]) and start switching to a new trie if it is.
+    /// This must be done to avoid tries growing beyond their hard 2GB size limit (due to the 32-bit pointers).
     @VisibleForTesting
     static final int ALLOCATED_SIZE_THRESHOLD;
     static
@@ -220,10 +214,8 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
         getBuffer(pos).putByte(inBufferOffset(pos), value);
     }
 
-    /**
-     * Allocate a new cell in the data buffers. This is called by the memory allocation strategy when it runs out of
-     * free cells to reuse.
-     */
+    /// Allocate a new cell in the data buffers. This is called by the memory allocation strategy when it runs out of
+    /// free cells to reuse.
     private int allocateNewCell() throws TrieSpaceExhaustedException
     {
         // Note: If this method is modified, please run InMemoryTrieTest.testOver1GSize to verify it acts correctly
@@ -246,11 +238,9 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
         return v;
     }
 
-    /**
-     * Allocate a cell to use for storing data. This uses the memory allocation strategy to reuse cells if any are
-     * available, or to allocate new cells using {@link #allocateNewCell}. Because some node types rely on cells being
-     * filled with 0 as initial state, any cell we get through the allocator must also be cleaned.
-     */
+    /// Allocate a cell to use for storing data. This uses the memory allocation strategy to reuse cells if any are
+    /// available, or to allocate new cells using [#allocateNewCell]. Because some node types rely on cells being
+    /// filled with 0 as initial state, any cell we get through the allocator must also be cleaned.
     private int allocateCell() throws TrieSpaceExhaustedException
     {
         int cell = cellAllocator.allocate();
@@ -263,10 +253,8 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
         cellAllocator.recycle(cell & -CELL_SIZE);
     }
 
-    /**
-     * Creates a copy of a given cell and marks the original for recycling. Used when a mutation needs to force-copy
-     * paths to ensure earlier states are still available for concurrent readers.
-     */
+    /// Creates a copy of a given cell and marks the original for recycling. Used when a mutation needs to force-copy
+    /// paths to ensure earlier states are still available for concurrent readers.
     private int copyCell(int cell) throws TrieSpaceExhaustedException
     {
         int copy = cellAllocator.allocate();
@@ -275,10 +263,8 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
         return copy | (cell & (CELL_SIZE - 1));
     }
 
-    /**
-     * Allocate a new position in the object array. Used by the memory allocation strategy to allocate a content spot
-     * when it runs out of recycled positions.
-     */
+    /// Allocate a new position in the object array. Used by the memory allocation strategy to allocate a content spot
+    /// when it runs out of recycled positions.
     private int allocateNewObject()
     {
         int index = contentCount++;
@@ -293,12 +279,10 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
     }
 
 
-    /**
-     * Add a new content value.
-     *
-     * @return A content id that can be used to reference the content, encoded as ~index where index is the
-     *         position of the value in the content array.
-     */
+    /// Add a new content value.
+    ///
+    /// @return A content id that can be used to reference the content, encoded as `~index` where index is the
+    ///         position of the value in the content array.
     private int addContent(@Nonnull T value) throws TrieSpaceExhaustedException
     {
         Preconditions.checkNotNull(value, "Content value cannot be null");
@@ -312,12 +296,10 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
         return ~index;
     }
 
-    /**
-     * Change the content associated with a given content id.
-     *
-     * @param id content id, encoded as ~index where index is the position in the content array
-     * @param value new content value to store
-     */
+    /// Change the content associated with a given content id.
+    ///
+    /// @param id content id, encoded as `~index` where index is the position in the content array
+    /// @param value new content value to store
     private void setContent(int id, T value)
     {
         int leadBit = getBufferIdx(~id, CONTENTS_START_SHIFT, CONTENTS_START_SIZE);
@@ -331,9 +313,7 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
         objectAllocator.recycle(~id);
     }
 
-    /**
-     * Called to clean up all buffers when the trie is known to no longer be needed.
-     */
+    /// Called to clean up all buffers when the trie is known to no longer be needed.
     public void discardBuffers()
     {
         if (bufferType == BufferType.ON_HEAP)
@@ -392,24 +372,22 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
     // first time, and such readers must pass through reading that pointer, which forces a happens-before relationship
     // that extends to all values written by this thread before it.
 
-    /**
-     * Attach a child to the given non-content node. This may be an update for an existing branch, or a new child for
-     * the node. An update _is_ required (i.e. this is only called when the newChild pointer is not the same as the
-     * existing value).
-     * This method is called when the original node content must be preserved for concurrent readers (i.e. any cell to
-     * be modified needs to be copied first.)
-     *
-     * @param node pointer to the node to update or copy
-     * @param originalNode pointer to the node as it was before any updates in the current modification (i.e. apply
-     *                     call) were started. In other words, the node that is currently reachable by readers if they
-     *                     follow the same key, and which will become unreachable for new readers after this update
-     *                     completes. Used to avoid copying again if already done -- if node is already != originalNode
-     *                     (which is the case when a second or further child of a node is changed by an update),
-     *                     then node is currently not reachable and can be safely modified or completely overwritten.
-     * @param trans transition to modify/add
-     * @param newChild new child pointer
-     * @return pointer to the updated node
-     */
+    /// Attach a child to the given non-content node. This may be an update for an existing branch, or a new child for
+    /// the node. An update _is_ required (i.e. this is only called when the `newChild` pointer is not the same as the
+    /// existing value).
+    /// This method is called when the original node content must be preserved for concurrent readers (i.e. any cell to
+    /// be modified needs to be copied first.)
+    ///
+    /// @param node pointer to the node to update or copy
+    /// @param originalNode pointer to the node as it was before any updates in the current modification (i.e. apply
+    ///                     call) were started. In other words, the node that is currently reachable by readers if they
+    ///                     follow the same key, and which will become unreachable for new readers after this update
+    ///                     completes. Used to avoid copying again if already done -- if `node` is already != `originalNode`
+    ///                     (which is the case when a second or further child of a node is changed by an update),
+    ///                     then node is currently not reachable and can be safely modified or completely overwritten.
+    /// @param trans transition to modify/add
+    /// @param newChild new child pointer
+    /// @return pointer to the updated node
     private int attachChildCopying(int node, int originalNode, int trans, int newChild) throws TrieSpaceExhaustedException
     {
         assert !isLeaf(node) : "attachChild cannot be used on content nodes.";
@@ -432,15 +410,13 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
         }
     }
 
-    /**
-     * Attach a child to the given node. This may be an update for an existing branch, or a new child for the node.
-     * An update _is_ required (i.e. this is only called when the newChild pointer is not the same as the existing value).
-     *
-     * @param node pointer to the node to update or copy
-     * @param trans transition to modify/add
-     * @param newChild new child pointer
-     * @return pointer to the updated node; same as node if update was in-place
-     */
+    /// Attach a child to the given node. This may be an update for an existing branch, or a new child for the node.
+    /// An update _is_ required (i.e. this is only called when the newChild pointer is not the same as the existing value).
+    ///
+    /// @param node pointer to the node to update or copy
+    /// @param trans transition to modify/add
+    /// @param newChild new child pointer
+    /// @return pointer to the updated node; same as node if update was in-place
     private int attachChild(int node, int trans, int newChild) throws TrieSpaceExhaustedException
     {
         assert !isLeaf(node) : "attachChild cannot be used on content nodes.";
@@ -458,9 +434,7 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
         }
     }
 
-    /**
-     * Attach a child to the given split node. This may be an update for an existing branch, or a new child for the node.
-     */
+    /// Attach a child to the given split node. This may be an update for an existing branch, or a new child for the node.
     private int attachChildToSplit(int node, int trans, int newChild) throws TrieSpaceExhaustedException
     {
         int midPos = splitCellPointerAddress(node, splitNodeMidIndex(trans), SPLIT_START_LEVEL_LIMIT);
@@ -493,10 +467,8 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
         return node;
     }
 
-    /**
-     * Non-volatile version of attachChildToSplit. Used when the split node is not reachable yet (during the conversion
-     * from sparse).
-     */
+    /// Non-volatile version of `attachChildToSplit`. Used when the split node is not reachable yet (during the conversion
+    /// from sparse).
     private int attachChildToSplitNonVolatile(int node, int trans, int newChild) throws TrieSpaceExhaustedException
     {
         assert offset(node) == SPLIT_OFFSET : "Invalid split node in trie";
@@ -511,11 +483,9 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
         return node;
     }
 
-    /**
-     * Attach a child to the given split node, copying all modified content to enable atomic visibility
-     * of modification.
-     * This may be an update for an existing branch, or a new child for the node.
-     */
+    /// Attach a child to the given split node, copying all modified content to enable atomic visibility
+    /// of modification.
+    /// This may be an update for an existing branch, or a new child for the node.
     private int attachChildToSplitCopying(int node, int originalNode, int trans, int newChild) throws TrieSpaceExhaustedException
     {
         if (offset(originalNode) != SPLIT_OFFSET)  // includes originalNode == NONE
@@ -539,9 +509,7 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
         return node;
     }
 
-    /**
-     * Attach a child to the given sparse node. This may be an update for an existing branch, or a new child for the node.
-     */
+    /// Attach a child to the given sparse node. This may be an update for an existing branch, or a new child for the node.
     private int attachChildToSparse(int node, int trans, int newChild) throws TrieSpaceExhaustedException
     {
         int index;
@@ -592,10 +560,8 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
         return node;
     }
 
-    /**
-     * Attach a child to the given sparse node. This may be an update for an existing branch, or a new child for the node.
-     * Resulting node is not reachable, no volatile set needed.
-     */
+    /// Attach a child to the given sparse node. This may be an update for an existing branch, or a new child for the node.
+    /// Resulting node is not reachable, no volatile set needed.
     private int attachChildToSparseCopying(int node, int originalNode, int trans, int newChild) throws TrieSpaceExhaustedException
     {
         int index;
@@ -654,15 +620,13 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
         return split;
     }
 
-    /**
-     * Insert the given newIndex in the base-6 encoded order word in the correct position with respect to the ordering.
-     * <p>
-     * E.g.
-     *   - insertOrderWord(120, 3, 0) must return 1203 (decimal 48*6 + 3)
-     *   - insertOrderWord(120, 3, 1, ptr) must return 1230 (decimal 8*36 + 3*6 + 0)
-     *   - insertOrderWord(120, 3, 2, ptr) must return 1320 (decimal 1*216 + 3*36 + 12)
-     *   - insertOrderWord(120, 3, 3, ptr) must return 3120 (decimal 3*216 + 48)
-     */
+    /// Insert the given newIndex in the base-6 encoded order word in the correct position with respect to the ordering.
+    ///
+    /// E.g.
+    ///   - `insertOrderWord(120, 3, 0)` must return 1203 (decimal 48*6 + 3)
+    ///   - `insertOrderWord(120, 3, 1, ptr)` must return 1230 (decimal 8*36 + 3*6 + 0)
+    ///   - `insertOrderWord(120, 3, 2, ptr)` must return 1320 (decimal 1*216 + 3*36 + 12)
+    ///   - `insertOrderWord(120, 3, 3, ptr)` must return 3120 (decimal 3*216 + 48)
     private static int insertInOrderWord(int order, int newIndex, int smallerCount)
     {
         int r = 1;
@@ -674,15 +638,14 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
         return tail + (head * 6 + newIndex) * r;
     }
 
-    /**
-     * Attach a child to the given chain node. This may be an update for an existing branch with different target
-     * address, or a second child for the node.
-     * This method always copies the node -- with the exception of updates that change the child of the last node in a
-     * chain cell with matching transition byte (which this method is not used for, see attachChild), modifications to
-     * chain nodes cannot be done in place, either because we introduce a new transition byte and have to convert from
-     * the single-transition chain type to sparse, or because we have to remap the child from the implicit node + 1 to
-     * something else.
-     */
+    /// Attach a child to the given chain node. This may be an update for an existing branch with different target
+    /// address, or a second child for the node.
+    ///
+    /// This method always copies the node -- with the exception of updates that change the child of the last node in a
+    /// chain cell with matching transition byte (which this method is not used for, see [#attachChild]), modifications to
+    /// chain nodes cannot be done in place, either because we introduce a new transition byte and have to convert from
+    /// the single-transition chain type to sparse, or because we have to remap the child from the implicit node + 1 to
+    /// something else.
     private int attachChildToChain(int node, int transitionByte, int newChild) throws TrieSpaceExhaustedException
     {
         int existingByte = getUnsignedByte(node);
@@ -710,9 +673,7 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
         return convertChainToSparse(node, existingByte, newChild, transitionByte);
     }
 
-    /**
-     * Attach a child to the given chain node, when we are force-copying.
-     */
+    /// Attach a child to the given chain node, when we are force-copying.
     private int attachChildToChainCopying(int node, int originalNode, int transitionByte, int newChild)
     throws TrieSpaceExhaustedException
     {
@@ -763,9 +724,7 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
         return newChild > 0 && newChild - 1 > NONE && newOffset > CHAIN_MIN_OFFSET && newOffset <= CHAIN_MAX_OFFSET;
     }
 
-    /**
-     * Create a sparse node with two children.
-     */
+    /// Create a sparse node with two children.
     private int createSparseNode(int byte1, int child1, int byte2, int child2) throws TrieSpaceExhaustedException
     {
         assert byte1 != byte2 : "Attempted to create a sparse node with two of the same transition";
@@ -788,11 +747,9 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
         return node;
     }
 
-    /**
-     * Creates a chain node with the single provided transition (pointing to the provided child).
-     * Note that to avoid creating inefficient tries with under-utilized chain nodes, this should only be called from
-     * {@link #expandOrCreateChainNode} and other call-sites should call {@link #expandOrCreateChainNode}.
-     */
+    /// Creates a chain node with the single provided transition (pointing to the provided child).
+    /// Note that to avoid creating inefficient tries with under-utilized chain nodes, this should only be called from
+    /// [#expandOrCreateChainNode] and other call-sites should call [#expandOrCreateChainNode].
     private int createNewChainNode(int transitionByte, int newChild) throws TrieSpaceExhaustedException
     {
         int newNode = allocateCell() + LAST_POINTER_OFFSET - 1;
@@ -803,8 +760,8 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
         return newNode;
     }
 
-    /** Like {@link #createNewChainNode}, but if the new child is already a chain node and has room, expand
-     * it instead of creating a brand new node. */
+    /// Like [#createNewChainNode], but if the new child is already a chain node and has room, expand
+    /// it instead of creating a brand new node.
     private int expandOrCreateChainNode(int transitionByte, int newChild) throws TrieSpaceExhaustedException
     {
         if (isExpandableChain(newChild))
@@ -884,22 +841,20 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
         return getUnsignedByte(node + PREFIX_FLAGS_OFFSET) < CELL_SIZE;
     }
 
-    /**
-     * Copy the content from an existing node, if it has any, to a newly-prepared update for its child.
-     *
-     * @param existingPreContentNode pointer to the existing node before skipping over content nodes, i.e. this is
-     *                               either the same as existingPostContentNode or a pointer to a prefix or leaf node
-     *                               whose child is existingPostContentNode
-     * @param existingPostContentNode pointer to the existing node being updated, after any content nodes have been
-     *                                skipped and before any modification have been applied; always a non-content node
-     * @param updatedPostContentNode is the updated node, i.e. the node to which all relevant modifications have been
-     *                               applied; if the modifications were applied in-place, this will be the same as
-     *                               existingPostContentNode, otherwise a completely different pointer; always a non-
-     *                               content node
-     * @param forcedCopy whether or not we need to preserve all pre-existing data for concurrent readers
-     * @return a node which has the children of updatedPostContentNode combined with the content of
-     *         existingPreContentNode
-     */
+    /// Copy the content from an existing node, if it has any, to a newly-prepared update for its child.
+    ///
+    /// @param existingPreContentNode pointer to the existing node before skipping over content nodes, i.e. this is
+    ///                               either the same as existingPostContentNode or a pointer to a prefix or leaf node
+    ///                               whose child is `existingPostContentNode`
+    /// @param existingPostContentNode pointer to the existing node being updated, after any content nodes have been
+    ///                                skipped and before any modification have been applied; always a non-content node
+    /// @param updatedPostContentNode is the updated node, i.e. the node to which all relevant modifications have been
+    ///                               applied; if the modifications were applied in-place, this will be the same as
+    ///                               `existingPostContentNode`, otherwise a completely different pointer; always a non-
+    ///                               content node
+    /// @param forcedCopy whether or not we need to preserve all pre-existing data for concurrent readers
+    /// @return a node which has the children of updatedPostContentNode combined with the content of
+    ///         `existingPreContentNode`
     private int preserveContent(int existingPreContentNode,
                                 int existingPostContentNode,
                                 int updatedPostContentNode,
@@ -927,23 +882,19 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
 
     private final ApplyState applyState = new ApplyState();
 
-    /**
-     * Represents the state for an {@link #apply} operation. Contains a stack of all nodes we descended through
-     * and used to update the nodes with any new data during ascent.
-     * <p>
-     * To make this as efficient and GC-friendly as possible, we use an integer array (instead of is an object stack)
-     * and we reuse the same object. The latter is safe because memtable tries cannot be mutated in parallel by multiple
-     * writers.
-     */
+    /// Represents the state for an [#apply] operation. Contains a stack of all nodes we descended through
+    /// and used to update the nodes with any new data during ascent.
+    ///
+    /// To make this as efficient and GC-friendly as possible, we use an integer array (instead of is an object stack)
+    /// and we reuse the same object. The latter is safe because memtable tries cannot be mutated in parallel by multiple
+    /// writers.
     private class ApplyState implements KeyProducer<T>
     {
         int[] data = new int[16 * 5];
         int currentDepth = -1;
 
-        /**
-         * Pointer to the existing node before skipping over content nodes, i.e. this is either the same as
-         * existingPostContentNode or a pointer to a prefix or leaf node whose child is existingPostContentNode.
-         */
+        /// Pointer to the existing node before skipping over content nodes, i.e. this is either the same as
+        /// existingPostContentNode or a pointer to a prefix or leaf node whose child is `existingPostContentNode`.
         int existingPreContentNode()
         {
             return data[currentDepth * 5 + 0];
@@ -953,10 +904,8 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
             data[currentDepth * 5 + 0] = value;
         }
 
-        /**
-         * Pointer to the existing node being updated, after any content nodes have been skipped and before any
-         * modification have been applied. Always a non-content node.
-         */
+        /// Pointer to the existing node being updated, after any content nodes have been skipped and before any
+        /// modification have been applied. Always a non-content node.
         int existingPostContentNode()
         {
             return data[currentDepth * 5 + 1];
@@ -966,14 +915,12 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
             data[currentDepth * 5 + 1] = value;
         }
 
-        /**
-         * The updated node, i.e. the node to which the relevant modifications are being applied. This will change as
-         * children are processed and attached to the node. After all children have been processed, this will contain
-         * the fully updated node (i.e. the union of existingPostContentNode and mutationNode) without any content,
-         * which will be processed separately and, if necessary, attached ahead of this. If the modifications were
-         * applied in-place, this will be the same as existingPostContentNode, otherwise a completely different
-         * pointer. Always a non-content node.
-         */
+        /// The updated node, i.e. the node to which the relevant modifications are being applied. This will change as
+        /// children are processed and attached to the node. After all children have been processed, this will contain
+        /// the fully updated node (i.e. the union of `existingPostContentNode` and `mutationNode`) without any content,
+        /// which will be processed separately and, if necessary, attached ahead of this. If the modifications were
+        /// applied in-place, this will be the same as `existingPostContentNode`, otherwise a completely different
+        /// pointer. Always a non-content node.
         int updatedPostContentNode()
         {
             return data[currentDepth * 5 + 2];
@@ -983,9 +930,7 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
             data[currentDepth * 5 + 2] = value;
         }
 
-        /**
-         * The transition we took on the way down.
-         */
+        /// The transition we took on the way down.
         int transition()
         {
             return data[currentDepth * 5 + 3];
@@ -999,10 +944,8 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
             return data[stackDepth * 5 + 3];
         }
 
-        /**
-         * The compiled content id. Needed because we can only access a cursor's content on the way down but we can't
-         * attach it until we ascend from the node.
-         */
+        /// The compiled content id. Needed because we can only access a cursor's content on the way down but we can't
+        /// attach it until we ascend from the node.
         int contentId()
         {
             return data[currentDepth * 5 + 4];
@@ -1025,9 +968,7 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
             return this;
         }
 
-        /**
-         * Returns true if the depth signals mutation cursor is exhausted.
-         */
+        /// Returns true if the depth signals mutation cursor is exhausted.
         boolean advanceTo(int depth, int transition, int forcedCopyDepth) throws TrieSpaceExhaustedException
         {
             while (currentDepth > Math.max(0, depth - 1))
@@ -1043,9 +984,7 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
             return false;
         }
 
-        /**
-         * Descend to a child node. Prepares a new entry in the stack for the node.
-         */
+        /// Descend to a child node. Prepares a new entry in the stack for the node.
         void descend(int transition)
         {
             setTransition(transition);
@@ -1117,9 +1056,7 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
             }
         }
 
-        /**
-         * Attach a child to the current node.
-         */
+        /// Attach a child to the current node.
         private void attachChild(int transition, int child, boolean forcedCopy) throws TrieSpaceExhaustedException
         {
             int updatedPostContentNode = updatedPostContentNode();
@@ -1136,10 +1073,8 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
                                                                         child));
         }
 
-        /**
-         * Apply the collected content to a node. Converts NONE to a leaf node, and adds or updates a prefix for all
-         * others.
-         */
+        /// Apply the collected content to a node. Converts `NONE` to a leaf node, and adds or updates a prefix for all
+        /// others.
         private int applyContent(boolean forcedCopy) throws TrieSpaceExhaustedException
         {
             // Note: the old content id itself is already released by setContent. Here we must release any standalone
@@ -1223,11 +1158,9 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
             return existingPrePrefixNode;
         }
 
-        /**
-         * After a node's children are processed, this is called to ascend from it. This means applying the collected
-         * content to the compiled updatedPostContentNode and creating a mapping in the parent to it (or updating if
-         * one already exists).
-         */
+        /// After a node's children are processed, this is called to ascend from it. This means applying the collected
+        /// content to the compiled `updatedPostContentNode` and creating a mapping in the parent to it (or updating if
+        /// one already exists).
         void attachAndMoveToParentState(int forcedCopyDepth) throws TrieSpaceExhaustedException
         {
             int updatedFullNode = applyContent(currentDepth >= forcedCopyDepth);
@@ -1238,9 +1171,7 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
                 attachChild(transition(), updatedFullNode, currentDepth >= forcedCopyDepth);
         }
 
-        /**
-         * Ascend and update the root at the end of processing.
-         */
+        /// Ascend and update the root at the end of processing.
         void attachRoot(int forcedCopyDepth) throws TrieSpaceExhaustedException
         {
             int updatedPreContentNode = applyContent(0 >= forcedCopyDepth);
@@ -1301,102 +1232,82 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
 
     public interface KeyProducer<T>
     {
-        /**
-         * Get the bytes of the path leading to this node.
-         */
+        /// Get the bytes of the path leading to this node.
         byte[] getBytes();
 
-        /**
-         * Get the bytes of the path leading to this node from the closest ancestor whose content, after any new inserts
-         * have been applied, satisfies the given predicate.
-         * Note that the predicate is not called for the current position, because its content is not yet prepared when
-         * the method is being called.
-         */
+        /// Get the bytes of the path leading to this node from the closest ancestor whose content, after any new inserts
+        /// have been applied, satisfies the given predicate.
+        /// Note that the predicate is not called for the current position, because its content is not yet prepared when
+        /// the method is being called.
         byte[] getBytes(Predicate<T> shouldStop);
 
         ByteComparable.Version byteComparableVersion();
     }
 
-    /**
-     * Somewhat similar to {@link Trie.MergeResolver}, this encapsulates logic to be applied whenever new content is
-     * being upserted into a {@link InMemoryTrie}. Unlike {@link Trie.MergeResolver}, {@link UpsertTransformer} will be
-     * applied no matter if there's pre-existing content for that trie key/path or not.
-     *
-     * @param <T> The content type for this {@link InMemoryTrie}.
-     * @param <U> The type of the new content being applied to this {@link InMemoryTrie}.
-     */
+    /// Somewhat similar to [Trie.MergeResolver], this encapsulates logic to be applied whenever new content is
+    /// being upserted into a [InMemoryTrie]. Unlike [Trie.MergeResolver], [UpsertTransformer] will be
+    /// applied no matter if there's pre-existing content for that trie key/path or not.
+    ///
+    /// @param <T> The content type for this [InMemoryTrie].
+    /// @param <U> The type of the new content being applied to this [InMemoryTrie].
     public interface UpsertTransformerWithKeyProducer<T, U>
     {
-        /**
-         * Called when there's content in the updating trie.
-         *
-         * @param existing Existing content for this key, or null if there isn't any.
-         * @param update   The update, always non-null.
-         * @param keyState An interface that can be used to retrieve the path of the value being updated.
-         * @return The combined value to use. Cannot be null.
-         */
+        /// Called when there's content in the updating trie.
+        ///
+        /// @param existing Existing content for this key, or null if there isn't any.
+        /// @param update   The update, always non-null.
+        /// @param keyState An interface that can be used to retrieve the path of the value being updated.
+        /// @return The combined value to use.
         @Nonnull T apply(T existing, @Nonnull U update, @Nonnull KeyProducer<T> keyState);
     }
 
-    /**
-     * Somewhat similar to {@link Trie.MergeResolver}, this encapsulates logic to be applied whenever new content is
-     * being upserted into a {@link InMemoryTrie}. Unlike {@link Trie.MergeResolver}, {@link UpsertTransformer} will be
-     * applied no matter if there's pre-existing content for that trie key/path or not.
-     * <p>
-     * A version of the above that does not use a {@link KeyProducer}.
-     *
-     * @param <T> The content type for this {@link InMemoryTrie}.
-     * @param <U> The type of the new content being applied to this {@link InMemoryTrie}.
-     */
+    /// Somewhat similar to [Trie.MergeResolver], this encapsulates logic to be applied whenever new content is
+    /// being upserted into a [InMemoryTrie]. Unlike [Trie.MergeResolver], [UpsertTransformer] will be
+    /// applied no matter if there's pre-existing content for that trie key/path or not.
+    ///
+    /// A version of the above that does not use a [KeyProducer].
+    ///
+    /// @param <T> The content type for this [InMemoryTrie].
+    /// @param <U> The type of the new content being applied to this [InMemoryTrie].
     public interface UpsertTransformer<T, U> extends UpsertTransformerWithKeyProducer<T, U>
     {
-        /**
-         * Called when there's content in the updating trie.
-         *
-         * @param existing Existing content for this key, or null if there isn't any.
-         * @param update   The update, always non-null.
-         * @return The combined value to use. Cannot be null.
-         */
+        /// Called when there's content in the updating trie.
+        ///
+        /// @param existing Existing content for this key, or null if there isn't any.
+        /// @param update   The update, always non-null.
+        /// @return The combined value to use. Cannot be null.
         @Nonnull T apply(T existing, @Nonnull U update);
 
-        /**
-         * Version of the above that also provides the path of a value being updated.
-         *
-         * @param existing Existing content for this key, or null if there isn't any.
-         * @param update   The update, always non-null.
-         * @param keyState An interface that can be used to retrieve the path of the value being updated.
-         * @return The combined value to use. Cannot be null.
-         */
+        /// Version of the above that also provides the path of a value being updated.
+        ///
+        /// @param existing Existing content for this key, or null if there isn't any.
+        /// @param update   The update, always non-null.
+        /// @param keyState An interface that can be used to retrieve the path of the value being updated.
+        /// @return The combined value to use. Cannot be null.
         default @Nonnull T apply(T existing, @Nonnull U update, @Nonnull KeyProducer<T> keyState)
         {
             return apply(existing, update);
         }
     }
 
-    /**
-     * Interface providing features of the mutating node during mutation done using {@link #apply}.
-     * Effectively a subset of the {@link Trie.Cursor} interface which only permits operations that are safe to
-     * perform before iterating the children of the mutation node to apply the branch mutation.
-     *
-     * This is mainly used as an argument to predicates that decide when to copy substructure when modifying tries,
-     * which enables different kinds of atomicity and consistency guarantees.
-     *
-     * See the InMemoryTrie javadoc or InMemoryTrieThreadedTest for demonstration of the typical usages and what they
-     * achieve.
-     */
+    /// Interface providing features of the mutating node during mutation done using [#apply].
+    /// Effectively a subset of the [Cursor] interface which only permits operations that are safe to
+    /// perform before iterating the children of the mutation node to apply the branch mutation.
+    ///
+    /// This is mainly used as an argument to predicates that decide when to copy substructure when modifying tries,
+    /// which enables different kinds of atomicity and consistency guarantees.
+    ///
+    /// See the InMemoryTrie javadoc or InMemoryTrieThreadedTest for demonstration of the typical usages and what they
+    /// achieve.
     public interface NodeFeatures<T>
     {
-        /**
-         * Whether or not the node has more than one descendant. If a checker needs mutations to be atomic, they can
-         * return true when this becomes true.
-         */
+        /// Whether or not the node has more than one descendant. If a checker needs mutations to be atomic, they can
+        /// return true when this becomes true.
         boolean isBranching();
 
-        /**
-         * The metadata associated with the node. If readers need to see a consistent view (i.e. where older updates
-         * cannot be missed if a new one is presented) below some specified point (e.g. within a partition), the checker
-         * should return true when it identifies that point.
-         */
+        /// The metadata associated with the node. If readers need to see a consistent view (i.e. where older updates
+        /// cannot be missed if a new one is presented) below some specified point (e.g. within a partition), the checker
+        /// should return true when it identifies that point.
         T content();
     }
 
@@ -1465,7 +1376,7 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
         {
             // This is not very efficient, but we only currently use this option in tests.
             // If it's needed for production use, isBranching should be implemented in the cursor interface.
-            Cursor<U> dupe = mutationCursor.tailTrie().cursor(Direction.FORWARD);
+            Cursor<U> dupe = mutationCursor.tailCursor(Direction.FORWARD);
             int childDepth = dupe.advance();
             return childDepth > 0 &&
                    dupe.skipTo(childDepth, dupe.incomingTransition() + 1) == childDepth;
@@ -1478,16 +1389,14 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
         }
     }
 
-    /**
-     * Modify this trie to apply the mutation given in the form of a trie. Any content in the mutation will be resolved
-     * with the given function before being placed in this trie (even if there's no pre-existing content in this trie).
-     * @param mutation the mutation to be applied, given in the form of a trie. Note that its content can be of type
-     * different than the element type for this memtable trie.
-     * @param transformer a function applied to the potentially pre-existing value for the given key, and the new
-     * value. Applied even if there's no pre-existing value in the memtable trie.
-     * @param needsForcedCopy a predicate which decides when to fully copy a branch to provide atomicity guarantees to
-     * concurrent readers. See NodeFeatures for details.
-     */
+    /// Modify this trie to apply the mutation given in the form of a trie. Any content in the mutation will be resolved
+    /// with the given function before being placed in this trie (even if there's no pre-existing content in this trie).
+    /// @param mutation the mutation to be applied, given in the form of a trie. Note that its content can be of type
+    /// different than the element type for this memtable trie.
+    /// @param transformer a function applied to the potentially pre-existing value for the given key, and the new
+    /// value. Applied even if there's no pre-existing value in the memtable trie.
+    /// @param needsForcedCopy a predicate which decides when to fully copy a branch to provide atomicity guarantees to
+    /// concurrent readers. See NodeFeatures for details.
     public <U> void apply(Trie<U> mutation,
                           final UpsertTransformerWithKeyProducer<T, U> transformer,
                           final Predicate<NodeFeatures<U>> needsForcedCopy)
@@ -1510,16 +1419,14 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
         }
     }
 
-    /**
-     * Modify this trie to apply the mutation given in the form of a trie. Any content in the mutation will be resolved
-     * with the given function before being placed in this trie (even if there's no pre-existing content in this trie).
-     * @param mutation the mutation to be applied, given in the form of a trie. Note that its content can be of type
-     * different than the element type for this memtable trie.
-     * @param transformer a function applied to the potentially pre-existing value for the given key, and the new
-     * value. Applied even if there's no pre-existing value in the memtable trie.
-     * @param needsForcedCopy a predicate which decides when to fully copy a branch to provide atomicity guarantees to
-     * concurrent readers. See NodeFeatures for details.
-     */
+    /// Modify this trie to apply the mutation given in the form of a trie. Any content in the mutation will be resolved
+    /// with the given function before being placed in this trie (even if there's no pre-existing content in this trie).
+    /// @param mutation the mutation to be applied, given in the form of a trie. Note that its content can be of type
+    /// different than the element type for this memtable trie.
+    /// @param transformer a function applied to the potentially pre-existing value for the given key, and the new
+    /// value. Applied even if there's no pre-existing value in the memtable trie.
+    /// @param needsForcedCopy a predicate which decides when to fully copy a branch to provide atomicity guarantees to
+    /// concurrent readers. See NodeFeatures for details.
     public <U> void apply(Trie<U> mutation,
                           final UpsertTransformer<T, U> transformer,
                           final Predicate<NodeFeatures<U>> needsForcedCopy)
@@ -1528,18 +1435,16 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
         apply(mutation, (UpsertTransformerWithKeyProducer<T, U>) transformer, needsForcedCopy);
     }
 
-    /**
-     * Map-like put method, using the apply machinery above which cannot run into stack overflow. When the correct
-     * position in the trie has been reached, the value will be resolved with the given function before being placed in
-     * the trie (even if there's no pre-existing content in this trie).
-     * @param key the trie path/key for the given value.
-     * @param value the value being put in the memtable trie. Note that it can be of type different than the element
-     * type for this memtable trie. It's up to the {@code transformer} to return the final value that will stay in
-     * the memtable trie.
-     * @param transformer a function applied to the potentially pre-existing value for the given key, and the new
-     * value (of a potentially different type), returning the final value that will stay in the memtable trie. Applied
-     * even if there's no pre-existing value in the memtable trie.
-     */
+    /// Map-like put method, using the apply machinery above which cannot run into stack overflow. When the correct
+    /// position in the trie has been reached, the value will be resolved with the given function before being placed in
+    /// the trie (even if there's no pre-existing content in this trie).
+    /// @param key the trie path/key for the given value.
+    /// @param value the value being put in the memtable trie. Note that it can be of type different than the element
+    /// type for this memtable trie. It's up to the `transformer` to return the final value that will stay in
+    /// the memtable trie.
+    /// @param transformer a function applied to the potentially pre-existing value for the given key, and the new
+    /// value (of a potentially different type), returning the final value that will stay in the memtable trie. Applied
+    /// even if there's no pre-existing value in the memtable trie.
     public <R> void putSingleton(ByteComparable key,
                                  R value,
                                  UpsertTransformer<T, ? super R> transformer) throws TrieSpaceExhaustedException
@@ -1561,18 +1466,16 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
             putSingleton(key, value, transformer);
     }
 
-    /**
-     * Map-like put method, using a fast recursive implementation through the key bytes. May run into stack overflow if
-     * the trie becomes too deep. When the correct position in the trie has been reached, the value will be resolved
-     * with the given function before being placed in the trie (even if there's no pre-existing content in this trie).
-     * @param key the trie path/key for the given value.
-     * @param value the value being put in the memtable trie. Note that it can be of type different than the element
-     * type for this memtable trie. It's up to the {@code transformer} to return the final value that will stay in
-     * the memtable trie.
-     * @param transformer a function applied to the potentially pre-existing value for the given key, and the new
-     * value (of a potentially different type), returning the final value that will stay in the memtable trie. Applied
-     * even if there's no pre-existing value in the memtable trie.
-     */
+    /// Map-like put method, using a fast recursive implementation through the key bytes. May run into stack overflow if
+    /// the trie becomes too deep. When the correct position in the trie has been reached, the value will be resolved
+    /// with the given function before being placed in the trie (even if there's no pre-existing content in this trie).
+    /// @param key the trie path/key for the given value.
+    /// @param value the value being put in the memtable trie. Note that it can be of type different than the element
+    /// type for this memtable trie. It's up to the `transformer` to return the final value that will stay in
+    /// the memtable trie.
+    /// @param transformer a function applied to the potentially pre-existing value for the given key, and the new
+    /// value (of a potentially different type), returning the final value that will stay in the memtable trie. Applied
+    /// even if there's no pre-existing value in the memtable trie.
     public <R> void putRecursive(ByteComparable key, R value, final UpsertTransformer<T, R> transformer) throws TrieSpaceExhaustedException
     {
         try
@@ -1643,22 +1546,18 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
         objectAllocator.abortMutation();
     }
 
-    /**
-     * Returns true if the allocation threshold has been reached. To be called by the the writing thread (ideally, just
-     * after the write completes). When this returns true, the user should switch to a new trie as soon as feasible.
-     * <p>
-     * The trie expects up to 10% growth above this threshold. Any growth beyond that may be done inefficiently, and
-     * the trie will fail altogether when the size grows beyond 2G - 256 bytes.
-     */
+    /// Returns true if the allocation threshold has been reached. To be called by the the writing thread (ideally, just
+    /// after the write completes). When this returns true, the user should switch to a new trie as soon as feasible.
+    ///
+    /// The trie expects up to 10% growth above this threshold. Any growth beyond that may be done inefficiently, and
+    /// the trie will fail altogether when the size grows beyond 2G - 256 bytes.
     public boolean reachedAllocatedSizeThreshold()
     {
         return allocatedPos >= ALLOCATED_SIZE_THRESHOLD;
     }
 
-    /**
-     * For tests only! Advance the allocation pointer (and allocate space) by this much to test behaviour close to
-     * full.
-     */
+    /// For tests only! Advance the allocation pointer (and allocate space) by this much to test behaviour close to
+    /// full.
     @VisibleForTesting
     int advanceAllocatedPos(int wantedPos) throws TrieSpaceExhaustedException
     {
@@ -1667,36 +1566,30 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
         return allocatedPos;
     }
 
-    /**
-     * For tests only! Returns the current allocation position.
-     */
+    /// For tests only! Returns the current allocation position.
     @VisibleForTesting
     int getAllocatedPos()
     {
         return allocatedPos;
     }
 
-    /**
-     * Returns the off heap size of the memtable trie itself, not counting any space taken by referenced content, or
-     * any space that has been allocated but is not currently in use (e.g. recycled cells or preallocated buffer).
-     * The latter means we are undercounting the actual usage, but the purpose of this reporting is to decide when
-     * to flush out e.g. a memtable and if we include the unused space we would almost always end up flushing out
-     * immediately after allocating a large buffer and not having a chance to use it. Counting only used space makes it
-     * possible to flush out before making these large allocations.
-     */
+    /// Returns the off heap size of the memtable trie itself, not counting any space taken by referenced content, or
+    /// any space that has been allocated but is not currently in use (e.g. recycled cells or preallocated buffer).
+    /// The latter means we are undercounting the actual usage, but the purpose of this reporting is to decide when
+    /// to flush out e.g. a memtable and if we include the unused space we would almost always end up flushing out
+    /// immediately after allocating a large buffer and not having a chance to use it. Counting only used space makes it
+    /// possible to flush out before making these large allocations.
     public long usedSizeOffHeap()
     {
         return bufferType == BufferType.ON_HEAP ? 0 : usedBufferSpace();
     }
 
-    /**
-     * Returns the on heap size of the memtable trie itself, not counting any space taken by referenced content, or
-     * any space that has been allocated but is not currently in use (e.g. recycled cells or preallocated buffer).
-     * The latter means we are undercounting the actual usage, but the purpose of this reporting is to decide when
-     * to flush out e.g. a memtable and if we include the unused space we would almost always end up flushing out
-     * immediately after allocating a large buffer and not having a chance to use it. Counting only used space makes it
-     * possible to flush out before making these large allocations.
-     */
+    /// Returns the on heap size of the memtable trie itself, not counting any space taken by referenced content, or
+    /// any space that has been allocated but is not currently in use (e.g. recycled cells or preallocated buffer).
+    /// The latter means we are undercounting the actual usage, but the purpose of this reporting is to decide when
+    /// to flush out e.g. a memtable and if we include the unused space we would almost always end up flushing out
+    /// immediately after allocating a large buffer and not having a chance to use it. Counting only used space makes it
+    /// possible to flush out before making these large allocations.
     public long usedSizeOnHeap()
     {
         return usedObjectSpace() +
@@ -1715,10 +1608,8 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
         return (contentCount - objectAllocator.indexCountInPipeline()) * MemoryLayoutSpecification.SPEC.getReferenceSize();
     }
 
-    /**
-     * Returns the amount of memory that has been allocated for various buffers but isn't currently in use.
-     * The total on-heap space used by the trie is {@code usedSizeOnHeap() + unusedReservedOnHeapMemory()}.
-     */
+    /// Returns the amount of memory that has been allocated for various buffers but isn't currently in use.
+    /// The total on-heap space used by the trie is `usedSizeOnHeap() + unusedReservedOnHeapMemory()`.
     @VisibleForTesting
     public long unusedReservedOnHeapMemory()
     {
@@ -1743,13 +1634,11 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
         return bufferOverhead + contentOverhead;
     }
 
-    /**
-     * Release all recycled content references, including the ones waiting in still incomplete recycling lists.
-     * This is a test method and can cause null pointer exceptions if used on a live trie.
-     * <p>
-     * If similar functionality is required for non-test purposes, a version of this should be developed that only
-     * releases references on barrier-complete lists.
-     */
+    /// Release all recycled content references, including the ones waiting in still incomplete recycling lists.
+    /// This is a test method and can cause null pointer exceptions if used on a live trie.
+    ///
+    /// If similar functionality is required for non-test purposes, a version of this should be developed that only
+    /// releases references on barrier-complete lists.
     @VisibleForTesting
     public void releaseReferencesUnsafe()
     {
@@ -1757,9 +1646,7 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
             setContent(~idx, null);
     }
 
-    /**
-     * Returns the number of values in the trie
-     */
+    /// Returns the number of values in the trie
     public int valuesCount()
     {
         return contentCount;

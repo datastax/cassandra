@@ -39,7 +39,7 @@ import org.apache.cassandra.utils.bytecomparable.ByteSource;
  *
  * See Trie.md for further details.
  */
-public class SlicedTrie<T> extends Trie<T>
+public class SlicedTrie<T> implements Trie<T>
 {
     private final Trie<T> source;
 
@@ -73,7 +73,7 @@ public class SlicedTrie<T> extends Trie<T>
     }
 
     @Override
-    protected Cursor<T> cursor(Direction direction)
+    public Cursor<T> cursor(Direction direction)
     {
         Cursor<T> sourceCursor = source.cursor(direction);
         // The cursor is left-inclusive and right-exclusive by default. If we need to change the inclusiveness, adjust
@@ -106,8 +106,7 @@ public class SlicedTrie<T> extends Trie<T>
                                   leftSource,
                                   leftNext,
                                   rightSource,
-                                  rightNext,
-                                  direction);
+                                  rightNext);
     }
 
     String sliceString()
@@ -165,11 +164,10 @@ public class SlicedTrie<T> extends Trie<T>
                             ByteSource leftSource,
                             int leftNext,
                             ByteSource rightSource,
-                            int rightNext,
-                            Direction direction)
+                            int rightNext)
         {
             this.source = source;
-            this.direction = direction;
+            this.direction = source.direction();
             start = direction.select(leftSource, rightSource);
             end = direction.select(rightSource, leftSource);
             startNext = direction.select(leftNext, rightNext);
@@ -392,19 +390,19 @@ public class SlicedTrie<T> extends Trie<T>
         }
 
         @Override
-        public Trie<T> tailTrie()
+        public Cursor<T> tailCursor(Direction dir)
         {
-            final Trie<T> sourceTail = source.tailTrie();
+            final Cursor<T> sourceTail = source.tailCursor(dir);
             switch (state)
             {
                 case INSIDE:
                     return sourceTail;
                 case COMMON_PREFIX:
-                    return makeTrie(sourceTail, duplicatableStart(), startNext, duplicatableEnd(), endNext, direction);
+                    return makeCursor(sourceTail, duplicatableStart(), startNext, duplicatableEnd(), endNext, direction);
                 case START_PREFIX:
-                    return makeTrie(sourceTail, duplicatableStart(), startNext, null, -1, direction);
+                    return makeCursor(sourceTail, duplicatableStart(), startNext, null, -1, direction);
                 case END_PREFIX:
-                    return makeTrie(sourceTail, null, -1, duplicatableEnd(), endNext, direction);
+                    return makeCursor(sourceTail, null, -1, duplicatableEnd(), endNext, direction);
                 default:
                     throw new UnsupportedOperationException("tailTrie on a slice boundary");
             }
@@ -429,30 +427,22 @@ public class SlicedTrie<T> extends Trie<T>
         }
 
 
-        private static <T> Trie<T> makeTrie(Trie<T> source,
-                                            ByteSource.Duplicatable startSource,
-                                            int startNext,
-                                            ByteSource.Duplicatable endSource,
-                                            int endNext,
-                                            Direction direction)
+        private static <T> Cursor<T> makeCursor(Cursor<T> source,
+                                                ByteSource.Duplicatable startSource,
+                                                int startNext,
+                                                ByteSource.Duplicatable endSource,
+                                                int endNext,
+                                                Direction startAndEndDirection)
         {
-            ByteSource.Duplicatable leftSource = direction.select(startSource, endSource);
-            ByteSource.Duplicatable rightSource = direction.select(endSource, startSource);
-            int leftNext = direction.select(startNext, endNext);
-            int rightNext = direction.select(endNext, startNext);
-            return new Trie<T>()
-            {
-                @Override
-                protected Cursor<T> cursor(Direction direction)
-                {
-                    return new SlicedCursor<>(source.cursor(direction),
-                                              leftSource != null ? leftSource.duplicate() : null,
-                                              leftNext,
-                                              rightSource != null ? rightSource.duplicate() : null,
-                                              rightNext,
-                                              direction);
-                }
-            };
+            ByteSource.Duplicatable leftSource = startAndEndDirection.select(startSource, endSource);
+            ByteSource.Duplicatable rightSource = startAndEndDirection.select(endSource, startSource);
+            int leftNext = startAndEndDirection.select(startNext, endNext);
+            int rightNext = startAndEndDirection.select(endNext, startNext);
+            return new SlicedCursor<>(source,
+                                      leftSource != null ? leftSource.duplicate() : null,
+                                      leftNext,
+                                      rightSource != null ? rightSource.duplicate() : null,
+                                      rightNext);
         }
     }
 }

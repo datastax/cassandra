@@ -25,12 +25,10 @@ import org.agrona.concurrent.UnsafeBuffer;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
-/**
- * In-memory trie built for fast modification and reads executing concurrently with writes from a single mutator thread.
- *
- * This class provides the read-only functionality, expanded in {@link InMemoryTrie} to writes.
- */
-public class InMemoryReadTrie<T> extends Trie<T>
+/// In-memory trie built for fast modification and reads executing concurrently with writes from a single mutator thread.
+///
+/// This class provides the read-only functionality, expanded in [InMemoryTrie] to writes.
+public class InMemoryReadTrie<T> implements Trie<T>
 {
     /*
     TRIE FORMAT AND NODE TYPES
@@ -174,11 +172,9 @@ public class InMemoryReadTrie<T> extends Trie<T>
     // Offset of the next pointer in a non-shared prefix node
     static final int PREFIX_POINTER_OFFSET = LAST_POINTER_OFFSET - PREFIX_OFFSET;
 
-    /**
-     * Value used as null for node pointers.
-     * No node can use this address (we enforce this by not allowing chain nodes to grow to position 0).
-     * Do not change this as the code relies there being a NONE placed in all bytes of the cell that are not set.
-     */
+    /// Value used as null for node pointers.
+    /// No node can use this address (we enforce this by not allowing chain nodes to grow to position 0).
+    /// Do not change this as the code relies on there being a `NONE` placed in all bytes of the cell that are not set.
     static final int NONE = 0;
 
     volatile int root;
@@ -252,9 +248,7 @@ public class InMemoryReadTrie<T> extends Trie<T>
     }
 
 
-    /**
-     * Pointer offset for a node pointer.
-     */
+    /// Pointer offset for a node pointer.
     int offset(int pos)
     {
         return pos & (CELL_SIZE - 1);
@@ -270,22 +264,18 @@ public class InMemoryReadTrie<T> extends Trie<T>
         return getBuffer(pos).getShortVolatile(inBufferOffset(pos)) & 0xFFFF;
     }
 
-    /**
-     * Following a pointer must be done using a volatile read to enforce happens-before between reading the node we
-     * advance to and the preparation of that node that finishes in a volatile write of the pointer that makes it
-     * visible.
-     */
+    /// Following a pointer must be done using a volatile read to enforce happens-before between reading the node we
+    /// advance to and the preparation of that node that finishes in a volatile write of the pointer that makes it
+    /// visible.
     final int getIntVolatile(int pos)
     {
         return getBuffer(pos).getIntVolatile(inBufferOffset(pos));
     }
 
-    /**
-     * Get the content for the given content pointer.
-     *
-     * @param id content pointer, encoded as ~index where index is the position in the content array.
-     * @return the current content value.
-     */
+    /// Get the content for the given content pointer.
+    ///
+    /// @param id content pointer, encoded as ~index where index is the position in the content array.
+    /// @return the current content value.
     T getContent(int id)
     {
         int leadBit = getBufferIdx(~id, CONTENTS_START_SHIFT, CONTENTS_START_SIZE);
@@ -313,17 +303,13 @@ public class InMemoryReadTrie<T> extends Trie<T>
         return node <= NONE;
     }
 
-    /**
-     * Returns the number of transitions in a chain cell entered with the given pointer.
-     */
+    /// Returns the number of transitions in a chain cell entered with the given pointer.
     private int chainCellLength(int node)
     {
         return LAST_POINTER_OFFSET - offset(node);
     }
 
-    /**
-     * Get a node's child for the given transition character
-     */
+    /// Get a node's child for the given transition character
     int getChild(int node, int trans)
     {
         if (isNullOrLeaf(node))
@@ -366,12 +352,10 @@ public class InMemoryReadTrie<T> extends Trie<T>
         return node;
     }
 
-    /**
-     * Advance as long as the cell pointed to by the given pointer will let you.
-     * <p>
-     * This is the same as getChild(node, first), except for chain nodes where it would walk the fill chain as long as
-     * the input source matches.
-     */
+    /// Advance as long as the cell pointed to by the given pointer will let you.
+    ///
+    /// This is the same as `getChild(node, first)`, except for chain nodes where it would walk the fill chain as long
+    /// as the input source matches.
     int advance(int node, int first, ByteSource rest)
     {
         if (isNullOrLeaf(node))
@@ -401,9 +385,7 @@ public class InMemoryReadTrie<T> extends Trie<T>
         }
     }
 
-    /**
-     * Get the child for the given transition character, knowing that the node is sparse
-     */
+    /// Get the child for the given transition character, knowing that the node is sparse
     int getSparseChild(int node, int trans)
     {
         for (int i = 0; i < SPARSE_CHILD_COUNT; ++i)
@@ -423,39 +405,31 @@ public class InMemoryReadTrie<T> extends Trie<T>
         return NONE;
     }
 
-    /**
-     * Given a transition, returns the corresponding index (within the node cell) of the pointer to the mid cell of
-     * a split node.
-     */
+    /// Given a transition, returns the corresponding index (within the node cell) of the pointer to the mid cell of
+    /// a split node.
     int splitNodeMidIndex(int trans)
     {
         // first 2 bits of the 2-3-3 split
         return (trans >> 6) & 0x3;
     }
 
-    /**
-     * Given a transition, returns the corresponding index (within the mid cell) of the pointer to the tail cell of
-     * a split node.
-     */
+    /// Given a transition, returns the corresponding index (within the mid cell) of the pointer to the tail cell of
+    /// a split node.
     int splitNodeTailIndex(int trans)
     {
         // second 3 bits of the 2-3-3 split
         return (trans >> 3) & 0x7;
     }
 
-    /**
-     * Given a transition, returns the corresponding index (within the tail cell) of the pointer to the child of
-     * a split node.
-     */
+    /// Given a transition, returns the corresponding index (within the tail cell) of the pointer to the child of
+    /// a split node.
     int splitNodeChildIndex(int trans)
     {
         // third 3 bits of the 2-3-3 split
         return trans & 0x7;
     }
 
-    /**
-     * Get the child for the given transition character, knowing that the node is split
-     */
+    /// Get the child for the given transition character, knowing that the node is split
     int getSplitChild(int node, int trans)
     {
         int mid = getSplitCellPointer(node, splitNodeMidIndex(trans), SPLIT_START_LEVEL_LIMIT);
@@ -468,9 +442,7 @@ public class InMemoryReadTrie<T> extends Trie<T>
         return getSplitCellPointer(tail, splitNodeChildIndex(trans), SPLIT_OTHER_LEVEL_LIMIT);
     }
 
-    /**
-     * Get the content for a given node
-     */
+    /// Get the content for a given node
     T getNodeContent(int node)
     {
         if (isLeaf(node))
@@ -495,12 +467,10 @@ public class InMemoryReadTrie<T> extends Trie<T>
         return getIntVolatile(splitCellPointerAddress(node, childIndex, subLevelLimit));
     }
 
-    /**
-     * Backtracking state for a cursor.
-     *
-     * To avoid allocations and pointer-chasing, the backtracking data is stored in a simple int array with
-     * BACKTRACK_INTS_PER_ENTRY ints for each level.
-     */
+    /// Backtracking state for a cursor.
+    ///
+    /// To avoid allocations and pointer-chasing, the backtracking data is stored in a simple int array with
+    /// `BACKTRACK_INTS_PER_ENTRY` ints for each level.
     private static class CursorBacktrackingState
     {
         static final int BACKTRACK_INTS_PER_ENTRY = 3;
@@ -534,21 +504,19 @@ public class InMemoryReadTrie<T> extends Trie<T>
         }
     }
 
-    /*
-     * Cursor implementation.
-     *
-     * InMemoryTrie cursors maintain their backtracking state in CursorBacktrackingState where they store
-     * information about the node to backtrack to and the transitions still left to take or attempt.
-     *
-     * This information is different for the different types of node:
-     * - for leaf and chain no backtracking is saved (because we know there are no further transitions)
-     * - for sparse we store the remainder of the order word
-     * - for split we store one entry per sub-level of the 2-3-3 split
-     *
-     * When the cursor is asked to advance it first checks the current node for children, and if there aren't any
-     * (i.e. it is positioned on a leaf node), it goes one level up the backtracking chain, where we are guaranteed to
-     * have a remaining child to advance to. When there's nothing to backtrack to, the trie is exhausted.
-     */
+    /// Cursor implementation.
+    ///
+    /// `InMemoryTrie` cursors maintain their backtracking state in [CursorBacktrackingState] where they store
+    /// information about the node to backtrack to and the transitions still left to take or attempt.
+    ///
+    /// This information is different for the different types of node:
+    /// - for leaf and chain no backtracking is saved (because we know there are no further transitions)
+    /// - for sparse we store the remainder of the order word
+    /// - for split we store one entry per sub-level of the 2-3-3 split
+    ///
+    /// When the cursor is asked to advance it first checks the current node for children, and if there aren't any
+    /// (i.e. it is positioned on a leaf node), it goes one level up the backtracking chain, where we are guaranteed to
+    /// have a remaining child to advance to. When there's nothing to backtrack to, the trie is exhausted.
     class InMemoryCursor extends CursorBacktrackingState implements Cursor<T>
     {
         private int currentNode;
@@ -556,12 +524,18 @@ public class InMemoryReadTrie<T> extends Trie<T>
         private int incomingTransition;
         private T content;
         private final Direction direction;
-        int depth = -1;
+        int depth;
 
         InMemoryCursor(Direction direction)
         {
+            this(direction, root, 0, -1);
+        }
+
+        InMemoryCursor(Direction direction, int root, int depth, int incomingTransition)
+        {
+            this.depth = depth - 1;
             this.direction = direction;
-            descendInto(root, -1);
+            descendInto(root, incomingTransition);
         }
 
         @Override
@@ -662,10 +636,10 @@ public class InMemoryReadTrie<T> extends Trie<T>
         }
 
         @Override
-        public Trie<T> tailTrie()
+        public Cursor<T> tailCursor(Direction dir)
         {
-            assert depth >= 0 : "tailTrie called on exhausted cursor";
-            return new InMemoryReadTrie<>(byteComparableVersion, buffers, contentArrays, currentFullNode);
+            assert depth >= 0 : "tailCursor called on exhausted cursor";
+            return new InMemoryCursor(dir, currentFullNode, 0, -1);
         }
 
         private int exhausted()
@@ -748,18 +722,16 @@ public class InMemoryReadTrie<T> extends Trie<T>
             }
         }
 
-        /**
-         * Descend into the sub-levels of a split node. Advances to the first child and creates backtracking entries
-         * for the following ones. We use the bits of trans (lowest non-zero ones) to identify which sub-level an
-         * entry refers to.
-         *
-         * @param node The node or cell id, must have offset SPLIT_OFFSET.
-         * @param limit The transition limit for the current sub-level (4 for the start, 8 for the others).
-         * @param collected The transition bits collected from the parent chain (e.g. 0x40 after following 1 on the top
-         *                  sub-level).
-         * @param shift This level's bit shift (6 for start, 3 for mid and 0 for tail).
-         * @return the depth reached after descending.
-         */
+        /// Descend into the sub-levels of a split node. Advances to the first child and creates backtracking entries
+        /// for the following ones. We use the bits of trans (lowest non-zero ones) to identify which sub-level an
+        /// entry refers to.
+        ///
+        /// @param node The node or cell id, must have offset `SPLIT_OFFSET`.
+        /// @param limit The transition limit for the current sub-level (4 for the start, 8 for the others).
+        /// @param collected The transition bits collected from the parent chain (e.g. 0x40 after following 1 on the top
+        ///                  sub-level).
+        /// @param shift This level's bit shift (6 for start, 3 for mid and 0 for tail).
+        /// @return the depth reached after descending.
         int descendInSplitSublevel(int node, int limit, int collected, int shift)
         {
             while (true)
@@ -795,10 +767,8 @@ public class InMemoryReadTrie<T> extends Trie<T>
             }
         }
 
-        /**
-         * As above, but also makes sure that the descend selects a value at least as big as the given
-         * {@code minTransition}.
-         */
+        /// As above, but also makes sure that the descent selects a value at least as big as the given
+        /// `minTransition`.
         private int descendInSplitSublevelWithTarget(int node, int limit, int collected, int shift, int minTransition)
         {
             minTransition -= collected;
@@ -846,9 +816,7 @@ public class InMemoryReadTrie<T> extends Trie<T>
             }
         }
 
-        /**
-         * Backtrack to a split sub-level. The level is identified by the lowest non-0 bits in data.
-         */
+        /// Backtrack to a split sub-level. The level is identified by the lowest non-0 bits in data.
         int nextValidSplitTransition(int node, int data)
         {
             // Note: This is equivalent to return advanceToSplitTransition(node, data, data) but quicker.
@@ -892,10 +860,8 @@ public class InMemoryReadTrie<T> extends Trie<T>
                                           SPLIT_LEVEL_SHIFT * 1);
         }
 
-        /**
-         * Backtrack to a split sub-level and advance to given transition if it fits within the sublevel.
-         * The level is identified by the lowest non-0 bits in data as above.
-         */
+        /// Backtrack to a split sub-level and advance to given transition if it fits within the sublevel.
+        /// The level is identified by the lowest non-0 bits in data as above.
         private int advanceToSplitTransition(int node, int data, int skipTransition)
         {
             assert data >= 0 && data <= 0xFF;
@@ -924,9 +890,7 @@ public class InMemoryReadTrie<T> extends Trie<T>
             return descendInSplitSublevelWithTarget(node, sublevelLimit, data & sublevelMask, sublevelShift, skipTransition);
         }
 
-        /**
-         * Look for any further non-null transitions on this sub-level and, if found, add a backtracking entry.
-         */
+        /// Look for any further non-null transitions on this sub-level and, if found, add a backtracking entry.
         private void maybeAddSplitBacktrack(int node, int startAfter, int limit, int collected, int shift)
         {
             int nextChildIndex;
@@ -969,10 +933,8 @@ public class InMemoryReadTrie<T> extends Trie<T>
             return descendInto(child, transition);
         }
 
-        /**
-         * Prepare the sparse node order word for iteration. For forward iteration, this means just reading it.
-         * For reverse, we also invert the data so that the peeling code above still works.
-         */
+        /// Prepare the sparse node order word for iteration. For forward iteration, this means just reading it.
+        /// For reverse, we also invert the data so that the peeling code above still works.
         int prepareOrderWord(int node)
         {
             int fwdState = getUnsignedShortVolatile(node + SPARSE_ORDER_OFFSET);
@@ -1008,9 +970,7 @@ public class InMemoryReadTrie<T> extends Trie<T>
             }
         }
 
-        /**
-         * Returns the state which marks the exhaustion of the order word.
-         */
+        /// Returns the state which marks the exhaustion of the order word.
         int exhaustedOrderWord()
         {
             return direction.select(0, 1);
@@ -1106,10 +1066,8 @@ public class InMemoryReadTrie<T> extends Trie<T>
      Direct read methods
      */
 
-    /**
-     * Get the content mapped by the specified key.
-     * Fast implementation using integer node addresses.
-     */
+    /// Get the content mapped by the specified key.
+    /// Fast implementation using integer node addresses.
     @Override
     public T get(ByteComparable path)
     {
@@ -1137,10 +1095,8 @@ public class InMemoryReadTrie<T> extends Trie<T>
         return byteComparableVersion;
     }
 
-    /**
-     * Override of dump to provide more detailed printout that includes the type of each node in the trie.
-     * We do this via a wrapping cursor that returns a content string for the type of node for every node we return.
-     */
+    /// Override of dump to provide more detailed printout that includes the type of each node in the trie.
+    /// We do this via a wrapping cursor that returns a content string for the type of node for every node we return.
     @Override
     public String dump(Function<T, String> contentToString)
     {
@@ -1191,7 +1147,7 @@ public class InMemoryReadTrie<T> extends Trie<T>
             }
 
             @Override
-            public Trie<String> tailTrie()
+            public Cursor<String> tailCursor(Direction direction)
             {
                 throw new AssertionError();
             }
@@ -1230,12 +1186,10 @@ public class InMemoryReadTrie<T> extends Trie<T>
                     return type;
             }
         }
-        return process(new TrieDumper<>(Function.identity()), new TypedNodesCursor());
+        return Trie.process(new TrieDumper<>(Function.identity()), new TypedNodesCursor());
     }
 
-    /**
-     * For use in debugging, dump info about the given node.
-     */
+    /// For use in debugging, dump info about the given node.
     @SuppressWarnings("unused")
     String dumpNode(int node)
     {

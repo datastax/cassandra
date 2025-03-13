@@ -26,13 +26,11 @@ import com.google.common.base.Predicates;
 
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
-/**
- * Convertor of trie entries to iterator where each entry is passed through {@link #mapContent} (to be implemented by
- * descendants).
- */
+/// Convertor of trie entries to iterator where each entry is passed through [#mapContent] (to be implemented by
+/// descendants).
 public abstract class TrieEntriesIterator<T, V> extends TriePathReconstructor implements Iterator<V>
 {
-    private final Trie.Cursor<T> cursor;
+    private final Cursor<T> cursor;
     private final Predicate<T> predicate;
     T next;
     boolean gotNext;
@@ -42,7 +40,7 @@ public abstract class TrieEntriesIterator<T, V> extends TriePathReconstructor im
         this(trie.cursor(direction), predicate);
     }
 
-    TrieEntriesIterator(Trie.Cursor<T> cursor, Predicate<T> predicate)
+    TrieEntriesIterator(Cursor<T> cursor, Predicate<T> predicate)
     {
         this.cursor = cursor;
         this.predicate = predicate;
@@ -88,7 +86,7 @@ public abstract class TrieEntriesIterator<T, V> extends TriePathReconstructor im
      */
     static class AsEntries<T> extends TrieEntriesIterator<T, Map.Entry<ByteComparable.Preencoded, T>>
     {
-        public AsEntries(Trie.Cursor<T> cursor)
+        public AsEntries(Cursor<T> cursor)
         {
             super(cursor, Predicates.alwaysTrue());
         }
@@ -105,7 +103,7 @@ public abstract class TrieEntriesIterator<T, V> extends TriePathReconstructor im
      */
     static class AsEntriesFilteredByType<T, U extends T> extends TrieEntriesIterator<T, Map.Entry<ByteComparable.Preencoded, U>>
     {
-        public AsEntriesFilteredByType(Trie.Cursor<T> cursor, Class<U> clazz)
+        public AsEntriesFilteredByType(Cursor<T> cursor, Class<U> clazz)
         {
             super(cursor, clazz::isInstance);
         }
