@@ -73,4 +73,16 @@ final class UnfilteredRows extends BaseRows<Unfiltered, UnfilteredRowIterator> i
     {
         return staticRow().isEmpty() && partitionLevelDeletion().isLive() && !hasNext();
     }
+
+    @Override
+    public boolean stopIssuingTombstones()
+    {
+        if (!input.stopIssuingTombstones())
+            return false;
+
+        // If we are stopping tombstones, we must check if any already prepared `next` is a tombstone and drop it if so.
+        if (next != null && next.isRangeTombstoneMarker())
+            next = null;
+        return true;
+    }
 }
