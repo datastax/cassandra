@@ -270,7 +270,8 @@ public class FeaturesVersionSupportTest extends VectorTester
         assertNumRowsMemtable(bodyIndexName, DATASET.length, totalTermsCount);
         assertNumRowsMemtable(mapIndexName, DATASET.length);
         execute("DELETE FROM %s WHERE id = ?", 4);
-        // Deletion is not tracked by Memindex
+        // Since TrieMemtable stage 3, deletion is tracked by Memindex
+        totalTermsCount -= calculateTotalTermsForRow(4);
         assertNumRowsMemtable(bodyIndexName, DATASET.length, totalTermsCount);
         // Test an update to a different value for the analyzed index
         execute("UPDATE %s SET body = ? WHERE id = ?", DATASET[10][DATASET_BODY_COLUMN], 6);
@@ -280,8 +281,6 @@ public class FeaturesVersionSupportTest extends VectorTester
         execute("UPDATE %s SET body = ? WHERE id = ?", DATASET[6][DATASET_BODY_COLUMN], 10);
         totalTermsCount += calculateTotalTermsForRow(6) - calculateTotalTermsForRow(10);
         assertNumRowsMemtable(bodyIndexName, DATASET.length, totalTermsCount);
-        // Flush will account for the deleted row
-        totalTermsCount -= calculateTotalTermsForRow(4);
         flush();
         assertNumRowsAndTotalTermsSSTable(scoreIndexName, DATASET.length - 1, DATASET.length - 1);
         assertNumRowsAndTotalTermsSSTable(bodyIndexName, DATASET.length - 1, totalTermsCount);

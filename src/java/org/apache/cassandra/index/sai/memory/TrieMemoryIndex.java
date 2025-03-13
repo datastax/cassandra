@@ -861,7 +861,7 @@ public class TrieMemoryIndex extends MemoryIndex
             upperInclusive = false;
         }
 
-        return data.subtrie(lowerBound, lowerInclusive, upperBound, upperInclusive);
+        return data.slice(lowerBound, lowerInclusive, upperBound, upperInclusive);
     }
 
     private class PrimaryKeysReducer implements InMemoryTrie.UpsertTransformer<PrimaryKeys, PrimaryKey>

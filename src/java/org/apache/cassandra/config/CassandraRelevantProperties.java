@@ -731,10 +731,10 @@ public enum CassandraRelevantProperties
 
     /** Class used to discover/load the proper SAI index components file for a given sstable. */
     SAI_ANN_USE_SYNTHETIC_SCORE("cassandra.sai.ann_use_synthetic_score", "false"),
-    
+
     /** The current version of the SAI on-disk index format. */
     SAI_CURRENT_VERSION("cassandra.sai.latest.version", "ec"),
-    
+
     SAI_CUSTOM_COMPONENTS_DISCOVERY_CLASS("cassandra.sai.custom_components_discovery_class"),
     SAI_ENABLE_EDGES_CACHE("cassandra.sai.enable_edges_cache", "false"),
     SAI_ENABLE_GENERAL_ORDER_BY("cassandra.sai.general_order_by", "true"),
@@ -840,8 +840,7 @@ public enum CassandraRelevantProperties
     // NVQ number of subvectors. This isn't really expected to change much so we're only exposing
     // it as a global variable in case it's needed.
     SAI_VECTOR_NVQ_NUM_SUB_VECTORS("cassandra.sai.vector.nvq_num_sub_vectors", "2"),
-
-    // The allowed ratio of extra rows (that map to "holes" in the ordinal space) to total rows indexed in the graph
+// The allowed ratio of extra rows (that map to "holes" in the ordinal space) to total rows indexed in the graph
     // Higher percentages will result in more memory utilized to store the extra postings mappings and larger graph
     // file sizes to store the empty nodes.
     SAI_VECTOR_ORDINAL_HOLE_DENSITY_LIMIT("cassandra.sai.vector.ordinal_hole_density_limit", "0.01"),
@@ -856,7 +855,6 @@ public enum CassandraRelevantProperties
      * build a potential result set for search-then-sort query execution.
      */
     SAI_VECTOR_SEARCH_MAX_MATERIALIZE_KEYS("cassandra.sai.vector_search.max_materialized_keys", "16000"),
-
     /** Controls the maximum top-k limit for vector search */
     SAI_VECTOR_SEARCH_MAX_TOP_K("cassandra.sai.vector_search.max_top_k", "1000"),
     SAI_VECTOR_USE_PRUNING_DEFAULT("cassandra.sai.jvector.use_pruning_default", "1000"),
@@ -1025,6 +1023,8 @@ public enum CassandraRelevantProperties
     // i.e. that all replicas except for at most one in the cluster (across all DCs) must accept the write for it to be successful.
     THREE_MEANS_ALL_BUT_ONE("dse.consistency_level.three_means_all_but_one", "false"),
     TOLERATE_SSTABLE_SIZE("cassandra.tolerate_sstable_size"),
+    /** To be used for tests: whether trie cursors should be verified for correctness. */
+    TRIE_DEBUG("cassandra.debug_tries"),
     /**
      * Allows to set custom current trie index format. This node will produce sstables in this format.
      */

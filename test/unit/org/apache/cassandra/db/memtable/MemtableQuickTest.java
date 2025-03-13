@@ -65,6 +65,7 @@ public class MemtableQuickTest extends CQLTester
                                 "skiplist_sharded_locking",
                                 "trie",
                                 "trie_stage1",
+                                "trie_stage2",
                                 "persistent_memory");
     }
 
