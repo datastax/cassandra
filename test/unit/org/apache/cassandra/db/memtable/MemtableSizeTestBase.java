@@ -88,7 +88,8 @@ public abstract class MemtableSizeTestBase extends CQLTester
         if (!skipSharded)
             params.add("skiplist_sharded");
         params.add("trie_stage1");
-        params.add("trie");
+        params.add("trie_stage2",
+                                "trie");
 
         return params.build();
     }

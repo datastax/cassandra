@@ -68,7 +68,7 @@ public class DeletionTime implements Comparable<DeletionTime>, IMeasurableMemory
                 : new DeletionTime(markedForDeleteAt, localDeletionTimeUnsignedInteger);
     }
 
-    private DeletionTime(long markedForDeleteAt, long localDeletionTime)
+    protected DeletionTime(long markedForDeleteAt, long localDeletionTime)
     {
         this(markedForDeleteAt, Cell.deletionTimeLongToUnsignedInteger(localDeletionTime));
     }
