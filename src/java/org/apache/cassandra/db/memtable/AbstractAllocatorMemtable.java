@@ -86,7 +86,7 @@ public abstract class AbstractAllocatorMemtable extends AbstractMemtableWithComm
      * the estimate is updated only whenever the number of operations on the memtable increases significantly from the
      * last update. This estimate is not very accurate but should be ok for planning or diagnostic purposes.
      */
-    private volatile MemtableAverageRowSize estimatedAverageRowSize;
+    protected volatile MemtableAverageRowSize estimatedAverageRowSize;
 
     @VisibleForTesting
     static MemtablePool createMemtableAllocatorPool()

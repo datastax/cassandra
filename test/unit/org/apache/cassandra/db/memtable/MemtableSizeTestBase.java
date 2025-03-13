@@ -80,6 +80,7 @@ public abstract class MemtableSizeTestBase extends CQLTester
         return ImmutableList.of("skiplist",
                                 "skiplist_sharded",
                                 "trie_stage1",
+                                "trie_stage2",
                                 "trie");
     }
 
