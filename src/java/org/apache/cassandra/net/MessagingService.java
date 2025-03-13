@@ -396,7 +396,7 @@ public class MessagingService extends MessagingServiceMBeanImpl
         // expire the callback if the message failed to enqueue (failed to establish a connection or exceeded queue capacity)
         while (true)
         {
-            OutboundConnections connections = getOutbound(to);
+            OutboundConnections connections = getOutbound(to, true);
             try
             {
                 connections.enqueue(message, specifyConnection);
@@ -602,10 +602,10 @@ public class MessagingService extends MessagingServiceMBeanImpl
         socketFactory.awaitTerminationUntil(deadlineNanos);
     }
 
-    private OutboundConnections getOutbound(InetAddressAndPort to)
+    private OutboundConnections getOutbound(InetAddressAndPort to, boolean tryRegister)
     {
         OutboundConnections connections = channelManagers.get(to);
-        if (connections == null)
+        if (connections == null && tryRegister)
             connections = OutboundConnections.tryRegister(channelManagers, to, new OutboundConnectionSettings(to).withDefaults(ConnectionCategory.MESSAGING));
         return connections;
     }
@@ -672,14 +672,14 @@ public class MessagingService extends MessagingServiceMBeanImpl
      * @param version a messaging version
      * @return a set of alive endpoints in the given keyspace with messaging version below the given version
      */
-    public Set<InetAddressAndPort> connectionsWithVersionBelow(String keyspace, int version)
+    public Set<InetAddressAndPort> endpointsWithConnectionsOnVersionBelow(String keyspace, int version)
     {
         Set<InetAddressAndPort> nodes = new HashSet<>();
         for (InetAddressAndPort node : StorageService.instance.getTokenMetadataForKeyspace(keyspace).getAllEndpoints())
         {
-            ConnectionType.MESSAGING_TYPES.stream().forEach(type -> {
-                OutboundConnections connections = getOutbound(node);
-                OutboundConnection connection = connections.connectionFor(type);
+            ConnectionType.MESSAGING_TYPES.forEach(type -> {
+                OutboundConnections connections = getOutbound(node, false);
+                OutboundConnection connection = connections != null ? connections.connectionFor(type) : null;
                 if (connection != null && connection.messagingVersion() < version)
                     nodes.add(node);
             });
