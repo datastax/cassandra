@@ -778,6 +778,17 @@ public class StatementRestrictions
         return nonPrimaryKeyRestrictions.restrictions().stream().anyMatch(SingleRestriction::isIndexBasedOrdering);
     }
 
+    public boolean hasIndxBasedBoundedAnn()
+    {
+        for (SingleRestriction restriction : nonPrimaryKeyRestrictions.restrictions())
+        {
+            if (restriction.isBoundedAnn())
+                return true;
+        }
+
+        return false;
+    }
+
     public void throwRequiresAllowFilteringError(TableMetadata table)
     {
         if (hasIndxBasedOrdering())
@@ -994,7 +1005,7 @@ public class StatementRestrictions
         return table.clusteringColumns().size() != clusteringColumnsRestrictions.size();
     }
 
-    public RowFilter getRowFilter(IndexRegistry indexManager, QueryOptions options, QueryState queryState, SelectOptions selectOptions)
+    public RowFilter getRowFilter(IndexRegistry indexManager, QueryOptions options, QueryState queryState, SelectOptions selectOptions, boolean allowFiltering)
     {
         boolean hasAnnOptions = selectOptions.hasANNOptions();
 
@@ -1007,7 +1018,14 @@ public class StatementRestrictions
         }
 
         ANNOptions annOptions = selectOptions.parseANNOptions();
-        RowFilter rowFilter = RowFilter.builder(indexManager)
+
+        // Ordering on non-clustering column requires each restricted column to be indexed except for
+        // fully-specified partition keys. ANN queries do not currently work correctly when filtering is required, so we
+        // fail even though ALLOW FILTERING was passed.
+        if (allowFiltering && (hasIndxBasedOrdering() || hasIndxBasedBoundedAnn()))
+            allowFiltering = false;
+
+        RowFilter rowFilter = RowFilter.builder(indexManager, allowFiltering)
                                        .buildFromRestrictions(this, table, options, queryState, annOptions);
 
         if (hasAnnOptions && !rowFilter.hasANN())

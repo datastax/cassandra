@@ -16,12 +16,11 @@
 
 package org.apache.cassandra.distributed.test.sai;
 
+import org.apache.cassandra.distributed.test.ByteBuddyUtils;
 import org.junit.Test;
 
-import net.bytebuddy.ByteBuddy;
-import net.bytebuddy.dynamic.loading.ClassLoadingStrategy;
-import net.bytebuddy.implementation.MethodDelegation;
 import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.db.filter.ANNOptions;
 import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.distributed.api.ConsistencyLevel;
 import org.apache.cassandra.distributed.api.ICoordinator;
@@ -29,7 +28,6 @@ import org.apache.cassandra.distributed.test.TestBaseImpl;
 import org.apache.cassandra.net.MessagingService;
 import org.assertj.core.api.Assertions;
 
-import static net.bytebuddy.matcher.ElementMatchers.named;
 import static org.apache.cassandra.distributed.api.Feature.GOSSIP;
 import static org.apache.cassandra.distributed.api.Feature.NATIVE_PROTOCOL;
 import static org.apache.cassandra.distributed.api.Feature.NETWORK;
@@ -71,7 +69,7 @@ public class ANNOptionsDistributedTest extends TestBaseImpl
                                            .withConfig(config -> config.with(GOSSIP).with(NETWORK))
                                            .start(), RF))
         {
-            testSelectWithAnnOptions(cluster, "ANN options are not supported in clusters below DS 11.");
+            testSelectWithAnnOptions(cluster, ANNOptions.REQUIRES_HIGHER_MESSAGING_VERSION);
         }
     }
 
@@ -84,11 +82,11 @@ public class ANNOptionsDistributedTest extends TestBaseImpl
         assert CassandraRelevantProperties.DS_CURRENT_MESSAGING_VERSION.getInt() >= MessagingService.VERSION_DS_11;
 
         try (Cluster cluster = init(Cluster.build(NUM_REPLICAS)
-                                           .withInstanceInitializer(BB::install)
+                                           .withInstanceInitializer(ByteBuddyUtils.MessagingVersionSetter::setDS10OnNode1)
                                            .withConfig(config -> config.with(GOSSIP).with(NETWORK).with(NATIVE_PROTOCOL))
                                            .start(), RF))
         {
-            testSelectWithAnnOptions(cluster, "ANN options are not supported in clusters below DS 11.");
+            testSelectWithAnnOptions(cluster, ANNOptions.REQUIRES_HIGHER_MESSAGING_VERSION);
         }
     }
 
@@ -108,31 +106,6 @@ public class ANNOptionsDistributedTest extends TestBaseImpl
             else
                 Assertions.assertThatThrownBy(() -> coordinator.execute(select, ConsistencyLevel.ONE))
                           .hasMessageContaining(expectedErrorMessage);
-        }
-    }
-
-    /**
-     * Injection to set the current version of the first cluster node to DS 10.
-     */
-    public static class BB
-    {
-        public static void install(ClassLoader classLoader, int node)
-        {
-            if (node == 1)
-            {
-                // set the current verson to DS 11, which suppors ANN options
-                new ByteBuddy().rebase(MessagingService.class)
-                               .method(named("currentVersion"))
-                               .intercept(MethodDelegation.to(BB.class))
-                               .make()
-                               .load(classLoader, ClassLoadingStrategy.Default.INJECTION);
-            }
-        }
-
-        @SuppressWarnings("unused")
-        public static int currentVersion()
-        {
-            return MessagingService.VERSION_DS_10;
         }
     }
 }
