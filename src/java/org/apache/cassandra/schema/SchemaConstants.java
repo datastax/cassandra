@@ -71,19 +71,21 @@ public final class SchemaConstants
     public static final Set<String> VIRTUAL_KEYSPACE_NAMES = ImmutableSet.of(SCHEMA_VIRTUAL_KEYSPACE_NAME, SYSTEM_VIEWS_KEYSPACE_NAME);
 
     /**
+     * Longest acceptable file name. Longer names lead to file write or read errors.
+     */
+    public static final int FILENAME_LENGTH = 255;
+
+     /**
      * The longest permissible KS or CF name.
      *
      * Before CASSANDRA-16956, we used to care about not having the entire path longer than 255 characters because of
      * Windows support but this limit is by implementing CASSANDRA-16956 not in effect anymore.
      *
      * Note: This extended to 222 for CNDB tenant specific keyspaces.
+     * 222 is maximum filename length of 255 chars minus a separator char and
+     * 32 chars for table UUID.
      */
-    public static final int NAME_LENGTH = 222;
-
-    /**
-     * Longest acceptable file name. Longer names lead to too long file name error.
-     */
-    public static final int FILENAME_LENGTH = 255;
+    public static final int NAME_LENGTH = FILENAME_LENGTH - 32 - 1;
 
     /**
      * Length of a table uuid as a hex string.

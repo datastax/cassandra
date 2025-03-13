@@ -46,7 +46,7 @@ import org.apache.cassandra.utils.DseLegacy;
 import org.apache.cassandra.utils.Pair;
 
 import static com.google.common.base.Preconditions.checkNotNull;
-import static org.apache.cassandra.io.sstable.Component.separator;
+import static org.apache.cassandra.io.sstable.Component.SEPARATOR;
 import static org.apache.cassandra.utils.TimeUUID.Generator.nextTimeUUID;
 
 /**
@@ -179,7 +179,7 @@ public class Descriptor
 
     public String filenameFor(Component component)
     {
-        return prefix + separator + component.name();
+        return prefix + SEPARATOR + component.name();
     }
 
     public File fileFor(Component component)
@@ -213,9 +213,9 @@ public class Descriptor
 
     private void appendFileName(StringBuilder buff)
     {
-        buff.append(version).append(separator);
+        buff.append(version).append(SEPARATOR);
         buff.append(id.toString());
-        buff.append(separator).append(version.format.name());
+        buff.append(SEPARATOR).append(version.format.name());
     }
 
     public String baseFileUri()
@@ -237,7 +237,7 @@ public class Descriptor
         }
 
         appendFileName(buff);
-        buff.append(separator).append(component.name());
+        buff.append(SEPARATOR).append(component.name());
         return buff.toString();
     }
 
