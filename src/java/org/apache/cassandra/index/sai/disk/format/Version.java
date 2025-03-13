@@ -36,6 +36,8 @@ import org.apache.cassandra.index.sai.disk.v5.V5OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.v6.V6OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.v7.V7OnDiskFormat;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
+import org.apache.cassandra.io.sstable.format.bti.BtiFormat;
+import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 import static com.google.common.base.Preconditions.checkArgument;
@@ -100,6 +102,48 @@ public class Version implements Comparable<Version>
     public static Version latest()
     {
         return LATEST;
+    }
+
+    /**
+     * Calculates the maximum allowed length for SAI index names to ensure generated filenames
+     * do not exceed the system's filename length limit (defined in {@link SchemaConstants#FILENAME_LENGTH}).
+     * This accounts for all additional components in the filename.
+     */
+    public static int calculateIndexNameAllowedLength()
+    {
+        int addedLength = getAddedLengthFromDescriptorAndVersion();
+        assert addedLength < SchemaConstants.FILENAME_LENGTH;
+        return SchemaConstants.FILENAME_LENGTH - addedLength;
+    }
+
+    /**
+     * Calculates the length of the added prefixes and suffixes from Descriptor constructor
+     * and {@link Version#stargazerFileNameFormat}.
+     *
+     * @return the length of the added prefixes and suffixes
+     */
+    private static int getAddedLengthFromDescriptorAndVersion()
+    {
+        // Prefixes and suffixes constructed by Version.stargazerFileNameFormat
+        int versionNameLength = latest().toString().length();
+        // room for up to 999 generations
+        int generationLength = 3 + SAI_SEPARATOR.length();
+        int addedLength = SAI_DESCRIPTOR.length()
+                          + versionNameLength
+                          + generationLength
+                          + IndexComponentType.PRIMARY_KEY_BLOCK_OFFSETS.representation.length()
+                          + SAI_SEPARATOR.length() * 3
+                          + EXTENSION.length();
+
+        // Prefixes from Descriptor constructor
+        int separatorLength = 1;
+        int indexVersionLength = 2;
+        int tableIdLength = 28;
+        addedLength += indexVersionLength
+                       + BtiFormat.NAME.length()
+                       + tableIdLength
+                       + separatorLength * 3;
+        return addedLength;
     }
 
     @Override
@@ -183,7 +227,7 @@ public class Version implements Comparable<Version>
      */
     public static Optional<ParsedFileName> tryParseFileName(String filename)
     {
-        if (!filename.endsWith(".db"))
+        if (!filename.endsWith(EXTENSION))
             return Optional.empty();
 
         // For flexibility, we handle both "full" filename, of the form "<descriptor>-SAI+....db", or just the component

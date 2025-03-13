@@ -41,7 +41,7 @@ import org.apache.cassandra.io.util.PathUtils;
  */
 public class Component
 {
-    public static final char separator = '-';
+    public static final char SEPARATOR = '-';
 
     /**
      * WARNING: Be careful while changing the names or string representation of the enum
@@ -230,8 +230,8 @@ public class Component
     public File getFile(String absolutePath)
     {
         File ret;
-        if (absolutePath.lastIndexOf(separator) != (absolutePath.length() - 1))
-            ret = new File(PathUtils.getPath(absolutePath + separator + name));
+        if (absolutePath.lastIndexOf(SEPARATOR) != (absolutePath.length() - 1))
+            ret = new File(PathUtils.getPath(absolutePath + SEPARATOR + name));
         else
             ret = new File(PathUtils.getPath(absolutePath + name));
 
