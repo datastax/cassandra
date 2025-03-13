@@ -30,7 +30,7 @@ public class IndexMetadataTest
     @Test
     public void testGetDefaultIndexName()
     {
-        Assert.assertEquals("aB4__idx", IndexMetadata.generateDefaultIndexName("a B-4@!_+"));
+        Assert.assertEquals("aB4__idx", IndexMetadata.generateDefaultIndexName("a B-4@!_+", null));
         Assert.assertEquals("34_Ddd_F6_idx", IndexMetadata.generateDefaultIndexName("34_()Ddd", new ColumnIdentifier("#F%6*", true)));
     }
 }
