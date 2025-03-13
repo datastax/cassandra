@@ -34,6 +34,7 @@ import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.DeletionPurger;
 import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.Digest;
+import org.apache.cassandra.db.IDataSize;
 import org.apache.cassandra.db.LivenessInfo;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.schema.ColumnMetadata;
@@ -62,7 +63,7 @@ import org.apache.cassandra.utils.memory.Cloner;
  * it's own data. For instance, a {@code Row} cannot contains a cell that is deleted by its own
  * row deletion.
  */
-public interface Row extends Unfiltered, Iterable<ColumnData>, IMeasurableMemory
+public interface Row extends Unfiltered, Iterable<ColumnData>, IMeasurableMemory, IDataSize
 {
     /**
      * The clustering values for this row.
@@ -123,6 +124,14 @@ public interface Row extends Unfiltered, Iterable<ColumnData>, IMeasurableMemory
      * @return {@code true} if the row has no data, {@code false} otherwise.
      */
     public boolean isEmpty();
+
+    /**
+     * Whether the row has no live data. This means no PK liveness info, no cells
+     * and no complex deletion info.
+     *
+     * @return {@code true} if the row has no data, {@code false} otherwise.
+     */
+    public boolean isEmptyAfterDeletion();
 
     /**
      * Whether the row has some live information (i.e. it's not just deletion informations).
