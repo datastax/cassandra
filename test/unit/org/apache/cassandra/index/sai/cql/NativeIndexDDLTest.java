@@ -22,6 +22,7 @@ package org.apache.cassandra.index.sai.cql;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.file.FileSystemException;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.EnumSet;
@@ -82,7 +83,6 @@ import org.apache.cassandra.inject.Injections;
 import org.apache.cassandra.inject.InvokePointBuilder;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.IndexMetadata;
-import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
@@ -97,6 +97,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 import static org.mockito.Mockito.when;
@@ -258,7 +259,7 @@ public class NativeIndexDDLTest extends SAITester
     public void shouldFailCreateWithUserType()
     {
         String typeName = createType("CREATE TYPE %s (a text, b int, c double)");
-        createTable("CREATE TABLE %s (id text PRIMARY KEY, val " + typeName + ")");
+        createTable("CREATE TABLE %s (id text PRIMARY KEY, val " + typeName + ')');
 
         assertThatThrownBy(() -> executeNet("CREATE CUSTOM INDEX ON %s(val) " +
                                             "USING 'StorageAttachedIndex'")).isInstanceOf(InvalidQueryException.class);
@@ -278,16 +279,30 @@ public class NativeIndexDDLTest extends SAITester
         assertTrue(tuple.isTuple());
     }
 
+    /**
+     * The test reproduces CNDB-13198
+     */
     @Test
-    public void shouldFailCreateWithInvalidCharactersInColumnName()
+    public void reproFailOnLongIndexName()
     {
-        String invalidColumn = "/invalid";
-        createTable(String.format("CREATE TABLE %%s (id text PRIMARY KEY, \"%s\" text)", invalidColumn));
+        // Generate an index name of the maximum allowed length, adding four chars accounting for components with a
+        // generation number of the form "-XXX", which won't be included in the first index segment, and
+        // the difference between actual index component representation and longest (4 chars).
+        String longIndexName = "a".repeat(Version.calculateIndexNameAllowedLength() + 4 + 4);
+        createTable("CREATE TABLE %s (key int PRIMARY KEY, value1 int, value2 int)");
+        createIndex(String.format("CREATE CUSTOM INDEX %s ON %%s(value1) USING 'StorageAttachedIndex'", longIndexName));
+        execute("INSERT INTO %s (\"key\", value1) VALUES (1, 1)");
+        execute("INSERT INTO %s (\"key\", value2) VALUES (2, 2)");
+        flush();
 
-        assertThatThrownBy(() -> executeNet(String.format("CREATE INDEX ON %%s(\"%s\")" +
-                                                          " USING 'sai'", invalidColumn)))
-        .isInstanceOf(InvalidQueryException.class)
-        .hasMessage(String.format(CreateIndexStatement.INVALID_CHARS_CUSTOM_INDEX_TARGET, invalidColumn));
+        // Now try to create an index with a name that is one character longer than the maximum allowed length.
+        longIndexName += "a";
+        createTable("CREATE TABLE %s (key int PRIMARY KEY, value1 int, value2 int)");
+        createIndex(String.format("CREATE CUSTOM INDEX %s ON %%s(value1) USING 'StorageAttachedIndex'", longIndexName));
+        execute("INSERT INTO %s (\"key\", value1) VALUES (1, 1)");
+        execute("INSERT INTO %s (\"key\", value2) VALUES (2, 2)");
+        RuntimeException e = assertThrows(RuntimeException.class, this::flush);
+        assertTrue(e.getCause() instanceof FileSystemException);
     }
 
     @Test
@@ -962,7 +977,7 @@ public class NativeIndexDDLTest extends SAITester
             truncate(true);
         }
 
-        waitForAssert(() -> verifyNoIndexFiles());
+        waitForAssert(this::verifyNoIndexFiles);
 
         // verify index-view-manager has been cleaned up
         verifySSTableIndexes(numericIndexIdentifier, 0);
@@ -1197,7 +1212,7 @@ public class NativeIndexDDLTest extends SAITester
 
 
     @Test
-    public void verifyCanRebuildAndReloadInPlaceToNewerVersion() throws Throwable
+    public void verifyCanRebuildAndReloadInPlaceToNewerVersion()
     {
         Version current = Version.latest();
         try
