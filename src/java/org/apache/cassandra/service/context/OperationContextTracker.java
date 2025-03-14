@@ -16,28 +16,40 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.sensors;
+package org.apache.cassandra.service.context;
 
 import org.apache.cassandra.concurrent.ExecutorLocals;
 
-/**
- * Extends {@link ExecutorLocals} implementation to track and propagate {@link RequestSensors} associated to a given request/response.
- */
-public class RequestTracker extends ExecutorLocals.Impl
+public class OperationContextTracker extends ExecutorLocals.Impl
 {
-    public static final RequestTracker instance = new RequestTracker();
+    public static final OperationContextTracker instance = new OperationContextTracker();
 
-    private RequestTracker()
+    private OperationContextTracker()
     {}
 
-    public RequestSensors get()
+    public OperationContext get()
     {
-        return ExecutorLocals.current().sensors;
+        return ExecutorLocals.current().operationContext;
     }
 
-    public void set(RequestSensors sensors)
+    public void set(OperationContext operationContext)
     {
         ExecutorLocals current = ExecutorLocals.current();
-        ExecutorLocals.Impl.set(current.traceState, current.clientWarnState, sensors, current.operationContext);
+        ExecutorLocals.Impl.set(current.traceState, current.clientWarnState, current.sensors, operationContext);
+    }
+
+    public static void start(OperationContext context)
+    {
+        instance.set(context);
+    }
+
+    public static void endCurrent()
+    {
+        OperationContext ctx = instance.get();
+        if (ctx != null)
+        {
+            ctx.close();
+            instance.set(null);
+        }
     }
 }
