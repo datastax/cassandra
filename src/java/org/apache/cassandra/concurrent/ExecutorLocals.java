@@ -21,6 +21,7 @@ package org.apache.cassandra.concurrent;
 import io.netty.util.concurrent.FastThreadLocal;
 import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.service.ClientWarn;
+import org.apache.cassandra.service.context.OperationContext;
 import org.apache.cassandra.tracing.TraceState;
 import org.apache.cassandra.utils.Closeable;
 import org.apache.cassandra.utils.WithResources;
@@ -33,7 +34,7 @@ import org.apache.cassandra.utils.WithResources;
  */
 public class ExecutorLocals implements WithResources, Closeable
 {
-    private static final ExecutorLocals none = new ExecutorLocals(null, null, null);
+    private static final ExecutorLocals none = new ExecutorLocals(null, null, null, null);
     private static final FastThreadLocal<ExecutorLocals> locals = new FastThreadLocal<ExecutorLocals>()
     {
         @Override
@@ -45,22 +46,24 @@ public class ExecutorLocals implements WithResources, Closeable
 
     public static class Impl
     {
-        public static void set(TraceState traceState, ClientWarn.State clientWarnState, RequestSensors sensors)
+        public static void set(TraceState traceState, ClientWarn.State clientWarnState, RequestSensors sensors, OperationContext operationContext)
         {
-            if (traceState == null && clientWarnState == null && sensors == null) locals.set(none);
-            else locals.set(new ExecutorLocals(traceState, clientWarnState, sensors));
+            if (traceState == null && clientWarnState == null && sensors == null && operationContext == null) locals.set(none);
+            else locals.set(new ExecutorLocals(traceState, clientWarnState, sensors, operationContext));
         }
     }
 
     public final TraceState traceState;
     public final ClientWarn.State clientWarnState;
     public final RequestSensors sensors;
+    public final OperationContext operationContext;
 
-    protected ExecutorLocals(TraceState traceState, ClientWarn.State clientWarnState, RequestSensors sensors)
+    protected ExecutorLocals(TraceState traceState, ClientWarn.State clientWarnState, RequestSensors sensors, OperationContext operationContext)
     {
         this.traceState = traceState;
         this.clientWarnState = clientWarnState;
         this.sensors = sensors;
+        this.operationContext = operationContext;
     }
 
     /**
@@ -84,13 +87,13 @@ public class ExecutorLocals implements WithResources, Closeable
     public static ExecutorLocals create(TraceState traceState)
     {
         ExecutorLocals current = locals.get();
-        return current.traceState == traceState ? current : new ExecutorLocals(traceState, current.clientWarnState, current.sensors);
+        return current.traceState == traceState ? current : new ExecutorLocals(traceState, current.clientWarnState, current.sensors, current.operationContext);
     }
 
     public static ExecutorLocals create(RequestSensors sensors)
     {
         ExecutorLocals current = locals.get();
-        return current.sensors == sensors ? current : new ExecutorLocals(current.traceState, current.clientWarnState, sensors);
+        return current.sensors == sensors ? current : new ExecutorLocals(current.traceState, current.clientWarnState, sensors, current.operationContext);
     }
 
     public static void clear()
