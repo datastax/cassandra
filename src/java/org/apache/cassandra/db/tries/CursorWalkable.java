@@ -21,7 +21,7 @@ package org.apache.cassandra.db.tries;
 /// representation of the trie.
 ///
 /// @param <C> The specific type of cursor a descendant uses.
-public interface CursorWalkable<C extends Cursor>
+interface CursorWalkable<C extends Cursor>
 {
     C cursor(Direction direction);
 }

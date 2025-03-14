@@ -242,6 +242,7 @@ public abstract class InMemoryTrieTestBase
             }
             if (current == null)
             {
+                stack = current;
                 assert depth == -1;
                 return depth;
             }
@@ -283,12 +284,12 @@ public abstract class InMemoryTrieTestBase
 
         public ByteBuffer content()
         {
-            return (ByteBuffer) stack.content;
+            return stack != null ? (ByteBuffer) stack.content : null;
         }
 
         public int incomingTransition()
         {
-            SpecStackEntry parent = stack.parent;
+            SpecStackEntry parent = stack != null ? stack.parent : null;
             return parent != null ? parent.curChild + 0x30 : -1;
         }
 
@@ -313,14 +314,7 @@ public abstract class InMemoryTrieTestBase
 
     static Trie<ByteBuffer> specifiedTrie(Object[] nodeDef)
     {
-        return new Trie<ByteBuffer>()
-        {
-            @Override
-            public Cursor<ByteBuffer> cursor(Direction direction)
-            {
-                return new CursorFromSpec(nodeDef, direction);
-            }
-        };
+        return direction -> new CursorFromSpec(nodeDef, direction);
     }
 
     @Test

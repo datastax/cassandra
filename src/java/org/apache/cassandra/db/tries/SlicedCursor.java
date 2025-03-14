@@ -259,7 +259,7 @@ class SlicedCursor<T> implements Cursor<T>
     @Override
     public int incomingTransition()
     {
-        return source.incomingTransition();
+        return state == State.EXHAUSTED ? -1 : source.incomingTransition();
     }
 
     @Override

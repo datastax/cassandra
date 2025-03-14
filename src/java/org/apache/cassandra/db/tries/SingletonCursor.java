@@ -53,7 +53,7 @@ class SingletonCursor<T> implements Cursor<T>
         }
         else
         {
-            return currentDepth = -1;
+            return done();
         }
     }
 
@@ -61,7 +61,7 @@ class SingletonCursor<T> implements Cursor<T>
     public int advanceMultiple(TransitionsReceiver receiver)
     {
         if (nextTransition == ByteSource.END_OF_STREAM)
-            return currentDepth = -1;
+            return done();
         int current = nextTransition;
         int depth = currentDepth;
         int next = src.next();
@@ -84,12 +84,18 @@ class SingletonCursor<T> implements Cursor<T>
         if (skipDepth <= currentDepth)
         {
             assert skipDepth < currentDepth || direction.gt(skipTransition, currentTransition);
-            return currentDepth = -1;  // no alternatives
+            return done();  // no alternatives
         }
         if (direction.gt(skipTransition, nextTransition))
-            return currentDepth = -1;   // request is skipping over our path
+            return done();   // request is skipping over our path
 
         return advance();
+    }
+
+    private int done()
+    {
+        currentTransition = -1;
+        return currentDepth = -1;
     }
 
     @Override
