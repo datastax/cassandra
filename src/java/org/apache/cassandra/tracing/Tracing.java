@@ -277,7 +277,7 @@ public abstract class Tracing extends ExecutorLocals.Impl
     public void set(TraceState tls)
     {
         ExecutorLocals current = ExecutorLocals.current();
-        ExecutorLocals.Impl.set(tls, current.clientWarnState, current.sensors);
+        ExecutorLocals.Impl.set(tls, current.clientWarnState, current.sensors, current.operationContext);
     }
 
     public TraceState begin(final String request, final Map<String, String> parameters)

@@ -30,6 +30,7 @@ import io.netty.util.Timeout;
 import org.apache.cassandra.concurrent.ExecutorLocals;
 import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.service.ClientWarn;
+import org.apache.cassandra.service.context.OperationContext;
 import org.apache.cassandra.tracing.TraceState;
 
 /**
@@ -72,11 +73,12 @@ public class Timer
         ClientWarn.State clientWarnState = executorLocals == null ? null : executorLocals.clientWarnState;
         TraceState traceState = executorLocals == null ? null : executorLocals.traceState;
         RequestSensors sensors = executorLocals == null ? null : executorLocals.sensors;
+        OperationContext operationContext = executorLocals == null ? null : executorLocals.operationContext;
         AsyncPromise<Void> result = new AsyncPromise<>();
         Timeout handle = timer.newTimeout(ignored ->
                                           {
 
-                                              ExecutorLocals.Impl.set(traceState, clientWarnState, sensors);
+                                              ExecutorLocals.Impl.set(traceState, clientWarnState, sensors, operationContext);
                                               try
                                               {
                                                   task.run();
