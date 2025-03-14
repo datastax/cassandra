@@ -42,7 +42,7 @@ public class ClientWarn extends ExecutorLocals.Impl
     public void set(State value)
     {
         ExecutorLocals current = ExecutorLocals.current();
-        ExecutorLocals.Impl.set(current.traceState, value, current.sensors);
+        ExecutorLocals.Impl.set(current.traceState, value, current.sensors, current.operationContext);
     }
 
     public void warn(String text)
