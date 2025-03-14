@@ -23,6 +23,8 @@ import java.util.Arrays;
 import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.sensors.RequestTracker;
 import org.apache.cassandra.service.ClientWarn;
+import org.apache.cassandra.service.context.OperationContext;
+import org.apache.cassandra.service.context.OperationContextTracker;
 import org.apache.cassandra.tracing.TraceState;
 import org.apache.cassandra.tracing.Tracing;
 
@@ -37,21 +39,24 @@ public class ExecutorLocals
     private static final ExecutorLocal<TraceState> tracing = Tracing.instance;
     private static final ExecutorLocal<ClientWarn.State> clientWarn = ClientWarn.instance;
     private static final ExecutorLocal<RequestSensors> requestTracker = RequestTracker.instance;
+    private static final ExecutorLocal<OperationContext> operationContextTracker = OperationContextTracker.instance;
 
     public final TraceState traceState;
     public final ClientWarn.State clientWarnState;
     public final RequestSensors sensors;
+    public final OperationContext operationContext;
 
-    private ExecutorLocals(TraceState traceState, ClientWarn.State clientWarnState, RequestSensors sensors)
+    private ExecutorLocals(TraceState traceState, ClientWarn.State clientWarnState, RequestSensors sensors, OperationContext operationContext)
     {
         this.traceState = traceState;
         this.clientWarnState = clientWarnState;
         this.sensors = sensors;
+        this.operationContext = operationContext;
     }
 
     static
     {
-        assert Arrays.equals(ExecutorLocal.all, new ExecutorLocal[]{ tracing, clientWarn, requestTracker })
+        assert Arrays.equals(ExecutorLocal.all, new ExecutorLocal[]{ tracing, clientWarn, requestTracker, operationContextTracker })
         : "ExecutorLocals has not been updated to reflect new ExecutorLocal.all";
     }
 
@@ -68,29 +73,32 @@ public class ExecutorLocals
         TraceState traceState = tracing.get();
         ClientWarn.State clientWarnState = clientWarn.get();
         RequestSensors sensors = requestTracker.get();
-        if (traceState == null && clientWarnState == null && sensors == null)
+        OperationContext operationContext = operationContextTracker.get();
+        if (traceState == null && clientWarnState == null && sensors == null && operationContext == null)
             return null;
         else
-            return new ExecutorLocals(traceState, clientWarnState, sensors);
+            return new ExecutorLocals(traceState, clientWarnState, sensors, operationContext);
     }
 
-    public static ExecutorLocals create(TraceState traceState, ClientWarn.State clientWarnState, RequestSensors sensors)
+    public static ExecutorLocals create(TraceState traceState, ClientWarn.State clientWarnState, RequestSensors sensors, OperationContext operationContext)
     {
-        return new ExecutorLocals(traceState, clientWarnState, sensors);
+        return new ExecutorLocals(traceState, clientWarnState, sensors, operationContext);
     }
 
     public static ExecutorLocals create(TraceState traceState)
     {
         ClientWarn.State clientWarnState = clientWarn.get();
         RequestSensors sensors = requestTracker.get();
-        return new ExecutorLocals(traceState, clientWarnState, sensors);
+        OperationContext operationContext = operationContextTracker.get();
+        return new ExecutorLocals(traceState, clientWarnState, sensors, operationContext);
     }
 
     public static ExecutorLocals create(RequestSensors sensors)
     {
         TraceState traceState = tracing.get();
         ClientWarn.State clientWarnState = clientWarn.get();
-        return new ExecutorLocals(traceState, clientWarnState, sensors);
+        OperationContext operationContext = operationContextTracker.get();
+        return new ExecutorLocals(traceState, clientWarnState, sensors, operationContext);
     }
 
     public static void set(ExecutorLocals locals)

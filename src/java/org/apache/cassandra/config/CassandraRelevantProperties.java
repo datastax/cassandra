@@ -27,6 +27,7 @@ import org.apache.cassandra.io.compress.LZ4Compressor;
 import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.sensors.SensorsFactory;
+import org.apache.cassandra.service.context.OperationContext;
 import org.apache.cassandra.service.reads.range.EndpointGroupingRangeCommandIterator;
 
 /** A class that extracts system properties for the cassandra node it runs within. */
@@ -600,7 +601,13 @@ public enum CassandraRelevantProperties
      * Do not try to calculate optimal streaming candidates. This can take a lot of time in some configs specially
      * with vnodes.
      */
-    SKIP_OPTIMAL_STREAMING_CANDIDATES_CALCULATION("cassandra.skip_optimal_streaming_candidates_calculation", "false");
+    SKIP_OPTIMAL_STREAMING_CANDIDATES_CALCULATION("cassandra.skip_optimal_streaming_candidates_calculation", "false"),
+
+    /**
+     * Allows custom implementation of {@link OperationContext.Factory} to optionally create and configure custom
+     * {@link OperationContext} instances.
+     */
+    OPERATION_CONTEXT_FACTORY("cassandra.operation_context_factory_class");
 
     CassandraRelevantProperties(String key, String defaultVal)
     {
