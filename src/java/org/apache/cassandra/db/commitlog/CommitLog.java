@@ -247,7 +247,7 @@ public class CommitLog implements CommitLogMBean
             for (File f : files)
             {
                 if (segmentsWithInvalidAndNoFailedMutations.contains(f.name()))
-                    invalidMutationRelocator.copySegmentsWithInvalidMutations(f.toPath());
+                    invalidMutationRelocator.moveSegmentsWithInvalidMutationsToHostSubDirectory(f.toPath());
 
                 boolean hasFailedMutations = segmentsWithFailedMutations.contains(f.name());
                 segmentManager.handleReplayedSegment(f, hasFailedMutations);
@@ -650,7 +650,7 @@ public class CommitLog implements CommitLogMBean
 
     public static class InvalidMutationRelocator
     {
-        protected void copySegmentsWithInvalidMutations(Path segmentWithInvalidAndNoFailedMutations)
+        protected void moveSegmentsWithInvalidMutationsToHostSubDirectory(Path segmentWithInvalidAndNoFailedMutations)
         {
             // no-op
         }
