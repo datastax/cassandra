@@ -37,7 +37,6 @@ import org.slf4j.LoggerFactory;
 
 import io.netty.util.concurrent.FastThreadLocal;
 import org.apache.cassandra.config.*;
-import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.db.filter.*;
 import org.apache.cassandra.db.transform.BasePartitions;
 import org.apache.cassandra.db.transform.BaseRows;
