@@ -151,7 +151,7 @@ public class SlicedTrieTest
                     {
                         int cmp1 = l != null ? ByteComparable.compare(key, l, byteComparableVersion) : 1;
                         int cmp2 = r != null ? ByteComparable.compare(r, key, byteComparableVersion) : 1;
-                        Trie<Boolean> ix = new SlicedTrie<>(Trie.singleton(key, byteComparableVersion, true), l, includeLeft, r, includeRight);
+                        Trie<Boolean> ix = Trie.singleton(key, byteComparableVersion, true).subtrie(l, includeLeft, r, includeRight);
                         boolean expected = true;
                         if (cmp1 < 0 || cmp1 == 0 && !includeLeft)
                             expected = false;

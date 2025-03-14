@@ -20,6 +20,7 @@ package org.apache.cassandra.db.tries;
 
 import java.nio.ByteBuffer;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Random;
 import java.util.SortedMap;
 import java.util.TreeMap;
@@ -85,7 +86,7 @@ public class MergeTrieTest
         InMemoryTrie<ByteBuffer> trie2 = makeInMemoryTrie(src2, content2, true);
 
         content1.putAll(content2);
-        Trie<ByteBuffer> union = new MergeTrie.Distinct<>(trie1, trie2);
+        Trie<ByteBuffer> union = Trie.mergeDistinct(trie1, trie2);
 
         assertSameContent(union, content1);
     }

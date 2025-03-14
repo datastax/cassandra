@@ -18,6 +18,7 @@
 package org.apache.cassandra.db.tries;
 
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Iterables;
 
 import java.util.Collection;
 import java.util.Iterator;
@@ -229,7 +230,7 @@ public interface Trie<T> extends CursorWalkable<Cursor<T>>
     {
         if (left == null && right == null)
             return this;
-        return new SlicedTrie<>(this, left, includeLeft, right, includeRight);
+        return dir -> SlicedCursor.create(cursor(dir), left, includeLeft, right, includeRight);
     }
 
     /// Returns a view of the subtrie containing everything in this trie whose keys fall between the given boundaries.
@@ -357,7 +358,7 @@ public interface Trie<T> extends CursorWalkable<Cursor<T>>
     /// (The resolver will not be called if there's content from only one source.)
     default Trie<T> mergeWith(Trie<T> other, MergeResolver<T> resolver)
     {
-        return new MergeTrie<>(resolver, this, other);
+        return dir -> new MergeCursor<>(resolver, this.cursor(dir), other.cursor(dir));
     }
 
     /// Resolver of content of merged nodes.
@@ -375,6 +376,31 @@ public interface Trie<T> extends CursorWalkable<Cursor<T>>
         default T resolve(T c1, T c2)
         {
             return resolve(ImmutableList.of(c1, c2));
+        }
+    }
+
+    /// Constructs a view of the merge of multiple tries. The view is live, i.e. any write to any of the
+    /// sources will be reflected in the merged view.
+    ///
+    /// If there is content for a given key in more than one sources, the resolver will be called to obtain the
+    /// combination. (The resolver will not be called if there's content from only one source.)
+    static <T> Trie<T> merge(Collection<? extends Trie<T>> sources, CollectionMergeResolver<T> resolver)
+    {
+        switch (sources.size())
+        {
+            case 0:
+                throw new AssertionError();
+            case 1:
+                return sources.iterator().next();
+            case 2:
+            {
+                Iterator<? extends Trie<T>> it = sources.iterator();
+                Trie<T> t1 = it.next();
+                Trie<T> t2 = it.next();
+                return t1.mergeWith(t2, resolver);
+            }
+            default:
+                return dir -> new CollectionMergeCursor<>(resolver, dir, sources, Trie::cursor);
         }
     }
 
@@ -401,29 +427,26 @@ public interface Trie<T> extends CursorWalkable<Cursor<T>>
         return (CollectionMergeResolver<T>) THROWING_RESOLVER;
     }
 
-    /// Constructs a view of the merge of multiple tries. The view is live, i.e. any write to any of the
-    /// sources will be reflected in the merged view.
+    /// Constructs a view of the merge of two tries, where each source must have distinct keys. The view is live, i.e.
+    /// any write to any of the sources will be reflected in the merged view.
     ///
-    /// If there is content for a given key in more than one sources, the resolver will be called to obtain the
-    /// combination. (The resolver will not be called if there's content from only one source.)
-    static <T> Trie<T> merge(Collection<? extends Trie<T>> sources, CollectionMergeResolver<T> resolver)
+    /// If there is content for a given key in more than one sources, the merge will throw an assertion error.
+    static <T> Trie<T> mergeDistinct(Trie<T> t1, Trie<T> t2)
     {
-        switch (sources.size())
+        return new Trie<T>()
         {
-        case 0:
-            throw new AssertionError();
-        case 1:
-            return sources.iterator().next();
-        case 2:
-        {
-            Iterator<? extends Trie<T>> it = sources.iterator();
-            Trie<T> t1 = it.next();
-            Trie<T> t2 = it.next();
-            return t1.mergeWith(t2, resolver);
-        }
-        default:
-            return new CollectionMergeTrie<>(sources, resolver);
-        }
+            @Override
+            public Cursor<T> cursor(Direction direction)
+            {
+                return new MergeCursor<>(throwingResolver(), t1.cursor(direction), t2.cursor(direction));
+            }
+
+            @Override
+            public Iterable<T> valuesUnordered()
+            {
+                return Iterables.concat(t1.valuesUnordered(), t2.valuesUnordered());
+            }
+        };
     }
 
     /// Constructs a view of the merge of multiple tries, where each source must have distinct keys. The view is live,
@@ -443,17 +466,35 @@ public interface Trie<T> extends CursorWalkable<Cursor<T>>
             Iterator<? extends Trie<T>> it = sources.iterator();
             Trie<T> t1 = it.next();
             Trie<T> t2 = it.next();
-            return new MergeTrie.Distinct<>(t1, t2);
+            return mergeDistinct(t1, t2);
         }
         default:
-            return new CollectionMergeTrie.Distinct<>(sources);
+            return mergeDistinctTrie(sources);
         }
+    }
+
+    private static <T> Trie<T> mergeDistinctTrie(Collection<? extends Trie<T>> sources)
+    {
+        return new Trie<T>()
+        {
+            @Override
+            public Cursor<T> cursor(Direction direction)
+            {
+                return new CollectionMergeCursor<>(Trie.throwingResolver(), direction, sources, Trie::cursor);
+            }
+
+            @Override
+            public Iterable<T> valuesUnordered()
+            {
+                return Iterables.concat(Iterables.transform(sources, Trie::valuesUnordered));
+            }
+        };
     }
 
     /// Returns a Trie that is a view of this one, where the given prefix is prepended before the root.
     default Trie<T> prefixedBy(ByteComparable prefix)
     {
-        return new PrefixedTrie(prefix, this);
+        return dir -> new PrefixedCursor(prefix, cursor(dir));
     }
 
     /// Returns an entry set containing all tail tree constructed at the points that contain content of

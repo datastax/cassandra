@@ -20,12 +20,14 @@ package org.apache.cassandra.db.tries;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.Random;
 import java.util.SortedMap;
 import java.util.TreeMap;
 
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Iterables;
 import org.junit.Test;
 
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
@@ -51,7 +53,7 @@ public class CollectionMergeTrieTest
 
         content1.putAll(content2);
         // construct directly, trie.merge() will defer to mergeWith on two sources
-        Trie<ByteBuffer> union = new CollectionMergeTrie<>(ImmutableList.of(trie1, trie2), x -> x.iterator().next());
+        Trie<ByteBuffer> union = makeCollectionMergeTrie(trie1, trie2);
 
         assertSameContent(union, content1);
     }
@@ -71,9 +73,14 @@ public class CollectionMergeTrieTest
         addToInMemoryTrie(generateKeys(new Random(5), COUNT), content2, trie2, true);
 
         content1.putAll(content2);
-        Trie<ByteBuffer> union = new CollectionMergeTrie<>(ImmutableList.of(trie1, trie2), x -> x.iterator().next());
+        Trie<ByteBuffer> union = makeCollectionMergeTrie(trie1, trie2);
 
         assertSameContent(union, content1);
+    }
+
+    private static Trie<ByteBuffer> makeCollectionMergeTrie(InMemoryTrie<ByteBuffer>... tries)
+    {
+        return dir -> new CollectionMergeCursor<>(x -> x.iterator().next(), dir, List.of(tries), Trie::cursor);
     }
 
     @Test
@@ -89,9 +96,28 @@ public class CollectionMergeTrieTest
         InMemoryTrie<ByteBuffer> trie2 = makeInMemoryTrie(src2, content2, true);
 
         content1.putAll(content2);
-        Trie<ByteBuffer> union = new CollectionMergeTrie.Distinct<>(ImmutableList.of(trie1, trie2));
+        Trie<ByteBuffer> union = mergeDistinctTrie(ImmutableList.of(trie1, trie2));
 
         assertSameContent(union, content1);
+    }
+
+    private static <T> Trie<T> mergeDistinctTrie(Collection<? extends Trie<T>> sources)
+    {
+        // This duplicates the code in the private Trie.mergeDistinctTrie
+        return new Trie<T>()
+        {
+            @Override
+            public Cursor<T> cursor(Direction direction)
+            {
+                return new CollectionMergeCursor<>(Trie.throwingResolver(), direction, sources, Trie::cursor);
+            }
+
+            @Override
+            public Iterable<T> valuesUnordered()
+            {
+                return Iterables.concat(Iterables.transform(sources, Trie::valuesUnordered));
+            }
+        };
     }
 
     @Test
