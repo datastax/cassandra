@@ -22,10 +22,14 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
+import com.datastax.driver.core.exceptions.InvalidQueryException;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.index.sai.disk.format.Version;
+import org.apache.cassandra.schema.SchemaConstants;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.Assert.assertEquals;
 
 @RunWith(Parameterized.class)
 public class IndexNameTest extends CQLTester
@@ -123,7 +127,7 @@ public class IndexNameTest extends CQLTester
     }
 
     @Test
-    public void testLongNamesInternal()
+    public void testTooLongNamesInternal() throws Throwable
     {
         String longName = "a".repeat(183);
 
@@ -135,10 +139,37 @@ public class IndexNameTest extends CQLTester
         execute(String.format("INSERT INTO %%s (\"key\", %s) VALUES (1, 1)", "value"));
         execute(String.format("INSERT INTO %%s (\"key\", %s) VALUES (2, 2)", "value"));
 
-        assertRows(execute(String.format("SELECT key, %s FROM %%s WHERE %<s = 1", "value")), row(1, 1));
+        beforeAndAfterFlush(() -> assertRows(execute(String.format("SELECT key, %s FROM %%s WHERE %<s = 1", "value")), row(1, 1)));
+    }
 
-        flush();
+    @Test
+    public void testMaxAcceptableLongNamesNewIndex() throws Throwable
+    {
+        assertEquals(182, Version.calculateIndexNameAllowedLength());
+        String longName = "a".repeat(182);
+        createTable("CREATE TABLE %s (" +
+                    "key int PRIMARY KEY," +
+                    "value int)"
+        );
+        executeNet(String.format(createIndexQuery, longName, "%s", "value"));
 
-        assertRows(execute(String.format("SELECT key, %s FROM %%s WHERE %<s = 1", "value")), row(1, 1));
+        execute(String.format("INSERT INTO %%s (\"key\", %s) VALUES (1, 1)", "value"));
+        execute(String.format("INSERT INTO %%s (\"key\", %s) VALUES (2, 2)", "value"));
+
+        beforeAndAfterFlush(() -> assertRows(execute(String.format("SELECT key, %s FROM %%s WHERE %<s = 1", "value")), row(1, 1)));
+    }
+
+    @Test
+    public void failTooLongNamesNewIndex()
+    {
+        String longName = "a".repeat(183);
+        createTable("CREATE TABLE %s (" +
+                    "key int PRIMARY KEY," +
+                    "value int)"
+        );
+        assertThatThrownBy(() -> executeNet(String.format(createIndexQuery, longName, "%s", "value")))
+        .isInstanceOf(InvalidQueryException.class)
+        .hasMessage(String.format("Index name shouldn't be more than %s characters long (got %s chars for %s)",
+                                  SchemaConstants.INDEX_NAME_LENGTH, longName.length(), longName));
     }
 }
