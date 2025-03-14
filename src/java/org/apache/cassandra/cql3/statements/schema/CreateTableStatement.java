@@ -109,7 +109,7 @@ public final class CreateTableStatement extends AlterSchemaStatement
     {
         super.validate(state);
 
-        if (!state.getClientState().isInternal && tableName.length() > SchemaConstants.NAME_LENGTH - keyspaceName.length())
+        if (!state.getClientState().isInternal && tableName.length() + keyspaceName.length() > SchemaConstants.NAME_LENGTH)
             throw ire("Keyspace and table names combined shouldn't be more than %s characters long (got keyspace of %s chars and table of %s chars for %s.%s)",
                       SchemaConstants.NAME_LENGTH, keyspaceName.length(), tableName.length(), keyspaceName, tableName);
 
