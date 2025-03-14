@@ -93,7 +93,12 @@ public final class CreateIndexStatement extends AlterSchemaStatement
     {
         super.validate(state);
 
-        if (!state.getClientState().isInternal && indexName.length() > SchemaConstants.INDEX_NAME_LENGTH)
+        // Check the length of a valid index name.
+        // Non-valid indexes are validated in IndexMetadata#validate.
+        if (!state.getClientState().isInternal
+            && SchemaConstants.isValidName(indexName, true)
+            && indexName.length() > SchemaConstants.INDEX_NAME_LENGTH)
+
             throw ire("Index name shouldn't be more than %s characters long (got %s chars for %s)",
                       SchemaConstants.INDEX_NAME_LENGTH, indexName.length(), indexName);
 
