@@ -107,7 +107,7 @@ public class CollectionMergeTrieTest
         return new Trie<T>()
         {
             @Override
-            public Cursor<T> cursor(Direction direction)
+            public Cursor<T> makeCursor(Direction direction)
             {
                 return new CollectionMergeCursor<>(Trie.throwingResolver(), direction, sources, Trie::cursor);
             }

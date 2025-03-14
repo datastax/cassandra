@@ -27,6 +27,7 @@ import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import org.agrona.DirectBuffer;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 /// Base trie interface.
@@ -58,12 +59,14 @@ import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 /// @param <T> The content type of the trie.
 public interface Trie<T> extends CursorWalkable<Cursor<T>>
 {
+    boolean DEBUG = CassandraRelevantProperties.TRIE_DEBUG.getBoolean();
+
     /// Adapter interface providing the methods a [Cursor.Walker] to a [Consumer], so that the latter can be used
     /// with [#process].
     /// This enables calls like
     ///     `trie.forEachEntry(x -> System.out.println(x));`
     /// to be mapped directly to a single call to [#process] without extra allocations.
-    public interface ValueConsumer<T> extends Consumer<T>, Cursor.Walker<T, Void>
+    interface ValueConsumer<T> extends Consumer<T>, Cursor.Walker<T, Void>
     {
         @Override
         default void content(T content)
@@ -436,7 +439,7 @@ public interface Trie<T> extends CursorWalkable<Cursor<T>>
         return new Trie<T>()
         {
             @Override
-            public Cursor<T> cursor(Direction direction)
+            public Cursor<T> makeCursor(Direction direction)
             {
                 return new MergeCursor<>(throwingResolver(), t1.cursor(direction), t2.cursor(direction));
             }
@@ -478,7 +481,7 @@ public interface Trie<T> extends CursorWalkable<Cursor<T>>
         return new Trie<T>()
         {
             @Override
-            public Cursor<T> cursor(Direction direction)
+            public Cursor<T> makeCursor(Direction direction)
             {
                 return new CollectionMergeCursor<>(Trie.throwingResolver(), direction, sources, Trie::cursor);
             }
@@ -581,5 +584,14 @@ public interface Trie<T> extends CursorWalkable<Cursor<T>>
         {
             return -1;
         }
+    }
+
+    Cursor<T> makeCursor(Direction direction);
+
+    @Override
+    default Cursor<T> cursor(Direction direction)
+    {
+        return DEBUG ? new VerificationCursor.Plain<>(makeCursor(direction), 0, 0, -1)
+                     : makeCursor(direction);
     }
 }

@@ -29,7 +29,7 @@ class TrieDumper<T> implements Cursor.Walker<T, String>
     int needsIndent = -1;
     int currentLength = 0;
 
-    public TrieDumper(Function<T, String> contentToString)
+    TrieDumper(Function<T, String> contentToString)
     {
         this.contentToString = contentToString;
         this.b = new StringBuilder();

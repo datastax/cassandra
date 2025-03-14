@@ -296,7 +296,7 @@ public class SlicedTrieTest
         return new Trie<Integer>()
         {
             @Override
-            public Cursor<Integer> cursor(Direction direction)
+            public Cursor<Integer> makeCursor(Direction direction)
             {
                 return new singleLevelCursor(direction);
             }

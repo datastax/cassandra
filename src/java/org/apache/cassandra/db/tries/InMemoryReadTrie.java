@@ -1057,7 +1057,7 @@ public class InMemoryReadTrie<T> implements Trie<T>
         return !isNullOrLeaf(node) && offset(node) <= CHAIN_MAX_OFFSET;
     }
 
-    public InMemoryCursor cursor(Direction direction)
+    public InMemoryCursor makeCursor(Direction direction)
     {
         return new InMemoryCursor(direction);
     }
@@ -1100,7 +1100,7 @@ public class InMemoryReadTrie<T> implements Trie<T>
     @Override
     public String dump(Function<T, String> contentToString)
     {
-        InMemoryCursor source = cursor(Direction.FORWARD);
+        InMemoryCursor source = makeCursor(Direction.FORWARD);
         class TypedNodesCursor implements Cursor<String>
         {
             @Override

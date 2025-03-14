@@ -91,7 +91,7 @@ class CollectionMergeCursor<T> implements Cursor<T>
     /// A list used to collect contents during [#content()] calls.
     private final List<T> contents;
 
-    public <I> CollectionMergeCursor(Trie.CollectionMergeResolver<T> resolver, Direction direction, Collection<I> inputs, BiFunction<I, Direction, Cursor<T>> extractor)
+    <I> CollectionMergeCursor(Trie.CollectionMergeResolver<T> resolver, Direction direction, Collection<I> inputs, BiFunction<I, Direction, Cursor<T>> extractor)
     {
         this.resolver = resolver;
         this.direction = direction;

@@ -284,7 +284,10 @@ public enum CassandraRelevantProperties
     /** what class to use for mbean registeration */
     MBEAN_REGISTRATION_CLASS("org.apache.cassandra.mbean_registration_class"),
 
+    /** Size limit for in-memory tries. This determines when the trie will report that it is full to trigger a flush. */
     MEMTABLE_TRIE_SIZE_LIMIT("cassandra.trie_size_limit_mb"),
+    /** To be used for tests: whether trie cursors should be verified for correctness. */
+    TRIE_DEBUG("cassandra.debug_tries"),
 
     /** This property indicates if the code is running under the in-jvm dtest framework */
     DTEST_IS_IN_JVM_DTEST("org.apache.cassandra.dtest.is_in_jvm_dtest"),
