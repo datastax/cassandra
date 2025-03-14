@@ -121,4 +121,24 @@ public class IndexNameTest extends CQLTester
         assertThatThrownBy(() -> execute(String.format(createIndexQuery, "\"unacceptable index name\"", "%s", columnName)))
         .isInstanceOf(ConfigurationException.class);
     }
+
+    @Test
+    public void testLongNamesInternal()
+    {
+        String longName = "a".repeat(183);
+
+        createTable("CREATE TABLE %s (" +
+                    "key int PRIMARY KEY," +
+                    "value int)"
+        );
+        createIndex(String.format(createIndexQuery, longName, "%s", "value"));
+        execute(String.format("INSERT INTO %%s (\"key\", %s) VALUES (1, 1)", "value"));
+        execute(String.format("INSERT INTO %%s (\"key\", %s) VALUES (2, 2)", "value"));
+
+        assertRows(execute(String.format("SELECT key, %s FROM %%s WHERE %<s = 1", "value")), row(1, 1));
+
+        flush();
+
+        assertRows(execute(String.format("SELECT key, %s FROM %%s WHERE %<s = 1", "value")), row(1, 1));
+    }
 }
