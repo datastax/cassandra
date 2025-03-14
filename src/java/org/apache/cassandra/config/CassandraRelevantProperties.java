@@ -35,6 +35,7 @@ import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.sensors.SensorsFactory;
 import org.apache.cassandra.service.FileSystemOwnershipCheck;
+import org.apache.cassandra.service.context.OperationContext;
 import org.apache.cassandra.service.reads.range.EndpointGroupingRangeCommandIterator;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.StorageCompatibilityMode;
@@ -574,6 +575,11 @@ public enum CassandraRelevantProperties
      * when the JVM terminates. Therefore, we can use such optimization and not wait unnecessarily. */
     NON_GRACEFUL_CLOSE("cassandra.messagingService.nonGracefulClose"),
     NON_GRACEFUL_SHUTDOWN("cassandra.test.messagingService.nonGracefulShutdown"),
+    /**
+     * Allows custom implementation of {@link OperationContext.Factory} to optionally create and configure custom
+     * {@link OperationContext} instances.
+     */
+    OPERATION_CONTEXT_FACTORY("cassandra.operation_context_factory_class"),
     /** for specific tests */
     /** This property indicates whether disable_mbean_registration is true */
     ORG_APACHE_CASSANDRA_DISABLE_MBEAN_REGISTRATION("org.apache.cassandra.disable_mbean_registration"),
