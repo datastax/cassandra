@@ -18,8 +18,10 @@
 
 package org.apache.cassandra.nodes;
 
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
+import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.Arrays;
 import java.util.Collection;
@@ -27,6 +29,10 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 
+import com.fasterxml.jackson.core.JsonGenerator;
+import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.databind.JsonSerializer;
+import com.fasterxml.jackson.databind.SerializerProvider;
 import org.apache.commons.lang3.RandomStringUtils;
 import org.junit.After;
 import org.junit.Before;
@@ -260,6 +266,42 @@ public class NodesTest
         assertEquals(clusterName, loadedLocalInfo.getClusterName());
     }
 
+    @Test
+    public void testDse6InetAddresPeerInfoDeserialisation() throws IOException {
+
+        InetAddressAndPort peer = InetAddressAndPort.getByName("127.0.0.2");
+        InetAddressSerializer ser = new InetAddressSerializer();
+        SerHelper.InetAddressAndPortDeserializer des = new SerHelper.InetAddressAndPortDeserializer();
+
+        ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+        JsonGenerator jsonGenerator = new ObjectMapper().getFactory().createGenerator(outputStream);
+
+        ser.serialize(peer.address, jsonGenerator, null);
+        jsonGenerator.flush();
+
+        JsonParser jsonParser = new ObjectMapper().getFactory().createParser(outputStream.toByteArray());
+
+        InetAddressAndPort inap = des.deserialize(jsonParser, null);
+        assertEquals(peer, inap);
+    }
+
+        @Test
+        public void testPeerInfoFromDse6() throws IOException
+        {
+// FIXME
+//        File local = dir.toPath().resolve("peers").toFile();
+//        ObjectMapper objectMapper = Nodes.createObjectMapper();
+//        SimpleModule module = new SimpleModule();
+//        module.addSerializer(InetAddress.class, new InetAddressSerializer());
+//        objectMapper.registerModule(module);
+//        objectMapper.writerFor(new TypeReference<Collection<TestDse6PeerInfo>>() {}).writeValue(local, Collections.singleton(existingPeerInfo));
+//
+//        Nodes.Instance.unsafeSetup(dir.toPath());
+//
+//        PeerInfo loadedPeerInfo = Nodes.peers().get(peer);
+//        assertEquals(peer, loadedPeerInfo.getPeer());
+    }
+
     static void fakePeer(PeerInfo p)
     {
         int nodeId = p.getPeer().address.getAddress()[3];
@@ -352,6 +394,16 @@ public class NodesTest
         public void setUnsupportedField(String unsupportedField)
         {
             this.unsupportedField = unsupportedField;
+        }
+    }
+
+    private static final class InetAddressSerializer extends JsonSerializer<InetAddress>
+    {
+        @Override
+        public void serialize(InetAddress t, JsonGenerator jsonGenerator, SerializerProvider serializerProvider) throws IOException
+        {
+            // same as https://github.com/riptano/bdp/blob/6.8.54/dse-db/src/java/com/datastax/bdp/db/nodes/SerHelper.java#L200
+            jsonGenerator.writeString(t.getHostAddress());
         }
     }
 }

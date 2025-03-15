@@ -20,10 +20,12 @@ package org.apache.cassandra.nodes;
 
 import java.io.IOException;
 import java.net.InetAddress;
+import java.net.UnknownHostException;
 import java.nio.ByteBuffer;
 import java.util.UUID;
 
 import com.fasterxml.jackson.core.JsonGenerator;
+import com.fasterxml.jackson.core.JsonParseException;
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.databind.DeserializationContext;
 import com.fasterxml.jackson.databind.JsonDeserializer;
@@ -31,6 +33,7 @@ import com.fasterxml.jackson.databind.JsonSerializer;
 import com.fasterxml.jackson.databind.Module;
 import com.fasterxml.jackson.databind.SerializerProvider;
 import com.fasterxml.jackson.databind.module.SimpleModule;
+import com.google.common.annotations.VisibleForTesting;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
 import org.apache.cassandra.dht.Token;
@@ -110,18 +113,24 @@ final class SerHelper
         }
     }
 
-    private static final class InetAddressAndPortDeserializer extends JsonDeserializer<InetAddressAndPort>
+    @VisibleForTesting
+    static final class InetAddressAndPortDeserializer extends JsonDeserializer<InetAddressAndPort>
     {
         @Override
         public InetAddressAndPort deserialize(JsonParser jsonParser, DeserializationContext deserializationContext) throws IOException
         {
-            jsonParser.isExpectedStartArrayToken();
+            if (jsonParser.isExpectedStartArrayToken())
+            {
+                jsonParser.nextToken();
+                InetAddress address = InetAddress.getByAddress(jsonParser.getBinaryValue());
+                jsonParser.nextToken();
+                int port = jsonParser.getIntValue();
+                jsonParser.nextToken();
+                return InetAddressAndPort.getByAddressOverrideDefaults(address, port);
+            }
+            // legacy DSE 6 compatibility where PeerInfo.peer is InetAddress (not InetAddressAndPort)
             jsonParser.nextToken();
-            InetAddress address = InetAddress.getByAddress(jsonParser.getBinaryValue());
-            jsonParser.nextToken();
-            int port = jsonParser.getIntValue();
-            jsonParser.nextToken();
-            return InetAddressAndPort.getByAddressOverrideDefaults(address, port);
+            return InetAddressAndPort.getByName(jsonParser.getText());
         }
     }
 
