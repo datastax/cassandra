@@ -357,17 +357,30 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
 
     /**
      * Throws an {@link IndexNotAvailableException} if any of the indexes in the specified {@link Index.QueryPlan} is
-     * not queryable, as it's defined by {@link #isIndexQueryable(Index)}.
+     * not queryable, as it's defined by {@link #isIndexQueryable(Index)}. If the reason for the index to be not available
+     * is that it's building, it will throw an {@link IndexBuildInProgressException}.
      *
      * @param queryPlan a query plan
      * @throws IndexNotAvailableException if the query plan has any index that is not queryable
      */
     public void checkQueryability(Index.QueryPlan queryPlan)
     {
+        InetAddressAndPort endpoint = FBUtilities.getBroadcastAddressAndPort();
+
         for (Index index : queryPlan.getIndexes())
         {
+            String indexName = index.getIndexMetadata().name;
+            Index.Status indexStatus = getIndexStatus(endpoint, keyspace.getName(), indexName);
+
             if (!isIndexQueryable(index))
+            {
+                // In Astra index can be queryable during index build, thus we need to check both not queryable and building
+                // Plus isQueryable is always true for non-SAI index implementations
+                if (indexStatus == Index.Status.FULL_REBUILD_STARTED)
+                    throw new IndexBuildInProgressException(index);
+
                 throw new IndexNotAvailableException(index);
+            }
         }
     }
 
@@ -1810,13 +1823,18 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
      */
     public static <E extends Endpoints<E>> E filterForQuery(E liveEndpoints, Keyspace keyspace, Index.QueryPlan indexQueryPlan, ConsistencyLevel level)
     {
+        Map<InetAddressAndPort, Index.Status> indexStatusMap = new HashMap<>();
+
         E queryableEndpoints = liveEndpoints.filter(replica -> {
 
             for (Index index : indexQueryPlan.getIndexes())
             {
                 Index.Status status = getIndexStatus(replica.endpoint(), keyspace.getName(), index.getIndexMetadata().name);
                 if (!index.isQueryable(status))
+                {
+                    indexStatusMap.put(replica.endpoint(), status);
                     return false;
+                }
             }
 
             return true;
@@ -1834,7 +1852,13 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
             {
                 Map<InetAddressAndPort, RequestFailureReason> failureReasons = new HashMap<>();
                 liveEndpoints.without(queryableEndpoints.endpoints())
-                             .forEach(replica -> failureReasons.put(replica.endpoint(), RequestFailureReason.INDEX_NOT_AVAILABLE));
+                             .forEach(replica -> {
+                                 Index.Status status = indexStatusMap.get(replica.endpoint());
+                                 if (status == Index.Status.FULL_REBUILD_STARTED)
+                                     failureReasons.put(replica.endpoint(), RequestFailureReason.INDEX_BUILD_IN_PROGRESS);
+                                 else
+                                     failureReasons.put(replica.endpoint(), RequestFailureReason.INDEX_NOT_AVAILABLE);
+                             });
 
                 throw new ReadFailureException(level, filtered, required, false, failureReasons);
             }
