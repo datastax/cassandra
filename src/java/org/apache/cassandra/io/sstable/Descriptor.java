@@ -150,7 +150,7 @@ public class Descriptor
 
     public File fileFor(Component component)
     {
-        return componentFileMap.computeIfAbsent(component, c -> component.getFile(baseFileURI));
+        return componentFileMap.computeIfAbsent(component, c -> component.getFile(directory, filenamePart));
     }
 
     public String baseFilename()

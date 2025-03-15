@@ -17,7 +17,7 @@
  */
 package org.apache.cassandra.io.sstable;
 
-import java.nio.file.Path;
+import java.net.URI;
 import java.util.UUID;
 
 import org.apache.commons.lang3.StringUtils;
@@ -31,8 +31,8 @@ import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.ByteBufferUtil;
-import org.apache.cassandra.utils.DseLegacy;
 import org.apache.cassandra.utils.Pair;
+import org.mockito.Mockito;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -112,6 +112,29 @@ public class DescriptorTest
         assertEquals(Component.DATA, pair.right);
 
         assertEquals(Component.DATA, Descriptor.validFilenameWithComponent(file.name()));
+    }
+
+    @Test
+    public void testFromFileWithResolveByDirectory() throws Exception
+    {
+        String rawUri = tempDataDir.absolutePath() + File.pathSeparator() + ksname + File.pathSeparator() + cfname + '-' + cfId;
+
+        File cfDirectory = Mockito.mock(File.class);
+        Mockito.when(cfDirectory.toCanonical()).thenReturn(cfDirectory);
+        Mockito.when(cfDirectory.toUri()).thenReturn(URI.create(rawUri));
+
+        File componentFile = Mockito.mock(File.class);
+        Mockito.when(cfDirectory.resolve(Mockito.anyString())).thenReturn(componentFile);
+
+        Descriptor desc = new Descriptor(cfDirectory, ksname, cfname, new SequenceBasedSSTableId(1), SSTableFormat.Type.BIG);
+        assertEquals(cfDirectory.toCanonical(), desc.directory);
+        assertEquals(ksname, desc.ksname);
+        assertEquals(cfname, desc.cfname);
+        assertEquals(new SequenceBasedSSTableId(1), desc.id);
+
+        // verify data component is resolved from given directory
+        File dataComponent = desc.fileFor(Component.DATA);
+        assertEquals(dataComponent, componentFile);
     }
 
     @Test
