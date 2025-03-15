@@ -185,8 +185,10 @@ public final class TableAttributes extends PropertyDefinitions
                 // Not exhaustive, but avoids raising an error upgrading from a CC 4.0 schema
                 if (memtableClass == null)
                     builder.memtable(MemtableParams.get(null));
-                else if ("SkipListMemtable".equalsIgnoreCase(memtableClass) || "PersistentMemoryMemtable".equalsIgnoreCase(memtableClass))
+                else if ("SkipListMemtable".equalsIgnoreCase(memtableClass))
                     builder.memtable(MemtableParams.get("skiplist"));
+                else if ("PersistentMemoryMemtable".equalsIgnoreCase(memtableClass))
+                    builder.memtable(MemtableParams.get("persistent_memory"));
                 else
                     builder.memtable(MemtableParams.get("trie"));
             }

@@ -35,6 +35,7 @@ import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.Duration;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.memtable.Memtable;
+import org.apache.cassandra.db.memtable.PersistentMemoryMemtable;
 import org.apache.cassandra.db.memtable.SkipListMemtable;
 import org.apache.cassandra.db.memtable.TestMemtable;
 import org.apache.cassandra.db.memtable.TrieMemtable;
@@ -650,10 +651,10 @@ public class CreateTest extends CQLTester
 
         // Handle CC 4.0 memtable configuration given as a map
         testMapMemtableConfig("", null, MemtableParams.DEFAULT.factory(), defaultClass);
-        testMapMemtableConfig("SkipListMemtable", "skiplist", MemtableParams.DEFAULT.factory(), defaultClass);
+        testMapMemtableConfig("SkipListMemtable", "skiplist", MemtableParams.get("skiplist").factory(), SkipListMemtable.class);
         testMapMemtableConfig("TrieMemtable","trie", MemtableParams.get("trie").factory(), TrieMemtable.class);
         testMapMemtableConfig("TrieMemtableStage1", "trie", MemtableParams.get("trie").factory(), TrieMemtable.class);
-        testMapMemtableConfig("PersistentMemoryMemtable", "skiplist", MemtableParams.DEFAULT.factory(), defaultClass);
+        testMapMemtableConfig("PersistentMemoryMemtable", "persistent_memory", MemtableParams.get("persistent_memory").factory(), PersistentMemoryMemtable.class);
 
         assertThrowsConfigurationException("The 'class_name' option must be specified.",
                                            "CREATE TABLE %s (a text, b int, c int, primary key (a, b))"
