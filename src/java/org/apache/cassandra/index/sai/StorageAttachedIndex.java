@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.index.sai;
 
+import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -29,7 +30,6 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.NavigableMap;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.SortedMap;
@@ -78,7 +78,6 @@ import org.apache.cassandra.dht.LocalPartitioner;
 import org.apache.cassandra.dht.OrderPreservingPartitioner;
 import org.apache.cassandra.dht.RandomPartitioner;
 import org.apache.cassandra.exceptions.InvalidRequestException;
-import org.apache.cassandra.db.filter.ANNOptions;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.IndexBuildDecider;
 import org.apache.cassandra.index.IndexRegistry;
@@ -99,6 +98,7 @@ import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableFlushObserver;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ClientWarn;
@@ -200,6 +200,8 @@ public class StorageAttachedIndex implements Index
                                                                      NonTokenizingOptions.ASCII,
                                                                      // For now, we leave this for backward compatibility even though it's not used
                                                                      IndexContext.ENABLE_SEGMENT_COMPACTION_OPTION_NAME,
+                                                                     IndexContext.KEY_COMPRESSION_OPTION_NAME,
+                                                                     IndexContext.VALUE_COMPRESSION_OPTION_NAME,
                                                                      IndexTarget.TARGET_OPTION_NAME,
                                                                      IndexTarget.CUSTOM_INDEX_OPTION_NAME,
                                                                      IndexWriterConfig.POSTING_LIST_LVL_MIN_LEAVES,
@@ -225,7 +227,6 @@ public class StorageAttachedIndex implements Index
             ImmutableSet.of(OrderPreservingPartitioner.class, LocalPartitioner.class, ByteOrderedPartitioner.class, RandomPartitioner.class);
 
     private final ColumnFamilyStore baseCfs;
-    private final IndexMetadata config;
     private final IndexContext indexContext;
 
     // Tracks whether or not we've started the index build on initialization.
@@ -240,7 +241,6 @@ public class StorageAttachedIndex implements Index
     public StorageAttachedIndex(ColumnFamilyStore baseCfs, IndexMetadata config)
     {
         this.baseCfs = baseCfs;
-        this.config = config;
         TableMetadata tableMetadata = baseCfs.metadata();
         Pair<ColumnMetadata, IndexTarget.Type> target = TargetParser.parse(tableMetadata, config);
         this.indexContext = new IndexContext(tableMetadata.keyspace,
@@ -252,6 +252,11 @@ public class StorageAttachedIndex implements Index
                                              target.right,
                                              config,
                                              baseCfs);
+    }
+
+    private void setMetadata(IndexMetadata config)
+    {
+        indexContext.setConfig(config);
     }
 
     /**
@@ -317,6 +322,22 @@ public class StorageAttachedIndex implements Index
         if (duplicateCount > 1)
             throw new InvalidRequestException(String.format("Cannot create duplicate storage-attached index on column: %s", target.left));
 
+        // Get to validate only; will throw IRE if option is invalid
+        getCompressionOption(options, IndexContext.VALUE_COMPRESSION_OPTION_NAME);
+
+        // Check for existence of other indexes with different key_compression:
+        CompressionParams keyCompression = getCompressionOption(options, IndexContext.KEY_COMPRESSION_OPTION_NAME);
+        for (IndexMetadata other : metadata.indexes)
+        {
+            CompressionParams otherCompression = getCompressionOptionUnchecked(other.options, IndexContext.KEY_COMPRESSION_OPTION_NAME);
+            if (other.getIndexClassName().equals(StorageAttachedIndex.class.getName())
+                && !otherCompression.equals(keyCompression))
+            {
+                throw new InvalidRequestException(String.format("Cannot create storage-attached index on column %s with different key_compression than existing index %s. Expected: %s",
+                                                                 target.left, other.name, keyCompression.asMap()));
+            }
+        }
+
         // Analyzer is not supported against PK columns
         if (isAnalyzed)
         {
@@ -377,7 +398,54 @@ public class StorageAttachedIndex implements Index
             throw new InvalidRequestException("Unsupported type for SAI: " + type.asCQL3Type());
         }
 
-        return Collections.emptyMap();
+        return unknown;
+    }
+
+    /**
+     * Gets compression params from index metadata option.
+     * Throws InvalidRequestException if the option contents is invalid.
+     * Returns no compression if the compression option is missing.
+     *
+     * @param options index options
+     * @param optionName index option key containing compression params map in JSON format
+     */
+    private static CompressionParams getCompressionOption(Map<String, String> options, String optionName)
+    {
+        String compression = options.get(optionName);
+        if (compression == null)
+            return CompressionParams.noCompression();
+
+        try
+        {
+            return CompressionParams.fromJson(compression);
+        }
+        catch (IOException e)
+        {
+            throw new InvalidRequestException("Invalid value of " + optionName + ": " + e.getMessage());
+        }
+    }
+
+    /**
+     * Gets compression params from index metadata option. Does not throw exception if the option is invalid,
+     * but returns no compression instead.
+     *
+     * @param options index options
+     * @param optionName index option key containing compression params map in JSON format
+     */
+    public static CompressionParams getCompressionOptionUnchecked(Map<String, String> options, String optionName)
+    {
+        String compression = options.get(optionName);
+        if (compression == null)
+            return CompressionParams.noCompression();
+        try
+        {
+            return CompressionParams.fromJson(compression);
+        }
+        catch (IOException e)
+        {
+            logger.error("Invalid value of {}: {} ({}). Falling back to no compression.", optionName, compression, e.getMessage());
+            return CompressionParams.noCompression();
+        }
     }
 
     @Override
@@ -396,7 +464,7 @@ public class StorageAttachedIndex implements Index
     @Override
     public IndexMetadata getIndexMetadata()
     {
-        return config;
+        return indexContext.getConfig();
     }
 
     @Override
@@ -526,7 +594,10 @@ public class StorageAttachedIndex implements Index
     @Override
     public Callable<?> getMetadataReloadTask(IndexMetadata indexMetadata)
     {
-        return null;
+        return () -> {
+            this.setMetadata(indexMetadata);
+            return null;
+        };
     }
 
     @Override
@@ -874,6 +945,7 @@ public class StorageAttachedIndex implements Index
     @Override
     public String toString()
     {
+        IndexMetadata config = indexContext.getConfig();
         return String.format("%s.%s.%s", baseCfs.keyspace.getName(), baseCfs.name, config == null ? "?" : config.name);
     }
 

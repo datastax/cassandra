@@ -159,6 +159,7 @@ public final class Indexes implements Iterable<IndexMetadata>
         return without(index.name).with(index);
     }
 
+
     @Override
     public boolean equals(Object o)
     {
