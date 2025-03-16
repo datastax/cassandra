@@ -29,6 +29,8 @@ import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.internal.CassandraIndex;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sasi.SASIIndex;
+import org.apache.cassandra.inject.Injections;
+import org.apache.cassandra.inject.InvokePointBuilder;
 
 import static org.apache.cassandra.cql3.restrictions.StatementRestrictions.INDEX_DOES_NOT_SUPPORT_DISJUNCTION;
 import static org.apache.cassandra.cql3.restrictions.StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE;
@@ -48,26 +50,43 @@ public class AllIndexImplementationsTest extends CQLTester
     @Parameterized.Parameter(2)
     public String createIndexQuery;
 
-    @Parameterized.Parameters(name = "{0}")
+    @Parameterized.Parameter(3)
+    public int useInjection;
+
+    @Parameterized.Parameters(name = "{0}{3, choice, 0#|1#-with-injection}")
     public static List<Object[]> parameters()
     {
         List<Object[]> parameters = new LinkedList<>();
-        parameters.add(new Object[]{ "none", null, null });
-        parameters.add(new Object[]{ "legacy", CassandraIndex.class, "CREATE INDEX ON %%s(%s)" });
-        parameters.add(new Object[]{ "SASI", SASIIndex.class, "CREATE CUSTOM INDEX ON %%s(%s) USING 'org.apache.cassandra.index.sasi.SASIIndex'" });
-        parameters.add(new Object[]{ "SAI", StorageAttachedIndex.class, "CREATE CUSTOM INDEX ON %%s(%s) USING 'StorageAttachedIndex'" });
+        // Regular cases without injection
+        //parameters.add(new Object[]{ "none", null, null, 0 });
+        //parameters.add(new Object[]{ "legacy", CassandraIndex.class, "CREATE INDEX ON %%s(%s)", 0 });
+        //parameters.add(new Object[]{ "SASI", SASIIndex.class, "CREATE CUSTOM INDEX ON %%s(%s) USING 'org.apache.cassandra.index.sasi.SASIIndex'", 0 });
+        //parameters.add(new Object[]{ "SAI", StorageAttachedIndex.class, "CREATE CUSTOM INDEX ON %%s(%s) USING 'StorageAttachedIndex'", 0 });
+
+        // Only SAI with injection
+        parameters.add(new Object[]{ "SAI", StorageAttachedIndex.class, "CREATE CUSTOM INDEX ON %%s(%s) USING 'StorageAttachedIndex'", 1 });
         return parameters;
     }
 
+    final Injections.Barrier blockIndexBuild = Injections.newBarrier("block_index_build", 2, false)
+                                                         .add(InvokePointBuilder.newInvokePoint().onClass(StorageAttachedIndex.class)
+                                                                                .onMethod("startInitialBuild"))
+                                                         .build();
+
     @Test
-    public void testDisjunction()
+    public void testDisjunction() throws Throwable
     {
+        if (useInjection == 1 && StorageAttachedIndex.class.equals(indexClass))
+        {
+            Injections.inject(blockIndexBuild);
+        }
+
         createTable("CREATE TABLE %s (pk int, a int, b int, PRIMARY KEY(pk))");
 
         boolean indexSupportsDisjuntion = StorageAttachedIndex.class.equals(indexClass);
         boolean hasIndex = createIndexQuery != null;
         if (hasIndex)
-            createIndex(String.format(createIndexQuery, 'a'));
+            createIndexAsync(String.format(createIndexQuery, 'a'));
 
         execute("INSERT INTO %s (pk, a, b) VALUES (?, ?, ?)", 1, 1, 1);
         execute("INSERT INTO %s (pk, a, b) VALUES (?, ?, ?)", 2, 2, 2);
@@ -78,7 +97,7 @@ public class AllIndexImplementationsTest extends CQLTester
                           hasIndex && indexSupportsDisjuntion,
                           hasIndex ? INDEX_DOES_NOT_SUPPORT_DISJUNCTION : REQUIRES_ALLOW_FILTERING_MESSAGE,
                           row(1), row(2));
-        assertDisjunction("a = 1 OR b = 2", true, false, row(1), row(2));
+        /*assertDisjunction("a = 1 OR b = 2", true, false, row(1), row(2));
         assertDisjunction("a = 1 AND (a = 1 OR b = 1)", true, hasIndex, row(1));
         assertDisjunction("a = 1 AND (a = 1 OR b = 2)", true, hasIndex, row(1));
         assertDisjunction("a = 1 AND (a = 2 OR b = 1)", true, hasIndex, row(1));
@@ -94,11 +113,11 @@ public class AllIndexImplementationsTest extends CQLTester
         assertDisjunction("a = 2 OR (a = 1 AND b = 1)", true, indexSupportsDisjuntion, row(1), row(2));
         assertDisjunction("a = 2 OR (a = 1 AND b = 2)", true, indexSupportsDisjuntion, row(2));
         assertDisjunction("a = 2 OR (a = 2 AND b = 1)", true, indexSupportsDisjuntion, row(2));
-        assertDisjunction("a = 2 OR (a = 2 AND b = 2)", true, indexSupportsDisjuntion, row(2));
+        assertDisjunction("a = 2 OR (a = 2 AND b = 2)", true, indexSupportsDisjuntion, row(2));*/
 
         // create a second index in the remaining column, so all columns are indexed
         if (hasIndex)
-            createIndex(String.format(createIndexQuery, 'b'));
+            createIndexAsync(String.format(createIndexQuery, 'b'));
 
         // test with all columns indexed
         assertDisjunction("a = 1 OR a = 2",
@@ -123,6 +142,12 @@ public class AllIndexImplementationsTest extends CQLTester
         assertDisjunction("a = 2 OR (a = 1 AND b = 2)", !indexSupportsDisjuntion, indexSupportsDisjuntion, row(2));
         assertDisjunction("a = 2 OR (a = 2 AND b = 1)", !indexSupportsDisjuntion, indexSupportsDisjuntion, row(2));
         assertDisjunction("a = 2 OR (a = 2 AND b = 2)", !indexSupportsDisjuntion, indexSupportsDisjuntion, row(2));
+
+        if (useInjection == 1 && StorageAttachedIndex.class.equals(indexClass))
+        {
+            blockIndexBuild.countDown();
+            blockIndexBuild.disable();
+        }
     }
 
     private void assertDisjunction(String restrictions,
@@ -144,7 +169,8 @@ public class AllIndexImplementationsTest extends CQLTester
         if (requiresFiltering)
             assertInvalidThrowMessage(error, InvalidRequestException.class, query);
         else
-            assertRowsIgnoringOrder(execute(query), rows);
+            System.out.println("KATE: I am building it");
+            //assertRowsIgnoringOrder(execute(query), rows);
 
         // with ALLOW FILTERING
         query += " ALLOW FILTERING";

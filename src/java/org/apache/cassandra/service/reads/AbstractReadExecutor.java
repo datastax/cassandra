@@ -204,7 +204,7 @@ public abstract class AbstractReadExecutor
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(command.metadata().id);
         SpeculativeRetryPolicy retry = cfs.metadata().params.speculativeRetry;
 
-        ReplicaPlan.ForTokenRead replicaPlan = ReplicaPlans.forRead(keyspace, command.partitionKey().getToken(), command.indexQueryPlan(), consistencyLevel, retry);
+        ReplicaPlan.ForTokenRead replicaPlan = ReplicaPlans.forRead(keyspace, command.partitionKey().getToken(), command.indexQueryPlan(), consistencyLevel, retry, command.rowFilter().allowFiltering);
 
         if (replicaPlan.candidates().stream().noneMatch(replica -> replica.endpoint().equals(FBUtilities.getBroadcastAddressAndPort())))
         {

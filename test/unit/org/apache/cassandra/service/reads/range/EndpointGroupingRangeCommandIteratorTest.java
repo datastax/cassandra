@@ -41,7 +41,6 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.locator.ReplicaPlan;
 import org.apache.cassandra.schema.KeyspaceParams;
-import org.apache.cassandra.service.QueryInfoTracker;
 import org.apache.cassandra.utils.CloseableIterator;
 
 import static org.apache.cassandra.service.QueryInfoTracker.*;
@@ -155,7 +154,7 @@ public class EndpointGroupingRangeCommandIteratorTest extends CQLTester
     private static CloseableIterator<ReplicaPlan.ForRangeRead> replicaPlanIterator(PartitionRangeReadCommand command)
     {
         AbstractBounds<PartitionPosition> keyRange = command.dataRange().keyRange();
-        CloseableIterator<ReplicaPlan.ForRangeRead> replicaPlans = new ReplicaPlanIterator(keyRange, null, keyspace, ConsistencyLevel.ONE);
+        CloseableIterator<ReplicaPlan.ForRangeRead> replicaPlans = new ReplicaPlanIterator(keyRange, null, keyspace, ConsistencyLevel.ONE, command.rowFilter().allowFiltering);
         return new ReplicaPlanMerger(replicaPlans, keyspace, ConsistencyLevel.ONE);
     }
 }

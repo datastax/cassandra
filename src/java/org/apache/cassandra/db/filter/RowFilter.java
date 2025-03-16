@@ -79,13 +79,44 @@ public class RowFilter
     private static final Logger logger = LoggerFactory.getLogger(RowFilter.class);
 
     public static final Serializer serializer = new Serializer();
-    public static final RowFilter NONE = new RowFilter(FilterElement.NONE);
+    public static final RowFilter NONE = new RowFilter(FilterElement.NONE, false);
 
     private final FilterElement root;
 
-    protected RowFilter(FilterElement root)
+    /**
+     * Indicates whether ALLOW FILTERING was specified in the CQL query and whether the respective type of query allows
+     * the query to be executed when using ALLOW FILTERING.
+     * <p>
+     * By default, CQL only allows queries that can be executed efficiently by:
+     * - Using the primary key
+     * - Using a secondary index
+     * - Scanning all data when no WHERE clause is present
+     * <p>
+     * When a query requires filtering data that cannot be handled efficiently (e.g., filtering on a non-indexed column),
+     * CQL will reject it unless ALLOW FILTERING is specified. This is because such queries may need to scan large amounts
+     * of data to return a small result set, leading to unpredictable performance.
+     * <p>
+     * For example, given a table:
+     * CREATE TABLE users (username text PRIMARY KEY, birth_year int, country text);
+     * CREATE INDEX ON users(birth_year);
+     * <p>
+     * These queries are allowed by default:
+     * - SELECT * FROM users WHERE username = 'joe'          // Uses primary key
+     * - SELECT * FROM users WHERE birth_year = 1981        // Uses secondary index
+     * - SELECT * FROM users                               // Full scan is explicit
+     * <p>
+     * This query requires ALLOW FILTERING:
+     * - SELECT * FROM users WHERE birth_year = 1981 AND country = 'FR' ALLOW FILTERING
+     * <p>
+     * When true, this field indicates the query is allowed to perform potentially expensive filtering operations
+     * that may scan large portions of the table to satisfy the query conditions.
+     */
+    public final boolean allowFiltering;
+
+    protected RowFilter(FilterElement root, boolean allowFiltering)
     {
         this.root = root;
+        this.allowFiltering = allowFiltering;
     }
 
     public FilterElement root()
@@ -294,7 +325,7 @@ public class RowFilter
         if (root.size() == 1)
             return RowFilter.NONE;
 
-        return new RowFilter(root.filter(e -> !e.equals(expression)));
+        return new RowFilter(root.filter(e -> !e.equals(expression)), allowFiltering);
     }
 
     public RowFilter withoutExpressions()
@@ -307,12 +338,12 @@ public class RowFilter
      */
     public RowFilter withoutDisjunctions()
     {
-        return new RowFilter(root.withoutDisjunctions());
+        return new RowFilter(root.withoutDisjunctions(), allowFiltering);
     }
 
     public RowFilter restrict(Predicate<Expression> filter)
     {
-        return new RowFilter(root.filter(filter));
+        return new RowFilter(root.filter(filter), allowFiltering);
     }
 
     public boolean isEmpty()
@@ -328,12 +359,12 @@ public class RowFilter
 
     public static Builder builder()
     {
-        return new Builder(null);
+        return new Builder(null, false);
     }
 
-    public static Builder builder(IndexRegistry indexRegistry)
+    public static Builder builder(IndexRegistry indexRegistry, boolean allowFiltering)
     {
-        return new Builder(indexRegistry);
+        return new Builder(indexRegistry, allowFiltering);
     }
 
     public static class Builder
@@ -341,15 +372,17 @@ public class RowFilter
         private FilterElement.Builder current = new FilterElement.Builder(false);
 
         private final IndexRegistry indexRegistry;
+        private final Boolean allowFiltering;
 
-        public Builder(IndexRegistry indexRegistry)
+        public Builder(IndexRegistry indexRegistry, boolean allowFiltering)
         {
             this.indexRegistry = indexRegistry;
+            this.allowFiltering = allowFiltering;
         }
 
         public RowFilter build()
         {
-            return new RowFilter(current.build());
+            return new RowFilter(current.build(), allowFiltering);
         }
 
         public RowFilter buildFromRestrictions(StatementRestrictions restrictions,
@@ -363,7 +396,7 @@ public class RowFilter
             if (Guardrails.queryFilters.enabled(queryState))
                 Guardrails.queryFilters.guard(root.numFilteredValues(), "Select query", false, queryState);
 
-            return new RowFilter(root);
+            return new RowFilter(root, allowFiltering);
         }
 
         private FilterElement doBuild(StatementRestrictions restrictions,
@@ -420,7 +453,7 @@ public class RowFilter
             {
                 // If we're in disjunction mode, we must not pass the current builder to addToRowFilter.
                 // We create a new conjunction sub-builder instead and add all expressions there.
-                var builder = new Builder(indexRegistry);
+                var builder = new Builder(indexRegistry, allowFiltering);
                 addToRowFilterDelegate.accept(builder);
 
                 if (builder.current.expressions.size() == 1 && builder.current.children.isEmpty())
@@ -1840,20 +1873,37 @@ public class RowFilter
         public void serialize(RowFilter filter, DataOutputPlus out, int version) throws IOException
         {
             out.writeBoolean(false); // Old "is for thrift" boolean
+
             FilterElement.serializer.serialize(filter.root, out, version);
+
+            // CNDB-12425 - allowFiltering is only serialized in DS 11 and above
+            if (version >= MessagingService.VERSION_DS_11)
+                out.writeBoolean(filter.allowFiltering);
         }
 
         public RowFilter deserialize(DataInputPlus in, int version, TableMetadata metadata) throws IOException
         {
-            in.readBoolean(); // Unused
+            // Skip unused "isForThrift" boolean from legacy versions
+            in.readBoolean();
+
             FilterElement operation = FilterElement.serializer.deserialize(in, version, metadata);
-            return new RowFilter(operation);
+
+            // CNDB-12425 - allowFiltering was added in DS 11
+            boolean allowFiltering = version >= MessagingService.VERSION_DS_11 && in.readBoolean();
+
+            return new RowFilter(operation, allowFiltering);
         }
 
         public long serializedSize(RowFilter filter, int version)
         {
-            return 1 // unused boolean
-                   + FilterElement.serializer.serializedSize(filter.root, version);
+            long size = 1; // unused boolean
+            size += FilterElement.serializer.serializedSize(filter.root, version);
+
+            // CNDB-12425 - We allow filtering during index build in DS 11 and above
+            if (version >= MessagingService.VERSION_DS_11)
+                size += TypeSizes.BOOL_SIZE; // for allowFiltering
+
+            return size;
         }
     }
 }

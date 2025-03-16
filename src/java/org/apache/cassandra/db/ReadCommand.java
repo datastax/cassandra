@@ -18,12 +18,7 @@
 package org.apache.cassandra.db;
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-import java.util.Objects;
-import java.util.Set;
-import java.util.UUID;
+import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiFunction;
 import java.util.function.Function;
@@ -64,7 +59,6 @@ import org.apache.cassandra.guardrails.DefaultGuardrail;
 import org.apache.cassandra.guardrails.Guardrails;
 import org.apache.cassandra.guardrails.Threshold;
 import org.apache.cassandra.index.Index;
-import org.apache.cassandra.index.IndexRegistry;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.DataInputPlus;
@@ -90,13 +84,14 @@ import org.apache.cassandra.utils.FBUtilities;
 import static com.google.common.collect.Iterables.any;
 import static com.google.common.collect.Iterables.filter;
 import static org.apache.cassandra.db.partitions.UnfilteredPartitionIterators.MergeListener.NOOP;
+import static org.apache.cassandra.index.SecondaryIndexManager.getIndexStatus;
 import static org.apache.cassandra.utils.MonotonicClock.approxTime;
 
 /**
  * General interface for storage-engine read commands (common to both range and
  * single partition commands).
  * <p>
- * This contains all the informations needed to do a local read.
+ * This contains all the information needed to do a local read.
  */
 public abstract class ReadCommand extends AbstractReadQuery
 {
@@ -216,7 +211,7 @@ public abstract class ReadCommand extends AbstractReadQuery
      * this allows us to use the command as a carrier of the digest version even if we only call
      * setIsDigestQuery on some copy of it.
      *
-     * @param digestVersion the version for the digest is this command is used for digest query..
+     * @param digestVersion the version for the digest is this command is used for digest query.
      * @return this read command.
      */
     public ReadCommand setDigestVersion(int digestVersion)
@@ -405,9 +400,8 @@ public abstract class ReadCommand extends AbstractReadQuery
         ColumnFamilyStore cfs = Keyspace.openAndGetStore(metadata());
 
         Index.Searcher searcher = null;
-        if (indexQueryPlan != null)
+        if (indexQueryPlan != null && cfs.indexManager.searcherFor(indexQueryPlan, rowFilter().allowFiltering))
         {
-            cfs.indexManager.checkQueryability(indexQueryPlan);
             searcher = indexSearcher();
             Index index = indexQueryPlan.getFirst();
             Tracing.trace("Executing read on {}.{} using index {}", cfs.metadata.keyspace, cfs.metadata.name, index.getIndexMetadata().name);
@@ -530,9 +524,9 @@ public abstract class ReadCommand extends AbstractReadQuery
     }
 
     /**
-     * Allow to post-process the result of the query after it has been reconciled on the coordinator
+     * Allow to post-process the result of the query after it has been reconciled on the coordinator,
      * but before it is passed to the CQL layer to return the ResultSet.
-     *
+     * <p>
      * See CASSANDRA-8717 for why this exists.
      */
     public PartitionIterator postReconciliationProcessing(PartitionIterator result)
@@ -740,7 +734,7 @@ public abstract class ReadCommand extends AbstractReadQuery
 
     // Skip purgeable tombstones. We do this because it's safe to do (post-merge of the memtable and sstable at least), it
     // can save us some bandwith, and avoid making us throw a TombstoneOverwhelmingException for purgeable tombstones (which
-    // are to some extend an artefact of compaction lagging behind and hence counting them is somewhat unintuitive).
+    // are to some extent an artefact of compaction lagging behind and hence counting them is somewhat unintuitive).
     protected UnfilteredPartitionIterator withoutPurgeableTombstones(UnfilteredPartitionIterator iterator,
                                                                      ColumnFamilyStore cfs,
                                                                      ReadExecutionController controller)
@@ -768,7 +762,7 @@ public abstract class ReadCommand extends AbstractReadQuery
      * Note that in general the returned string will not be exactly the original user string, first
      * because there isn't always a single syntax for a given query,  but also because we don't have
      * all the information needed (we know the non-PK columns queried but not the PK ones as internally
-     * we query them all). So this shouldn't be relied too strongly, but this should be good enough for
+     * we query them all). So this shouldn't be relied on too strongly, but this should be good enough for
      * debugging purpose which is what this is for.
      */
     public String toCQLString()
@@ -832,7 +826,7 @@ public abstract class ReadCommand extends AbstractReadQuery
      * input for a query. Separates them according to repaired status and of repaired
      * status is being tracked, handles the merge and wrapping in a digest generator of
      * the repaired iterators.
-     *
+     * <p>
      * Intentionally not AutoCloseable so we don't mistakenly use this in ARM blocks
      * as this prematurely closes the underlying iterators
      */
@@ -1040,7 +1034,7 @@ public abstract class ReadCommand extends AbstractReadQuery
             int flags = in.readByte();
             boolean isDigest = isDigest(flags);
             boolean acceptsTransient = acceptsTransient(flags);
-            // Shouldn't happen or it's a user error (see comment above) but
+            // Shouldn't happen, or it's a user error (see comment above) but
             // better complain loudly than doing the wrong thing.
             if (isForThrift(flags))
                 throw new IllegalStateException("Received a command with the thrift flag set. "
@@ -1072,15 +1066,60 @@ public abstract class ReadCommand extends AbstractReadQuery
             if (hasIndex)
             {
                 IndexMetadata index = deserializeIndexMetadata(in, version, metadata);
-                if (index != null)
-                {
-                    Index.Group indexGroup = Keyspace.openAndGetStore(metadata).indexManager.getIndexGroup(index);
-                    if (indexGroup != null)
-                        indexQueryPlan = indexGroup.queryPlanFor(rowFilter);
-                }
+                indexQueryPlan = buildIndexQueryPlan(index, metadata, rowFilter);
             }
 
             return kind.selectionDeserializer.deserialize(in, version, isDigest, digestVersion, acceptsTransient, metadata, nowInSec, columnFilter, rowFilter, limits, indexQueryPlan);
+        }
+
+        /**
+         * Builds a query plan for the specified index, considering index availability and status.
+         * 
+         * @param index The index metadata to build the plan for
+         * @param metadata The table metadata that contains the index
+         * @param rowFilter The row filter to be applied in the query
+         * @return A query plan that uses available indexes, or null if:
+         *         - the provided index is null
+         *         - no index group is found for the index
+         *         - no query plan could be created for the row filter
+         *         - all indexes are in INITIAL_BUILD_STARTED state and not queryable
+         * <p>
+         * If some indexes are in INITIAL_BUILD_STARTED state but others are available, 
+         * returns a new query plan using only the available indexes.
+         */
+        private static Index.QueryPlan buildIndexQueryPlan(IndexMetadata index, TableMetadata metadata, RowFilter rowFilter)
+        {
+            if (index == null)
+                return null;
+
+            Index.Group indexGroup = Keyspace.openAndGetStore(metadata).indexManager.getIndexGroup(index);
+            if (indexGroup == null)
+                return null;
+
+            Index.QueryPlan queryPlan = indexGroup.queryPlanFor(rowFilter);
+            if (queryPlan == null)
+                return null;
+
+            Set<Index> allIndexes = queryPlan.getIndexes();
+            Set<Index> availableIndexes = new HashSet<>();
+
+            for (Index plannedIndex : allIndexes)
+            {
+                String indexName = plannedIndex.getIndexMetadata().name;
+                Index.Status status = getIndexStatus(FBUtilities.getBroadcastAddressAndPort(),
+                                                     metadata.keyspace,
+                                                     indexName);
+
+                if (status != Index.Status.INITIAL_BUILD_STARTED && plannedIndex.isQueryable(status))
+                    availableIndexes.add(plannedIndex);
+            }
+
+            if (availableIndexes.isEmpty())
+                return null;
+
+            return availableIndexes.size() < allIndexes.size()
+                   ? indexGroup.queryPlanForIndices(rowFilter, availableIndexes)
+                   : queryPlan;
         }
 
         private @Nullable IndexMetadata deserializeIndexMetadata(DataInputPlus in, int version, TableMetadata metadata) throws IOException

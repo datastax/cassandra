@@ -21,7 +21,6 @@
 package org.apache.cassandra.index;
 
 import java.util.Collection;
-import java.util.HashSet;
 import java.util.Collections;
 import java.util.Optional;
 import java.util.Set;
@@ -235,6 +234,13 @@ public interface IndexRegistry
             @Nullable
             @Override
             public Index.QueryPlan queryPlanFor(RowFilter rowFilter)
+            {
+                return null;
+            }
+
+            @Nullable
+            @Override
+            public Index.QueryPlan queryPlanForIndices(RowFilter rowFilter, Set<Index> indexes)
             {
                 return null;
             }

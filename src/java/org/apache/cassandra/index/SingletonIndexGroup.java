@@ -72,7 +72,7 @@ public class SingletonIndexGroup implements Index.Group
         // This class does not work for SAI because the `componentsForNewBuid` method would be incorrect (so more
         // generally, it does not work for indexes that use dedicated sstable components, which is only SAI). See
         // comments on `componentsForNewBuid` for more details.
-        Preconditions.checkState(!(index instanceof StorageAttachedIndex), "This shoudl not be used with SAI");
+        Preconditions.checkState(!(index instanceof StorageAttachedIndex), "This should not be used with SAI");
         delegate = index;
         indexes.add(index);
     }
@@ -118,6 +118,12 @@ public class SingletonIndexGroup implements Index.Group
         }
 
         return null;
+    }
+
+    @Override
+    public Index.QueryPlan queryPlanForIndices(RowFilter rowFilter, Set<Index> indexes)
+    {
+        throw new UnsupportedOperationException("This method should not be called on a SingletonIndexGroup");
     }
 
     @Override

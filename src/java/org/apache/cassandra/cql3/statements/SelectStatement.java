@@ -1008,7 +1008,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
     public RowFilter getRowFilter(QueryOptions options, QueryState state) throws InvalidRequestException
     {
         IndexRegistry indexRegistry = IndexRegistry.obtain(table);
-        return restrictions.getRowFilter(indexRegistry, options, state, selectOptions);
+        return restrictions.getRowFilter(indexRegistry, options, state, selectOptions, parameters.allowFiltering);
     }
 
     private ResultSet process(PartitionIterator partitions,

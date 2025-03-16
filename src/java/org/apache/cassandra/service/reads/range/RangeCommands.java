@@ -76,7 +76,8 @@ public class RangeCommands
         ReplicaPlanIterator replicaPlans = new ReplicaPlanIterator(command.dataRange().keyRange(),
                                                                    command.indexQueryPlan(),
                                                                    keyspace,
-                                                                   consistencyLevel);
+                                                                   consistencyLevel,
+                                                                   command.rowFilter().allowFiltering);
         if (command.isTopK())
             return new ScanAllRangesCommandIterator(keyspace, replicaPlans, command, replicaPlans.size(), queryStartNanoTime, readTracker);
 
