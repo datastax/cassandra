@@ -547,4 +547,18 @@ public class BM25Test extends SAITester
         // Shutdown executor
         assertEquals(0, executor.shutdownNow().size());
     }
+
+    @Test
+    public void testWildcardSelection()
+    {
+        createTable("CREATE TABLE %s (k int, c int, v text, PRIMARY KEY (k, c))");
+        analyzeIndex();
+        execute("INSERT INTO %s (k, c, v) VALUES (1, 1, 'apple')");
+
+        var result = execute("SELECT * FROM %s ORDER BY v BM25 OF 'apple' LIMIT 3");
+        assertThat(result).hasSize(1);
+
+        var result2 = execute("SELECT * FROM %s GROUP BY k, c ORDER BY v BM25 OF 'apple' LIMIT 3");
+        assertThat(result2).hasSize(1);
+    }
 }
