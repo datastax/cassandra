@@ -1965,9 +1965,6 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
 
     private synchronized static void propagateLocalIndexStatus(String keyspace, String index, Index.Status status)
     {
-        if (!Gossiper.instance.isEnabled())
-            return;
-
         try
         {
             Map<String, Index.Status> states = peerIndexStatus.computeIfAbsent(FBUtilities.getBroadcastAddressAndPort(),
@@ -1978,6 +1975,11 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
                 states.remove(keyspaceIndex);
             else
                 states.put(keyspaceIndex, status);
+
+            // Make sure to check this after peerIndexStatus is populatedm but before the JSON is built: we don't need
+            // the latter if there's no Gossiper (as in CNDB), so we can avoid the related CPU and memory usage.
+            if (!Gossiper.instance.isEnabled())
+                return;
 
             String newStatus = JSONValue.toJSONString(states.entrySet().stream()
                                                             .collect(Collectors.toMap(Map.Entry::getKey, e -> e.getValue().toString())));
