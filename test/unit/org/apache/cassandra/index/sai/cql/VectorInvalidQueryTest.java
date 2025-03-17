@@ -20,6 +20,7 @@ package org.apache.cassandra.index.sai.cql;
 
 import java.util.Collections;
 
+import com.datastax.driver.core.exceptions.InvalidQueryException;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -238,6 +239,34 @@ public class VectorInvalidQueryTest extends SAITester
         // Cover the alternative code path
         createIndex("CREATE CUSTOM INDEX ON %s(num) USING 'StorageAttachedIndex'");
         assertRows(execute("SELECT num FROM %s WHERE pk=3 AND num > 3 ORDER BY v ANN OF [1,1] LIMIT 1"), row(4));
+    }
+
+    @Test
+    public void cannotHaveAggregationOnANNQuery()
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v vector<float, 1>, c int)");
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
+
+        execute("INSERT INTO %s (k, v, c) VALUES (1, [4], 1)");
+        execute("INSERT INTO %s (k, v, c) VALUES (2, [3], 10)");
+        execute("INSERT INTO %s (k, v, c) VALUES (3, [2], 100)");
+        execute("INSERT INTO %s (k, v, c) VALUES (4, [1], 1000)");
+
+        assertThatThrownBy(() -> execute("SELECT sum(c) FROM %s ORDER BY v ANN OF [0] LIMIT 4"))
+                .isInstanceOf(InvalidRequestException.class)
+                .hasMessage(SelectStatement.TOPK_AGGREGATION_ERROR);
+
+        assertThatThrownBy(() -> execute("SELECT sum(c) FROM %s WHERE k = 1 ORDER BY v ANN OF [0] LIMIT 4"))
+                .isInstanceOf(InvalidRequestException.class)
+                .hasMessage(SelectStatement.TOPK_AGGREGATION_ERROR);
+
+        assertThatThrownBy(() -> execute("SELECT * FROM %s GROUP BY k ORDER BY v ANN OF [0] LIMIT 4"))
+                .isInstanceOf(InvalidRequestException.class)
+                .hasMessage(SelectStatement.TOPK_AGGREGATION_ERROR);
+
+        assertThatThrownBy(() -> execute("SELECT count(*) FROM %s ORDER BY v ANN OF [0] LIMIT 4"))
+                .isInstanceOf(InvalidRequestException.class)
+                .hasMessage(SelectStatement.TOPK_AGGREGATION_ERROR);
     }
 
     @Test
