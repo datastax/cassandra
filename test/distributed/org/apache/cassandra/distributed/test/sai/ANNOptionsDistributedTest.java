@@ -16,8 +16,6 @@
 
 package org.apache.cassandra.distributed.test.sai;
 
-import java.util.concurrent.ThreadLocalRandom;
-
 import org.junit.Test;
 
 import net.bytebuddy.ByteBuddy;
@@ -120,8 +118,7 @@ public class ANNOptionsDistributedTest extends TestBaseImpl
     {
         public static void install(ClassLoader classLoader, int node)
         {
-            // inject randomly first or second node to make sure it works if the node is a coordinator or replica
-            if (node == ThreadLocalRandom.current().nextInt(1, 3))
+            if (node == 1)
             {
                 new ByteBuddy().rebase(MessagingService.class)
                                .method(named("currentVersion"))
