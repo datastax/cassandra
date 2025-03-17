@@ -321,9 +321,6 @@ public class RepairCoordinator implements Runnable, ProgressEventNotifier, Repai
         .addCallback((pair, failure) -> {
             if (failure != null)
             {
-                // clear peers' parent repair session if there are registered
-                ctx.repair().cleanUp(state.id, neighborsAndRanges.participants);
-
                 notifyError(failure);
                 fail(failure.getMessage());
             }
