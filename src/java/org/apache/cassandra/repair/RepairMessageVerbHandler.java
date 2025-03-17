@@ -334,6 +334,9 @@ public class RepairMessageVerbHandler implements IVerbHandler<RepairMessage>
             {
                 FailSession failure = (FailSession) message.payload;
                 sendAck(message);
+                ParticipateState p = ctx.repair().participate(failure.sessionID);
+                if (p != null)
+                    p.phase.fail("Failure message from " + message.from());
                 ctx.repair().consistent.coordinated.handleFailSessionMessage(failure);
                 ctx.repair().consistent.local.handleFailSessionMessage(message.from(), failure);
             }
