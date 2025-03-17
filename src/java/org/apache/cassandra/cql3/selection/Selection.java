@@ -153,9 +153,14 @@ public abstract class Selection
 
     public static Selection wildcard(TableMetadata table, Set<ColumnMetadata> orderingColumns, boolean isJson, boolean returnStaticContentOnPartitionWithNoRows)
     {
+        // Add all table columns, but skip orderingColumns:
         List<ColumnMetadata> all = new ArrayList<>(table.columns().size());
         Iterators.addAll(all, table.allColumnsInSelectOrder());
-        return new SimpleSelection(table, all, orderingColumns, true, isJson, returnStaticContentOnPartitionWithNoRows);
+
+        Set<ColumnMetadata> newOrderingColumns = new HashSet<>(orderingColumns);
+        all.forEach(newOrderingColumns::remove);
+
+        return new SimpleSelection(table, all, newOrderingColumns, true, isJson, returnStaticContentOnPartitionWithNoRows);
     }
 
     public static Selection wildcardWithGroupByOrMaskedColumns(TableMetadata table,

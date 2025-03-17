@@ -1579,7 +1579,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             {
                 return hasGroupBy || table.hasMaskedColumns()
                        ? Selection.wildcardWithGroupByOrMaskedColumns(table, boundNames, resultSetOrderingColumns, isJson, returnStaticContentOnPartitionWithNoRows)
-                       : Selection.wildcard(table, isJson, returnStaticContentOnPartitionWithNoRows);
+                       : Selection.wildcard(table, resultSetOrderingColumns, isJson, returnStaticContentOnPartitionWithNoRows);
             }
 
             return Selection.fromSelectors(table,
