@@ -114,6 +114,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
 
     private static final Logger logger = LoggerFactory.getLogger(SelectStatement.class);
     private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(SelectStatement.logger, 1, TimeUnit.MINUTES);
+    public static final String TOPK_AGGREGATION_ERROR = "Top-K queries can not be run with aggregation";
     public static final String TOPK_CONSISTENCY_LEVEL_ERROR = "Top-K queries can only be run with consistency level ONE/LOCAL_ONE. Consistency level %s was used.";
     public static final String TOPK_CONSISTENCY_LEVEL_WARNING = "Top-K queries can only be run with consistency level ONE " +
                                                                 "/ LOCAL_ONE / NODE_LOCAL. Consistency level %s was requested. " +
@@ -785,6 +786,11 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
 
         ReadQuery command =
             PartitionRangeReadQuery.create(table, nowInSec, columnFilter, rowFilter, limit, new DataRange(keyBounds, clusteringIndexFilter));
+
+        if (command.isTopK())
+        {
+            checkFalse(aggregationSpec != null, TOPK_AGGREGATION_ERROR);
+        }
 
         // If there's a secondary index that the command can use, have it validate the request parameters.
         command.maybeValidateIndexes();
