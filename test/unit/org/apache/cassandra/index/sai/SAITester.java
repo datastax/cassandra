@@ -238,6 +238,23 @@ public class SAITester extends CQLTester
         CQLTester.enableCoordinatorExecution();
     }
 
+    /**
+     * Creates a SAI index on the current table, waiting for it to become queryable.
+     *
+     * @param column the name of the indexed column, maybe with {@code FULL()}, {@code KEYS()} or {@code VALUES()} spec
+     * @param options the index options, of the form {@code "{'option1': value1, 'option2': value2, ...}"}.
+     * @return the name of the created index
+     */
+    public String createSAIIndex(String column, @Nullable String options)
+    {
+        String query = String.format(CREATE_INDEX_TEMPLATE, column);
+
+        if (options != null)
+            query += " WITH OPTIONS = " + options;
+
+        return createIndex(query);
+    }
+
     public static IndexContext createIndexContext(String name, AbstractType<?> validator, ColumnFamilyStore cfs)
     {
         return new IndexContext(cfs.getKeyspaceName(),

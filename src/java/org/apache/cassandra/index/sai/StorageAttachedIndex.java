@@ -329,7 +329,7 @@ public class StorageAttachedIndex implements Index
         AbstractType<?> type = TypeUtil.cellValueType(target.left, target.right);
 
         // Validate analyzers by building them
-        try (AbstractAnalyzer.AnalyzerFactory analyzerFactory = AbstractAnalyzer.fromOptions(type, options))
+        try (AbstractAnalyzer.AnalyzerFactory analyzerFactory = AbstractAnalyzer.fromOptions(targetColumn, type, options))
         {
             if (AbstractAnalyzer.hasQueryAnalyzer(options))
                 AbstractAnalyzer.fromOptionsQueryAnalyzer(type, options).close();
