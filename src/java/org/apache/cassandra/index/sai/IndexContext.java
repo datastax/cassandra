@@ -183,14 +183,16 @@ public class IndexContext
         this.cfs = cfs;
         this.primaryKeyFactory = Version.latest().onDiskFormat().newPrimaryKeyFactory(clusteringComparator);
 
+        String columnName = column.name.toString();
+
         if (config != null)
         {
             String fullIndexName = String.format("%s.%s.%s", this.keyspace, this.table, this.config.name);
             this.indexWriterConfig = IndexWriterConfig.fromOptions(fullIndexName, validator, config.options);
             this.isAnalyzed = AbstractAnalyzer.isAnalyzed(config.options);
-            this.analyzerFactory = AbstractAnalyzer.fromOptions(getValidator(), config.options);
+            this.analyzerFactory = AbstractAnalyzer.fromOptions(columnName, validator, config.options);
             this.queryAnalyzerFactory = AbstractAnalyzer.hasQueryAnalyzer(config.options)
-                                        ? AbstractAnalyzer.fromOptionsQueryAnalyzer(getValidator(), config.options)
+                                        ? AbstractAnalyzer.fromOptionsQueryAnalyzer(validator, config.options)
                                         : this.analyzerFactory;
             this.vectorSimilarityFunction = indexWriterConfig.getSimilarityFunction();
             this.hasEuclideanSimilarityFunc = vectorSimilarityFunction == VectorSimilarityFunction.EUCLIDEAN;
@@ -204,7 +206,7 @@ public class IndexContext
         {
             this.indexWriterConfig = IndexWriterConfig.emptyConfig();
             this.isAnalyzed = AbstractAnalyzer.isAnalyzed(Collections.emptyMap());
-            this.analyzerFactory = AbstractAnalyzer.fromOptions(getValidator(), Collections.emptyMap());
+            this.analyzerFactory = AbstractAnalyzer.fromOptions(columnName, validator, Collections.EMPTY_MAP);
             this.queryAnalyzerFactory = this.analyzerFactory;
             this.vectorSimilarityFunction = null;
             this.hasEuclideanSimilarityFunc = false;
