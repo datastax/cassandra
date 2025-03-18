@@ -55,49 +55,9 @@ import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 /// See [Trie.md](./Trie.md) for further description of the trie representation model.
 ///
 /// @param <T> The content type of the trie.
-public interface Trie<T> extends CursorWalkable<Cursor<T>>, BaseTrie<T, Trie<T>>
+public interface Trie<T> extends BaseTrie<T, Cursor<T>, Trie<T>>
 {
     boolean DEBUG = CassandraRelevantProperties.TRIE_DEBUG.getBoolean();
-
-    @Override
-    default void forEachEntry(Direction direction, BiConsumer<ByteComparable.Preencoded, T> consumer)
-    {
-        Cursor<T> cursor = cursor(direction);
-        cursor.process(new TrieEntriesWalker.WithConsumer<T>(consumer, cursor.byteComparableVersion()));
-        // Note: we can't do the ValueConsumer trick here, because the implementation requires state and cannot be
-        // implemented with default methods alone.
-    }
-
-    @Override
-    default <R> R process(Direction direction, Cursor.Walker<T, R> walker)
-    {
-        return cursor(direction).process(walker);
-    }
-
-    @Override
-    default void forEachEntrySkippingBranches(Direction direction, BiConsumer<ByteComparable.Preencoded, T> consumer)
-    {
-        Cursor<T> cursor = cursor(direction);
-        cursor.processSkippingBranches(new TrieEntriesWalker.WithConsumer<T>(consumer, cursor.byteComparableVersion()));
-        // Note: we can't do the ValueConsumer trick here, because the implementation requires state and cannot be
-        // implemented with default methods alone.
-    }
-
-    @Override
-    default <R> R processSkippingBranches(Direction direction, Cursor.Walker<T, R> walker)
-    {
-        return cursor(direction).processSkippingBranches(walker);
-    }
-
-    @Override
-    default T get(ByteComparable key)
-    {
-        Cursor<T> cursor = cursor(Direction.FORWARD);
-        if (cursor.descendAlong(key.asComparableBytes(cursor.byteComparableVersion())))
-            return cursor.content();
-        else
-            return null;
-    }
 
     /// Returns a singleton trie mapping the given byte path to content.
     static <T> Trie<T> singleton(ByteComparable b, ByteComparable.Version byteComparableVersion, T v)
@@ -128,30 +88,6 @@ public interface Trie<T> extends CursorWalkable<Cursor<T>>, BaseTrie<T, Trie<T>>
     default Trie<T> subtrie(ByteComparable left, ByteComparable right)
     {
         return subtrie(left, true, right, false);
-    }
-
-    @Override
-    default Iterator<Map.Entry<ByteComparable.Preencoded, T>> entryIterator(Direction direction)
-    {
-        return new TrieEntriesIterator.AsEntries<>(cursor(direction));
-    }
-
-    @Override
-    default <U extends T> Iterator<Map.Entry<ByteComparable.Preencoded, U>> filteredEntryIterator(Direction direction, Class<U> clazz)
-    {
-        return new TrieEntriesIterator.AsEntriesFilteredByType<>(cursor(direction), clazz);
-    }
-
-    @Override
-    default Iterator<T> valueIterator(Direction direction)
-    {
-        return new TrieValuesIterator<>(cursor(direction));
-    }
-
-    @Override
-    default <U extends T> Iterator<U> filteredValuesIterator(Direction direction, Class<U> clazz)
-    {
-        return new TrieValuesIterator.FilteredByType<>(cursor(direction), clazz);
     }
 
     /// Returns the values in any order. For some tries this is much faster than the ordered iterable.
