@@ -113,7 +113,7 @@ import org.apache.cassandra.utils.bytecomparable.ByteSource;
 /// prefixes will still be reported before their descendants.
 ///
 /// Also see [Trie.md](./Trie.md) for further documentation.
-public interface Cursor<T>
+interface Cursor<T>
 {
     /// @return the current descend-depth; 0, if the cursor has just been created and is positioned on the root,
     ///         and -1, if the trie has been exhausted.
@@ -253,5 +253,64 @@ public interface Cursor<T>
 
         /// Called at the completion of the walk.
         R complete();
+    }
+
+    class Empty<T> implements Cursor<T>
+    {
+        private final Direction direction;
+        private final ByteComparable.Version byteComparableVersion;
+        int depth;
+
+        Empty(Direction direction, ByteComparable.Version byteComparableVersion)
+        {
+            this.direction = direction;
+            this.byteComparableVersion = byteComparableVersion;
+            depth = 0;
+        }
+
+        public int advance()
+        {
+            return depth = -1;
+        }
+
+        public int skipTo(int skipDepth, int skipTransition)
+        {
+            return depth = -1;
+        }
+
+        public ByteComparable.Version byteComparableVersion()
+        {
+            if (byteComparableVersion != null)
+                return byteComparableVersion;
+            throw new AssertionError();
+        }
+
+        @Override
+        public Cursor<T> tailCursor(Direction direction)
+        {
+            assert depth == 0 : "tailTrie called on exhausted cursor";
+            return new Empty<>(direction, byteComparableVersion);
+        }
+
+        public int depth()
+        {
+            return depth;
+        }
+
+        public T content()
+        {
+            return null;
+        }
+
+        @Override
+        public Direction direction()
+        {
+            return direction;
+        }
+
+        public int incomingTransition()
+        {
+            return -1;
+        }
     }
 }

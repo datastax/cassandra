@@ -376,7 +376,7 @@ class SlicedCursor<T> implements Cursor<T>
             if (rightNext == ByteSource.END_OF_STREAM)
             {
                 assert leftSource == null : "Invalid range " + sliceString(sourceCursor.byteComparableVersion(), left, includeLeft, right, includeRight);
-                return new Trie.EmptyCursor<>(direction, sourceCursor.byteComparableVersion());
+                return new Empty<>(direction, sourceCursor.byteComparableVersion());
             }
         }
 
