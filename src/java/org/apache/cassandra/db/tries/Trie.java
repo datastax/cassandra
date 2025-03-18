@@ -24,16 +24,14 @@ import java.util.Collection;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.function.BiConsumer;
-import java.util.function.Consumer;
-import java.util.function.Function;
-import org.agrona.DirectBuffer;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
-/// Base trie interface.
+/// Basic deterministic trie interface.
 ///
-/// Normal users of tries will only use the public methods, which provide various transformations of the trie, conversion
-/// of its content to other formats (e.g. iterable of values), and several forms of processing.
+/// Normal users of tries will only use the public methods of [BaseTrie] and this class, which provide various
+/// transformations of the trie, conversion of its content to other formats (e.g. iterable of values), and several
+/// forms of processing.
 ///
 /// For any unimplemented data extraction operations one can build on the [TrieEntriesWalker] (for-each processing)
 /// and [TrieEntriesIterator] (to iterator) base classes, which provide the necessary mechanisms to handle walking
@@ -57,67 +55,11 @@ import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 /// See [Trie.md](./Trie.md) for further description of the trie representation model.
 ///
 /// @param <T> The content type of the trie.
-public interface Trie<T> extends CursorWalkable<Cursor<T>>
+public interface Trie<T> extends CursorWalkable<Cursor<T>>, BaseTrie<T>
 {
     boolean DEBUG = CassandraRelevantProperties.TRIE_DEBUG.getBoolean();
 
-    /// Adapter interface providing the methods a [Cursor.Walker] to a [Consumer], so that the latter can be used
-    /// with [#process].
-    /// This enables calls like
-    ///     `trie.forEachEntry(x -> System.out.println(x));`
-    /// to be mapped directly to a single call to [#process] without extra allocations.
-    interface ValueConsumer<T> extends Consumer<T>, Cursor.Walker<T, Void>
-    {
-        @Override
-        default void content(T content)
-        {
-            accept(content);
-        }
-
-        @Override
-        default Void complete()
-        {
-            return null;
-        }
-
-        @Override
-        default void resetPathLength(int newDepth)
-        {
-            // not tracking path
-        }
-
-        @Override
-        default void addPathByte(int nextByte)
-        {
-            // not tracking path
-        }
-
-        @Override
-        default void addPathBytes(DirectBuffer buffer, int pos, int count)
-        {
-            // not tracking path
-        }
-    }
-
-    /// Call the given consumer on all content values in the trie in order.
-    default void forEachValue(ValueConsumer<T> consumer)
-    {
-        process(Direction.FORWARD, consumer);
-    }
-
-    /// Call the given consumer on all content values in the trie in order.
-    default void forEachValue(Direction direction, ValueConsumer<T> consumer)
-    {
-        process(direction, consumer);
-    }
-
-    /// Call the given consumer on all (path, content) pairs with non-null content in the trie in order.
-    default void forEachEntry(BiConsumer<ByteComparable.Preencoded, T> consumer)
-    {
-        forEachEntry(Direction.FORWARD, consumer);
-    }
-
-    /// Call the given consumer on all (path, content) pairs with non-null content in the trie in order.
+    @Override
     default void forEachEntry(Direction direction, BiConsumer<ByteComparable.Preencoded, T> consumer)
     {
         Cursor<T> cursor = cursor(direction);
@@ -126,7 +68,7 @@ public interface Trie<T> extends CursorWalkable<Cursor<T>>
         // implemented with default methods alone.
     }
 
-    /// Process the trie using the given [Cursor.Walker].
+    @Override
     default <R> R process(Direction direction, Cursor.Walker<T, R> walker)
     {
         return process(cursor(direction), walker);
@@ -148,14 +90,7 @@ public interface Trie<T> extends CursorWalkable<Cursor<T>>
     }
 
 
-    /// Process the trie using the given [ValueConsumer], skipping all branches below the top content-bearing node.
-    default void forEachValueSkippingBranches(Direction direction, ValueConsumer<T> consumer)
-    {
-        processSkippingBranches(cursor(direction), consumer);
-    }
-
-    /// Call the given consumer on all `(path, content)` pairs with non-null content in the trie in order, skipping all
-    /// branches below the top content-bearing node.
+    @Override
     default void forEachEntrySkippingBranches(Direction direction, BiConsumer<ByteComparable.Preencoded, T> consumer)
     {
         Cursor<T> cursor = cursor(direction);
@@ -164,7 +99,7 @@ public interface Trie<T> extends CursorWalkable<Cursor<T>>
         // implemented with default methods alone.
     }
 
-    /// Process the trie using the given [Cursor.Walker], skipping all branches below the top content-bearing node.
+    @Override
     default <R> R processSkippingBranches(Direction direction, Cursor.Walker<T, R> walker)
     {
         return processSkippingBranches(cursor(direction), walker);
@@ -195,7 +130,7 @@ public interface Trie<T> extends CursorWalkable<Cursor<T>>
         return walker.complete();
     }
 
-    /// Map-like get by key.
+    @Override
     default T get(ByteComparable key)
     {
         Cursor<T> cursor = cursor(Direction.FORWARD);
@@ -203,18 +138,6 @@ public interface Trie<T> extends CursorWalkable<Cursor<T>>
             return cursor.content();
         else
             return null;
-    }
-
-    /// Constuct a textual representation of the trie.
-    default String dump()
-    {
-        return dump(Object::toString);
-    }
-
-    /// Constuct a textual representation of the trie using the given content-to-string mapper.
-    default String dump(Function<T, String> contentToString)
-    {
-        return process(Direction.FORWARD, new TrieDumper<>(contentToString));
     }
 
     /// Returns a singleton trie mapping the given byte path to content.
@@ -242,105 +165,31 @@ public interface Trie<T> extends CursorWalkable<Cursor<T>>
         return dir -> SlicedCursor.create(cursor(dir), left, includeLeft, right, includeRight);
     }
 
-    /// Returns a view of the subtrie containing everything in this trie whose keys fall between the given boundaries.
-    /// The view is live, i.e. any write to the source will be reflected in the subtrie.
-    ///
-    /// @param left the left bound for the returned subtrie, inclusive. If `null`, the resulting subtrie is not
-    ///             left-bounded.
-    /// @param right the right bound for the returned subtrie, exclusive. If `null`, the resulting subtrie is not
-    ///              right-bounded.
-    /// @return a view of the subtrie containing all the keys of this trie falling between `left` inclusively and
-    /// `right` exclusively.
+    @Override
     default Trie<T> subtrie(ByteComparable left, ByteComparable right)
     {
         return subtrie(left, true, right, false);
     }
 
-    /// Returns the ordered entry set of this trie's content as an iterable.
-    default Iterable<Map.Entry<ByteComparable.Preencoded, T>> entrySet()
-    {
-        return this::entryIterator;
-    }
-
-    /// Returns the ordered entry set of this trie's content as an iterable.
-    default Iterable<Map.Entry<ByteComparable.Preencoded, T>> entrySet(Direction direction)
-    {
-        return () -> entryIterator(direction);
-    }
-
-    /// Returns the ordered entry set of this trie's content in an iterator.
-    default Iterator<Map.Entry<ByteComparable.Preencoded, T>> entryIterator()
-    {
-        return entryIterator(Direction.FORWARD);
-    }
-
-    /// Returns the ordered entry set of this trie's content in an iterator.
+    @Override
     default Iterator<Map.Entry<ByteComparable.Preencoded, T>> entryIterator(Direction direction)
     {
         return new TrieEntriesIterator.AsEntries<>(cursor(direction));
     }
 
-    /// Returns the ordered entry set of this trie's content in an iterable, filtered by the given type.
-    default <U extends T> Iterable<Map.Entry<ByteComparable.Preencoded, U>> filteredEntrySet(Class<U> clazz)
-    {
-        return filteredEntrySet(Direction.FORWARD, clazz);
-    }
-
-    /// Returns the ordered entry set of this trie's content in an iterable, filtered by the given type.
-    default <U extends T> Iterable<Map.Entry<ByteComparable.Preencoded, U>> filteredEntrySet(Direction direction, Class<U> clazz)
-    {
-        return () -> filteredEntryIterator(direction, clazz);
-    }
-
-    /// Returns the ordered entry set of this trie's content in an iterator, filtered by the given type.
+    @Override
     default <U extends T> Iterator<Map.Entry<ByteComparable.Preencoded, U>> filteredEntryIterator(Direction direction, Class<U> clazz)
     {
         return new TrieEntriesIterator.AsEntriesFilteredByType<>(cursor(direction), clazz);
     }
 
-    /// Returns the ordered set of values of this trie as an iterable.
-    default Iterable<T> values()
-    {
-        return this::valueIterator;
-    }
-
-    /// Returns the ordered set of values of this trie as an iterable.
-    default Iterable<T> values(Direction direction)
-    {
-        return direction.isForward() ? this::valueIterator : this::reverseValueIterator;
-    }
-
-    /// Returns the ordered set of values of this trie in an iterator.
-    default Iterator<T> valueIterator()
-    {
-        return valueIterator(Direction.FORWARD);
-    }
-
-    /// Returns the inversely ordered set of values of this trie in an iterator.
-    default Iterator<T> reverseValueIterator()
-    {
-        return valueIterator(Direction.REVERSE);
-    }
-
-    /// Returns the ordered set of values of this trie in an iterator.
+    @Override
     default Iterator<T> valueIterator(Direction direction)
     {
         return new TrieValuesIterator<>(cursor(direction));
     }
 
-    /// Returns the ordered set of values of this trie in an iterable, filtered by the given type.
-    default <U extends T> Iterable<U> filteredValues(Class<U> clazz)
-    {
-        return filteredValues(Direction.FORWARD, clazz);
-    }
-
-    /// Returns the ordered set of values of this trie in an iterable, filtered by the given type.
-    default <U extends T> Iterable<U> filteredValues(Direction direction, Class<U> clazz)
-    {
-        return () -> filteredValuesIterator(direction, clazz);
-    }
-
-    /// Returns the ordered set of values of this trie in an iterator, filtered by the given type.
+    @Override
     default <U extends T> Iterator<U> filteredValuesIterator(Direction direction, Class<U> clazz)
     {
         return new TrieValuesIterator.FilteredByType<>(cursor(direction), clazz);
@@ -500,25 +349,13 @@ public interface Trie<T> extends CursorWalkable<Cursor<T>>
         };
     }
 
-    /// Returns a Trie that is a view of this one, where the given prefix is prepended before the root.
+    @Override
     default Trie<T> prefixedBy(ByteComparable prefix)
     {
         return dir -> new PrefixedCursor(prefix, cursor(dir));
     }
 
-    /// Returns an entry set containing all tail tree constructed at the points that contain content of
-    /// the given type.
-    default Iterable<Map.Entry<ByteComparable.Preencoded, Trie<T>>> tailTries(Direction direction, Class<? extends T> clazz)
-    {
-        return () -> new TrieTailsIterator.AsEntries<>(cursor(direction), clazz);
-    }
-
-    /// Returns a trie that corresponds to the branch of this trie rooted at the given prefix.
-    ///
-    /// The result will include the same values as `subtrie(prefix, nextBranch(prefix))`, but the keys in the
-    /// resulting trie will not include the prefix. In other words,
-    /// ```tailTrie(prefix).prefixedBy(prefix) = subtrie(prefix, nextBranch(prefix))```
-    /// where `nextBranch` stands for the key adjusted by adding one at the last position.
+    @Override
     default Trie<T> tailTrie(ByteComparable prefix)
     {
         Cursor<T> c = cursor(Direction.FORWARD);
@@ -526,6 +363,13 @@ public interface Trie<T> extends CursorWalkable<Cursor<T>>
             return dir -> c.tailCursor(dir);
         else
             return null;
+    }
+
+    /// Returns an entry set containing all tail tree constructed at the points that contain content of
+    /// the given type.
+    default Iterable<Map.Entry<ByteComparable.Preencoded, Trie<T>>> tailTries(Direction direction, Class<? extends T> clazz)
+    {
+        return () -> new TrieTailsIterator.AsEntries<>(cursor(direction), clazz);
     }
 
     static <T> Trie<T> empty(ByteComparable.Version byteComparableVersion)
