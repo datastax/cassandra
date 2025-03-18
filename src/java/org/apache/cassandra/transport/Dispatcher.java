@@ -476,10 +476,18 @@ public class Dispatcher implements CQLMessageHandler.MessageConsumer<Message.Req
         Message.logger.trace("Received: {}, v={}", request, connection.getVersion());
         connection.requests.inc();
         return request.execute(qstate, requestTime).addCallback((result, ignored) -> {
-            result.setStreamId(request.getStreamId());
-            result.setWarnings(ClientWarn.instance.getWarnings());
-            result.attach(connection);
-            connection.applyStateTransition(request.type, result.type);
+            try
+            {
+                result.setStreamId(request.getStreamId());
+                result.setWarnings(ClientWarn.instance.getWarnings());
+                result.attach(connection);
+                connection.applyStateTransition(request.type, result.type);
+            }
+            finally
+            {
+                CoordinatorWarnings.reset();
+                ClientWarn.instance.resetWarnings();
+            }
         });
     }
 
