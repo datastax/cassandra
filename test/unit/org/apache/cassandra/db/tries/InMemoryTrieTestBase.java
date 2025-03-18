@@ -321,30 +321,30 @@ public abstract class InMemoryTrieTestBase
     public void testEntriesNullChildBug()
     {
         Object[] trieDef = new Object[]
-                                   {
-                                           new Object[] { // 0
-                                                   ByteBufferUtil.bytes(1), // 01
-                                                   ByteBufferUtil.bytes(2)  // 02
-                                           },
-                                           // If requestChild returns null, bad things can happen (DB-2982)
-                                           null, // 1
-                                           ByteBufferUtil.bytes(3), // 2
-                                           new Object[] {  // 3
-                                                   ByteBufferUtil.bytes(4), // 30
-                                                   // Also try null on the Remaining.ONE path
-                                                   null // 31
-                                           },
-                                           ByteBufferUtil.bytes(5), // 4
-                                           // Also test requestUniqueDescendant returning null
-                                           new Object[] { // 5
-                                                   new Object[] { // 50
-                                                           new Object[] { // 500
-                                                                   null // 5000
-                                                           }
-                                                   }
-                                           },
-                                           ByteBufferUtil.bytes(6) // 6
-                                   };
+                           {
+                               new Object[] { // 0
+                                              ByteBufferUtil.bytes(1), // 01
+                                              ByteBufferUtil.bytes(2)  // 02
+                               },
+                               // If requestChild returns null, bad things can happen (DB-2982)
+                               null, // 1
+                               ByteBufferUtil.bytes(3), // 2
+                               new Object[] {  // 3
+                                               ByteBufferUtil.bytes(4), // 30
+                                               // Also try null on the Remaining.ONE path
+                                               null // 31
+                               },
+                               ByteBufferUtil.bytes(5), // 4
+                               // Also test requestUniqueDescendant returning null
+                               new Object[] { // 5
+                                              new Object[] { // 50
+                                                             new Object[] { // 500
+                                                                            null // 5000
+                                                             }
+                                              }
+                               },
+                               ByteBufferUtil.bytes(6) // 6
+                           };
 
         SortedMap<ByteComparable, ByteBuffer> expected = new TreeMap<>(forwardComparator);
         expected.put(comparable("00"), ByteBufferUtil.bytes(1));
