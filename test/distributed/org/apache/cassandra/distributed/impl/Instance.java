@@ -57,6 +57,7 @@ import org.apache.cassandra.concurrent.ExecutorLocals;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.concurrent.SharedExecutorPool;
 import org.apache.cassandra.concurrent.Stage;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.YamlConfigurationLoader;
@@ -650,6 +651,7 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
             }
             catch (Throwable t)
             {
+                startedAt.set(0);
                 if (t instanceof RuntimeException)
                     throw (RuntimeException) t;
                 throw new RuntimeException(t);
@@ -803,7 +805,7 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
     @Override
     public Future<Void> shutdown(boolean graceful)
     {
-        if (!Boolean.parseBoolean(System.getProperty("cassandra.test.flush_local_schema_changes", "true")))
+        if (!CassandraRelevantProperties.UNSAFE_SYSTEM.getBoolean())
             flush(SchemaKeyspace.metadata().name);
 
         if (!graceful)

@@ -41,7 +41,6 @@ import java.util.function.BooleanSupplier;
 import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Preconditions;
 import com.google.common.base.Predicates;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.util.concurrent.Futures;
@@ -50,15 +49,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
-import io.github.jbellis.jvector.vector.VectorizationProvider;
-import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.Operator;
-import org.apache.cassandra.cql3.QueryOptions;
-import org.apache.cassandra.cql3.restrictions.Restriction;
-import org.apache.cassandra.cql3.restrictions.SingleColumnRestriction;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget;
 import org.apache.cassandra.db.CassandraWriteContext;
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -84,6 +78,7 @@ import org.apache.cassandra.dht.LocalPartitioner;
 import org.apache.cassandra.dht.OrderPreservingPartitioner;
 import org.apache.cassandra.dht.RandomPartitioner;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.db.filter.ANNOptions;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.IndexBuildDecider;
 import org.apache.cassandra.index.IndexRegistry;
@@ -124,7 +119,6 @@ public class StorageAttachedIndex implements Index
     "In most cases it's better to use a simpler query_analyzer such as the standard one.";
 
     private static final Logger logger = LoggerFactory.getLogger(StorageAttachedIndex.class);
-    private static final VectorTypeSupport vts = VectorizationProvider.getInstance().getVectorTypeSupport();
 
     private static final boolean VALIDATE_TERMS_AT_COORDINATOR = SAI_VALIDATE_TERMS_AT_COORDINATOR.getBoolean();
 
@@ -305,20 +299,26 @@ public class StorageAttachedIndex implements Index
             throw new InvalidRequestException("Failed to retrieve target column for: " + targetColumn);
         }
 
-        // In order to support different index target on non-frozen map, ie. KEYS, VALUE, ENTRIES, we need to put index
-        // name as part of index file name instead of column name. We only need to check that the target is different
-        // between indexes. This will only allow indexes in the same column with a different IndexTarget.Type.
-        //
-        // Note that: "metadata.indexes" already includes current index
-        if (metadata.indexes.stream().filter(index -> index.getIndexClassName().equals(StorageAttachedIndex.class.getName()))
-                            .map(index -> TargetParser.parse(metadata, index.options.get(IndexTarget.TARGET_OPTION_NAME)))
-                            .filter(Objects::nonNull).filter(t -> t.equals(target)).count() > 1)
-        {
-            throw new InvalidRequestException("Cannot create more than one storage-attached index on the same column: " + target.left);
-        }
+        // Check for duplicate indexes considering both target and analyzer configuration
+        boolean isAnalyzed = AbstractAnalyzer.isAnalyzed(options);
+        long duplicateCount = metadata.indexes.stream()
+                                              .filter(index -> index.getIndexClassName().equals(StorageAttachedIndex.class.getName()))
+                                              .filter(index -> {
+                                                  // Indexes on the same column with different target (KEYS, VALUES, ENTRIES)
+                                                  // are allowed on non-frozen Maps
+                                                  var existingTarget = TargetParser.parse(metadata, index.options.get(IndexTarget.TARGET_OPTION_NAME));
+                                                  if (existingTarget == null || !existingTarget.equals(target))
+                                                      return false;
+                                                  // Also allow different indexes if one is analyzed and the other isn't
+                                                  return isAnalyzed == AbstractAnalyzer.isAnalyzed(index.options);
+                                              })
+                                              .count();
+        // >1 because "metadata.indexes" already includes current index
+        if (duplicateCount > 1)
+            throw new InvalidRequestException(String.format("Cannot create duplicate storage-attached index on column: %s", target.left));
 
         // Analyzer is not supported against PK columns
-        if (AbstractAnalyzer.isAnalyzed(options))
+        if (isAnalyzed)
         {
             for (ColumnMetadata column : metadata.primaryKeyColumns())
             {
@@ -330,7 +330,7 @@ public class StorageAttachedIndex implements Index
         AbstractType<?> type = TypeUtil.cellValueType(target.left, target.right);
 
         // Validate analyzers by building them
-        try (AbstractAnalyzer.AnalyzerFactory analyzerFactory = AbstractAnalyzer.fromOptions(type, options))
+        try (AbstractAnalyzer.AnalyzerFactory analyzerFactory = AbstractAnalyzer.fromOptions(targetColumn, type, options))
         {
             if (AbstractAnalyzer.hasQueryAnalyzer(options))
                 AbstractAnalyzer.fromOptionsQueryAnalyzer(type, options).close();
@@ -666,26 +666,36 @@ public class StorageAttachedIndex implements Index
     }
 
     @Override
-    public Optional<Analyzer> getAnalyzer()
+    public Optional<Analyzer> getIndexAnalyzer()
     {
-        if (!indexContext.isAnalyzed())
-            return Optional.empty();
+        return indexContext.isAnalyzed()
+               ? Optional.of(value -> analyze(indexContext.getAnalyzerFactory(), value))
+               : Optional.empty();
+    }
 
-        return Optional.of(value -> {
-            List<ByteBuffer> tokens = new ArrayList<>();
-            AbstractAnalyzer analyzer = indexContext.getQueryAnalyzerFactory().create();
-            try
-            {
-                analyzer.reset(value);
-                while (analyzer.hasNext())
-                    tokens.add(analyzer.next());
-            }
-            finally
-            {
-                analyzer.end();
-            }
-            return tokens;
-        });
+    @Override
+    public Optional<Analyzer> getQueryAnalyzer()
+    {
+        return indexContext.isAnalyzed()
+               ? Optional.of(value -> analyze(indexContext.getQueryAnalyzerFactory(), value))
+               : Optional.empty();
+    }
+
+    private static List<ByteBuffer> analyze(AbstractAnalyzer.AnalyzerFactory factory, ByteBuffer value)
+    {
+        List<ByteBuffer> tokens = new ArrayList<>();
+        AbstractAnalyzer analyzer = factory.create();
+        try
+        {
+            analyzer.reset(value.duplicate());
+            while (analyzer.hasNext())
+                tokens.add(analyzer.next());
+        }
+        finally
+        {
+            analyzer.end();
+        }
+        return tokens;
     }
 
     @Override
@@ -693,49 +703,6 @@ public class StorageAttachedIndex implements Index
     {
         // it should be executed from the SAI query plan, this is only used by the singleton index query plan
         throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public Comparator<List<ByteBuffer>> postQueryComparator(Restriction restriction, int columnIndex, QueryOptions options)
-    {
-        assert restriction instanceof SingleColumnRestriction.OrderRestriction;
-
-        SingleColumnRestriction.OrderRestriction orderRestriction = (SingleColumnRestriction.OrderRestriction) restriction;
-        var typeComparator = orderRestriction.getDirection() == Operator.ORDER_BY_DESC
-                             ? indexContext.getValidator().reversed()
-                             : indexContext.getValidator();
-        return (a, b) -> typeComparator.compare(a.get(columnIndex), b.get(columnIndex));
-    }
-
-    @Override
-    public Scorer postQueryScorer(Restriction restriction, int columnIndex, QueryOptions options)
-    {
-        // For now, only support ANN
-        assert restriction instanceof SingleColumnRestriction.AnnRestriction;
-
-        Preconditions.checkState(indexContext.isVector());
-
-        SingleColumnRestriction.AnnRestriction annRestriction = (SingleColumnRestriction.AnnRestriction) restriction;
-        VectorSimilarityFunction similarityFunction = indexContext.getIndexWriterConfig().getSimilarityFunction();
-
-        var targetVector = vts.createFloatVector(TypeUtil.decomposeVector(indexContext, annRestriction.value(options).duplicate()));
-
-        return new Scorer()
-        {
-            @Override
-            public float score(List<ByteBuffer> row)
-            {
-                ByteBuffer vectorBuffer = row.get(columnIndex);
-                var vector = vts.createFloatVector(TypeUtil.decomposeVector(indexContext, vectorBuffer.duplicate()));
-                return similarityFunction.compare(vector, targetVector);
-            }
-
-            @Override
-            public boolean reversed()
-            {
-                return true;
-            }
-        };
     }
 
     @Override
@@ -801,7 +768,7 @@ public class StorageAttachedIndex implements Index
             //   1. The current view does not contain the SSTable
             //   2. The SSTable is not marked compacted
             //   3. The column index does not have a completion marker
-            if (!view.containsSSTable(sstable)
+            if (!view.containsSSTableIndex(sstable.descriptor)
                 && !sstable.isMarkedCompacted()
                 && !IndexDescriptor.isIndexBuildCompleteOnDisk(sstable, indexContext))
             {

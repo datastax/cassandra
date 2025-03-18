@@ -36,9 +36,12 @@ import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.transport.messages.AuthenticateMessage;
 
 import static org.apache.cassandra.auth.CassandraRoleManager.*;
 import static org.apache.cassandra.auth.PasswordAuthenticator.*;
+
+import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.mindrot.jbcrypt.BCrypt.hashpw;
@@ -174,5 +177,12 @@ public class PasswordAuthenticatorTest extends CQLTester
     public static void tearDown()
     {
         schemaChange("DROP KEYSPACE " + SchemaConstants.AUTH_KEYSPACE_NAME);
+    }
+
+    @Test
+    public void testDefaultAuthenticateMessage()
+    {
+        AuthenticateMessage authenticateMessage = authenticator.getAuthenticateMessage(null);
+        assertThat(authenticateMessage.authenticator).isEqualTo(PasswordAuthenticator.class.getName());
     }
 }

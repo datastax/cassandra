@@ -39,7 +39,7 @@ import org.apache.cassandra.utils.DseLegacy;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.UUIDGen;
 
-import static org.apache.cassandra.io.sstable.Component.separator;
+import static org.apache.cassandra.io.sstable.Component.SEPARATOR;
 
 /**
  * A SSTable is described by the keyspace and column family it contains data
@@ -108,7 +108,7 @@ public class Descriptor
 
         hashCode = Objects.hashCode(version, this.directory, id, ksname, cfname, formatType);
 
-        filenamePart = version.toString() + separator + id + separator + formatType.name;
+        filenamePart = version.toString() + SEPARATOR + id + SEPARATOR + formatType.name;
         String locationURI = directory.toUri().toString();
         if (!locationURI.endsWith(java.io.File.separator))
             locationURI = locationURI + java.io.File.separatorChar;
@@ -145,7 +145,7 @@ public class Descriptor
 
     public String filenameFor(Component component)
     {
-        return baseFilename() + separator + component.name();
+        return baseFilename() + SEPARATOR + component.name();
     }
 
     public File fileFor(Component component)
@@ -163,9 +163,9 @@ public class Descriptor
 
     private void appendFileName(StringBuilder buff)
     {
-        buff.append(version).append(separator);
+        buff.append(version).append(SEPARATOR);
         buff.append(id.toString());
-        buff.append(separator).append(formatType.name);
+        buff.append(SEPARATOR).append(formatType.name);
     }
 
     public String baseFileUri()
@@ -186,7 +186,7 @@ public class Descriptor
             buff.append(directory.name()).append(File.pathSeparator());
         }
 
-        return buff.append(filenamePart).append(separator).append(component.name()).toString();
+        return buff.append(filenamePart).append(SEPARATOR).append(component.name()).toString();
     }
 
     public SSTableFormat getFormat()

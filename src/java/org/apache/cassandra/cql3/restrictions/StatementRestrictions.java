@@ -29,8 +29,10 @@ import com.google.common.collect.Iterables;
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.cql3.statements.Bound;
+import org.apache.cassandra.cql3.statements.SelectOptions;
 import org.apache.cassandra.cql3.statements.StatementType;
 import org.apache.cassandra.db.*;
+import org.apache.cassandra.db.filter.ANNOptions;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.DecimalType;
@@ -81,6 +83,7 @@ public class StatementRestrictions
     "Restriction on partition key column %s must not be nested under OR operator";
 
     public static final String GEO_DISTANCE_REQUIRES_INDEX_MESSAGE = "GEO_DISTANCE requires the vector column to be indexed";
+    public static final String BM25_ORDERING_REQUIRES_ANALYZED_INDEX_MESSAGE = "BM25 ordering on column %s requires an analyzed index";
     public static final String NON_CLUSTER_ORDERING_REQUIRES_INDEX_MESSAGE = "Ordering on non-clustering column %s requires the column to be indexed.";
     public static final String NON_CLUSTER_ORDERING_REQUIRES_ALL_RESTRICTED_NON_PARTITION_KEY_COLUMNS_INDEXED_MESSAGE =
     "Ordering on non-clustering column requires each restricted column to be indexed except for fully-specified partition keys";
@@ -88,6 +91,7 @@ public class StatementRestrictions
     public static final String VECTOR_INDEX_PRESENT_NOT_SUPPORT_GEO_DISTANCE_MESSAGE =
     "Vector index present, but configuration does not support GEO_DISTANCE queries. GEO_DISTANCE requires similarity_function 'euclidean'";
     public static final String VECTOR_INDEXES_UNSUPPORTED_OP_MESSAGE = "Vector indexes only support ANN and GEO_DISTANCE queries";
+    public static final String ANN_OPTIONS_WITHOUT_ORDER_BY_ANN = "ANN options specified without ORDER BY ... ANN OF ...";
 
     /**
      * The Column Family meta data
@@ -442,7 +446,7 @@ public class StatementRestrictions
                     }
                     else
                     {
-                        nonPrimaryKeyRestrictionSet.addRestriction((SingleRestriction) restriction, element.isDisjunction(), indexRegistry);
+                        nonPrimaryKeyRestrictionSet.addRestriction((SingleRestriction) restriction, element.isDisjunction());
                     }
                 }
             }
@@ -682,7 +686,8 @@ public class StatementRestrictions
                 if (orderings.size() > 1)
                     throw new InvalidRequestException("Cannot combine clustering column ordering with non-clustering column ordering");
                 Ordering ordering = indexOrderings.get(0);
-                if (ordering.direction != Ordering.Direction.ASC && ordering.expression instanceof Ordering.Ann)
+                // TODO remove the instanceof with SelectStatement.ANN_USE_SYNTHETIC_SCORE.
+                if (ordering.direction != Ordering.Direction.ASC && (ordering.expression.isScored() || ordering.expression instanceof Ordering.Ann))
                     throw new InvalidRequestException("Descending ANN ordering is not supported");
                 if (!ENABLE_SAI_GENERAL_ORDER_BY && ordering.expression instanceof Ordering.SingleColumn)
                     throw new InvalidRequestException("SAI based ORDER BY on non-vector column is not supported");
@@ -695,10 +700,14 @@ public class StatementRestrictions
                         throw new InvalidRequestException(String.format("SAI based ordering on column %s of type %s is not supported",
                                                           restriction.getFirstColumn(),
                                                           restriction.getFirstColumn().type.asCQL3Type()));
-                    throw new InvalidRequestException(String.format(NON_CLUSTER_ORDERING_REQUIRES_INDEX_MESSAGE,
-                                                                    restriction.getFirstColumn()));
+                    if (ordering.expression instanceof Ordering.Bm25)
+                        throw new InvalidRequestException(String.format(BM25_ORDERING_REQUIRES_ANALYZED_INDEX_MESSAGE,
+                                                                        restriction.getFirstColumn()));
+                    else
+                        throw new InvalidRequestException(String.format(NON_CLUSTER_ORDERING_REQUIRES_INDEX_MESSAGE,
+                                                                        restriction.getFirstColumn()));
                 }
-                receiver.addRestriction(restriction, false, indexRegistry);
+                receiver.addRestriction(restriction, false);
             }
         }
 
@@ -985,12 +994,26 @@ public class StatementRestrictions
         return table.clusteringColumns().size() != clusteringColumnsRestrictions.size();
     }
 
-    public RowFilter getRowFilter(IndexRegistry indexManager, QueryOptions options, QueryState queryState)
+    public RowFilter getRowFilter(IndexRegistry indexManager, QueryOptions options, QueryState queryState, SelectOptions selectOptions)
     {
-        if (filterRestrictions.isEmpty() && children.isEmpty())
-            return RowFilter.NONE;
+        boolean hasAnnOptions = selectOptions.hasANNOptions();
 
-        return RowFilter.builder(indexManager).buildFromRestrictions(this, table, options, queryState);
+        if (filterRestrictions.isEmpty() && children.isEmpty())
+        {
+            if (hasAnnOptions)
+                throw new InvalidRequestException(ANN_OPTIONS_WITHOUT_ORDER_BY_ANN);
+
+            return RowFilter.NONE;
+        }
+
+        ANNOptions annOptions = selectOptions.parseANNOptions();
+        RowFilter rowFilter = RowFilter.builder(indexManager)
+                                       .buildFromRestrictions(this, table, options, queryState, annOptions);
+
+        if (hasAnnOptions && !rowFilter.hasANN())
+            throw new InvalidRequestException(ANN_OPTIONS_WITHOUT_ORDER_BY_ANN);
+
+        return rowFilter;
     }
 
     /**

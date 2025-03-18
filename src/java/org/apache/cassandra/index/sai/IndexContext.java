@@ -83,6 +83,7 @@ import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.index.sai.view.IndexViewManager;
 import org.apache.cassandra.index.sai.view.View;
+import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.ColumnMetadata;
@@ -152,6 +153,8 @@ public class IndexContext
 
     private final int maxTermSize;
 
+    private volatile boolean dropped = false;
+
     public IndexContext(@Nonnull String keyspace,
                         @Nonnull String table,
                         @Nonnull TableId tableId,
@@ -173,17 +176,18 @@ public class IndexContext
         this.viewManager = new IndexViewManager(this);
         this.validator = TypeUtil.cellValueType(column, indexType);
         this.cfs = cfs;
-
         this.primaryKeyFactory = Version.latest().onDiskFormat().newPrimaryKeyFactory(clusteringComparator);
+
+        String columnName = column.name.toString();
 
         if (config != null)
         {
             String fullIndexName = String.format("%s.%s.%s", this.keyspace, this.table, this.config.name);
             this.indexWriterConfig = IndexWriterConfig.fromOptions(fullIndexName, validator, config.options);
             this.isAnalyzed = AbstractAnalyzer.isAnalyzed(config.options);
-            this.analyzerFactory = AbstractAnalyzer.fromOptions(getValidator(), config.options);
+            this.analyzerFactory = AbstractAnalyzer.fromOptions(columnName, validator, config.options);
             this.queryAnalyzerFactory = AbstractAnalyzer.hasQueryAnalyzer(config.options)
-                                        ? AbstractAnalyzer.fromOptionsQueryAnalyzer(getValidator(), config.options)
+                                        ? AbstractAnalyzer.fromOptionsQueryAnalyzer(validator, config.options)
                                         : this.analyzerFactory;
             this.vectorSimilarityFunction = indexWriterConfig.getSimilarityFunction();
             this.hasEuclideanSimilarityFunc = vectorSimilarityFunction == VectorSimilarityFunction.EUCLIDEAN;
@@ -197,7 +201,7 @@ public class IndexContext
         {
             this.indexWriterConfig = IndexWriterConfig.emptyConfig();
             this.isAnalyzed = AbstractAnalyzer.isAnalyzed(Collections.EMPTY_MAP);
-            this.analyzerFactory = AbstractAnalyzer.fromOptions(getValidator(), Collections.EMPTY_MAP);
+            this.analyzerFactory = AbstractAnalyzer.fromOptions(columnName, validator, Collections.EMPTY_MAP);
             this.queryAnalyzerFactory = this.analyzerFactory;
             this.vectorSimilarityFunction = null;
             this.hasEuclideanSimilarityFunc = false;
@@ -564,9 +568,12 @@ public class IndexContext
     /**
      * @return A set of SSTables which have attached to them invalid index components.
      */
-    public Set<SSTableContext> onSSTableChanged(Collection<SSTableReader> oldSSTables, Collection<SSTableContext> newSSTables, boolean validate)
+    public Set<SSTableContext> onSSTableChanged(Collection<SSTableReader> oldSSTables,
+                                                Collection<SSTableReader> newSSTables,
+                                                Collection<SSTableContext> newContexts,
+                                                boolean validate)
     {
-        return viewManager.update(oldSSTables, newSSTables, validate);
+        return viewManager.update(oldSSTables, newSSTables, newContexts, validate);
     }
 
     public ColumnMetadata getDefinition()
@@ -656,7 +663,12 @@ public class IndexContext
 
     public boolean isIndexed()
     {
-        return config != null;
+        return config != null && !dropped;
+    }
+
+    public boolean isDropped()
+    {
+        return dropped;
     }
 
     /**
@@ -675,6 +687,7 @@ public class IndexContext
      */
     public void invalidate(boolean obsolete)
     {
+        dropped = true;
         liveMemtables.clear();
         viewManager.invalidate(obsolete);
         indexMetrics.release();
@@ -692,12 +705,22 @@ public class IndexContext
         return liveMemtables;
     }
 
+    public @Nullable MemtableIndex getMemtableIndex(Memtable memtable)
+    {
+        return liveMemtables.get(memtable);
+    }
+
+    public @Nullable SSTableIndex getSSTableIndex(Descriptor descriptor)
+    {
+        return getView().getSSTableIndex(descriptor);
+    }
+
     public boolean supports(Operator op)
     {
         if (op.isLike() || op == Operator.LIKE) return false;
         // Analyzed columns store the indexed result, so we are unable to compute raw equality.
-        // The only supported operator is ANALYZER_MATCHES.
-        if (op == Operator.ANALYZER_MATCHES) return isAnalyzed;
+        // The only supported operators are ANALYZER_MATCHES and BM25.
+        if (op == Operator.ANALYZER_MATCHES || op == Operator.BM25) return isAnalyzed;
 
         // If the column is analyzed and the operator is EQ, we need to check if the analyzer supports it.
         if (op == Operator.EQ && isAnalyzed && !analyzerFactory.supportsEquals())
@@ -721,7 +744,6 @@ public class IndexContext
                          || column.type instanceof IntegerType); // Currently truncates to 20 bytes
 
         Expression.Op operator = Expression.Op.valueOf(op);
-
         if (isNonFrozenCollection())
         {
             if (indexType == IndexTarget.Type.KEYS)
@@ -733,17 +755,12 @@ public class IndexContext
             return indexType == IndexTarget.Type.KEYS_AND_VALUES &&
                    (operator == Expression.Op.EQ || operator == Expression.Op.NOT_EQ || operator == Expression.Op.RANGE);
         }
-
         if (indexType == IndexTarget.Type.FULL)
             return operator == Expression.Op.EQ;
-
         AbstractType<?> validator = getValidator();
-
         if (operator == Expression.Op.IN)
             return true;
-
         if (operator != Expression.Op.EQ && EQ_ONLY_TYPES.contains(validator)) return false;
-
         // RANGE only applicable to non-literal indexes
         return (operator != null) && !(TypeUtil.isLiteral(validator) && operator == Expression.Op.RANGE);
     }

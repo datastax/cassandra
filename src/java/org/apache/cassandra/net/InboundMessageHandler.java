@@ -75,7 +75,7 @@ public class InboundMessageHandler extends AbstractMessageHandler
     private final ConnectionType type;
     private final InetAddressAndPort self;
     private final InetAddressAndPort peer;
-    private final int version;
+    final int version;
 
     private final InboundMessageCallbacks callbacks;
     private final Consumer<Message<?>> consumer;

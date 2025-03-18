@@ -31,7 +31,6 @@ import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.DiskBoundaries;
 import org.apache.cassandra.db.compaction.unified.Environment;
-import org.apache.cassandra.db.compaction.unified.RealEnvironment;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.memtable.Memtable;
@@ -126,12 +125,12 @@ public interface CompactionRealm
      * Return the estimated partition count, used when the number of partitions in an sstable is not sufficient to give
      * a sensible range estimation.
      */
-    default long estimatedPartitionCount()
+    default long estimatedPartitionCountInSSTables()
     {
         final long INITIAL_ESTIMATED_PARTITION_COUNT = 1 << 16; // If we don't yet have a count, use a sensible default.
         if (metrics() == null)
             return INITIAL_ESTIMATED_PARTITION_COUNT;
-        final Long estimation = metrics().estimatedPartitionCount.getValue();
+        final Long estimation = metrics().estimatedPartitionCountInSSTablesCached.getValue();
         if (estimation == null || estimation == 0)
             return INITIAL_ESTIMATED_PARTITION_COUNT;
         return estimation;

@@ -218,8 +218,8 @@ public abstract class CommitLogTest
     {
         runExpecting(() -> {
             CommitLog.instance.recoverFiles(STARTUP, new File[]{
-            tmpFile(CommitLogDescriptor.current_version),
-            tmpFile(CommitLogDescriptor.current_version)
+            tmpFile(CommitLogDescriptor.CURRENT_VERSION),
+            tmpFile(CommitLogDescriptor.CURRENT_VERSION)
             });
             return null;
         }, CommitLogReplayException.class);
@@ -228,7 +228,7 @@ public abstract class CommitLogTest
     @Test
     public void testRecoveryWithEmptyFinalLog() throws Exception
     {
-        CommitLog.instance.recoverFiles(STARTUP, tmpFile(CommitLogDescriptor.current_version));
+        CommitLog.instance.recoverFiles(STARTUP, tmpFile(CommitLogDescriptor.CURRENT_VERSION));
     }
 
     /**
@@ -243,8 +243,8 @@ public abstract class CommitLogTest
 
         File directory = new File(Files.createTempDir());
 
-        CommitLogDescriptor desc1 = new CommitLogDescriptor(CommitLogDescriptor.current_version, 1, null, DatabaseDescriptor.getEncryptionContext());
-        CommitLogDescriptor desc2 = new CommitLogDescriptor(CommitLogDescriptor.current_version, 2, null, DatabaseDescriptor.getEncryptionContext());
+        CommitLogDescriptor desc1 = new CommitLogDescriptor(CommitLogDescriptor.CURRENT_VERSION, 1, null, DatabaseDescriptor.getEncryptionContext());
+        CommitLogDescriptor desc2 = new CommitLogDescriptor(CommitLogDescriptor.CURRENT_VERSION, 2, null, DatabaseDescriptor.getEncryptionContext());
 
         ByteBuffer buffer;
 
@@ -302,7 +302,7 @@ public abstract class CommitLogTest
     public void testRecoveryWithShortSize() throws Exception
     {
         runExpecting(() -> {
-            testRecovery(new byte[2], CommitLogDescriptor.current_version);
+            testRecovery(new byte[2], CommitLogDescriptor.CURRENT_VERSION);
             return null;
         }, CommitLogReplayException.class);
     }
@@ -310,7 +310,7 @@ public abstract class CommitLogTest
     @Test
     public void testRecoveryWithTruncatedFileAndTruncationToleration() throws Exception
     {
-        CommitLogDescriptor desc = new CommitLogDescriptor(CommitLogDescriptor.current_version,
+        CommitLogDescriptor desc = new CommitLogDescriptor(CommitLogDescriptor.CURRENT_VERSION,
                                                            CommitLog.instance.getSegmentManager().getNextId(),
                                                            DatabaseDescriptor.getCommitLogCompression(),
                                                            DatabaseDescriptor.getEncryptionContext());
@@ -339,7 +339,7 @@ public abstract class CommitLogTest
     {
         byte[] garbage = new byte[100];
         (new java.util.Random()).nextBytes(garbage);
-        testRecovery(garbage, CommitLogDescriptor.current_version);
+        testRecovery(garbage, CommitLogDescriptor.CURRENT_VERSION);
     }
 
     @Test
@@ -611,7 +611,7 @@ public abstract class CommitLogTest
     protected Pair<File, Integer> tmpFile() throws IOException
     {
         EncryptionContext encryptionContext = DatabaseDescriptor.getEncryptionContext();
-        CommitLogDescriptor desc = new CommitLogDescriptor(CommitLogDescriptor.current_version,
+        CommitLogDescriptor desc = new CommitLogDescriptor(CommitLogDescriptor.CURRENT_VERSION,
                                                            CommitLog.instance.getSegmentManager().getNextId(),
                                                            DatabaseDescriptor.getCommitLogCompression(),
                                                            encryptionContext);
@@ -742,7 +742,7 @@ public abstract class CommitLogTest
     {
         ParameterizedClass commitLogCompression = DatabaseDescriptor.getCommitLogCompression();
         EncryptionContext encryptionContext = DatabaseDescriptor.getEncryptionContext();
-        runExpecting(() -> testRecovery(logData, CommitLogDescriptor.current_version), expected);
+        runExpecting(() -> testRecovery(logData, CommitLogDescriptor.CURRENT_VERSION), expected);
     }
 
     @Test

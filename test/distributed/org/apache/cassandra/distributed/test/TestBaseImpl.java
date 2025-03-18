@@ -20,6 +20,7 @@ package org.apache.cassandra.distributed.test;
 
 import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
+import java.nio.file.Files;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -31,6 +32,7 @@ import org.junit.After;
 import org.junit.Assert;
 import org.junit.BeforeClass;
 
+import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.marshal.*;
 import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.distributed.api.Feature;
@@ -42,6 +44,7 @@ import org.apache.cassandra.distributed.util.ColumnTypeUtil;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.gms.EndpointState;
 import org.apache.cassandra.gms.Gossiper;
+import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.locator.InetAddressAndPort;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.BOOTSTRAP_SCHEMA_DELAY_MS;
@@ -61,6 +64,7 @@ public class TestBaseImpl extends DistributedTestBase
     @BeforeClass
     public static void beforeClass() throws Throwable
     {
+        Files.createDirectories(FileUtils.getTempDir().toPath());
         ICluster.setup();
     }
 
@@ -175,6 +179,40 @@ public class TestBaseImpl extends DistributedTestBase
         else
         {
             Assert.assertEquals(ConfigurationException.class.getName(), tr.getClass().getName());
+        }
+    }
+
+    /**
+     * Runs the given function before and after a flush of sstables.  This is useful for checking that behavior is
+     * the same whether data is in memtables or sstables.
+     *
+     * @param cluster the tested cluster
+     * @param keyspace the keyspace to flush
+     * @param runnable the test to run
+     */
+    public static void beforeAndAfterFlush(Cluster cluster, String keyspace, CQLTester.CheckedFunction runnable) throws Throwable
+    {
+        try
+        {
+            runnable.apply();
+        }
+        catch (Throwable t)
+        {
+            throw new AssertionError("Test failed before flush:\n" + t, t);
+        }
+
+        for (int i = 1; i <= cluster.size(); i++)
+        {
+            cluster.get(i).flush(keyspace);
+
+            try
+            {
+                runnable.apply();
+            }
+            catch (Throwable t)
+            {
+                throw new AssertionError("Test failed after flushing node " + i + ":\n" + t, t);
+            }
         }
     }
 }

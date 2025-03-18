@@ -26,6 +26,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
+import org.apache.cassandra.db.filter.ANNOptions;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.serializers.CollectionSerializer;
 
@@ -134,15 +135,6 @@ public abstract class MultiColumnRestriction implements SingleRestriction
     }
 
     @Override
-    public final Index findSupportingIndex(IndexRegistry indexRegistry)
-    {
-        for (Index index : indexRegistry.listIndexes())
-            if (isSupportingIndex(index))
-                return index;
-        return null;
-    }
-
-    @Override
     public boolean needsFiltering(Index.Group indexGroup)
     {
         for (ColumnMetadata column : columnDefs)
@@ -247,7 +239,10 @@ public abstract class MultiColumnRestriction implements SingleRestriction
         }
 
         @Override
-        public final void addToRowFilter(RowFilter.Builder filter, IndexRegistry indexRegistry, QueryOptions options)
+        public final void addToRowFilter(RowFilter.Builder filter,
+                                         IndexRegistry indexRegistry,
+                                         QueryOptions options,
+                                         ANNOptions annOptions)
         {
             Tuples.Value t = ((Tuples.Value) term.bind(options));
             List<ByteBuffer> values = t.getElements();
@@ -312,7 +307,8 @@ public abstract class MultiColumnRestriction implements SingleRestriction
         @Override
         public final void addToRowFilter(RowFilter.Builder filter,
                                          IndexRegistry indexRegistry,
-                                         QueryOptions options)
+                                         QueryOptions options,
+                                         ANNOptions annOptions)
         {
             // If the relation is of the type (c) IN ((x),(y),(z)) then it is equivalent to
             // c IN (x, y, z) and we can perform filtering
@@ -580,7 +576,8 @@ public abstract class MultiColumnRestriction implements SingleRestriction
         @Override
         public final void addToRowFilter(RowFilter.Builder filter,
                                          IndexRegistry indexRegistry,
-                                         QueryOptions options)
+                                         QueryOptions options,
+                                         ANNOptions annOptions)
         {
             throw invalidRequest("Multi-column slice restrictions cannot be used for filtering.");
         }
@@ -672,7 +669,7 @@ public abstract class MultiColumnRestriction implements SingleRestriction
         }
 
         @Override
-        public final void addToRowFilter(RowFilter.Builder filter, IndexRegistry indexRegistry, QueryOptions options)
+        public final void addToRowFilter(RowFilter.Builder filter, IndexRegistry indexRegistry, QueryOptions options, ANNOptions annOptions)
         {
             throw new UnsupportedOperationException("Secondary indexes do not support IS NOT NULL restrictions");
         }

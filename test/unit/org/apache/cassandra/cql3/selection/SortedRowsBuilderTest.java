@@ -29,7 +29,6 @@ import com.google.common.math.IntMath;
 import org.junit.Test;
 
 import org.apache.cassandra.db.marshal.Int32Type;
-import org.apache.cassandra.index.Index;
 import org.assertj.core.api.Assertions;
 
 /**
@@ -88,19 +87,6 @@ public class SortedRowsBuilderTest
                 }
                 test(rows, SortedRowsBuilder.WithHybridSort.create(limit, offset, comparator), comparator);
                 test(rows, SortedRowsBuilder.WithHybridSort.create(limit, offset, reverseComparator), reverseComparator);
-
-                // with index scorer
-                test(rows, SortedRowsBuilder.create(limit, offset, scorer(false)), comparator);
-                test(rows, SortedRowsBuilder.create(limit, offset, scorer(true)), reverseComparator);
-                test(rows, SortedRowsBuilder.WithListSort.create(limit, offset, scorer(false)), comparator);
-                test(rows, SortedRowsBuilder.WithListSort.create(limit, offset, scorer(true)), reverseComparator);
-                if (totalLimit < 1 << 20)
-                {
-                    test(rows, SortedRowsBuilder.WithHeapSort.create(limit, offset, scorer(false)), comparator);
-                    test(rows, SortedRowsBuilder.WithHeapSort.create(limit, offset, scorer(true)), reverseComparator);
-                }
-                test(rows, SortedRowsBuilder.WithHybridSort.create(limit, offset, scorer(false)), comparator);
-                test(rows, SortedRowsBuilder.WithHybridSort.create(limit, offset, scorer(true)), reverseComparator);
             }
         }
     }
@@ -142,23 +128,5 @@ public class SortedRowsBuilderTest
         for (List<ByteBuffer> row : rows)
             values.add(Int32Type.instance.compose(row.get(0)));
         return values;
-    }
-
-    private static Index.Scorer scorer(boolean reversed)
-    {
-        return new Index.Scorer()
-        {
-            @Override
-            public float score(List<ByteBuffer> row)
-            {
-                return Int32Type.instance.compose(row.get(0));
-            }
-
-            @Override
-            public boolean reversed()
-            {
-                return reversed;
-            }
-        };
     }
 }

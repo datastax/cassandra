@@ -27,7 +27,6 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import org.junit.Assert;
-import org.junit.Assume;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -69,7 +68,7 @@ public class ShardManagerTest
         localRanges = Mockito.mock(SortedLocalRanges.class, Mockito.withSettings().defaultAnswer(Mockito.CALLS_REAL_METHODS));
         Mockito.when(localRanges.getRanges()).thenAnswer(invocation -> weightedRanges);
         Mockito.when(localRanges.getRealm()).thenReturn(realm);
-        Mockito.when(realm.estimatedPartitionCount()).thenReturn(10000L);
+        Mockito.when(realm.estimatedPartitionCountInSSTables()).thenReturn(10000L);
     }
 
     @Test
@@ -435,6 +434,42 @@ public class ShardManagerTest
                      shardManager.coveredShardCount(partitioner.split(min, min, left).maxKeyBound(),
                                                     partitioner.split(min, min, right).maxKeyBound(),
                                                     numShards));
+    }
+
+    @Test
+    public void testGetShardRanges()
+    {
+        CompactionRealm realm = Mockito.mock(CompactionRealm.class);
+        when(realm.getPartitioner()).thenReturn(partitioner);
+        SortedLocalRanges sortedRanges = SortedLocalRanges.forTestingFull(realm);
+
+        for (int numDisks = 1; numDisks <= 3; ++numDisks)
+        {
+            List<Token> diskBoundaries = sortedRanges.split(numDisks);
+            DiskBoundaries db = Mockito.mock(DiskBoundaries.class);
+            when(db.getLocalRanges()).thenReturn(sortedRanges);
+            when(db.getPositions()).thenReturn(diskBoundaries);
+
+            var rs = Mockito.mock(AbstractReplicationStrategy.class);
+
+            ShardManager shardManager = ShardManager.create(db, rs, false);
+            for (int numShardsPerDisk = 1; numShardsPerDisk <= 3; ++numShardsPerDisk)
+            {
+                var ranges = shardManager.getShardRanges(numShardsPerDisk);
+                var boundaries = shardManager.boundaries(numShardsPerDisk);
+                assertEquals(numShardsPerDisk * numDisks, ranges.size());
+                for (int i = 0; i < ranges.size(); ++i)
+                {
+                    Range<Token> range = ranges.get(i);
+                    boundaries.advanceTo(range.left.nextValidToken());
+                    assertEquals(i, boundaries.shardIndex());
+                    boundaries.advanceTo(partitioner.split(range.left, range.right, 0.5));
+                    assertEquals(i, boundaries.shardIndex());
+                    boundaries.advanceTo(range.right);
+                    assertEquals(i, boundaries.shardIndex());
+                }
+            }
+        }
     }
 
     @Test

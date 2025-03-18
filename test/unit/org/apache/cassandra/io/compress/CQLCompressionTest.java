@@ -175,6 +175,39 @@ public class CQLCompressionTest extends CQLTester
     }
 
     @Test
+    public void adaptiveFlushTest() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k text PRIMARY KEY, v text) WITH compression = {'sstable_compression': 'AdaptiveCompressor'};");
+        DatabaseDescriptor.setFlushCompression(Config.FlushCompression.fast);
+        ColumnFamilyStore store = flushTwice();
+
+        // Should flush as LZ4
+        Set<SSTableReader> sstables = store.getLiveSSTables();
+        sstables.forEach(sstable -> {
+            assertTrue(sstable.getCompressionMetadata().parameters.getSstableCompressor() instanceof LZ4Compressor);
+        });
+        store.truncateBlocking();
+
+        DatabaseDescriptor.setFlushCompression(Config.FlushCompression.adaptive);
+        store = flushTwice();
+
+        // Should flush as Adaptive
+        sstables = store.getLiveSSTables();
+        sstables.forEach(sstable -> {
+            assertTrue(sstable.getCompressionMetadata().parameters.getSstableCompressor() instanceof AdaptiveCompressor);
+        });
+
+        // Should compact to Adaptive
+        compact();
+
+        sstables = store.getLiveSSTables();
+        assertEquals(1, sstables.size());
+        store.getLiveSSTables().forEach(sstable -> {
+            assertTrue(sstable.getCompressionMetadata().parameters.getSstableCompressor() instanceof AdaptiveCompressor);
+        });
+    }
+
+    @Test
     public void deflateFlushTest() throws Throwable
     {
         createTable("CREATE TABLE %s (k text PRIMARY KEY, v text) WITH compression = {'sstable_compression': 'DeflateCompressor'};");
@@ -260,16 +293,11 @@ public class CQLCompressionTest extends CQLTester
     {
         ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
 
-        // Insert multiple entries to force overlap
-        execute("INSERT INTO %s (k, v) values (?, ?)", "k10", "v10");
-        execute("INSERT INTO %s (k, v) values (?, ?)", "k11", "v11");
-        execute("INSERT INTO %s (k, v) values (?, ?)", "k12", "v12");
+        execute("INSERT INTO %s (k, v) values (?, ?)", "k1" , "v1");
         flush();
         assertEquals(1, cfs.getLiveSSTables().size());
 
-        execute("INSERT INTO %s (k, v) values (?, ?)", "k20", "v20");
-        execute("INSERT INTO %s (k, v) values (?, ?)", "k21", "v21");
-        execute("INSERT INTO %s (k, v) values (?, ?)", "k22", "v22");
+        execute("INSERT INTO %s (k, v) values (?, ?)", "k2", "v2");
         flush();
         assertEquals(2, cfs.getLiveSSTables().size());
 

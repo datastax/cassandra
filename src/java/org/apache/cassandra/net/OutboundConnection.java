@@ -1117,6 +1117,8 @@ public class OutboundConnection
                         assert !state.isClosed();
 
                         MessagingSuccess success = result.success();
+                        messagingVersion = success.messagingVersion;
+                        settings.endpointToVersion.set(settings.to, messagingVersion);
                         debug.onConnect(success.messagingVersion, settings);
                         state.disconnected().maintenance.cancel(false);
 

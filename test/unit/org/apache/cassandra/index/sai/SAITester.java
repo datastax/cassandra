@@ -22,8 +22,6 @@ package org.apache.cassandra.index.sai;
 
 import java.io.IOException;
 import java.io.RandomAccessFile;
-import java.lang.reflect.Field;
-import java.lang.reflect.Modifier;
 import java.nio.channels.FileChannel;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
@@ -48,6 +46,7 @@ import com.google.common.base.Predicates;
 import com.google.common.collect.Sets;
 import org.junit.After;
 import org.junit.Assert;
+import org.junit.BeforeClass;
 import org.junit.Rule;
 import org.junit.rules.TestRule;
 
@@ -63,6 +62,8 @@ import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.compaction.CompactionManager;
+import org.apache.cassandra.db.lifecycle.SSTableSet;
+import org.apache.cassandra.db.lifecycle.View;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.exceptions.RequestFailureReason;
@@ -70,8 +71,6 @@ import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.format.Version;
-import org.apache.cassandra.index.sai.disk.v1.V1OnDiskFormat;
-import org.apache.cassandra.index.sai.utils.NamedMemoryLimiter;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.ResourceLeakDetector;
 import org.apache.cassandra.inject.ActionBuilder;
@@ -89,10 +88,8 @@ import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.ReflectionUtils;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.lucene.codecs.CodecUtil;
-import org.awaitility.Awaitility;
 
 import static org.apache.cassandra.inject.ActionBuilder.newActionBuilder;
 import static org.apache.cassandra.inject.Expression.expr;
@@ -222,6 +219,34 @@ public class SAITester extends CQLTester
         Injections.deleteAll();
     }
 
+    /**
+     * Enable external execution of all queries because we want to use reconciliation in SELECT queries so that we can
+     * simulate the application of the entire row filter in the coordinator node, even if unit tests are not multinode.
+     */
+    @BeforeClass
+    public static void setUpClass()
+    {
+        CQLTester.setUpClass();
+        CQLTester.enableCoordinatorExecution();
+    }
+
+    /**
+     * Creates a SAI index on the current table, waiting for it to become queryable.
+     *
+     * @param column the name of the indexed column, maybe with {@code FULL()}, {@code KEYS()} or {@code VALUES()} spec
+     * @param options the index options, of the form {@code "{'option1': value1, 'option2': value2, ...}"}.
+     * @return the name of the created index
+     */
+    public String createSAIIndex(String column, @Nullable String options)
+    {
+        String query = String.format(CREATE_INDEX_TEMPLATE, column);
+
+        if (options != null)
+            query += " WITH OPTIONS = " + options;
+
+        return createIndex(query);
+    }
+
     public static IndexContext createIndexContext(String name, AbstractType<?> validator, ColumnFamilyStore cfs)
     {
         return new IndexContext(cfs.getKeyspaceName(),
@@ -332,15 +357,19 @@ public class SAITester extends CQLTester
     {
         ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(currentTable());
 
-        for (SSTableReader sstable : cfs.getLiveSSTables())
+        try (ColumnFamilyStore.RefViewFragment rvf = cfs.selectAndReference(View.selectFunction(SSTableSet.CANONICAL)))
         {
-            IndexDescriptor indexDescriptor = loadDescriptor(sstable, cfs);
-            if (indexDescriptor.isIndexEmpty(context))
-                continue;
-            if (!indexDescriptor.perSSTableComponents().validateComponents(sstable, cfs.getTracker(), true)
-                || !indexDescriptor.perIndexComponents(context).validateComponents(sstable, cfs.getTracker(), true))
-                return false;
+            for (SSTableReader sstable : rvf.sstables)
+            {
+                IndexDescriptor indexDescriptor = loadDescriptor(sstable, cfs);
+                if (indexDescriptor.isIndexEmpty(context))
+                    continue;
+                if (!indexDescriptor.perSSTableComponents().validateComponents(sstable, cfs.getTracker(), true)
+                    || !indexDescriptor.perIndexComponents(context).validateComponents(sstable, cfs.getTracker(), true))
+                    return false;
+            }
         }
+
         return true;
     }
 

@@ -35,6 +35,7 @@ import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.db.filter.ANNOptions;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.IndexRegistry;
 import org.apache.cassandra.schema.ColumnMetadata;
@@ -331,21 +332,15 @@ abstract class TokenFilter implements PartitionKeyRestrictions
     }
 
     @Override
-    public Index findSupportingIndex(IndexRegistry indexRegistry)
-    {
-        return restrictions.findSupportingIndex(indexRegistry);
-    }
-
-    @Override
     public boolean needsFiltering(Index.Group indexGroup)
     {
         return restrictions.needsFiltering(indexGroup);
     }
 
     @Override
-    public void addToRowFilter(RowFilter.Builder filter, IndexRegistry indexRegistry, QueryOptions options)
+    public void addToRowFilter(RowFilter.Builder filter, IndexRegistry indexRegistry, QueryOptions options, ANNOptions annOptions)
     {
-        restrictions.addToRowFilter(filter, indexRegistry, options);
+        restrictions.addToRowFilter(filter, indexRegistry, options, annOptions);
     }
 
     @Override

@@ -23,7 +23,6 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
-import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
@@ -161,9 +160,9 @@ public abstract class AbstractCompactionTask extends WrappedRunnable
 
     protected Throwable cleanup(Throwable err)
     {
-        final boolean isSuccess = err == null;
+        final Throwable originalError = err;
         for (CompactionObserver compObserver : compObservers)
-            err = Throwables.perform(err, () -> compObserver.onCompleted(transaction.opId(), isSuccess));
+            err = Throwables.perform(err, () -> compObserver.onCompleted(transaction.opId(), originalError));
 
         return Throwables.perform(err, () -> transaction.close());
     }
@@ -208,6 +207,13 @@ public abstract class AbstractCompactionTask extends WrappedRunnable
     {
         compObservers.add(compObserver);
     }
+
+    /**
+     * Returns the space overhead of this compaction. This can be used to limit running compactions to they fit under
+     * a given space budget. Only implemented for the types of tasks used by the unified compaction strategy and used
+     * by CNDB.
+     */
+    public abstract long getSpaceOverhead();
 
     /**
      * @return The compaction observers for this task. Used by CNDB.

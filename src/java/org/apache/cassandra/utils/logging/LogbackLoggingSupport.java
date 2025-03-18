@@ -18,7 +18,6 @@
 
 package org.apache.cassandra.utils.logging;
 
-import java.lang.management.ManagementFactory;
 import java.security.AccessControlException;
 import java.util.Collection;
 import java.util.HashSet;
@@ -26,8 +25,6 @@ import java.util.Iterator;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
-import javax.management.JMX;
-import javax.management.ObjectName;
 
 import com.google.common.collect.Maps;
 import org.apache.commons.lang3.StringUtils;
@@ -37,14 +34,14 @@ import org.slf4j.LoggerFactory;
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.LoggerContext;
-import ch.qos.logback.classic.jmx.JMXConfiguratorMBean;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.classic.spi.TurboFilterList;
 import ch.qos.logback.classic.turbo.ReconfigureOnChangeFilter;
 import ch.qos.logback.classic.turbo.TurboFilter;
+import ch.qos.logback.classic.util.ContextInitializer;
 import ch.qos.logback.core.Appender;
 import ch.qos.logback.core.filter.Filter;
-import ch.qos.logback.core.hook.DelayingShutdownHook;
+import ch.qos.logback.core.hook.DefaultShutdownHook;
 import ch.qos.logback.core.spi.AppenderAttachable;
 import org.apache.cassandra.security.ThreadAwareSecurityManager;
 
@@ -92,7 +89,7 @@ public class LogbackLoggingSupport implements LoggingSupport
     @Override
     public void onShutdown()
     {
-        DelayingShutdownHook logbackHook = new DelayingShutdownHook();
+        DefaultShutdownHook logbackHook = new DefaultShutdownHook();
         logbackHook.setContext((LoggerContext) LoggerFactory.getILoggerFactory());
         logbackHook.run();
     }
@@ -105,10 +102,11 @@ public class LogbackLoggingSupport implements LoggingSupport
         // if both classQualifier and rawLevel are empty, reload from configuration
         if (StringUtils.isBlank(classQualifier) && StringUtils.isBlank(rawLevel))
         {
-            JMXConfiguratorMBean jmxConfiguratorMBean = JMX.newMBeanProxy(ManagementFactory.getPlatformMBeanServer(),
-                                                                          new ObjectName("ch.qos.logback.classic:Name=default,Type=ch.qos.logback.classic.jmx.JMXConfigurator"),
-                                                                          JMXConfiguratorMBean.class);
-            jmxConfiguratorMBean.reloadDefaultConfiguration();
+            LoggerContext lc = (LoggerContext) LoggerFactory.getILoggerFactory();
+            lc.reset();
+
+            ContextInitializer ci = new ContextInitializer(lc);
+            ci.autoConfig();
             return;
         }
         // classQualifier is set, but blank level given

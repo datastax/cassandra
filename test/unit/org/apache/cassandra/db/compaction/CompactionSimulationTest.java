@@ -663,12 +663,6 @@ public class CompactionSimulationTest extends BaseCompactionStrategyTest
         }
 
         @Override
-        public long getOverheadSizeInBytes(CompactionPick compactionPick)
-        {
-            return compactionPick.totSizeInBytes();
-        }
-
-        @Override
         public String toString()
         {
             return String.format("Read latency: %d us / partition, flush latency: %d us / KiB, compaction latency: %d us / KiB, bfpr: %f, measured WA: %.2f, flush size %s",
@@ -1384,7 +1378,7 @@ public class CompactionSimulationTest extends BaseCompactionStrategyTest
                     //Thread.sleep(5);
 
                     // then remove the old sstables
-                    strategy.onCompleted(id, true);
+                    strategy.onCompleted(id, null);
                     counters.numCompactions.incrementAndGet();
                     counters.numCompactionsPending.decrementAndGet();
                     counters.numCompactedSSTables.addAndGet(candidates.size());

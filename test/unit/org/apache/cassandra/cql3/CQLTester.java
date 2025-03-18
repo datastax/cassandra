@@ -43,7 +43,6 @@ import java.util.Optional;
 import java.util.Random;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -61,7 +60,6 @@ import javax.management.remote.JMXConnectorServer;
 import javax.management.remote.JMXServiceURL;
 import javax.management.remote.rmi.RMIConnectorServer;
 
-import com.datastax.shaded.netty.channel.EventLoopGroup;
 import com.google.common.base.Objects;
 import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableList;
@@ -94,12 +92,12 @@ import com.datastax.driver.core.Session;
 import com.datastax.driver.core.SimpleStatement;
 import com.datastax.driver.core.SocketOptions;
 import com.datastax.driver.core.Statement;
+import com.datastax.shaded.netty.channel.EventLoopGroup;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.ServerTestUtils;
 import org.apache.cassandra.auth.CassandraAuthorizer;
 import org.apache.cassandra.auth.CassandraRoleManager;
 import org.apache.cassandra.auth.PasswordAuthenticator;
-import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.EncryptionOptions;
@@ -107,6 +105,7 @@ import org.apache.cassandra.cql3.functions.FunctionName;
 import org.apache.cassandra.cql3.functions.types.ParseUtils;
 import org.apache.cassandra.cql3.statements.SelectStatement;
 import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.ReadCommand;
@@ -152,6 +151,7 @@ import org.apache.cassandra.nodes.Nodes;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.KeyspaceMetadata;
+import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
@@ -203,6 +203,16 @@ public abstract class CQLTester
     private static final int ASSERTION_TIMEOUT_SECONDS = 15;
     private static final User SUPER_USER = new User("cassandra", "cassandra");
 
+    /**
+     * Whether to use coordinator execution in {@link #execute(String, Object...)}, so queries get full validation and
+     * go through reconciliation. When enabled, calls to {@link #execute(String, Object...)} will behave as calls to
+     * {@link #executeWithCoordinator(String, Object...)}. Otherwise, they will behave as calls to
+     * {@link #executeInternal(String, Object...)}.
+     *
+     * @see #execute
+     */
+    private static boolean coordinatorExecution = false;
+
     private static org.apache.cassandra.transport.Server server;
     private static JMXConnectorServer jmxServer;
     protected static String jmxHost;
@@ -224,11 +234,12 @@ public abstract class CQLTester
     public static final List<ProtocolVersion> PROTOCOL_VERSIONS = new ArrayList<>(ProtocolVersion.SUPPORTED.size());
 
     private static final String CREATE_INDEX_NAME_REGEX = "(\\s*(\\w*|\"\\w*\")\\s*)";
+    private static final String CREATE_INDEX_NAME_QUOTED_REGEX = "(\\s*(\\w*|\"[^\"]*\")\\s*)";
     private static final String CREATE_INDEX_REGEX = String.format("\\A\\s*CREATE(?:\\s+CUSTOM)?\\s+INDEX" +
                                                                    "(?:\\s+IF\\s+NOT\\s+EXISTS)?\\s*" +
                                                                    "%s?\\s*ON\\s+(%<s\\.)?%<s\\s*" +
-                                                                   "(\\((?:\\s*\\w+\\s*\\()?%<s\\))?",
-                                                                   CREATE_INDEX_NAME_REGEX);
+                                                                   "(\\((?:\\s*\\w+\\s*\\()?%s\\))?",
+                                                                   CREATE_INDEX_NAME_REGEX, CREATE_INDEX_NAME_QUOTED_REGEX);
     private static final Pattern CREATE_INDEX_PATTERN = Pattern.compile(CREATE_INDEX_REGEX, Pattern.CASE_INSENSITIVE);
 
     public static final NettyOptions IMMEDIATE_CONNECTION_SHUTDOWN_NETTY_OPTIONS = new NettyOptions()
@@ -378,6 +389,8 @@ public abstract class CQLTester
     @BeforeClass
     public static void setUpClass()
     {
+        DatabaseDescriptor.setAutoSnapshot(false);
+
         if (ROW_CACHE_SIZE_IN_MB > 0)
             DatabaseDescriptor.setRowCacheSizeInMB(ROW_CACHE_SIZE_IN_MB);
         StorageService.instance.setPartitionerUnsafe(Murmur3Partitioner.instance);
@@ -421,15 +434,13 @@ public abstract class CQLTester
     @Before
     public void beforeTest() throws Throwable
     {
-        schemaChange(String.format("CREATE KEYSPACE IF NOT EXISTS %s WITH replication = {'class': 'SimpleStrategy', 'replication_factor': '1'}", KEYSPACE));
-        schemaChange(String.format("CREATE KEYSPACE IF NOT EXISTS %s WITH replication = {'class': 'SimpleStrategy', 'replication_factor': '1'}", KEYSPACE_PER_TEST));
+        Schema.instance.transform(schema -> schema.withAddedOrUpdated(KeyspaceMetadata.create(KEYSPACE_PER_TEST, KeyspaceParams.simple(1)))
+                                                  .withAddedOrUpdated(KeyspaceMetadata.create(KEYSPACE, KeyspaceParams.simple(1))), false);
     }
 
     @After
     public void afterTest() throws Throwable
     {
-        dropPerTestKeyspace();
-
         // Restore standard behavior in case it was changed
         usePrepared = USE_PREPARED_VALUES;
         reusePrepared = REUSE_PREPARED;
@@ -437,9 +448,6 @@ public abstract class CQLTester
         final List<String> keyspacesToDrop = copy(keyspaces);
         final List<String> tablesToDrop = copy(tables);
         final List<String> viewsToDrop = copy(views);
-        final List<String> typesToDrop = copy(types);
-        final List<String> functionsToDrop = copy(functions);
-        final List<String> aggregatesToDrop = copy(aggregates);
         keyspaces = null;
         tables = null;
         views = null;
@@ -448,51 +456,16 @@ public abstract class CQLTester
         aggregates = null;
         user = null;
 
-        // We want to clean up after the test, but dropping a table is rather long so just do that asynchronously
-        schemaCleanup.execute(() -> {
-            try
-            {
-                logger.debug("Dropping {} materialized view created in previous test", viewsToDrop.size());
-                for (int i = viewsToDrop.size() - 1; i >= 0; i--)
-                    schemaChange(String.format("DROP MATERIALIZED VIEW IF EXISTS %s.%s", KEYSPACE, viewsToDrop.get(i)));
-
-                for (int i = tablesToDrop.size() - 1; i >= 0; i--)
-                    schemaChange(String.format("DROP TABLE IF EXISTS %s.%s", KEYSPACE, tablesToDrop.get(i)));
-
-                for (int i = aggregatesToDrop.size() - 1; i >= 0; i--)
-                    schemaChange(String.format("DROP AGGREGATE IF EXISTS %s", aggregatesToDrop.get(i)));
-
-                for (int i = functionsToDrop.size() - 1; i >= 0; i--)
-                    schemaChange(String.format("DROP FUNCTION IF EXISTS %s", functionsToDrop.get(i)));
-
-                for (int i = typesToDrop.size() - 1; i >= 0; i--)
-                    schemaChange(String.format("DROP TYPE IF EXISTS %s.%s", KEYSPACE, typesToDrop.get(i)));
-
-                for (int i = keyspacesToDrop.size() - 1; i >= 0; i--)
-                    schemaChange(String.format("DROP KEYSPACE IF EXISTS %s", keyspacesToDrop.get(i)));
-
-                // Dropping doesn't delete the sstables. It's not a huge deal but it's cleaner to cleanup after us
-                // Thas said, we shouldn't delete blindly before the TransactionLogs.SSTableTidier for the table we drop
-                // have run or they will be unhappy. Since those taks are scheduled on StorageService.tasks and that's
-                // mono-threaded, just push a task on the queue to find when it's empty. No perfect but good enough.
-
-                final CountDownLatch latch = new CountDownLatch(1);
-                ScheduledExecutors.nonPeriodicTasks.execute(new Runnable()
-                {
-                    public void run()
-                    {
-                        latch.countDown();
-                    }
-                });
-                latch.await(2, TimeUnit.SECONDS);
-
-                removeAllSSTables(KEYSPACE, tablesToDrop);
-            }
-            catch (Exception e)
-            {
-                throw new RuntimeException(e);
-            }
-        });
+        try
+        {
+            Schema.instance.transform(schema -> schema.without(List.of(KEYSPACE_PER_TEST))
+                                                      .withAddedOrUpdated(KeyspaceMetadata.create(KEYSPACE, KeyspaceParams.simple(1)))
+                                                      .without(keyspacesToDrop), false);
+        }
+        catch (Exception e)
+        {
+            throw new RuntimeException(e);
+        }
     }
 
     /**
@@ -543,6 +516,9 @@ public abstract class CQLTester
 
     protected static void requireNetworkWithoutDriver()
     {
+        if (server != null)
+            return;
+
         startServices();
         startServer(server -> {});
     }
@@ -803,6 +779,11 @@ public abstract class CQLTester
         if (indexes.isEmpty())
             return null;
         return indexes.get(indexes.size() - 1);
+    }
+
+    protected String getIndex(int i)
+    {
+        return indexes.get(i);
     }
 
     protected Collection<String> currentTables()
@@ -1081,6 +1062,7 @@ public abstract class CQLTester
             keyspace = parsedKeyspace;
 
         String index = matcher.group(2);
+        boolean isQuotedGeneratedIndexName = false;
         if (Strings.isNullOrEmpty(index))
         {
             String table = matcher.group(7);
@@ -1088,19 +1070,19 @@ public abstract class CQLTester
                 throw new IllegalArgumentException("Table name should be specified: " + formattedQuery);
 
             String column = matcher.group(9);
+            isQuotedGeneratedIndexName = ParseUtils.isQuoted(column, '\"');
 
             String baseName = Strings.isNullOrEmpty(column)
-                              ? IndexMetadata.generateDefaultIndexName(table)
+                              ? IndexMetadata.generateDefaultIndexName(table, null)
                               : IndexMetadata.generateDefaultIndexName(table, new ColumnIdentifier(column, true));
 
             KeyspaceMetadata ks = Schema.instance.getKeyspaceMetadata(keyspace);
             assertNotNull(ks);
             index = ks.findAvailableIndexName(baseName);
         }
-
         index = ParseUtils.isQuoted(index, '\"')
                 ? ParseUtils.unDoubleQuote(index)
-                : index.toLowerCase();
+                : isQuotedGeneratedIndexName ? index : index.toLowerCase();
 
         return Pair.create(keyspace, index);
     }
@@ -1325,15 +1307,33 @@ public abstract class CQLTester
 
     protected static void assertWarningsContain(Message.Response response, String message)
     {
-        List<String> warnings = response.getWarnings();
+        assertWarningsContain(response.getWarnings(), message);
+    }
+
+    protected static void assertWarningsContain(List<String> warnings, String message)
+    {
         Assert.assertNotNull(warnings);
         assertTrue(warnings.stream().anyMatch(s -> s.contains(message)));
     }
 
+    protected static void assertWarningsEquals(ResultSet rs, String... messages)
+    {
+        assertWarningsEquals(rs.getExecutionInfo().getWarnings(), messages);
+    }
+
+    protected static void assertWarningsEquals(List<String> warnings, String... messages)
+    {
+        Assert.assertNotNull(warnings);
+        Assertions.assertThat(messages).hasSameElementsAs(warnings);
+    }
+
     protected static void assertNoWarningContains(Message.Response response, String message)
     {
-        List<String> warnings = response.getWarnings();
+        assertNoWarningContains(response.getWarnings(), message);
+    }
 
+    protected static void assertNoWarningContains(List<String> warnings, String message)
+    {
         if (warnings != null)
         {
             assertFalse(warnings.stream().anyMatch(s -> s.contains(message)));
@@ -1529,7 +1529,7 @@ public abstract class CQLTester
                .connect(false, false);
     }
 
-    protected String formatQuery(String query)
+    public String formatQuery(String query)
     {
         return formatQuery(KEYSPACE, query);
     }
@@ -1557,21 +1557,101 @@ public abstract class CQLTester
         return QueryProcessor.instance.prepare(formatQuery(query), ClientState.forInternalCalls());
     }
 
+    /**
+     * Enables coordinator execution in {@link #execute(String, Object...)}, so queries get full validation and go
+     * through reconciliation. This makes calling {@link #execute(String, Object...)} equivalent to calling
+     * {@link #executeWithCoordinator(String, Object...)}.
+     */
+    protected static void enableCoordinatorExecution()
+    {
+        requireNetworkWithoutDriver();
+        coordinatorExecution = true;
+    }
+
+    /**
+     * Disables coordinator execution in {@link #execute(String, Object...)}, so queries won't get full validation nor
+     * go through reconciliation.This makes calling {@link #execute(String, Object...)} equivalent to calling
+     * {@link #executeInternal(String, Object...)}.
+     */
+    protected static void disableCoordinatorExecution()
+    {
+        coordinatorExecution = false;
+    }
+
+    /**
+     * Execute the specified query as either an internal query or a coordinator query depending on the value of
+     * {@link #coordinatorExecution}.
+     *
+     * @param query a CQL query
+     * @param values the values to bind to the query
+     * @return the query results
+     * @see #execute
+     * @see #executeInternal
+     */
     public UntypedResultSet execute(String query, Object... values)
     {
-        return executeFormattedQuery(formatQuery(query), values);
+        return coordinatorExecution
+               ? executeWithCoordinator(query, values)
+               : executeInternal(query, values);
+    }
+
+    /**
+     * Execute the specified query as an internal query only for the local node. This will skip reconciliation and some
+     * validation.
+     * </p>
+     * For the particular case of {@code SELECT} queries using secondary indexes, the skipping of reconciliation means
+     * that the query {@link org.apache.cassandra.db.filter.RowFilter} might not be fully applied to the index results.
+     *
+     * @param query a CQL query
+     * @param values the values to bind to the query
+     * @return the query results
+     * @see CQLStatement#executeLocally
+     */
+    public UntypedResultSet executeInternal(String query, Object... values)
+    {
+        return executeFormattedQuery(formatQuery(query), false, values);
+    }
+
+    /**
+     * Execute the specified query as an coordinator-side query meant for all the relevant nodes in the cluster, even if
+     * {@link CQLTester} tests are single-node. This won't skip reconciliation and will do full validation.
+     * </p>
+     * For the particular case of {@code SELECT} queries using secondary indexes, applying reconciliation means that the
+     * query {@link org.apache.cassandra.db.filter.RowFilter} will be fully applied to the index results.
+     *
+     * @param query a CQL query
+     * @param values the values to bind to the query
+     * @return the query results
+     * @see CQLStatement#execute
+     */
+    public UntypedResultSet executeWithCoordinator(String query, Object... values)
+    {
+        return executeFormattedQuery(formatQuery(query), true, values);
     }
 
     public UntypedResultSet executeFormattedQuery(String query, Object... values)
     {
+        return executeFormattedQuery(query, coordinatorExecution, values);
+    }
+
+    private UntypedResultSet executeFormattedQuery(String query, boolean useCoordinator, Object... values)
+    {        
+        if (useCoordinator)
+            requireNetworkWithoutDriver();
+        
         UntypedResultSet rs;
         if (usePrepared)
         {
             if (logger.isTraceEnabled())
                 logger.trace("Executing: {} with values {}", query, formatAllValues(values));
+
+            Object[] transformedValues = transformValues(values);
+
             if (reusePrepared)
             {
-                rs = QueryProcessor.executeInternal(query, transformValues(values));
+                rs = useCoordinator
+                     ? QueryProcessor.execute(query, ConsistencyLevel.ONE, transformedValues)
+                     : QueryProcessor.executeInternal(query, transformedValues);
 
                 // If a test uses a "USE ...", then presumably its statements use relative table. In that case, a USE
                 // change the meaning of the current keyspace, so we don't want a following statement to reuse a previously
@@ -1582,15 +1662,21 @@ public abstract class CQLTester
             }
             else
             {
-                rs = QueryProcessor.executeOnceInternal(query, transformValues(values));
+                rs = useCoordinator
+                     ? QueryProcessor.executeOnce(query, ConsistencyLevel.ONE, transformedValues)
+                     : QueryProcessor.executeOnceInternal(query, transformedValues);
             }
         }
         else
         {
             query = replaceValues(query, values);
+
             if (logger.isTraceEnabled())
                 logger.trace("Executing: {}", query);
-            rs = QueryProcessor.executeOnceInternal(query);
+
+            rs = useCoordinator
+                 ? QueryProcessor.executeOnce(query, ConsistencyLevel.ONE)
+                 : QueryProcessor.executeOnceInternal(query);
         }
         if (rs != null)
         {

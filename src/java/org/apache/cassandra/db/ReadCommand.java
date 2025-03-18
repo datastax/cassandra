@@ -37,6 +37,8 @@ import com.google.common.collect.Sets;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.cql3.statements.SelectOptions;
+import org.apache.cassandra.db.filter.ANNOptions;
 import org.apache.cassandra.db.filter.ClusteringIndexFilter;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.filter.DataLimits;
@@ -72,6 +74,7 @@ import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessageFlag;
 import org.apache.cassandra.net.Verb;
+import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
@@ -382,8 +385,6 @@ public abstract class ReadCommand extends AbstractReadQuery
     @Override
     public void maybeValidateIndexes()
     {
-        IndexRegistry.obtain(metadata()).validate(rowFilter());
-
         if (null != indexQueryPlan)
             indexQueryPlan.validate(this);
     }
@@ -413,9 +414,9 @@ public abstract class ReadCommand extends AbstractReadQuery
         }
 
         Context context = Context.from(this);
-        UnfilteredPartitionIterator iterator = (null == searcher) ? Transformation.apply(queryStorage(cfs, executionController), new TrackingRowIterator(context))
-                                                                  : Transformation.apply(searchStorage(searcher, executionController), new TrackingRowIterator(context));
-
+        var storageTarget = (null == searcher) ? queryStorage(cfs, executionController)
+                                               : searchStorage(searcher, executionController);
+        UnfilteredPartitionIterator iterator = Transformation.apply(storageTarget, new TrackingRowIterator(context));
         iterator = RTBoundValidator.validate(iterator, Stage.MERGED, false);
 
         try
@@ -779,6 +780,11 @@ public abstract class ReadCommand extends AbstractReadQuery
 
         if (limits() != DataLimits.NONE)
             sb.append(' ').append(limits());
+
+        ANNOptions annOptions = rowFilter().annOptions();
+        if (annOptions != ANNOptions.NONE)
+            sb.append(" WITH ").append(SelectOptions.ANN_OPTIONS).append(" = ").append(annOptions.toCQLString());
+
         return sb.toString();
     }
 
@@ -1047,6 +1053,19 @@ public abstract class ReadCommand extends AbstractReadQuery
             TableMetadata metadata = schema.getExistingTableMetadata(TableId.deserialize(in));
             int nowInSec = in.readInt();
             ColumnFilter columnFilter = ColumnFilter.serializer.deserialize(in, version, metadata);
+
+            // add synthetic columns to the tablemetadata so we can serialize them in our response
+            var tmb = metadata.unbuild();
+            for (var it = columnFilter.fetchedColumns().regulars.simpleColumns(); it.hasNext(); )
+            {
+                var c = it.next();
+                // synthetic columns sort first, so when we hit the first non-synthetic, we're done
+                if (!c.isSynthetic())
+                    break;
+                tmb.addColumn(ColumnMetadata.syntheticColumn(c.ksName, c.cfName, c.name, c.type));
+            }
+            metadata = tmb.build();
+
             RowFilter rowFilter = RowFilter.serializer.deserialize(in, version, metadata);
             DataLimits limits = DataLimits.serializer.deserialize(in, version,  metadata.comparator);
             Index.QueryPlan indexQueryPlan = null;

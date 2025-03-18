@@ -18,13 +18,7 @@
 
 package org.apache.cassandra.index.sai.plan;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.HashMap;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -70,6 +64,7 @@ import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
 import org.apache.cassandra.index.sai.disk.v1.Segment;
+import org.apache.cassandra.index.sai.disk.vector.VectorCompression;
 import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIntersectionIterator;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
@@ -199,6 +194,11 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     public TableMetadata metadata()
     {
         return command.metadata();
+    }
+
+    public ReadCommand command()
+    {
+        return command;
     }
 
     RowFilter.FilterElement filterOperation()
@@ -344,6 +344,19 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
                                                  makeFilter(key));
     }
 
+    private void updateIndexMetricsQueriesCount(Plan plan)
+    {
+        HashSet<IndexContext> queriedIndexesContexts = new HashSet<>();
+        plan.forEach(node -> {
+            IndexContext indexContext = node.getIndexContext();
+            if (indexContext != null)
+                queriedIndexesContexts.add(indexContext);
+            return Plan.ControlFlow.Continue;
+        });
+        queriedIndexesContexts.forEach(indexContext ->
+                                       indexContext.getIndexMetrics().queriesCount.inc());
+    }
+
     Plan buildPlan()
     {
         Plan.KeysIteration keysIterationPlan = buildKeysIterationPlan();
@@ -371,6 +384,8 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
             queryContext.setFilterSortOrder(QueryContext.FilterSortOrder.SCAN_THEN_FILTER);
         if (plan.contains(node -> node instanceof Plan.KeysSort))
             queryContext.setFilterSortOrder(QueryContext.FilterSortOrder.SEARCH_THEN_ORDER);
+
+        updateIndexMetricsQueriesCount(plan);
 
         if (logger.isTraceEnabled())
             logger.trace("Query execution plan:\n" + plan.toStringRecursive());
@@ -442,7 +457,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
      * Invocations are memorized - multiple calls for the same context return the same view.
      * The views are kept for the lifetime of this {@code QueryController}.
      */
-    QueryView getQueryView(IndexContext context)
+    QueryView getQueryView(IndexContext context) throws QueryView.Builder.MissingIndexException
     {
         return queryViews.computeIfAbsent(context,
                                           c -> new QueryView.Builder(c, mergeRange, queryContext).build());
@@ -522,16 +537,15 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
      * @param builder The plan node builder which receives the built index scans
      * @param expressions The expressions to build the plan from
      */
-    public void buildPlanForExpressions(Plan.Builder builder, Collection<Expression> expressions)
+    void buildPlanForExpressions(Plan.Builder builder, Collection<Expression> expressions)
     {
         Operation.OperationType op = builder.type;
         assert !expressions.isEmpty() : "expressions should not be empty for " + op + " in " + command.rowFilter().root();
 
-        // VSTODO move ANN out of expressions and into its own abstraction? That will help get generic ORDER BY support
-        Collection<Expression> exp = expressions.stream().filter(e -> e.operation != Expression.Op.ORDER_BY).collect(Collectors.toList());
+        assert !expressions.stream().anyMatch(e -> e.operation == Expression.Op.ORDER_BY);
 
         // we cannot use indexes with OR if we have a mix of indexed and non-indexed columns (see CNDB-10142)
-        if (op == Operation.OperationType.OR && !exp.stream().allMatch(e -> e.context.isIndexed()))
+        if (op == Operation.OperationType.OR && !expressions.stream().allMatch(e -> e.context.isIndexed()))
         {
             builder.add(planFactory.everything);
             return;
@@ -585,6 +599,13 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
             var sstableResults = searchSSTables(view, searcher);
             sstableResults.addAll(memtableResults);
             return MergeIterator.getNonReducingCloseable(sstableResults, orderer.getComparator());
+        }
+        catch (QueryView.Builder.MissingIndexException e)
+        {
+            if (orderer.context.isDropped())
+                throw invalidRequest(TopKProcessor.INDEX_MAY_HAVE_BEEN_DROPPED);
+            else
+                throw new IllegalStateException("Index not found but hasn't been dropped", e);
         }
         catch (Throwable t)
         {
@@ -650,15 +671,16 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     private CloseableIterator<PrimaryKeyWithSortKey> getTopKRows(List<PrimaryKey> sourceKeys, int softLimit)
     {
         Tracing.logAndTrace(logger, "SAI predicates produced {} keys", sourceKeys.size());
-        QueryView view = getQueryView(orderer.context);
-        var memtableResults = view.memtableIndexes.stream()
-                                                               .map(index -> index.orderResultsBy(queryContext,
-                                                                                                  sourceKeys,
-                                                                                                  orderer,
-                                                                                                  softLimit))
-                                                               .collect(Collectors.toList());
+        List<CloseableIterator<PrimaryKeyWithSortKey>> memtableResults = null;
         try
         {
+            QueryView view = getQueryView(orderer.context);
+            memtableResults = view.memtableIndexes.stream()
+                                                  .map(index -> index.orderResultsBy(queryContext,
+                                                                                     sourceKeys,
+                                                                                     orderer,
+                                                                                     softLimit))
+                                                  .collect(Collectors.toList());
             var totalRows = view.getTotalSStableRows();
             SSTableSearcher ssTableSearcher = index -> index.orderResultsBy(queryContext,
                                                                             sourceKeys,
@@ -669,9 +691,17 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
             sstableScoredPrimaryKeyIterators.addAll(memtableResults);
             return MergeIterator.getNonReducingCloseable(sstableScoredPrimaryKeyIterators, orderer.getComparator());
         }
+        catch (QueryView.Builder.MissingIndexException e)
+        {
+            if (orderer.context.isDropped())
+                throw invalidRequest(TopKProcessor.INDEX_MAY_HAVE_BEEN_DROPPED);
+            else
+                throw new IllegalStateException("Index not found but hasn't been dropped", e);
+        }
         catch (Throwable t)
         {
-            FileUtils.closeQuietly(memtableResults);
+            if (memtableResults != null)
+                FileUtils.closeQuietly(memtableResults);
             throw t;
         }
 
@@ -861,6 +891,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         switch (predicate.getOp())
         {
             case EQ:
+            case MATCH:
             case CONTAINS_KEY:
             case CONTAINS_VALUE:
             case NOT_EQ:
@@ -915,20 +946,21 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
 
 
     @Override
-    public double estimateAnnSearchCost(Orderer ordering, int limit, long candidates)
+    public double estimateAnnSearchCost(Orderer orderer, int limit, long candidates)
     {
         Preconditions.checkArgument(limit > 0, "limit must be > 0");
 
-        IndexContext context = ordering.context;
+        IndexContext context = orderer.context;
         Collection<MemtableIndex> memtables = context.getLiveMemtables().values();
         View queryView = context.getView();
 
+        int memoryRerankK = orderer.rerankKFor(limit, VectorCompression.NO_COMPRESSION);
         double cost = 0;
         for (MemtableIndex index : memtables)
         {
             // FIXME convert nodes visited to search cost
             int memtableCandidates = (int) Math.min(Integer.MAX_VALUE, candidates);
-            cost += ((VectorMemtableIndex) index).estimateAnnNodesVisited(limit, memtableCandidates);
+            cost += ((VectorMemtableIndex) index).estimateAnnNodesVisited(memoryRerankK, memtableCandidates);
         }
 
         long totalRows = 0;
@@ -943,7 +975,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
                     continue;
                 int segmentLimit = segment.proportionalAnnLimit(limit, totalRows);
                 int segmentCandidates = max(1, (int) (candidates * (double) segment.metadata.numRows / totalRows));
-                cost += segment.estimateAnnSearchCost(segmentLimit, segmentCandidates);
+                cost += segment.estimateAnnSearchCost(orderer, segmentLimit, segmentCandidates);
             }
         }
         return cost;

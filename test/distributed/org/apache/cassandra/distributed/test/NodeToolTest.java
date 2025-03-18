@@ -116,4 +116,18 @@ public class NodeToolTest extends TestBaseImpl
             ringResult.asserts().stderrContains("is not permitted as this cache is disabled");
         }
     }
+
+    @Test
+    public void testCompactionStats() throws Throwable
+    {
+        NodeToolResult result = NODE.nodetoolResult("compactionstats", "--aggregate", "--overlap");
+        result.asserts().success().stdoutContains("pending tasks");
+        result.asserts().success().stdoutContains("Aggregated view");
+        result.asserts().success().stdoutContains("Max overlap map");
+
+        result = NODE.nodetoolResult("compactionstats", "--aggregate", "--overlap", "--human-readable", "system_schema", "tables");
+        result.asserts().success().stdoutContains("system_schema.tables");
+        result.asserts().success().stdoutNotContains("system.peers");
+        result.asserts().success().stdoutNotContains("system_schema.keyspaces");
+    }
 }

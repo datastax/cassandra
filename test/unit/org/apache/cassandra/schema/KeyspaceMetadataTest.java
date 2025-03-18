@@ -26,7 +26,11 @@ import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 import com.google.common.collect.ImmutableCollection;
+import org.apache.cassandra.cql3.functions.types.ParseUtils;
+import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.commons.lang3.StringUtils;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.cql3.CQLTester;
@@ -37,16 +41,24 @@ import org.apache.cassandra.cql3.functions.UDFunction;
 import org.apache.cassandra.cql3.functions.UserFunction;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.UserType;
+import org.apache.cassandra.service.StorageService;
 
 import static junit.framework.TestCase.assertEquals;
 import static junit.framework.TestCase.assertFalse;
 import static junit.framework.TestCase.assertNotNull;
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.junit.Assert.assertNotEquals;
 import static org.psjava.util.AssertStatus.assertTrue;
 
 public class KeyspaceMetadataTest extends CQLTester
 {
     private static final String NEW_KEYSPACE = "new_keyspace";
+
+    @BeforeClass
+    public static void beforeClass()
+    {
+        StorageService.instance.setUpDistributedSystemKeyspaces();
+    }
 
     @Test
     public void testRenameWithNestedTypes()
@@ -145,6 +157,20 @@ public class KeyspaceMetadataTest extends CQLTester
         assertNotNull(original);
         Predicate<Boolean> isCdcDisabled = cdc -> !cdc;
         checkTransformedParams(original, transformed, params -> params.cdc, isCdcDisabled);
+    }
+
+    @Test
+    public void testUnsafeKeyspaceName() {
+        String[] badKeyspaceNames = {"\"non-alphanumeric\"",
+                "test_create_k8yq1r75bpzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+        };
+        for (String badKeyspaceName : badKeyspaceNames)
+            assertThatExceptionOfType(InvalidRequestException.class)
+                    .isThrownBy(() -> createTableMayThrow(String.format("CREATE KEYSPACE %s with replication = " +
+                                    "{ 'class' : 'SimpleStrategy', 'replication_factor' : 1 }",
+                            badKeyspaceName)))
+                    .withMessageContaining(String.format("Keyspace name must not be empty, more than %s characters long, or contain non-alphanumeric-underscore characters (got '%s')",
+                            SchemaConstants.NAME_LENGTH, ParseUtils.unDoubleQuote(badKeyspaceName)));
     }
 
     private void checkKeyspaceRenaming(KeyspaceMetadata original, String newName)

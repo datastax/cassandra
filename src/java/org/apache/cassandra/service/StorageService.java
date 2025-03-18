@@ -96,6 +96,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.codahale.metrics.Meter;
 import org.apache.cassandra.audit.AuditLogManager;
 import org.apache.cassandra.audit.AuditLogOptions;
 import org.apache.cassandra.auth.AuthKeyspace;
@@ -233,6 +234,7 @@ import static org.apache.cassandra.config.CassandraRelevantProperties.DRAIN_EXEC
 import static org.apache.cassandra.config.CassandraRelevantProperties.REPLACEMENT_ALLOW_EMPTY;
 import static org.apache.cassandra.index.SecondaryIndexManager.getIndexName;
 import static org.apache.cassandra.index.SecondaryIndexManager.isIndexColumnFamily;
+import static org.apache.cassandra.io.util.FileUtils.ONE_MB;
 import static org.apache.cassandra.net.NoPayload.noPayload;
 import static org.apache.cassandra.net.Verb.REPLICATION_DONE_REQ;
 import static org.apache.cassandra.utils.FBUtilities.getBroadcastAddressAndPort;
@@ -1650,6 +1652,21 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         CompactionManager.instance.setRate(value);
     }
 
+    /**
+     * Get the Current Compaction Throughput
+     * key is 1/5/15minute time dimension for statistics
+     * value is the metric double string (unit is:mib/s)
+     */
+    public Map<String, String> getCurrentCompactionThroughputMebibytesPerSec()
+    {
+        HashMap<String, String> result = new LinkedHashMap<>();
+        Meter rate = CompactionManager.instance.getCompactionThroughput();
+        result.put("1minute", String.format("%.3f", rate.getOneMinuteRate() / ONE_MB));
+        result.put("5minute", String.format("%.3f", rate.getFiveMinuteRate() / ONE_MB));
+        result.put("15minute", String.format("%.3f", rate.getFifteenMinuteRate() / ONE_MB));
+        return result;
+    }
+
     public int getBatchlogReplayThrottleInKB()
     {
         return DatabaseDescriptor.getBatchlogReplayThrottleInKB();
@@ -1899,7 +1916,11 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             Nodes.peers().remove(DatabaseDescriptor.getReplaceAddress());
         }
         if (!Gossiper.instance.seenAnySeed())
+        {
+            logger.info("Announcing shutdown to get out of the hibernation deadlock");
+            Gossiper.instance.announceShutdown();
             throw new IllegalStateException("Unable to contact any seeds: " + Gossiper.instance.getSeeds());
+        }
 
         if (Boolean.getBoolean("cassandra.reset_bootstrap_progress"))
         {
@@ -2769,22 +2790,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     private Collection<Token> getTokensFor(InetAddressAndPort endpoint)
     {
-        try
-        {
-            EndpointState state = Gossiper.instance.getEndpointStateForEndpoint(endpoint);
-            if (state == null)
-                return Collections.emptyList();
-
-            VersionedValue versionedValue = state.getApplicationState(ApplicationState.TOKENS);
-            if (versionedValue == null)
-                return Collections.emptyList();
-
-            return TokenSerializer.deserialize(getTokenMetadata().partitioner, new DataInputStream(new ByteArrayInputStream(versionedValue.toBytes())));
-        }
-        catch (IOException e)
-        {
-            throw new RuntimeException(e);
-        }
+        return Gossiper.instance.getTokensFor(endpoint, getTokenMetadata().partitioner);
     }
 
     /**

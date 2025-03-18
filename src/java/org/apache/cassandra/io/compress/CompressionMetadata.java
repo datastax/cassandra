@@ -27,6 +27,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.SortedSet;
 import java.util.TreeSet;
+import java.util.concurrent.atomic.AtomicLong;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
@@ -60,6 +61,7 @@ import org.apache.cassandra.utils.concurrent.Transactional;
  */
 public class CompressionMetadata implements AutoCloseable
 {
+    private static final AtomicLong NATIVE_MEMORY_USAGE = new AtomicLong(0);
     /**
      * DataLength can represent either the true length of the file
      * or some shorter value, in the case we want to impose a shorter limit on readers
@@ -206,6 +208,11 @@ public class CompressionMetadata implements AutoCloseable
         this.startChunkIndex = 0;
     }
 
+    public static long nativeMemoryAllocated()
+    {
+        return NATIVE_MEMORY_USAGE.get();
+    }
+
     public ICompressor compressor()
     {
         return parameters.getSstableCompressor();
@@ -283,6 +290,7 @@ public class CompressionMetadata implements AutoCloseable
             }
 
             lastOffset = endIndex < chunkCount ? input.readLong() - offsets.get(0) : compressedFileLength;
+            NATIVE_MEMORY_USAGE.addAndGet(offsets.memoryUsed());
             return Pair.create(offsets, lastOffset);
         }
         catch (EOFException e)
@@ -394,6 +402,7 @@ public class CompressionMetadata implements AutoCloseable
 
     public void close()
     {
+        NATIVE_MEMORY_USAGE.addAndGet(-chunkOffsets.memoryUsed());
         chunkOffsets.close();
     }
 
@@ -403,7 +412,7 @@ public class CompressionMetadata implements AutoCloseable
         private final CompressionParams parameters;
         private final File filePath;
         private int maxCount = 100;
-        private SafeMemory offsets = new SafeMemory(maxCount * 8L);
+        private SafeMemory offsets;
         private int count = 0;
 
         // provided by user when setDescriptor
@@ -413,6 +422,8 @@ public class CompressionMetadata implements AutoCloseable
         {
             this.parameters = parameters;
             filePath = path;
+            offsets = new SafeMemory(maxCount * 8L);
+            NATIVE_MEMORY_USAGE.addAndGet(offsets.size());
         }
 
         public static Writer open(CompressionParams parameters, File path)
@@ -425,6 +436,7 @@ public class CompressionMetadata implements AutoCloseable
             if (count == maxCount)
             {
                 SafeMemory newOffsets = offsets.copy((maxCount *= 2L) * 8L);
+                NATIVE_MEMORY_USAGE.addAndGet(newOffsets.size() - offsets.size());
                 offsets.close();
                 offsets = newOffsets;
             }
@@ -474,6 +486,7 @@ public class CompressionMetadata implements AutoCloseable
             {
                 SafeMemory tmp = offsets;
                 offsets = offsets.copy(count * 8L);
+                NATIVE_MEMORY_USAGE.addAndGet(offsets.size() - tmp.size());
                 tmp.free();
             }
 
@@ -500,6 +513,11 @@ public class CompressionMetadata implements AutoCloseable
         @SuppressWarnings("resource")
         public CompressionMetadata open(long dataLength, long compressedLength)
         {
+            // we are overcounting for a while, but it's not worth the effort to fix
+            // the problem is that the offsets object is allocated by the Writer and `closed` when
+            // the Writer is closed, but the offsets object is used by the CompressionMetadata object
+            // that will survive for all the time the SSTableReader is open
+            NATIVE_MEMORY_USAGE.addAndGet(offsets.size());
             SafeMemory tOffsets = this.offsets.sharedCopy();
 
             // calculate how many entries we need, if our dataLength is truncated
@@ -540,6 +558,7 @@ public class CompressionMetadata implements AutoCloseable
 
         protected Throwable doPostCleanup(Throwable failed)
         {
+            NATIVE_MEMORY_USAGE.addAndGet(-offsets.size());
             return offsets.close(failed);
         }
 

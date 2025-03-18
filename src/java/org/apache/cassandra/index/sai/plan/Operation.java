@@ -93,7 +93,7 @@ public class Operation
                 analyzer.reset(e.getIndexValue());
 
                 // EQ/LIKE_*/NOT_EQ can have multiple expressions e.g. text = "Hello World",
-                // becomes text = "Hello" OR text = "World" because "space" is always interpreted as a split point (by analyzer),
+                // becomes text = "Hello" AND text = "World" because "space" is always interpreted as a split point (by analyzer),
                 // CONTAINS/CONTAINS_KEY are always treated as multiple expressions since they currently only targetting
                 // collections, NOT_EQ is made an independent expression only in case of pre-existing multiple EQ expressions, or
                 // if there is no EQ operations and NOT_EQ is met or a single NOT_EQ expression present,
@@ -102,6 +102,7 @@ public class Operation
                 boolean isMultiExpression = columnIsMultiExpression.getOrDefault(e.column(), Boolean.FALSE);
                 switch (e.operator())
                 {
+                    // case BM25: leave it at the default of `false`
                     case EQ:
                         // EQ operator will always be a multiple expression because it is being used by map entries
                         isMultiExpression = indexContext.isNonFrozenCollection();
@@ -311,7 +312,9 @@ public class Operation
                                                                                                         ByteBufferAccessor.instance,
                                                                                                         offset,
                                                                                                         ProtocolVersion.V3),
-                                                                               expression.analyzer())));
+                                                                               expression.indexAnalyzer(),
+                                                                               expression.queryAnalyzer(),
+                                                                               expression.annOptions())));
                     offset += TypeSizes.INT_SIZE + ByteBufferAccessor.instance.getInt(expression.getIndexValue(), offset);
                 }
                 if (node.children().size() == 1)

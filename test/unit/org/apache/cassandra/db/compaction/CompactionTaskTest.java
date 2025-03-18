@@ -294,7 +294,7 @@ public class CompactionTaskTest
 
         verify(operationObserver, times(1)).onOperationStart(tableOpCaptor.capture());
         verify(compObserver, times(1)).onInProgress(compactionCaptor.capture());
-        verify(compObserver, times(1)).onCompleted(eq(txn.opId()), eq(true));
+        verify(compObserver, times(1)).onCompleted(eq(txn.opId()), eq(null));
     }
 
     @Test
@@ -308,7 +308,7 @@ public class CompactionTaskTest
         taskMock.addObserver(compObserver);
         Mockito.doThrow(new RuntimeException("Test throw")).when(taskMock).executeInternal();
         Assert.assertThrows(RuntimeException.class, () ->  taskMock.execute());
-        Mockito.verify(compObserver, times(1)).onCompleted(any(UUID.class), eq(false));
+        Mockito.verify(compObserver, times(1)).onCompleted(any(UUID.class), any(Throwable.class));
     }
 
     private Set<SSTableReader> generateData(int numSSTables, int numKeys)

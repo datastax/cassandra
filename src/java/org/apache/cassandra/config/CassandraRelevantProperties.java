@@ -22,8 +22,12 @@ import java.util.concurrent.TimeUnit;
 
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.io.compress.AdaptiveCompressor;
+import org.apache.cassandra.io.compress.LZ4Compressor;
 import org.apache.cassandra.metrics.TableMetrics;
+import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.sensors.SensorsFactory;
+import org.apache.cassandra.service.context.OperationContext;
 import org.apache.cassandra.service.reads.range.EndpointGroupingRangeCommandIterator;
 
 /** A class that extracts system properties for the cassandra node it runs within. */
@@ -225,6 +229,11 @@ public enum CassandraRelevantProperties
     TRUNCATE_STATEMENT_PROVIDER("cassandra.truncate_statement_provider"),
 
     /**
+     * whether to persist prepared statements in the system table
+     */
+    PERSIST_PREPARED_STATEMENTS("cassandra.persist_prepared_statements", "true"),
+
+    /**
      * custom native library for os access
      */
     CUSTOM_NATIVE_LIBRARY("cassandra.custom_native_library"),
@@ -287,11 +296,11 @@ public enum CassandraRelevantProperties
      * when the JVM terminates. Therefore, we can use such optimization and not wait unnecessarily. */
     NON_GRACEFUL_SHUTDOWN("cassandra.test.messagingService.nonGracefulShutdown"),
 
-    /** Flush changes of {@link org.apache.cassandra.schema.SchemaKeyspace} after each schema modification. In production,
-     * we always do that. However, tests which do not restart nodes may disable this functionality in order to run
-     * faster. Note that this is disabled for unit tests but if an individual test requires schema to be flushed, it
-     * can be also done manually for that particular case: {@code flush(SchemaConstants.SCHEMA_KEYSPACE_NAME);}. */
-    FLUSH_LOCAL_SCHEMA_CHANGES("cassandra.test.flush_local_schema_changes", "true"),
+    /** Disables flush changes to local and schema keyspaces. Also, disables recycling all segments of commitlog after
+     * dropping a table. Tests which do not restart nodes may enable this option in order to run faster. Note that this
+     * is enabled for unit tests but if an individual test requires schema to be flushed, it can be also done manually
+     * for that particular case: {@code flush(SchemaConstants.SCHEMA_KEYSPACE_NAME);}. */
+    UNSAFE_SYSTEM("cassandra.unsafesystem", "false"),
 
     /**
      * Delay before checking if gossip is settled.
@@ -574,7 +583,31 @@ public enum CassandraRelevantProperties
     /**
      * If true, the coordinator will propagate sensors via the native protocol custom payload bytes map.
      */
-    SENSORS_VIA_NATIVE_PROTOCOL("cassandra.sensors_via_native_protocol", "false");
+    SENSORS_VIA_NATIVE_PROTOCOL("cassandra.sensors_via_native_protocol", "false"),
+
+    /**
+     * The current messaging version. This is used when we add new messaging versions without adopting them immediately,
+     * or to force the node to use a specific version for testing purposes.
+     */
+    DS_CURRENT_MESSAGING_VERSION("ds.current_messaging_version", Integer.toString(MessagingService.VERSION_DS_11)),
+
+    /**
+     * Which compression algorithm to use for SSTable compression when not specified explicitly in the sstable options.
+     * Can be "fast", which selects {@link LZ4Compressor}, or "adaptive" which selects {@link AdaptiveCompressor}.
+     */
+    DEFAULT_SSTABLE_COMPRESSION("cassandra.default_sstable_compression", "fast"),
+
+    /**
+     * Do not try to calculate optimal streaming candidates. This can take a lot of time in some configs specially
+     * with vnodes.
+     */
+    SKIP_OPTIMAL_STREAMING_CANDIDATES_CALCULATION("cassandra.skip_optimal_streaming_candidates_calculation", "false"),
+
+    /**
+     * Allows custom implementation of {@link OperationContext.Factory} to optionally create and configure custom
+     * {@link OperationContext} instances.
+     */
+    OPERATION_CONTEXT_FACTORY("cassandra.operation_context_factory_class");
 
     CassandraRelevantProperties(String key, String defaultVal)
     {

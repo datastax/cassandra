@@ -64,6 +64,32 @@ public class LuceneAnalyzerTest extends SAITester
         assertEquals(0, execute("SELECT * FROM %s WHERE val = 'query'").size());
     }
 
+    /**
+     * See CNDB-12739 for more details.
+     */
+    @Test
+    public void testQueryAnalyzerWithExtraData() throws Throwable
+    {
+        createTable("CREATE TABLE %s (c1 int PRIMARY KEY , c2 text)");
+
+        createIndex("CREATE CUSTOM INDEX ON %s(c2) USING 'StorageAttachedIndex' WITH OPTIONS = {" +
+                "'index_analyzer': '{" +
+                "  \"tokenizer\" : { \"name\" : \"whitespace\", \"args\" : {} }," +
+                "  \"filters\" : [ { \"name\" : \"lowercase\", \"args\": {} }, " +
+                "                  { \"name\" : \"edgengram\", \"args\": { \"minGramSize\":\"1\", \"maxGramSize\":\"30\" } }]," +
+                "  \"charFilters\" : []}', " +
+                "'query_analyzer': '{" +
+                "  \"tokenizer\" : { \"name\" : \"whitespace\", \"args\" : {} }," +
+                "  \"filters\" : [ {\"name\" : \"lowercase\",\"args\": {}} ]}'}");
+
+        execute("INSERT INTO %s(c1,c2) VALUES (1, 'astra quick fox')");
+        execute("INSERT INTO %s(c1,c2) VALUES (2, 'astra quick foxes')");
+        execute("INSERT INTO %s(c1,c2) VALUES (3, 'astra1')");
+        execute("INSERT INTO %s(c1,c2) VALUES (4, 'astra4 -1@a#')");
+
+        beforeAndAfterFlush(() -> assertEquals(4, execute("SELECT * FROM %s WHERE c2 :'ast' ").size()));
+    }
+
     @Test
     public void testStandardQueryAnalyzer()
     {
@@ -469,7 +495,7 @@ public class LuceneAnalyzerTest extends SAITester
 
         execute("INSERT INTO %s (id, val) VALUES ('1', 'MAL0133AU')");
         execute("INSERT INTO %s (id, val) VALUES ('2', 'WFS2684AU')");
-        execute("INSERT INTO %s (id, val) VALUES ('3', 'FPWMCR005 Mercer High Growth Managed')");
+        execute("INSERT INTO %s (id, val) VALUES ('3', 'FPWMCR005 some other words')");
         execute("INSERT INTO %s (id, val) VALUES ('4', 'WFS7093AU')");
         execute("INSERT INTO %s (id, val) VALUES ('5', 'WFS0565AU')");
 
@@ -515,7 +541,7 @@ public class LuceneAnalyzerTest extends SAITester
 
         execute("INSERT INTO %s (id, val) VALUES ('1', 'MAL0133AU')");
         execute("INSERT INTO %s (id, val) VALUES ('2', 'WFS2684AU')");
-        execute("INSERT INTO %s (id, val) VALUES ('3', 'FPWMCR005 Mercer High Growth Managed')");
+        execute("INSERT INTO %s (id, val) VALUES ('3', 'FPWMCR005 some other words')");
         execute("INSERT INTO %s (id, val) VALUES ('4', 'WFS7093AU')");
         execute("INSERT INTO %s (id, val) VALUES ('5', 'WFS0565AU')");
 
@@ -861,6 +887,171 @@ public class LuceneAnalyzerTest extends SAITester
                         "'query_analyzer': '{" +
                         "   \"tokenizer\":{\"name\":\"whitespace\"}," +
                         "   \"filters\":[{\"name\":\"porterstem\"}]}'}");
+    }
+
+    @Test
+    public void testAnalyzerOnSet() throws Throwable
+    {
+        createTable("CREATE TABLE %s (id text PRIMARY KEY, genres set<text>)");
+        execute("INSERT INTO %s (id, genres) VALUES ('1', {'Horror', 'comedy'})");
+
+        assertRowsNet(executeNet("SELECT id FROM %s WHERE genres CONTAINS 'Horror' ALLOW FILTERING"), row("1"));
+        assertRowsNet(executeNet("SELECT id FROM %s WHERE genres NOT CONTAINS 'Horror' ALLOW FILTERING"));
+        assertRowsNet(executeNet("SELECT id FROM %s WHERE genres CONTAINS 'horror' ALLOW FILTERING"));
+        assertRowsNet(executeNet("SELECT id FROM %s WHERE genres NOT CONTAINS 'horror' ALLOW FILTERING"), row("1"));
+
+        createIndex("CREATE CUSTOM INDEX ON %s(genres) USING 'StorageAttachedIndex' WITH OPTIONS = { 'index_analyzer':'STANDARD'}");
+
+        beforeAndAfterFlush(() -> {
+            assertRowsNet(executeNet("SELECT id FROM %s WHERE genres CONTAINS 'horror'"), row("1"));
+            assertRowsNet(executeNet("SELECT id FROM %s WHERE genres NOT CONTAINS 'horror'"));
+        });
+    }
+
+    @Test
+    public void testAnalyzerOnSetWithDistinctQueryAnalyzer() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k int, c int, v set<text>, PRIMARY KEY(k, c))");
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = {" +
+                    "'index_analyzer': '{" +
+                    "  \"tokenizer\" : { \"name\" : \"whitespace\", \"args\" : {} }," +
+                    "  \"filters\" : [ { \"name\" : \"lowercase\", \"args\": {} }, " +
+                    "                  { \"name\" : \"edgengram\", \"args\": { \"minGramSize\":\"1\", \"maxGramSize\":\"30\" } }]," +
+                    "  \"charFilters\" : []}', " +
+                    "'query_analyzer': '{" +
+                    "  \"tokenizer\" : { \"name\" : \"whitespace\", \"args\" : {} }," +
+                    "  \"filters\" : [ {\"name\" : \"lowercase\",\"args\": {}} ]}'}");
+
+        execute("INSERT INTO %s (k, c, v) VALUES (0, 1, {'astra quick fox', 'astra quick foxes', 'astra4', 'astra5 -1@a#', 'lazy dog'})");
+        execute("INSERT INTO %s (k, c, v) VALUES (0, 2, {'astra quick fox'})");
+        execute("INSERT INTO %s (k, c, v) VALUES (0, 3, {'astra quick foxes'})");
+        execute("INSERT INTO %s (k, c, v) VALUES (0, 4, {'astra4'})");
+        execute("INSERT INTO %s (k, c, v) VALUES (0, 5, {'astra5 -1@a#'})");
+        execute("INSERT INTO %s (k, c, v) VALUES (0, 6, {'lazy dog'})");
+
+        beforeAndAfterFlush(() -> {
+            assertRowsNet(executeNet("SELECT c FROM %s WHERE v CONTAINS 'ast'"), row(1), row(2), row(3), row(4), row(5));
+            assertRowsNet(executeNet("SELECT c FROM %s WHERE v CONTAINS 'astra'"), row(1), row(2), row(3), row(4), row(5));
+            assertRowsNet(executeNet("SELECT c FROM %s WHERE v CONTAINS 'astra4'"), row(1), row(4));
+            assertRowsNet(executeNet("SELECT c FROM %s WHERE v CONTAINS 'astra5'"), row(1), row(5));
+            assertRowsNet(executeNet("SELECT c FROM %s WHERE v CONTAINS 'astra9'"));
+
+            assertRowsNet(executeNet("SELECT c FROM %s WHERE v NOT CONTAINS 'ast'"), row(6));
+            assertRowsNet(executeNet("SELECT c FROM %s WHERE v NOT CONTAINS 'astra'"), row(6));
+            assertRowsNet(executeNet("SELECT c FROM %s WHERE v NOT CONTAINS 'astra4'"), row(2), row(3), row(5), row(6));
+            assertRowsNet(executeNet("SELECT c FROM %s WHERE v NOT CONTAINS 'astra5'"), row(2), row(3), row(4), row(6));
+            assertRowsNet(executeNet("SELECT c FROM %s WHERE v NOT CONTAINS 'astra9'"), row(1), row(2), row(3), row(4), row(5), row(6));
+        });
+    }
+
+    @Test
+    public void testAnalyzerOnList() throws Throwable
+    {
+        createTable("CREATE TABLE %s (id text PRIMARY KEY, genres list<text>)");
+        execute("INSERT INTO %s (id, genres) VALUES ('1', ['Horror', 'comedy'])");
+
+        assertRowsNet(executeNet("SELECT id FROM %s WHERE genres CONTAINS 'Horror' ALLOW FILTERING"), row("1"));
+        assertRowsNet(executeNet("SELECT id FROM %s WHERE genres NOT CONTAINS 'Horror' ALLOW FILTERING"));
+        assertRowsNet(executeNet("SELECT id FROM %s WHERE genres CONTAINS 'horror' ALLOW FILTERING"));
+        assertRowsNet(executeNet("SELECT id FROM %s WHERE genres NOT CONTAINS 'horror' ALLOW FILTERING"), row("1"));
+
+        createIndex("CREATE CUSTOM INDEX ON %s(genres) USING 'StorageAttachedIndex' WITH OPTIONS = { 'index_analyzer':'STANDARD'}");
+
+        beforeAndAfterFlush(() -> {
+            assertRowsNet(executeNet("SELECT id FROM %s WHERE genres CONTAINS 'horror'"), row("1"));
+            assertRowsNet(executeNet("SELECT id FROM %s WHERE genres NOT CONTAINS 'horror'"));
+        });
+    }
+
+    @Test
+    public void testAnalyzerOnListWithDistinctQueryAnalyzer() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k int, c int, v list<text>, PRIMARY KEY(k, c))");
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = {" +
+                    "'index_analyzer': '{" +
+                    "  \"tokenizer\" : { \"name\" : \"whitespace\", \"args\" : {} }," +
+                    "  \"filters\" : [ { \"name\" : \"lowercase\", \"args\": {} }, " +
+                    "                  { \"name\" : \"edgengram\", \"args\": { \"minGramSize\":\"1\", \"maxGramSize\":\"30\" } }]," +
+                    "  \"charFilters\" : []}', " +
+                    "'query_analyzer': '{" +
+                    "  \"tokenizer\" : { \"name\" : \"whitespace\", \"args\" : {} }," +
+                    "  \"filters\" : [ {\"name\" : \"lowercase\",\"args\": {}} ]}'}");
+
+        execute("INSERT INTO %s (k, c, v) VALUES (0, 1, ['astra quick fox', 'astra quick foxes', 'astra4', 'astra5 -1@a#', 'lazy dog'])");
+        execute("INSERT INTO %s (k, c, v) VALUES (0, 2, ['astra quick fox'])");
+        execute("INSERT INTO %s (k, c, v) VALUES (0, 3, ['astra quick foxes'])");
+        execute("INSERT INTO %s (k, c, v) VALUES (0, 4, ['astra4'])");
+        execute("INSERT INTO %s (k, c, v) VALUES (0, 5, ['astra5 -1@a#'])");
+        execute("INSERT INTO %s (k, c, v) VALUES (0, 6, ['lazy dog'])");
+
+        beforeAndAfterFlush(() -> {
+            assertRowsNet(executeNet("SELECT c FROM %s WHERE v CONTAINS 'ast'"), row(1), row(2), row(3), row(4), row(5));
+            assertRowsNet(executeNet("SELECT c FROM %s WHERE v CONTAINS 'astra'"), row(1), row(2), row(3), row(4), row(5));
+            assertRowsNet(executeNet("SELECT c FROM %s WHERE v CONTAINS 'astra4'"), row(1), row(4));
+            assertRowsNet(executeNet("SELECT c FROM %s WHERE v CONTAINS 'astra5'"), row(1), row(5));
+            assertRowsNet(executeNet("SELECT c FROM %s WHERE v CONTAINS 'astra9'"));
+
+            assertRowsNet(executeNet("SELECT c FROM %s WHERE v NOT CONTAINS 'ast'"), row(6));
+            assertRowsNet(executeNet("SELECT c FROM %s WHERE v NOT CONTAINS 'astra'"), row(6));
+            assertRowsNet(executeNet("SELECT c FROM %s WHERE v NOT CONTAINS 'astra4'"), row(2), row(3), row(5), row(6));
+            assertRowsNet(executeNet("SELECT c FROM %s WHERE v NOT CONTAINS 'astra5'"), row(2), row(3), row(4), row(6));
+            assertRowsNet(executeNet("SELECT c FROM %s WHERE v NOT CONTAINS 'astra9'"), row(1), row(2), row(3), row(4), row(5), row(6));
+        });
+    }
+
+    @Test
+    public void testAnalyzerOnMapKeys() throws Throwable
+    {
+        createTable("CREATE TABLE %s (id text PRIMARY KEY, genres map<text, int>)");
+        execute("INSERT INTO %s (id, genres) VALUES ('1', {'Horror' : 1, 'comedy' : 2})");
+
+        assertRowsNet(executeNet("SELECT id FROM %s WHERE genres CONTAINS KEY 'Horror' ALLOW FILTERING"), row("1"));
+        assertRowsNet(executeNet("SELECT id FROM %s WHERE genres NOT CONTAINS KEY 'Horror' ALLOW FILTERING"));
+        assertRowsNet(executeNet("SELECT id FROM %s WHERE genres CONTAINS KEY 'horror' ALLOW FILTERING"));
+        assertRowsNet(executeNet("SELECT id FROM %s WHERE genres NOT CONTAINS KEY 'horror' ALLOW FILTERING"), row("1"));
+
+        createIndex("CREATE CUSTOM INDEX ON %s(KEYS(genres)) USING 'StorageAttachedIndex' WITH OPTIONS = { 'index_analyzer':'STANDARD'}");
+
+        beforeAndAfterFlush(() -> {
+            assertRowsNet(executeNet("SELECT id FROM %s WHERE genres CONTAINS KEY 'horror'"), row("1"));
+            assertRowsNet(executeNet("SELECT id FROM %s WHERE genres NOT CONTAINS KEY 'horror'"));
+        });
+    }
+
+    @Test
+    public void testAnalyzerOnMapKeysWithDistinctQueryAnalyzer() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k int, c int, v map<text, int>, PRIMARY KEY(k, c))");
+        createIndex("CREATE CUSTOM INDEX ON %s(KEYS(v)) USING 'StorageAttachedIndex' WITH OPTIONS = {" +
+                    "'index_analyzer': '{" +
+                    "  \"tokenizer\" : { \"name\" : \"whitespace\", \"args\" : {} }," +
+                    "  \"filters\" : [ { \"name\" : \"lowercase\", \"args\": {} }, " +
+                    "                  { \"name\" : \"edgengram\", \"args\": { \"minGramSize\":\"1\", \"maxGramSize\":\"30\" } }]," +
+                    "  \"charFilters\" : []}', " +
+                    "'query_analyzer': '{" +
+                    "  \"tokenizer\" : { \"name\" : \"whitespace\", \"args\" : {} }," +
+                    "  \"filters\" : [ {\"name\" : \"lowercase\",\"args\": {}} ]}'}");
+
+        execute("INSERT INTO %s (k, c, v) VALUES (0, 1, {'astra quick fox':0, 'astra quick foxes':0, 'astra4':0, 'astra5 -1@a#':0, 'lazy dog':0})");
+        execute("INSERT INTO %s (k, c, v) VALUES (0, 2, {'astra quick fox':0})");
+        execute("INSERT INTO %s (k, c, v) VALUES (0, 3, {'astra quick foxes':0})");
+        execute("INSERT INTO %s (k, c, v) VALUES (0, 4, {'astra4':0})");
+        execute("INSERT INTO %s (k, c, v) VALUES (0, 5, {'astra5 -1@a#':0})");
+        execute("INSERT INTO %s (k, c, v) VALUES (0, 6, {'lazy dog':0})");
+
+        beforeAndAfterFlush(() -> {
+            assertRowsNet(executeNet("SELECT c FROM %s WHERE v CONTAINS KEY 'ast'"), row(1), row(2), row(3), row(4), row(5));
+            assertRowsNet(executeNet("SELECT c FROM %s WHERE v CONTAINS KEY 'astra'"), row(1), row(2), row(3), row(4), row(5));
+            assertRowsNet(executeNet("SELECT c FROM %s WHERE v CONTAINS KEY 'astra4'"), row(1), row(4));
+            assertRowsNet(executeNet("SELECT c FROM %s WHERE v CONTAINS KEY 'astra5'"), row(1), row(5));
+            assertRowsNet(executeNet("SELECT c FROM %s WHERE v CONTAINS KEY 'astra9'"));
+
+            assertRowsNet(executeNet("SELECT c FROM %s WHERE v NOT CONTAINS KEY 'ast'"), row(6));
+            assertRowsNet(executeNet("SELECT c FROM %s WHERE v NOT CONTAINS KEY 'astra'"), row(6));
+            assertRowsNet(executeNet("SELECT c FROM %s WHERE v NOT CONTAINS KEY 'astra4'"), row(2), row(3), row(5), row(6));
+            assertRowsNet(executeNet("SELECT c FROM %s WHERE v NOT CONTAINS KEY 'astra5'"), row(2), row(3), row(4), row(6));
+            assertRowsNet(executeNet("SELECT c FROM %s WHERE v NOT CONTAINS KEY 'astra9'"), row(1), row(2), row(3), row(4), row(5), row(6));
+        });
     }
 
     private void assertClientWarningOnNGram(String indexOptions)

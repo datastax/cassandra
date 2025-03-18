@@ -26,7 +26,7 @@ import org.apache.cassandra.io.sstable.SSTableId;
  */
 public class RowIdWithScore extends RowIdWithMeta
 {
-    private final float score;
+    public final float score;
 
     public RowIdWithScore(int segmentRowId, float score)
     {

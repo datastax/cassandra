@@ -158,7 +158,6 @@ public class DatabaseDescriptor
     private static final int searchConcurrencyFactor = Integer.parseInt(System.getProperty(Config.PROPERTY_PREFIX + "search_concurrency_factor", "1"));
 
     private static volatile boolean disableSTCSInL0 = Boolean.getBoolean(Config.PROPERTY_PREFIX + "disable_stcs_in_l0");
-    private static final boolean unsafeSystem = Boolean.getBoolean(Config.PROPERTY_PREFIX + "unsafesystem");
 
     // turns some warnings into exceptions for testing
     private static final boolean strictRuntimeChecks = Boolean.getBoolean("cassandra.strict.runtime.checks");
@@ -2119,7 +2118,9 @@ public class DatabaseDescriptor
 
     public static Config.FlushCompression getFlushCompression()
     {
-        return conf.flush_compression;
+        return Objects.requireNonNullElseGet(conf.flush_compression, () -> shouldUseAdaptiveCompressionByDefault()
+                                                                           ? Config.FlushCompression.adaptive
+                                                                           : Config.FlushCompression.fast);
     }
 
     public static void setFlushCompression(Config.FlushCompression compression)
@@ -2127,7 +2128,12 @@ public class DatabaseDescriptor
         conf.flush_compression = compression;
     }
 
-   /**
+    public static boolean shouldUseAdaptiveCompressionByDefault()
+    {
+        return CassandraRelevantProperties.DEFAULT_SSTABLE_COMPRESSION.getString().equals("adaptive");
+    }
+
+    /**
     * Maximum number of buffers in the compression pool. The default value is 3, it should not be set lower than that
     * (one segment in compression, one written to, one in reserve); delays in compression may cause the log to use
     * more, depending on how soon the sync policy stops all writing threads.
@@ -2814,6 +2820,11 @@ public class DatabaseDescriptor
         return conf.file_cache_size_in_mb;
     }
 
+    public static void disableChunkCache()
+    {
+        conf.file_cache_enabled = false;
+    }
+
     public static void enableChunkCache(int sizeInMB)
     {
         conf.file_cache_enabled = true;
@@ -3327,11 +3338,6 @@ public class DatabaseDescriptor
     public static int searchConcurrencyFactor()
     {
         return searchConcurrencyFactor;
-    }
-
-    public static boolean isUnsafeSystem()
-    {
-        return unsafeSystem;
     }
 
     public static boolean diagnosticEventsEnabled()

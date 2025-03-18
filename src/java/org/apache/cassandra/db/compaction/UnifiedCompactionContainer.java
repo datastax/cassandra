@@ -18,6 +18,7 @@ package org.apache.cassandra.db.compaction;
 
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -358,6 +359,12 @@ public class UnifiedCompactionContainer implements CompactionStrategyContainer
         strategy.periodicReport();
     }
 
+    @Override
+    public Map<String, String> getMaxOverlapsMap()
+    {
+        return strategy.getMaxOverlapsMap();
+    }
+
     BackgroundCompactions getBackgroundCompactions()
     {
         return strategy.backgroundCompactions;
@@ -370,9 +377,9 @@ public class UnifiedCompactionContainer implements CompactionStrategyContainer
     }
 
     @Override
-    public void onCompleted(UUID id, boolean isSuccess)
+    public void onCompleted(UUID id, Throwable err)
     {
-        strategy.onCompleted(id, isSuccess);
+        strategy.onCompleted(id, err);
     }
 
     @Override

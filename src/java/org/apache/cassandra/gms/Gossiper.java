@@ -17,6 +17,9 @@
  */
 package org.apache.cassandra.gms;
 
+import java.io.ByteArrayInputStream;
+import java.io.DataInputStream;
+import java.io.IOException;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -64,6 +67,7 @@ import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.SystemKeyspace;
+import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.locator.InetAddressAndPort;
@@ -937,6 +941,130 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
         });
     }
 
+    public void reviveEndpoint(String address) throws UnknownHostException
+    {
+        InetAddressAndPort endpoint = InetAddressAndPort.getByName(address);
+        EndpointState epState = endpointStateMap.get(endpoint);
+        logger.warn("Reviving {} via gossip", endpoint);
+
+        if (epState == null)
+            throw new RuntimeException("Cannot revive endpoint " + endpoint + ": no endpoint-state");
+
+        int generation = epState.getHeartBeatState().getGeneration();
+        int heartbeat = epState.getHeartBeatState().getHeartBeatVersion();
+
+        logger.info("Have endpoint-state for {}: status={}, generation={}, heartbeat={}",
+                endpoint, epState.getStatus(), generation, heartbeat);
+
+        if (!isSilentShutdownState(epState))
+            throw new RuntimeException("Cannot revive endpoint " + endpoint + ": not in a (silent) shutdown state: " + epState.getStatus());
+
+        if (FailureDetector.instance.isAlive(endpoint))
+            throw new RuntimeException("Cannot revive endpoint " + endpoint + ": still alive (failure-detector)");
+
+        logger.info("Sleeping for {}ms to ensure {} does not change", StorageService.RING_DELAY_MILLIS, endpoint);
+        Uninterruptibles.sleepUninterruptibly(StorageService.RING_DELAY_MILLIS, TimeUnit.MILLISECONDS);
+        // make sure the endpoint state did not change
+        EndpointState newState = endpointStateMap.get(endpoint);
+        if (newState == null)
+            throw new RuntimeException("Cannot revive endpoint " + endpoint + ": endpoint-state disappeared");
+        if (newState.getHeartBeatState().getGeneration() != generation)
+            throw new RuntimeException("Cannot revive endpoint " + endpoint + ": still alive, generation changed while trying to reviving it");
+        if (newState.getHeartBeatState().getHeartBeatVersion() != heartbeat)
+            throw new RuntimeException("Cannot revive endpoint " + endpoint + ": still alive, heartbeat changed while trying to reviving it");
+
+        epState.updateTimestamp(); // make sure we don't evict it too soon
+        epState.getHeartBeatState().forceNewerGenerationUnsafe();
+
+        // using the tokens from the endpoint-state as that is the real source of truth
+        Collection<Token> tokens = getTokensFromEndpointState(epState, DatabaseDescriptor.getPartitioner());
+        if (tokens == null || tokens.isEmpty())
+            throw new RuntimeException("Cannot revive endpoint " + endpoint + ": no tokens from TokenMetadata");
+
+        epState.addApplicationState(ApplicationState.STATUS, StorageService.instance.valueFactory.normal(tokens));
+        epState.addApplicationState(ApplicationState.STATUS_WITH_PORT, StorageService.instance.valueFactory.normal(tokens));
+        handleMajorStateChange(endpoint, epState);
+        Uninterruptibles.sleepUninterruptibly(intervalInMillis * 4, TimeUnit.MILLISECONDS);
+        logger.warn("Finished reviving {}, status={}, generation={}, heartbeat={}",
+                endpoint, epState.getStatus(), generation, heartbeat);
+    }
+
+    public void unsafeSetEndpointState(String address, String status) throws UnknownHostException
+    {
+        logger.warn("Forcibly changing gossip status of " + address + " to " + status);
+
+        InetAddressAndPort endpoint = InetAddressAndPort.getByName(address);
+        EndpointState epState = endpointStateMap.get(endpoint);
+
+        if (epState == null)
+            throw new RuntimeException("No state for endpoint " + endpoint);
+
+        int generation = epState.getHeartBeatState().getGeneration();
+        int heartbeat = epState.getHeartBeatState().getHeartBeatVersion();
+
+        logger.info("Have endpoint-state for {}: status={}, generation={}, heartbeat={}",
+                endpoint, epState.getStatus(), generation, heartbeat);
+
+        if (FailureDetector.instance.isAlive(endpoint))
+            throw new RuntimeException("Cannot update status for endpoint " + endpoint + ": still alive (failure-detector)");
+
+        Collection<Token> tokens = getTokensFromEndpointState(epState, DatabaseDescriptor.getPartitioner());
+
+        VersionedValue newStatus;
+        switch (status.toLowerCase())
+        {
+            case "hibernate":
+                newStatus = StorageService.instance.valueFactory.hibernate(true);
+                break;
+            case "normal":
+                newStatus = StorageService.instance.valueFactory.normal(tokens);
+                break;
+            case "left":
+                newStatus = StorageService.instance.valueFactory.left(tokens, computeExpireTime());
+                break;
+            case "shutdown":
+                newStatus = StorageService.instance.valueFactory.shutdown(true);
+                break;
+            default:
+                throw new IllegalArgumentException("Unknown status '" + status + '\'');
+        }
+
+        epState.updateTimestamp(); // make sure we don't evict it too soon
+        epState.getHeartBeatState().forceNewerGenerationUnsafe();
+
+        epState.addApplicationState(ApplicationState.STATUS, newStatus);
+        epState.addApplicationState(ApplicationState.STATUS_WITH_PORT, newStatus);
+
+        handleMajorStateChange(endpoint, epState);
+
+        logger.warn("Forcibly changed gossip status of " + endpoint + " to " + newStatus);
+    }
+
+    public Collection<Token> getTokensFor(InetAddressAndPort endpoint, IPartitioner partitioner)
+    {
+        EndpointState state = getEndpointStateForEndpoint(endpoint);
+        if (state == null)
+            return Collections.emptyList();
+
+        return getTokensFromEndpointState(state, partitioner);
+    }
+
+    private Collection<Token> getTokensFromEndpointState(EndpointState state, IPartitioner partitioner)
+    {
+        try
+        {
+            VersionedValue versionedValue = state.getApplicationState(ApplicationState.TOKENS);
+            if (versionedValue == null)
+                return Collections.emptyList();
+
+            return TokenSerializer.deserialize(partitioner, new DataInputStream(new ByteArrayInputStream(versionedValue.toBytes())));
+        }
+        catch (IOException e)
+        {
+            throw new RuntimeException(e);
+        }
+    }
+
     public boolean isKnownEndpoint(InetAddressAndPort endpoint)
     {
         return endpointStateMap.containsKey(endpoint);
@@ -1460,11 +1588,13 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
 
     /**
      * This method is called whenever there is a "big" change in ep state (a generation change for a known node).
+     * It is public as the state change simulation is needed in testing, otherwise should not be used directly.
      *
      * @param ep      endpoint
      * @param epState EndpointState for the endpoint
      */
-    private void handleMajorStateChange(InetAddressAndPort ep, EndpointState epState)
+    @VisibleForTesting
+    public void handleMajorStateChange(InetAddressAndPort ep, EndpointState epState)
     {
         checkProperThreadForStateMutation();
         EndpointState localEpState = endpointStateMap.get(ep);
@@ -2137,18 +2267,27 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
         EndpointState mystate = endpointStateMap.get(FBUtilities.getBroadcastAddressAndPort());
         if (mystate != null && !isSilentShutdownState(mystate) && StorageService.instance.isJoined())
         {
-            logger.info("Announcing shutdown");
-            addLocalApplicationState(ApplicationState.STATUS_WITH_PORT, StorageService.instance.valueFactory.shutdown(true));
-            addLocalApplicationState(ApplicationState.STATUS, StorageService.instance.valueFactory.shutdown(true));
-            Message message = Message.out(Verb.GOSSIP_SHUTDOWN, noPayload);
-            for (InetAddressAndPort ep : liveEndpoints)
-                MessagingService.instance().send(message, ep);
-            Uninterruptibles.sleepUninterruptibly(Integer.getInteger("cassandra.shutdown_announce_in_ms", 2000), TimeUnit.MILLISECONDS);
+            announceShutdown();
         }
         else
             logger.warn("No local state, state is in silent shutdown, or node hasn't joined, not announcing shutdown");
         if (scheduledGossipTask != null)
             scheduledGossipTask.cancel(false);
+    }
+
+    /**
+     * This method sends the node shutdown status to all live endpoints.
+     * It does not close the gossiper itself.
+     */
+    public void announceShutdown()
+    {
+        logger.info("Announcing shutdown");
+        addLocalApplicationState(ApplicationState.STATUS_WITH_PORT, StorageService.instance.valueFactory.shutdown(true));
+        addLocalApplicationState(ApplicationState.STATUS, StorageService.instance.valueFactory.shutdown(true));
+        Message message = Message.out(Verb.GOSSIP_SHUTDOWN, noPayload);
+        for (InetAddressAndPort ep : liveEndpoints)
+            MessagingService.instance().send(message, ep);
+        Uninterruptibles.sleepUninterruptibly(Integer.getInteger("cassandra.shutdown_announce_in_ms", 2000), TimeUnit.MILLISECONDS);
     }
 
     public boolean isEnabled()
