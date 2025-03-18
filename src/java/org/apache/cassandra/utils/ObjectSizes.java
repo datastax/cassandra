@@ -231,6 +231,18 @@ public class ObjectSizes
 
     /**
      * @param pojo the object to measure
+     * @return The size on the heap of the instance and all retained heap referenced by it, excluding portions of
+     * ByteBuffer that are not directly referenced by it but including any other referenced that may also be retained
+     * by other objects. This also includes bytes referenced in direct byte buffers, and may double-count memory if
+     * it is referenced by multiple ByteBuffer copies.
+     */
+    public static long measureDeepOmitShared(Object pojo)
+    {
+        return meter.measureDeep(pojo, ByteBufferMode.SLAB_ALLOCATION_NO_SLICE);
+    }
+
+    /**
+     * @param pojo the object to measure
      * @return the size on the heap of the instance only, excluding any referenced objects
      */
     public static long measure(Object pojo)
