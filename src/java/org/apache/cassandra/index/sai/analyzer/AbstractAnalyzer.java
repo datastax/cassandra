@@ -187,7 +187,7 @@ public abstract class AbstractAnalyzer implements Iterator<ByteBuffer>
         return options.containsKey(LuceneAnalyzer.INDEX_ANALYZER) || NonTokenizingOptions.hasNonDefaultOptions(options);
     }
 
-    public static AnalyzerFactory fromOptions(AbstractType<?> type, Map<String, String> options)
+    public static AnalyzerFactory fromOptions(String target, AbstractType<?> type, Map<String, String> options)
     {
         boolean containsIndexAnalyzer = options.containsKey(LuceneAnalyzer.INDEX_ANALYZER);
         boolean containsNonTokenizingOptions = NonTokenizingOptions.hasNonDefaultOptions(options);
@@ -205,6 +205,9 @@ public abstract class AbstractAnalyzer implements Iterator<ByteBuffer>
             throw new InvalidRequestException("Cannot specify query_analyzer without an index_analyzer option or any" +
                                               " combination of case_sensitive, normalize, or ascii options. options=" + options);
         }
+
+        if ((containsIndexAnalyzer || containsNonTokenizingOptions) && type.isCollection() && !type.isMultiCell())
+            throw new InvalidRequestException("Cannot use an analyzer on " + target + " because it's a frozen collection.");
 
         if (containsIndexAnalyzer)
         {
