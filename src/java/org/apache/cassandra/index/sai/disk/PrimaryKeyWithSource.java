@@ -173,6 +173,6 @@ public class PrimaryKeyWithSource implements PrimaryKey
         return RamUsageEstimator.NUM_BYTES_OBJECT_HEADER +
                2L * RamUsageEstimator.NUM_BYTES_OBJECT_REF +
                Long.BYTES +
-               primaryKey.ramBytesUsed();
+               primaryKey().ramBytesUsed();
     }
 }
