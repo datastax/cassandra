@@ -55,7 +55,7 @@ import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 /// See [Trie.md](./Trie.md) for further description of the trie representation model.
 ///
 /// @param <T> The content type of the trie.
-public interface Trie<T> extends CursorWalkable<Cursor<T>>, BaseTrie<T>
+public interface Trie<T> extends CursorWalkable<Cursor<T>>, BaseTrie<T, Trie<T>>
 {
     boolean DEBUG = CassandraRelevantProperties.TRIE_DEBUG.getBoolean();
 
@@ -63,7 +63,7 @@ public interface Trie<T> extends CursorWalkable<Cursor<T>>, BaseTrie<T>
     default void forEachEntry(Direction direction, BiConsumer<ByteComparable.Preencoded, T> consumer)
     {
         Cursor<T> cursor = cursor(direction);
-        process(cursor, new TrieEntriesWalker.WithConsumer<T>(consumer, cursor.byteComparableVersion()));
+        cursor.process(new TrieEntriesWalker.WithConsumer<T>(consumer, cursor.byteComparableVersion()));
         // Note: we can't do the ValueConsumer trick here, because the implementation requires state and cannot be
         // implemented with default methods alone.
     }
@@ -71,30 +71,14 @@ public interface Trie<T> extends CursorWalkable<Cursor<T>>, BaseTrie<T>
     @Override
     default <R> R process(Direction direction, Cursor.Walker<T, R> walker)
     {
-        return process(cursor(direction), walker);
+        return cursor(direction).process(walker);
     }
-
-    static <T, R> R process(Cursor<T> cursor, Cursor.Walker<T, R> walker)
-    {
-        assert cursor.depth() == 0 : "The provided cursor has already been advanced.";
-        T content = cursor.content();   // handle content on the root node
-        if (content == null)
-            content = cursor.advanceToContent(walker);
-
-        while (content != null)
-        {
-            walker.content(content);
-            content = cursor.advanceToContent(walker);
-        }
-        return walker.complete();
-    }
-
 
     @Override
     default void forEachEntrySkippingBranches(Direction direction, BiConsumer<ByteComparable.Preencoded, T> consumer)
     {
         Cursor<T> cursor = cursor(direction);
-        processSkippingBranches(cursor, new TrieEntriesWalker.WithConsumer<T>(consumer, cursor.byteComparableVersion()));
+        cursor.processSkippingBranches(new TrieEntriesWalker.WithConsumer<T>(consumer, cursor.byteComparableVersion()));
         // Note: we can't do the ValueConsumer trick here, because the implementation requires state and cannot be
         // implemented with default methods alone.
     }
@@ -102,32 +86,7 @@ public interface Trie<T> extends CursorWalkable<Cursor<T>>, BaseTrie<T>
     @Override
     default <R> R processSkippingBranches(Direction direction, Cursor.Walker<T, R> walker)
     {
-        return processSkippingBranches(cursor(direction), walker);
-    }
-
-    static <T, R> R processSkippingBranches(Cursor<T> cursor, Cursor.Walker<T, R> walker)
-    {
-        assert cursor.depth() == 0 : "The provided cursor has already been advanced.";
-        T content = cursor.content();   // handle content on the root node
-        if (content != null)
-        {
-            walker.content(content);
-            return walker.complete();
-        }
-        content = cursor.advanceToContent(walker);
-
-        while (content != null)
-        {
-            walker.content(content);
-            if (cursor.skipTo(cursor.depth(), cursor.incomingTransition() + cursor.direction().increase) < 0)
-                break;
-            walker.resetPathLength(cursor.depth() - 1);
-            walker.addPathByte(cursor.incomingTransition());
-            content = cursor.content();
-            if (content == null)
-                content = cursor.advanceToContent(walker);
-        }
-        return walker.complete();
+        return cursor(direction).processSkippingBranches(walker);
     }
 
     @Override

@@ -255,6 +255,50 @@ interface Cursor<T>
         R complete();
     }
 
+    /// Process the trie using the given [Walker].
+    /// This method should only be called on a freshly constructed cursor.
+    default <R> R process(Cursor.Walker<T, R> walker)
+    {
+        assert depth() == 0 : "The provided cursor has already been advanced.";
+        T content = content();   // handle content on the root node
+        if (content == null)
+            content = advanceToContent(walker);
+
+        while (content != null)
+        {
+            walker.content(content);
+            content = advanceToContent(walker);
+        }
+        return walker.complete();
+    }
+
+    /// Process the trie using the given [Walker], skipping over branches where content was found.
+    /// This method should only be called on a freshly constructed cursor.
+    default <R> R processSkippingBranches(Cursor.Walker<T, R> walker)
+    {
+        assert depth() == 0 : "The provided cursor has already been advanced.";
+        T content = content();   // handle content on the root node
+        if (content != null)
+        {
+            walker.content(content);
+            return walker.complete();
+        }
+        content = advanceToContent(walker);
+
+        while (content != null)
+        {
+            walker.content(content);
+            if (skipTo(depth(), incomingTransition() + direction().increase) < 0)
+                break;
+            walker.resetPathLength(depth() - 1);
+            walker.addPathByte(incomingTransition());
+            content = content();
+            if (content == null)
+                content = advanceToContent(walker);
+        }
+        return walker.complete();
+    }
+
     class Empty<T> implements Cursor<T>
     {
         private final Direction direction;
