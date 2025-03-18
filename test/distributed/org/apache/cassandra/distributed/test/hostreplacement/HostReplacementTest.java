@@ -232,7 +232,7 @@ public class HostReplacementTest extends TestBaseImpl
         {
             properties.setProperty(DISABLE_THREAD_VALIDATION, "true");
 
-            // given a two node cluster with one need
+            // given a two node cluster with one seed
             TokenSupplier even = TokenSupplier.evenlyDistributedTokens(2);
             try (Cluster cluster = Cluster.build(2)
                                           .withConfig(c -> c.with(Feature.GOSSIP, Feature.NATIVE_PROTOCOL)
