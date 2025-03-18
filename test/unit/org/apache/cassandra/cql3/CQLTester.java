@@ -243,7 +243,7 @@ public abstract class CQLTester
     private static final int ASSERTION_TIMEOUT_SECONDS = 15;
 
     /**
-     * Whether to use coorfinator execution in {@link #execute(String, Object...)}, so queries get full validation and
+     * Whether to use coordinator execution in {@link #execute(String, Object...)}, so queries get full validation and
      * go through reconciliation. When enabled, calls to {@link #execute(String, Object...)} will behave as calls to
      * {@link #executeWithCoordinator(String, Object...)}. Otherwise, they will behave as calls to
      * {@link #executeInternal(String, Object...)}.
