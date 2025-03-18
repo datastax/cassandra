@@ -539,7 +539,7 @@ public class TrieMemtable extends AbstractAllocatorMemtable
         Trie<Object> toFlush = mergedTrie.subtrie(from, true, to, false);
 
         var counter = new KeySizeAndCountCollector(); // need to jump over tails keys
-        toFlush.processSkippingBranches(counter, Direction.FORWARD);
+        toFlush.processSkippingBranches(Direction.FORWARD, counter);
         int partitionCount = counter.keyCount;
         long partitionKeySize = counter.keySize;
 

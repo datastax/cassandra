@@ -102,7 +102,13 @@ public interface Trie<T> extends CursorWalkable<Cursor<T>>
     /// Call the given consumer on all content values in the trie in order.
     default void forEachValue(ValueConsumer<T> consumer)
     {
-        process(consumer, Direction.FORWARD);
+        process(Direction.FORWARD, consumer);
+    }
+
+    /// Call the given consumer on all content values in the trie in order.
+    default void forEachValue(Direction direction, ValueConsumer<T> consumer)
+    {
+        process(direction, consumer);
     }
 
     /// Call the given consumer on all (path, content) pairs with non-null content in the trie in order.
@@ -115,18 +121,18 @@ public interface Trie<T> extends CursorWalkable<Cursor<T>>
     default void forEachEntry(Direction direction, BiConsumer<ByteComparable.Preencoded, T> consumer)
     {
         Cursor<T> cursor = cursor(direction);
-        process(new TrieEntriesWalker.WithConsumer<T>(consumer, cursor.byteComparableVersion()), cursor);
+        process(cursor, new TrieEntriesWalker.WithConsumer<T>(consumer, cursor.byteComparableVersion()));
         // Note: we can't do the ValueConsumer trick here, because the implementation requires state and cannot be
         // implemented with default methods alone.
     }
 
     /// Process the trie using the given [Cursor.Walker].
-    default <R> R process(Cursor.Walker<T, R> walker, Direction direction)
+    default <R> R process(Direction direction, Cursor.Walker<T, R> walker)
     {
-        return process(walker, cursor(direction));
+        return process(cursor(direction), walker);
     }
 
-    static <T, R> R process(Cursor.Walker<T, R> walker, Cursor<T> cursor)
+    static <T, R> R process(Cursor<T> cursor, Cursor.Walker<T, R> walker)
     {
         assert cursor.depth() == 0 : "The provided cursor has already been advanced.";
         T content = cursor.content();   // handle content on the root node
@@ -145,7 +151,7 @@ public interface Trie<T> extends CursorWalkable<Cursor<T>>
     /// Process the trie using the given [ValueConsumer], skipping all branches below the top content-bearing node.
     default void forEachValueSkippingBranches(Direction direction, ValueConsumer<T> consumer)
     {
-        processSkippingBranches(consumer, cursor(direction));
+        processSkippingBranches(cursor(direction), consumer);
     }
 
     /// Call the given consumer on all `(path, content)` pairs with non-null content in the trie in order, skipping all
@@ -153,18 +159,18 @@ public interface Trie<T> extends CursorWalkable<Cursor<T>>
     default void forEachEntrySkippingBranches(Direction direction, BiConsumer<ByteComparable.Preencoded, T> consumer)
     {
         Cursor<T> cursor = cursor(direction);
-        processSkippingBranches(new TrieEntriesWalker.WithConsumer<T>(consumer, cursor.byteComparableVersion()), cursor);
+        processSkippingBranches(cursor, new TrieEntriesWalker.WithConsumer<T>(consumer, cursor.byteComparableVersion()));
         // Note: we can't do the ValueConsumer trick here, because the implementation requires state and cannot be
         // implemented with default methods alone.
     }
 
     /// Process the trie using the given [Cursor.Walker], skipping all branches below the top content-bearing node.
-    default <R> R processSkippingBranches(Cursor.Walker<T, R> walker, Direction direction)
+    default <R> R processSkippingBranches(Direction direction, Cursor.Walker<T, R> walker)
     {
-        return processSkippingBranches(walker, cursor(direction));
+        return processSkippingBranches(cursor(direction), walker);
     }
 
-    static <T, R> R processSkippingBranches(Cursor.Walker<T, R> walker, Cursor<T> cursor)
+    static <T, R> R processSkippingBranches(Cursor<T> cursor, Cursor.Walker<T, R> walker)
     {
         assert cursor.depth() == 0 : "The provided cursor has already been advanced.";
         T content = cursor.content();   // handle content on the root node
@@ -208,7 +214,7 @@ public interface Trie<T> extends CursorWalkable<Cursor<T>>
     /// Constuct a textual representation of the trie using the given content-to-string mapper.
     default String dump(Function<T, String> contentToString)
     {
-        return process(new TrieDumper<>(contentToString), Direction.FORWARD);
+        return process(Direction.FORWARD, new TrieDumper<>(contentToString));
     }
 
     /// Returns a singleton trie mapping the given byte path to content.
@@ -524,66 +530,7 @@ public interface Trie<T> extends CursorWalkable<Cursor<T>>
 
     static <T> Trie<T> empty(ByteComparable.Version byteComparableVersion)
     {
-        return dir -> new EmptyCursor<>(dir, byteComparableVersion);
-    }
-
-    class EmptyCursor<T> implements Cursor<T>
-    {
-        private final Direction direction;
-        private final ByteComparable.Version byteComparableVersion;
-        int depth;
-
-        EmptyCursor(Direction direction, ByteComparable.Version byteComparableVersion)
-        {
-            this.direction = direction;
-            this.byteComparableVersion = byteComparableVersion;
-            depth = 0;
-        }
-
-        public int advance()
-        {
-            return depth = -1;
-        }
-
-        public int skipTo(int skipDepth, int skipTransition)
-        {
-            return depth = -1;
-        }
-
-        public ByteComparable.Version byteComparableVersion()
-        {
-            if (byteComparableVersion != null)
-                return byteComparableVersion;
-            throw new AssertionError();
-        }
-
-        @Override
-        public Cursor<T> tailCursor(Direction direction)
-        {
-            assert depth == 0 : "tailTrie called on exhausted cursor";
-            return new EmptyCursor<>(direction, byteComparableVersion);
-        }
-
-        public int depth()
-        {
-            return depth;
-        }
-
-        public T content()
-        {
-            return null;
-        }
-
-        @Override
-        public Direction direction()
-        {
-            return direction;
-        }
-
-        public int incomingTransition()
-        {
-            return -1;
-        }
+        return dir -> new Cursor.Empty<>(dir, byteComparableVersion);
     }
 
     Cursor<T> makeCursor(Direction direction);

@@ -1186,7 +1186,7 @@ public class InMemoryReadTrie<T> implements Trie<T>
                     return type;
             }
         }
-        return Trie.process(new TrieDumper<>(Function.identity()), new TypedNodesCursor());
+        return Trie.process(new TypedNodesCursor(), new TrieDumper<>(Function.identity()));
     }
 
     /// For use in debugging, dump info about the given node.
