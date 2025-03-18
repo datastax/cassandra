@@ -36,7 +36,8 @@ import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 /// See [Trie.md](./Trie.md) for further description of the trie representation model.
 ///
 /// @param <T> The content type of the trie.
-public interface BaseTrie<T>
+/// @param <C> The concrete subtype of the trie.
+public interface BaseTrie<T, C extends BaseTrie<T, C>>
 {
     /// Adapter interface providing the methods a [Cursor.Walker] to a [Consumer], so that the latter can be used
     /// with [#process].
@@ -215,10 +216,10 @@ public interface BaseTrie<T>
     ///              right-bounded.
     /// @return a view of the subtrie containing all the keys of this trie falling between `left` inclusively and
     /// `right` exclusively.
-    BaseTrie<T> subtrie(ByteComparable left, ByteComparable right);
+    C subtrie(ByteComparable left, ByteComparable right);
 
     /// Returns a Trie that is a view of this one, where the given prefix is prepended before the root.
-    BaseTrie<T> prefixedBy(ByteComparable prefix);
+    C prefixedBy(ByteComparable prefix);
 
     /// Returns a trie that corresponds to the branch of this trie rooted at the given prefix.
     ///
@@ -226,5 +227,5 @@ public interface BaseTrie<T>
     /// resulting trie will not include the prefix. In other words,
     /// ```tailTrie(prefix).prefixedBy(prefix) = subtrie(prefix, nextBranch(prefix))```
     /// where `nextBranch` stands for the key adjusted by adding one at the last position.
-    BaseTrie<T> tailTrie(ByteComparable prefix);
+    C tailTrie(ByteComparable prefix);
 }
