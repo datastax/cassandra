@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.cql3.functions.masking;
 
+import java.math.BigDecimal;
 import java.nio.ByteBuffer;
 
 import org.junit.Assert;
@@ -27,8 +28,11 @@ import com.datastax.driver.core.ColumnDefinitions;
 import com.datastax.driver.core.DataType;
 import com.datastax.driver.core.ResultSet;
 import org.apache.cassandra.cql3.CQL3Type;
+import org.apache.cassandra.db.marshal.DecimalType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.schema.SchemaConstants;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
+import org.apache.cassandra.utils.bytecomparable.ByteSource;
 
 import static java.lang.String.format;
 
@@ -47,6 +51,13 @@ public class HashMaskingFunctionTest extends MaskingFunctionTester
     protected void testMaskingOnColumn(String name, CQL3Type type, Object value) throws Throwable
     {
         ByteBuffer serializedValue = serializedValue(type, value);
+
+        // See CNDB-13393; needed when TrieMemtable is the default in MemtableParams
+        if (value instanceof BigDecimal && "ck".equals(name))
+        {
+            ByteSource byteSource = DecimalType.instance.asComparableBytes(serializedValue, ByteComparable.Version.OSS50);
+            serializedValue = DecimalType.instance.fromComparableBytes(ByteSource.peekable(byteSource), ByteComparable.Version.OSS50);
+        }
 
         // with default algorithm
         assertRows(execute(format("SELECT mask_hash(%s) FROM %%s", name)),
