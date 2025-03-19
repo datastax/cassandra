@@ -536,7 +536,7 @@ public class TrieMemtable extends AbstractAllocatorMemtable
 
     public FlushCollection<TrieBackedPartition> getFlushSet(PartitionPosition from, PartitionPosition to)
     {
-        Trie<Object> toFlush = mergedTrie.subtrie(from, true, to, false);
+        Trie<Object> toFlush = mergedTrie.subtrie(toComparableBound(from, true), toComparableBound(to, true));
 
         var counter = new KeySizeAndCountCollector(); // need to jump over tails keys
         toFlush.processSkippingBranches(Direction.FORWARD, counter);

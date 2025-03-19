@@ -387,13 +387,19 @@ public class TrieMemtableStage1 extends AbstractAllocatorMemtable
         boolean includeStart = isBound || keyRange instanceof IncludingExcludingBounds;
         boolean includeStop = isBound || keyRange instanceof Range;
 
-        Trie<BTreePartitionData> subMap = mergedTrie.subtrie(left, includeStart, right, includeStop);
+        Trie<BTreePartitionData> subMap = mergedTrie.subtrie(toComparableBound(left, includeStart),
+                                                             toComparableBound(right, !includeStop));
 
         return new MemtableUnfilteredPartitionIterator(metadata(),
                                                        allocator.ensureOnHeap(),
                                                        subMap,
                                                        columnFilter,
                                                        dataRange);
+    }
+
+    private static ByteComparable toComparableBound(PartitionPosition position, boolean before)
+    {
+        return position.isMinimum() ? null : position.asComparableBound(before);
     }
 
     public Partition getPartition(DecoratedKey key)
@@ -426,7 +432,7 @@ public class TrieMemtableStage1 extends AbstractAllocatorMemtable
 
     public FlushCollection<MemtablePartition> getFlushSet(PartitionPosition from, PartitionPosition to)
     {
-        Trie<BTreePartitionData> toFlush = mergedTrie.subtrie(from, true, to, false);
+        Trie<BTreePartitionData> toFlush = mergedTrie.subtrie(toComparableBound(from, true), toComparableBound(to, true));
         long keySize = 0;
         int keyCount = 0;
 

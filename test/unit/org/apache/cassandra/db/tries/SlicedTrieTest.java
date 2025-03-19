@@ -19,10 +19,8 @@
 package org.apache.cassandra.db.tries;
 
 import java.nio.ByteBuffer;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Comparator;
 import java.util.List;
 import java.util.NavigableMap;
 import java.util.Random;
@@ -35,14 +33,18 @@ import org.junit.Test;
 
 import com.googlecode.concurrenttrees.common.Iterables;
 import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
-import static org.apache.cassandra.db.tries.InMemoryTrieTestBase.asString;
-import static org.apache.cassandra.db.tries.InMemoryTrieTestBase.assertSameContent;
-import static org.apache.cassandra.db.tries.InMemoryTrieTestBase.byteComparableVersion;
-import static org.apache.cassandra.db.tries.InMemoryTrieTestBase.generateKeys;
-import static org.apache.cassandra.db.tries.InMemoryTrieTestBase.makeInMemoryTrie;
 import static java.util.Arrays.asList;
+import static org.apache.cassandra.db.tries.InMemoryTrieTestBase.makeInMemoryTrie;
+import static org.apache.cassandra.db.tries.TrieUtil.FORWARD_COMPARATOR;
+import static org.apache.cassandra.db.tries.TrieUtil.VERSION;
+import static org.apache.cassandra.db.tries.TrieUtil.asString;
+import static org.apache.cassandra.db.tries.TrieUtil.assertSameContent;
+import static org.apache.cassandra.db.tries.TrieUtil.generateKeys;
+import static org.apache.cassandra.db.tries.TrieUtil.toBound;
+import static org.apache.cassandra.utils.bytecomparable.ByteComparable.Preencoded;
 import static org.junit.Assert.assertEquals;
 
 public class SlicedTrieTest
@@ -53,7 +55,7 @@ public class SlicedTrieTest
         CassandraRelevantProperties.TRIE_DEBUG.setBoolean(true);
     }
 
-    public static final ByteComparable[] BOUNDARIES = toByteComparable(new String[]{
+    public static final Preencoded[] BOUNDARIES = toByteComparable(new String[]{
     "test1",
     "test11",
     "test12",
@@ -72,7 +74,7 @@ public class SlicedTrieTest
     "\000\000\377",
     "\377\377"
     });
-    public static final ByteComparable[] KEYS = toByteComparable(new String[]{
+    public static final Preencoded[] KEYS = toByteComparable(new String[]{
     "test1",
     "test2",
     "test55",
@@ -92,7 +94,6 @@ public class SlicedTrieTest
     "\377\377"
     });
 
-    public static final Comparator<ByteComparable> BYTE_COMPARABLE_COMPARATOR = (bytes1, bytes2) -> ByteComparable.compare(bytes1, bytes2, byteComparableVersion);
     private static final int COUNT = 15000;
     Random rand = new Random();
 
@@ -104,22 +105,22 @@ public class SlicedTrieTest
 
     public void testIntersectRange(int count)
     {
-        ByteComparable[] src1 = generateKeys(rand, count);
-        NavigableMap<ByteComparable, ByteBuffer> content1 = new TreeMap<>((bytes1, bytes2) -> ByteComparable.compare(bytes1, bytes2, byteComparableVersion));
+        Preencoded[] src1 = generateKeys(rand, count);
+        NavigableMap<Preencoded, ByteBuffer> content1 = new TreeMap<>(FORWARD_COMPARATOR);
 
         InMemoryTrie<ByteBuffer> trie1 = makeInMemoryTrie(src1, content1, true);
 
         checkEqualRange(content1, trie1, null, true, null, true);
-        checkEqualRange(content1, trie1, InMemoryTrieTestBase.generateKey(rand), true, null, true);
-        checkEqualRange(content1, trie1, null, true, InMemoryTrieTestBase.generateKey(rand), true);
+        checkEqualRange(content1, trie1, TrieUtil.generateKey(rand), true, null, true);
+        checkEqualRange(content1, trie1, null, true, TrieUtil.generateKey(rand), true);
         for (int i = 0; i < 4; ++i)
         {
-            ByteComparable l = rand.nextBoolean() ? InMemoryTrieTestBase.generateKey(rand) : src1[rand.nextInt(src1.length)];
-            ByteComparable r = rand.nextBoolean() ? InMemoryTrieTestBase.generateKey(rand) : src1[rand.nextInt(src1.length)];
-            int cmp = ByteComparable.compare(l, r, byteComparableVersion);
+            Preencoded l = rand.nextBoolean() ? TrieUtil.generateKey(rand) : src1[rand.nextInt(src1.length)];
+            Preencoded r = rand.nextBoolean() ? TrieUtil.generateKey(rand) : src1[rand.nextInt(src1.length)];
+            int cmp = ByteComparable.compare(l, r, VERSION);
             if (cmp > 0)
             {
-                ByteComparable t = l;
+                Preencoded t = l;
                 l = r;
                 r = t; // swap
             }
@@ -132,34 +133,34 @@ public class SlicedTrieTest
         }
     }
 
-    private static ByteComparable[] toByteComparable(String[] keys)
+    private static Preencoded[] toByteComparable(String[] keys)
     {
         return Arrays.stream(keys)
-                     .map(x -> ByteComparable.preencoded(byteComparableVersion, x.getBytes(StandardCharsets.UTF_8)))
-                     .toArray(ByteComparable[]::new);
+                     .map(TrieUtil::comparable)
+                     .toArray(Preencoded[]::new);
     }
 
     @Test
     public void testSingletonSubtrie()
     {
-        Arrays.sort(BOUNDARIES, (a, b) -> ByteComparable.compare(a, b, byteComparableVersion));
+        Arrays.sort(BOUNDARIES, (a, b) -> ByteComparable.compare(a, b, VERSION));
         for (int li = -1; li < BOUNDARIES.length; ++li)
         {
-            ByteComparable l = li < 0 ? null : BOUNDARIES[li];
+            Preencoded l = li < 0 ? null : BOUNDARIES[li];
             for (int ri = Math.max(0, li); ri <= BOUNDARIES.length; ++ri)
             {
-                ByteComparable r = ri == BOUNDARIES.length ? null : BOUNDARIES[ri];
+                Preencoded r = ri == BOUNDARIES.length ? null : BOUNDARIES[ri];
 
                 for (int i = li == ri ? 3 : 0; i < 4; ++i)
                 {
                     boolean includeLeft = (i & 1) != 0;
                     boolean includeRight = (i & 2) != 0;
 
-                    for (ByteComparable key : KEYS)
+                    for (Preencoded key : KEYS)
                     {
-                        int cmp1 = l != null ? ByteComparable.compare(key, l, byteComparableVersion) : 1;
-                        int cmp2 = r != null ? ByteComparable.compare(r, key, byteComparableVersion) : 1;
-                        Trie<Boolean> ix = Trie.singleton(key, byteComparableVersion, true).subtrie(l, includeLeft, r, includeRight);
+                        int cmp1 = l != null ? ByteComparable.compare(key, l, VERSION) : 1;
+                        int cmp2 = r != null ? ByteComparable.compare(r, key, VERSION) : 1;
+                        Trie<Boolean> ix = Trie.singleton(key, VERSION, true).subtrie(toBound(l, !includeLeft), toBound(r, includeRight));
                         boolean expected = true;
                         if (cmp1 < 0 || cmp1 == 0 && !includeLeft)
                             expected = false;
@@ -172,10 +173,10 @@ public class SlicedTrieTest
                             System.err.println(ix.dump());
                             Assert.fail(String.format("Failed on range %s%s,%s%s key %s expected %s got %s\n",
                                                       includeLeft ? "[" : "(",
-                                                      l != null ? l.byteComparableAsString(byteComparableVersion) : null,
-                                                      r != null ? r.byteComparableAsString(byteComparableVersion) : null,
+                                                      l != null ? l.byteComparableAsString(VERSION) : null,
+                                                      r != null ? r.byteComparableAsString(VERSION) : null,
                                                       includeRight ? "]" : ")",
-                                                      key.byteComparableAsString(byteComparableVersion),
+                                                      key.byteComparableAsString(VERSION),
                                                       expected,
                                                       actual));
                         }
@@ -188,16 +189,16 @@ public class SlicedTrieTest
     @Test
     public void testMemtableSubtrie()
     {
-        Arrays.sort(BOUNDARIES, BYTE_COMPARABLE_COMPARATOR);
-        NavigableMap<ByteComparable, ByteBuffer> content1 = new TreeMap<>(BYTE_COMPARABLE_COMPARATOR);
+        Arrays.sort(BOUNDARIES, FORWARD_COMPARATOR);
+        NavigableMap<Preencoded, ByteBuffer> content1 = new TreeMap<>(FORWARD_COMPARATOR);
         InMemoryTrie<ByteBuffer> trie1 = makeInMemoryTrie(KEYS, content1, true);
 
         for (int li = -1; li < BOUNDARIES.length; ++li)
         {
-            ByteComparable l = li < 0 ? null : BOUNDARIES[li];
+            Preencoded l = li < 0 ? null : BOUNDARIES[li];
             for (int ri = Math.max(0, li); ri <= BOUNDARIES.length; ++ri)
             {
-                ByteComparable r = ri == BOUNDARIES.length ? null : BOUNDARIES[ri];
+                Preencoded r = ri == BOUNDARIES.length ? null : BOUNDARIES[ri];
                 for (int i = 0; i < 4; ++i)
                 {
                     boolean includeLeft = (i & 1) != 0;
@@ -230,8 +231,8 @@ public class SlicedTrieTest
 
     public void testMergeSubtrie(int mergeCount)
     {
-        Arrays.sort(BOUNDARIES, BYTE_COMPARABLE_COMPARATOR);
-        NavigableMap<ByteComparable, ByteBuffer> content1 = new TreeMap<>(BYTE_COMPARABLE_COMPARATOR);
+        Arrays.sort(BOUNDARIES, FORWARD_COMPARATOR);
+        NavigableMap<Preencoded, ByteBuffer> content1 = new TreeMap<>(FORWARD_COMPARATOR);
         List<Trie<ByteBuffer>> tries = new ArrayList<>();
         for (int i = 0; i < mergeCount; ++i)
         {
@@ -245,10 +246,10 @@ public class SlicedTrieTest
 
         for (int li = -1; li < BOUNDARIES.length; ++li)
         {
-            ByteComparable l = li < 0 ? null : BOUNDARIES[li];
+            Preencoded l = li < 0 ? null : BOUNDARIES[li];
             for (int ri = Math.max(0, li); ri <= BOUNDARIES.length; ++ri)
             {
-                ByteComparable r = ri == BOUNDARIES.length ? null : BOUNDARIES[ri];
+                Preencoded r = ri == BOUNDARIES.length ? null : BOUNDARIES[ri];
                 for (int i = 0; i < 4; ++i)
                 {
                     boolean includeLeft = (i & 1) != 0;
@@ -261,32 +262,58 @@ public class SlicedTrieTest
         }
     }
 
-    public void checkEqualRange(NavigableMap<ByteComparable, ByteBuffer> content1,
+
+    static <T> NavigableMap<Preencoded, T> boundedMap(NavigableMap<Preencoded, T> sourceMap, Preencoded l, boolean includeLeft, Preencoded r, boolean includeRight)
+    {
+        NavigableMap<Preencoded, T> imap = l == null
+                                               ? r == null
+                                                 ? sourceMap
+                                                 : sourceMap.headMap(r, includeRight)
+                                               : r == null
+                                                 ? sourceMap.tailMap(l, includeLeft)
+                                                 : sourceMap.subMap(l, includeLeft, r, includeRight);
+        return imap;
+    }
+
+    public void checkEqualRange(NavigableMap<Preencoded, ByteBuffer> content1,
                                 Trie<ByteBuffer> t1,
-                                ByteComparable l,
+                                Preencoded l,
                                 boolean includeLeft,
-                                ByteComparable r,
+                                Preencoded r,
                                 boolean includeRight)
     {
         System.out.println(String.format("Intersection with %s%s:%s%s", includeLeft ? "[" : "(", asString(l), asString(r), includeRight ? "]" : ")"));
-        SortedMap<ByteComparable, ByteBuffer> imap = l == null
-                                                     ? r == null
-                                                       ? content1
-                                                       : content1.headMap(r, includeRight)
-                                                     : r == null
-                                                       ? content1.tailMap(l, includeLeft)
-                                                       : content1.subMap(l, includeLeft, r, includeRight);
-        Trie<ByteBuffer> intersection = t1.subtrie(l, includeLeft, r, includeRight);
+        SortedMap<Preencoded, ByteBuffer> imap = boundedMap(content1, l, includeLeft, r, includeRight);
+        Trie<ByteBuffer> intersection = t1.subtrie(toBound(l, !includeLeft), toBound(r, includeRight));
+        try
+        {
+            assertSameContent(intersection, imap);
+        }
+        catch (AssertionError e)
+        {
+            System.out.println("\n" + t1.dump(ByteBufferUtil::bytesToHex));
 
+            System.out.println("\n" + intersection.dump(ByteBufferUtil::bytesToHex));
+            throw e;
+        }
+
+        if (l == null || r == null)
+            return;
+
+        // Test intersecting intersection.
+        intersection = t1.subtrie(toBound(l, !includeLeft), null).subtrie(null, toBound(r, includeRight));
+        assertSameContent(intersection, imap);
+
+        intersection = t1.subtrie(null, toBound(r, includeRight)).subtrie(toBound(l, !includeLeft), null);
         assertSameContent(intersection, imap);
     }
 
     /**
      * Extract the values of the provide trie into a list.
      */
-    private static <T> List<T> toList(Trie<T> trie)
+    private static <T> List<T> toList(Trie<T> trie, Direction direction)
     {
-        return Iterables.toList(trie.values());
+        return Iterables.toList(trie.values(direction));
     }
 
     /**
@@ -306,15 +333,15 @@ public class SlicedTrieTest
             @Override
             public Cursor<Integer> makeCursor(Direction direction)
             {
-                return new singleLevelCursor(direction);
+                return new SingleLevelCursor(direction);
             }
 
-            class singleLevelCursor implements Cursor<Integer>
+            class SingleLevelCursor implements Cursor<Integer>
             {
                 final Direction direction;
-                int current = -1;
+                int current;
 
-                singleLevelCursor(Direction direction)
+                SingleLevelCursor(Direction direction)
                 {
                     this.direction = direction;
                     current = direction.select(-1, childs);
@@ -374,7 +401,7 @@ public class SlicedTrieTest
                 @Override
                 public ByteComparable.Version byteComparableVersion()
                 {
-                    return byteComparableVersion;
+                    return VERSION;
                 }
 
                 @Override
@@ -390,145 +417,143 @@ public class SlicedTrieTest
     private static ByteComparable of(int value)
     {
         assert value >= 0 && value <= Byte.MAX_VALUE;
-        return ByteComparable.preencoded(byteComparableVersion, new byte[]{ (byte)value });
+        return ByteComparable.preencoded(VERSION, new byte[]{ (byte)value });
+    }
+
+    List<Integer> maybeReversed(Direction direction, List<Integer> list)
+    {
+        if (direction.isForward())
+            return list;
+        List<Integer> reversed = new ArrayList<>(list);
+        reversed.sort((x, y) -> x == -1 ? -1 : y == -1 ? 1 : Integer.compare(y, x));
+        return reversed;
+    }
+
+    void assertTrieEquals(List<Integer> expected, Trie<Integer> trie)
+    {
+        assertEquals(expected, toList(trie, Direction.FORWARD));
+        assertEquals(maybeReversed(Direction.REVERSE, expected), toList(trie, Direction.REVERSE));
     }
 
     @Test
-    public void testSimpleIntersectionII()
+    public void testSimpleIntersection()
     {
         Trie<Integer> trie = singleLevelIntTrie(10);
-        assertEquals(asList(-1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9), toList(trie));
+        assertTrieEquals(asList(-1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9), trie);
 
-        Trie<Integer> intersection = trie.subtrie(of(3), true, of(7), true);
-        assertEquals(asList(3, 4, 5, 6, 7), toList(intersection));
+        Trie<Integer> intersection = trie.subtrie(of(3), of(7));
+        assertTrieEquals(asList(-1, 3, 4, 5, 6, 7), intersection);
     }
 
     @Test
-    public void testSimpleIntersectionEI()
+    public void testSimpleLeftIntersection()
     {
         Trie<Integer> trie = singleLevelIntTrie(10);
-        assertEquals(asList(-1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9), toList(trie));
+        assertTrieEquals(asList(-1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9), trie);
 
-        Trie<Integer> intersection = trie.subtrie(of(3), false, of(7), true);
-        assertEquals(asList(4, 5, 6, 7), toList(intersection));
+        Trie<Integer> intersection = trie.subtrie(of(3), null);
+        assertTrieEquals(asList(-1, 3, 4, 5, 6, 7, 8, 9), intersection);
     }
 
     @Test
-    public void testSimpleIntersectionIE()
+    public void testSimpleRightIntersection()
     {
         Trie<Integer> trie = singleLevelIntTrie(10);
-        assertEquals(asList(-1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9), toList(trie));
+        assertTrieEquals(asList(-1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9), trie);
 
-        Trie<Integer> intersection = trie.subtrie(of(3), true, of(7), false);
-        assertEquals(asList(3, 4, 5, 6), toList(intersection));
-    }
-
-    @Test
-    public void testSimpleIntersectionEE()
-    {
-        Trie<Integer> trie = singleLevelIntTrie(10);
-        assertEquals(asList(-1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9), toList(trie));
-
-        Trie<Integer> intersection = trie.subtrie(of(3), false, of(7), false);
-        assertEquals(asList(4, 5, 6), toList(intersection));
-    }
-
-    @Test
-    public void testSimpleLeftIntersectionE()
-    {
-        Trie<Integer> trie = singleLevelIntTrie(10);
-        assertEquals(asList(-1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9), toList(trie));
-
-        Trie<Integer> intersection = trie.subtrie(of(3), false, null, true);
-        assertEquals(asList(4, 5, 6, 7, 8, 9), toList(intersection));
-    }
-
-    @Test
-    public void testSimpleLeftIntersectionI()
-    {
-        Trie<Integer> trie = singleLevelIntTrie(10);
-        assertEquals(asList(-1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9), toList(trie));
-
-        Trie<Integer> intersection = trie.subtrie(of(3), true, null, true);
-        assertEquals(asList(3, 4, 5, 6, 7, 8, 9), toList(intersection));
-    }
-
-    @Test
-    public void testSimpleRightIntersectionE()
-    {
-        Trie<Integer> trie = singleLevelIntTrie(10);
-        assertEquals(asList(-1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9), toList(trie));
-
-        Trie<Integer> intersection = trie.subtrie(null, true, of(7), false);
-        assertEquals(asList(-1, 0, 1, 2, 3, 4, 5, 6), toList(intersection));
-    }
-
-    @Test
-    public void testSimpleRightIntersectionI()
-    {
-        Trie<Integer> trie = singleLevelIntTrie(10);
-        assertEquals(asList(-1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9), toList(trie));
-
-        Trie<Integer> intersection = trie.subtrie(null, true, of(7), true);
-        assertEquals(asList(-1, 0, 1, 2, 3, 4, 5, 6, 7), toList(intersection));
+        Trie<Integer> intersection = trie.subtrie(null, of(7));
+        assertTrieEquals(asList(-1, 0, 1, 2, 3, 4, 5, 6, 7), intersection);
     }
 
     @Test
     public void testSimpleNoIntersection()
     {
         Trie<Integer> trie = singleLevelIntTrie(10);
-        assertEquals(asList(-1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9), toList(trie));
+        assertTrieEquals(asList(-1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9), trie);
 
-        Trie<Integer> intersection = trie.subtrie(null, true, null, true);
-        assertEquals(asList(-1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9), toList(intersection));
-
-        // The two boolean flags don't have a meaning when the bound does not exist. For completeness, also test
-        // with them set to false.
-        intersection = trie.subtrie(null, false, null, false);
-        assertEquals(asList(-1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9), toList(intersection));
+        Trie<Integer> intersection = trie.subtrie(null, null);
+        assertTrieEquals(asList(-1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9), intersection);
     }
 
     @Test
     public void testSimpleEmptyIntersectionLeft()
     {
         Trie<Integer> trie = singleLevelIntTrie(10);
-        assertEquals(asList(-1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9), toList(trie));
+        assertTrieEquals(asList(-1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9), trie);
 
-        Trie<Integer> intersection = trie.subtrie(ByteComparable.EMPTY, true, null, true);
-        assertEquals(asList(-1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9), toList(intersection));
+        Trie<Integer> intersection = trie.subtrie(ByteComparable.EMPTY, null);
+        assertTrieEquals(asList(-1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9), intersection);
 
-        intersection = trie.subtrie(ByteComparable.EMPTY, false, null, true);
-        assertEquals(asList(0, 1, 2, 3, 4, 5, 6, 7, 8, 9), toList(intersection));
-
-        intersection = trie.subtrie(ByteComparable.EMPTY, true, of(5), true);
-        assertEquals(asList(-1, 0, 1, 2, 3, 4, 5), toList(intersection));
-
-        intersection = trie.subtrie(ByteComparable.EMPTY, false, of(5), true);
-        assertEquals(asList(0, 1, 2, 3, 4, 5), toList(intersection));
-
+        intersection = trie.subtrie(ByteComparable.EMPTY, ByteComparable.EMPTY);
+        assertTrieEquals(asList(-1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9), intersection);
     }
 
     @Test
     public void testSimpleEmptyIntersectionRight()
     {
         Trie<Integer> trie = singleLevelIntTrie(10);
-        assertEquals(asList(-1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9), toList(trie));
+        assertTrieEquals(asList(-1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9), trie);
 
-        Trie<Integer> intersection = trie.subtrie(null, true, ByteComparable.EMPTY, true);
-        assertEquals(asList(-1), toList(intersection));
+        Trie<Integer> intersection = trie.subtrie(null, ByteComparable.EMPTY);
+        assertTrieEquals(asList(-1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9), intersection);
 
-        intersection = trie.subtrie(null, true, ByteComparable.EMPTY, false);
-        assertEquals(asList(), toList(intersection));
+        intersection = trie.subtrie(ByteComparable.EMPTY, ByteComparable.EMPTY);
+        assertTrieEquals(asList(-1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9), intersection);
+    }
 
-        intersection = trie.subtrie(ByteComparable.EMPTY, true, ByteComparable.EMPTY, true);
-        assertEquals(asList(-1), toList(intersection));
+    @Test
+    public void testSubtrieOnSubtrie()
+    {
+        Trie<Integer> trie = singleLevelIntTrie(15);
 
-        intersection = trie.subtrie(ByteComparable.EMPTY, false, ByteComparable.EMPTY, true);
-        assertEquals(asList(), toList(intersection));
+        // non-overlapping
+        Trie<Integer> intersection = trie.subtrie(of(0), of(4)).subtrie(of(5), of(8));
+        assertTrieEquals(asList(-1), intersection);
+        // touching
+        intersection = trie.subtrie(of(0), of(3)).subtrie(of(3), of(8));
+        assertTrieEquals(asList(-1, 3), intersection);
+        // overlapping 1
+        intersection = trie.subtrie(of(0), of(4)).subtrie(of(2), of(8));
+        assertTrieEquals(asList(-1, 2, 3, 4), intersection);
+        // overlapping 2
+        intersection = trie.subtrie(of(0), of(4)).subtrie(of(1), of(8));
+        assertTrieEquals(asList(-1, 1, 2, 3, 4), intersection);
+        // covered
+        intersection = trie.subtrie(of(0), of(4)).subtrie(of(0), of(8));
+        assertTrieEquals(asList(-1, 0, 1, 2, 3, 4), intersection);
+        // covered 2
+        intersection = trie.subtrie(of(4), of(8)).subtrie(of(0), of(8));
+        assertTrieEquals(asList(-1, 4, 5, 6, 7, 8), intersection);
+    }
 
-        intersection = trie.subtrie(ByteComparable.EMPTY, true, ByteComparable.EMPTY, false);
-        assertEquals(asList(), toList(intersection));
+    @Test
+    public void testIntersectedIntersection()
+    {
+        Trie<Integer> trie = singleLevelIntTrie(15);
 
-        // (empty, empty) is an invalid call as the "(empty" is greater than "empty)"
+        // non-overlapping
+        Trie<Integer> intersection = trie.intersect(TrieSet.range(VERSION, of(0), of(4)))
+                                         .intersect(TrieSet.range(VERSION, of(5), of(8)));
+        assertTrieEquals(asList(-1), intersection);
+        // touching
+        intersection = trie.intersect(TrieSet.range(VERSION, of(0), of(3)))
+                           .intersect(TrieSet.range(VERSION, of(3), of(8)));
+        assertTrieEquals(asList(-1, 3), intersection);
+        // overlapping 1
+        intersection = trie.intersect(TrieSet.range(VERSION, of(0), of(4)))
+                           .intersect(TrieSet.range(VERSION, of(2), of(8)));
+        assertTrieEquals(asList(-1, 2, 3, 4), intersection);
+        // overlapping 2
+        intersection = trie.intersect(TrieSet.range(VERSION, of(0), of(4)))
+                           .intersect(TrieSet.range(VERSION, of(1), of(8)));
+        assertTrieEquals(asList(-1, 1, 2, 3, 4), intersection);
+        // covered
+        intersection = trie.intersect(TrieSet.range(VERSION, of(0), of(4)))
+                           .intersect(TrieSet.range(VERSION, of(0), of(8)));
+        assertTrieEquals(asList(-1, 0, 1, 2, 3, 4), intersection);
+        // covered 2
+        intersection = trie.intersect(TrieSet.range(VERSION, of(4), of(8)))
+                           .intersect(TrieSet.range(VERSION, of(0), of(8)));
+        assertTrieEquals(asList(-1, 4, 5, 6, 7, 8), intersection);
     }
 }

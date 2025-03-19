@@ -205,7 +205,7 @@ The same argument holds when `b` is the smaller cursor to be advanced.
 
 ## Merging two tries
 
-Two tries can be merged using `Trie.mergeWith`, which is implemented using the class `MergeTrie`. The implementation
+Two tries can be merged using `Trie.mergeWith`, which is implemented using the class `MergeCursor`. The implementation
 is a straightforward application of the parallel walking scheme above, where the merged cursor presents the depth
 and incoming transition of the currently smaller cursor, and advances by advancing the smaller cursor, or both if they
 are equal.
@@ -218,7 +218,7 @@ the other through "bb" &mdash; condition 2. is violated, the latter will have hi
 
 ## Merging an arbitrary number of tries
 
-Merging is extended to an arbitrary number of sources in `CollectionMergeTrie`, used through the static `Trie.merge`.
+Merging is extended to an arbitrary number of sources in `CollectionMergeCursor`, used through the static `Trie.merge`.
 The process is a generalization of the above, implemented using the min-heap solution from `MergeIterator` applied
 to cursors.
 
@@ -229,28 +229,6 @@ descendants) at the expense of possibly adding one additional comparison in the 
 As above, when we know that the head element is not equal to the heap top (i.e. it's necessarily smaller) we can
 use its `advanceMultiple` safely.
 
-## Slicing tries
-
-Slicing, implemented in `SlicedTrie` and used via `Trie.subtrie`, can also be seen as a variation of the parallel 
-walk. In this case we walk the source as well as singletons of the two bounds.
-
-More precisely, while the source cursor is smaller than the left bound, we don't produce any output. That is, we
-keep advancing in a loop, but to avoid walking subtries unnecessarily, we use `skipChildren` instead of `advance`.
-As we saw above, a smaller cursor that descends remains smaller, thus there is no point to do so when we are
-ahead of the left bound. When the source matches a node from the left bound, we descend both and pass the
-state to the consumer. As soon as the source becomes known greater than the left bound, we can stop processing 
-the latter and pass any state we see to the consumer. 
-
-Throughout this we also process the right bound cursor and we stop the iteration (by returning `depth = -1`) 
-as soon as the source becomes larger than the right bound.
-
-`SlicedTrie` does not use singleton tries and cursors over them but opts to implement them directly, using an
-implicit representation using a pair of `depth` and `incomingTransition` for each bound.
-
-In slices we can also use `advanceMultiple` when we are certain to be strictly inside the slice, i.e. beyond the
-left bound and before the right bound. As above, descending to any depth in this case is safe as the
-result will remain smaller than the right bound.
-
 ## Reverse iteration
 
 Tries and trie cursors support reverse iteration. Reverse trie iteration presents data in lexicographic order 
@@ -260,3 +238,191 @@ is prefix-free like the byte-ordered type translations).
 
 This difference is imposed by the cursor interfaces which necessarily have to present parent nodes before their 
 children and do not preserve or present any state on ascent.
+
+
+# Trie sets
+
+The simplest way to implement a set in the trie paradigm is to define
+an infinite trie that returns `true` for all positions that are covered by the set. Such a set is very easy to define
+and apply, but unfortunately is not at all efficient because an intersection must necessarily walk the set cursor for
+every covered position, which introduces a lot of overhead and makes it impossible to apply efficiency improvements such
+as `advanceMultiple`.
+
+Instead, our trie sets (defined in `TrieSet/TrieSetCursor`) implement sets of ranges of keys by listing the boundaries of
+each range and their prefixes. This makes it possible to identify fully contained regions of the set and proceed inside
+such regions without touching the set cursor.
+
+Trie set cursors specify a "state" at any position they list. This state includes information about the inclusion of trie
+branches before, after and below the listed position. When we are applying a set to a trie (i.e. intersecting the trie
+with it), we would walk the two cursors in parallel. If the set moves ahead, we use the state to determine whether the
+position of the trie cursor is covered by the set. Similarly, when a `skipTo` is performed on the set, the same state
+flags can tell us if the set covers the position we attempted to skip to, when the set cursor does not have an exact
+match and skips over the requested position.
+
+## Trie set content
+
+Trie sets list the boundary points for the represented ranges. For example, the range `[abc, ade]` will be represented
+by the trie
+```
+a ->
+  b ->
+    c -> START
+  d ->
+    e -> END
+```
+where `START` is a state marking a left boundary, and `END` marks a right boundary. To be able to easily say that e.g.
+`aa` is not covered by the set, but `ac` is, nodes on the prefix path also keep track of a richer state that also
+provide information on the coverage on both sides of the position.
+
+The full state trie for the above example is
+```
+a -> START_END_PREFIX
+  b -> START_PREFIX
+    c -> START
+  d -> END_PREFIX
+    e -> END
+```
+The "prefix" states are not reported by `content()`, but they are used to determine the inclusion of preceding positions
+in the set. `START_PREFIX` denotes a prefix of a left boundary, and thus positions before it are not covered by the set,
+but positions after it are. Similarly, `END_PREFIX` is a prefix of a right boundary, which has the opposite coverage on
+the two sides. `START_END_PREFIX` is a prefix of both a left and a right boundary (or more generally a boundary of some
+number of pairs of left and right boundaries), and thus neither side of that prefix belongs to the covered set.
+
+There are several additional states that the sets can list:
+- `POINT` is a position that is both the start and end boundary of a range. This is a singleton branch covered by the
+  set, e.g. `[abc, abc]` is represented by the trie
+  ```
+  a -> START_END_PREFIX
+    b -> START_END_PREFIX
+      c -> POINT
+  ```
+- `END_START_PREFIX` is the prefix of both a right and left boundary (or more generally any number of pairs of right
+  and left boundary). This is a position that is covered by the set on both sides but whose branch is not entirely in
+  the set. For example, the ranges `[abc, adc] + [ade, afg]` are represented by the trie
+  ```
+    a -> START_END_PREFIX
+      b -> START_PREFIX
+        c -> START
+      d -> END_START_PREFIX
+        c -> END
+        e -> START
+      f -> END_PREFIX
+        g -> END
+  ```
+- `COVERED` is a position which is both an end of one boundary and the start of another. Such boundaries have no effect
+  and the position at which they are reported is fully covered on both sides, as well as on the whole descendant branch.
+  For example, the ranges `[abc, ade] + [ade, afg]` are represented by the trie
+  ```
+    a -> START_END_PREFIX
+      b -> START_PREFIX
+        c -> START
+      d -> END_START_PREFIX
+        e -> COVERED
+      f -> END_PREFIX
+        g -> END
+  ```
+
+## Inclusivity and prefixes
+
+One important feature of the trie sets is that they are always inclusive of all boundaries, all their prefixes and all
+their descendants. Additionally, set boundaries cannot contain prefixes of other boundaries. This is imposed by the
+necessity to perform cursor walks on tries in both forward and reverse direction.
+
+For example, consider the range `[a, aaa]`.  In both directions of a cursor walk `a` precedes `aaa`, which means that
+if we are to accept such a range, it must be presented as `a: START, aaa: END` in a forward walk, and as
+`a: END, aaa: START` in a reverse walk. Allowing different trie content depending on the direction of the walk is not
+an acceptable solution because of the complexity and confusion that can bring.
+
+Additionally, if we are to exclude some prefixes or descendants, so that e.g. `[aa, bb)` includes `aaa` and `b` but not
+`a` or `bbb`, the reverse iteration of this range (which would report `a` before `aa` and `bbb` after `b`) would not be
+a contiguous range, which would also introduce unacceptable complexity.
+
+The above is only a material limitation when the keys allow prefixes. If the keys we work with are prefix-free and can
+present positions before and after any valid key (both provided by our byte-comparable translation), we can still
+correctly define ranges between any two keys, with the posibility of inclusive or exclusive boundaries as needed.
+
+As we also would also like to retrieve metadata on the paths leading to queried keys (e.g. a partition marker and stats
+when we query information for a subset of rows in that partition), the fact that these sets always produce prefixes can
+be seen as an advantage.
+
+## Converting ranges to trie sets
+
+The main usage of a trie set is to return subtries bounded by one or more key ranges. We achieve this as the
+intersection of a trie with a trie set that represents the ranges. The ranges are constructed by taking an array of
+ordered boundaries, walking them in parallel and presenting states as follows:
+- if the keys that we are currently descending on start on an odd position in the array, this is a prefix of a left
+  boundary, so the state we need should cover the positions to the left of it (i.e. be `START_PREFIX`,
+  `START_END_PREFIX`, `START` or `COVERED`).
+- if the keys that we are currently descending on end on an even position in the array, this is a prefix of a right
+  boundary, so the state we need should cover the positions to the right of it (i.e. be `END_PREFIX`,
+  `START_END_PREFIX`, `END` or `COVERED`).
+- if the keys that we are currently descending on are exhausted (i.e. return `END_OF_STREAM`), we need to report a
+  boundary state (i.e. `START`, `END`, `POINT` or `COVERED`) and we need to advance and ascend to the next keys in the
+  array.
+
+For the `[abc, adc] + [ade, afg]` example above, the ranges construction will accept the array `[abc, adc, ade, afg]`
+and proceed as follows:
+- We start at depth 0, with all four array positions assigned depth 0.
+- On the first `advance` call, we advance all sources at depth 0, and all of them return `a` and depth 1. Since the left
+  index is 0 (left excluded), the right index is 3 (right excluded), and the key is not exhausted, the state returned
+  should be `START_END_PREFIX`.
+- On the next `advance` call, we advance all sources at the current depth 1 (this is again all 4). This time they return
+  different characters, thus we restrict our advancing set to just index 0, with character `b` and depth 2.
+  Since the left index is 0 (left excluded), the right index is 0 (right included), and the key is not exhausted, the
+  state returned should be `START_PREFIX`.
+- On the next `advance` call, we advance all sources at the current depth 2. This is only the source at index 0, which
+  returns `c` and depth 3. Since the left index is 0 (left excluded), the right index is 0 (right included), and the key
+  is exhausted, the state returned is `START`.
+- On the next `advance` call we recognize that the currently followed key is exhausted, so we advance to the next set,
+  which has depth 2 and character `d`. This includes two keys, with indexes 1 and 2. Since the left index is 1 (left
+  included), the right index is 2 (right included), and the key is not exhausted, the state returned should be
+  `END_START_PREFIX`.
+- On the next `advance` call we advance the sources at the current depth 2, which are the sources at indexes 1 and 2.
+  They return different characters, so we restrict our advancing set to just index 1, with character `c` and depth 3.
+  Since the left index is 1 (left included), the right index is 1 (right excluded), and the key is exhausted, the
+  state returned should be `END`.
+- On the next `advance` call we recognize that the currently followed key is exhausted, so we advance to the next set,
+  which has depth 3 and character `e`, and includes only the key at array index 2. Since the index for both sides is 2,
+  left is excluded and right is included, which with the exhausted key gives us the state `START`.
+- On the next `advance` call we recognize that the currently followed key is exhausted, so we advance to the next set,
+  which has depth 2 and character `f`, and includes only the key at array index 3. For index 3 on both sides (left
+  included, right excluded) and a key that is not exhausted, the state returned is `END_PREFIX`.
+- On the next `advance` call we descend along key 3, which is `g` and exhausted, so the state returned is `END`
+  (left included, right excluded, key exhausted).
+- The next `advance` call moves outside the span of the array, and we return a depth of -1, denoting the end of the
+  walk.
+
+## Intersecting a trie with a trie set
+
+Set intersection is performed by walking the source and set with a parallel walk. If the set advances beyond the
+position of the trie, we check the state of the set to see if the position is covered by the set (done by
+`TrieSetCursor.precedingIncluded`). If it is, we can present all content in the trie until it catches up with the set
+position, and we can also apply `advanceMultiple` as a direct call on the trie. If the position is not covered by the
+set, we perform a `skipTo` call to the current position of the set. This may move beyond the current position of the
+set, so we must skip the set to the new position, and then repeat the above steps.
+
+If at any point both trie and set are at the same position, we can report that position and advance both trie and set
+on the next `advance` or `skipTo` call. In this case `advanceMultiple` cannot be used and must act as `advance`.
+
+## Set algebra
+
+A variation of the above can also be applied to sets, giving us set intersections.
+
+We can also perform "weak" negation of a set by simply inverting the returned states. This has the effect of changing
+the covered branches, but not any boundary or their descendant branches. For example, the weak inverse of the range
+`[abc, ade]` is the set `[null, abc] + [ade, null]`, which is represented as
+```
+END_START_PREFIX
+a -> END_START_PREFIX
+  b -> END_PREFIX
+    c -> END
+  d -> START_PREFIX
+    e -> START
+END_START_PREFIX
+```
+(The END_START_PREFIX before the trie describes the result of calling `state` on the root node, and the one at the end,
+the result of calling state when the iteration is exhausted; these are START_END_STATE for sets that are limited on the
+respective side. Also note that the inversion of an array of boundaries is the array with "null" appended on both
+sides.)
+
+Using De Morgan's law, this weak negation also lets us perform set union.

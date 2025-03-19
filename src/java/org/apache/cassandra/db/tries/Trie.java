@@ -23,7 +23,6 @@ import com.google.common.collect.Iterables;
 import java.util.Collection;
 import java.util.Iterator;
 import java.util.Map;
-import java.util.function.BiConsumer;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
@@ -65,29 +64,10 @@ public interface Trie<T> extends BaseTrie<T, Cursor<T>, Trie<T>>
         return dir -> new SingletonCursor<>(dir, b.asComparableBytes(byteComparableVersion), byteComparableVersion, v);
     }
 
-    /// Returns a view of the subtrie containing everything in this trie whose keys fall between the given boundaries.
-    /// The view is live, i.e. any write to the source will be reflected in the subtrie.
-    /// This method will throw an assertion error if the bounds provided are not correctly ordered, including with
-    /// respect to the `includeLeft` and `includeRight` constraints (i.e. `subtrie(x, false, x, false)` is an invalid call
-    /// but `subtrie(x, true, x, false)` is inefficient but fine for an empty subtrie).
-    ///
-    /// @param left the left bound for the returned subtrie. If `null`, the resulting subtrie is not left-bounded.
-    /// @param includeLeft whether `left` is an inclusive bound of not.
-    /// @param right the right bound for the returned subtrie. If `null`, the resulting subtrie is not right-bounded.
-    /// @param includeRight whether `right` is an inclusive bound of not.
-    /// @return a view of the subtrie containing all the keys of this trie falling between `left` (inclusively if
-    /// `includeLeft`) and `right` (inclusively if `includeRight`).
-    default Trie<T> subtrie(ByteComparable left, boolean includeLeft, ByteComparable right, boolean includeRight)
-    {
-        if (left == null && right == null)
-            return this;
-        return dir -> SlicedCursor.create(cursor(dir), left, includeLeft, right, includeRight);
-    }
-
     @Override
-    default Trie<T> subtrie(ByteComparable left, ByteComparable right)
+    default Trie<T> intersect(TrieSet set)
     {
-        return subtrie(left, true, right, false);
+        return dir -> new IntersectionCursor.Plain<>(cursor(dir), set.cursor(dir));
     }
 
     /// Returns the values in any order. For some tries this is much faster than the ordered iterable.
@@ -255,7 +235,7 @@ public interface Trie<T> extends BaseTrie<T, Cursor<T>, Trie<T>>
     {
         Cursor<T> c = cursor(Direction.FORWARD);
         if (c.descendAlong(prefix.asComparableBytes(c.byteComparableVersion())))
-            return dir -> c.tailCursor(dir);
+            return c::tailCursor;
         else
             return null;
     }
