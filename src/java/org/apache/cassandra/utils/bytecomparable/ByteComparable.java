@@ -19,14 +19,8 @@
 package org.apache.cassandra.utils.bytecomparable;
 
 import java.nio.ByteBuffer;
-import java.util.Arrays;
-
-import com.google.common.primitives.UnsignedBytes;
-
-import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FastByteOperations;
 
-import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 
 /**
@@ -80,13 +74,6 @@ public interface ByteComparable
     }
 
     // Simple factories used for testing
-
-    @VisibleForTesting
-    static ByteComparable of(String s)
-    {
-        // Note: This is not prefix-free
-        return v -> ByteSource.of(s, v);
-    }
 
     static ByteComparable of(long value)
     {

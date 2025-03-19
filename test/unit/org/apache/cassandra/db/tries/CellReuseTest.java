@@ -38,10 +38,10 @@ import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 
-import static org.apache.cassandra.db.tries.InMemoryTrieTestBase.asString;
-import static org.apache.cassandra.db.tries.InMemoryTrieTestBase.assertMapEquals;
-import static org.apache.cassandra.db.tries.InMemoryTrieTestBase.byteComparableVersion;
-import static org.apache.cassandra.db.tries.InMemoryTrieTestBase.generateKeys;
+import static org.apache.cassandra.db.tries.TrieUtil.VERSION;
+import static org.apache.cassandra.db.tries.TrieUtil.asString;
+import static org.apache.cassandra.db.tries.TrieUtil.assertMapEquals;
+import static org.apache.cassandra.db.tries.TrieUtil.generateKeys;
 
 public class CellReuseTest
 {
@@ -73,7 +73,7 @@ public class CellReuseTest
     public void testCellReuse(Predicate<InMemoryTrie.NodeFeatures<Object>> forceCopyPredicate) throws Exception
     {
         ByteComparable[] src = generateKeys(rand, COUNT);
-        InMemoryTrie<Object> trieLong = makeInMemoryTrie(src, opOrder -> InMemoryTrie.longLived(byteComparableVersion, BufferType.ON_HEAP, opOrder),
+        InMemoryTrie<Object> trieLong = makeInMemoryTrie(src, opOrder -> InMemoryTrie.longLived(VERSION, BufferType.ON_HEAP, opOrder),
                                                              forceCopyPredicate);
 
         // dump some information first
@@ -121,8 +121,8 @@ public class CellReuseTest
     {
         ByteComparable[] src = generateKeys(rand, COUNT);
         OpOrder order = new OpOrder();
-        InMemoryTrie<Object> trie = InMemoryTrie.longLived(byteComparableVersion, order);
-        InMemoryTrie<Object> check = InMemoryTrie.shortLived(byteComparableVersion);
+        InMemoryTrie<Object> trie = InMemoryTrie.longLived(VERSION, order);
+        InMemoryTrie<Object> check = InMemoryTrie.shortLived(VERSION);
         int step = Math.min(100, COUNT / 100);
         int throwStep = (COUNT + 10) / 5;   // do 4 throwing inserts
         int nextThrow = throwStep;
@@ -247,7 +247,8 @@ public class CellReuseTest
 
     static InMemoryTrie<Object> makeInMemoryTrie(ByteComparable[] src,
                                                  Function<OpOrder, InMemoryTrie<Object>> creator,
-                                                 Predicate<InMemoryTrie.NodeFeatures<Object>> forceCopyPredicate) throws TrieSpaceExhaustedException
+                                                 Predicate<InMemoryTrie.NodeFeatures<Object>> forceCopyPredicate)
+    throws TrieSpaceExhaustedException
     {
         OpOrder order = new OpOrder();
         InMemoryTrie<Object> trie = creator.apply(order);
@@ -271,7 +272,7 @@ public class CellReuseTest
             // (so that all sources have the same value).
             int payload = asString(b).hashCode();
             ByteBuffer v = ByteBufferUtil.bytes(payload);
-            Trie<Object> update = Trie.singleton(b, byteComparableVersion, v);
+            Trie<Object> update = Trie.singleton(b, VERSION, v);
             update = InMemoryTrieThreadedTest.withRootMetadata(update, Boolean.TRUE);
             update = update.prefixedBy(source("prefix"));
             applyUpdating(trie, update, forceCopyPredicate);
@@ -280,7 +281,7 @@ public class CellReuseTest
 
     static ByteComparable source(String key)
     {
-        return ByteComparable.preencoded(byteComparableVersion, key.getBytes(StandardCharsets.UTF_8));
+        return ByteComparable.preencoded(VERSION, key.getBytes(StandardCharsets.UTF_8));
     }
 
     static void addThrowingEntry(ByteComparable b,
@@ -289,7 +290,7 @@ public class CellReuseTest
     {
         int payload = asString(b).hashCode();
         ByteBuffer v = ByteBufferUtil.bytes(payload);
-        Trie<Object> update = Trie.singleton(b, byteComparableVersion, v);
+        Trie<Object> update = Trie.singleton(b, VERSION, v);
 
         // Create an update with two metadata entries, so that the lower is already a copied node.
         // Abort processing on the lower metadata, where the new branch is not attached yet (so as not to affect the

@@ -40,14 +40,14 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Hex;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
-import static org.apache.cassandra.db.tries.InMemoryTrieTestBase.byteComparableVersion;
 import static org.apache.cassandra.db.tries.InMemoryTrieTestBase.addNthToInMemoryTrie;
 import static org.apache.cassandra.db.tries.InMemoryTrieTestBase.addToInMemoryTrie;
-import static org.apache.cassandra.db.tries.InMemoryTrieTestBase.assertIterablesEqual;
-import static org.apache.cassandra.db.tries.InMemoryTrieTestBase.assertMapEquals;
 import static org.apache.cassandra.db.tries.InMemoryTrieTestBase.checkGet;
-import static org.apache.cassandra.db.tries.InMemoryTrieTestBase.generateKey;
-import static org.apache.cassandra.db.tries.InMemoryTrieTestBase.generateKeys;
+import static org.apache.cassandra.db.tries.TrieUtil.VERSION;
+import static org.apache.cassandra.db.tries.TrieUtil.assertIterablesEqual;
+import static org.apache.cassandra.db.tries.TrieUtil.assertMapEquals;
+import static org.apache.cassandra.db.tries.TrieUtil.generateKey;
+import static org.apache.cassandra.db.tries.TrieUtil.generateKeys;
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
@@ -62,14 +62,8 @@ public class PrefixTailTrieTest
 
     private static final int COUNT_TAIL = 5000;
     private static final int COUNT_HEAD = 25;
-    public static final Comparator<ByteComparable> BYTE_COMPARABLE_COMPARATOR = (a, b) -> ByteComparable.compare(a, b, byteComparableVersion);
+    public static final Comparator<ByteComparable> BYTE_COMPARABLE_COMPARATOR = (a, b) -> ByteComparable.compare(a, b, VERSION);
     Random rand = new Random();
-
-    static
-    {
-        // Use prefix-free keys to avoid putting partitions within partitions
-        InMemoryTrieTestBase.prefixFree = true;
-    }
 
     static final InMemoryTrie.UpsertTransformer<Object, Object> THROWING_UPSERT = (e, u) -> {
         if (e != null) throw new AssertionError();
@@ -176,7 +170,7 @@ public class PrefixTailTrieTest
             long count = 0;
             for (var en : trie.tailTries(td, Tail.class))
             {
-                System.out.println(en.getKey().byteComparableAsString(byteComparableVersion));
+                System.out.println(en.getKey().byteComparableAsString(VERSION));
                 Trie<Object> tail = en.getValue();
                 Tail t = data.get(en.getKey());
                 assertNotNull(t);
@@ -197,17 +191,15 @@ public class PrefixTailTrieTest
             ByteComparable first = rand.nextInt(5) > 0 ? Iterables.get(t.data.keySet(), firstIndex) : null;
             ByteComparable last = rand.nextInt(5) > 0 ? Iterables.get(t.data.keySet(), lastIndex) : null;
             ByteComparable prefix = prefixes[i];
-            final ByteComparable leftWithPrefix = concat(prefix, first, rand.nextBoolean() ? prefix
-                                                                                           : rand.nextBoolean()
-                                                                                             ? data.lowerKey(prefix)
-                                                                                             : null);
+            final ByteComparable leftWithPrefix = concat(prefix, first, rand.nextBoolean() ? data.lowerKey(prefix)
+                                                                                           : null);
             final ByteComparable rightWithPrefix = concat(prefix, last, rand.nextBoolean() ? data.higherKey(prefix)
                                                                                            : null);
+            System.out.println("Between " + (leftWithPrefix == null ? "null" : leftWithPrefix.byteComparableAsString(VERSION)) + " and " + (rightWithPrefix == null ? "null" : rightWithPrefix.byteComparableAsString(VERSION)));
             Trie<Object> tail = trie.subtrie(leftWithPrefix,
                                              rightWithPrefix)
                                     .tailTrie(prefixes[i]);
-            System.out.println("Between " + (leftWithPrefix == null ? "null" : leftWithPrefix.byteComparableAsString(byteComparableVersion)) + " and " + (rightWithPrefix == null ? "null" : rightWithPrefix.byteComparableAsString(byteComparableVersion)));
-            assertEquals(first == null ? t : null, getRootContent(tail));   // this behavior will change soon to report all prefixes
+            assertEquals(t, getRootContent(tail));
             checkContent(tail, subMap(t.data, first, last));
         }
 
@@ -221,7 +213,7 @@ public class PrefixTailTrieTest
             count.set(0);
             trie.forEachEntrySkippingBranches(td, (key, tail) ->
             {
-                assertArrayEquals(((Tail) tail).prefix, key.asByteComparableArray(byteComparableVersion));
+                assertArrayEquals(((Tail) tail).prefix, key.asByteComparableArray(VERSION));
                 count.incrementAndGet();
             });
             assertEquals(COUNT_HEAD, count.get());
@@ -245,28 +237,29 @@ public class PrefixTailTrieTest
 
     private static <K, V> NavigableMap<K, V> subMap(NavigableMap<K, V> data, K left, K right)
     {
+        // Subtries are always inclusive.
         if (left == null)
-            return right == null ? data : data.headMap(right, false);
+            return right == null ? data : data.headMap(right, true);
         else
             return right == null
                    ? data.tailMap(left, true)
-                   : data.subMap(left, true, right, false);
+                   : data.subMap(left, true, right, true);
     }
 
     private static ByteComparable concat(ByteComparable a, ByteComparable b, ByteComparable ifBNull)
     {
         if (b == null)
             return ifBNull;
-        return ByteComparable.preencoded(byteComparableVersion,
-                                         Bytes.concat(a.asByteComparableArray(byteComparableVersion),
-                                                      b.asByteComparableArray(byteComparableVersion)));
+        return ByteComparable.preencoded(VERSION,
+                                         Bytes.concat(a.asByteComparableArray(VERSION),
+                                                      b.asByteComparableArray(VERSION)));
     }
 
     private Trie<Object> prepareSplitInTailTrie(int splits, ByteComparable[] prefixes, Map<ByteComparable, Tail> data) throws TrieSpaceExhaustedException
     {
         InMemoryTrie<Object>[] tries = new InMemoryTrie[splits];
         for (int i = 0; i < splits; ++i)
-            tries[i] = InMemoryTrie.shortLived(byteComparableVersion);
+            tries[i] = InMemoryTrie.shortLived(VERSION);
         for (int i = 0; i < COUNT_HEAD; ++i)
         {
             ByteComparable[] src = generateKeys(rand, COUNT_TAIL);
@@ -274,17 +267,17 @@ public class PrefixTailTrieTest
             for (int k = 0; k < splits; ++k)
             {
                 NavigableMap<ByteComparable, ByteBuffer> content = new TreeMap<>(BYTE_COMPARABLE_COMPARATOR);
-                InMemoryTrie<Object> tail = InMemoryTrie.shortLived(byteComparableVersion);
+                InMemoryTrie<Object> tail = InMemoryTrie.shortLived(VERSION);
                 addNthToInMemoryTrie(src, content, tail, true, splits, k);
 
-                Tail t = new Tail(prefixes[i].asByteComparableArray(byteComparableVersion), content);
+                Tail t = new Tail(prefixes[i].asByteComparableArray(VERSION), content);
                 allContent.putAll(content);
                 tail.putRecursive(ByteComparable.EMPTY, t, THROWING_UPSERT);
 //            System.out.println(tail.dump(CONTENT_TO_STRING));
                 tries[k].apply(tail.prefixedBy(prefixes[i]), THROWING_UPSERT, Predicates.alwaysFalse());
             }
-            Tail t = new Tail(prefixes[i].asByteComparableArray(byteComparableVersion), allContent);
-            data.put(ByteComparable.preencoded(byteComparableVersion, t.prefix), t);
+            Tail t = new Tail(prefixes[i].asByteComparableArray(VERSION), allContent);
+            data.put(ByteComparable.preencoded(VERSION, t.prefix), t);
         }
 
         return Trie.merge(Arrays.asList(tries), c -> c.stream().reduce(PrefixTailTrieTest::combineTails).get());
@@ -295,22 +288,22 @@ public class PrefixTailTrieTest
     {
         InMemoryTrie<Object>[] tries = new InMemoryTrie[splits];
         for (int i = 0; i < splits; ++i)
-            tries[i] = InMemoryTrie.shortLived(byteComparableVersion);
+            tries[i] = InMemoryTrie.shortLived(VERSION);
         int trieIndex = 0;
         for (int i = 0; i < prefixes.length; ++i)
         {
             ByteComparable[] src = generateKeys(rand, COUNT_TAIL);
 
             NavigableMap<ByteComparable, ByteBuffer> content = new TreeMap<>(BYTE_COMPARABLE_COMPARATOR);
-            InMemoryTrie<Object> tail = InMemoryTrie.shortLived(byteComparableVersion);
+            InMemoryTrie<Object> tail = InMemoryTrie.shortLived(VERSION);
             addToInMemoryTrie(src, content, tail, true);
 
-            Tail t = new Tail(prefixes[i].asByteComparableArray(byteComparableVersion), content);
+            Tail t = new Tail(prefixes[i].asByteComparableArray(VERSION), content);
             tail.putRecursive(ByteComparable.EMPTY, t, THROWING_UPSERT);
 //            System.out.println(tail.dump(CONTENT_TO_STRING));
             tries[trieIndex].apply(tail.prefixedBy(prefixes[i]), THROWING_UPSERT, Predicates.alwaysFalse());
 
-            data.put(ByteComparable.preencoded(byteComparableVersion, t.prefix), t);
+            data.put(ByteComparable.preencoded(VERSION, t.prefix), t);
             trieIndex = (trieIndex + 1) % splits;
         }
 
@@ -323,13 +316,13 @@ public class PrefixTailTrieTest
     public void testTailMerge() throws Exception
     {
         ByteComparable prefix = generateKey(rand);
-        InMemoryTrie<Object> trie = InMemoryTrie.shortLived(byteComparableVersion);
+        InMemoryTrie<Object> trie = InMemoryTrie.shortLived(VERSION);
         NavigableMap<ByteComparable, ByteBuffer> content = new TreeMap<>(BYTE_COMPARABLE_COMPARATOR);
 
         for (int i = 0; i < COUNT_HEAD; ++i)
         {
             ByteComparable[] src = generateKeys(rand, COUNT_TAIL);
-            InMemoryTrie<Object> tail = InMemoryTrie.shortLived(byteComparableVersion);
+            InMemoryTrie<Object> tail = InMemoryTrie.shortLived(VERSION);
             addToInMemoryTrie(src, content, tail, true);
 //                        System.out.println(tail.dump(CONTENT_TO_STRING));
             tail.putRecursive(ByteComparable.EMPTY, 1, THROWING_UPSERT);
@@ -352,7 +345,7 @@ public class PrefixTailTrieTest
         long count = 0;
         for (var en : trie.tailTries(Direction.FORWARD, Integer.class))
         {
-            System.out.println(en.getKey().byteComparableAsString(byteComparableVersion));
+            System.out.println(en.getKey().byteComparableAsString(VERSION));
             Trie<Object> tt = en.getValue();
             assertNotNull(tt);
             assertEquals(COUNT_HEAD, ((Integer) getRootContent(tail)).intValue());
@@ -385,7 +378,7 @@ public class PrefixTailTrieTest
         final Trie<Object> trie = prepareSplitInHeadTrie(1, prefixes, data);
 //        System.out.println(trie.dump(CONTENT_TO_STRING));
 
-        InMemoryTrie<Object> dest = InMemoryTrie.shortLived(byteComparableVersion);
+        InMemoryTrie<Object> dest = InMemoryTrie.shortLived(VERSION);
         InclusionChecker checker = new InclusionChecker();
         dest.apply(trie, checker, Predicates.alwaysFalse());
         assertEquals("", checker.output.toString());
@@ -434,7 +427,7 @@ public class PrefixTailTrieTest
 
                 if (!(update instanceof ByteBuffer))
                     output.append("Not ByteBuffer " + update + msg);
-                ByteBuffer expected = currentTail.data.get(ByteComparable.preencoded(byteComparableVersion, tailPath));
+                ByteBuffer expected = currentTail.data.get(ByteComparable.preencoded(VERSION, tailPath));
                 if (expected == null)
                     output.append("Suffix not found" + msg);
                 if (!expected.equals(update))
