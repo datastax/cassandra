@@ -244,16 +244,33 @@ public interface BaseTrie<T, C extends Cursor<T>, Q extends BaseTrie<T, C, Q>> e
         return new TrieValuesIterator.FilteredByType<>(cursor(direction), clazz);
     }
 
-    /// Returns a view of the subtrie containing everything in this trie whose keys fall between the given boundaries.
+    /// Returns a view of the subtrie containing everything in this trie whose keys fall between the given boundaries,
+    /// inclusive of both bounds and any prefix of the bounds.
+    ///
     /// The view is live, i.e. any write to the source will be reflected in the subtrie.
     ///
-    /// @param left  the left bound for the returned subtrie, inclusive. If `null`, the resulting subtrie is not
-    ///              left-bounded.
-    /// @param right the right bound for the returned subtrie, exclusive. If `null`, the resulting subtrie is not
-    ///              right-bounded.
-    /// @return a view of the subtrie containing all the keys of this trie falling between `left` inclusively and
-    /// `right` exclusively.
-    Q subtrie(ByteComparable left, ByteComparable right);
+    /// This method will not check its arguments for correctness. The resulting trie may throw an exception if the right
+    /// bound is smaller than the left.
+    ///
+    /// This package is designed to walk tries efficiently using cursors that necessarily present prefix nodes before
+    /// children. Lexicographically correct slices (where e.g. the left bound and prefixes of the right are included in
+    /// the set but prefixes of the left are not) are not contiguous in this representation in both iteration directions
+    /// (because a prefix of the left bound must necessarily be presented before the left bound itself in reverse order)
+    /// and are thus not supported. However, if the encoded keys are prefix-free, this limitation is immaterial.
+    ///
+    /// @param left the left bound for the returned subtrie. If `null`, the resulting subtrie is not left-bounded.
+    /// @param right the right bound for the returned subtrie. If `null`, the resulting subtrie is not right-bounded.
+    /// @return a view of the subtrie containing all the keys of this trie falling between `left` and `right`,
+    /// including both bounds and any prefix of the bounds.
+    default Q subtrie(ByteComparable left, ByteComparable right)
+    {
+        return intersect(TrieSet.range(cursor(Direction.FORWARD).byteComparableVersion(), left, right));
+    }
+
+    /// Returns a view of this trie that is an intersection of its content with the given set.
+    ///
+    /// The view is live, i.e. any write to the source will be reflected in the intersection.
+    Q intersect(TrieSet set);
 
     /// Returns a Trie that is a view of this one, where the given prefix is prepended before the root.
     Q prefixedBy(ByteComparable prefix);
