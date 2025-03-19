@@ -19,7 +19,9 @@ package org.apache.cassandra.index;
 import java.util.LinkedList;
 import java.util.List;
 
+import org.junit.After;
 import org.junit.Assert;
+import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
@@ -29,6 +31,7 @@ import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.internal.CassandraIndex;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sasi.SASIIndex;
+import org.apache.cassandra.index.sasi.SASIIndexBuilder;
 import org.apache.cassandra.inject.Injections;
 import org.apache.cassandra.inject.InvokePointBuilder;
 
@@ -51,42 +54,86 @@ public class AllIndexImplementationsTest extends CQLTester
     public String createIndexQuery;
 
     @Parameterized.Parameter(3)
-    public int useInjection;
+    public boolean duringInitialBuild;
 
-    @Parameterized.Parameters(name = "{0}{3, choice, 0#|1#-with-injection}")
+    private Injections.Barrier blockIndexBuildInjection;
+
+    @Parameterized.Parameters(name = "index={0} during_initial_build={3}")
     public static List<Object[]> parameters()
     {
         List<Object[]> parameters = new LinkedList<>();
-        // Regular cases without injection
-        //parameters.add(new Object[]{ "none", null, null, 0 });
-        //parameters.add(new Object[]{ "legacy", CassandraIndex.class, "CREATE INDEX ON %%s(%s)", 0 });
-        //parameters.add(new Object[]{ "SASI", SASIIndex.class, "CREATE CUSTOM INDEX ON %%s(%s) USING 'org.apache.cassandra.index.sasi.SASIIndex'", 0 });
-        //parameters.add(new Object[]{ "SAI", StorageAttachedIndex.class, "CREATE CUSTOM INDEX ON %%s(%s) USING 'StorageAttachedIndex'", 0 });
 
-        // Only SAI with injection
-        parameters.add(new Object[]{ "SAI", StorageAttachedIndex.class, "CREATE CUSTOM INDEX ON %%s(%s) USING 'StorageAttachedIndex'", 1 });
+        // without any indexes
+        parameters.add(new Object[]{ "none", null, null, false });
+
+        // for each known index implementation, before and after finishing the initial build
+        for (boolean duringInitialBuild : new boolean[]{ false, true })
+        {
+            parameters.add(new Object[]{ "legacy",
+                                         CassandraIndex.class,
+                                         "CREATE INDEX ON %%s(%s)",
+                                         duringInitialBuild });
+            parameters.add(new Object[]{ "SASI",
+                                         SASIIndex.class,
+                                         "CREATE CUSTOM INDEX ON %%s(%s) USING 'org.apache.cassandra.index.sasi.SASIIndex'",
+                                         duringInitialBuild });
+            parameters.add(new Object[]{ "SAI",
+                                         StorageAttachedIndex.class,
+                                         "CREATE CUSTOM INDEX ON %%s(%s) USING 'StorageAttachedIndex'",
+                                         duringInitialBuild });
+        }
         return parameters;
     }
 
-    final Injections.Barrier blockIndexBuild = Injections.newBarrier("block_index_build", 2, false)
-                                                         .add(InvokePointBuilder.newInvokePoint().onClass(StorageAttachedIndex.class)
-                                                                                .onMethod("startInitialBuild"))
-                                                         .build();
-
-    @Test
-    public void testDisjunction() throws Throwable
+    @Before
+    public void setupBlockIndexBuildInjection() throws Throwable
     {
-        if (useInjection == 1 && StorageAttachedIndex.class.equals(indexClass))
+        if (!duringInitialBuild)
+            return;
+
+        if (StorageAttachedIndex.class.equals(indexClass))
         {
-            Injections.inject(blockIndexBuild);
+            blockIndexBuildInjection = blockInitialBuildInjection(indexClass, "startInitialBuild");
+        }
+        else if (CassandraIndex.class.equals(indexClass))
+        {
+            blockIndexBuildInjection = blockInitialBuildInjection(indexClass, "buildBlocking");
+        }
+        else if (SASIIndex.class.equals(indexClass))
+        {
+            blockIndexBuildInjection = blockInitialBuildInjection(SASIIndexBuilder.class, "build");
+        }
+        else
+        {
+            throw new AssertionError("Unsupported index class: " + indexClass);
         }
 
+        Injections.inject(blockIndexBuildInjection);
+    }
+
+    @After
+    public void teardownBlockIndexBuildInjection()
+    {
+        if (blockIndexBuildInjection != null)
+        {
+            blockIndexBuildInjection.countDown();
+            blockIndexBuildInjection.disable();
+        }
+    }
+
+    @Test
+    public void testDisjunction()
+    {
         createTable("CREATE TABLE %s (pk int, a int, b int, PRIMARY KEY(pk))");
 
         boolean indexSupportsDisjuntion = StorageAttachedIndex.class.equals(indexClass);
         boolean hasIndex = createIndexQuery != null;
         if (hasIndex)
+        {
             createIndexAsync(String.format(createIndexQuery, 'a'));
+            if (!duringInitialBuild)
+                waitForTableIndexesQueryable();
+        }
 
         execute("INSERT INTO %s (pk, a, b) VALUES (?, ?, ?)", 1, 1, 1);
         execute("INSERT INTO %s (pk, a, b) VALUES (?, ?, ?)", 2, 2, 2);
@@ -97,7 +144,7 @@ public class AllIndexImplementationsTest extends CQLTester
                           hasIndex && indexSupportsDisjuntion,
                           hasIndex ? INDEX_DOES_NOT_SUPPORT_DISJUNCTION : REQUIRES_ALLOW_FILTERING_MESSAGE,
                           row(1), row(2));
-        /*assertDisjunction("a = 1 OR b = 2", true, false, row(1), row(2));
+        assertDisjunction("a = 1 OR b = 2", true, false, row(1), row(2));
         assertDisjunction("a = 1 AND (a = 1 OR b = 1)", true, hasIndex, row(1));
         assertDisjunction("a = 1 AND (a = 1 OR b = 2)", true, hasIndex, row(1));
         assertDisjunction("a = 1 AND (a = 2 OR b = 1)", true, hasIndex, row(1));
@@ -113,11 +160,15 @@ public class AllIndexImplementationsTest extends CQLTester
         assertDisjunction("a = 2 OR (a = 1 AND b = 1)", true, indexSupportsDisjuntion, row(1), row(2));
         assertDisjunction("a = 2 OR (a = 1 AND b = 2)", true, indexSupportsDisjuntion, row(2));
         assertDisjunction("a = 2 OR (a = 2 AND b = 1)", true, indexSupportsDisjuntion, row(2));
-        assertDisjunction("a = 2 OR (a = 2 AND b = 2)", true, indexSupportsDisjuntion, row(2));*/
+        assertDisjunction("a = 2 OR (a = 2 AND b = 2)", true, indexSupportsDisjuntion, row(2));
 
         // create a second index in the remaining column, so all columns are indexed
         if (hasIndex)
+        {
             createIndexAsync(String.format(createIndexQuery, 'b'));
+            if (!duringInitialBuild)
+                waitForTableIndexesQueryable();
+        }
 
         // test with all columns indexed
         assertDisjunction("a = 1 OR a = 2",
@@ -142,12 +193,6 @@ public class AllIndexImplementationsTest extends CQLTester
         assertDisjunction("a = 2 OR (a = 1 AND b = 2)", !indexSupportsDisjuntion, indexSupportsDisjuntion, row(2));
         assertDisjunction("a = 2 OR (a = 2 AND b = 1)", !indexSupportsDisjuntion, indexSupportsDisjuntion, row(2));
         assertDisjunction("a = 2 OR (a = 2 AND b = 2)", !indexSupportsDisjuntion, indexSupportsDisjuntion, row(2));
-
-        if (useInjection == 1 && StorageAttachedIndex.class.equals(indexClass))
-        {
-            blockIndexBuild.countDown();
-            blockIndexBuild.disable();
-        }
     }
 
     private void assertDisjunction(String restrictions,
@@ -166,11 +211,13 @@ public class AllIndexImplementationsTest extends CQLTester
     {
         // without ALLOW FILTERING
         String query = "SELECT pk FROM %s WHERE " + restrictions;
+
         if (requiresFiltering)
             assertInvalidThrowMessage(error, InvalidRequestException.class, query);
+        else if (duringInitialBuild)
+            assertInvalidThrow(IndexNotAvailableException.class, query);
         else
-            System.out.println("KATE: I am building it");
-            //assertRowsIgnoringOrder(execute(query), rows);
+            assertRowsIgnoringOrder(execute(query), rows);
 
         // with ALLOW FILTERING
         query += " ALLOW FILTERING";
@@ -179,5 +226,13 @@ public class AllIndexImplementationsTest extends CQLTester
         // verify whether the indexes are used
         Index.QueryPlan plan = parseReadCommand(query).indexQueryPlan();
         Assert.assertEquals(shouldUseIndexes, plan != null);
+    }
+
+    private static Injections.Barrier blockInitialBuildInjection(Class<?> indexClass, String methodName)
+    {
+        return Injections.newBarrier("block_index_build", 2, false)
+                         .add(InvokePointBuilder.newInvokePoint().onClass(indexClass)
+                                                .onMethod(methodName))
+                         .build();
     }
 }

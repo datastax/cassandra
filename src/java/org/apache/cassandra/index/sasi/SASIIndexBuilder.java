@@ -48,7 +48,7 @@ import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.UUIDGen;
 
-class SASIIndexBuilder extends SecondaryIndexBuilder
+public class SASIIndexBuilder extends SecondaryIndexBuilder
 {
     private final ColumnFamilyStore cfs;
     private final UUID compactionId = UUIDGen.getTimeUUID();
