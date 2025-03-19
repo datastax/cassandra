@@ -98,6 +98,13 @@ public final class SchemaConstants
      */
     public static final int TABLE_NAME_LENGTH = FILENAME_LENGTH - TABLE_UUID_AS_HEX_LENGTH - TABLE_DIRECTORY_NAME_SEPARATOR.length();
 
+    /** Longest permissible index name, so no index can fail on file name error.
+     * It is based on the most restrictive requirement coming from SAI and calculated by
+     * {@link org.apache.cassandra.index.sai.disk.format.Version#calculateIndexNameAllowedLength}.
+     * The exact number is used here, since it will be in user's documentation.
+     */
+    public static final int INDEX_NAME_LENGTH = 182;
+
     // 59adb24e-f3cd-3e02-97f0-5b395827453f
     public static final UUID emptyVersion;
 
