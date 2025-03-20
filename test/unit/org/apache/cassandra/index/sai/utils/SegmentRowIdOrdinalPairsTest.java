@@ -24,12 +24,12 @@ import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
 
-public class IntIntPairArrayTest
+public class SegmentRowIdOrdinalPairsTest
 {
     @Test
     public void testOperationsOnIntIntPairArray()
     {
-        IntIntPairArray array = new IntIntPairArray(2);
+        SegmentRowIdOrdinalPairs array = new SegmentRowIdOrdinalPairs(2);
         assertEquals(0, array.size());
         array.add(1, 2);
         array.add(3, 4);
@@ -37,11 +37,11 @@ public class IntIntPairArrayTest
 
         // Validate the iteration
         var accumulator = new AtomicInteger();
-        array.forEachRightInt(accumulator::addAndGet);
+        array.forEachOrdinal(accumulator::addAndGet);
         assertEquals(6, accumulator.get());
 
         accumulator.set(0);
-        array.forEachIntPair((x,y) -> {
+        array.forEachPair((x, y) -> {
             accumulator.addAndGet(x);
             accumulator.addAndGet(y);
         });
@@ -51,7 +51,7 @@ public class IntIntPairArrayTest
     @Test(expected = IndexOutOfBoundsException.class)
     public void testAddToFullArray()
     {
-        IntIntPairArray array = new IntIntPairArray(1);
+        SegmentRowIdOrdinalPairs array = new SegmentRowIdOrdinalPairs(1);
         array.add(1, 2);
         array.add(3, 4);
     }
@@ -59,6 +59,6 @@ public class IntIntPairArrayTest
     @Test(expected = AssertionError.class)
     public void testCapacityTooLarge()
     {
-        new IntIntPairArray(Integer.MAX_VALUE / 2 + 1);
+        new SegmentRowIdOrdinalPairs(Integer.MAX_VALUE / 2 + 1);
     }
 }
