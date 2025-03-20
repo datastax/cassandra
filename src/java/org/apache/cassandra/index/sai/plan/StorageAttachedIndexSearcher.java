@@ -133,7 +133,8 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                 assert !(keysIterator instanceof KeyRangeIterator);
                 var scoredKeysIterator = (CloseableIterator<PrimaryKeyWithSortKey>) keysIterator;
                 var result = new ScoreOrderedResultRetriever(scoredKeysIterator, filterTree, executionController,
-                                                             command.limits().count());
+                                                             command.limits().count(),
+                                                             ordering.context.getDefinition());
                 return new TopKProcessor(command).filter(result);
             }
             catch (QueryView.Builder.MissingIndexException e)
@@ -513,6 +514,10 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         private final HashSet<PrimaryKey> processedKeys;
         private final Queue<UnfilteredRowIterator> pendingRows;
 
+        // Null indicates we are not sending the synthetic score column to the coordinator
+        @Nullable
+        private final ColumnMetadata syntheticScoreColumn;
+
         // The limit requested by the query. We cannot load more than softLimit rows in bulk because we only want
         // to fetch the topk rows where k is the limit. However, we allow the iterator to fetch more rows than the
         // soft limit to avoid confusing behavior. When the softLimit is reached, the iterator will fetch one row
@@ -522,7 +527,8 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
 
         private ScoreOrderedResultRetriever(CloseableIterator<PrimaryKeyWithSortKey> scoredPrimaryKeyIterator,
                                             FilterTree filterTree,
-                                            ReadExecutionController executionController, int limit)
+                                            ReadExecutionController executionController, int limit,
+                                            ColumnMetadata orderedColumn)
         {
             IndexContext context = controller.getOrderer().context;
             this.view = controller.getQueryView(context).view;
@@ -536,6 +542,13 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             this.processedKeys = new HashSet<>(limit);
             this.pendingRows = new ArrayDeque<>(limit);
             this.softLimit = limit;
+
+            // When +score is added on the coordinator side, it's represented as a PrecomputedColumnFilter
+            // even in a 'SELECT *' because WCF is not capable of representing synthetic columns.
+            // This can be simplified when we remove ANN_USE_SYNTHETIC_SCORE
+            var tempColumn = ColumnMetadata.syntheticScoreColumn(orderedColumn, FloatType.instance);
+            var isScoreFetched = controller.command().columnFilter().fetchesExplicitly(tempColumn);
+            this.syntheticScoreColumn = isScoreFetched ? tempColumn : null;
         }
 
         @Override
@@ -693,7 +706,8 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                         }
                     }
                 }
-                return isRowValid ? new PrimaryKeyIterator(partition, staticRow, row, sourceKeys, controller.command()) : null;
+                return isRowValid ? new PrimaryKeyIterator(partition, staticRow, row, sourceKeys, syntheticScoreColumn)
+                                  : null;
             }
         }
 
@@ -717,7 +731,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             private boolean consumed = false;
             private final Unfiltered row;
 
-            public PrimaryKeyIterator(UnfilteredRowIterator partition, Row staticRow, Unfiltered content, List<PrimaryKeyWithSortKey> primaryKeysWithScore, ReadCommand command)
+            public PrimaryKeyIterator(UnfilteredRowIterator partition, Row staticRow, Unfiltered content, List<PrimaryKeyWithSortKey> primaryKeysWithScore, ColumnMetadata syntheticScoreColumn)
             {
                 super(partition.metadata(),
                       partition.partitionKey(),
@@ -735,16 +749,8 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                     return;
                 }
 
-                // When +score is added on the coordinator side, it's represented as a PrecomputedColumnFilter
-                // even in a 'SELECT *' because WCF is not capable of representing synthetic columns.
-                // This can be simplified when we remove ANN_USE_SYNTHETIC_SCORE
-                var tm = metadata();
-                var scoreColumn = ColumnMetadata.syntheticColumn(tm.keyspace,
-                                                                 tm.name,
-                                                                 ColumnMetadata.SYNTHETIC_SCORE_ID,
-                                                                 FloatType.instance);
-                var isScoreFetched = command.columnFilter().fetchesExplicitly(scoreColumn);
-                if (!isScoreFetched)
+
+                if (syntheticScoreColumn == null)
                 {
                     this.row = content;
                     return;
@@ -757,7 +763,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
 
                 // inject +score as a new column
                 var pkWithScore = (PrimaryKeyWithScore) primaryKeysWithScore.get(0);
-                columnData.add(BufferCell.live(scoreColumn,
+                columnData.add(BufferCell.live(syntheticScoreColumn,
                                                FBUtilities.nowInSeconds(),
                                                FloatType.instance.decompose(pkWithScore.indexScore)));
 
