@@ -120,6 +120,9 @@ public final class ColumnMetadata extends ColumnSpecification implements Selecta
     private final Comparator<Object> asymmetricCellPathComparator;
     private final Comparator<? super Cell<?>> cellComparator;
 
+    // When the kind is SYNTHETIC, this is the column from which the synthetic column is derived
+    public final ColumnIdentifier sythenticSourceColumn;
+
     private int hash;
 
     /**
@@ -194,9 +197,9 @@ public final class ColumnMetadata extends ColumnSpecification implements Selecta
     /**
      * Creates a new synthetic column metadata instance.
      */
-    public static ColumnMetadata syntheticColumn(String keyspace, String table, ColumnIdentifier id, AbstractType<?> type)
+    public static ColumnMetadata syntheticScoreColumn(ColumnMetadata sourceColumn, AbstractType<?> type)
     {
-        return new ColumnMetadata(keyspace, table, id, type, NO_POSITION, Kind.SYNTHETIC, null);
+        return new ColumnMetadata(sourceColumn.ksName, sourceColumn.cfName, SYNTHETIC_SCORE_ID, type, NO_POSITION, Kind.SYNTHETIC, null, false, sourceColumn.name);
     }
 
     /**
@@ -256,6 +259,19 @@ public final class ColumnMetadata extends ColumnSpecification implements Selecta
                           @Nullable ColumnMask mask,
                           boolean isDropped)
     {
+        this(ksName, cfName, name, type, position, kind, mask, isDropped, null);
+    }
+
+    public ColumnMetadata(String ksName,
+                          String cfName,
+                          ColumnIdentifier name,
+                          AbstractType<?> type,
+                          int position,
+                          Kind kind,
+                          @Nullable ColumnMask mask,
+                          boolean isDropped,
+                          ColumnIdentifier sythenticSourceColumnName)
+    {
         super(ksName, cfName, name, type);
         assert name != null && type != null && kind != null;
         assert (position == NO_POSITION) == !kind.isPrimaryKeyKind(); // The position really only make sense for partition and clustering columns (and those must have one),
@@ -289,6 +305,10 @@ public final class ColumnMetadata extends ColumnSpecification implements Selecta
         this.comparisonOrder = comparisonOrder(kind, isComplex(), Math.max(0, position), name);
         this.mask = mask;
         this.isDropped = isDropped;
+
+        // Synthetic columns are the only ones that can have a source column
+        assert kind == Kind.SYNTHETIC || sythenticSourceColumnName == null;
+        this.sythenticSourceColumn = sythenticSourceColumnName;
     }
 
     private static Comparator<CellPath> makeCellPathComparator(Kind kind, AbstractType<?> type)
