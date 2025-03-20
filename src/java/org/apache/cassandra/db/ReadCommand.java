@@ -77,7 +77,6 @@ import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.locator.Replica;
 import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.net.Message;
-import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
@@ -1295,7 +1294,8 @@ public abstract class ReadCommand extends AbstractReadQuery
                 // synthetic columns sort first, so when we hit the first non-synthetic, we're done
                 if (!c.isSynthetic())
                     break;
-                tmb.addColumn(ColumnMetadata.syntheticColumn(c.ksName, c.cfName, c.name, c.type));
+                assert c.sythenticSourceColumn != null;
+                tmb.addColumn(c);
             }
             metadata = tmb.build();
 
