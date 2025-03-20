@@ -120,6 +120,12 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
                 continue;
             }
 
+            if (!sstable.isIndexable())
+            {
+                logger.debug(logMessage("{} is not indexable, skipping index build"), sstable);
+                continue;
+            }
+
             if (indexSSTable(sstable, existing))
             {
                 return;
