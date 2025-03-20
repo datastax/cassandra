@@ -110,7 +110,7 @@ public class TopKProcessor
         else
             this.queryVector = null;
         this.limit = command.limits().count();
-        this.scoreColumn = ColumnMetadata.syntheticColumn(indexContext.getKeyspace(), indexContext.getTable(), ColumnMetadata.SYNTHETIC_SCORE_ID, FloatType.instance);
+        this.scoreColumn = ColumnMetadata.syntheticScoreColumn(expression.column(), FloatType.instance);
     }
 
     /**
