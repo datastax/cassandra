@@ -22,18 +22,18 @@ import java.lang.invoke.MethodHandles;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.function.Consumer;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.MoreObjects;
-import com.google.common.util.concurrent.Runnables;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.github.jbellis.jvector.graph.NodeQueue;
 import io.github.jbellis.jvector.quantization.CompressedVectors;
 import io.github.jbellis.jvector.quantization.ProductQuantization;
 import io.github.jbellis.jvector.util.BitSet;
 import io.github.jbellis.jvector.util.Bits;
+import io.github.jbellis.jvector.util.BoundedLongHeap;
 import io.github.jbellis.jvector.util.SparseBits;
 import io.github.jbellis.jvector.vector.VectorizationProvider;
 import io.github.jbellis.jvector.vector.types.VectorFloat;
@@ -54,6 +54,7 @@ import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
 import org.apache.cassandra.index.sai.disk.vector.BruteForceRowIdIterator;
 import org.apache.cassandra.index.sai.disk.vector.CassandraDiskAnn;
 import org.apache.cassandra.index.sai.disk.vector.CloseableReranker;
+import org.apache.cassandra.index.sai.disk.vector.NodeQueueRowIdIterator;
 import org.apache.cassandra.index.sai.disk.vector.VectorCompression;
 import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
@@ -72,7 +73,6 @@ import org.apache.cassandra.metrics.PairedSlidingWindowReservoir;
 import org.apache.cassandra.metrics.QuickSlidingWindowReservoir;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.CloseableIterator;
-import org.apache.cassandra.utils.SortingIterator;
 
 import static java.lang.Math.ceil;
 import static java.lang.Math.min;
@@ -293,17 +293,20 @@ public class V2VectorIndexSearcher extends IndexSearcher
                                                                 int limit,
                                                                 int rerankK) throws IOException
     {
-        var approximateScores = new SortingIterator.Builder<BruteForceRowIdIterator.RowWithApproximateScore>(segmentOrdinalPairs.size());
+        // Use the jvector NodeQueue to avoid unnecessary object allocations since this part of the code operates on
+        // many rows.
+        var approximateScores = new NodeQueue(new BoundedLongHeap(segmentOrdinalPairs.size()), NodeQueue.Order.MAX_HEAP);
         var similarityFunction = indexContext.getIndexWriterConfig().getSimilarityFunction();
         var scoreFunction = cv.precomputedScoreFunctionFor(queryVector, similarityFunction);
 
-        segmentOrdinalPairs.forEachPair((segmentRowId, ordinal) -> {
-            var score = scoreFunction.similarityTo(ordinal);
-            approximateScores.add(new BruteForceRowIdIterator.RowWithApproximateScore(segmentRowId, ordinal, score));
+        // Store the index of the (rowId, ordinal) pair from the segmentOrdinalPairs in the NodeQueue so that we can
+        // retrieve both values with O(1) lookup when we need to resolve the full resolution score in the
+        // BruteForceRowIdIterator.
+        segmentOrdinalPairs.forEachIndexOrdinalPair((i, ordinal) -> {
+            approximateScores.push(i, scoreFunction.similarityTo(ordinal));
         });
-        var approximateScoresQueue = approximateScores.build(BruteForceRowIdIterator.RowWithApproximateScore::compare);
         var reranker = new CloseableReranker(similarityFunction, queryVector, graph.getView());
-        return new BruteForceRowIdIterator(approximateScoresQueue, reranker, limit, rerankK);
+        return new BruteForceRowIdIterator(approximateScores, segmentOrdinalPairs, reranker, limit, rerankK);
     }
 
     /**
@@ -313,9 +316,17 @@ public class V2VectorIndexSearcher extends IndexSearcher
      */
     private CloseableIterator<RowIdWithScore> orderByBruteForce(VectorFloat<?> queryVector, SegmentRowIdOrdinalPairs segmentOrdinalPairs) throws IOException
     {
-        var scoredRowIds = new SortingIterator.Builder<RowIdWithScore>(segmentOrdinalPairs.size());
-        addScoredRowIdsToCollector(queryVector, segmentOrdinalPairs, 0, scoredRowIds::add);
-        return scoredRowIds.closeable(RowIdWithScore::compare, Runnables.doNothing());
+        var scoredRowIds = new NodeQueue(new BoundedLongHeap(segmentOrdinalPairs.size()), NodeQueue.Order.MAX_HEAP);
+        try (var vectorsView = graph.getView())
+        {
+            var similarityFunction = indexContext.getIndexWriterConfig().getSimilarityFunction();
+            var esf = vectorsView.rerankerFor(queryVector, similarityFunction);
+            // Because the scores are exact, we only store the rowid, score pair.
+            segmentOrdinalPairs.forEachSegmentRowIdOrdinalPair((segmentRowId, ordinal) -> {
+                scoredRowIds.push(segmentRowId, esf.similarityTo(ordinal));
+            });
+            return new NodeQueueRowIdIterator(scoredRowIds);
+        }
     }
 
     /**
@@ -328,25 +339,17 @@ public class V2VectorIndexSearcher extends IndexSearcher
                                                                  float threshold) throws IOException
     {
         var results = new ArrayList<RowIdWithScore>(segmentOrdinalPairs.size());
-        addScoredRowIdsToCollector(queryVector, segmentOrdinalPairs, threshold, results::add);
-        return CloseableIterator.wrap(results.iterator());
-    }
-
-    private void addScoredRowIdsToCollector(VectorFloat<?> queryVector,
-                                            SegmentRowIdOrdinalPairs segmentOrdinalPairs,
-                                            float threshold,
-                                            Consumer<RowIdWithScore> collector) throws IOException
-    {
-        var similarityFunction = indexContext.getIndexWriterConfig().getSimilarityFunction();
         try (var vectorsView = graph.getView())
         {
+            var similarityFunction = indexContext.getIndexWriterConfig().getSimilarityFunction();
             var esf = vectorsView.rerankerFor(queryVector, similarityFunction);
-            segmentOrdinalPairs.forEachPair((segmentRowId, ordinal) -> {
+            segmentOrdinalPairs.forEachSegmentRowIdOrdinalPair((segmentRowId, ordinal) -> {
                 var score = esf.similarityTo(ordinal);
                 if (score >= threshold)
-                    collector.accept(new RowIdWithScore(segmentRowId, score));
+                    results.add(new RowIdWithScore(segmentRowId, score));
             });
         }
+        return CloseableIterator.wrap(results.iterator());
     }
 
     private long getMaxSSTableRowId(PrimaryKeyMap primaryKeyMap, PartitionPosition right)

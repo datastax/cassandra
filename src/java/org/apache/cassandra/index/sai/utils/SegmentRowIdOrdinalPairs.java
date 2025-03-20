@@ -34,7 +34,7 @@ public class SegmentRowIdOrdinalPairs
 
     /**
      * Create a new IntIntPairArray with the given capacity.
-     * @param capacity
+     * @param capacity the capacity
      */
     public SegmentRowIdOrdinalPairs(int capacity)
     {
@@ -52,10 +52,34 @@ public class SegmentRowIdOrdinalPairs
     public void add(int segmentRowId, int ordinal)
     {
         if (size == capacity)
-            throw new IndexOutOfBoundsException(size);
+            throw new ArrayIndexOutOfBoundsException(size);
         array[size * 2] = segmentRowId;
         array[size * 2 + 1] = ordinal;
         size++;
+    }
+
+    /**
+     * Get the row id at the given index.
+     * @param index the index
+     * @return the row id
+     */
+    public int getSegmentRowId(int index)
+    {
+        if ( index < 0 || index >= size)
+            throw new ArrayIndexOutOfBoundsException(index);
+        return array[index * 2];
+    }
+
+    /**
+     * Get the ordinal at the given index.
+     * @param index the index
+     * @return the ordinal
+     */
+    public int getOrdinal(int index)
+    {
+        if ( index < 0 || index >= size)
+            throw new ArrayIndexOutOfBoundsException(index);
+        return array[index * 2 + 1];
     }
 
     /**
@@ -68,14 +92,25 @@ public class SegmentRowIdOrdinalPairs
     }
 
     /**
-     * Iterate over the pairs in the array, calling the consumer for each pair.
+     * Iterate over the pairs in the array, calling the consumer for each pair passing (index, x, y).
      * @param consumer the consumer to call for each pair
      */
-    public void forEachPair(IntIntConsumer consumer)
+    public void forEachSegmentRowIdOrdinalPair(IntIntConsumer consumer)
     {
         for (int i = 0; i < size; i++)
             consumer.accept(array[i * 2], array[i * 2 + 1]);
     }
+
+    /**
+     * Iterate over the pairs in the array, calling the consumer for each pair passing (index, x, y).
+     * @param consumer the consumer to call for each pair
+     */
+    public void forEachIndexOrdinalPair(IntIntConsumer consumer)
+    {
+        for (int i = 0; i < size; i++)
+            consumer.accept(i, array[i * 2 + 1]);
+    }
+
 
     /**
      * Calls the consumer for each right value in each pair of the array.

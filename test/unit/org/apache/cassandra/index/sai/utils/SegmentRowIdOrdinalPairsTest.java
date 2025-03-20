@@ -18,47 +18,158 @@
 
 package org.apache.cassandra.index.sai.utils;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertThrows;
 
 public class SegmentRowIdOrdinalPairsTest
 {
     @Test
-    public void testOperationsOnIntIntPairArray()
+    public void testBasicOperations()
     {
-        SegmentRowIdOrdinalPairs array = new SegmentRowIdOrdinalPairs(2);
-        assertEquals(0, array.size());
-        array.add(1, 2);
-        array.add(3, 4);
-        assertEquals(2, array.size());
+        SegmentRowIdOrdinalPairs pairs = new SegmentRowIdOrdinalPairs(3);
 
-        // Validate the iteration
-        var accumulator = new AtomicInteger();
-        array.forEachOrdinal(accumulator::addAndGet);
-        assertEquals(6, accumulator.get());
+        // Test initial state
+        assertEquals(0, pairs.size());
 
-        accumulator.set(0);
-        array.forEachPair((x, y) -> {
-            accumulator.addAndGet(x);
-            accumulator.addAndGet(y);
-        });
-        assertEquals(10, accumulator.get());
+        // Test adding pairs
+        pairs.add(1, 10);
+        pairs.add(2, 20);
+        pairs.add(3, 30);
+
+        assertEquals(3, pairs.size());
+
+        // Test getting values
+        assertEquals(1, pairs.getSegmentRowId(0));
+        assertEquals(2, pairs.getSegmentRowId(1));
+        assertEquals(3, pairs.getSegmentRowId(2));
+
+        assertEquals(10, pairs.getOrdinal(0));
+        assertEquals(20, pairs.getOrdinal(1));
+        assertEquals(30, pairs.getOrdinal(2));
     }
 
-    @Test(expected = IndexOutOfBoundsException.class)
+    @Test
+    public void testForEachOrdinal()
+    {
+        SegmentRowIdOrdinalPairs pairs = new SegmentRowIdOrdinalPairs(3);
+        pairs.add(1, 10);
+        pairs.add(2, 20);
+        pairs.add(3, 30);
+
+        List<Integer> ordinals = new ArrayList<>();
+        pairs.forEachOrdinal(ordinals::add);
+
+        assertEquals(3, ordinals.size());
+        assertEquals(Integer.valueOf(10), ordinals.get(0));
+        assertEquals(Integer.valueOf(20), ordinals.get(1));
+        assertEquals(Integer.valueOf(30), ordinals.get(2));
+    }
+
+    @Test
+    public void testForEachSegmentRowIdOrdinalPair()
+    {
+        SegmentRowIdOrdinalPairs pairs = new SegmentRowIdOrdinalPairs(3);
+        pairs.add(1, 10);
+        pairs.add(2, 20);
+        pairs.add(3, 30);
+
+        List<Integer> rowIds = new ArrayList<>();
+        List<Integer> ordinals = new ArrayList<>();
+
+        pairs.forEachSegmentRowIdOrdinalPair((rowId, ordinal) -> {
+            rowIds.add(rowId);
+            ordinals.add(ordinal);
+        });
+
+        assertEquals(3, rowIds.size());
+        assertEquals(3, ordinals.size());
+        assertEquals(Integer.valueOf(1), rowIds.get(0));
+        assertEquals(Integer.valueOf(10), ordinals.get(0));
+        assertEquals(Integer.valueOf(2), rowIds.get(1));
+        assertEquals(Integer.valueOf(20), ordinals.get(1));
+        assertEquals(Integer.valueOf(3), rowIds.get(2));
+        assertEquals(Integer.valueOf(30), ordinals.get(2));
+    }
+
+    @Test
+    public void testForEachIndexOrdinalPair()
+    {
+        SegmentRowIdOrdinalPairs pairs = new SegmentRowIdOrdinalPairs(3);
+        pairs.add(1, 10);
+        pairs.add(2, 20);
+        pairs.add(3, 30);
+
+        List<Integer> indices = new ArrayList<>();
+        List<Integer> ordinals = new ArrayList<>();
+
+        pairs.forEachIndexOrdinalPair((index, ordinal) -> {
+            indices.add(index);
+            ordinals.add(ordinal);
+        });
+
+        assertEquals(3, indices.size());
+        assertEquals(3, ordinals.size());
+        assertEquals(Integer.valueOf(0), indices.get(0));
+        assertEquals(Integer.valueOf(10), ordinals.get(0));
+        assertEquals(Integer.valueOf(1), indices.get(1));
+        assertEquals(Integer.valueOf(20), ordinals.get(1));
+        assertEquals(Integer.valueOf(2), indices.get(2));
+        assertEquals(Integer.valueOf(30), ordinals.get(2));
+    }
+
+    @Test
+    public void testGetSegmentRowIdAndOrdinalBoundaryChecks()
+    {
+        SegmentRowIdOrdinalPairs pairs = new SegmentRowIdOrdinalPairs(2);
+        pairs.add(1, 10);
+
+        assertThrows(ArrayIndexOutOfBoundsException.class, () -> pairs.getSegmentRowId(-1));
+        assertThrows(ArrayIndexOutOfBoundsException.class, () -> pairs.getSegmentRowId(1));
+        assertThrows(ArrayIndexOutOfBoundsException.class, () -> pairs.getOrdinal(-1));
+        assertThrows(ArrayIndexOutOfBoundsException.class, () -> pairs.getOrdinal(1));
+    }
+
+    @Test
     public void testAddToFullArray()
     {
-        SegmentRowIdOrdinalPairs array = new SegmentRowIdOrdinalPairs(1);
-        array.add(1, 2);
-        array.add(3, 4);
+        SegmentRowIdOrdinalPairs pairs = new SegmentRowIdOrdinalPairs(1);
+        pairs.add(1, 10);
+        assertThrows(IndexOutOfBoundsException.class, () -> pairs.add(2, 20));
     }
 
-    @Test(expected = AssertionError.class)
+    @Test
     public void testCapacityTooLarge()
     {
-        new SegmentRowIdOrdinalPairs(Integer.MAX_VALUE / 2 + 1);
+        assertThrows(AssertionError.class, () -> new SegmentRowIdOrdinalPairs(Integer.MAX_VALUE / 2 + 1));
+    }
+
+    @Test
+    public void testOperationsOnEmptyArray()
+    {
+        SegmentRowIdOrdinalPairs pairs = new SegmentRowIdOrdinalPairs(1);
+        AtomicInteger count = new AtomicInteger(0);
+
+        pairs.forEachOrdinal(i -> count.incrementAndGet());
+        assertEquals(0, count.get());
+
+        pairs.forEachSegmentRowIdOrdinalPair((x, y) -> count.incrementAndGet());
+        assertEquals(0, count.get());
+
+        pairs.forEachIndexOrdinalPair((x, y) -> count.incrementAndGet());
+        assertEquals(0, count.get());
+    }
+
+    @Test
+    public void testZeroCapacity()
+    {
+        SegmentRowIdOrdinalPairs pairs = new SegmentRowIdOrdinalPairs(0);
+        assertEquals(0, pairs.size());
+        assertThrows(IndexOutOfBoundsException.class, () -> pairs.add(1, 10));
     }
 }
