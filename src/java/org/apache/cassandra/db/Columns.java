@@ -493,6 +493,7 @@ public class Columns extends AbstractCollection<ColumnMetadata> implements Colle
                 if (column.isSynthetic())
                 {
                     ByteBufferUtil.writeWithVIntLength(column.name.bytes, out);
+                    ByteBufferUtil.writeWithVIntLength(column.sythenticSourceColumn.bytes, out);
                     typeSerializer.serialize(column.type, out);
                 }
             }
@@ -525,6 +526,7 @@ public class Columns extends AbstractCollection<ColumnMetadata> implements Colle
                 {
                     syntheticCount++;
                     size += ByteBufferUtil.serializedSizeWithVIntLength(column.name.bytes);
+                    size += ByteBufferUtil.serializedSizeWithVIntLength(column.sythenticSourceColumn.bytes);
                     size += typeSerializer.serializedSize(column.type);
                 }
                 else
@@ -550,12 +552,22 @@ public class Columns extends AbstractCollection<ColumnMetadata> implements Colle
                 for (int i = 0; i < syntheticCount; i++)
                 {
                     ByteBuffer name = ByteBufferUtil.readWithVIntLength(in);
+                    ByteBuffer sourceColumnName = ByteBufferUtil.readWithVIntLength(in);
                     AbstractType<?> type = typeSerializer.deserialize(in);
 
                     if (!name.equals(ColumnMetadata.SYNTHETIC_SCORE_ID.bytes))
                         throw new IllegalStateException("Unknown synthetic column " + UTF8Type.instance.getString(name));
 
-                    ColumnMetadata column = ColumnMetadata.syntheticColumn(metadata.keyspace, metadata.name, ColumnMetadata.SYNTHETIC_SCORE_ID, type);
+                    ColumnMetadata sourceColumn = metadata.getColumn(sourceColumnName);
+                    if (sourceColumn == null)
+                    {
+                        // If we don't find the definition, it could be we have data for a dropped column
+                        sourceColumn = metadata.getDroppedColumn(name);
+                        if (sourceColumn == null)
+                            throw new RuntimeException("Unknown column " + UTF8Type.instance.getString(name) + " during deserialization of " + metadata.keyspace + '.' + metadata.name);
+                    }
+
+                    ColumnMetadata column = ColumnMetadata.syntheticScoreColumn(sourceColumn, type);
                     builder.add(column);
                 }
 
