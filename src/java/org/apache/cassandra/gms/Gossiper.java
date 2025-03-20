@@ -271,7 +271,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean, 
                     minVersion = version;
             }
 
-            // remember the minumum version for the expiration duration
+            // remember the minimum version for the expiration duration
             if (minVersion.compareTo(SystemKeyspace.CURRENT_VERSION) < 0)
                 return new ExpiringMemoizingSupplier.Memoized<>(minVersion);
 
