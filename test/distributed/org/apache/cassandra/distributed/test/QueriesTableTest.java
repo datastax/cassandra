@@ -30,6 +30,8 @@ import net.bytebuddy.implementation.bind.annotation.SuperCall;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+
 
 import com.datastax.driver.core.Session;
 import org.apache.cassandra.db.Keyspace;
@@ -43,10 +45,15 @@ import org.apache.cassandra.distributed.api.Row;
 import org.apache.cassandra.distributed.api.SimpleQueryResult;
 import org.apache.cassandra.utils.Throwables;
 
+import org.jboss.byteman.contrib.bmunit.BMRule;
+import org.jboss.byteman.contrib.bmunit.BMUnitRunner;
+
+
 import static net.bytebuddy.matcher.ElementMatchers.named;
 import static net.bytebuddy.matcher.ElementMatchers.takesArguments;
 import static org.junit.Assert.assertTrue;
 
+@RunWith(BMUnitRunner.class)
 public class QueriesTableTest extends TestBaseImpl
 {
     private static Cluster SHARED_CLUSTER;
@@ -76,6 +83,10 @@ public class QueriesTableTest extends TestBaseImpl
     }
 
     @Test
+    @BMRule(name = "Make mutations slow",
+    targetClass = "Mutation",
+    targetMethod = "apply",
+    action = "Thread.sleep(100)")
     public void shouldExposeReadsAndWrites() throws Throwable
     {
         SHARED_CLUSTER.schemaChange("CREATE TABLE " + KEYSPACE + ".tbl (k int primary key, v int)");
