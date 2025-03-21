@@ -34,6 +34,7 @@ import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.tries.IncrementalTrieWriter;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.lucene.store.IndexOutput;
@@ -104,14 +105,15 @@ public class SortedTermsWriter implements Closeable
     public SortedTermsWriter(@NonNull IndexComponent.ForWrite termsDataComponent,
                              @NonNull MetadataWriter metadataWriter,
                              @Nonnull NumericValuesWriter termsDataBlockOffsets,
-                             @Nonnull IndexComponent.ForWrite trieComponent) throws IOException
+                             @Nonnull IndexComponent.ForWrite trieComponent,
+                             @Nonnull CompressionParams compression) throws IOException
     {
         this.componentName = termsDataComponent.fileNamePart();
         this.metadataWriter = metadataWriter;
-        this.trieOutput = trieComponent.openOutput();
+        this.trieOutput = trieComponent.openOutput(compression);
         SAICodecUtils.writeHeader(this.trieOutput);
         this.trieWriter = IncrementalTrieWriter.open(trieSerializer, trieOutput.asSequentialWriter(), TypeUtil.BYTE_COMPARABLE_VERSION);
-        this.termsOutput = termsDataComponent.openOutput();
+        this.termsOutput = termsDataComponent.openOutput(compression);
         SAICodecUtils.writeHeader(termsOutput);
         this.bytesStartFP = termsOutput.getFilePointer();
         this.offsetsWriter = termsDataBlockOffsets;

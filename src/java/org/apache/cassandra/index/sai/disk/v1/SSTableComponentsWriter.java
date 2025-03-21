@@ -29,6 +29,7 @@ import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.v1.bitpack.NumericValuesWriter;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.schema.CompressionParams;
 import org.apache.lucene.util.IOUtils;
 
 /**
