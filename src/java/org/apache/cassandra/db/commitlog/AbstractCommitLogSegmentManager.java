@@ -417,9 +417,9 @@ public abstract class AbstractCommitLogSegmentManager
         handleReplayedSegment(file, false);
     }
 
-    void handleReplayedSegment(final File file, boolean hasInvalidOrFailedMutations)
+    void handleReplayedSegment(final File file, boolean hasFailedMutations)
     {
-        if (!hasInvalidOrFailedMutations)
+        if (!hasFailedMutations)
         {
             // (don't decrease managed size, since this was never a "live" segment)
             logger.trace("(Unopened) segment {} is no longer needed and will be deleted now", file);
