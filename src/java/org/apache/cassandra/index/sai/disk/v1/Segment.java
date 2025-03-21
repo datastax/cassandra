@@ -20,6 +20,7 @@ package org.apache.cassandra.index.sai.disk.v1;
 import java.io.Closeable;
 import java.io.IOException;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Objects;
@@ -43,6 +44,7 @@ import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.CloseableIterator;
 
 /**
@@ -183,7 +185,22 @@ public class Segment implements Closeable
 
     public CloseableIterator<PrimaryKeyWithSortKey> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Orderer orderer, int limit) throws IOException
     {
-        return index.orderResultsBy(sstableContext.sstable, context, keys, orderer, limit);
+        long now = 0;
+        if (Tracing.isTracing())
+            now = System.nanoTime();
+        try
+        {
+            return index.orderResultsBy(sstableContext.sstable, context, keys, orderer, limit);
+        }
+        finally
+        {
+            if (Tracing.isTracing())
+                Tracing.trace("Search took {} micros to search {} rows for sstable {} with segment row id offset {}",
+                              TimeUnit.NANOSECONDS.toMicros(System.nanoTime() - now),
+                              keys.size(),
+                              sstableContext.sstable.getFilename(),
+                              metadata.segmentRowIdOffset);
+        }
     }
 
     @Override

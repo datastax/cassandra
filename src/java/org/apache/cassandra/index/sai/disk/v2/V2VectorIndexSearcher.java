@@ -222,8 +222,8 @@ public class V2VectorIndexSearcher extends IndexSearcher
             // Upper-bound cost based on maximum possible rows included
             int nRows = Math.toIntExact(maxSSTableRowId - minSSTableRowId + 1);
             var initialCostEstimate = estimateCost(rerankK, nRows);
-            Tracing.logAndTrace(logger, "Search range covers {} rows in index of {} nodes; estimate for LIMIT {} is {}",
-                                nRows, graph.size(), rerankK, initialCostEstimate);
+            Tracing.logAndTrace(logger, "Search range covers {} rows in index of {} nodes; estimate for LIMIT {} rerankK {} is {}",
+                                nRows, graph.size(), limit, rerankK, initialCostEstimate);
             // if the range spans a small number of rows, then generate scores from the sstable rows instead of searching the index
             int startSegmentRowId = metadata.toSegmentRowId(minSSTableRowId);
             int endSegmentRowId = metadata.toSegmentRowId(maxSSTableRowId);
@@ -479,8 +479,8 @@ public class V2VectorIndexSearcher extends IndexSearcher
         var segmentOrdinalPairs = flatmapPrimaryKeysToBitsAndRows(keys);
         var numRows = segmentOrdinalPairs.size();
         final CostEstimate cost = estimateCost(rerankK, numRows);
-        Tracing.logAndTrace(logger, "{} relevant rows out of {} in range in index of {} nodes; estimate for LIMIT {} is {}",
-                            numRows, keys.size(), graph.size(), limit, cost);
+        Tracing.logAndTrace(logger, "{} relevant rows out of {} in range in index of {} nodes; estimate for LIMIT {} rerankK {} is {}",
+                            numRows, keys.size(), graph.size(), limit, rerankK, cost);
         if (numRows == 0)
             return CloseableIterator.emptyIterator();
 

@@ -83,19 +83,23 @@ public class AutoResumingNodeScoreIterator extends AbstractIterator<SearchResult
         if (nodeScores.hasNext())
             return nodeScores.next();
 
+        long start = Tracing.isTracing() ? System.nanoTime() : 0;
         var nextResult = searcher.resume(limit, rerankK);
-        maybeLogTrace(nextResult);
+        maybeLogTrace(nextResult, start);
         cumulativeNodesVisited += nextResult.getVisitedCount();
         // If the next result is empty, we are done searching.
         nodeScores = Arrays.stream(nextResult.getNodes()).iterator();
         return nodeScores.hasNext() ? nodeScores.next() : endOfData();
     }
 
-    private void maybeLogTrace(SearchResult result)
+    private void maybeLogTrace(SearchResult result, long start)
     {
+        if (!Tracing.isTracing())
+            return;
         String msg = inMemory ? "ANN resume for {}/{} visited {} nodes, reranked {} to return {} results from {}"
-                              : "DiskANN resume for {}/{} visited {} nodes, reranked {} to return {} results from {}";
-        Tracing.trace(msg, limit, rerankK, result.getVisitedCount(), result.getRerankedCount(), result.getNodes().length, source);
+                              : "DiskANN resume for {}/{} visited {} nodes, reranked {} to return {} results from {}, took {} micros";
+        Tracing.trace(msg, limit, rerankK, result.getVisitedCount(), result.getRerankedCount(), result.getNodes().length, source,
+                      (System.nanoTime() - start) / 1000);
     }
 
     @Override
