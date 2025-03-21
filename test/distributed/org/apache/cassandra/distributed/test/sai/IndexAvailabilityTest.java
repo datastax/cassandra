@@ -187,29 +187,23 @@ public class IndexAvailabilityTest extends TestBaseImpl
             cluster.schemaChange("CREATE TABLE " + ks2 + '.' + cf1 + " (pk int PRIMARY KEY, v1 int, v2 int)");
             executeOnAllCoordinators(cluster,
                                      "SELECT pk FROM " + ks2 + '.' + cf1 + " WHERE v1=0 AND v2=0 ALLOW FILTERING",
-                    ConsistencyLevel.LOCAL_QUORUM,
-                    0);
+                                     ConsistencyLevel.LOCAL_QUORUM,
+                                     0);
             executeOnAllCoordinators(cluster,
                                      "SELECT pk FROM " + ks2 + '.' + cf1 + " WHERE v2=0 ALLOW FILTERING",
-                    ConsistencyLevel.LOCAL_QUORUM,
-                    0);
+                                     ConsistencyLevel.LOCAL_QUORUM,
+                                     0);
             executeOnAllCoordinators(cluster,
                                      "SELECT pk FROM " + ks2 + '.' + cf1 + " WHERE v1=0 ALLOW FILTERING",
-                    ConsistencyLevel.LOCAL_QUORUM,
-                    0);
+                                     ConsistencyLevel.LOCAL_QUORUM,
+                                     0);
 
             cluster.schemaChange(String.format(CREATE_INDEX, index1, ks2, cf1, "v1"));
             cluster.schemaChange(String.format(CREATE_INDEX, index2, ks2, cf1, "v2"));
             cluster.forEach(node -> expectedNodeIndexQueryability.put(NodeIndex.create(ks2, index1, node), Index.Status.BUILD_SUCCEEDED));
-            waitForIndexingStatus(cluster.get(2), ks2, index1, cluster.get(1), Index.Status.BUILD_SUCCEEDED);
-            waitForIndexingStatus(cluster.get(2), ks2, index1, cluster.get(2), Index.Status.BUILD_SUCCEEDED);
-            waitForIndexingStatus(cluster.get(2), ks2, index1, cluster.get(3), Index.Status.BUILD_SUCCEEDED);
-            waitForIndexingStatus(cluster.get(1), ks2, index1, cluster.get(1), Index.Status.BUILD_SUCCEEDED);
-            waitForIndexingStatus(cluster.get(1), ks2, index1, cluster.get(2), Index.Status.BUILD_SUCCEEDED);
-            waitForIndexingStatus(cluster.get(1), ks2, index1, cluster.get(3), Index.Status.BUILD_SUCCEEDED);
-            waitForIndexingStatus(cluster.get(3), ks2, index1, cluster.get(1), Index.Status.BUILD_SUCCEEDED);
-            waitForIndexingStatus(cluster.get(3), ks2, index1, cluster.get(2), Index.Status.BUILD_SUCCEEDED);
-            waitForIndexingStatus(cluster.get(3), ks2, index1, cluster.get(3), Index.Status.BUILD_SUCCEEDED);
+            for (IInvokableInstance node : cluster.get(2, 1, 3))
+                for (IInvokableInstance replica : cluster.get(1, 2, 3))
+                    waitForIndexingStatus(node, ks2, index1, replica, Index.Status.BUILD_SUCCEEDED);
 
             // Mark only index2 as building on node3, leave index1 in BUILD_SUCCEEDED state
             markIndexBuilding(cluster.get(3), ks2, cf1, index2);
