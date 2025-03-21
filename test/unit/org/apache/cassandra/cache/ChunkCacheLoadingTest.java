@@ -262,7 +262,7 @@ public class ChunkCacheLoadingTest
     }
 
     @BMRule(name = "Throw once during async load of compressed chunk",
-            targetClass = "org.apache.cassandra.io.util.CompressedChunkReader$Mmap",
+            targetClass = "org.apache.cassandra.io.util.CompressedChunkReader$Standard",
             targetMethod = "readChunk(long, java.nio.ByteBuffer)",
             condition = "not flagged(\"throw\")" +
                     "&& $0.toString().contains(\"db3050\")" +
