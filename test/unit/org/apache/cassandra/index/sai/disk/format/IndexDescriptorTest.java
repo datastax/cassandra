@@ -39,8 +39,10 @@ import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.PathUtils;
+import org.mockito.Mockito;
 import org.mortbay.util.IO;
 
 import static org.apache.cassandra.index.sai.SAIUtil.setLatestVersion;
@@ -90,9 +92,9 @@ public class IndexDescriptorTest
     static IndexDescriptor loadDescriptor(Descriptor sstableDescriptor, IndexContext... contexts)
     {
         IndexDescriptor indexDescriptor = IndexDescriptor.empty(sstableDescriptor);
-        // Note: passing `null` as metadata is a bit hacky, but it only exists to be passed to the underlying index
-        // discovery class, and the default one ignores it so ... keeping it simple.
-        indexDescriptor.reload(null, new HashSet<>(Arrays.asList(contexts)));
+        SSTableReader sstable = Mockito.mock(SSTableReader.class);
+        Mockito.when(sstable.getDescriptor()).thenReturn(sstableDescriptor);
+        indexDescriptor.reload(sstable, new HashSet<>(Arrays.asList(contexts)));
         return indexDescriptor;
     }
 
@@ -232,8 +234,9 @@ public class IndexDescriptorTest
         createFakePerSSTableComponents(descriptor, latest, 0);
         createFakePerIndexComponents(descriptor, indexContext, latest, 0);
 
-        // See comment on `loadDescriptor` regarding passing null
-        indexDescriptor.reload(null, Set.of(indexContext));
+        SSTableReader sstable = Mockito.mock(SSTableReader.class);
+        Mockito.when(sstable.getDescriptor()).thenReturn(descriptor);
+        indexDescriptor.reload(sstable, Set.of(indexContext));
 
         // Both the perSSTableComponents and perIndexComponents should now be complete and the components should be present
 

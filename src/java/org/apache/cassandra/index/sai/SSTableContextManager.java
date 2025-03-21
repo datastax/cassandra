@@ -80,12 +80,6 @@ public class SSTableContextManager
 
         for (SSTableReader sstable : added)
         {
-            if (!sstable.isIndexable())
-            {
-                logger.debug("Skipped tracking sstable {} because it's not indexable", sstable);
-                continue;
-            }
-
             if (sstable.isMarkedCompacted())
             {
                 logger.debug("Skipped tracking sstable {} because it's marked compacted", sstable);

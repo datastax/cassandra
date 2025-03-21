@@ -918,9 +918,6 @@ public class IndexContext
         Set<SSTableContext> invalid = ConcurrentHashMap.newKeySet();
 
         sstableContexts.stream().parallel().forEach(context -> {
-            if (!context.sstable.isIndexable())
-                return;
-
             if (context.sstable.isMarkedCompacted())
                 return;
 

@@ -1865,14 +1865,6 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         }
     }
 
-    /**
-     * @return true if given sstable can be indexed by 2i, e.g. SAI. Used by CNDB ShallowSSTableReader to skip indexing
-     */
-    public boolean isIndexable()
-    {
-        return true;
-    }
-
     public boolean isMarkedCompacted()
     {
         return tidy.global.obsoletion != null;
