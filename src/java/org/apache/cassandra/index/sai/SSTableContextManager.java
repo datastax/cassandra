@@ -82,6 +82,7 @@ public class SSTableContextManager
         {
             if (sstable.isMarkedCompacted())
             {
+                logger.debug("Skipped tracking sstable {} because it's marked compacted", sstable);
                 continue;
             }
 
@@ -94,6 +95,7 @@ public class SSTableContextManager
                 // validation (it would fail), and we also don't want to add it to the returned contexts, since it's
                 // not ready yet. We know a future call of this method will be triggered for that sstable once the
                 // index finishes building.
+                logger.debug("Skipped tracking sstable {} because per sstable components are not complete (components={})", sstable, perSSTableComponents.all());
                 continue;
             }
 
