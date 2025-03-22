@@ -24,6 +24,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Predicate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -367,9 +368,10 @@ public class Dispatcher implements CQLMessageHandler.MessageConsumer<Message.Req
                     else
                     {
                         JVMStabilityInspector.inspectThrowable(ex);
-                        ExceptionHandlers.UnexpectedChannelExceptionHandler handler = new ExceptionHandlers.UnexpectedChannelExceptionHandler(channel, true);
+                        Predicate<Throwable> handler = ExceptionHandlers.getUnexpectedExceptionHandler(channel, true);
                         ErrorMessage error = ErrorMessage.fromException(ex, handler);
                         error.setStreamId(request.getStreamId());
+                        error.setWarnings(ClientWarn.instance.getWarnings());
                         toFlush = forFlusher.toFlushItem(channel, request, error);
                     }
                     flush(toFlush);
@@ -445,24 +447,32 @@ public class Dispatcher implements CQLMessageHandler.MessageConsumer<Message.Req
 
         Message.logger.trace("Received: {}, v={}", request, connection.getVersion());
         connection.requests.inc();
-        return request.execute(qstate, requestTime)
-                      .addCallback((result, ignored) -> {
-                          try
-                          {
-                              if (request.isTrackable())
-                                  CoordinatorWarnings.done();
+        try
+        {
+            return request.execute(qstate, requestTime).addCallback((result, ignored) -> {
+                try
+                {
+                    if (request.isTrackable())
+                        CoordinatorWarnings.done();
 
-                              result.setStreamId(request.getStreamId());
-                              result.setWarnings(ClientWarn.instance.getWarnings());
-                              result.attach(connection);
-                              connection.applyStateTransition(request.type, result.type);
-                          }
-                          finally
-                          {
-                              CoordinatorWarnings.reset();
-                              ClientWarn.instance.resetWarnings();
-                          }
-                      });
+                    result.setStreamId(request.getStreamId());
+                    result.setWarnings(ClientWarn.instance.getWarnings());
+                    result.attach(connection);
+                    connection.applyStateTransition(request.type, result.type);
+                }
+                finally
+                {
+                    CoordinatorWarnings.reset();
+                    ClientWarn.instance.resetWarnings();
+                }
+            });
+        }
+        catch (Throwable t)
+        {
+            CoordinatorWarnings.reset();
+            ClientWarn.instance.resetWarnings();
+            return ImmediateFuture.failure(t);
+        }
     }
 
     static Future<Message.Response> processInit(ServerConnection connection, StartupMessage request)
