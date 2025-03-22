@@ -929,7 +929,7 @@ public class IndexContext
             var perIndexComponents = perSSTableComponents.indexDescriptor().perIndexComponents(this);
             if (!perSSTableComponents.isComplete() || !perIndexComponents.isComplete())
             {
-                logger.debug(logMessage("An on-disk index build for SSTable {} has not completed."), context.descriptor());
+                logger.debug(logMessage("An on-disk index build for SSTable {} has not completed (per-index components={})."), context.descriptor(), perIndexComponents.all());
                 return;
             }
 
