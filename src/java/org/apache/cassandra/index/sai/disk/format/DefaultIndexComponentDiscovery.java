@@ -18,17 +18,16 @@
 
 package org.apache.cassandra.index.sai.disk.format;
 
-import org.apache.cassandra.io.sstable.Descriptor;
-import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 
 public class DefaultIndexComponentDiscovery extends IndexComponentDiscovery
 {
     @Override
-    public SSTableIndexComponentsState discoverComponents(Descriptor descriptor, TableMetadata metadata)
+    public SSTableIndexComponentsState discoverComponents(SSTableReader sstable)
     {
-        SSTableIndexComponentsState groups = tryDiscoverComponentsFromTOC(descriptor);
+        SSTableIndexComponentsState groups = tryDiscoverComponentsFromTOC(sstable.getDescriptor());
         return groups == null
-               ? discoverComponentsFromDiskFallback(descriptor)
+               ? discoverComponentsFromDiskFallback(sstable.getDescriptor())
                : groups;
     }
 }
