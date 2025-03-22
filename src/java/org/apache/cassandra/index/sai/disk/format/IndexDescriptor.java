@@ -54,7 +54,6 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
-import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.lucene.store.BufferedChecksumIndexInput;
 import org.apache.lucene.store.ChecksumIndexInput;
@@ -110,7 +109,7 @@ public class IndexDescriptor
 
     public static IndexDescriptor load(SSTableReader sstable, Set<IndexContext> indices)
     {
-        SSTableIndexComponentsState discovered = IndexComponentDiscovery.instance().discoverComponents(sstable.descriptor, sstable.metadata());
+        SSTableIndexComponentsState discovered = IndexComponentDiscovery.instance().discoverComponents(sstable);
         IndexDescriptor descriptor = new IndexDescriptor(sstable.descriptor);
         descriptor.initialize(indices, discovered);
         return descriptor;
@@ -223,13 +222,14 @@ public class IndexDescriptor
      * where (post-flush) index building is done on separate dedicated services, and this method allows to reload the
      * result of such external services once it is made available locally.
      *
-     * @param metadata The metadata of the table this descriptor is for.
+     * @param sstable the sstable reader to reload index components
      * @param indices The set of indices to should part of the reloaded descriptor.
      * @return this descriptor, for chaining purpose.
      */
-    public IndexDescriptor reload(TableMetadata metadata, Set<IndexContext> indices)
+    public IndexDescriptor reload(SSTableReader sstable, Set<IndexContext> indices)
     {
-        SSTableIndexComponentsState discovered = IndexComponentDiscovery.instance().discoverComponents(descriptor, metadata);
+        Preconditions.checkArgument(sstable.getDescriptor().equals(this.descriptor));
+        SSTableIndexComponentsState discovered = IndexComponentDiscovery.instance().discoverComponents(sstable);
 
         // We want to make sure the descriptor only has data for the provided `indices` on reload, so we remove any
         // index data that is not in the ones provided. This essentially make sure we don't hold up memory for
