@@ -40,7 +40,7 @@ import org.apache.cassandra.db.Keyspace;
 
 import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
 
-/// This test is a counterpart to InMemoryTrieThreadedTest that makes sure TrieMemtable is wiring the trie consistency
+/// This test is a counterpart to InMemoryTrieConsistencyTest that makes sure TrieMemtable is wiring the trie consistency
 /// machinery correctly. Note that this test always applies mutations the same way (with partition-level forced copying)
 /// and is effectively doing the same test but checking different correctness properties.
 ///
