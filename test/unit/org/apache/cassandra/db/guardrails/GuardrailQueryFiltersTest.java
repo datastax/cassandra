@@ -176,6 +176,29 @@ public class GuardrailQueryFiltersTest extends ThresholdTester
     }
 
     @Test
+    public void testQueryFiltersWithIndexAndQueryAnalyzers() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v text)");
+
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = {" +
+                    "'index_analyzer': '{\n" +
+                    "\t\"tokenizer\":{\"name\":\"ngram\", \"args\":{\"minGramSize\":\"1\", \"maxGramSize\":\"10\"}}," +
+                    "\t\"filters\":[{\"name\":\"lowercase\"}]\n" +
+                    "}'," +
+                    "'query_analyzer': '{\n" +
+                    "\t\"tokenizer\":{\"name\":\"whitespace\"},\n" +
+                    "\t\"filters\":[{\"name\":\"porterstem\"}]\n" +
+                    "}'};");
+
+        // only the query analyzer should be used to calculate the number of filters
+        assertValid("SELECT * FROM %s WHERE v : 'abcdef'");
+        assertValid("SELECT * FROM %s WHERE v : 'abcdef ghijkl'");
+        assertWarns("SELECT * FROM %s WHERE v : 'abcdef ghijkl mnopqr'", 3);
+        assertWarns("SELECT * FROM %s WHERE v : 'abcdef ghijkl mnopqr stuvwx'", 4);
+        assertFails("SELECT * FROM %s WHERE v : 'abcdef ghijkl mnopqr stuvwx xyz'", 5);
+    }
+
+    @Test
     public void testExcludedUsers() throws Throwable
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, x text, y text)");
