@@ -108,6 +108,7 @@ import org.apache.cassandra.index.transactions.CompactionTransaction;
 import org.apache.cassandra.index.transactions.IndexTransaction;
 import org.apache.cassandra.index.transactions.UpdateTransaction;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.notifications.INotification;
 import org.apache.cassandra.notifications.INotificationConsumer;
 import org.apache.cassandra.notifications.SSTableAddedNotification;
@@ -364,10 +365,22 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
      */
     public void checkQueryability(Index.QueryPlan queryPlan)
     {
+        InetAddressAndPort endpoint = FBUtilities.getBroadcastAddressAndPort();
+
         for (Index index : queryPlan.getIndexes())
         {
+            String indexName = index.getIndexMetadata().name;
+            Index.Status indexStatus = IndexStatusManager.instance.getIndexStatus(endpoint, keyspace.getName(), indexName);
+
             if (!isIndexQueryable(index))
+            {
+                // In Astra index can be queryable during index build, thus we need to check both not queryable and building
+                // Plus isQueryable is always true for non-SAI index implementations
+                if (indexStatus == Index.Status.FULL_REBUILD_STARTED)
+                    throw new IndexBuildInProgressException(index);
+
                 throw new IndexNotAvailableException(index);
+            }
         }
     }
 
@@ -904,6 +917,8 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
 
             if (!index.getSupportedLoadTypeOnFailure(isInitialBuild).supportsReads() && queryableIndexes.remove(indexName))
                 logger.info("Index [{}] became not-queryable because of failed build.", indexName);
+
+            makeIndexNonQueryable(index, Index.Status.BUILD_FAILED);
         }
     }
 

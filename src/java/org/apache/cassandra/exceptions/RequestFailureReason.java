@@ -18,43 +18,44 @@
 package org.apache.cassandra.exceptions;
 
 import java.io.IOException;
-import java.util.function.ToIntFunction;
+import java.util.HashMap;
+import java.util.Map;
 
 import org.apache.cassandra.db.filter.TombstoneOverwhelmingException;
+import org.apache.cassandra.index.IndexBuildInProgressException;
+import org.apache.cassandra.index.IndexNotAvailableException;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
-import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.utils.vint.VIntCoding;
 
-import static java.lang.Math.max;
 import static org.apache.cassandra.net.MessagingService.VERSION_40;
 
 public enum RequestFailureReason
 {
-    UNKNOWN                  (0, 0),
-    READ_TOO_MANY_TOMBSTONES (1, 1),
-    TIMEOUT                  (2, 2),
-    INCOMPATIBLE_SCHEMA      (3, 3),
-    READ_SIZE                (4, 4),
-    NODE_DOWN                (5, 8),
-    INDEX_NOT_AVAILABLE      (6, 9),
-    READ_TOO_MANY_INDEXES    (7, 10),
-    UNKNOWN_COLUMN           (8, 5),
-    UNKNOWN_TABLE            (9, 6),
-    REMOTE_STORAGE_FAILURE   (10, 7),
-    ;
+    UNKNOWN                  (0),
+    READ_TOO_MANY_TOMBSTONES (1),
+    TIMEOUT                  (2),
+    INCOMPATIBLE_SCHEMA      (3),
+    READ_SIZE                (4),
+    NODE_DOWN                (5),
+    INDEX_NOT_AVAILABLE      (6),
+    READ_TOO_MANY_INDEXES    (7),
+    // The following codes are not present in Apache Cassandra's RequestFailureReason
+    // We should add new codes in HCD (which do not exist in Apache Cassandra) only with big numbers, to avoid conflicts
+    UNKNOWN_COLUMN           (500),
+    UNKNOWN_TABLE            (501),
+    REMOTE_STORAGE_FAILURE   (502),
+    INDEX_BUILD_IN_PROGRESS  (503);
 
     public static final Serializer serializer = new Serializer();
 
     public final int code;
-    public final int ccCode;
 
-    RequestFailureReason(int code, int ccCode)
+    RequestFailureReason(int code)
     {
         this.code = code;
-        this.ccCode = ccCode;
     }
 
     public int codeForNativeProtocol()
@@ -64,53 +65,49 @@ public enum RequestFailureReason
         return code;
     }
 
-    private static RequestFailureReason[] makeCodeMapping(ToIntFunction<RequestFailureReason> mappingFunction)
+    private static final Map<Integer, RequestFailureReason> codeToReasonMap = new HashMap<>();
+    private static final Map<Class<? extends Throwable>, RequestFailureReason> exceptionToReasonMap = new HashMap<>();
+
+    static
     {
         RequestFailureReason[] reasons = values();
 
-        int max = -1;
-        for (RequestFailureReason r : reasons)
-            max = max(mappingFunction.applyAsInt(r), max);
-
-        RequestFailureReason[] codeMap = new RequestFailureReason[max + 1];
-
         for (RequestFailureReason reason : reasons)
         {
-            if (codeMap[mappingFunction.applyAsInt(reason)] != null)
+            if (codeToReasonMap.put(reason.code, reason) != null)
                 throw new RuntimeException("Two RequestFailureReason-s that map to the same code: " + reason.code);
-            codeMap[mappingFunction.applyAsInt(reason)] = reason;
         }
 
-        return codeMap;
+        exceptionToReasonMap.put(TombstoneOverwhelmingException.class, READ_TOO_MANY_TOMBSTONES);
+        exceptionToReasonMap.put(IncompatibleSchemaException.class, INCOMPATIBLE_SCHEMA);
+        exceptionToReasonMap.put(AbortedOperationException.class, TIMEOUT);
+        exceptionToReasonMap.put(IndexNotAvailableException.class, INDEX_NOT_AVAILABLE);
+        exceptionToReasonMap.put(UnknownColumnException.class, UNKNOWN_COLUMN);
+        exceptionToReasonMap.put(UnknownTableException.class, UNKNOWN_TABLE);
+        exceptionToReasonMap.put(IndexBuildInProgressException.class, INDEX_BUILD_IN_PROGRESS);
+
+        if (exceptionToReasonMap.size() != reasons.length-5)
+            throw new RuntimeException("A new RequestFailureReasons was probably added and you may need to update the exceptionToReasonMap");
     }
 
-    private static final RequestFailureReason[] codeToReasonMap = makeCodeMapping(r -> r.code);
-    private static final RequestFailureReason[] ccCodeToReasonMap = makeCodeMapping(r -> r.ccCode);
-
-    public static RequestFailureReason fromCode(int code, int version)
+    public static RequestFailureReason fromCode(int code)
     {
-        assert version >= VERSION_40;
-
         if (code < 0)
             throw new IllegalArgumentException("RequestFailureReason code must be non-negative (got " + code + ')');
 
         // be forgiving and return UNKNOWN if we aren't aware of the code - for forward compatibility
-        if (version >= MessagingService.VERSION_DS_10)
-            return code < ccCodeToReasonMap.length ? ccCodeToReasonMap[code] : UNKNOWN;
-        else
-            return code < codeToReasonMap.length ? codeToReasonMap[code] : UNKNOWN;
+        return codeToReasonMap.getOrDefault(code, UNKNOWN);
     }
 
     public static RequestFailureReason forException(Throwable t)
     {
-        if (t instanceof TombstoneOverwhelmingException)
-            return READ_TOO_MANY_TOMBSTONES;
+        RequestFailureReason r = exceptionToReasonMap.get(t.getClass());
+        if (r != null)
+            return r;
 
-        if (t instanceof IncompatibleSchemaException)
-            return INCOMPATIBLE_SCHEMA;
-
-        if (t instanceof AbortedOperationException)
-            return TIMEOUT;
+        for (Map.Entry<Class<? extends Throwable>, RequestFailureReason> entry : exceptionToReasonMap.entrySet())
+            if (entry.getKey().isInstance(t))
+                return entry.getValue();
 
         return UNKNOWN;
     }
@@ -124,25 +121,19 @@ public enum RequestFailureReason
         public void serialize(RequestFailureReason reason, DataOutputPlus out, int version) throws IOException
         {
             assert version >= VERSION_40;
-            if (version >= MessagingService.VERSION_DS_10)
-                out.writeUnsignedVInt32(reason.ccCode);
-            else
-                out.writeUnsignedVInt32(reason.code);
+            out.writeUnsignedVInt32(reason.code);
         }
 
         public RequestFailureReason deserialize(DataInputPlus in, int version) throws IOException
         {
             assert version >= VERSION_40;
-            return fromCode(in.readUnsignedVInt32(), version);
+            return fromCode(in.readUnsignedVInt32());
         }
 
         public long serializedSize(RequestFailureReason reason, int version)
         {
             assert version >= VERSION_40;
-            if (version >= MessagingService.VERSION_DS_10)
-                return VIntCoding.computeVIntSize(reason.ccCode);
-            else
-                return VIntCoding.computeVIntSize(reason.code);
+            return VIntCoding.computeVIntSize(reason.code);
         }
     }
 }
