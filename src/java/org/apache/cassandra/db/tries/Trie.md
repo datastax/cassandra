@@ -426,3 +426,211 @@ respective side. Also note that the inversion of an array of boundaries is the a
 sides.)
 
 Using De Morgan's law, this weak negation also lets us perform set union.
+
+# Range tries
+
+A range trie is a generalization of the trie set, where the covered ranges can come with further information. This is
+achieved by replacing the `precedingIncluded` method with one that returns a state applicable to the preceding
+positions.
+
+In their simplest, a range trie is one that returns `content` for the boundary positions of the ranges, and also
+implements a `precedingState` method that returns the range state that applies to positions before the cursor's. For
+a little better efficiency most of the time we combine these two into a `state` method that returns the content, if
+the position is a boundary, or the preceding state otherwise. This suffices to implement the required operations,
+including:
+- Intersecting a range trie with a trie set, which generates boundaries that match the closer of the range trie's or
+  the set's.
+- Combining two range tries in a union, where the applicable covering state is applied to every content position
+  given to the merge resolver.
+- Inserting ranges into an in-memory range trie, applying new ranges to existing content as well as existing ranges to
+  new content to have the same result as the union above.
+- The above also form the basis of the application of range tries to data, e.g. applying deletions as range tries to
+  content tries.
+
+For the examples below, consider range states that specify deletion times. For example, a range trie could be used to
+describe a deletion with timestamp 555 that applies to the range `[abc, adc]` as
+```
+a ->
+  b ->
+    c -> start(555)
+  d ->
+    c -> end(555)
+```
+
+This dump only lists the content of the range trie. If we also include the preceding state by reporting all `state`
+values, the trie will look like this in the forward direction:
+```
+a ->
+  b ->
+    c -> start(555)
+  d -> covering(555)
+    c -> end(555)
+```
+and like this in the reverse:
+```
+a ->
+  d ->
+    c -> end(555)
+  b -> covering(555)
+    c -> start(555)
+```
+Note that any content must be the same in both directions, but preceding state applies to preceding positions in
+iteration order and thus will be different in the two directions.
+
+The range state used in this representation will be such that `end(dt)` has a `null` state on the left (i.e. returned
+by `precedingState(FORWARD)`) and has `covering(dt)` on the right (`precedingState(REVERSE)`), `start(dt)` has
+`covering(dt)` on the left and `null` on the right. `covering(dt)` is a non-boundary state that returns itself for the
+preceding state in both directions. To support touching ranges, we also need a `switch(ldt, rdt)` state that has
+`covering(ldt)` on the left and `covering(rdt)` on the right.
+
+## Slice / set intersection of range tries
+
+Intersection of range tries is performed by the same process as normal trie set intersection, augmented by information
+about the covering states of every position. If positions are completely covered by the set, we report the range
+cursor's `state/precedingState/content` unmodified. If the position falls on a prefix or a boundary of the set, we throw
+away (using the `restrict` method) parts that do not fall inside the set. The latter may also happen if the position
+is not one present in the range trie, but covered by a range (i.e. where `skipTo` went beyond the set cursor's position
+and the range cursor's `precedingState` returned covering state): in this case we apply `restrict` to the covering
+state, which may promote it to a boundary if the set cursor's position is a boundary.
+
+Imagine that we want to slice the range trie above with the range `[aaa, acc]`, which would be implemented by the trie
+set
+```
+a -> START_END_PREFIX
+  a -> START_PREFIX
+    a -> START
+  c -> END_PREFIX
+    c -> END
+```
+
+The intersection cursor will first visit the root and the position "a", where in both cases it will find `null` range
+cursor state, resulting in an `null` state for the intersection. The next position "aa" is present in the set, but not
+in the range, thus the `skipTo` operation on the range advances to "ab", whose `precedingState` is null. This means that
+there is nothing to intersect in the "aa" branch and anything before the range cursor's position, thus we continue by
+skipping the set cursor to "ab". This positions it at "ac", whose state is `END_PREFIX` and thus `precedingIncluded`
+is `true`. This means that we must report all branches of the range cursor that we see until we advance to or beyond the
+set's position. The intersection cursor is positioned at the range cursor's "ab" position. It does not have any `state`
+for it, so the intersection cursor reports `null` state as well.
+
+On the next advance we descend to "abc" (which by virtue of descending is known to fall before the set cursor's
+position) and report the range cursor's `start(555)` state unchanged, resulting also in the same `content` and `null`
+as `precedingState` (because `start(dt)` has `null` on its left (preceding in forward direction) side).
+
+The next advance takes the range cursor to "ad", which is beyond the current set cursor position. We check the range
+cursor's `precedingState` and find that it is `covering(555)`. Since at this point we have a preceding state, we need to
+walk the set branch and use it to augment and report the active covering state. The intersection cursor remains at the
+set cursor's "ac" position, and must report the active `covering(555)` augmented by the set cursor's `END_PREFIX` state.
+This would drop the right side of any state, but as the intersection cursor is iterating in forward direction, it must
+report the _left_ side as the `precedingState`, and thus `covering(555)` is reported as the state and `null` as the
+`content` (because `covering(dt)` is not a boundary state).
+
+On the next advance, the intersection cursor follows the earlier of the two cursors, which is the set cursor. This
+advances it to "acc", which is a boundary of the set with state `END`. The active covering state is still
+`covering(555)`; augmenting it with `END` turns it into the boundary `end(555)`, which is reported in `state` as
+well as `content` (because `start(dt)` is a boundary state). `precedingState` reports the left side of this boundary,
+which is still `covering(555)`.
+
+The next advance takes the set to the exhausted position with `START_END_PREFIX` state, which has `false` for
+`precedingIncluded`. Therefore, there is nothing to report before this position, and the range cursor is skipped to it,
+which completes the intersection.
+
+The resulting trie looks as expected:
+```
+a ->
+  b ->
+    c -> start(555)
+  c -> covering(555)
+    c -> end(555)
+```
+
+## Union of range tries
+
+The union process is similar (with a second range trie instead of a set), but we walk all branches of both tries and
+combine their states. There are two differences from the normal trie union process:
+- We apply the merge resolver to states instead of content. This includes both content and preceding state, which is
+  necessary to be able to report the correct state for the merged trie.
+- When one of the range cursors is ahead, we pass its `precedingState` as an argument to the merge resolver to modify
+  all reported states.
+
+As an example, consider once again the `[abc, adc]` range with deeltion 555, merged with the following trie for the
+`[aaa, acc]` range with deletion 666:
+```
+a ->
+  a ->
+    a -> start(666)
+  c -> covering(666)
+    c -> end(666)
+```
+
+The merge cursor will first proceed along "aaa" where the first source (advancing to "ab") does not have any
+`precedingState`, and thus the merge reports "null" for "aa" and the `start(666)` state for "aaa" unchanged. On the next
+advance this source moves beyond the other cursor's "ab" position. The merge thus follows the second source, but the
+first has a `precedingState` of `covering(666)`, which must be reflected in the reported states. The second cursor has
+no `state` for "ab", thus the merge reports `covering(666)` as the state for "ab".
+
+The next advance takes the second source to "abc", with `start(555)` state. The merge resolved is called with
+`start(555)` and `covering(666)` as arguments. Typically, the resolvers we use drop smaller deletion timestamps, so
+this returns `covering(666)` unchanged.
+
+The next advance takes the second source to "ad", which is beyond the current position of the first source. The merge
+cursor switches to following the first source, positioned at "ac", with `covering(666)` as the `state`, but
+it must also reflect the second sources `covering(555)` preceding state. The resolver is called with these two
+arguments and once again returns the bigger deletion timestamp, `covering(666)`.
+
+The next advance takes the first source and the iteration cursor to "acc", where this source has the `end(666)`
+boundary as state. The merge resolver is called with `end(666)` and `covering(555)`. This time the covering state does
+not override the boundary, thus the resolver must create a state that reflects the end of the current range, as
+well as the fact that we continue with the other covering state. It must thus return the boundary state 
+`switch(666, 555)` which the intersection cursor reports.
+
+The next advance takes the first source to the exhausted position and no `precedingState`. The merge thus reports all
+paths and state from the other cursor unchanged until it is exhausted as well, i.e. `covering(555)` for "ad" and
+`end(555)` for "adc".
+
+The final resulting trie looks like this:
+```
+a ->
+  a ->
+    a -> start(666)
+  b -> covering(666)
+    c -> covering(666)
+  c -> covering(666)
+    c -> switch(666, 555)
+  d -> covering(555)
+    c -> end(555)
+```
+Note that the "abc" path adds no information. We don't, however, know that before descending into that branch, thus we
+can't easily remove it. This could be done using a special `cleanup` operation over a trie which must buffer descents
+until effective content is found, which is best done as a separate transformation rather than as part of the merge.
+
+## In-memory range tries
+
+When a range trie is stored in an in-memory trie, it stores only content values. The range cursors created keep track of
+the currently active covering state (which is equal to the succeeding side of any visited boundary during advance) and
+report it as `precedingState`. This information, however, is no longer valid when a `skipTo` operation is performed, as
+it may skip over arbitrarily many boundaries and end up in a covered range. If `precedingState` is requested after such
+a skip, the cursor needs to obtain the applicable state. This is done by descending into the current branch (in
+iteration order) until the closest boundary is found, and using its preceding side. For this to work, all in-memory trie
+branches must terminate in a boundary state with content, which is something that in-memory tries do maintain (see 
+below).
+
+Because singletons don't really make sense for range tries (a range will have different start and end paths), all
+insertions into a range trie are done using the `apply` method. The application itself is more elaborate than the case
+of simple data tries: when `apply` is called with a range trie argument, the in-memory trie has to walk all existing
+positions that fall under ranges of the trie and apply the active state to them. Additionally, it must track any active
+existing range to combine it with incoming content.
+
+Because the incoming content is often expected to be a (newer) deletion, the resolver is expected to often return null
+for combined content. This triggers removal of nodes and paths up the relevant branch (which may also result in changing
+the type of a node e.g. from sparse to chain), which in turn guarantees that we remove branches that do not terminate in
+non-null content.
+
+## Relation to trie sets
+
+`TrieSetCursor` is a subclass of `RangeTrieCursor`, and the trie set is a special case of a range trie. It uses a
+richer state, which contains information for both iteration directions, which also makes it possible to present the same
+state for both forward and reverse iteration directions.
+
+Such richer state is not forbidden, but also not necessary for a general range trie. Because it is something that is
+pretty difficult to obtain (or store and maintain) for an in-memory trie, general range tries, which are meant to be
+stored in in-memory tries, do not provide it.

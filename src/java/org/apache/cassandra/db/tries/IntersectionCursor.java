@@ -177,12 +177,6 @@ abstract class IntersectionCursor<T, C extends Cursor<T>> implements Cursor<T>
     }
 
     @Override
-    public T content()
-    {
-        return source.content();
-    }
-
-    @Override
     public Direction direction()
     {
         return source.direction();
@@ -200,6 +194,12 @@ abstract class IntersectionCursor<T, C extends Cursor<T>> implements Cursor<T>
         public Plain(Cursor<T> source, TrieSetCursor set)
         {
             super(source, set);
+        }
+
+        @Override
+        public T content()
+        {
+            return source.content();
         }
 
         @Override

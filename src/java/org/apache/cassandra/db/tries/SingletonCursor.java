@@ -25,9 +25,9 @@ import org.apache.cassandra.utils.bytecomparable.ByteSource;
 class SingletonCursor<T> implements Cursor<T>
 {
     private final Direction direction;
-    private ByteSource src;
-    private final ByteComparable.Version byteComparableVersion;
-    private final T value;
+    ByteSource src;
+    final ByteComparable.Version byteComparableVersion;
+    final T value;
     private int currentDepth = 0;
     private int currentTransition = -1;
     protected int nextTransition;
@@ -110,10 +110,15 @@ class SingletonCursor<T> implements Cursor<T>
         return currentDepth;
     }
 
+    protected boolean atEnd()
+    {
+        return nextTransition == ByteSource.END_OF_STREAM && currentDepth >= 0;
+    }
+
     @Override
     public T content()
     {
-        return nextTransition == ByteSource.END_OF_STREAM ? value : null;
+        return atEnd() ? value : null;
     }
 
     @Override
@@ -146,5 +151,36 @@ class SingletonCursor<T> implements Cursor<T>
             src = ByteSource.duplicatable(src);
         ByteSource.Duplicatable duplicatableSource = (ByteSource.Duplicatable) src;
         return duplicatableSource.duplicate();
+    }
+
+    static class Range<S extends RangeState<S>> extends SingletonCursor<S> implements RangeCursor<S>
+    {
+        public Range(Direction direction, ByteSource src, ByteComparable.Version byteComparableVersion, S value)
+        {
+            super(direction, src, byteComparableVersion, value);
+        }
+
+        public Range(Direction direction, int firstByte, ByteSource src, ByteComparable.Version byteComparableVersion, S value)
+        {
+            super(direction, firstByte, src, byteComparableVersion, value);
+        }
+
+        @Override
+        public S precedingState()
+        {
+            return null;
+        }
+
+        @Override
+        public S state()
+        {
+            return content();
+        }
+
+        @Override
+        public Range<S> tailCursor(Direction dir)
+        {
+            return new Range<>(dir, nextTransition, duplicateSource(), byteComparableVersion, value);
+        }
     }
 }

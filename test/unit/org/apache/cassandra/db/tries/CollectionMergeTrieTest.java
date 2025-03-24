@@ -90,7 +90,7 @@ public class CollectionMergeTrieTest
 
     private static Trie<ByteBuffer> makeCollectionMergeTrie(InMemoryTrie<ByteBuffer>... tries)
     {
-        return dir -> new CollectionMergeCursor<>(x -> x.iterator().next(), dir, List.of(tries), Trie::cursor);
+        return dir -> new CollectionMergeCursor.Plain<>(x -> x.iterator().next(), dir, List.of(tries), Trie::cursor);
     }
 
     @Test
@@ -119,7 +119,7 @@ public class CollectionMergeTrieTest
             @Override
             public Cursor<T> makeCursor(Direction direction)
             {
-                return new CollectionMergeCursor<>(Trie.throwingResolver(), direction, sources, Trie::cursor);
+                return new CollectionMergeCursor.Plain<>(Trie.throwingResolver(), direction, sources, Trie::cursor);
             }
 
             @Override

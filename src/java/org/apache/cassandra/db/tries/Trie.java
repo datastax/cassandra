@@ -91,7 +91,7 @@ public interface Trie<T> extends BaseTrie<T, Cursor<T>, Trie<T>>
     /// (The resolver will not be called if there's content from only one source.)
     default Trie<T> mergeWith(Trie<T> other, MergeResolver<T> resolver)
     {
-        return dir -> new MergeCursor<>(resolver, this.cursor(dir), other.cursor(dir));
+        return dir -> new MergeCursor.Plain<>(resolver, this.cursor(dir), other.cursor(dir));
     }
 
     /// Resolver of content of merged nodes.
@@ -133,7 +133,7 @@ public interface Trie<T> extends BaseTrie<T, Cursor<T>, Trie<T>>
                 return t1.mergeWith(t2, resolver);
             }
             default:
-                return dir -> new CollectionMergeCursor<>(resolver, dir, sources, Trie::cursor);
+                return dir -> new CollectionMergeCursor.Plain<>(resolver, dir, sources, Trie::cursor);
         }
     }
 
@@ -171,7 +171,7 @@ public interface Trie<T> extends BaseTrie<T, Cursor<T>, Trie<T>>
             @Override
             public Cursor<T> makeCursor(Direction direction)
             {
-                return new MergeCursor<>(throwingResolver(), t1.cursor(direction), t2.cursor(direction));
+                return new MergeCursor.Plain<>(throwingResolver(), t1.cursor(direction), t2.cursor(direction));
             }
 
             @Override
@@ -213,7 +213,7 @@ public interface Trie<T> extends BaseTrie<T, Cursor<T>, Trie<T>>
             @Override
             public Cursor<T> makeCursor(Direction direction)
             {
-                return new CollectionMergeCursor<>(Trie.throwingResolver(), direction, sources, Trie::cursor);
+                return new CollectionMergeCursor.Plain<>(Trie.throwingResolver(), direction, sources, Trie::cursor);
             }
 
             @Override
@@ -227,7 +227,7 @@ public interface Trie<T> extends BaseTrie<T, Cursor<T>, Trie<T>>
     @Override
     default Trie<T> prefixedBy(ByteComparable prefix)
     {
-        return dir -> new PrefixedCursor(prefix, cursor(dir));
+        return dir -> new PrefixedCursor.Plain<>(prefix, cursor(dir));
     }
 
     @Override

@@ -22,6 +22,8 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.function.BiFunction;
+import java.util.function.IntFunction;
+
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 /// A merged view of multiple tries.
@@ -73,34 +75,38 @@ import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 ///
 /// Note: This is a simplification of the MergeIterator code from CASSANDRA-8915, without the leading ordered
 /// section and equalParent flag since comparisons of cursor positions are cheap.
-class CollectionMergeCursor<T> implements Cursor<T>
+abstract class CollectionMergeCursor<T, C extends Cursor<T>> implements Cursor<T>
 {
-    private final Trie.CollectionMergeResolver<T> resolver;
-    private final Direction direction;
+    final Trie.CollectionMergeResolver<T> resolver;
+    final Direction direction;
 
     /// The smallest cursor, tracked separately to improve performance in single-source sections of the trie.
-    private Cursor<T> head;
+    C head;
 
     /// Binary heap of the remaining cursors. The smallest element is at position 0.
     /// Every element `i` is smaller than or equal to its two children, i.e.
     /// ```heap[i] <= heap[i*2 + 1] && heap[i] <= heap[i*2 + 2]```
-    private final Cursor<T>[] heap;
+    final C[] heap;
 
     /// A list used to collect contents during [#content()] calls.
-    private final List<T> contents;
+    final List<T> contents;
+    /// Whether content has already been collected for this position.
+    boolean contentCollected;
+    /// The collected content.
+    T collectedContent;
 
-    <I> CollectionMergeCursor(Trie.CollectionMergeResolver<T> resolver, Direction direction, Collection<I> inputs, BiFunction<I, Direction, Cursor<T>> extractor)
+    <I> CollectionMergeCursor(Trie.CollectionMergeResolver<T> resolver, Direction direction, Collection<I> inputs, IntFunction<C[]> cursorArrayConstructor, BiFunction<I, Direction, C> extractor)
     {
         this.resolver = resolver;
         this.direction = direction;
         int count = inputs.size();
         // Get cursors for all inputs. Put one of them in head and the rest in the heap.
-        heap = new Cursor[count - 1];
+        heap = cursorArrayConstructor.apply(count - 1);
         contents = new ArrayList<>(count);
         int i = -1;
         for (I src : inputs)
         {
-            Cursor<T> cursor = extractor.apply(src, direction);
+            C cursor = extractor.apply(src, direction);
             assert cursor.depth() == 0;
             if (i >= 0)
                 heap[i] = cursor;
@@ -112,11 +118,11 @@ class CollectionMergeCursor<T> implements Cursor<T>
     }
 
     /// Interface for internal operations that can be applied to selected top elements of the heap.
-    interface HeapOp<T>
+    interface HeapOp<T, C extends Cursor<T>>
     {
-        void apply(CollectionMergeCursor<T> self, Cursor<T> cursor, int index);
+        void apply(CollectionMergeCursor<T, C> self, C cursor, int index);
 
-        default boolean shouldContinueWithChild(Cursor<T> child, Cursor<T> head)
+        default boolean shouldContinueWithChild(C child, C head)
         {
             return equalCursor(child, head);
         }
@@ -125,18 +131,18 @@ class CollectionMergeCursor<T> implements Cursor<T>
     /// Apply a non-interfering operation, i.e. one that does not change the cursor state, to all inputs in the heap
     /// that satisfy the [HeapOp#shouldContinueWithChild] condition (by default, being equal to the head).
     /// For interfering operations like advancing the cursors, use [#advanceSelectedAndRestoreHeap(AdvancingHeapOp)].
-    private void applyToSelectedInHeap(HeapOp<T> action)
+    void applyToSelectedInHeap(HeapOp<T, C> action)
     {
         applyToSelectedElementsInHeap(action, 0);
     }
 
     /// Interface for internal advancing operations that can be applied to the heap cursors. This interface provides
     /// the code to restore the heap structure after advancing the cursors.
-    interface AdvancingHeapOp<T> extends HeapOp<T>
+    interface AdvancingHeapOp<T, C extends Cursor<T>> extends HeapOp<T, C>
     {
-        void apply(Cursor<T> cursor);
+        void apply(C cursor);
 
-        default void apply(CollectionMergeCursor<T> self, Cursor<T> cursor, int index)
+        default void apply(CollectionMergeCursor<T, C> self, C cursor, int index)
         {
             // Apply the operation, which should advance the position of the element.
             apply(cursor);
@@ -152,7 +158,7 @@ class CollectionMergeCursor<T> implements Cursor<T>
 
     /// Advance the state of all inputs in the heap that satisfy the [#shouldContinueWithChild] condition
     /// (by default, being equal to the head) and restore the heap invariant.
-    private void advanceSelectedAndRestoreHeap(AdvancingHeapOp<T> action)
+    void advanceSelectedAndRestoreHeap(AdvancingHeapOp<T, C> action)
     {
         applyToSelectedElementsInHeap(action, 0);
     }
@@ -165,11 +171,11 @@ class CollectionMergeCursor<T> implements Cursor<T>
     /// that advances the cursor to a new state, wrapped in a [AdvancingHeapOp] ([#advance] or
     /// [#skipTo]). The latter interface takes care of pushing elements down in the heap after advancing
     /// and restores the subheap state on return from each level of the recursion.
-    private void applyToSelectedElementsInHeap(HeapOp<T> action, int index)
+    private void applyToSelectedElementsInHeap(HeapOp<T, C> action, int index)
     {
         if (index >= heap.length)
             return;
-        Cursor<T> item = heap[index];
+        C item = heap[index];
         if (!action.shouldContinueWithChild(item, head))
             return;
 
@@ -183,9 +189,15 @@ class CollectionMergeCursor<T> implements Cursor<T>
         action.apply(this, item, index);
     }
 
+    void applyToAllOnHeap(HeapOp<T, C> action)
+    {
+        for (int i = 0; i < heap.length; i++)
+            action.apply(this, heap[i], i);
+    }
+
     /// Push the given state down in the heap from the given index until it finds its proper place among
     /// the subheap rooted at that position.
-    private void heapifyDown(Cursor<T> item, int index)
+    private void heapifyDown(C item, int index)
     {
         while (true)
         {
@@ -217,7 +229,7 @@ class CollectionMergeCursor<T> implements Cursor<T>
             return headDepth;   // head is still smallest
 
         // otherwise we need to swap heap and heap[0]
-        Cursor<T> newHeap0 = head;
+        C newHeap0 = head;
         head = heap[0];
         heapifyDown(newHeap0, 0);
         return heap0Depth;
@@ -228,8 +240,19 @@ class CollectionMergeCursor<T> implements Cursor<T>
         return equalCursor(heap[0], head);
     }
 
+    boolean isExhausted()
+    {
+        return head.depth() < 0;
+    }
+
     @Override
     public int advance()
+    {
+        contentCollected = false;
+        return doAdvance();
+    }
+
+    private int doAdvance()
     {
         advanceSelectedAndRestoreHeap(Cursor::advance);
         return maybeSwapHead(head.advance());
@@ -238,10 +261,11 @@ class CollectionMergeCursor<T> implements Cursor<T>
     @Override
     public int advanceMultiple(TransitionsReceiver receiver)
     {
+        contentCollected = false;
         // If the current position is present in just one cursor, we can safely descend multiple levels within
         // its branch as no one of the other tries has content for it.
         if (branchHasMultipleSources())
-            return advance();   // More than one source at current position, do single-step advance.
+            return doAdvance();   // More than one source at current position, do single-step advance.
 
         // If there are no children, i.e. the cursor ascends, we have to check if it's become larger than some
         // other candidate.
@@ -254,10 +278,10 @@ class CollectionMergeCursor<T> implements Cursor<T>
         // We need to advance all cursors that stand before the requested position.
         // If a child cursor does not need to advance as it is greater than the skip position, neither of the ones
         // below it in the heap hierarchy do as they can't have an earlier position.
-        class SkipTo implements AdvancingHeapOp<T>
+        class SkipTo implements AdvancingHeapOp<T, C>
         {
             @Override
-            public boolean shouldContinueWithChild(Cursor<T> child, Cursor<T> head)
+            public boolean shouldContinueWithChild(C child, C head)
             {
                 // When the requested position descends, the inplicit prefix bytes are those of the head cursor,
                 // and thus we need to check against that if it is a match.
@@ -271,12 +295,13 @@ class CollectionMergeCursor<T> implements Cursor<T>
             }
 
             @Override
-            public void apply(Cursor<T> cursor)
+            public void apply(C cursor)
             {
                 cursor.skipTo(skipDepth, skipTransition);
             }
         }
 
+        contentCollected = false;
         applyToSelectedElementsInHeap(new SkipTo(), 0);
         return maybeSwapHead(head.skipTo(skipDepth, skipTransition));
     }
@@ -305,15 +330,25 @@ class CollectionMergeCursor<T> implements Cursor<T>
         return head.byteComparableVersion();
     }
 
-    @Override
-    public T content()
+    T maybeCollectContent()
     {
-        if (!branchHasMultipleSources())
-            return head.content();
+        if (!contentCollected)
+        {
+            collectedContent = isExhausted() ? null : collectContent();
+            contentCollected = true;
+        }
+        return collectedContent;
+    }
 
+    T collectContent()
+    {
         applyToSelectedInHeap(CollectionMergeCursor::collectContent);
         collectContent(head, -1);
+        return resolveContent();
+    }
 
+    T resolveContent()
+    {
         T toReturn;
         switch (contents.size())
         {
@@ -331,25 +366,14 @@ class CollectionMergeCursor<T> implements Cursor<T>
         return toReturn;
     }
 
-    private void collectContent(Cursor<T> item, int index)
+    void collectContent(C item, int index)
     {
-        T itemContent = item.content();
+        T itemContent = getContent(item);
         if (itemContent != null)
             contents.add(itemContent);
     }
 
-    @Override
-    public Cursor<T> tailCursor(Direction dir)
-    {
-        if (!branchHasMultipleSources())
-            return head.tailCursor(dir);
-
-        List<Cursor<T>> inputs = new ArrayList<>(heap.length + 1);
-        inputs.add(head);
-        applyToSelectedInHeap((self, cursor, index) -> inputs.add(cursor));
-
-        return new CollectionMergeCursor<>(resolver, dir, inputs, Cursor::tailCursor);
-    }
+    abstract T getContent(C item);
 
     /// Compare the positions of two cursors. One is before the other when
     /// - its depth is greater, or
@@ -367,4 +391,91 @@ class CollectionMergeCursor<T> implements Cursor<T>
     {
         return c1.depth() == c2.depth() && c1.incomingTransition() == c2.incomingTransition();
     }
+
+    static class Plain<T> extends CollectionMergeCursor<T, Cursor<T>> implements Cursor<T>
+    {
+        public <I> Plain(Trie.CollectionMergeResolver<T> resolver, Direction direction, Collection<I> inputs, BiFunction<I, Direction, Cursor<T>> extractor)
+        {
+            super(resolver, direction, inputs, Cursor[]::new, extractor);
+        }
+
+        @Override
+        public T content()
+        {
+            return maybeCollectContent();
+        }
+
+        @Override
+        T getContent(Cursor<T> item)
+        {
+            return item.content();
+        }
+
+        @Override
+        public Cursor<T> tailCursor(Direction dir)
+        {
+            if (!branchHasMultipleSources())
+                return head.tailCursor(dir);
+
+            List<Cursor<T>> inputs = new ArrayList<>(heap.length + 1);
+            inputs.add(head);
+            applyToSelectedInHeap((self, cursor, index) -> inputs.add(cursor));
+
+            return new Plain<>(resolver, dir, inputs, Cursor::tailCursor);
+        }
+    }
+
+    static class Range<S extends RangeState<S>> extends CollectionMergeCursor<S, RangeCursor<S>> implements RangeCursor<S>
+    {
+        <I> Range(Trie.CollectionMergeResolver<S> resolver,
+                  Direction direction,
+                  Collection<I> inputs,
+                  BiFunction<I, Direction, RangeCursor<S>> extractor)
+        {
+            super(resolver, direction, inputs, RangeCursor[]::new, extractor);
+        }
+
+        @Override
+        public S state()
+        {
+            return maybeCollectContent();
+        }
+
+        @Override
+        S collectContent()
+        {
+            applyToAllOnHeap(CollectionMergeCursor::collectContent);
+            collectContent(head, -1);
+            return resolveContent();
+        }
+
+        @Override
+        S getContent(RangeCursor<S> item)
+        {
+            return equalCursor(item, head) ? item.state() : item.precedingState();
+        }
+
+        @Override
+        public RangeCursor<S> tailCursor(Direction direction)
+        {
+            List<RangeCursor<S>> inputs = new ArrayList<>(heap.length);
+            inputs.add(head);
+            applyToAllOnHeap((self, cursor, index) ->
+                             {
+                                 if (equalCursor(head, cursor))
+                                     inputs.add(cursor);
+                                 else if (cursor.precedingState() != null)
+                                     inputs.add(cursor.precedingStateCursor(direction));
+                             });
+
+            if (inputs.size() == 1)
+            {
+                assert head == inputs.get(0);
+                return head.tailCursor(direction);
+            }
+
+            return new Range<>(resolver, direction, inputs, RangeCursor::tailCursor);
+        }
+    }
+
 }

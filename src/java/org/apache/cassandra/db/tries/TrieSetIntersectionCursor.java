@@ -233,7 +233,7 @@ class TrieSetIntersectionCursor implements TrieSetCursor
 
     TrieSetCursor.RangeState combineState(TrieSetCursor.RangeState cl, TrieSetCursor.RangeState cr)
     {
-        assert cl.branchIncluded() == cr.branchIncluded() : "Intersection results in a prefix range";
+        assert cl.isBoundary() == cr.isBoundary() : "Intersection results in a prefix range";
         return cl.intersect(cr);
     }
 
@@ -271,7 +271,7 @@ class TrieSetIntersectionCursor implements TrieSetCursor
         @Override
         TrieSetCursor.RangeState combineState(TrieSetCursor.RangeState cl, TrieSetCursor.RangeState cr)
         {
-            assert cl.branchIncluded() == cr.branchIncluded() : "Union results in a prefix range";
+            assert cl.isBoundary() == cr.isBoundary() : "Union results in a prefix range";
             return cl.union(cr);
         }
 

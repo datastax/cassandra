@@ -28,20 +28,21 @@ import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 /// Crucial for the efficiency of this is the fact that when they are advanced like this, we can compare cursors'
 /// positions by their `depth` descending and then `incomingTransition` ascending.
 /// See [Trie.md](./Trie.md) for further details.
-class MergeCursor<T> implements Cursor<T>
+abstract class MergeCursor<T, C extends Cursor<T>> implements Cursor<T>
 {
-    private final Trie.MergeResolver<T> resolver;
-    private final Direction direction;
-    private final Cursor<T> c1;
-    private final Cursor<T> c2;
+    final Direction direction;
+    final Trie.MergeResolver<T> resolver;
+
+    final C c1;
+    final C c2;
 
     boolean atC1;
     boolean atC2;
 
-    MergeCursor(Trie.MergeResolver<T> resolver, Cursor<T> c1, Cursor<T> c2)
+    MergeCursor(Trie.MergeResolver<T> resolver, C c1, C c2)
     {
-        this.resolver = resolver;
         this.direction = c1.direction();
+        this.resolver = resolver;
         this.c1 = c1;
         this.c2 = c2;
         assert c1.depth() == 0;
@@ -87,7 +88,7 @@ class MergeCursor<T> implements Cursor<T>
             return checkOrder(c1.depth(), c2.advanceMultiple(receiver));
     }
 
-    private int checkOrder(int c1depth, int c2depth)
+    int checkOrder(int c1depth, int c2depth)
     {
         if (c1depth > c2depth)
         {
@@ -132,33 +133,106 @@ class MergeCursor<T> implements Cursor<T>
     public ByteComparable.Version byteComparableVersion()
     {
         assert c1.byteComparableVersion() == c2.byteComparableVersion() :
-        "Merging cursors with different byteComparableVersions: " +
-        c1.byteComparableVersion() + " vs " + c2.byteComparableVersion();
+            "Merging cursors with different byteComparableVersions: " +
+            c1.byteComparableVersion() + " vs " + c2.byteComparableVersion();
         return c1.byteComparableVersion();
     }
 
-    public T content()
+    /// Merge implementation for [Trie]
+    static class Plain<T> extends MergeCursor<T, Cursor<T>>
     {
-        T mc = atC2 ? c2.content() : null;
-        T nc = atC1 ? c1.content() : null;
-        if (mc == null)
-            return nc;
-        else if (nc == null)
-            return mc;
-        else
-            return resolver.resolve(nc, mc);
+        Plain(Trie.MergeResolver<T> resolver, Cursor<T> c1, Cursor<T> c2)
+        {
+            super(resolver, c1, c2);
+        }
+
+        @Override
+        public T content()
+        {
+            T mc = atC2 ? c2.content() : null;
+            T nc = atC1 ? c1.content() : null;
+            if (mc == null)
+                return nc;
+            else if (nc == null)
+                return mc;
+            else
+                return resolver.resolve(nc, mc);
+        }
+
+        @Override
+        public Cursor<T> tailCursor(Direction direction)
+        {
+            if (atC1 && atC2)
+                return new Plain<>(resolver, c1.tailCursor(direction), c2.tailCursor(direction));
+            else if (atC1)
+                return c1.tailCursor(direction);
+            else if (atC2)
+                return c2.tailCursor(direction);
+            else
+                throw new AssertionError();
+        }
     }
 
-    @Override
-    public Cursor<T> tailCursor(Direction dir)
+    /// Merge implementation for [RangeTrie]
+    static class Range<S extends RangeState<S>> extends MergeCursor<S, RangeCursor<S>> implements RangeCursor<S>
     {
-        if (atC1 && atC2)
-            return new MergeCursor<>(resolver, c1.tailCursor(dir), c2.tailCursor(dir));
-        else if (atC1)
-            return c1.tailCursor(dir);
-        else if (atC2)
-            return c2.tailCursor(dir);
-        else
-            throw new AssertionError();
+        private S state;
+        boolean stateCollected;
+
+        Range(Trie.MergeResolver<S> resolver, RangeCursor<S> c1, RangeCursor<S> c2)
+        {
+            super(resolver, c1, c2);
+        }
+
+        @Override
+        public S state()
+        {
+            if (!stateCollected)
+            {
+                S state1 = atC1 ? c1.state() : c1.precedingState();
+                S state2 = atC2 ? c2.state() : c2.precedingState();
+                if (state1 == null)
+                    return state2;
+                if (state2 == null)
+                    return state1;
+                state = resolver.resolve(state1, state2);
+                stateCollected = true;
+            }
+            return state;
+        }
+
+        @Override
+        public int advance()
+        {
+            stateCollected = false;
+            return super.advance();
+        }
+
+        @Override
+        public int skipTo(int depth, int incomingTransition)
+        {
+            stateCollected = false;
+            return super.skipTo(depth, incomingTransition);
+        }
+
+        @Override
+        public int advanceMultiple(Cursor.TransitionsReceiver receiver)
+        {
+            stateCollected = false;
+            return super.advanceMultiple(receiver);
+        }
+
+        @Override
+        public RangeCursor<S> tailCursor(Direction direction)
+        {
+            if (atC1 && atC2)
+                return new Range<>(resolver, c1.tailCursor(direction), c2.tailCursor(direction));
+            else if (atC1)
+                return new Range<>(resolver, c1.tailCursor(direction), c2.precedingStateCursor(direction));
+            else if (atC2)
+                return new Range<>(resolver, c1.precedingStateCursor(direction), c2.tailCursor(direction));
+            else
+                throw new AssertionError();
+        }
     }
 }

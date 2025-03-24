@@ -20,6 +20,7 @@ package org.apache.cassandra.db.tries;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.Iterator;
@@ -37,6 +38,7 @@ import java.util.stream.IntStream;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Objects;
 import com.google.common.collect.HashMultiset;
+import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Multiset;
 import com.google.common.collect.Sets;
@@ -47,6 +49,7 @@ import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 
+import static org.apache.cassandra.db.tries.TestRangeState.remap;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.fail;
 
@@ -357,6 +360,82 @@ public class TrieUtil
                 bytes[p++] = (byte) r2.nextInt(256);
         }
         return ((ByteComparable)(v -> ByteSource.withTerminator(terminator, ByteSource.of(bytes, v)))).preencode(VERSION);
+    }
+
+    public static <T> Trie<T> withRootMetadata(Trie<T> wrapped, T metadata)
+    {
+        return wrapped.mergeWith(Trie.singleton(ByteComparable.EMPTY, VERSION, metadata), Trie.throwingResolver());
+    }
+
+    static Trie<String> directTrie(String... points) throws TrieSpaceExhaustedException
+    {
+        InMemoryTrie<String> trie = InMemoryTrie.shortLived(VERSION);
+        for (String s : points)
+            trie.putRecursive(directComparable(s), s, (ex, n) -> n);
+        return trie;
+    }
+
+    static TrieSet directRanges(String... ranges)
+    {
+        if (ranges.length == 0)
+            return TrieSet.empty(VERSION);
+
+        // to test singleton too, special case two equal boundaries
+        if (ranges.length == 2 && Objects.equal(ranges[0], ranges[1]))
+            return TrieSet.singleton(VERSION, directComparable(ranges[0]));
+
+        return TrieSet.ranges(VERSION, Arrays.stream(ranges)
+                                             .map(r -> directComparable(r))
+                                             .toArray(ByteComparable[]::new));
+    }
+
+    static RangeTrie<TestRangeState> directRangeTrie(String... keys)
+    {
+        return directRangeTrie(1, keys);
+    }
+
+    static RangeTrie<TestRangeState> directRangeTrie(int value, String... keys)
+    {
+        if (keys.length == 0)
+            return RangeTrie.empty(VERSION);
+        if (keys.length == 2 && Objects.equal(keys[0], keys[1]))
+        {
+            // special case to make a singleton trie
+            ByteComparable bc = directComparable(keys[0]);
+            return RangeTrie.range(bc, bc, VERSION, new TestRangeState(bc, value, value, false));
+        }
+
+        try
+        {
+            InMemoryRangeTrie<TestRangeState> trie = InMemoryRangeTrie.shortLived(VERSION);
+            boolean left = true;
+            for (String s : keys)
+            {
+                trie.putRecursive(directComparable(s),
+                                  new TestRangeState(directComparable(s), left ? -1 : value, left ? value : -1, true),
+                                  (e, n) -> e != null ? e.restrict(n.leftSide >= 0, n.rightSide >= 0) : n);
+                left = !left;
+            }
+            return trie;
+        }
+        catch (TrieSpaceExhaustedException e)
+        {
+            throw new AssertionError(e); // we are not inserting that much data
+        }
+    }
+
+    static void verifyEqualRangeTries(RangeTrie<TestRangeState> trie, RangeTrie<TestRangeState> expected)
+    {
+//        System.out.println("Trie:\n" + trie.dump(TestRangeState::toStringNoPosition));
+//        System.out.println("Expected:\n" + expected.cursor(Direction.FORWARD).process(new TrieDumper<>(TestRangeState::toStringNoPosition)));
+        assertMapEquals(Iterables.transform(trie.entrySet(Direction.FORWARD),
+                                            en -> remap(en)),
+                        expected.entrySet(Direction.FORWARD),
+                        FORWARD_COMPARATOR);
+        assertMapEquals(Iterables.transform(trie.entrySet(Direction.REVERSE),
+                                            en -> remap(en)),
+                        expected.entrySet(Direction.REVERSE),
+                        REVERSE_COMPARATOR);
     }
 
     static Preencoded toBound(Preencoded bc)

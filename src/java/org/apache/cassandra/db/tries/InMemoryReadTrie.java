@@ -334,6 +334,37 @@ public abstract class InMemoryReadTrie<T>
         }
     }
 
+    /// Returns first present transition byte in the node that is the same or greater as the given target transition.
+    int getNextTransition(int node, int trans)
+    {
+        if (isNullOrLeaf(node))
+            return Integer.MAX_VALUE;
+
+        node = followContentTransition(node);
+
+        if (isNullOrLeaf(node))
+            return Integer.MAX_VALUE;
+
+        switch (offset(node))
+        {
+            case SPARSE_OFFSET:
+                return getSparseNextTransition(node, trans);
+            case SPLIT_OFFSET:
+                return getSplitNextTransition(node, trans);
+            default:
+                return getChainNextTransition(node, trans);
+        }
+    }
+
+    int getNextChild(int node, int targetTransition)
+    {
+        int nextTransition = getNextTransition(node, targetTransition);
+        if (nextTransition <= 0xFF)
+            return getChild(node, nextTransition);
+        else
+            return NONE;
+    }
+
     protected int followContentTransition(int node)
     {
         if (isNullOrLeaf(node))
@@ -403,6 +434,73 @@ public abstract class InMemoryReadTrie<T>
             }
         }
         return NONE;
+    }
+
+    int getSparseNextTransition(int node, int targetTransition)
+    {
+        UnsafeBuffer chunk = getBuffer(node);
+        int inChunkNode = inBufferOffset(node);
+        int data = chunk.getShortVolatile(inChunkNode + SPARSE_ORDER_OFFSET) & 0xFFFF;
+        int index;
+        int transition;
+        do
+        {
+            // Peel off the next index.
+            index = data % SPARSE_CHILD_COUNT;
+            data = data / SPARSE_CHILD_COUNT;
+            transition = chunk.getByte(inChunkNode + SPARSE_BYTES_OFFSET + index) & 0xFF;
+        }
+        while (transition < targetTransition && data != 0);
+
+        if (transition < targetTransition)
+            return Integer.MAX_VALUE;
+        else
+            return transition;
+    }
+
+    int getChainNextTransition(int node, int targetTransition)
+    {
+        int transition = getUnsignedByte(node);
+        if (transition < targetTransition)
+            return Integer.MAX_VALUE;
+        else
+            return transition;
+    }
+
+    int getSplitNextTransition(int node, int targetTransition)
+    {
+        if (targetTransition < 0)
+            targetTransition = 0;
+        int midIndex = splitNodeMidIndex(targetTransition);
+        int tailIndex = splitNodeTailIndex(targetTransition);
+        int childIndex = splitNodeChildIndex(targetTransition);
+        while (midIndex < SPLIT_START_LEVEL_LIMIT)
+        {
+            int mid = getSplitCellPointer(node, midIndex, SPLIT_START_LEVEL_LIMIT);
+            if (!isNull(mid))
+            {
+                while (tailIndex < SPLIT_OTHER_LEVEL_LIMIT)
+                {
+                    int tail = getSplitCellPointer(mid, tailIndex, SPLIT_OTHER_LEVEL_LIMIT);
+                    if (!isNull(tail))
+                    {
+                        while (childIndex < SPLIT_OTHER_LEVEL_LIMIT)
+                        {
+                            int child = getSplitCellPointer(tail, childIndex, SPLIT_OTHER_LEVEL_LIMIT);
+                            if (!isNull(child))
+                                return childIndex | (tailIndex << 3) | (midIndex << 6);
+                            ++childIndex;
+                        }
+                    }
+                    childIndex = 0;
+                    ++tailIndex;
+                }
+            }
+            tailIndex = 0;
+            childIndex = 0;
+            ++midIndex;
+        }
+        return Integer.MAX_VALUE;
     }
 
     /// Given a transition, returns the corresponding index (within the node cell) of the pointer to the mid cell of
@@ -475,8 +573,14 @@ public abstract class InMemoryReadTrie<T>
     {
         static final int BACKTRACK_INTS_PER_ENTRY = 3;
         static final int BACKTRACK_INITIAL_SIZE = 16;
-        private int[] backtrack = new int[BACKTRACK_INITIAL_SIZE * BACKTRACK_INTS_PER_ENTRY];
-        int backtrackDepth = 0;
+        private int[] backtrack;
+        int backtrackDepth;
+
+        CursorBacktrackingState()
+        {
+            backtrack = new int[BACKTRACK_INITIAL_SIZE * BACKTRACK_INTS_PER_ENTRY];
+            backtrackDepth = 0;
+        }
 
         void addBacktrack(int node, int data, int depth)
         {
@@ -519,17 +623,12 @@ public abstract class InMemoryReadTrie<T>
     /// have a remaining child to advance to. When there's nothing to backtrack to, the trie is exhausted.
     class InMemoryCursor extends CursorBacktrackingState implements Cursor<T>
     {
-        private int currentNode;
-        private int currentFullNode;
-        private int incomingTransition;
-        private T content;
-        private final Direction direction;
+        int currentNode;
+        int currentFullNode;
+        int incomingTransition;
         int depth;
-
-        InMemoryCursor(Direction direction)
-        {
-            this(direction, root, 0, -1);
-        }
+        T content;
+        final Direction direction;
 
         InMemoryCursor(Direction direction, int root, int depth, int incomingTransition)
         {
@@ -540,6 +639,11 @@ public abstract class InMemoryReadTrie<T>
 
         @Override
         public int advance()
+        {
+            return doAdvance();
+        }
+
+        int doAdvance()
         {
             if (isNullOrLeaf(currentNode))
                 return backtrack();
@@ -552,7 +656,7 @@ public abstract class InMemoryReadTrie<T>
         {
             int node = currentNode;
             if (!isChainNode(node))
-                return advance();
+                return doAdvance();
 
             // Jump directly to the chain's child.
             UnsafeBuffer buffer = getBuffer(node);

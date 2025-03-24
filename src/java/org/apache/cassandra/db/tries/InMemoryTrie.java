@@ -120,10 +120,10 @@ public class InMemoryTrie<T> extends InMemoryBaseTrie<T> implements Trie<T>
     {
         try
         {
-            Mutation<T, U> m = new Mutation<>(transformer,
-                                              needsForcedCopy,
-                                              mutation.cursor(Direction.FORWARD),
-                                              applyState.start());
+            Mutation<T, U, Cursor<U>> m = new Mutation<>(transformer,
+                                                         needsForcedCopy,
+                                                         mutation.cursor(Direction.FORWARD),
+                                                         applyState.start());
             m.apply();
             m.complete();
             completeMutation();
@@ -168,9 +168,7 @@ public class InMemoryTrie<T> extends InMemoryBaseTrie<T> implements Trie<T>
         apply(Trie.singleton(key, byteComparableVersion, value), transformer, Predicates.alwaysFalse());
     }
 
-    /**
-     * A version of putSingleton which uses recursive put if the last argument is true.
-     */
+    /// A version of putSingleton which uses recursive put if the last argument is true.
     public <R> void putSingleton(ByteComparable key,
                                  R value,
                                  UpsertTransformer<T, ? super R> transformer,

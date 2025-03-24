@@ -19,6 +19,7 @@
 package org.apache.cassandra.db.tries;
 
 import java.util.Arrays;
+
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 

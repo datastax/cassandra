@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.db.tries;
 
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 import java.util.ArrayList;
@@ -26,9 +27,6 @@ import java.util.List;
 import java.util.NavigableMap;
 import java.util.Set;
 import java.util.TreeMap;
-
-import org.junit.BeforeClass;
-
 import java.util.TreeSet;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
@@ -414,7 +412,7 @@ public class RangesTrieSetTest
                     TrieSetCursor.RangeState state = TrieSetCursor.RangeState.fromProperties(applicableBefore, applicableAfter, applicableAt);
                     assertEquals(applicableBefore, state.applicableBefore);
                     assertEquals(applicableAfter, state.applicableAfter);
-                    assertEquals(applicableAt, state.asContent != null);
+                    assertEquals(applicableAt, state.isBoundary);
                 }
     }
 }

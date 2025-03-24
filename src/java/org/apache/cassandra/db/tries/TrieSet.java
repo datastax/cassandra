@@ -19,6 +19,7 @@
 package org.apache.cassandra.db.tries;
 
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
+import org.apache.cassandra.utils.bytecomparable.ByteSource;
 
 /// A trie that defines an infinite set of `ByteComparable`s. The convention of this package is that sets always
 /// include all boundaries, all prefixes that lead to a boundary, and all descendants of all boundaries. This is done
@@ -45,6 +46,52 @@ public interface TrieSet extends CursorWalkable<TrieSetCursor>
     static TrieSet ranges(ByteComparable.Version version, ByteComparable... boundaries)
     {
         return dir -> new RangesCursor(dir, version, boundaries);
+    }
+
+    static TrieSet empty(ByteComparable.Version byteComparableVersion)
+    {
+        return dir -> TrieSetCursor.empty(dir, byteComparableVersion);
+    }
+
+    /// Returns true if the given key is strictly contained in this set, i.e. it falls inside a covered range or branch.
+    /// This excludes prefixes of set boundaries.
+    default boolean strictlyContains(ByteComparable key)
+    {
+        return contains(key) == ContainsResult.CONTAINED;
+    }
+
+    /// Returns true if the given key is weaky contained in this set, i.e. it falls inside a covered range or branch, or
+    /// is a prefix of a set boundary.
+    default boolean weaklyContains(ByteComparable key)
+    {
+        return contains(key) != ContainsResult.NOT_CONTAINED;
+    }
+
+    enum ContainsResult
+    {
+        CONTAINED,
+        PREFIX,
+        NOT_CONTAINED
+    }
+
+    /// Returns whether the given key is contained in this set. Returns CONTAINED if it falls inside a covered range or
+    /// branch, PREFIX if it is a prefix of a set boundary, and NOT_CONTAINED if it is not contained in the set at all.
+    default ContainsResult contains(ByteComparable key)
+    {
+        TrieSetCursor cursor = cursor(Direction.FORWARD);
+        final ByteSource bytes = key.asComparableBytes(cursor.byteComparableVersion());
+        int next = bytes.next();
+        int depth = cursor.depth();
+        while (next != ByteSource.END_OF_STREAM)
+        {
+            if (cursor.branchIncluded())
+                return ContainsResult.CONTAINED; // The set covers a prefix of the key.
+            if (cursor.skipTo(++depth, next) != depth || cursor.incomingTransition() != next)
+                return cursor.state().precedingIncluded(Direction.FORWARD) ? ContainsResult.CONTAINED
+                                                                           : ContainsResult.NOT_CONTAINED;
+            next = bytes.next();
+        }
+        return cursor.branchIncluded() ? ContainsResult.CONTAINED : ContainsResult.PREFIX;
     }
 
     default TrieSet union(TrieSet other)
