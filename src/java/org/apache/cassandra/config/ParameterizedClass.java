@@ -19,16 +19,15 @@ package org.apache.cassandra.config;
 
 import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 import com.google.common.base.Objects;
 
 import org.apache.cassandra.exceptions.ConfigurationException;
-import org.apache.cassandra.utils.IntegerInterval;
 
 public class ParameterizedClass
 {
@@ -45,8 +44,7 @@ public class ParameterizedClass
 
     public ParameterizedClass(String class_name)
     {
-        this.class_name = class_name;
-        this.parameters = Collections.emptyMap();
+        this(class_name, Collections.emptyMap());
     }
 
     public ParameterizedClass(String class_name, Map<String, String> parameters)
@@ -84,43 +82,46 @@ public class ParameterizedClass
 
         if (providerClass == null)
         {
-            String error = "Unable to find class " + parameterizedClass.class_name + " in packages [" +
-                           searchPackages.stream().map(p -> '"' + p + '"').collect(Collectors.joining(",")) + ']';
+            String pkgList = '[' + searchPackages.stream().map(p -> '"' + p + '"').collect(Collectors.joining(",")) + ']';
+            String error = "Unable to find class " + parameterizedClass.class_name + " in packages " + pkgList;
             throw new ConfigurationException(error);
         }
 
         try
         {
-            Constructor<?>[] declaredConstructors = providerClass.getDeclaredConstructors();
-
-            Constructor mapConstructor = Arrays.stream(declaredConstructors)
-                                               .filter(c -> c.getParameterTypes().length == 1 && c.getParameterTypes()[0].equals(Map.class))
-                                               .findFirst().orElse(null);
+            Constructor<?> mapConstructor = filterConstructor(providerClass, c -> c.getParameterTypes().length == 1 && c.getParameterTypes()[0].equals(Map.class));
             if (mapConstructor != null)
-                return (K) mapConstructor.newInstance(parameterizedClass.parameters);
+                return (K) mapConstructor.newInstance(parameterizedClass.parameters == null ? Collections.emptyMap() : parameterizedClass.parameters);
 
-            // Falls-back to no-arg constructor if no parameters are present
-            if (parameterizedClass.parameters == null || parameterizedClass.parameters.isEmpty())
-            {
-                Constructor emptyConstructor = Arrays.stream(declaredConstructors)
-                                                     .filter(c -> c.getParameterTypes().length == 0)
-                                                     .findFirst().orElse(null);
-                if (emptyConstructor != null)
-                    return (K) emptyConstructor.newInstance();
-            }
+            // Falls-back to no-arg constructor
+            Constructor<?> noArgsConstructor = filterConstructor(providerClass, c -> c.getParameterTypes().length == 0);
+            if (noArgsConstructor != null)
+                return (K) noArgsConstructor.newInstance();
 
             throw new ConfigurationException("No valid constructor found for class " + parameterizedClass.class_name);
         }
-        catch (IllegalAccessException|InstantiationException|ExceptionInInitializerError e)
+        catch (IllegalAccessException | InstantiationException | ExceptionInInitializerError e)
         {
             throw new ConfigurationException("Unable to instantiate parameterized class " + parameterizedClass.class_name, e);
         }
         catch (InvocationTargetException e)
         {
             Throwable cause = e.getCause();
-            String error = "Failed to instantiate class " + parameterizedClass.class_name + ": " + cause.getMessage();
+            String error = "Failed to instantiate class " + parameterizedClass.class_name +
+                           (cause.getMessage() != null ? ": " + cause.getMessage() : "");
             throw new ConfigurationException(error, cause);
         }
+    }
+
+    private static Constructor<?> filterConstructor(Class<?> providerClass, Predicate<Constructor<?>> filter)
+    {
+        for (Constructor<?> constructor : providerClass.getDeclaredConstructors())
+        {
+            if (filter.test(constructor))
+                return constructor;
+        }
+
+        return null;
     }
 
     @Override
