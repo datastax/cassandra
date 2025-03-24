@@ -1296,9 +1296,9 @@ public class RowFilter
         @Override
         public int numFilteredValues()
         {
-            return indexAnalyzer == null
+            return queryAnalyzer == null
                    ? super.numFilteredValues()
-                   : indexAnalyzer().analyze(value).size();
+                   : queryAnalyzer().analyze(value).size();
         }
     }
 
