@@ -18,20 +18,22 @@
 
 package org.apache.cassandra.db.tries;
 
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
+
 /// The implementation of a [TrieSet].
 ///
 /// In addition to the functionality of normal trie cursors, set cursors also produce a [#state] that describes the
-/// coverage of trie sections to the left, right and below the cursor position. This is necessary to be able to identify
+/// coverage of trie sections to the left and right of the cursor position. This is necessary to be able to identify
 /// coverage after a [#skipTo] operation, where the set cursor jumps to a position beyond the requested one.
-interface TrieSetCursor extends Cursor<TrieSetCursor.RangeState>
+interface TrieSetCursor extends RangeCursor<TrieSetCursor.RangeState>
 {
     /// This type describes the state at a given cursor position. It describes the coverage of the positions before and
     /// after the current in forward order, whether the node is boundary (and thus applies to this point and all its
     /// descendants) and also describes the type of boundary (e.g. start/end).
-    enum RangeState
+    enum RangeState implements org.apache.cassandra.db.tries.RangeState<RangeState>
     {
         // Note: the states must be ordered so that
-        //   `values()[applicableBefore * 1 + applicableAfter * 2 + applicableAtPoint * 4]`
+        //   `values()[applicableBefore * 1 + applicableAfter * 2 + isBoundary * 4]`
         // produces a state with the requested flags
 
         /// The cursor is at a prefix of a contained range, and neither the branches to the left or right are contained.
@@ -59,15 +61,14 @@ interface TrieSetCursor extends Cursor<TrieSetCursor.RangeState>
         final boolean applicableBefore;
         /// Whether the set applied to positions after the cursor's in forward order.
         final boolean applicableAfter;
-        /// The state to report as content. This converts prefix states to null to report only the boundaries
-        /// (e.g. for dumping to text).
-        final RangeState asContent;
+        /// Whether this marker specifies a boundary point. Boundary points are reported as content.
+        final boolean isBoundary;
 
-        RangeState(boolean applicableBefore, boolean applicableAfter, boolean applicableAtPoint)
+        RangeState(boolean applicableBefore, boolean applicableAfter, boolean isBoundary)
         {
             this.applicableBefore = applicableBefore;
             this.applicableAfter = applicableAfter;
-            this.asContent = applicableAtPoint ? this : null;
+            this.isBoundary = isBoundary;
         }
 
         /// Whether the positions preceding the current in iteration order are included in the set.
@@ -76,15 +77,16 @@ interface TrieSetCursor extends Cursor<TrieSetCursor.RangeState>
             return direction.select(applicableBefore, applicableAfter);
         }
 
-        /// Whether the descendant branch is fully included in the set.
-        public boolean branchIncluded()
+        /// Whether the current position is a range boundary. This also means that the descendant branch is fully
+        /// included in the set.
+        public boolean isBoundary()
         {
-            return asContent != null;
+            return isBoundary;
         }
 
         public RangeState toContent()
         {
-            return asContent;
+            return isBoundary ? this : null;
         }
 
         /// Return an "intersection" state for the combination of two states, i.e. the ranges covered by both states.
@@ -106,9 +108,54 @@ interface TrieSetCursor extends Cursor<TrieSetCursor.RangeState>
             return values()[ordinal() ^ 3];
         }
 
-        public static RangeState fromProperties(boolean applicableBefore, boolean applicableAfter, boolean applicableAtPoint)
+        public static RangeState fromProperties(boolean applicableBefore, boolean applicableAfter, boolean isBoundary)
         {
-            return values()[(applicableBefore ? 1 : 0) + (applicableAfter ? 2 : 0) + (applicableAtPoint ? 4 : 0)];
+            return values()[(applicableBefore ? 1 : 0) + (applicableAfter ? 2 : 0) + (isBoundary ? 4 : 0)];
+        }
+
+        // RangeState implementations (used for verification)
+
+        @Override
+        public RangeState precedingState(Direction direction)
+        {
+            return precedingIncluded(direction) ? END_START_PREFIX : START_END_PREFIX;
+        }
+
+        @Override
+        public RangeState restrict(boolean applicableBefore, boolean applicableAfter)
+        {
+            return fromProperties(this.applicableBefore && applicableBefore,
+                                  this.applicableAfter && applicableAfter,
+                                  this.isBoundary);
+        }
+
+        @Override
+        public RangeState asBoundary(Direction direction)
+        {
+            final boolean isForward = direction.isForward();
+            return fromProperties(this.applicableBefore && !isForward,
+                                  this.applicableAfter && isForward,
+                                  true);
+        }
+
+
+        public <S extends org.apache.cassandra.db.tries.RangeState<S>>
+        S applyToCoveringState(S srcState, Direction direction)
+        {
+            switch (this)
+            {
+                case POINT:
+                    return null;
+                case COVERED:
+                    return srcState;
+                case START:
+                    return srcState.asBoundary(Direction.FORWARD);
+                case END:
+                    return srcState.asBoundary(Direction.REVERSE);
+                default:
+                    return precedingIncluded(direction) ? srcState : null;
+            }
+
         }
     }
 
@@ -130,7 +177,7 @@ interface TrieSetCursor extends Cursor<TrieSetCursor.RangeState>
     /// points.
     default boolean branchIncluded()
     {
-        return state().asContent != null;
+        return state().isBoundary;
     }
 
     @Override
@@ -141,4 +188,38 @@ interface TrieSetCursor extends Cursor<TrieSetCursor.RangeState>
 
     @Override
     TrieSetCursor tailCursor(Direction direction);
+
+    class Empty extends Cursor.Empty<RangeState> implements TrieSetCursor
+    {
+        final RangeState coveringState;
+
+        public Empty(RangeState coveringState, ByteComparable.Version version, Direction direction)
+        {
+            super(direction, version);
+            this.coveringState = coveringState;
+        }
+
+        @Override
+        public RangeState state()
+        {
+            return coveringState;
+        }
+
+        @Override
+        public RangeState content()
+        {
+            return null;
+        }
+
+        @Override
+        public TrieSetCursor tailCursor(Direction direction)
+        {
+            return new TrieSetCursor.Empty(coveringState, byteComparableVersion(), direction);
+        }
+    }
+
+    static TrieSetCursor empty(Direction direction, ByteComparable.Version version)
+    {
+        return new Empty(TrieSetCursor.RangeState.START_END_PREFIX, version, direction);
+    }
 }

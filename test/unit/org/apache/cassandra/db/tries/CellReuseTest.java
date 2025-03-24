@@ -273,7 +273,7 @@ public class CellReuseTest
             int payload = asString(b).hashCode();
             ByteBuffer v = ByteBufferUtil.bytes(payload);
             Trie<Object> update = Trie.singleton(b, VERSION, v);
-            update = InMemoryTrieThreadedTest.withRootMetadata(update, Boolean.TRUE);
+            update = TrieUtil.withRootMetadata(update, Boolean.TRUE);
             update = update.prefixedBy(source("prefix"));
             applyUpdating(trie, update, forceCopyPredicate);
         }
@@ -295,9 +295,9 @@ public class CellReuseTest
         // Create an update with two metadata entries, so that the lower is already a copied node.
         // Abort processing on the lower metadata, where the new branch is not attached yet (so as not to affect the
         // contents).
-        update = InMemoryTrieThreadedTest.withRootMetadata(update, Boolean.FALSE);
+        update = TrieUtil.withRootMetadata(update, Boolean.FALSE);
         update = update.prefixedBy(source("fix"));
-        update = InMemoryTrieThreadedTest.withRootMetadata(update, Boolean.TRUE);
+        update = TrieUtil.withRootMetadata(update, Boolean.TRUE);
         update = update.prefixedBy(source("pre"));
 
         trie.apply(update,
