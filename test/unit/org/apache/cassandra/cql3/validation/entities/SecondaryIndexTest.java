@@ -51,6 +51,7 @@ import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.exceptions.SyntaxException;
+import org.apache.cassandra.index.IndexBuildInProgressException;
 import org.apache.cassandra.index.IndexNotAvailableException;
 import org.apache.cassandra.index.SecondaryIndexManager;
 import org.apache.cassandra.index.StubIndex;
@@ -1192,7 +1193,7 @@ public class SecondaryIndexTest extends CQLTester
             execute("SELECT value FROM %s WHERE value = 2");
             fail();
         }
-        catch (IndexNotAvailableException e)
+        catch (IndexBuildInProgressException e)
         {
             assertTrue(true);
         }

@@ -20,9 +20,13 @@ package org.apache.cassandra.index.sai.cql;
 import org.junit.Test;
 
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
+import org.apache.cassandra.index.IndexBuildInProgressException;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
+import org.apache.cassandra.inject.Injections;
+import org.apache.cassandra.inject.InvokePointBuilder;
 
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertNotNull;
 
 /**
@@ -366,17 +370,17 @@ public class AllowFilteringTest extends SAITester
         execute("INSERT INTO %s (a, b, c, d) VALUES ('Test3', 'Test3', 'Test3', 'Test3')");
 
         // Single restriction
-        assertInvalidMessage(String.format(StatementRestrictions.HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_SINGLE, "b"), "SELECT * FROM %s WHERE b > 'Test'");
-        assertInvalidMessage(String.format(StatementRestrictions.HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_SINGLE, "c"), "SELECT * FROM %s WHERE c > 'Test'");
-        assertInvalidMessage(String.format(StatementRestrictions.HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_SINGLE, "d"), "SELECT * FROM %s WHERE d > 'Test'");
+        assertInvalidMessage(String.format(StatementRestrictions.HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_SINGLE, 'b'), "SELECT * FROM %s WHERE b > 'Test'");
+        assertInvalidMessage(String.format(StatementRestrictions.HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_SINGLE, 'c'), "SELECT * FROM %s WHERE c > 'Test'");
+        assertInvalidMessage(String.format(StatementRestrictions.HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_SINGLE, 'd'), "SELECT * FROM %s WHERE d > 'Test'");
 
         // Supported and unsupported restriction
-        assertInvalidMessage(String.format(StatementRestrictions.HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_SINGLE, "b"), "SELECT * FROM %s WHERE b > 'Test' AND c = 'Test1'");
-        assertInvalidMessage(String.format(StatementRestrictions.HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_SINGLE, "c"), "SELECT * FROM %s WHERE c > 'Test' AND d = 'Test1'");
-        assertInvalidMessage(String.format(StatementRestrictions.HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_SINGLE, "d"), "SELECT * FROM %s WHERE d > 'Test' AND b = 'Test1'");
+        assertInvalidMessage(String.format(StatementRestrictions.HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_SINGLE, 'b'), "SELECT * FROM %s WHERE b > 'Test' AND c = 'Test1'");
+        assertInvalidMessage(String.format(StatementRestrictions.HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_SINGLE, 'c'), "SELECT * FROM %s WHERE c > 'Test' AND d = 'Test1'");
+        assertInvalidMessage(String.format(StatementRestrictions.HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_SINGLE, 'd'), "SELECT * FROM %s WHERE d > 'Test' AND b = 'Test1'");
 
         // Two unsupported restrictions
-        assertInvalidMessage(String.format(StatementRestrictions.HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_SINGLE, "b"), "SELECT * FROM %s WHERE b > 'Test' AND b < 'Test3'");
+        assertInvalidMessage(String.format(StatementRestrictions.HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_SINGLE, 'b'), "SELECT * FROM %s WHERE b > 'Test' AND b < 'Test3'");
         assertInvalidMessage(String.format(StatementRestrictions.HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_MULTI, "[b, c]"), "SELECT * FROM %s WHERE c > 'Test' AND b < 'Test3'");
         assertInvalidMessage(String.format(StatementRestrictions.HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_MULTI, "[b, d]"), "SELECT * FROM %s WHERE d > 'Test' AND b < 'Test3'");
 
@@ -416,9 +420,9 @@ public class AllowFilteringTest extends SAITester
         createIndex(String.format("CREATE CUSTOM INDEX ON %%s(d) USING '%s'", StorageAttachedIndex.class.getName()));
 
         // LIKE restriction
-        assertInvalidMessage(String.format(StatementRestrictions.INDEX_DOES_NOT_SUPPORT_LIKE_MESSAGE, "b"), "SELECT * FROM %s WHERE b LIKE 'Test'");
-        assertInvalidMessage(String.format(StatementRestrictions.INDEX_DOES_NOT_SUPPORT_LIKE_MESSAGE, "c"), "SELECT * FROM %s WHERE c LIKE 'Test'");
-        assertInvalidMessage(String.format(StatementRestrictions.INDEX_DOES_NOT_SUPPORT_LIKE_MESSAGE, "d"), "SELECT * FROM %s WHERE d LIKE 'Test'");
+        assertInvalidMessage(String.format(StatementRestrictions.INDEX_DOES_NOT_SUPPORT_LIKE_MESSAGE, 'b'), "SELECT * FROM %s WHERE b LIKE 'Test'");
+        assertInvalidMessage(String.format(StatementRestrictions.INDEX_DOES_NOT_SUPPORT_LIKE_MESSAGE, 'c'), "SELECT * FROM %s WHERE c LIKE 'Test'");
+        assertInvalidMessage(String.format(StatementRestrictions.INDEX_DOES_NOT_SUPPORT_LIKE_MESSAGE, 'd'), "SELECT * FROM %s WHERE d LIKE 'Test'");
     }
 
     @Test
@@ -430,7 +434,7 @@ public class AllowFilteringTest extends SAITester
         createIndex(String.format("CREATE CUSTOM INDEX ON %%s(d) USING '%s'", StorageAttachedIndex.class.getName()));
 
         // Analyzer restriction
-        assertInvalidMessage(String.format(": restriction is only supported on properly indexed columns. a : 'Test' is not valid."), "SELECT * FROM %s WHERE a : 'Test'");
+        assertInvalidMessage(": restriction is only supported on properly indexed columns. a : 'Test' is not valid.", "SELECT * FROM %s WHERE a : 'Test'");
         assertInvalidMessage(String.format(StatementRestrictions.INDEX_DOES_NOT_SUPPORT_ANALYZER_MATCHES_MESSAGE, 'b'), "SELECT * FROM %s WHERE b : 'Test'");
         assertInvalidMessage(String.format(StatementRestrictions.INDEX_DOES_NOT_SUPPORT_ANALYZER_MATCHES_MESSAGE, 'c'), "SELECT * FROM %s WHERE c : 'Test'");
         assertInvalidMessage(String.format(StatementRestrictions.INDEX_DOES_NOT_SUPPORT_ANALYZER_MATCHES_MESSAGE, 'd'), "SELECT * FROM %s WHERE d : 'Test'");
@@ -445,11 +449,11 @@ public class AllowFilteringTest extends SAITester
         // Should not fail because allow filtering is set but not required
         assertRows(execute("SELECT * FROM %s ORDER BY vec ANN OF [1,1,1] LIMIT 10 ALLOW FILTERING;"));
 
-        // Do not recommend ALLOW FILTERING for non primary key, non clustering column restrictions
+        // Do not recommend ALLOW FILTERING for non-primary key, non clustering column restrictions
         assertInvalidMessage(StatementRestrictions.NON_CLUSTER_ORDERING_REQUIRES_ALL_RESTRICTED_NON_PARTITION_KEY_COLUMNS_INDEXED_MESSAGE,
                              "SELECT * FROM %s WHERE k > 0 ORDER BY vec ANN OF [2.5, 3.5, 4.5] LIMIT 10;");
 
-        // Do not let ALLOW FILTERING to lead to query execution for non primary key, non clustering column restrictions
+        // Do not let ALLOW FILTERING to lead to query execution for non-primary key, non clustering column restrictions
         assertInvalidMessage(StatementRestrictions.NON_CLUSTER_ORDERING_REQUIRES_ALL_RESTRICTED_NON_PARTITION_KEY_COLUMNS_INDEXED_MESSAGE,
                              "SELECT * FROM %s WHERE k > 0 ORDER BY vec ANN OF [2.5, 3.5, 4.5] LIMIT 10 ALLOW FILTERING;");
 
@@ -513,5 +517,32 @@ public class AllowFilteringTest extends SAITester
 
         // Show that we're now able to execute the query.
         assertRows(execute("SELECT partition FROM %s WHERE item_cost['apple'] < 3 AND item_cost['apple'] > 1"), row(0));
+    }
+
+    private final Injections.Barrier blockIndexBuild = Injections.newBarrier("block_index_build", 2, false)
+                                                                 .add(InvokePointBuilder.newInvokePoint().onClass(StorageAttachedIndex.class)
+                                                                 .onMethod("startInitialBuild"))
+                                                                 .build();
+
+    @Test
+    public void testAllowFilteringDuringIndexBuild() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v int)");
+        Injections.inject(blockIndexBuild);
+        String idx = createIndexAsync(String.format("CREATE CUSTOM INDEX ON %%s(v) USING '%s'", StorageAttachedIndex.class.getName()));
+
+        assertThatThrownBy(() -> executeInternal("SELECT * FROM %s WHERE v=0"))
+                .hasMessage("The secondary index '" + idx + "' is not yet available as it is building")
+                .isInstanceOf(IndexBuildInProgressException.class);
+
+        assertThatThrownBy(() -> executeInternal("SELECT * FROM %s WHERE v=0 ALLOW FILTERING"))
+                .hasMessage("The secondary index '" + idx + "' is not yet available as it is building")
+                .isInstanceOf(IndexBuildInProgressException.class);
+
+        blockIndexBuild.countDown();
+        blockIndexBuild.disable();
+        waitForIndexQueryable(idx);
+        execute("SELECT * FROM %s WHERE v=0");
+        execute("SELECT * FROM %s WHERE v=0 ALLOW FILTERING");
     }
 }
