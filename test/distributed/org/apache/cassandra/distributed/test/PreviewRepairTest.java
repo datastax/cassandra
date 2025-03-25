@@ -210,6 +210,9 @@ public class PreviewRepairTest extends TestBaseImpl
                                                                 config.with(GOSSIP)
                                                                       .with(NETWORK)).start()))
         {
+            cluster.setUncaughtExceptionsFilter(t -> t.getClass().toString().contains("RepairException") &&
+                                                     t.getMessage() != null &&
+                                                     t.getMessage().contains("Validation failed"));
             cluster.schemaChange("create table " + KEYSPACE + ".tbl (id int primary key, t int)");
             insert(cluster.coordinator(1), 0, 100);
             cluster.forEach((node) -> node.flush(KEYSPACE));
