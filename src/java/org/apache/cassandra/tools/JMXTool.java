@@ -164,7 +164,7 @@ public class JMXTool
             {
                 void dump(OutputStream output, Map<String, Info> map) throws IOException
                 {
-                    Representer representer = new Representer();
+                    Representer representer = new Representer(new DumperOptions());
                     representer.addClassTag(Info.class, Tag.MAP); // avoid the auto added tag
                     Yaml yaml = new Yaml(representer);
                     yaml.dump(map, new OutputStreamWriter(output));
@@ -386,7 +386,8 @@ public class JMXTool
             {
                 Map<String, Info> load(InputStream input) throws IOException
                 {
-                    Yaml yaml = new Yaml(new CustomConstructor(), new Representer(), new DumperOptions(), LOADER_CONFIG);
+                    DumperOptions dOpts = new DumperOptions();
+                    Yaml yaml = new Yaml(new CustomConstructor(), new Representer(dOpts), dOpts, LOADER_CONFIG);
                     return (Map<String, Info>) yaml.load(input);
                 }
             };
