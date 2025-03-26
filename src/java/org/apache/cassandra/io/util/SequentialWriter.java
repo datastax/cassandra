@@ -302,8 +302,6 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
         fhBuilder.withLength(lastFlushOffset);
     }
 
-    // Page management using on-disk pages
-
     /**
      * Some writers cannot feasibly calculate the exact length of a file. If any user needs to be able to store
      * metadata at the end, they should use this function to ensure the content to be written can be addressed
