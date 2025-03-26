@@ -35,6 +35,7 @@ import org.apache.cassandra.exceptions.RequestValidationException;
 import org.apache.cassandra.metrics.ClientMetrics;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
+import org.apache.cassandra.service.reads.thresholds.CoordinatorWarnings;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.transport.CBUtil;
 import org.apache.cassandra.transport.Dispatcher;
@@ -127,20 +128,50 @@ public class QueryMessage extends Message.Request
             Optional<Stage> asyncStage = Stage.fromStatement(statement);
             if (asyncStage.isPresent())
             {
+                // Execution will continue on a new executor. Dispatcher.processRequest calls CoordinatorWarnings.init()
+                // and CoordinatorWarnings.done() on the NTR thread. For async execution, warnings are collected on the
+                // async stage thread, so we must also call CoordinatorWarnings.init()/done() there. The NTR-thread
+                // done() call will see an empty STATE (no warnings collected on NTR thread) and is harmless.
+                // See CNDB-13432 and CNDB-10759.
+                //
+                // Capture ExecutorLocals (including ClientWarn.State) to propagate to the async stage thread
+                // so that warnings generated during query execution are properly captured.
+                ExecutorLocals executorLocals = ExecutorLocals.current();
                 CQLStatement finalStatement = statement;
                 return asyncStage.get().submit(() ->
                                                {
                                                    try
                                                    {
-                                                       // at the time of the check, this includes the time spent in the NTR queue, basic query parsing/set up,
-                                                       // and any time spent in the queue for the async stage
-                                                       long elapsedTime = elapsedTimeSinceCreation(TimeUnit.NANOSECONDS);
-                                                       ClientMetrics.instance.recordAsyncQueueTime(elapsedTime, TimeUnit.NANOSECONDS);
-                                                       if (elapsedTime > DatabaseDescriptor.getNativeTransportTimeout(TimeUnit.NANOSECONDS))
+                                                       Response response;
+                                                       try
                                                        {
-                                                           ClientMetrics.instance.markTimedOutBeforeAsyncProcessing();
-                                                           throw new OverloadedException("Query timed out before it could start");
+                                                           if (isTrackable())
+                                                               CoordinatorWarnings.init();
+
+                                                           // at the time of the check, this includes the time spent in the NTR queue, basic query parsing/set up,
+                                                           // and any time spent in the queue for the async stage
+                                                           long elapsedTime = elapsedTimeSinceCreation(TimeUnit.NANOSECONDS);
+                                                           ClientMetrics.instance.recordAsyncQueueTime(elapsedTime, TimeUnit.NANOSECONDS);
+                                                           if (elapsedTime > DatabaseDescriptor.getNativeTransportTimeout(TimeUnit.NANOSECONDS))
+                                                           {
+                                                               ClientMetrics.instance.markTimedOutBeforeAsyncProcessing();
+                                                               throw new OverloadedException("Query timed out before it could start");
+                                                           }
+                                                           response = handleRequest(state, queryHandler, requestTime, finalStatement, requestStartMillisTime);
                                                        }
+                                                       catch (Exception e)
+                                                       {
+                                                           response = handleException(state, finalStatement, e);
+                                                       }
+                                                       finally
+                                                       {
+                                                           if (isTrackable())
+                                                           {
+                                                               CoordinatorWarnings.done();
+                                                               CoordinatorWarnings.reset();
+                                                           }
+                                                       }
+                                                       return response;
                                                    }
                                                    catch (Exception e)
                                                    {

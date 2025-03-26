@@ -19,13 +19,14 @@ package org.apache.cassandra.index.sai.disk.io;
 
 import java.io.IOException;
 
-public abstract class FilterIndexInput extends IndexInput
-{
-    private final IndexInput delegate;
 
-    protected FilterIndexInput(IndexInput delegate)
+public abstract class FilterIndexInput extends IndexInputReader
+{
+    private final IndexInputReader delegate;
+
+    protected FilterIndexInput(IndexInputReader delegate)
     {
-        super(delegate.toString(), delegate.order());
+        super(delegate.input, delegate.doOnClose, 0L, delegate.input.length());
         this.delegate = delegate;
     }
 
@@ -35,7 +36,7 @@ public abstract class FilterIndexInput extends IndexInput
     }
 
     @Override
-    public void close() throws IOException
+    public void close()
     {
         delegate.close();
     }
@@ -47,7 +48,7 @@ public abstract class FilterIndexInput extends IndexInput
     }
 
     @Override
-    public void seek(long pos) throws IOException
+    public void seek(long pos)
     {
         delegate.seek(pos);
     }
@@ -59,7 +60,7 @@ public abstract class FilterIndexInput extends IndexInput
     }
 
     @Override
-    public IndexInput slice(String sliceDescription, long offset, long length) throws IOException
+    public IndexInput slice(String sliceDescription, long offset, long length)
     {
         return delegate.slice(sliceDescription, offset, length);
     }

@@ -44,6 +44,7 @@ import org.apache.cassandra.exceptions.PreparedQueryNotFoundException;
 import org.apache.cassandra.metrics.ClientMetrics;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
+import org.apache.cassandra.service.reads.thresholds.CoordinatorWarnings;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.transport.CBUtil;
 import org.apache.cassandra.transport.Dispatcher;
@@ -199,9 +200,9 @@ public class BatchMessage extends Message.Request
                 }
                 else
                 {
-                    p = handler.getPrepared((MD5Digest)query);
+                    p = handler.getPrepared((MD5Digest) query);
                     if (null == p)
-                        throw new PreparedQueryNotFoundException((MD5Digest)query);
+                        throw new PreparedQueryNotFoundException((MD5Digest) query);
                 }
 
                 List<ByteBuffer> queryValues = values.get(i);
@@ -239,11 +240,20 @@ public class BatchMessage extends Message.Request
             Optional<Stage> asyncStage = Stage.fromStatement(batch);
             if (asyncStage.isPresent())
             {
+                // Execution will continue on a new thread. Dispatcher.processRequest calls CoordinatorWarnings.init()
+                // and CoordinatorWarnings.done() on the NTR thread. For async execution, warnings are collected on the
+                // async stage thread, so we must also call CoordinatorWarnings.init()/done() there. The NTR-thread
+                // done() call will see an empty STATE (no warnings collected on NTR thread) and is harmless.
+                // See CNDB-13432 and CNDB-10759.
                 List<QueryHandler.Prepared> finalPrepared = prepared;
                 return asyncStage.get().submit(() ->
                                                {
+                                                   Response response;
                                                    try
                                                    {
+                                                       if (isTrackable())
+                                                           CoordinatorWarnings.init();
+
                                                        // at the time of the check, this includes the time spent in the NTR queue, basic query parsing/set up,
                                                        // and any time spent in the queue for the async stage
                                                        long elapsedTime = elapsedTimeSinceCreation(TimeUnit.NANOSECONDS);
@@ -253,12 +263,21 @@ public class BatchMessage extends Message.Request
                                                            ClientMetrics.instance.markTimedOutBeforeAsyncProcessing();
                                                            throw new OverloadedException("Query timed out before it could start");
                                                        }
+                                                       response = handleRequest(state, requestTime, handler, batch, batchOptions, queries, statements, finalPrepared, requestStartMillisTime);
                                                    }
                                                    catch (Exception e)
                                                    {
-                                                       return handleException(state, finalPrepared, e);
+                                                       response = handleException(state, finalPrepared, e);
                                                    }
-                                                   return handleRequest(state, requestTime, handler, batch, batchOptions, queries, statements, finalPrepared, requestStartMillisTime);
+                                                   finally
+                                                   {
+                                                       if (isTrackable())
+                                                       {
+                                                           CoordinatorWarnings.done();
+                                                           CoordinatorWarnings.reset();
+                                                       }
+                                                   }
+                                                   return response;
                                                });
             }
             else
