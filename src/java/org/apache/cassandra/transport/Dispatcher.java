@@ -31,6 +31,7 @@ import io.netty.channel.Channel;
 import io.netty.channel.EventLoop;
 import io.netty.util.AttributeKey;
 import org.apache.cassandra.concurrent.DebuggableTask;
+import org.apache.cassandra.concurrent.ExecutorLocals;
 import org.apache.cassandra.concurrent.ExecutorPlus;
 import org.apache.cassandra.concurrent.LocalAwareExecutorPlus;
 import org.apache.cassandra.concurrent.Stage;
@@ -47,6 +48,7 @@ import org.apache.cassandra.transport.Flusher.FlushItem;
 import org.apache.cassandra.transport.messages.ErrorMessage;
 import org.apache.cassandra.transport.messages.EventMessage;
 import org.apache.cassandra.transport.messages.StartupMessage;
+import org.apache.cassandra.utils.Closeable;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.MonotonicClock;
 import org.apache.cassandra.utils.NoSpamLogger;
@@ -445,9 +447,12 @@ public class Dispatcher implements CQLMessageHandler.MessageConsumer<Message.Req
 
         Message.logger.trace("Received: {}, v={}", request, connection.getVersion());
         connection.requests.inc();
+        ExecutorLocals executorLocals = ExecutorLocals.current();
         return request.execute(qstate, requestTime)
                       .addCallback((result, ignored) -> {
-                          try
+                          // If the request was executed on a different Stage, we need to restore the ExecutorLocals
+                          // on the current thread. See CNDB-13432 and CNDB-10759.
+                          try (Closeable close = executorLocals.get())
                           {
                               if (request.isTrackable())
                                   CoordinatorWarnings.done();
@@ -485,7 +490,6 @@ public class Dispatcher implements CQLMessageHandler.MessageConsumer<Message.Req
             }
             finally
             {
-                CoordinatorWarnings.reset();
                 ClientWarn.instance.resetWarnings();
             }
         });
