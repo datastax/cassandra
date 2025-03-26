@@ -38,7 +38,6 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
-import java.util.stream.Collectors;
 import javax.annotation.Nullable;
 
 import com.google.common.base.Preconditions;
@@ -123,9 +122,7 @@ import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.sensors.ActiveRequestSensors;
 import org.apache.cassandra.sensors.Context;
-import org.apache.cassandra.sensors.NoOpRequestSensors;
 import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.sensors.SensorsFactory;
 import org.apache.cassandra.sensors.Type;
@@ -1870,7 +1867,7 @@ public class StorageProxy implements StorageProxyMBean
         // CASSANDRA-13043: filter out those endpoints not accepting clients yet, maybe because still bootstrapping
         // We have a keyspace, so filter by affinity too
         replicas = replicas.filter(IFailureDetector.isReplicaAlive)
-                           .filter(snitch.filterByAffinity(keyspace.getName()));
+                           .filter(snitch.filterByAffinityForReads(keyspace.getName()));
 
         // CASSANDRA-17411: filter out endpoints that are not alive
         replicas = replicas.filter(replica -> FailureDetector.instance.isAlive(replica.endpoint()));

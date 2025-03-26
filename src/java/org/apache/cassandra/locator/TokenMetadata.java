@@ -271,6 +271,49 @@ public class TokenMetadata
     }
 
     /**
+     * Used by CNDB to update endpoint address for given normal tokens
+     */
+    public void updateAddressForNormalTokens(Collection<Token> tokens, InetAddressAndPort existing, InetAddressAndPort current)
+    {
+        assert tokens != null && !tokens.isEmpty();
+        assert existing != null && current != null;
+
+        lock.writeLock().lock();
+        try
+        {
+            Collection<Token> oldNodeTokens = tokenToEndpointMap.inverse().get(existing);
+            if (!tokens.containsAll(oldNodeTokens) || !oldNodeTokens.containsAll(tokens))
+            {
+                throw new RuntimeException(String.format("Node %s is trying to replace node %s with tokens %s with a " +
+                                                         "different set of tokens %s.", current, existing, oldNodeTokens,
+                                                         tokens));
+            }
+
+            Topology.Builder topologyBuilder = topology.unbuild();
+            bootstrapTokens.removeValue(current);
+            tokenToEndpointMap.removeValue(existing);
+            tokenToEndpointMap.removeValue(current);
+            topologyBuilder.addEndpoint(current);
+            leavingEndpoints.remove(current);
+            replacementToOriginal.remove(current);
+            removeFromMoving(current); // also removing this endpoint from moving
+
+            for (Token token : tokens)
+                tokenToEndpointMap.put(token, current);
+
+            topology = topologyBuilder.build();
+
+            sortedTokens = sortTokens();
+        }
+        finally
+        {
+            lock.writeLock().unlock();
+        }
+
+
+    }
+
+    /**
      * Store an end-point to host ID mapping.  Each ID must be unique, and
      * cannot be changed after the fact.
      */
@@ -299,6 +342,46 @@ public class TokenMetadata
                 logger.warn("Changing {}'s host ID from {} to {}", endpoint, storedId, hostId);
 
             endpointToHostIdMap.forcePut(endpoint, hostId);
+        }
+        finally
+        {
+            lock.writeLock().unlock();
+        }
+
+    }
+
+    /**
+     * Used by CNDB to update endpoint address for given host id
+     */
+    public void updateAddressForHostId(UUID hostId, InetAddressAndPort existing, InetAddressAndPort current)
+    {
+        assert hostId != null;
+        assert existing != null;
+        assert current != null;
+
+        lock.writeLock().lock();
+        try
+        {
+            InetAddressAndPort storedEp = endpointToHostIdMap.inverse().get(hostId);
+            if (storedEp != null && !storedEp.equals(existing))
+            {
+                throw new RuntimeException(String.format("Endpoint mismatch between stored endpoint %s and expected endpoint %s (id=%s)",
+                                                         storedEp,
+                                                         existing,
+                                                         hostId));
+            }
+
+            UUID storedId = endpointToHostIdMap.get(existing);
+            if (storedId != null && !storedId.equals(hostId))
+            {
+                throw new RuntimeException(String.format("Host id mismatch for existing endpoint %s and existing id %s and provided id=%s)",
+                                                         existing,
+                                                         storedId,
+                                                         hostId));
+            }
+
+            endpointToHostIdMap.remove(existing);
+            endpointToHostIdMap.forcePut(current, hostId);
         }
         finally
         {
@@ -395,6 +478,33 @@ public class TokenMetadata
         }
     }
 
+    /**
+     * Used by CNDB to update endpoint address for bootstrap tokens
+     */
+    public void updateAddressForBootstrapTokens(InetAddressAndPort existing, InetAddressAndPort current)
+    {
+        assert existing != null;
+        assert current != null;
+        assert !existing.equals(current);
+
+        lock.writeLock().lock();
+        try
+        {
+            Collection<Token> existingTokens = bootstrapTokens.removeValue(existing);
+            for (Token token : existingTokens)
+            {
+                bootstrapTokens.put(token, current);
+            }
+        }
+        finally
+        {
+            lock.writeLock().unlock();
+        }
+    }
+
+    /**
+     * Used by C* node replacement to add replacement tokens as bootstrapping tokens
+     */
     public void addReplaceTokens(Collection<Token> replacingTokens, InetAddressAndPort newNode, InetAddressAndPort oldNode)
     {
         assert replacingTokens != null && !replacingTokens.isEmpty();
@@ -472,6 +582,27 @@ public class TokenMetadata
         try
         {
             leavingEndpoints.add(endpoint);
+        }
+        finally
+        {
+            lock.writeLock().unlock();
+        }
+    }
+
+    /**
+     * Used by CNDB to update endpoint address for leaving endpoints
+     */
+    public void updateAddressForLeavingEndpoint(InetAddressAndPort existing, InetAddressAndPort current)
+    {
+        assert existing != null;
+        assert current != null;
+        assert !existing.equals(current);
+
+        lock.writeLock().lock();
+        try
+        {
+            leavingEndpoints.add(current);
+            leavingEndpoints.remove(existing);
         }
         finally
         {

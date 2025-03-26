@@ -19,6 +19,7 @@ package org.apache.cassandra.locator;
 
 import java.net.UnknownHostException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
@@ -347,5 +348,95 @@ public class TokenMetadataTest
         assertEquals(0, tokenMetadata.getSizeOfAllEndpoints());
         assertEquals(0, tokenMetadata.getSizeOfLeavingEndpoints());
         assertEquals(0, tokenMetadata.getSizeOfMovingEndpoints());
+    }
+
+    @Test
+    public void testUpdateAddressForBootstrapTokens() throws UnknownHostException
+    {
+        final InetAddressAndPort first = InetAddressAndPort.getByName("127.0.0.1");
+        final InetAddressAndPort second = InetAddressAndPort.getByName("127.0.0.6");
+
+        tmd.updateNormalToken(token(ONE), first);
+        tmd.updateNormalToken(token(SIX), second);
+
+        final InetAddressAndPort bootstrappingNode = InetAddressAndPort.getByName("127.0.0.8");
+        tmd.addBootstrapTokens(Collections.singleton(token(8)), bootstrappingNode);
+
+        assertEquals(tmd.getBootstrapTokens().size(), 1);
+        assertEquals(tmd.getBootstrapTokens().get(token(8)), bootstrappingNode);
+
+        InetAddressAndPort updatedBootstrappingNode = InetAddressAndPort.getByName("127.0.0.10");
+        tmd.updateAddressForBootstrapTokens(bootstrappingNode, updatedBootstrappingNode);
+
+        assertEquals(tmd.getBootstrapTokens().size(), 1);
+        assertEquals(tmd.getBootstrapTokens().get(token(8)), updatedBootstrappingNode);
+    }
+
+    @Test
+    public void testUpdateAddressForLeavingEndpoint() throws UnknownHostException
+    {
+        final InetAddressAndPort first = InetAddressAndPort.getByName("127.0.0.1");
+        final InetAddressAndPort second = InetAddressAndPort.getByName("127.0.0.6");
+
+        tmd.updateNormalToken(token(ONE), first);
+        tmd.updateNormalToken(token(SIX), second);
+
+        final InetAddressAndPort leavingNode = InetAddressAndPort.getByName("127.0.0.8");
+        tmd.addLeavingEndpoint(leavingNode);
+        assertEquals(tmd.getLeavingEndpoints().size(), 1);
+        assertEquals(tmd.getLeavingEndpoints().iterator().next(), leavingNode);
+
+        InetAddressAndPort updatedLeavingNode = InetAddressAndPort.getByName("127.0.0.10");
+        tmd.updateAddressForLeavingEndpoint(leavingNode, updatedLeavingNode);
+
+        assertEquals(tmd.getLeavingEndpoints().size(), 1);
+        assertEquals(tmd.getLeavingEndpoints().iterator().next(), updatedLeavingNode);
+    }
+
+    @Test
+    public void testUpdateAddressForNormalTokens() throws UnknownHostException
+    {
+        final InetAddressAndPort first = InetAddressAndPort.getByName("127.0.0.1");
+        final InetAddressAndPort second = InetAddressAndPort.getByName("127.0.0.6");
+
+        tmd.updateNormalToken(token(ONE), first);
+        tmd.updateNormalToken(token(SIX), second);
+
+        assertEquals(tmd.getTokens(first).size(), 1);
+        assertEquals(tmd.getTokens(first).iterator().next(), token(ONE));
+
+        assertEquals(tmd.getTokens(second).size(), 1);
+        assertEquals(tmd.getTokens(second).iterator().next(), token(SIX));
+
+        InetAddressAndPort updatedNode = InetAddressAndPort.getByName("127.0.0.10");
+        tmd.updateAddressForNormalTokens(Collections.singleton(token(ONE)), first, updatedNode);
+
+        assertEquals(tmd.getTokens(updatedNode).size(), 1);
+        assertEquals(tmd.getTokens(updatedNode).iterator().next(), token(SIX));
+
+        assertEquals(tmd.getTokens(second).size(), 1);
+        assertEquals(tmd.getTokens(second).iterator().next(), token(SIX));
+    }
+
+    @Test
+    public void testUpdateAddressForHostId() throws UnknownHostException
+    {
+        final InetAddressAndPort first = InetAddressAndPort.getByName("127.0.0.1");
+        UUID firstId = UUID.randomUUID();
+
+        final InetAddressAndPort second = InetAddressAndPort.getByName("127.0.0.6");
+        UUID secondId = UUID.randomUUID();
+
+        tmd.updateHostId(firstId, first);
+        tmd.updateHostId(secondId, second);
+
+        assertEquals(tmd.getHostId(first), firstId);
+        assertEquals(tmd.getHostId(second), secondId);
+
+        InetAddressAndPort updatedNode = InetAddressAndPort.getByName("127.0.0.10");
+        tmd.updateAddressForHostId(secondId, second, updatedNode);
+
+        assertEquals(tmd.getHostId(first), firstId);
+        assertEquals(tmd.getHostId(updatedNode), secondId);
     }
 }
