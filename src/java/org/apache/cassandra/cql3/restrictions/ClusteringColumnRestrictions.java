@@ -20,6 +20,7 @@ package org.apache.cassandra.cql3.restrictions;
 import java.util.*;
 
 import org.apache.cassandra.guardrails.Guardrails;
+import org.apache.cassandra.db.filter.ANNOptions;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.cql3.QueryOptions;
@@ -42,7 +43,7 @@ final class ClusteringColumnRestrictions extends RestrictionSetWrapper
     /**
      * The composite type.
      */
-    protected final ClusteringComparator comparator;
+    private final ClusteringComparator comparator;
 
     private ClusteringColumnRestrictions(ClusteringComparator comparator,
                                          RestrictionSet restrictionSet)
@@ -124,7 +125,8 @@ final class ClusteringColumnRestrictions extends RestrictionSetWrapper
     @Override
     public void addToRowFilter(RowFilter.Builder filter,
                                IndexRegistry indexRegistry,
-                               QueryOptions options) throws InvalidRequestException
+                               QueryOptions options,
+                               ANNOptions annOptions) throws InvalidRequestException
     {
         int position = 0;
 
@@ -135,7 +137,7 @@ final class ClusteringColumnRestrictions extends RestrictionSetWrapper
             // We ignore all the clustering columns that can be handled by slices.
             if (handleInFilter(restriction, position) || restriction.hasSupportingIndex(indexRegistry))
             {
-                restriction.addToRowFilter(filter, indexRegistry, options);
+                restriction.addToRowFilter(filter, indexRegistry, options, annOptions);
                 continue;
             }
 

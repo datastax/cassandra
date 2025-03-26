@@ -32,7 +32,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
-import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.virtual.SimpleDataSet;
@@ -44,13 +43,15 @@ import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.Segment;
+import org.apache.cassandra.index.sai.iterators.KeyRangeAntiJoinIterator;
+import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.plan.Orderer;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
-import org.apache.cassandra.index.sai.utils.RangeAntiJoinIterator;
-import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
+import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.sstable.SSTableIdFactory;
+import org.apache.cassandra.io.sstable.SSTableWatcher;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.CloseableIterator;
@@ -95,7 +96,7 @@ public class SSTableIndex
             return new EmptyIndex();
         }
 
-        return perIndexComponents.version().onDiskFormat().newSearchableIndex(sstableContext, perIndexComponents);
+        return perIndexComponents.onDiskFormat().newSearchableIndex(sstableContext, perIndexComponents);
     }
 
     public IndexContext getIndexContext()
@@ -132,6 +133,11 @@ public class SSTableIndex
     public long getRowCount()
     {
         return searchableIndex.getRowCount();
+    }
+
+    public long estimateMatchingRowsCount(Expression predicate, AbstractBounds<PartitionPosition> keyRange)
+    {
+        return searchableIndex.estimateMatchingRowsCount(predicate, keyRange);
     }
 
     /**
@@ -186,27 +192,46 @@ public class SSTableIndex
         return searchableIndex.maxKey();
     }
 
-    public RangeIterator search(Expression expression,
-                                AbstractBounds<PartitionPosition> keyRange,
-                                QueryContext context,
-                                boolean defer,
-                                int limit) throws IOException
+    // Returns an iterator for NEQ, NOT_CONTAINS_KEY, NOT_CONTAINS_VALUE, which
+    // 1. Either includes everything if the column type values can be truncated and
+    // thus the keys cannot be matched precisely,
+    // 2. or includes everything minus the keys matching the expression
+    // if the column type values cannot be truncated, i.e., matching the keys is always precise.
+    // (not matching precisely will lead to false negatives)
+    //
+    // keys k such that row(k) not contains v = (all keys) \ (keys k such that row(k) contains v)
+    //
+    // Note that rows in other indexes are not matched, so this can return false positives,
+    // but they are not a problem as post-filtering would get rid of them.
+    // The keys matched in other indexes cannot be safely subtracted
+    // as indexes may contain false positives caused by deletes and updates.
+    private KeyRangeIterator getNonEqIterator(Expression expression,
+                                              AbstractBounds<PartitionPosition> keyRange,
+                                              QueryContext context,
+                                              boolean defer) throws IOException
+    {
+        KeyRangeIterator allKeys = allSSTableKeys(keyRange);
+        if (TypeUtil.supportsRounding(expression.validator))
+        {
+            return allKeys;
+        }
+        else
+        {
+            Expression negExpression = expression.negated();
+            KeyRangeIterator matchedKeys = searchableIndex.search(negExpression, keyRange, context, defer, Integer.MAX_VALUE);
+            return KeyRangeAntiJoinIterator.create(allKeys, matchedKeys);
+        }
+    }
+
+    public KeyRangeIterator search(Expression expression,
+                                   AbstractBounds<PartitionPosition> keyRange,
+                                   QueryContext context,
+                                   boolean defer,
+                                   int limit) throws IOException
     {
         if (expression.getOp().isNonEquality())
         {
-            // For NEQ, NOT_CONTAINS_KEY, NOT_CONTAINS_VALUE we return everything minus the keys matching
-            // the expression.
-            //
-            // keys k such that row(k) not contains v = (all keys) \ (keys k such that row(k) contains v)
-            //
-            // Note that we will not match rows in other indexes,
-            // so this can return false positives, but they are not a problem as post-filtering would get rid of them.
-            // We could not safely substract the keys matched in other indexes as indexes may contain false positives
-            // caused by deletes and updates.
-            Expression negExpression = expression.negated();
-            RangeIterator allKeys = allSSTableKeys(keyRange);
-            RangeIterator matchedKeys = searchableIndex.search(negExpression, keyRange, context, defer, Integer.MAX_VALUE);
-            return RangeAntiJoinIterator.create(allKeys, matchedKeys);
+            return getNonEqIterator(expression, keyRange, context, defer);
         }
 
         return searchableIndex.search(expression, keyRange, context, defer, limit);
@@ -281,7 +306,7 @@ public class SSTableIndex
              * components are not in use.
              */
             if (indexWasDropped.get())
-                perIndexComponents.forWrite().forceDeleteAllComponents();
+                SSTableWatcher.instance.onIndexDropped(sstable.metadata(), perIndexComponents.forWrite());
         }
     }
 
@@ -321,7 +346,7 @@ public class SSTableIndex
                           .toString();
     }
 
-    protected final RangeIterator allSSTableKeys(AbstractBounds<PartitionPosition> keyRange) throws IOException
+    protected final KeyRangeIterator allSSTableKeys(AbstractBounds<PartitionPosition> keyRange) throws IOException
     {
         return PrimaryKeyMapIterator.create(sstableContext, keyRange);
     }

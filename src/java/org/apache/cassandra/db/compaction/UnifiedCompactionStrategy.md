@@ -373,15 +373,38 @@ any remainder for the top level, up to two times that number plus the remainder 
 still solves the original problem (higher-level compactions starving low levels of resources) while making better use of
 the compaction threads. This is the mode (with `max` reservations) used by default.
 
+## Output shard parallelization
+
+Because the sharding of the output of a compaction operation is known in advance, we can parallelize the compaction
+process by starting a separate task for each shard. This can dramatically speed the throughput of compaction and is
+especially helpful for the lower levels of the compaction heirarchy, where the number of input shards is very low
+(often just one). To make sure that we correctly change the state of input and output sstables, such operations will
+share a transaction and will complete only when all individual tasks complete (and, conversely, abort if any of the
+individual tasks abort). Early opening of sstables is not supported in this mode, because we currently do not support
+arbitraty filtering of the requests to an sstable; it is expected that the smaller size and quicker completion time of
+compactions should make up for this.
+
+This is controlled by the `parallelize_output_shards` parameter, which is `true` by default.
 
 ## Major compaction
 
-Under the working principles of UCS, a major compaction is an operation which compacts together all sstables that have
-(transitive) overlap, and where the output is split on shard boundaries appropriate for the expected result density.
+Major compaction in UCS always splits the output into a shard number suitable for the expected result density.
+If the input sstables can be split into non-overlapping sets that correspond to current shard boundaries, the compaction
+will construct independent operations that work over these sets, to improve the space overhead of the operation as well
+as the time needed to persistently complete individual steps. Because all levels will usually be split in $b$ shards,
+it will very often be the case that major compactions split into $b$ individual jobs, reducing the space overhead by a
+factor close to $b$. Note that this does not always apply; for example, if a topology change causes the sharding
+boundaries to move, the mismatch between old and new sharding boundaries will cause the compaction to produce a single
+operation and require 100% space overhead.
 
-In other words, it is expected that a major compaction will result in $b$ concurrent compactions, each containing all
-sstables covered in each of the base shards, and that the result will be split on shard boundaries whose number
-depends on the total size of data contained in the shard.
+Output shard parallelization also applies to major compactions: if the `parallelize_output_shards` option is enabled,
+shards of individual compactions will be compacted concurrently, which can significantly reduce the time needed to
+perform the compaction; if the option is not enabled, major compaction will only be parallelized up to the number of
+individual non-overlapping sets the sstables can be split into. In either case, the number of parallel operations is
+limited to a number specified as a parameter of the operation (e.g. `nodetool compact -j n`), which is set to half the
+compaction thread count by default. Using a jobs of 0 will let the compaction use all available threads and run
+as quickly as possible, but this will prevent other compaction operations from running until it completes and thus
+should be used with caution, only while the database is known to not receive any writes.
 
 ## Differences with STCS and LCS
 
@@ -452,8 +475,8 @@ UCS accepts these compaction strategy parameters:
   expense of making reads more difficult.  
   N is the middle ground that has the features of levelled (one sstable run per level) as well as tiered (one
   compaction to be promoted to the next level) and a fan factor of 2. This can also be specified as T2 or L2.  
-  The default value is T4, matching the default STCS behaviour with threshold 4. To select an equivalent of LCS
-  with its default fan factor 10, use L10.
+  The default value is T4, matching the default STCS behaviour with threshold 4. The default value in vector mode (see
+  paragraph below) is L10, equivalent to LCS with its default fan factor 10.
 * `target_sstable_size` The target sstable size $t$, specified as a human-friendly size in bytes (e.g. 100 MiB =
   $100\cdot 2^{20}$ B or (10 MB = 10,000,000 B)). The strategy will split data in shards that aim to produce sstables
   of size between $t / \sqrt 2$ and $t \cdot \sqrt 2$.  
@@ -461,11 +484,12 @@ UCS accepts these compaction strategy parameters:
   on disk has a non-trivial in-memory footprint that also affects garbage collection times.  
   Increase this if the memory pressure from the number of sstables in the system becomes too high. Also see
   `sstable_growth` below.  
-  The default value is 1 GiB.
+  The default value is 1 GiB. The default value in vector mode is 5GiB.
 * `base_shard_count` The minimum number of shards $b$, used for levels with the smallest density. This gives the
   minimum compaction concurrency for the lowest levels. A low number would result in larger L0 sstables but may limit
-  the overall maximum write throughput (as every piece of data has to go through L0). The base shard count only applies after `min_sstable_size` is reached.  
-  The default value is 4 for all tables.
+  the overall maximum write throughput (as every piece of data has to go through L0). The base shard count only applies 
+  after `min_sstable_size` is reached.  
+  The default value is 4. The default value in vector mode is 1. 
 * `sstable_growth` The sstable growth component $\lambda$, applied as a factor in the shard exponent calculation.
   This is a number between 0 and 1 that controls what part of the density growth should apply to individual sstable
   size and what part should increase the number of shards. Using a value of 1 has the effect of fixing the shard
@@ -480,10 +504,12 @@ UCS accepts these compaction strategy parameters:
   two can be further tweaked by increasing $\lambda$ to get fewer but bigger sstables on the top level, and decreasing
   it to favour a higher count of smaller sstables.  
   The default value is 0.333 meaning the sstable size grows with the square root of the growth of the shard count.
+  The default value in vector mode is 1 which means the shard count will be fixed to the base value.
 * `min_sstable_size` The minimum sstable size $m$, applicable when the base shard count will result is sstables
   that are considered too small. If set, the strategy will split the space into fewer than the base count shards, to
-  make the estimated sstables size at least as large as this value. A value of 0 disables this feature. A value of `auto` sets the minimum sstable size to the size
-  of sstables resulting from flushes. The default value is 100MiB.
+  make the estimated sstables size at least as large as this value. A value of 0 disables this feature. 
+  A value of `auto` sets the minimum sstable size to the size of sstables resulting from flushes. 
+  The default value is 100MiB. The default value in vector mode is 1GiB.
 * `reserved_threads` Specifies the number of threads to reserve per level. Any remaining threads will take
   work according to the prioritization mechanism (i.e. higher overlap first). Higher reservations mean better
   responsiveness of the compaction strategy to new work, or smoother performance, at the expense of reducing the
@@ -495,6 +521,11 @@ UCS accepts these compaction strategy parameters:
   reservations are only used by the specific level. If set to `level_or_below`, the reservations can be used by this
   level as well as any one below it.  
   The default value is `level_or_below`.
+* `parallelize_output_shards` Enables or disables parallelization of compaction tasks for the output shards of a
+  compaction. This can dramatically improve compaction throughput especially on the lowest levels of the hierarchy,
+  but disables early open and thus may be less efficient when compaction is configured to produce very large
+  sstables.   
+  The default value is `true`.
 * `expired_sstable_check_frequency_seconds` Determines how often to check for expired SSTables.  
   The default value is 10 minutes.
 * `num_shards` Specifying this switches the strategy to UCS V1 mode, where the number of shards is fixed, but a
@@ -502,6 +533,17 @@ UCS accepts these compaction strategy parameters:
   Sets $b$ to the specified value, $\lambda$ to 1, and the default minimum sstable size to 'auto'.  
   Disabled by default and cannot be used in combination with `base_shard_count`, `target_sstable_size` or
   `sstable_growth`.
+
+All UCS options can also be supplied as system properties, using the prefix `unified_compaction.`, e.g. 
+`-Dunified_compaction.sstable_growth=0.5` sets the default `sstable_growth` to 0.5.
+
+In addition to this, the strategy permits different defaults to be applied to tables that have a vector column when the 
+system property `unified_compaction.override_ucs_config_for_vector_tables` is set to `true`. If this is enabled and the
+table has a column of type `vector`, the "vector mode" defaults in the list above apply. These vector defaults can be 
+altered using the prefix `unified_compaction.vector_`, e.g. 
+`-Dunified_compaction.vector_sstable_growth=1` in combination with 
+`-Dunified_compaction.override_ucs_config_for_vector_tables=true` sets the growth to 1 only for tables with a vector
+column.
 
 In `cassandra.yaml`:
 

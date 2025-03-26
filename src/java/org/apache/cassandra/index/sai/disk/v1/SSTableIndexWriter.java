@@ -22,7 +22,6 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 import javax.annotation.concurrent.NotThreadSafe;
@@ -32,18 +31,20 @@ import com.google.common.base.Stopwatch;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.github.jbellis.jvector.pq.ProductQuantization;
+import io.github.jbellis.jvector.quantization.BinaryQuantization;
+import io.github.jbellis.jvector.quantization.ProductQuantization;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SSTableIndex;
-import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
 import org.apache.cassandra.index.sai.disk.PerIndexWriter;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher;
 import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
+import org.apache.cassandra.index.sai.disk.v5.V5VectorIndexSearcher;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
 import org.apache.cassandra.index.sai.disk.vector.CassandraDiskAnn;
 import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
@@ -51,6 +52,7 @@ import org.apache.cassandra.index.sai.disk.vector.VectorCompression.CompressionT
 import org.apache.cassandra.index.sai.utils.NamedMemoryLimiter;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
+import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Throwables;
 
@@ -65,7 +67,6 @@ public class SSTableIndexWriter implements PerIndexWriter
     private final IndexComponents.ForWrite perIndexComponents;
     private final IndexContext indexContext;
     private final int nowInSec = FBUtilities.nowInSeconds();
-    private final AbstractAnalyzer analyzer;
     private final NamedMemoryLimiter limiter;
     private final BooleanSupplier isIndexValid;
     private final long keyCount;
@@ -81,7 +82,6 @@ public class SSTableIndexWriter implements PerIndexWriter
         this.perIndexComponents = perIndexComponents;
         this.indexContext = perIndexComponents.context();
         Preconditions.checkNotNull(indexContext, "Provided components %s are the per-sstable ones, expected per-index ones", perIndexComponents);
-        this.analyzer = indexContext.getAnalyzerFactory().create();
         this.limiter = limiter;
         this.isIndexValid = isIndexValid;
         this.keyCount = keyCount;
@@ -103,6 +103,12 @@ public class SSTableIndexWriter implements PerIndexWriter
     public void addRow(PrimaryKey key, Row row, long sstableRowId) throws IOException
     {
         if (maybeAbort())
+            return;
+
+        // This is to avoid duplicates (and also reduce space taken by indexes on static columns).
+        // An index on a static column indexes static rows only.
+        // An index on a non-static column indexes regular rows only.
+        if (indexContext.getDefinition().isStatic() != row.isStatic())
             return;
 
         if (indexContext.isNonFrozenCollection())
@@ -232,10 +238,10 @@ public class SSTableIndexWriter implements PerIndexWriter
             currentBuilder = newSegmentBuilder(sstableRowId);
         }
 
-        if (term.remaining() == 0)
+        if (term.remaining() == 0 && TypeUtil.skipsEmptyValue(indexContext.getValidator()))
             return;
 
-        long allocated = currentBuilder.addAll(term, type, key, sstableRowId, analyzer, indexContext);
+        long allocated = currentBuilder.analyzeAndAdd(term, type, key, sstableRowId);
         limiter.increment(allocated);
     }
 
@@ -339,20 +345,27 @@ public class SSTableIndexWriter implements PerIndexWriter
 
         if (indexContext.isVector())
         {
+            int dimension = ((VectorType<?>) indexContext.getValidator()).dimension;
+            boolean bqPreferred = indexContext.getIndexWriterConfig().getSourceModel().compressionProvider.apply(dimension).type == CompressionType.BINARY_QUANTIZATION;
+
             // if we have a PQ instance available, we can use it to build a CompactionGraph;
             // otherwise, build on heap (which will create PQ for next time, if we have enough vectors)
             var pqi = CassandraOnHeapGraph.getPqIfPresent(indexContext, vc -> vc.type == CompressionType.PRODUCT_QUANTIZATION);
-            if (pqi == null && segments.size() > 0)
+            // If no PQ instance available in indexes of completed sstables, check if we just wrote one in the previous segment
+            if (pqi == null && !segments.isEmpty())
                 pqi = maybeReadPqFromLastSegment();
 
-            if (pqi == null || pqi.unitVectors.isEmpty() || !V3OnDiskFormat.ENABLE_LTM_CONSTRUCTION)
+            if ((bqPreferred || pqi != null) && V3OnDiskFormat.ENABLE_LTM_CONSTRUCTION)
             {
-                builder = new SegmentBuilder.VectorOnHeapSegmentBuilder(perIndexComponents, rowIdOffset, keyCount, limiter);
+                var compressor = bqPreferred ? new BinaryQuantization(dimension) : pqi.pq;
+                var unitVectors = bqPreferred ? false : pqi.unitVectors;
+                var allRowsHaveVectors = allRowsHaveVectorsInWrittenSegments(indexContext);
+                builder = new SegmentBuilder.VectorOffHeapSegmentBuilder(perIndexComponents, rowIdOffset, keyCount, compressor, unitVectors, allRowsHaveVectors, limiter);
             }
             else
             {
-                var allRowsHaveVectors = allRowsHaveVectorsInWrittenSegments(indexContext);
-                builder = new SegmentBuilder.VectorOffHeapSegmentBuilder(perIndexComponents, rowIdOffset, keyCount, pqi.pq, pqi.unitVectors.get(), allRowsHaveVectors, limiter);
+                // building on heap is the only way to get a PQ from nothing (CompactionGraph only knows how to fine-tune an existing one)
+                builder = new SegmentBuilder.VectorOnHeapSegmentBuilder(perIndexComponents, rowIdOffset, keyCount, limiter);
             }
         }
         else if (indexContext.isLiteral())
@@ -374,27 +387,28 @@ public class SSTableIndexWriter implements PerIndexWriter
 
     private static boolean allRowsHaveVectorsInWrittenSegments(IndexContext indexContext)
     {
-        int segmentsChecked = 0;
         for (SSTableIndex index : indexContext.getView().getIndexes())
         {
             for (Segment segment : index.getSegments())
             {
-                segmentsChecked++;
-                var searcher = (V2VectorIndexSearcher) segment.getIndexSearcher();
+                if (segment.getIndexSearcher() instanceof  V2VectorIndexSearcher)
+                    return true; // V2 doesn't know, so we err on the side of being optimistic.  See comments in CompactionGraph
+                var searcher = (V5VectorIndexSearcher) segment.getIndexSearcher();
                 var structure = searcher.getPostingsStructure();
                 if (structure == V5VectorPostingsWriter.Structure.ZERO_OR_ONE_TO_MANY)
                     return false;
             }
         }
-        return segmentsChecked != 0;
+        return true;
     }
 
     private CassandraOnHeapGraph.PqInfo maybeReadPqFromLastSegment() throws IOException
     {
-        // No PQ instance available in completed indexes, so check if we just wrote one
         var pqComponent = perIndexComponents.get(IndexComponentType.PQ);
         assert pqComponent != null; // we always have a PQ component even if it's not actually PQ compression
-        try (var fh = pqComponent.createFileHandle();
+
+        try (var fhBuilder = StorageProvider.instance.indexBuildTimeFileHandleBuilderFor(pqComponent);
+             var fh = fhBuilder.complete();
              var reader = fh.createReader())
         {
             var sm = segments.get(segments.size() - 1);
@@ -417,7 +431,7 @@ public class SSTableIndexWriter implements PerIndexWriter
             if (compressionType == CompressionType.PRODUCT_QUANTIZATION)
             {
                 var pq = ProductQuantization.load(reader);
-                return new CassandraOnHeapGraph.PqInfo(pq, Optional.of(unitVectors));
+                return new CassandraOnHeapGraph.PqInfo(pq, unitVectors, sm.numRows);
             }
         }
         return null;

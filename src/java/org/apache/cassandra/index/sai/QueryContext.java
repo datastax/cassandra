@@ -25,8 +25,8 @@ import javax.annotation.concurrent.NotThreadSafe;
 import com.google.common.annotations.VisibleForTesting;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.index.sai.plan.QueryViewBuilder;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
+import org.apache.cassandra.utils.MonotonicClock;
 
 import static java.lang.Math.max;
 
@@ -36,13 +36,11 @@ import static java.lang.Math.max;
 @NotThreadSafe
 public class QueryContext
 {
-    private static final boolean DISABLE_TIMEOUT = Boolean.getBoolean("cassandra.sai.test.disable.timeout");
+    public static final boolean DISABLE_TIMEOUT = Boolean.getBoolean("cassandra.sai.test.disable.timeout");
 
     protected final long queryStartTimeNanos;
 
     public final long executionQuotaNano;
-
-    public QueryViewBuilder.QueryView view;
 
     private final LongAdder sstablesHit = new LongAdder();
     private final LongAdder segmentsHit = new LongAdder();
@@ -80,12 +78,12 @@ public class QueryContext
     public QueryContext(long executionQuotaMs)
     {
         this.executionQuotaNano = TimeUnit.MILLISECONDS.toNanos(executionQuotaMs);
-        this.queryStartTimeNanos = System.nanoTime();
+        this.queryStartTimeNanos = MonotonicClock.approxTime.now();
     }
 
     public long totalQueryTimeNs()
     {
-        return System.nanoTime() - queryStartTimeNanos;
+        return MonotonicClock.approxTime.now() - queryStartTimeNanos;
     }
 
     // setters
@@ -252,10 +250,10 @@ public class QueryContext
      */
     public enum FilterSortOrder
     {
-        /** First get the matching keys from the non-vector indexes, then use vector index to sort them */
-        FILTER_THEN_SORT,
+        /** First get the matching keys from the non-vector indexes, then use vector index to return the top K by similarity order */
+        SEARCH_THEN_ORDER,
 
-        /** First get the candidates in ANN order from the vector index, then fetch the rows and post-filter them */
-        SORT_THEN_FILTER
+        /** First get the candidates in ANN order from the vector index, then fetch the rows and filter them until we find K matching the predicates */
+        SCAN_THEN_FILTER
     }
 }

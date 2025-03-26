@@ -23,15 +23,20 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import org.junit.Assert;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
+import io.github.jbellis.jvector.graph.GraphSearcher;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.cql3.UntypedResultSet;
@@ -46,6 +51,11 @@ import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.SegmentBuilder;
 import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
 import org.apache.cassandra.index.sai.disk.vector.VectorSourceModel;
+import org.apache.cassandra.index.sai.plan.QueryController;
+import org.apache.cassandra.inject.ActionBuilder;
+import org.apache.cassandra.inject.Expression;
+import org.apache.cassandra.inject.Injections;
+import org.apache.cassandra.inject.InvokePointBuilder;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.tracing.TracingTestImpl;
@@ -69,9 +79,10 @@ public class VectorTypeTest extends VectorTester
     private static final IPartitioner partitioner = Murmur3Partitioner.instance;
 
     @BeforeClass
-    public static void setupClass()
+    public static void setUpClass()
     {
         System.setProperty("cassandra.custom_tracing_class", "org.apache.cassandra.tracing.TracingTestImpl");
+        VectorTester.setUpClass();
     }
 
     @Before
@@ -95,11 +106,10 @@ public class VectorTypeTest extends VectorTester
     }
 
     @Test
-    public void endToEndTest() throws Throwable
+    public void endToEndTest()
     {
         createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', [1.0, 2.0, 3.0])");
         execute("INSERT INTO %s (pk, str_val, val) VALUES (1, 'B', [2.0, 3.0, 4.0])");
@@ -138,11 +148,10 @@ public class VectorTypeTest extends VectorTester
     }
 
     @Test
-    public void tracingTest() throws Throwable
+    public void tracingTest()
     {
         createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', [1.0, 2.0, 3.0])");
         execute("INSERT INTO %s (pk, str_val, val) VALUES (1, 'B', [2.0, 3.0, 4.0])");
@@ -165,7 +174,7 @@ public class VectorTypeTest extends VectorTester
     }
 
     @Test
-    public void createIndexAfterInsertTest() throws Throwable
+    public void createIndexAfterInsertTest()
     {
         createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
 
@@ -176,7 +185,6 @@ public class VectorTypeTest extends VectorTester
 
         flush();
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         UntypedResultSet result = execute("SELECT * FROM %s ORDER BY val ann of [2.5, 3.5, 4.5] LIMIT 3");
         assertThat(result).hasSize(3);
@@ -199,12 +207,11 @@ public class VectorTypeTest extends VectorTester
     }
 
     @Test
-    public void testTwoPredicates() throws Throwable
+    public void testTwoPredicates()
     {
         createTable("CREATE TABLE %s (pk int, b boolean, v vector<float, 3>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(b) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         execute("INSERT INTO %s (pk, b, v) VALUES (0, true, [1.0, 2.0, 3.0])");
         execute("INSERT INTO %s (pk, b, v) VALUES (1, true, [2.0, 3.0, 4.0])");
@@ -223,7 +230,7 @@ public class VectorTypeTest extends VectorTester
     }
 
     @Test
-    public void testTwoPredicatesWithBruteForce() throws Throwable
+    public void testTwoPredicatesWithBruteForce()
     {
         // Note: the PKs in this test are chosen intentionally to ensure their tokens overlap so that
         // we can test the brute force path.
@@ -231,7 +238,6 @@ public class VectorTypeTest extends VectorTester
         createTable("CREATE TABLE %s (pk int, b boolean, v vector<float, 3>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(b) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         execute("INSERT INTO %s (pk, b, v) VALUES (1, true, [1.0, 2.0, 3.0])");
         execute("INSERT INTO %s (pk, b, v) VALUES (2, true, [2.0, 3.0, 4.0])");
@@ -258,12 +264,11 @@ public class VectorTypeTest extends VectorTester
     }
 
     @Test
-    public void testTwoPredicatesWithUnnecessaryAllowFiltering() throws Throwable
+    public void testTwoPredicatesWithUnnecessaryAllowFiltering()
     {
         createTable("CREATE TABLE %s (pk int, b int, v vector<float, 3>, PRIMARY KEY(pk, b))");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(b) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         execute("INSERT INTO %s (pk, b, v) VALUES (0, 0, [1.0, 2.0, 3.0])");
         execute("INSERT INTO %s (pk, b, v) VALUES (1, 2, [2.0, 3.0, 4.0])");
@@ -276,12 +281,11 @@ public class VectorTypeTest extends VectorTester
     }
 
     @Test
-    public void testTwoPredicatesManyRows() throws Throwable
+    public void testTwoPredicatesManyRows()
     {
         createTable("CREATE TABLE %s (pk int, b boolean, v vector<float, 3>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(b) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         for (int i = 0; i < 100; i++)
             execute("INSERT INTO %s (pk, b, v) VALUES (?, true, ?)",
@@ -298,13 +302,12 @@ public class VectorTypeTest extends VectorTester
     }
 
     @Test
-    public void testThreePredicates() throws Throwable
+    public void testThreePredicates()
     {
         createTable("CREATE TABLE %s (pk int, b boolean, v vector<float, 3>, str text, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(b) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(str) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         execute("INSERT INTO %s (pk, b, v, str) VALUES (0, true, [1.0, 2.0, 3.0], 'A')");
         execute("INSERT INTO %s (pk, b, v, str) VALUES (1, true, [2.0, 3.0, 4.0], 'B')");
@@ -323,11 +326,10 @@ public class VectorTypeTest extends VectorTester
     }
 
     @Test
-    public void testSameVectorMultipleRows() throws Throwable
+    public void testSameVectorMultipleRows()
     {
         createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', [1.0, 2.0, 3.0])");
         execute("INSERT INTO %s (pk, str_val, val) VALUES (1, 'A', [1.0, 2.0, 3.0])");
@@ -344,22 +346,20 @@ public class VectorTypeTest extends VectorTester
     }
 
     @Test
-    public void testQueryEmptyTable() throws Throwable
+    public void testQueryEmptyTable()
     {
         createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         var result = execute("SELECT * FROM %s ORDER BY val ANN OF [2.5, 3.5, 4.5] LIMIT 1");
         assertThat(result).hasSize(0);
     }
 
     @Test
-    public void testQueryTableWithNulls() throws Throwable
+    public void testQueryTableWithNulls()
     {
         createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', null)");
         var result = execute("SELECT * FROM %s ORDER BY val ANN OF [2.5, 3.5, 4.5] LIMIT 1");
@@ -371,11 +371,10 @@ public class VectorTypeTest extends VectorTester
     }
 
     @Test
-    public void testLimitLessThanInsertedRowCount() throws Throwable
+    public void testLimitLessThanInsertedRowCount()
     {
         createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         // Insert more rows than the query limit
         execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', [1.0, 2.0, 3.0])");
@@ -388,11 +387,10 @@ public class VectorTypeTest extends VectorTester
     }
 
     @Test
-    public void testQueryMoreRowsThanInserted() throws Throwable
+    public void testQueryMoreRowsThanInserted()
     {
         createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', [1.0, 2.0, 3.0])");
 
@@ -401,7 +399,7 @@ public class VectorTypeTest extends VectorTester
     }
 
     @Test
-    public void changingOptionsTest() throws Throwable
+    public void changingOptionsTest()
     {
         createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
         if (CassandraRelevantProperties.SAI_HNSW_ALLOW_CUSTOM_PARAMETERS.getBoolean())
@@ -416,7 +414,6 @@ public class VectorTypeTest extends VectorTester
             .isInstanceOf(InvalidRequestException.class);
             return;
         }
-        waitForIndexQueryable();
 
         execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', [1.0, 2.0, 3.0])");
         execute("INSERT INTO %s (pk, str_val, val) VALUES (1, 'B', [2.0, 3.0, 4.0])");
@@ -459,7 +456,6 @@ public class VectorTypeTest extends VectorTester
     {
         createTable("CREATE TABLE %s (pk int, v vector<float, 3>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = {'source_model' : 'ada002' }");
-        waitForIndexQueryable();
 
         var sim = getCurrentColumnFamilyStore().indexManager;
         var index = (StorageAttachedIndex) sim.listIndexes().iterator().next();
@@ -472,16 +468,14 @@ public class VectorTypeTest extends VectorTester
     {
         createTable("CREATE TABLE %s (pk int, v vector<float, 3>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = {'optimize_for' : 'recall' }");
-        waitForIndexQueryable();
         // as long as CREATE doesn't error out, we're good
     }
 
     @Test
-    public void bindVariablesTest() throws Throwable
+    public void bindVariablesTest()
     {
         createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', ?)", vector(1, 2 , 3));
         execute("INSERT INTO %s (pk, str_val, val) VALUES (1, 'B', ?)", vector(2 , 3, 4));
@@ -493,14 +487,13 @@ public class VectorTypeTest extends VectorTester
     }
 
     @Test
-    public void intersectedSearcherTest() throws Throwable
+    public void intersectedSearcherTest()
     {
         // check that we correctly get back the two rows with str_val=B even when those are not
         // the closest rows to the query vector
         createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(str_val) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', ?)", vector(1, 2 , 3));
         execute("INSERT INTO %s (pk, str_val, val) VALUES (1, 'B', ?)", vector(2 , 3, 4));
@@ -517,12 +510,11 @@ public class VectorTypeTest extends VectorTester
     }
 
     @Test
-    public void nullVectorTest() throws Throwable
+    public void nullVectorTest()
     {
         createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(str_val) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', ?)", vector(1, 2 , 3));
         execute("INSERT INTO %s (pk, str_val) VALUES (1, 'B')"); // no vector
@@ -546,11 +538,10 @@ public class VectorTypeTest extends VectorTester
     }
 
     @Test
-    public void lwtTest() throws Throwable
+    public void lwtTest()
     {
         createTable("CREATE TABLE %s (p int, c int, v text, vec vector<float, 2>, PRIMARY KEY(p, c))");
         createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         execute("INSERT INTO %s (p, c, v) VALUES (?, ?, ?)", 0, 0, "test");
         execute("INSERT INTO %s (p, c, v) VALUES (?, ?, ?)", 0, 1, "00112233445566");
@@ -563,20 +554,18 @@ public class VectorTypeTest extends VectorTester
     }
 
     @Test
-    public void twoVectorFieldsTest() throws Throwable
+    public void twoVectorFieldsTest()
     {
         createTable("CREATE TABLE %s (pk int, v2 vector<float, 2>, v3 vector<float, 3>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(v2) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(v3) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
     }
 
     @Test
-    public void primaryKeySearchTest() throws Throwable
+    public void primaryKeySearchTest()
     {
         createTable("CREATE TABLE %s (pk int, val vector<float, 3>, i int, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         var N = 5;
         for (int i = 0; i < N; i++)
@@ -599,11 +588,10 @@ public class VectorTypeTest extends VectorTester
     }
 
     @Test
-    public void partitionKeySearchTest() throws Throwable
+    public void partitionKeySearchTest()
     {
         createTable("CREATE TABLE %s (partition int, row int, val vector<float, 2>, PRIMARY KEY(partition, row))");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
-        waitForIndexQueryable();
 
         var nPartitions = 5;
         var rowsPerPartition = 10;
@@ -620,7 +608,7 @@ public class VectorTypeTest extends VectorTester
             }
         }
 
-        var queryVector = vector(new float[] { 1.5f, 1.5f });
+        var queryVector = vector(1.5f, 1.5f);
         for (int i = 1; i <= nPartitions; i++)
         {
             UntypedResultSet result = execute("SELECT partition, row FROM %s WHERE partition = ? ORDER BY val ann of ? LIMIT 2", i, queryVector);
@@ -646,7 +634,6 @@ public class VectorTypeTest extends VectorTester
     {
         createTable("CREATE TABLE %s (partition int, val vector<float, 2>, PRIMARY KEY(partition))");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
-        waitForIndexQueryable();
 
         var nPartitions = 100;
         Map<Integer, float[]> vectorsByKey = new HashMap<>();
@@ -658,7 +645,7 @@ public class VectorTypeTest extends VectorTester
             vectorsByKey.put(i, vector);
         }
 
-        var queryVector = vector(new float[] { 1.5f, 1.5f });
+        var queryVector = vector(1.5f, 1.5f);
         CheckedFunction tester = () -> {
             for (int i = 1; i <= nPartitions; i++)
             {
@@ -736,7 +723,7 @@ public class VectorTypeTest extends VectorTester
     }
 
     @Test
-    public void selectFloatVectorFunctions() throws Throwable
+    public void selectFloatVectorFunctions()
     {
         createTable(KEYSPACE, "CREATE TABLE %s (pk int primary key, value vector<float, 2>)");
 
@@ -761,11 +748,10 @@ public class VectorTypeTest extends VectorTester
     }
 
     @Test
-    public void selectSimilarityWithAnn() throws Throwable
+    public void selectSimilarityWithAnn()
     {
         createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', [1.0, 2.0, 3.0])");
         execute("INSERT INTO %s (pk, str_val, val) VALUES (1, 'B', [2.0, 3.0, 4.0])");
@@ -782,7 +768,7 @@ public class VectorTypeTest extends VectorTester
     }
 
     @Test
-    public void castedTerminalFloatVectorFunctions() throws Throwable
+    public void castedTerminalFloatVectorFunctions()
     {
         createTable(KEYSPACE, "CREATE TABLE %s (pk int primary key, value vector<float, 2>)");
 
@@ -793,7 +779,7 @@ public class VectorTypeTest extends VectorTester
     }
 
     @Test
-    public void inferredTerminalFloatVectorFunctions() throws Throwable
+    public void inferredTerminalFloatVectorFunctions()
     {
         createTable(KEYSPACE, "CREATE TABLE %s (pk int primary key, value vector<float, 2>)");
 
@@ -879,7 +865,6 @@ public class VectorTypeTest extends VectorTester
         createTable(KEYSPACE, "CREATE TABLE %s (pk int, val text, vec vector<float, 2>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         // There was an edge case where we failed because there was just a single row in the table.
         execute("INSERT INTO %s (pk, val) VALUES (1, 'match me')");
@@ -895,7 +880,6 @@ public class VectorTypeTest extends VectorTester
         createTable(KEYSPACE, "CREATE TABLE %s (pk int, val text, vec vector<float, 2>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         // When we search the memtable, we filter out PKs outside the memtable's bounrdaries.
         // Persist two rows and push to sstable that will be outside of bounds.
@@ -915,7 +899,6 @@ public class VectorTypeTest extends VectorTester
         createTable("CREATE TABLE %s (pk int, name text, body text, vals vector<float, 2>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(vals) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(name) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
         execute("INSERT INTO %s (pk, name, body, vals) VALUES (1, 'Ann', 'A lizard said bad things to the snakes', [0.1, 0.1])");
         execute("INSERT INTO %s (pk, name, body, vals) VALUES (2, 'Bea', 'Please wear protective gear before operating the machine', [0.2, -0.3])");
         execute("INSERT INTO %s (pk, name, body, vals) VALUES (3, 'Cal', 'My name is Slim Shady', [0.0, 0.9])");
@@ -931,7 +914,6 @@ public class VectorTypeTest extends VectorTester
         createIndex("CREATE CUSTOM INDEX ON %s(b) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(c) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         // This row is created so that it matches the query parameters, and so that the PK is before the other PKs.
         // The token for 5 is -7509452495886106294 and the token for 1 is -4069959284402364209.
@@ -952,139 +934,9 @@ public class VectorTypeTest extends VectorTester
         });
     }
 
-    @Test
-    public void testHybridSearchWithPrimaryKeyHoles() throws Throwable
-    {
-        setMaxBruteForceRows(0);
-        createTable(KEYSPACE, "CREATE TABLE %s (pk int primary key, val text, vec vector<float, 2>)");
-        createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex'");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-
-        // Insert rows into two sstables. The tokens for each PK are in each line's comment.
-        execute("INSERT INTO %s (pk, val, vec) VALUES (1, 'A', [1, 3])"); // -4069959284402364209
-        execute("INSERT INTO %s (pk, val, vec) VALUES (2, 'A', [1, 2])"); // -3248873570005575792
-        // Make the last row in the sstable the correct result. That way we verify the ceiling logic
-        // works correctly.
-        execute("INSERT INTO %s (pk, val, vec) VALUES (3, 'A', [1, 1])"); // 9010454139840013625
-        flush();
-        execute("INSERT INTO %s (pk, val, vec) VALUES (5, 'A', [1, 5])"); // -7509452495886106294
-        execute("INSERT INTO %s (pk, val, vec) VALUES (4, 'A', [1, 4])"); // -2729420104000364805
-        execute("INSERT INTO %s (pk, val, vec) VALUES (6, 'A', [1, 6])"); // 2705480034054113608
-
-        // Get all rows using first predicate, then filter to get top 1
-        // Use a small limit to ensure we do not use brute force
-        beforeAndAfterFlush(() -> {
-            assertRows(execute("SELECT pk FROM %s WHERE val = 'A' ORDER BY vec ANN OF [1,1] LIMIT 1"),
-                       row(3));
-        });
-    }
-
-    // Clustering columns hit a different code path, we need both sets of tests, even though queries
-    // that expose the underlying regression are the same.
-    @Test
-    public void testHybridSearchWithPrimaryKeyHolesAndWithClusteringColumns() throws Throwable
-    {
-        setMaxBruteForceRows(0);
-        createTable(KEYSPACE, "CREATE TABLE %s (pk int, a int, val text, vec vector<float, 2>, PRIMARY KEY(pk, a))");
-        createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex'");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-
-        // Insert rows into two sstables. The tokens for each PK are in each line's comment.
-        execute("INSERT INTO %s (pk, a, val, vec) VALUES (1, 1, 'A', [1, 3])"); // -4069959284402364209
-        execute("INSERT INTO %s (pk, a, val, vec) VALUES (2, 1, 'A', [1, 2])"); // -3248873570005575792
-        // Make the last row in the sstable the correct result. That way we verify the ceiling logic
-        // works correctly.
-        execute("INSERT INTO %s (pk, a, val, vec) VALUES (3, 1, 'A', [1, 1])"); // 9010454139840013625
-        flush();
-        execute("INSERT INTO %s (pk, a, val, vec) VALUES (5, 1, 'A', [1, 5])"); // -7509452495886106294
-        execute("INSERT INTO %s (pk, a, val, vec) VALUES (4, 1, 'A', [1, 4])"); // -2729420104000364805
-        execute("INSERT INTO %s (pk, a, val, vec) VALUES (6, 1, 'A', [1, 6])"); // 2705480034054113608
-
-        // Get all rows using first predicate, then filter to get top 1
-        // Use a small limit to ensure we do not use brute force
-        beforeAndAfterFlush(() -> {
-            assertRows(execute("SELECT pk FROM %s WHERE val = 'A' ORDER BY vec ANN OF [1,1] LIMIT 1"),
-                       row(3));
-        });
-    }
-
-    @Test
-    public void testHybridSearchSequentialClusteringColumns() throws Throwable
-    {
-        setMaxBruteForceRows(0);
-        createTable(KEYSPACE, "CREATE TABLE %s (pk int, a int, val text, vec vector<float, 2>, PRIMARY KEY(pk, a))");
-        createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex'");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
-
-        execute("INSERT INTO %s (pk, a, val, vec) VALUES (1, 1, 'A', [1, 3])");
-        execute("INSERT INTO %s (pk, a, val, vec) VALUES (1, 2, 'A', [1, 2])");
-        execute("INSERT INTO %s (pk, a, val, vec) VALUES (1, 3, 'A', [1, 1])");
-
-        // Get all rows using first predicate, then filter to get top 1
-        // Use a small limit to ensure we do not use brute force
-        beforeAndAfterFlush(() -> {
-            assertRows(execute("SELECT a FROM %s WHERE val = 'A' ORDER BY vec ANN OF [1,3] LIMIT 1"), row(1));
-            assertRows(execute("SELECT a FROM %s WHERE val = 'A' ORDER BY vec ANN OF [1,2] LIMIT 1"), row(2));
-            assertRows(execute("SELECT a FROM %s WHERE val = 'A' ORDER BY vec ANN OF [1,1] LIMIT 1"), row(3));
-        });
-    }
-
-    @Test
-    public void testHybridSearchHoleInClusteringColumnOrdering() throws Throwable
-    {
-        setMaxBruteForceRows(0);
-        createTable(KEYSPACE, "CREATE TABLE %s (pk int, a int, val text, vec vector<float, 2>, PRIMARY KEY(pk, a))");
-        createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex'");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
-
-        // Create two sstables. The first needs a hole forcing us to skip.
-        execute("INSERT INTO %s (pk, a, val, vec) VALUES (1, 1, 'A', [1, 3])");
-        execute("INSERT INTO %s (pk, a, val, vec) VALUES (1, 3, 'A', [1, 2])");
-        execute("INSERT INTO %s (pk, a, val, vec) VALUES (1, 4, 'A', [1, 1])");
-        flush();
-        execute("INSERT INTO %s (pk, a, val, vec) VALUES (1, 2, 'A', [1, 4])");
-
-        beforeAndAfterFlush(() -> {
-            assertRows(execute("SELECT a FROM %s WHERE val = 'A' ORDER BY vec ANN OF [1,1] LIMIT 1"), row(4));
-            assertRows(execute("SELECT a FROM %s WHERE val = 'A' ORDER BY vec ANN OF [1,2] LIMIT 1"), row(3));
-            assertRows(execute("SELECT a FROM %s WHERE val = 'A' ORDER BY vec ANN OF [1,3] LIMIT 1"), row(1));
-            assertRows(execute("SELECT a FROM %s WHERE val = 'A' ORDER BY vec ANN OF [1,4] LIMIT 1"), row(2));
-        });
-    }
-
-    @Test
-        public void testHybridSearchSeqLogicForMappingPKsBackToRowIds() throws Throwable
-    {
-        createTable(KEYSPACE, "CREATE TABLE %s (pk int, a int, val text, vec vector<float, 2>, PRIMARY KEY(pk, a))");
-        createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex' WITH OPTIONS = { 'similarity_function' : 'euclidean' }");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-
-        // Insert rows into two sstables. The rows are interleaved to ensure binary search is less efficient, which
-        // pushes us to use a sequential scan when we map PKs back to row ids in the sstable.
-        int rowCount = 100;
-        // Insert even rows to first sstable
-        for (int i = 0; i < rowCount; i += 2)
-            execute("INSERT INTO %s (pk, a, val, vec) VALUES (1, ?, 'A', ?)", i, vector(1, i));
-
-        flush();
-        // Insert odd rows to new sstable
-        for (int i = 1; i < rowCount; i += 2)
-            execute("INSERT INTO %s (pk, a, val, vec) VALUES (1, ?, 'A', ?)", i, vector(1, i));
-
-        // Verify result for rows in different memtables/sstables
-        beforeAndAfterFlush(() -> {
-            assertRows(execute("SELECT a FROM %s WHERE val = 'A' ORDER BY vec ANN OF [1,49] LIMIT 1"),
-                       row(49));
-            assertRows(execute("SELECT a FROM %s WHERE val = 'A' ORDER BY vec ANN OF [1,50] LIMIT 1"),
-                       row(50));
-        });
-    }
-
     // search across multiple sstables each with multiple segments, verify results with and without non-ann filtering
     @Test
-    public void multipleSSTablesAndMultipleSegmentsTest() throws Throwable
+    public void multipleSSTablesAndMultipleSegmentsTest()
     {
         createTable("CREATE TABLE %s (pk int, constant boolean, val vector<float, 2>, PRIMARY KEY(pk))");
         disableCompaction(KEYSPACE);
@@ -1108,7 +960,6 @@ public class VectorTypeTest extends VectorTester
         // create indexes on existing sstable to produce multiple segments
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
         createIndex("CREATE CUSTOM INDEX ON %s(constant) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         // query multiple on-disk indexes
         int limit = getRandom().nextIntBetween(5,25);
@@ -1124,46 +975,13 @@ public class VectorTypeTest extends VectorTester
         assertThat(filteredRows).containsExactly(unfilteredRows);
     }
 
-    // This test covers a bug in the RowIdMatchingOrdinalsView logic. Essentially, when the final rows in a segment
-    // do not have an associated vector, we will think we can do fast mapping from row id to ordinal, but in reality
-    // we have to do bounds checking still.
     @Test
-    public void testHybridIndexWithPartialRowInsertsAtSegmentBoundaries() throws Throwable
-    {
-        // This test requires the non-bruteforce route
-        setMaxBruteForceRows(0);
-        createTable("CREATE TABLE %s (pk int, val text, vec vector<float, 2>, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
-
-        execute("INSERT INTO %s (pk, val, vec) VALUES (1, 'A', [1, 1])");
-        execute("INSERT INTO %s (pk, val) VALUES (2, 'A')");
-        flush();
-        execute("INSERT INTO %s (pk, vec) VALUES (2, [1,3])");
-
-        beforeAndAfterFlush(() -> {
-            assertRows(execute("SELECT pk FROM %s WHERE val = 'A' ORDER BY vec ANN OF [1,1] LIMIT 1"), row(1));
-        });
-
-        // Assert the opposite with these writes where the lower bound is not present. (This case actually pushes us to
-        // use disk based ordinal mapping.)
-        execute("INSERT INTO %s (pk, val, vec) VALUES (2, 'A', [1, 2])");
-        execute("INSERT INTO %s (pk, val) VALUES (1, 'A')");
-
-        beforeAndAfterFlush(() -> {
-            assertRows(execute("SELECT pk FROM %s WHERE val = 'A' ORDER BY vec ANN OF [1,1] LIMIT 1"), row(1));
-        });
-    }
-
-    @Test
-    public void insertstuff() throws Throwable
+    public void insertstuff()
     {
         // This test requires the non-bruteforce route
         setMaxBruteForceRows(0);
         createTable("CREATE TABLE %s (pk int, val text, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         // Insert data
         execute("INSERT INTO %s (pk, val) VALUES (1, 'A')");
@@ -1179,24 +997,33 @@ public class VectorTypeTest extends VectorTester
     }
 
     @Test
-    public void testQueryOnEmptyTable() throws Throwable
+    public void testEnsureIndexQueryableAfterTransientFailure() throws Throwable
     {
-        createTable("CREATE TABLE %s (pk int, val text, vec vector<float, 2>, PRIMARY KEY(pk))");
+        createTable("CREATE TABLE %s (pk int, vec vector<float, 2>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex'");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
+        var injection = Injections.newCustom("fail_on_searcher_search")
+                                  .add(InvokePointBuilder.newInvokePoint().onClass(GraphSearcher.class).onMethod("search").atEntry())
+                                  .add(ActionBuilder.newActionBuilder().actions().doThrow(RuntimeException.class, Expression.quote("Injected failure!")))
+                                  .build();
+        Injections.inject(injection);
+        // Insert data so we can query the index
+        execute("INSERT INTO %s (pk, vec) VALUES (1, [1,1])");
+
+        // Ensure that we fail, as expected, and that a subsequent call to search is successful.
         beforeAndAfterFlush(() -> {
-            assertRows(execute("SELECT pk FROM %s WHERE val = 'A' ORDER BY vec ANN OF [1,1] LIMIT 1"));
+            injection.enable();
+            assertThatThrownBy(() -> executeInternal("SELECT pk FROM %s ORDER BY vec ANN OF [1,1] LIMIT 2")).hasMessageContaining("Injected failure!");
+            injection.disable();
+            assertRows(execute("SELECT pk FROM %s ORDER BY vec ANN OF [1,1] LIMIT 2"), row(1));
         });
     }
 
     @Test
-    public void testCompactionWithEnoughRowsForPQAndDeleteARow() throws Throwable
+    public void testCompactionWithEnoughRowsForPQAndDeleteARow()
     {
         createTable("CREATE TABLE %s (pk int, vec vector<float, 2>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         disableCompaction();
 
@@ -1214,5 +1041,91 @@ public class VectorTypeTest extends VectorTester
 
         // Confirm we can query the data
         assertRowCount(execute("SELECT * FROM %s ORDER BY vec ANN OF [1,2] LIMIT 1"), 1);
+    }
+
+    /**
+     * Tests a filter-then-sort query with a concurrent vector deletion. See CNDB-10536 for details.
+     */
+    @Test
+    public void testFilterThenSortQueryWithConcurrentVectorDeletion() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v vector<float, 2>, c int)");
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(c) USING 'StorageAttachedIndex'");
+
+        // write into memtable
+        execute("INSERT INTO %s (k, v, c) VALUES (1, [1, 1], 1)");
+        execute("INSERT INTO %s (k, v, c) VALUES (2, [2, 2], 1)");
+
+        // inject a barrier to block CassandraOnHeapGraph#getOrdinal
+        Injections.Barrier barrier = Injections.newBarrier("block_get_ordinal", 2, false)
+                                               .add(InvokePointBuilder.newInvokePoint()
+                                                                      .onClass(CassandraOnHeapGraph.class)
+                                                                      .onMethod("getOrdinal")
+                                                                      .atEntry())
+                                               .build();
+        Injections.inject(barrier);
+
+        // start a filter-then-sort query asynchronously that will get blocked in the injected barrier
+        QueryController.QUERY_OPT_LEVEL = 0;
+        try
+        {
+            ExecutorService executor = Executors.newFixedThreadPool(1);
+            String select = "SELECT k FROM %s WHERE c=1 ORDER BY v ANN OF [1, 1] LIMIT 100";
+            Future<UntypedResultSet> future = executor.submit(() -> execute(select));
+
+            // once the query is blocked, delete one of the vectors and flush, so the postings for the vector are removed
+            waitForAssert(() -> Assert.assertEquals(1, barrier.getCount()));
+            execute("DELETE v FROM %s WHERE k = 1");
+            flush();
+
+            // release the barrier to resume the query, which should succeed
+            barrier.countDown();
+            assertRows(future.get(), row(2));
+
+            assertEquals(0, executor.shutdownNow().size());
+        }
+        finally
+        {
+            QueryController.QUERY_OPT_LEVEL = 1;
+        }
+    }
+
+    @Test
+    public void testPartitionKeyRestrictionCombinedWithSearchPredicate() throws Throwable
+    {
+        // Need to test the search then order path
+        QueryController.QUERY_OPT_LEVEL = 0;
+
+        // We use a clustered primary key to simplify the mental model for this test.
+        // The bug this test exposed happens when the last row(s) in a segment, based on PK order, are present
+        // in a peer index for an sstable's search index but not its vector index.
+        createTable("CREATE TABLE %s (partition int, i int, v vector<float, 2>, c int, PRIMARY KEY(partition, i))");
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function': 'euclidean'}");
+        createIndex("CREATE CUSTOM INDEX ON %s(c) USING 'StorageAttachedIndex'");
+
+        var partitionKeys = new ArrayList<Integer>();
+        // Insert many rows
+        for (int i = 1; i < 1000; i++)
+        {
+            execute("INSERT INTO %s (partition, i, v, c) VALUES (?, ?, ?, ?)", i, i, vector(i, i), i);
+            partitionKeys.add(i);
+        }
+
+        beforeAndAfterFlush(() -> {
+            // Restricted by partition key and with low as well as high cardinality of results for column c
+            assertRows(execute("SELECT i FROM %s WHERE partition = 1 AND c > 0 ORDER BY v ANN OF [1,1] LIMIT 1"), row(1));
+            assertRows(execute("SELECT i FROM %s WHERE partition = 1 AND c < 10 ORDER BY v ANN OF [1,1] LIMIT 1"), row(1));
+
+            // Do some partition key range queries, the restriction on c is meaningless, but forces the search then
+            // order path
+            var r1 = execute("SELECT partition FROM %s WHERE token(partition) < token(11) AND c > 0 ORDER BY v ANN OF [1,1] LIMIT 1000");
+            var e1 = keysWithUpperBound(partitionKeys, 11,false);
+            assertThat(keys(r1)).containsExactlyInAnyOrderElementsOf(e1);
+
+            var r2 = execute("SELECT partition FROM %s WHERE token(partition) >= token(11) AND token(partition) <= token(20) AND c <= 1000 ORDER BY v ANN OF [1,1] LIMIT 1000");
+            var e2 = keysInBounds(partitionKeys, 11, true, 20, true);
+            assertThat(keys(r2)).containsExactlyInAnyOrderElementsOf(e2);
+        });
     }
 }

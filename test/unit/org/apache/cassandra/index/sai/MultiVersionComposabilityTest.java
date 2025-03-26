@@ -44,7 +44,7 @@ public class MultiVersionComposabilityTest extends SAITester
 
         // Don't want compaction changing versions on us
         disableCompaction();
-        waitForIndexQueryable();
+        waitForTableIndexesQueryable();
 
         // Copy and randomize versions to ensure we can cover different orders of versions.
         var versions = new ArrayList<>(Version.ALL);

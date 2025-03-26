@@ -42,6 +42,7 @@ import org.apache.cassandra.db.marshal.AsciiType;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
+import org.apache.cassandra.utils.Pair;
 import org.apache.lucene.analysis.Analyzer;
 
 public abstract class AbstractAnalyzer implements Iterator<ByteBuffer>
@@ -103,6 +104,23 @@ public abstract class AbstractAnalyzer implements Iterator<ByteBuffer>
     {
         AbstractAnalyzer create();
 
+        /**
+         * @return true if the analyzer supports EQ queries (see {@link AnalyzerEqOperatorSupport})
+         */
+        default boolean supportsEquals()
+        {
+            return true;
+        }
+
+        /**
+         * @return {@link true} if this analyzer configuration has a n-gram tokenizer or any of its filters is n-gram.
+         */
+        default boolean isNGram()
+        {
+            return false;
+        }
+
+        @Override
         default void close()
         {
         }
@@ -124,7 +142,10 @@ public abstract class AbstractAnalyzer implements Iterator<ByteBuffer>
 
         try
         {
-            final Analyzer analyzer = JSONAnalyzerParser.parse(json);
+            Pair<Analyzer, LuceneCustomAnalyzerConfig> analyzerAndConfig = JSONAnalyzerParser.parse(json);
+            final Analyzer analyzer = analyzerAndConfig.left;
+            final boolean isNGram = analyzerAndConfig.right != null && analyzerAndConfig.right.isNGram();
+
             return new AnalyzerFactory()
             {
                 @Override
@@ -133,9 +154,22 @@ public abstract class AbstractAnalyzer implements Iterator<ByteBuffer>
                     analyzer.close();
                 }
 
+                @Override
                 public AbstractAnalyzer create()
                 {
                     return new LuceneAnalyzer(type, analyzer, options);
+                }
+
+                @Override
+                public boolean isNGram()
+                {
+                    return isNGram;
+                }
+
+                @Override
+                public boolean supportsEquals()
+                {
+                    return AnalyzerEqOperatorSupport.supportsEqualsFromOptions(options);
                 }
             };
         }
@@ -153,10 +187,11 @@ public abstract class AbstractAnalyzer implements Iterator<ByteBuffer>
         return options.containsKey(LuceneAnalyzer.INDEX_ANALYZER) || NonTokenizingOptions.hasNonDefaultOptions(options);
     }
 
-    public static AnalyzerFactory fromOptions(AbstractType<?> type, Map<String, String> options)
+    public static AnalyzerFactory fromOptions(String target, AbstractType<?> type, Map<String, String> options)
     {
         boolean containsIndexAnalyzer = options.containsKey(LuceneAnalyzer.INDEX_ANALYZER);
         boolean containsNonTokenizingOptions = NonTokenizingOptions.hasNonDefaultOptions(options);
+        boolean supportsEquals = AnalyzerEqOperatorSupport.supportsEqualsFromOptions(options);
         if (containsIndexAnalyzer && containsNonTokenizingOptions)
         {
             logger.warn("Invalid combination of options for index_analyzer: {}", options);
@@ -170,6 +205,9 @@ public abstract class AbstractAnalyzer implements Iterator<ByteBuffer>
             throw new InvalidRequestException("Cannot specify query_analyzer without an index_analyzer option or any" +
                                               " combination of case_sensitive, normalize, or ascii options. options=" + options);
         }
+
+        if ((containsIndexAnalyzer || containsNonTokenizingOptions) && type.isCollection() && !type.isMultiCell())
+            throw new InvalidRequestException("Cannot use an analyzer on " + target + " because it's a frozen collection.");
 
         if (containsIndexAnalyzer)
         {
@@ -185,7 +223,21 @@ public abstract class AbstractAnalyzer implements Iterator<ByteBuffer>
                 NonTokenizingAnalyzer a = new NonTokenizingAnalyzer(type, options);
                 a.end();
                 Map<String, String> finalOptions = options;
-                return () -> new NonTokenizingAnalyzer(type, finalOptions);
+
+                return new AnalyzerFactory()
+                {
+                    @Override
+                    public AbstractAnalyzer create()
+                    {
+                        return new NonTokenizingAnalyzer(type, finalOptions);
+                    }
+
+                    @Override
+                    public boolean supportsEquals()
+                    {
+                        return supportsEquals;
+                    }
+                };
             }
             else
             {

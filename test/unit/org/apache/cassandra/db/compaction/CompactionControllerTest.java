@@ -23,9 +23,9 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.TimeUnit;
 import java.util.function.LongPredicate;
-import java.util.function.Predicate;
 
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Sets;
@@ -49,6 +49,7 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.WrappedRunnable;
 import org.jboss.byteman.contrib.bmunit.BMRule;
 import org.jboss.byteman.contrib.bmunit.BMRules;
 import org.jboss.byteman.contrib.bmunit.BMUnitRunner;
@@ -184,19 +185,19 @@ public class CompactionControllerTest extends SchemaLoader
 
         // the first sstable should be expired because the overlapping sstable is newer and the gc period is later
         int gcBefore = (int) (System.currentTimeMillis() / 1000) + 5;
-        Set<CompactionSSTable> expired = CompactionController.getFullyExpiredSSTables(cfs, compacting, overlapping, gcBefore);
+        Set<CompactionSSTable> expired = CompactionController.getFullyExpiredSSTables(cfs, compacting, x -> overlapping, gcBefore);
         assertNotNull(expired);
         assertEquals(1, expired.size());
         assertEquals(compacting.iterator().next(), expired.iterator().next());
 
         // however if we add an older mutation to the memtable then the sstable should not be expired
         applyMutation(cfs.metadata(), key, timestamp3);
-        expired = CompactionController.getFullyExpiredSSTables(cfs, compacting, overlapping, gcBefore);
+        expired = CompactionController.getFullyExpiredSSTables(cfs, compacting, x -> overlapping, gcBefore);
         assertNotNull(expired);
         assertEquals(0, expired.size());
 
         // Now if we explicitly ask to ignore overlaped sstables, we should get back our expired sstable
-        expired = CompactionController.getFullyExpiredSSTables(cfs, compacting, overlapping, gcBefore, true);
+        expired = CompactionController.getFullyExpiredSSTables(cfs, compacting, x -> overlapping, gcBefore, true);
         assertNotNull(expired);
         assertEquals(1, expired.size());
     }
@@ -234,6 +235,90 @@ public class CompactionControllerTest extends SchemaLoader
         compaction1RefreshLatch = new CountDownLatch(1);
         refreshCheckLatch = new CountDownLatch(1);
         testOverlapIterator(false);
+    }
+
+    static CountDownLatch memtableRaceStartLatch = new CountDownLatch(1);
+    static CountDownLatch memtableRaceFinishLatch = new CountDownLatch(1);
+
+    @Test
+    @BMRules(rules = {
+      @BMRule(name = "Pause between getting and processing partition",
+              targetClass = "org.apache.cassandra.db.partitions.TrieBackedPartition",
+              targetMethod = "create",
+              targetLocation = "AT ENTRY",
+              condition = "Thread.currentThread().getName().matches(\"CompactionExecutor:.*\")",
+              action = "System.out.println(\"Byteman rule firing\");" +
+                       "org.apache.cassandra.db.compaction.CompactionControllerTest.memtableRaceStartLatch.countDown();" +
+                       "com.google.common.util.concurrent.Uninterruptibles.awaitUninterruptibly(" +
+                       "    org.apache.cassandra.db.compaction.CompactionControllerTest.memtableRaceFinishLatch, " +
+                       "    5, java.util.concurrent.TimeUnit.SECONDS);")
+    })
+    public void testMemtableRace() throws Exception
+    {
+        // If CompactionController does not take an OpOrder group for reading the memtable, it is open to a race
+        // making its reads corrupted. See CNDB-11398
+
+        Keyspace keyspace = Keyspace.open(KEYSPACE);
+        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF1);
+        cfs.truncateBlocking();
+        cfs.disableAutoCompaction();
+
+        DecoratedKey pk = Util.dk("k1");
+        for (int j = 0; j < 3; ++j)
+        {
+            writeRows(cfs, pk, j, j + 100);
+            deleteRows(cfs, pk, 0, j + 1); // make sure we have some tombstones to trigger purging
+            cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
+        }
+        writeRows(cfs, pk, 5, 5 + 5000);
+
+        // We have a few sstables and a memtable, let's compact and have compaction sleep while we insert more data.
+        Runnable addDataToMemtable = new WrappedRunnable()
+        {
+            @Override
+            public void runMayThrow() throws Exception
+            {
+                assertTrue("BMRule did not trigger", memtableRaceStartLatch.await(5, TimeUnit.SECONDS));
+                writeRows(cfs, pk, 8, 8 + 5000);
+                memtableRaceFinishLatch.countDown();
+            }
+        };
+        var addDataFuture = ForkJoinPool.commonPool().submit(addDataToMemtable);
+
+        // Submit a compaction where all tombstones are expired to make compactor read memtables.
+        FBUtilities.waitOnFutures(CompactionManager.instance.submitMaximal(cfs, Integer.MAX_VALUE, false));
+        // We must have had a signal and written data to the memtable.
+        addDataFuture.get();
+        // Compaction must have succeeded.
+        assertEquals(1, cfs.getLiveSSTables().size());
+    }
+
+    private static void writeRows(ColumnFamilyStore cfs, DecoratedKey pk, int start, int end)
+    {
+        for (int i = start; i < end; ++i)
+        {
+            TableMetadata cfm = cfs.metadata();
+            long timestamp = FBUtilities.timestampMicros();
+            ByteBuffer val = ByteBufferUtil.bytes(1L);
+
+            new RowUpdateBuilder(cfm, timestamp, pk)
+            .clustering("ck" + i)
+            .add("val", val)
+            .build()
+            .applyUnsafe();
+        }
+    }
+
+    private static void deleteRows(ColumnFamilyStore cfs, DecoratedKey pk, int start, int end)
+    {
+        for (int i = start; i < end; ++i)
+        {
+            TableMetadata cfm = cfs.metadata();
+            long timestamp = FBUtilities.timestampMicros();
+
+            RowUpdateBuilder.deleteRowAt(cfm, timestamp, (int) (timestamp / 1000000), pk, "ck" + i)
+                            .applyUnsafe();
+        }
     }
 
     public void testOverlapIterator(boolean ignoreOverlaps) throws Exception

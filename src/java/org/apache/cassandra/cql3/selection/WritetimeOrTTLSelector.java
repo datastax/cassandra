@@ -19,120 +19,159 @@ package org.apache.cassandra.cql3.selection;
 
 import java.nio.ByteBuffer;
 
-import org.apache.cassandra.schema.ColumnMetadata;
-import org.apache.cassandra.cql3.QueryOptions;
+import com.google.common.base.Objects;
+
 import org.apache.cassandra.cql3.ColumnSpecification;
+import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.marshal.AbstractType;
-import org.apache.cassandra.db.marshal.Int32Type;
-import org.apache.cassandra.db.marshal.LongType;
+import org.apache.cassandra.db.marshal.ListType;
 import org.apache.cassandra.transport.ProtocolVersion;
-import org.apache.cassandra.utils.ByteBufferUtil;
 
 final class WritetimeOrTTLSelector extends Selector
 {
-    private final ColumnMetadata column;
-    private final int idx;
-    private final boolean isWritetime;
+    private final Selector selected;
+    private final Selectable.WritetimeOrTTL.Kind kind;
     private ByteBuffer current;
+    private final boolean isMultiCell;
     private boolean isSet;
 
-    public static Factory newFactory(final ColumnMetadata def, final int idx, final boolean isWritetime)
+    public static Factory newFactory(final Selector.Factory factory, final Selectable.WritetimeOrTTL.Kind kind, boolean isMultiCell)
     {
         return new Factory()
         {
+            @Override
             protected String getColumnName()
             {
-                return String.format("%s(%s)", isWritetime ? "writetime" : "ttl", def.name.toString());
+                return String.format("%s(%s)", kind.functionName, factory.getColumnName());
             }
 
+            @Override
             protected AbstractType<?> getReturnType()
             {
-                return isWritetime ? LongType.instance : Int32Type.instance;
+                AbstractType<?> type = kind.returnType;
+                return isMultiCell ? ListType.getInstance(type, false) : type;
             }
 
+            @Override
             protected void addColumnMapping(SelectionColumnMapping mapping, ColumnSpecification resultsColumn)
             {
-               mapping.addMapping(resultsColumn, def);
+                factory.addColumnMapping(mapping, resultsColumn);
             }
 
+            @Override
             public Selector newInstance(QueryOptions options)
             {
-                return new WritetimeOrTTLSelector(def, idx, isWritetime);
+                return new WritetimeOrTTLSelector(factory.newInstance(options), kind, isMultiCell);
             }
 
+            @Override
             public boolean isWritetimeSelectorFactory()
             {
-                return isWritetime;
+                return kind != Selectable.WritetimeOrTTL.Kind.TTL;
             }
 
+            @Override
             public boolean isTTLSelectorFactory()
             {
-                return !isWritetime;
+                return kind == Selectable.WritetimeOrTTL.Kind.TTL;
             }
 
+            @Override
             public boolean areAllFetchedColumnsKnown()
             {
                 return true;
             }
 
+            @Override
             public void addFetchedColumns(ColumnFilter.Builder builder)
             {
-                builder.add(def);
+                factory.addFetchedColumns(builder);
             }
         };
     }
 
+    @Override
     public void addFetchedColumns(ColumnFilter.Builder builder)
     {
-        builder.add(column);
+        selected.addFetchedColumns(builder);
     }
 
-    public void addInput(ProtocolVersion protocolVersion, ResultSetBuilder rs)
+    @Override
+    public void addInput(ResultSetBuilder rs)
     {
         if (isSet)
             return;
 
         isSet = true;
 
-        if (isWritetime)
+        selected.addInput(rs);
+        ProtocolVersion protocolVersion = rs.getProtocolVersion();
+
+        switch (kind)
         {
-            long ts = rs.timestamps[idx];
-            current = ts != Long.MIN_VALUE ? ByteBufferUtil.bytes(ts) : null;
-        }
-        else
-        {
-            int ttl = rs.ttls[idx];
-            current = ttl > 0 ? ByteBufferUtil.bytes(ttl) : null;
+            case WRITE_TIME:
+                current = selected.getWritetimes(protocolVersion).toByteBuffer(protocolVersion);
+                break;
+            case TTL:
+                current = selected.getTTLs(protocolVersion).toByteBuffer(protocolVersion);
+                break;
+            default:
+                throw new AssertionError("Unexpected kind of selector: " + kind);
         }
     }
 
+    @Override
     public ByteBuffer getOutput(ProtocolVersion protocolVersion)
     {
         return current;
     }
 
+    @Override
     public void reset()
     {
+        selected.reset();
         isSet = false;
         current = null;
     }
 
+    @Override
     public AbstractType<?> getType()
     {
-        return isWritetime ? LongType.instance : Int32Type.instance;
+        AbstractType<?> type = kind.returnType;
+        return isMultiCell ? ListType.getInstance(type, false) : type;
     }
 
     @Override
     public String toString()
     {
-        return column.name.toString();
+        return selected.toString();
     }
 
-    private WritetimeOrTTLSelector(ColumnMetadata column, int idx, boolean isWritetime)
+    private WritetimeOrTTLSelector(Selector selected, Selectable.WritetimeOrTTL.Kind kind, boolean isMultiCell)
     {
-        this.column = column;
-        this.idx = idx;
-        this.isWritetime = isWritetime;
+        this.selected = selected;
+        this.kind = kind;
+        this.isMultiCell = isMultiCell;
+    }
+
+    @Override
+    public boolean equals(Object o)
+    {
+        if (this == o)
+            return true;
+
+        if (!(o instanceof WritetimeOrTTLSelector))
+            return false;
+
+        WritetimeOrTTLSelector s = (WritetimeOrTTLSelector) o;
+
+        return Objects.equal(selected, s.selected) && kind == s.kind && isMultiCell == s.isMultiCell;
+    }
+
+    @Override
+    public int hashCode()
+    {
+        return Objects.hashCode(selected, kind, isMultiCell);
     }
 }

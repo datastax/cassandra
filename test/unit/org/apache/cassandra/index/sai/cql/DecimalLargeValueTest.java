@@ -37,14 +37,12 @@ public class DecimalLargeValueTest extends SAITester
 
         createIndex("CREATE CUSTOM INDEX ON %s(dec) USING 'StorageAttachedIndex'");
 
-        waitForIndexQueryable();
-
         disableCompaction();
     }
 
     /**
      * This test tries to induce rounding errors involving decimal values with wide significands.
-     *
+     * </p>
      * Two values are indexed:
      * <ul>
      * <li>1.0</li>
@@ -52,7 +50,7 @@ public class DecimalLargeValueTest extends SAITester
      * </ul>
      */
     @Test
-    public void runQueriesWithDecimalValueCollision() throws Throwable
+    public void runQueriesWithDecimalValueCollision()
     {
         final int significandSizeInDecimalDigits = 512;
         // String.repeat(int) exists in JDK 11 and later, but this line was introduced on JDK 8
@@ -112,7 +110,7 @@ public class DecimalLargeValueTest extends SAITester
      * This is a control method with small (two-significant-digit) values.
      */
     @Test
-    public void runQueriesWithoutCollisions() throws Throwable
+    public void runQueriesWithoutCollisions()
     {
         execute("INSERT INTO %s (pk, ck, dec) VALUES (-2, 1, 2.2)");
         execute("INSERT INTO %s (pk, ck, dec) VALUES (-2, 2, 2.2)");

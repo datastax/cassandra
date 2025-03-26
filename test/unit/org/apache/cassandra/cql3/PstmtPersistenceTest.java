@@ -36,6 +36,7 @@ import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.MD5Digest;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.PERSIST_PREPARED_STATEMENTS;
 import static org.junit.Assert.*;
 
 public class PstmtPersistenceTest extends CQLTester
@@ -113,6 +114,41 @@ public class PstmtPersistenceTest extends CQLTester
         execute("DROP KEYSPACE foo");
         assertEquals(3, numberOfStatementsInMemory());
         assertEquals(3, numberOfStatementsOnDisk());
+    }
+
+    @Test
+    public void testUnpersistedPreparedStatements() throws Throwable {
+        requireNetwork();
+        try
+        {
+            System.setProperty(PERSIST_PREPARED_STATEMENTS.getKey(), Boolean.FALSE.toString());
+
+            assertEquals(0, numberOfStatementsOnDisk());
+
+            execute("CREATE KEYSPACE IF NOT EXISTS foo WITH replication = {'class': 'SimpleStrategy', 'replication_factor': '1'}");
+            execute("CREATE TABLE foo.unpersisted (key text PRIMARY KEY, val int)");
+
+            ClientState clientState = ClientState.forExternalCalls(InetSocketAddress.createUnresolved("127.0.0.1", 1234));
+
+            createTable("CREATE TABLE %s (pk int PRIMARY KEY, val text)");
+
+            String statement0 = "SELECT * FROM %s WHERE keyspace_name = ?";
+            String statement1 = "SELECT * FROM %s WHERE pk = ?";
+            String statement2 = "SELECT * FROM %s WHERE key = ?";
+            String statement3 = "SELECT * FROM %S WHERE key = ?";
+            prepareStatement(statement0, SchemaConstants.SCHEMA_KEYSPACE_NAME, SchemaKeyspaceTables.TABLES, clientState);
+            prepareStatement(statement1, clientState);
+            prepareStatement(statement2, "foo", "unpersisted", clientState);
+            clientState.setKeyspace("foo");
+            prepareStatement(statement1, clientState);
+            prepareStatement(statement3, "foo", "unpersisted", clientState);
+
+            assertEquals(0, numberOfStatementsOnDisk());
+        }
+        finally
+        {
+            System.setProperty(PERSIST_PREPARED_STATEMENTS.getKey(), Boolean.TRUE.toString());
+        }
     }
 
     private void validatePstmts(List<MD5Digest> stmtIds, QueryHandler handler)

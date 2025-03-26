@@ -42,18 +42,6 @@ public class SingletonIndexQueryPlan implements Index.QueryPlan
         this.postIndexFilter = postIndexFilter;
     }
 
-    @Nullable
-    protected static SingletonIndexQueryPlan create(Index index, RowFilter rowFilter)
-    {
-        for (RowFilter.Expression e : rowFilter.getExpressions())
-        {
-            if (index.supportsExpression(e.column(), e.operator()))
-                return new SingletonIndexQueryPlan(index, index.getPostIndexQueryFilter(rowFilter));
-        }
-
-        return null;
-    }
-
     @Override
     public Set<Index> getIndexes()
     {

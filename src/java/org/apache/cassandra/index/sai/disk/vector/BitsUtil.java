@@ -23,6 +23,7 @@ import java.util.Set;
 import org.cliffc.high_scale_lib.NonBlockingHashMapLong;
 
 import io.github.jbellis.jvector.util.Bits;
+import io.github.jbellis.jvector.util.DenseIntMap;
 
 public class BitsUtil
 {
@@ -33,7 +34,7 @@ public class BitsUtil
                : toAccept == Bits.ALL ? new NoDeletedBits(deletedOrdinals) : new NoDeletedIntersectingBits(toAccept, deletedOrdinals);
     }
 
-    public static <T> Bits bitsIgnoringDeleted(Bits toAccept, NonBlockingHashMapLong<VectorPostings<T>> postings)
+    public static <T> Bits bitsIgnoringDeleted(Bits toAccept, DenseIntMap<VectorPostings<T>> postings)
     {
         return toAccept == Bits.ALL ? new NoDeletedPostings(postings) : new NoDeletedIntersectingPostings(toAccept, postings);
     }
@@ -84,9 +85,9 @@ public class BitsUtil
 
     private static class NoDeletedPostings<T> extends BitsWithoutLength
     {
-        private final NonBlockingHashMapLong<VectorPostings<T>> postings;
+        private final DenseIntMap<VectorPostings<T>> postings;
 
-        public NoDeletedPostings(NonBlockingHashMapLong<VectorPostings<T>> postings)
+        public NoDeletedPostings(DenseIntMap<VectorPostings<T>> postings)
         {
             this.postings = postings;
         }
@@ -103,9 +104,9 @@ public class BitsUtil
     private static class NoDeletedIntersectingPostings<T> extends BitsWithoutLength
     {
         private final Bits toAccept;
-        private final NonBlockingHashMapLong<VectorPostings<T>> postings;
+        private final DenseIntMap<VectorPostings<T>> postings;
 
-        public NoDeletedIntersectingPostings(Bits toAccept, NonBlockingHashMapLong<VectorPostings<T>> postings)
+        public NoDeletedIntersectingPostings(Bits toAccept, DenseIntMap<VectorPostings<T>> postings)
         {
             this.toAccept = toAccept;
             this.postings = postings;

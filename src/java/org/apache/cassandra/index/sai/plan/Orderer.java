@@ -19,9 +19,12 @@
 package org.apache.cassandra.index.sai.plan;
 
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.EnumSet;
+import java.util.HashSet;
+import java.util.List;
 import java.util.stream.Collectors;
 
 import javax.annotation.Nullable;
@@ -31,6 +34,7 @@ import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.index.SecondaryIndexManager;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
+import org.apache.cassandra.index.sai.disk.vector.VectorCompression;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 
@@ -41,25 +45,35 @@ public class Orderer
 {
     // The list of operators that are valid for order by clauses.
     static final EnumSet<Operator> ORDER_BY_OPERATORS = EnumSet.of(Operator.ANN,
+                                                                   Operator.BM25,
                                                                    Operator.ORDER_BY_ASC,
                                                                    Operator.ORDER_BY_DESC);
 
     public final IndexContext context;
     public final Operator operator;
-    public final float[] vector;
+    public final ByteBuffer term;
+
+    // Vector search parameters
+    private float[] vector;
+    private final Integer rerankK;
+
+    // BM25 search parameter
+    private List<ByteBuffer> queryTerms;
 
     /**
      * Create an orderer for the given index context, operator, and term.
      * @param context the index context, used to build the view of memtables and sstables for query execution.
      * @param operator the operator for the order by clause.
      * @param term the term to order by (not always relevant)
+     * @param rerankK optional rerank K parameter for ANN queries
      */
-    public Orderer(IndexContext context, Operator operator, ByteBuffer term)
+    public Orderer(IndexContext context, Operator operator, ByteBuffer term, @Nullable Integer rerankK)
     {
         this.context = context;
         assert ORDER_BY_OPERATORS.contains(operator) : "Invalid operator for order by clause " + operator;
         this.operator = operator;
-        this.vector = context.getValidator().isVector() ? TypeUtil.decomposeVector(context.getValidator(), term) : null;
+        this.rerankK = rerankK;
+        this.term = term;
     }
 
     public String getIndexName()
@@ -75,8 +89,8 @@ public class Orderer
 
     public Comparator<? super PrimaryKeyWithSortKey> getComparator()
     {
-        // ANN's PrimaryKeyWithSortKey is always descending, so we use the natural order for the priority queue
-        return isAscending() || isANN() ? Comparator.naturalOrder() : Comparator.reverseOrder();
+        // ANN/BM25's PrimaryKeyWithSortKey is always descending, so we use the natural order for the priority queue
+        return (isAscending() || isANN() || isBM25()) ? Comparator.naturalOrder() : Comparator.reverseOrder();
     }
 
     public boolean isLiteral()
@@ -89,16 +103,41 @@ public class Orderer
         return operator == Operator.ANN;
     }
 
+    /**
+     * Provide rerankK for ANN queries. Use the user provided rerankK if available, otherwise use the model's default
+     * based on the limit and compression type.
+     *
+     * @param limit the query limit or the proportional segment limit to use when calculating a reasonable rerankK
+     *              default value
+     * @param vc the compression type of the vectors in the index
+     * @return the rerankK value to use in ANN search
+     */
+    public int rerankKFor(int limit, VectorCompression vc)
+    {
+        assert isANN() : "rerankK is only valid for ANN queries";
+        return rerankK != null
+               ? rerankK
+               : context.getIndexWriterConfig().getSourceModel().rerankKFor(limit, vc);
+    }
+
+    public boolean isBM25()
+    {
+        return operator == Operator.BM25;
+    }
+
     @Nullable
     public static Orderer from(SecondaryIndexManager indexManager, RowFilter filter)
     {
         var expressions = filter.root().expressions().stream().filter(Orderer::isFilterExpressionOrderer).collect(Collectors.toList());
         if (expressions.isEmpty())
             return null;
-        var orderRowFilter = expressions.get(0);
-        var index = indexManager.getBestIndexFor(orderRowFilter, StorageAttachedIndex.class)
+        var orderExpression = expressions.get(0);
+        var index = indexManager.getBestIndexFor(orderExpression, StorageAttachedIndex.class)
                                 .orElseThrow(() -> new IllegalStateException("No index found for order by clause"));
-        return new Orderer(index.getIndexContext(), orderRowFilter.operator(), orderRowFilter.getIndexValue());
+
+        // Null if not specified explicitly in the CQL query.
+        Integer rerankK = filter.annOptions().rerankK;
+        return new Orderer(index.getIndexContext(), orderExpression.operator(), orderExpression.getIndexValue(), rerankK);
     }
 
     public static boolean isFilterExpressionOrderer(RowFilter.Expression expression)
@@ -110,8 +149,39 @@ public class Orderer
     public String toString()
     {
         String direction = isAscending() ? "ASC" : "DESC";
-        return isANN()
-               ? context.getColumnName() + " ANN OF " + Arrays.toString(vector) + ' ' + direction
-               : context.getColumnName() + ' ' + direction;
+        String rerankInfo = rerankK != null ? String.format(" (rerank_k=%d)", rerankK) : "";
+        if (isANN())
+            return context.getColumnName() + " ANN OF " + Arrays.toString(getVectorTerm()) + ' ' + direction + rerankInfo;
+        if (isBM25())
+            return context.getColumnName() + " BM25 OF " + TypeUtil.getString(term, context.getValidator()) + ' ' + direction;
+        return context.getColumnName() + ' ' + direction;
+    }
+
+    public float[] getVectorTerm()
+    {
+        if (vector == null)
+            vector = TypeUtil.decomposeVector(context.getValidator(), term);
+        return vector;
+    }
+
+    public List<ByteBuffer> getQueryTerms()
+    {
+        if (queryTerms != null)
+            return queryTerms;
+
+        var queryAnalyzer = context.getQueryAnalyzerFactory().create();
+        // Split query into terms
+        var uniqueTerms = new HashSet<ByteBuffer>();
+        queryAnalyzer.reset(term);
+        try
+        {
+            queryAnalyzer.forEachRemaining(uniqueTerms::add);
+        }
+        finally
+        {
+            queryAnalyzer.end();
+        }
+        queryTerms = new ArrayList<>(uniqueTerms);
+        return queryTerms;
     }
 }

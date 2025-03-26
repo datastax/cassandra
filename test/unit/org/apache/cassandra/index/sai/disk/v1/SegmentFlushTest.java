@@ -50,12 +50,13 @@ import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.SAIUtil;
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.TermsIterator;
-import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
+import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
+import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SequenceBasedSSTableId;
 import org.apache.cassandra.io.util.File;
@@ -63,6 +64,7 @@ import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.MockSchema;
+import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 import static org.apache.cassandra.Util.dk;
@@ -144,6 +146,7 @@ public class SegmentFlushTest
 
         IndexContext indexContext = new IndexContext("ks",
                                                      "cf",
+                                                     TableId.generate(),
                                                      UTF8Type.instance,
                                                      new ClusteringComparator(),
                                                      column,
@@ -173,7 +176,7 @@ public class SegmentFlushTest
         MetadataSource source = MetadataSource.loadMetadata(components);
 
         // verify segment count
-        List<SegmentMetadata> segmentMetadatas = SegmentMetadata.load(source, indexContext.keyFactory());
+        List<SegmentMetadata> segmentMetadatas = SegmentMetadata.load(source, indexContext);
         assertEquals(segments, segmentMetadatas.size());
 
         // verify segment metadata
@@ -243,7 +246,9 @@ public class SegmentFlushTest
         ByteComparable term = iterator.next();
         PostingList postings = iterator.postings();
 
-        assertEquals(0, ByteComparable.compare(term, ByteComparable.fixedLength(expectedTerm), ByteComparable.Version.OSS41));
+        assertEquals(0, ByteComparable.compare(term,
+                                               ByteComparable.preencoded(TypeUtil.BYTE_COMPARABLE_VERSION, expectedTerm),
+                                               TypeUtil.BYTE_COMPARABLE_VERSION));
         assertEquals(minSegmentRowId == maxSegmentRowId ? 1 : 2, postings.size());
     }
 

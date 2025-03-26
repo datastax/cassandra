@@ -101,6 +101,23 @@ public class UUIDGen
         return new UUID(createTime(fromUnixTimestamp(when)), clockSeqAndNode);
     }
 
+    public static int sequence(UUID timeUUID)
+    {
+        long lsb = timeUUID.getLeastSignificantBits();
+        return (int) ((lsb >> 48) & 0x0000000000003FFFL);
+    }
+
+    /**
+     * Returns a new TimeUUID with the same timestamp as this one, but with the provided sequence value.
+     */
+    public static UUID withSequence(UUID timeUUID, long sequence)
+    {
+        long sequenceBits = 0x0000000000003FFFL;
+        long sequenceMask = ~(sequenceBits << 48);
+        final long bits = (sequence & sequenceBits) << 48;
+        return new UUID(timeUUID.getMostSignificantBits(), timeUUID.getLeastSignificantBits() & sequenceMask | bits);
+    }
+
     /**
      * Returns a version 1 UUID using the provided timestamp and the local clock and sequence.
      * <p>

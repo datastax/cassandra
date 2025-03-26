@@ -29,6 +29,7 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.statements.schema.TableAttributes;
@@ -81,6 +82,8 @@ public class GuardrailsConfig
     public volatile Boolean read_before_write_list_operations_enabled;
     public volatile Integer vector_dimensions_warn_threshold;
     public volatile Integer vector_dimensions_failure_threshold;
+    public volatile Integer sai_ann_rerank_k_warn_threshold;
+    public volatile Integer sai_ann_rerank_k_fail_threshold;
 
     // Legacy 2i guardrail
     public volatile Integer secondary_index_per_table_failure_threshold;
@@ -145,6 +148,10 @@ public class GuardrailsConfig
     public volatile Integer offset_rows_warn_threshold;
     public volatile Integer offset_rows_failure_threshold;
 
+    // Limit the number of column value filters per SELECT query (after applying analyzers, in case they are used)
+    public volatile Integer query_filters_warn_threshold;
+    public volatile Integer query_filters_fail_threshold;
+
     /**
      * If {@link DatabaseDescriptor#isEmulateDbaasDefaults()} is true, apply cloud defaults to guardrails settings that
      * are not specified in yaml; otherwise, apply on-prem defaults to guardrails settings that are not specified in yaml;
@@ -160,6 +167,11 @@ public class GuardrailsConfig
 
         enforceDefault(tombstone_warn_threshold, v -> tombstone_warn_threshold = v, 1000, 1000);
         enforceDefault(tombstone_failure_threshold, v -> tombstone_failure_threshold = v, 100000, 100000);
+
+        // Default to no warning and failure at 4 times the maxTopK value
+        int maxTopK = CassandraRelevantProperties.SAI_VECTOR_SEARCH_MAX_TOP_K.getInt();
+        enforceDefault(sai_ann_rerank_k_warn_threshold, v -> sai_ann_rerank_k_warn_threshold = v, -1, -1);
+        enforceDefault(sai_ann_rerank_k_fail_threshold, v -> sai_ann_rerank_k_fail_threshold = v, 4 * maxTopK, 4 * maxTopK);
 
         // for write requests
         enforceDefault(logged_batch_enabled, v -> logged_batch_enabled = v, true, true);
@@ -234,6 +246,9 @@ public class GuardrailsConfig
 
         enforceDefault(offset_rows_warn_threshold, v -> offset_rows_warn_threshold = v, 10000, 10000);
         enforceDefault(offset_rows_failure_threshold, v -> offset_rows_failure_threshold = v, 20000, 20000);
+
+        enforceDefault(query_filters_warn_threshold, v -> query_filters_warn_threshold = v, -1, -1);
+        enforceDefault(query_filters_fail_threshold, v -> query_filters_fail_threshold = v, -1, -1);
     }
 
     /**
@@ -261,6 +276,10 @@ public class GuardrailsConfig
         validateStrictlyPositiveInteger(vector_dimensions_warn_threshold, "vector_dimensions_warn_threshold");
         validateStrictlyPositiveInteger(vector_dimensions_failure_threshold, "vector_dimensions_failure_threshold");
         validateWarnLowerThanFail(vector_dimensions_warn_threshold, vector_dimensions_failure_threshold, "vector_dimensions");
+
+        validateStrictlyPositiveInteger(sai_ann_rerank_k_warn_threshold, "sai_ann_rerank_k_warn_threshold");
+        validateStrictlyPositiveInteger(sai_ann_rerank_k_fail_threshold, "sai_ann_rerank_k_fail_threshold");
+        validateWarnLowerThanFail(sai_ann_rerank_k_warn_threshold, sai_ann_rerank_k_fail_threshold, "sai_ann_rerank_k");
 
         validateStrictlyPositiveInteger(tables_warn_threshold, "tables_warn_threshold");
         validateStrictlyPositiveInteger(tables_failure_threshold, "tables_failure_threshold");
@@ -300,6 +319,10 @@ public class GuardrailsConfig
         validateStrictlyPositiveInteger(offset_rows_warn_threshold, "offset_rows_warn_threshold");
         validateStrictlyPositiveInteger(offset_rows_failure_threshold, "offset_rows_failure_threshold");
         validateWarnLowerThanFail(offset_rows_warn_threshold, offset_rows_failure_threshold, "offset_rows_threshold");
+
+        validateStrictlyPositiveInteger(query_filters_warn_threshold, "query_filters_warn_threshold");
+        validateStrictlyPositiveInteger(query_filters_fail_threshold, "query_filters_fail_threshold");
+        validateWarnLowerThanFail(query_filters_warn_threshold, query_filters_fail_threshold, "query_filters_threshold");
     }
 
     /**

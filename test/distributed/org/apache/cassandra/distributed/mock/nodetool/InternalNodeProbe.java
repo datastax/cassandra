@@ -21,7 +21,9 @@ package org.apache.cassandra.distributed.mock.nodetool;
 import java.lang.management.ManagementFactory;
 import java.util.Iterator;
 import java.util.Map;
-import javax.management.ListenerNotFoundException;
+
+import javax.management.JMX;
+import javax.management.ObjectName;
 
 import com.google.common.collect.Multimap;
 
@@ -38,6 +40,7 @@ import org.apache.cassandra.locator.DynamicEndpointSnitchMBean;
 import org.apache.cassandra.locator.EndpointSnitchInfo;
 import org.apache.cassandra.locator.EndpointSnitchInfoMBean;
 import org.apache.cassandra.metrics.CassandraMetricsRegistry;
+import org.apache.cassandra.metrics.CompactionMetrics;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.service.CacheService;
@@ -45,14 +48,13 @@ import org.apache.cassandra.service.CacheServiceMBean;
 import org.apache.cassandra.service.GCInspector;
 import org.apache.cassandra.service.StorageProxy;
 import org.apache.cassandra.service.StorageService;
-import org.apache.cassandra.service.StorageServiceMBean;
 import org.apache.cassandra.streaming.StreamManager;
 import org.apache.cassandra.tools.NodeProbe;
-import org.mockito.Mockito;
 
 public class InternalNodeProbe extends NodeProbe
 {
     private final boolean withNotifications;
+    private boolean previousSkipNotificationListeners = false;
 
     public InternalNodeProbe(boolean withNotifications)
     {
@@ -66,26 +68,10 @@ public class InternalNodeProbe extends NodeProbe
         mbeanServerConn = null;
         jmxc = null;
 
-        if (withNotifications)
-        {
-            ssProxy = StorageService.instance;
-        }
-        else
-        {
-            // replace the notification apis with a no-op method
-            StorageServiceMBean mock = Mockito.spy(StorageService.instance);
-            Mockito.doNothing().when(mock).addNotificationListener(Mockito.any(), Mockito.any(), Mockito.any());
-            try
-            {
-                Mockito.doNothing().when(mock).removeNotificationListener(Mockito.any(), Mockito.any(), Mockito.any());
-                Mockito.doNothing().when(mock).removeNotificationListener(Mockito.any());
-            }
-            catch (ListenerNotFoundException e)
-            {
-                throw new AssertionError(e);
-            }
-            ssProxy = mock;
-        }
+        previousSkipNotificationListeners = StorageService.instance.skipNotificationListeners;
+        StorageService.instance.skipNotificationListeners = !withNotifications;
+
+        ssProxy = StorageService.instance;
         msProxy = MessagingService.instance();
         streamProxy = StreamManager.instance;
         compactionProxy = CompactionManager.instance;
@@ -105,7 +91,7 @@ public class InternalNodeProbe extends NodeProbe
     @Override
     public void close()
     {
-        // nothing to close. no-op
+        StorageService.instance.skipNotificationListeners = previousSkipNotificationListeners;
     }
 
     @Override
@@ -178,7 +164,28 @@ public class InternalNodeProbe extends NodeProbe
     @Override
     public Object getCompactionMetric(String metricName)
     {
-        throw new UnsupportedOperationException();
+        CompactionMetrics metrics = CompactionManager.instance.getMetrics();
+        switch(metricName)
+        {
+            case "BytesCompacted":
+                return metrics.bytesCompacted;
+            case "CompletedTasks":
+                return metrics.completedTasks.getValue();
+            case "PendingTasks":
+                return metrics.pendingTasks.getValue();
+            case "PendingTasksByTableName":
+                return metrics.pendingTasksByTableName.getValue();
+            case "WriteAmplificationByTableName":
+                return metrics.writeAmplificationByTableName.getValue();
+            case "AggregateCompactions":
+                return metrics.aggregateCompactions.getValue();
+            case "MaxOverlapsMap":
+                return metrics.overlapsMap.getValue();
+            case "TotalCompactionsCompleted":
+                return metrics.totalCompactionsCompleted;
+            default:
+                throw new RuntimeException("Unknown compaction metric.");
+        }
     }
 
     @Override

@@ -22,8 +22,6 @@ package org.apache.cassandra.index.sai;
 
 import java.io.IOException;
 import java.io.RandomAccessFile;
-import java.lang.reflect.Field;
-import java.lang.reflect.Modifier;
 import java.nio.channels.FileChannel;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
@@ -48,6 +46,7 @@ import com.google.common.base.Predicates;
 import com.google.common.collect.Sets;
 import org.junit.After;
 import org.junit.Assert;
+import org.junit.BeforeClass;
 import org.junit.Rule;
 import org.junit.rules.TestRule;
 
@@ -63,6 +62,8 @@ import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.compaction.CompactionManager;
+import org.apache.cassandra.db.lifecycle.SSTableSet;
+import org.apache.cassandra.db.lifecycle.View;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.exceptions.RequestFailureReason;
@@ -70,8 +71,6 @@ import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.format.Version;
-import org.apache.cassandra.index.sai.disk.v1.V1OnDiskFormat;
-import org.apache.cassandra.index.sai.utils.NamedMemoryLimiter;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.ResourceLeakDetector;
 import org.apache.cassandra.inject.ActionBuilder;
@@ -86,11 +85,11 @@ import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.MockSchema;
 import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.lucene.codecs.CodecUtil;
-import org.awaitility.Awaitility;
 
 import static org.apache.cassandra.inject.ActionBuilder.newActionBuilder;
 import static org.apache.cassandra.inject.Expression.expr;
@@ -220,10 +219,39 @@ public class SAITester extends CQLTester
         Injections.deleteAll();
     }
 
+    /**
+     * Enable external execution of all queries because we want to use reconciliation in SELECT queries so that we can
+     * simulate the application of the entire row filter in the coordinator node, even if unit tests are not multinode.
+     */
+    @BeforeClass
+    public static void setUpClass()
+    {
+        CQLTester.setUpClass();
+        CQLTester.enableCoordinatorExecution();
+    }
+
+    /**
+     * Creates a SAI index on the current table, waiting for it to become queryable.
+     *
+     * @param column the name of the indexed column, maybe with {@code FULL()}, {@code KEYS()} or {@code VALUES()} spec
+     * @param options the index options, of the form {@code "{'option1': value1, 'option2': value2, ...}"}.
+     * @return the name of the created index
+     */
+    public String createSAIIndex(String column, @Nullable String options)
+    {
+        String query = String.format(CREATE_INDEX_TEMPLATE, column);
+
+        if (options != null)
+            query += " WITH OPTIONS = " + options;
+
+        return createIndex(query);
+    }
+
     public static IndexContext createIndexContext(String name, AbstractType<?> validator, ColumnFamilyStore cfs)
     {
         return new IndexContext(cfs.getKeyspaceName(),
                                 cfs.getTableName(),
+                                cfs.metadata().id,
                                 UTF8Type.instance,
                                 new ClusteringComparator(),
                                 ColumnMetadata.regularColumn("sai", "internal", name, validator),
@@ -236,6 +264,7 @@ public class SAITester extends CQLTester
     {
         return new IndexContext("test_ks",
                                 "test_cf",
+                                TableId.generate(),
                                 UTF8Type.instance,
                                 new ClusteringComparator(),
                                 ColumnMetadata.regularColumn("sai", "internal", name, validator),
@@ -248,6 +277,7 @@ public class SAITester extends CQLTester
     {
         return new IndexContext("test_ks",
                                 "test_cf",
+                                TableId.generate(),
                                 UTF8Type.instance,
                                 new ClusteringComparator(),
                                 ColumnMetadata.regularColumn("sai", "internal", columnName, validator),
@@ -291,7 +321,7 @@ public class SAITester extends CQLTester
         cfs.indexManager.executePreJoinTasksBlocking(true);
         if (wait)
         {
-            waitForIndexQueryable();
+            waitForTableIndexesQueryable();
         }
     }
 
@@ -323,57 +353,23 @@ public class SAITester extends CQLTester
         }
     }
 
-    protected void waitForAssert(Runnable runnableAssert, long timeout, TimeUnit unit)
-    {
-        Awaitility.await().dontCatchUncaughtExceptions().atMost(timeout, unit).untilAsserted(runnableAssert::run);
-    }
-
-    protected void waitForAssert(Runnable assertion)
-    {
-        waitForAssert(() -> assertion.run(), ASSERTION_TIMEOUT_SECONDS, TimeUnit.SECONDS);
-    }
-
-    protected boolean indexNeedsFullRebuild(String index)
-    {
-        ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(currentTable());
-        return cfs.indexManager.needsFullRebuild(index);
-    }
-
-    protected boolean isIndexQueryable()
-    {
-        return isIndexQueryable(KEYSPACE, currentTable());
-    }
-
-    protected boolean isIndexQueryable(String keyspace, String table)
-    {
-        ColumnFamilyStore cfs = Keyspace.open(keyspace).getColumnFamilyStore(table);
-        for (Index index : cfs.indexManager.listIndexes())
-        {
-            if (!cfs.indexManager.isIndexQueryable(index))
-                return false;
-        }
-        return true;
-    }
-
-    protected void verifyInitialIndexFailed(String indexName)
-    {
-        // Verify that the initial index build fails...
-        waitForAssert(() -> assertTrue(indexNeedsFullRebuild(indexName)));
-    }
-
     protected boolean verifyChecksum(IndexContext context)
     {
         ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(currentTable());
 
-        for (SSTableReader sstable : cfs.getLiveSSTables())
+        try (ColumnFamilyStore.RefViewFragment rvf = cfs.selectAndReference(View.selectFunction(SSTableSet.CANONICAL)))
         {
-            IndexDescriptor indexDescriptor = loadDescriptor(sstable, cfs);
-            if (indexDescriptor.isIndexEmpty(context))
-                continue;
-            if (!indexDescriptor.perSSTableComponents().validateComponents(sstable, cfs.getTracker(), true)
-                || !indexDescriptor.perIndexComponents(context).validateComponents(sstable, cfs.getTracker(), true))
-                return false;
+            for (SSTableReader sstable : rvf.sstables)
+            {
+                IndexDescriptor indexDescriptor = loadDescriptor(sstable, cfs);
+                if (indexDescriptor.isIndexEmpty(context))
+                    continue;
+                if (!indexDescriptor.perSSTableComponents().validateComponents(sstable, cfs.getTracker(), true)
+                    || !indexDescriptor.perIndexComponents(context).validateComponents(sstable, cfs.getTracker(), true))
+                    return false;
+            }
         }
+
         return true;
     }
 
@@ -439,25 +435,6 @@ public class SAITester extends CQLTester
             throw new RuntimeException(e);
         }
         return metricValue;
-    }
-
-    public void waitForIndexQueryable()
-    {
-        waitForIndexQueryable(KEYSPACE, currentTable());
-    }
-
-    public void waitForIndexQueryable(int seconds)
-    {
-        waitForIndexQueryable(KEYSPACE, currentTable(), seconds);
-    }
-
-    public void waitForIndexQueryable(String keyspace, String table) {
-        waitForIndexQueryable(keyspace, table, 60);
-    }
-
-    public void waitForIndexQueryable(String keyspace, String table, int seconds)
-    {
-        waitForAssert(() -> assertTrue(isIndexQueryable(keyspace, table)), seconds, TimeUnit.SECONDS);
     }
 
     protected void startCompaction() throws Throwable
@@ -610,7 +587,7 @@ public class SAITester extends CQLTester
 
         for (IndexComponentType indexComponentType : Version.latest().onDiskFormat().perSSTableComponentTypes())
         {
-            Set<File> tableFiles = componentFiles(indexFiles, new Component(Component.Type.CUSTOM, Version.latest().fileNameFormatter().format(indexComponentType, null, 0)));
+            Set<File> tableFiles = componentFiles(indexFiles, new Component(Component.Type.CUSTOM, Version.latest().fileNameFormatter().format(indexComponentType, (String)null, 0)));
             assertEquals(tableFiles.toString(), perSSTableFiles, tableFiles.size());
         }
 
@@ -898,21 +875,6 @@ public class SAITester extends CQLTester
     {
         String componentName = Version.latest().fileNameFormatter().format(indexComponentType, indexContext, 0);
         return indexFiles.stream().filter(c -> c.name().endsWith(componentName)).collect(Collectors.toSet());
-    }
-
-    protected static void setSegmentWriteBufferSpace(final int segmentSize) throws Exception
-    {
-        NamedMemoryLimiter limiter = (NamedMemoryLimiter) V1OnDiskFormat.class.getDeclaredField("SEGMENT_BUILD_MEMORY_LIMITER").get(null);
-        Field limitBytes = limiter.getClass().getDeclaredField("limitBytes");
-        limitBytes.setAccessible(true);
-        Field modifiersField = Field.class.getDeclaredField("modifiers");
-        modifiersField.setAccessible(true);
-        modifiersField.setInt(limitBytes, limitBytes.getModifiers() & ~Modifier.FINAL);
-        limitBytes.set(limiter, segmentSize);
-        limitBytes = V1OnDiskFormat.class.getDeclaredField("SEGMENT_BUILD_MEMORY_LIMIT");
-        limitBytes.setAccessible(true);
-        modifiersField.setInt(limitBytes, limitBytes.getModifiers() & ~Modifier.FINAL);
-        limitBytes.set(limiter, segmentSize);
     }
 
     /**

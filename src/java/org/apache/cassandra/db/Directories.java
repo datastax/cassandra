@@ -213,7 +213,7 @@ public class Directories
     public Directories(@Nullable KeyspaceMetadata ksMetadata, final TableMetadata metadata, DataDirectory[] dirs)
     {
         this.metadata = metadata;
-        this.paths = StorageProvider.instance.createDataDirectories(ksMetadata, metadata.keyspace, dirs);
+        this.paths = StorageProvider.instance.createDataDirectories(ksMetadata, metadata, dirs);
 
         ImmutableMap.Builder<Path, DataDirectory> canonicalPathsBuilder = ImmutableMap.builder();
         String tableId = metadata.id.toHexString();

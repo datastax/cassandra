@@ -127,6 +127,10 @@ batchlog_replay_throttle_in_kb: 1024
 # Authentication backend, implementing IAuthenticator; used to identify users
 # Out of the box, Cassandra provides org.apache.cassandra.auth.{AllowAllAuthenticator,
 # PasswordAuthenticator}.
+# Optional parameters can be specified in the form of:
+#   parameters:
+#    param_key1: param_value1
+#    ...
 #
 # - AllowAllAuthenticator performs no checks - set it to disable authentication.
 # - PasswordAuthenticator relies on username/password pairs to authenticate
@@ -138,6 +142,10 @@ authenticator: AllowAllAuthenticator
 # Authorization backend, implementing IAuthorizer; used to limit access/provide permissions
 # Out of the box, Cassandra provides org.apache.cassandra.auth.{AllowAllAuthorizer,
 # CassandraAuthorizer}.
+# Optional parameters can be specified in the form of:
+#   parameters:
+#    param_key1: param_value1
+#    ...
 #
 # - AllowAllAuthorizer allows any action to any user - set it to disable authorization.
 # - CassandraAuthorizer stores permissions in system_auth.role_permissions table. Please
@@ -150,6 +158,10 @@ authorizer: AllowAllAuthorizer
 # which stores role information in the system_auth keyspace. Most functions of the
 # IRoleManager require an authenticated login, so unless the configured IAuthenticator
 # actually implements authentication, most of this functionality will be unavailable.
+# Optional parameters can be specified in the form of:
+#   parameters:
+#    param_key1: param_value1
+#    ...
 #
 # - CassandraRoleManager stores role data in the system_auth keyspace. Please
 #   increase system_auth keyspace replication factor if you use this role manager.
@@ -159,6 +171,10 @@ role_manager: CassandraRoleManager
 # access to certain DCs
 # Out of the box, Cassandra provides org.apache.cassandra.auth.{AllowAllNetworkAuthorizer,
 # CassandraNetworkAuthorizer}.
+# Optional parameters can be specified in the form of:
+#   parameters:
+#    param_key1: param_value1
+#    ...
 #
 # - AllowAllNetworkAuthorizer allows access to any DC to any user - set it to disable authorization.
 # - CassandraNetworkAuthorizer stores permissions in system_auth.network_permissions table. Please
@@ -478,6 +494,8 @@ commitlog_segment_size_in_mb: 32
 #
 # none : Flush without compressing blocks but while still doing checksums.
 # fast : Flush with a fast compressor. If the table is already using a
+#        fast compressor that compressor is used.
+# adaptive : Flush with a fast adaptive compressor. If the table is already using a
 #        fast compressor that compressor is used.
 # table: Always flush with the same compressor that the table uses. This
 #        was the pre 4.0 behavior.
@@ -998,6 +1016,15 @@ truncate_request_timeout_in_ms: 60000
 # The default timeout for other, miscellaneous operations.
 # Lowest acceptable value is 10 ms.
 request_timeout_in_ms: 10000
+# Upper bound for how long any request received via native transport
+# should be considered live and serviceable by the system. This is
+# currently considered at two points: when the message is dequeued and
+# executed by the NATIVE_TRANSPORT_REQUESTS stage, and when the message
+# is dequeued and executed by an async stage if NATIVE_TRANSPORT_ASYNC_READ_WRITE_ENABLED
+# is set to true. If the request is not completed within this time, an
+# OverloadedException is thrown.
+native_transport_timeout_in_ms: 12000
+
 
 # Defensive settings for protecting Cassandra from true network partitions.
 # See (CASSANDRA-14358) for details.
@@ -1361,6 +1388,11 @@ replica_filtering_protection:
 
 # Audit logging - Logs every incoming CQL command request, authentication to a node. See the docs
 # on audit_logging for full details about the various configuration options.
+# NOTE: Chronicle Queue has changed the enums used for log rolling roll_cycle).
+# Older legacy options will still work for the foreseeable future, but you will see warnings in logs and future dependency
+# upgrades may break your log rolling param. The default log rolling param will be changed with the next major release
+# from HOURLY to FAST_HOURLY, primarily different on how frequently indexes are built. For more info refer to:
+# net.openhft.chronicle.queue.RollCycles
 audit_logging_options:
     enabled: false
     logger:
@@ -1595,3 +1627,11 @@ enable_drop_compact_storage: false
   # Default offset_rows_failure_threshold is 20000, may differ if emulate_dbaas_defaults is enabled
   # offset_rows_warn_threshold: 10000
   # offset_rows_failure_threshold: 20000
+
+  # Guardrail to warn or fail when a SELECT query has more column value filters than threshold.
+  # Note that restrictions on indexed columns can be expanded to multiple column filters if the indexes have an analyzer.
+  # In that case, there will be a filter for every token produced by the analyzer for the queried column value. This can
+  # prevent that productive analyzers such as n-gram explode the query to a large number of filtering operations.
+  # Default -1 to disable, may differ if emulate_dbaas_defaults is enabled
+  # query_filters_warn_threshold: -1
+  # query_filters_fail_threshold: -1

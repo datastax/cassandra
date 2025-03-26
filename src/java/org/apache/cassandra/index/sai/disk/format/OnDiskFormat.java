@@ -164,7 +164,12 @@ public interface OnDiskFormat
      * @param indexContext The {@link IndexContext} for the index
      * @return The set of {@link IndexComponentType} for the per-index index
      */
-    public Set<IndexComponentType> perIndexComponentTypes(IndexContext indexContext);
+    default public Set<IndexComponentType> perIndexComponentTypes(IndexContext indexContext)
+    {
+        return perIndexComponentTypes(indexContext.getValidator());
+    }
+
+    public Set<IndexComponentType> perIndexComponentTypes(AbstractType<?> validator);
 
     /**
      * Return the number of open per-SSTable files that can be open during a query.
@@ -201,5 +206,13 @@ public interface OnDiskFormat
      *
      * @return The encoded {@link ByteComparable} object
      */
-    public ByteComparable encodeForTrie(ByteBuffer input, AbstractType<?> type);
+    ByteComparable encodeForTrie(ByteBuffer input, AbstractType<?> type);
+
+    /**
+     * Inverse of {@link #encodeForTrie(ByteBuffer, AbstractType)}
+     */
+    ByteBuffer decodeFromTrie(ByteComparable value, AbstractType<?> type);
+
+
+
 }

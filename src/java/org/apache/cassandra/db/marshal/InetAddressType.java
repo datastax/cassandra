@@ -35,6 +35,12 @@ public class InetAddressType extends AbstractType<InetAddress>
 
     InetAddressType() {super(ComparisonType.BYTE_ORDER);} // singleton
 
+    @Override
+    public boolean allowsEmpty()
+    {
+        return true;
+    }
+
     public boolean isEmptyValueMeaningless()
     {
         return true;

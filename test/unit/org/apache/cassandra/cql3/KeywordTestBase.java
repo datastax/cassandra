@@ -27,9 +27,12 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 
 import org.junit.Assert;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.exceptions.SyntaxException;
+import org.apache.cassandra.service.StorageService;
+import org.assertj.core.api.Assertions;
 
 /**
  * This class tests all keywords which took a long time. Hence it was split into multiple
@@ -44,6 +47,12 @@ public abstract class KeywordTestBase extends CQLTester
                                                       return new Object[] { keyword,ReservedKeywords.isReserved(keyword) };
                                                   })
                                                   .collect(Collectors.toList());
+
+    static
+    {
+        // ensure that ANN is a separate keyword, so it's included on this tests (see CNDB-12733)
+        Assertions.assertThat(keywords).contains(new Object[]{"ANN", false});
+    }
     
     public static Collection<Object[]> getKeywordsForSplit(int split, int totalSplits)
     {
@@ -57,6 +66,12 @@ public abstract class KeywordTestBase extends CQLTester
     {
         this.keyword = keyword;
         this.isReserved = isReserved;
+    }
+
+    @BeforeClass
+    public static void beforeClass()
+    {
+        StorageService.instance.setUpDistributedSystemKeyspaces();
     }
 
     @Test

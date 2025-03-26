@@ -79,11 +79,14 @@ public class AdaptiveControllerTest extends ControllerTest
                                       Controller.DEFAULT_EXPIRED_SSTABLE_CHECK_FREQUENCY_SECONDS,
                                       Controller.DEFAULT_ALLOW_UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION,
                                       numShards,
+                                      false,
                                       sstableSizeMB << 20,
                                       Controller.DEFAULT_SSTABLE_GROWTH,
                                       Controller.DEFAULT_RESERVED_THREADS,
                                       Controller.DEFAULT_RESERVED_THREADS_TYPE,
                                       Controller.DEFAULT_OVERLAP_INCLUSION_METHOD,
+                                      true,
+                                      false,
                                       interval,
                                       minW,
                                       maxW,
@@ -92,6 +95,22 @@ public class AdaptiveControllerTest extends ControllerTest
                                       maxAdaptiveCompactions,
                                       keyspaceName,
                                       tableName);
+    }
+
+    @Test
+    public void testLongTableNameFromOptions()
+    {
+        String longTableName = "test_create_k8yq1r75bpzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz";
+        when(cfs.getTableName()).thenReturn(longTableName);
+
+        Map<String, String> options = new HashMap<>();
+        options.put(AdaptiveController.THRESHOLD, "0.15");
+        // Calls fromOptions on long table name, which tries to read options from a file.
+        // The too long file name should not lead to a failure.
+        Controller controller = testFromOptions(true, options);
+        assertTrue(controller instanceof AdaptiveController);
+
+        when(cfs.getTableName()).thenReturn(tableName);
     }
 
     @Test

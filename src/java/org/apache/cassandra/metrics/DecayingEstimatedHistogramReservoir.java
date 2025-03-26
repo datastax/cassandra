@@ -38,6 +38,7 @@ import org.apache.cassandra.utils.EstimatedHistogram;
 
 import static java.lang.Math.max;
 import static java.lang.Math.min;
+import static org.apache.cassandra.utils.EstimatedHistogram.USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES;
 
 /**
  * A decaying histogram reservoir where values collected during each minute will be twice as significant as the values
@@ -80,7 +81,6 @@ import static java.lang.Math.min;
  */
 public class DecayingEstimatedHistogramReservoir implements Reservoir
 {
-
     /**
      * The default number of decayingBuckets. Use this bucket count to reduce memory allocation for bucket offsets.
      */
@@ -217,7 +217,7 @@ public class DecayingEstimatedHistogramReservoir implements Reservoir
 
         if (bucketCount == DEFAULT_BUCKET_COUNT)
         {
-            if (CassandraRelevantProperties.USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES.getBoolean())
+            if (USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES)
                 bucketOffsets = considerZeroes ? DEFAULT_DSE_WITH_ZERO_BUCKET_OFFSETS : DEFAULT_DSE_WITHOUT_ZERO_BUCKET_OFFSETS;
             else
                 bucketOffsets = considerZeroes ? DEFAULT_WITH_ZERO_BUCKET_OFFSETS : DEFAULT_WITHOUT_ZERO_BUCKET_OFFSETS;
@@ -273,7 +273,7 @@ public class DecayingEstimatedHistogramReservoir implements Reservoir
     @VisibleForTesting
     public static int findIndex(long[] bucketOffsets, long value)
     {
-        if (CassandraRelevantProperties.USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES.getBoolean())
+        if (USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES)
             return findIndexDse(bucketOffsets, value);
 
         // values below zero are nonsense, but we have never failed when presented them

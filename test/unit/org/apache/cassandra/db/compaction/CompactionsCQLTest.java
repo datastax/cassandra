@@ -642,10 +642,9 @@ public class CompactionsCQLTest extends CQLTester
         @Override
         public CompactionAwareWriter getCompactionAwareWriter(CompactionRealm realm,
                                                               Directories directories,
-                                                              LifecycleTransaction txn,
                                                               Set<SSTableReader> nonExpiredSSTables)
         {
-            return new MaxSSTableSizeWriter(realm, directories, txn, nonExpiredSSTables, 1 << 20, 1)
+            return new MaxSSTableSizeWriter(realm, directories, transaction, nonExpiredSSTables, 1 << 20, 1)
             {
                 int switchCount = 0;
                 public void switchCompactionWriter(Directories.DataDirectory directory, DecoratedKey nextKey)

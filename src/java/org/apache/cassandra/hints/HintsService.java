@@ -397,6 +397,22 @@ public final class HintsService implements HintsServiceMBean
     }
 
     /**
+     * @return the number of all hint files on disk, including corrupted files
+     */
+    public int getTotalFilesNum()
+    {
+        return catalog.stores().mapToInt(HintsStore::getTotalFilesNum).sum();
+    }
+
+    /**
+     * @return the number of corrupted hint files on disk.
+     */
+    public int getCorruptedFilesNum()
+    {
+        return catalog.stores().mapToInt(HintsStore::getCorruptedFilesNum).sum();
+    }
+
+    /**
      * Checks hints files total size on disk exceeds the total maximum.
      * @return true if the max is exceeded
      */

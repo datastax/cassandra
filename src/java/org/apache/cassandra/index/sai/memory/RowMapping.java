@@ -17,18 +17,19 @@
  */
 package org.apache.cassandra.index.sai.memory;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Iterator;
+import java.util.List;
 
-import com.carrotsearch.hppc.IntArrayList;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.rows.RangeTombstoneMarker;
 import org.apache.cassandra.db.rows.Row;
-import org.apache.cassandra.db.tries.MemtableTrie;
-import org.apache.cassandra.db.tries.Trie;
-import org.apache.cassandra.index.sai.utils.AbstractIterator;
+import org.apache.cassandra.db.tries.InMemoryTrie;
+import org.apache.cassandra.db.tries.TrieSpaceExhaustedException;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
-import org.apache.cassandra.io.compress.BufferType;
+import org.apache.cassandra.index.sai.utils.TypeUtil;
+import org.apache.cassandra.utils.AbstractGuavaIterator;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
@@ -44,7 +45,7 @@ public class RowMapping
     public static final RowMapping DUMMY = new RowMapping()
     {
         @Override
-        public Iterator<Pair<ByteComparable, IntArrayList>> merge(MemtableIndex index) { return Collections.emptyIterator(); }
+        public Iterator<Pair<ByteComparable, List<RowIdWithFrequency>>> merge(MemtableIndex index) { return Collections.emptyIterator(); }
 
         @Override
         public void complete() {}
@@ -65,7 +66,7 @@ public class RowMapping
         }
     };
 
-    private final MemtableTrie<Integer> rowMapping = new MemtableTrie<>(BufferType.OFF_HEAP);
+    private final InMemoryTrie<Integer> rowMapping = InMemoryTrie.shortLived(TypeUtil.BYTE_COMPARABLE_VERSION);
 
     private volatile boolean complete = false;
 
@@ -89,6 +90,16 @@ public class RowMapping
         return DUMMY;
     }
 
+    public static class RowIdWithFrequency {
+        public final int rowId;
+        public final int frequency;
+
+        public RowIdWithFrequency(int rowId, int frequency) {
+            this.rowId = rowId;
+            this.frequency = frequency;
+        }
+    }
+    
     /**
      * Merge IndexMemtable(index term to PrimaryKeys mappings) with row mapping of a sstable
      * (PrimaryKey to RowId mappings).
@@ -97,33 +108,32 @@ public class RowMapping
      *
      * @return iterator of index term to postings mapping exists in the sstable
      */
-    public Iterator<Pair<ByteComparable, IntArrayList>> merge(MemtableIndex index)
+    public Iterator<Pair<ByteComparable, List<RowIdWithFrequency>>> merge(MemtableIndex index)
     {
         assert complete : "RowMapping is not built.";
 
-        Iterator<Pair<ByteComparable, Iterator<PrimaryKey>>> iterator = index.iterator(minKey.partitionKey(), maxKey.partitionKey());
-        return new AbstractIterator<Pair<ByteComparable, IntArrayList>>()
+        var it = index.iterator(minKey.partitionKey(), maxKey.partitionKey());
+        return new AbstractGuavaIterator<>()
         {
             @Override
-            protected Pair<ByteComparable, IntArrayList> computeNext()
+            protected Pair<ByteComparable, List<RowIdWithFrequency>> computeNext()
             {
-                while (iterator.hasNext())
+                while (it.hasNext())
                 {
-                    Pair<ByteComparable, Iterator<PrimaryKey>> pair = iterator.next();
+                    var pair = it.next();
 
-                    IntArrayList postings = null;
-                    Iterator<PrimaryKey> primaryKeys = pair.right;
+                    List<RowIdWithFrequency> postings = null;
+                    var primaryKeysWithFreq = pair.right;
 
-                    while (primaryKeys.hasNext())
+                    for (var pkWithFreq : primaryKeysWithFreq)
                     {
-                        PrimaryKey primaryKey = primaryKeys.next();
-                        ByteComparable byteComparable = v -> primaryKey.asComparableBytes(v);
+                        ByteComparable byteComparable = pkWithFreq.pk::asComparableBytes;
                         Integer segmentRowId = rowMapping.get(byteComparable);
 
                         if (segmentRowId != null)
                         {
-                            postings = postings == null ? new IntArrayList() : postings;
-                            postings.add(segmentRowId);
+                            postings = postings == null ? new ArrayList<>() : postings;
+                            postings.add(new RowIdWithFrequency(segmentRowId, pkWithFreq.frequency));
                         }
                     }
                     if (postings != null && !postings.isEmpty())
@@ -146,7 +156,7 @@ public class RowMapping
     /**
      * Include PrimaryKey to RowId mapping
      */
-    public void add(PrimaryKey key, long sstableRowId) throws MemtableTrie.SpaceExhaustedException
+    public void add(PrimaryKey key, long sstableRowId) throws TrieSpaceExhaustedException
     {
         assert !complete : "Cannot modify built RowMapping.";
 
@@ -158,7 +168,7 @@ public class RowMapping
         int segmentRowId = (int) sstableRowId;
 
         ByteComparable byteComparable = v -> key.asComparableBytes(v);
-        rowMapping.apply(Trie.singleton(byteComparable, segmentRowId), (existing, neww) -> neww);
+        rowMapping.putSingleton(byteComparable, segmentRowId, (existing, neww) -> neww);
 
         maxSegmentRowId = Math.max(maxSegmentRowId, segmentRowId);
 

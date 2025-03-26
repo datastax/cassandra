@@ -22,6 +22,8 @@ import java.nio.ByteBuffer;
 import java.util.Collection;
 import java.util.List;
 
+import com.google.common.collect.Range;
+
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.db.marshal.ByteBufferAccessor;
 import org.apache.cassandra.db.marshal.ValueAccessor;
@@ -183,6 +185,37 @@ public abstract class CollectionSerializer<T> extends TypeSerializer<T>
                                                       boolean frozen);
 
     /**
+     * Returns the index of an element in a serialized collection.
+     * <p>
+     * Note that this is only supported by sets and maps, but not by lists.
+     *
+     * @param collection The serialized collection. This cannot be {@code null}.
+     * @param key The key for which the index must be found. This cannot be {@code null} nor
+     * {@link ByteBufferUtil#UNSET_BYTE_BUFFER}).
+     * @param comparator The type to use to compare the {@code key} value to those in the collection.
+     * @return The index of the element associated with {@code key} if one exists, {@code -1} otherwise.
+     */
+    public abstract int getIndexFromSerialized(ByteBuffer collection, ByteBuffer key, AbstractType<?> comparator);
+
+    /**
+     * Returns the range of indexes corresponding to the specified range of elements in the serialized collection.
+     * <p>
+     * Note that this is only supported by sets and maps, but not by lists.
+     *
+     * @param collection The serialized collection. This cannot be {@code null}.
+     * @param from  The left bound of the slice to extract. This cannot be {@code null} but if this is
+     * {@link ByteBufferUtil#UNSET_BYTE_BUFFER}, then the returned slice starts at the beginning of the collection.
+     * @param to The right bound of the slice to extract. This cannot be {@code null} but if this is
+     * {@link ByteBufferUtil#UNSET_BYTE_BUFFER}, then the returned slice ends at the end of the collection.
+     * @param comparator The type to use to compare the {@code from} and {@code to} values to those in the collection.
+     * @return The range of indexes corresponding to specified range of elements.
+     */
+    public abstract Range<Integer> getIndexesRangeFromSerialized(ByteBuffer collection,
+                                                                 ByteBuffer from,
+                                                                 ByteBuffer to,
+                                                                 AbstractType<?> comparator);
+
+    /**
      * Creates a new serialized map composed from the data from {@code input} between {@code startPos}
      * (inclusive) and {@code endPos} (exclusive), assuming that data holds {@code count} elements.
      */
@@ -198,5 +231,48 @@ public abstract class CollectionSerializer<T> extends TypeSerializer<T>
         output.position(0);
         ByteBufferUtil.copyBytes(input, startPos, output, sizeLen, bodyLen);
         return output;
+    }
+
+    /**
+     * Checks if the specified serialized collection contains the specified serialized collection element.
+     *
+     * @param elementType the type of the collection elements
+     * @param collection a serialized collection
+     * @param element a serialized collection element
+     * @param hasKeys whether the collection has keys, that is, it's a map
+     * @param getKeys whether to check keys or values
+     * @param version the protocol version uses for serialization
+     * @return {@code true} if the collection contains the element, {@code false} otherwise
+     */
+    public static boolean contains(AbstractType<?> elementType,
+                                   ByteBuffer collection,
+                                   ByteBuffer element,
+                                   boolean hasKeys,
+                                   boolean getKeys,
+                                   ProtocolVersion version)
+    {
+        assert hasKeys || !getKeys;
+        int size = readCollectionSize(collection, ByteBufferAccessor.instance, version);
+        int offset = sizeOfCollectionSize(size, version);
+
+        for (int i = 0; i < size; i++)
+        {
+            // read the key (if the collection has keys)
+            if (hasKeys)
+            {
+                ByteBuffer key = readValue(collection, ByteBufferAccessor.instance, offset, version);
+                if (getKeys && elementType.compare(key, element) == 0)
+                    return true;
+                offset += sizeOfValue(key, ByteBufferAccessor.instance, version);
+            }
+
+            // read the value
+            ByteBuffer value = readValue(collection, ByteBufferAccessor.instance, offset, version);
+            if (!getKeys && elementType.compare(value, element) == 0)
+                return true;
+            offset += sizeOfValue(value, ByteBufferAccessor.instance, version);
+        }
+
+        return false;
     }
 }

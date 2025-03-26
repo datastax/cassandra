@@ -31,16 +31,19 @@ import org.apache.cassandra.cache.ChunkCache;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.Directories;
+import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
+import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.sstable.metadata.ZeroCopyMetadata;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.PathUtils;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.INativeLibrary;
 
@@ -107,11 +110,11 @@ public interface StorageProvider
      *
      * @param ksMetadata   The keyspace metadata, can be null. This is used when schema metadata is
      *                     not available in {@link Schema}, eg. CNDB backup & restore
-     * @param keyspaceName the name of the keyspace
+     * @param tableMetadata the metadata of the table
      * @param dirs         current local data directories
      * @return data directories that are created
      */
-    Directories.DataDirectory[] createDataDirectories(@Nullable KeyspaceMetadata ksMetadata, String keyspaceName, Directories.DataDirectory[] dirs);
+    Directories.DataDirectory[] createDataDirectories(@Nullable KeyspaceMetadata ksMetadata, TableMetadata tableMetadata, Directories.DataDirectory[] dirs);
 
     /**
      * Create directory for the given path and type, either locally or remotely if any remote storage parameters are passed in.
@@ -148,6 +151,20 @@ public interface StorageProvider
      *   configured as appropriate.
      */
     FileHandle.Builder fileHandleBuilderFor(Descriptor descriptor, Component component);
+
+    /**
+     * Creates a new {@link FileHandle.Builder} for the given primary index component during primary index writing time.
+     * <p>
+     * The returned builder will be configured with the appropriate "access mode" (mmap or not), and the "chunk cache"
+     * will have been set if appropriate.
+     *
+     * @param descriptor    descriptor for the sstable whose handler is built.
+     * @param component     sstable component for which to build the handler.
+     * @param operationType the operation for current primary index writer
+     * @return a new {@link FileHandle.Builder} for the provided primary index component with access mode and chunk cache
+     * configured as appropriate.
+     */
+    FileHandle.Builder primaryIndexWriteTimeFileHandleBuilderFor(Descriptor descriptor, Component component, OperationType operationType);
 
     /**
      * Creates a new {@link FileHandle.Builder} for the given sstable component.
@@ -189,7 +206,7 @@ public interface StorageProvider
 
     /**
      * Creates a new {@link FileHandle.Builder} for the given SAI component and context (for index with per-index files),
-     * that is suitable for reading the component "at flush time", that is typcally for when we need to access the
+     * that is suitable for reading the component during index build, that is typcally for when we need to access the
      * component to complete the writing of another related component.
      * <p>
      * Other the fact that this method will be called a different time, it's requirements are the same than for
@@ -199,7 +216,7 @@ public interface StorageProvider
      * @return a new {@link FileHandle.Builder} for the provided SAI component with access mode and chunk cache
      *   configured as appropriate.
      */
-    FileHandle.Builder flushTimeFileHandleBuilderFor(IndexComponent.ForRead component);
+    FileHandle.Builder indexBuildTimeFileHandleBuilderFor(IndexComponent.ForRead component);
 
     class DefaultProvider implements StorageProvider
     {
@@ -222,7 +239,7 @@ public interface StorageProvider
         }
 
         @Override
-        public Directories.DataDirectory[] createDataDirectories(@Nullable KeyspaceMetadata ksMetadata, String keyspaceName, Directories.DataDirectory[] dirs)
+        public Directories.DataDirectory[] createDataDirectories(@Nullable KeyspaceMetadata ksMetadata, TableMetadata tableMetadata, Directories.DataDirectory[] dirs)
         {
             // data directories are already created in DatabadeDescriptor#createAllDirectories
             return dirs;
@@ -240,14 +257,15 @@ public interface StorageProvider
         public void invalidateFileSystemCache(File file)
         {
             INativeLibrary.instance.trySkipCache(file, 0, 0);
+            if (ChunkCache.instance != null)
+                ChunkCache.instance.invalidateFile(file);
         }
 
         @Override
         public void invalidateFileSystemCache(Descriptor desc, boolean tidied)
         {
-            StorageProvider.instance.invalidateFileSystemCache(desc.fileFor(Component.DATA));
-            StorageProvider.instance.invalidateFileSystemCache(desc.fileFor(Component.ROW_INDEX));
-            StorageProvider.instance.invalidateFileSystemCache(desc.fileFor(Component.PARTITION_INDEX));
+            for (Component component : SSTable.discoverComponentsFor(desc))
+                invalidateFileSystemCache(desc.fileFor(component));
         }
 
         protected Config.DiskAccessMode accessMode(Component component)
@@ -270,6 +288,14 @@ public interface StorageProvider
             return new FileHandle.Builder(descriptor.fileFor(component))
                    .mmapped(accessMode(component) == Config.DiskAccessMode.mmap)
                    .withChunkCache(ChunkCache.instance);
+        }
+
+        @Override
+        public FileHandle.Builder primaryIndexWriteTimeFileHandleBuilderFor(Descriptor descriptor, Component component, OperationType operationType)
+        {
+            // By default, no difference between accesses during sstable writing and "at query time", but subclasses may need
+            // to differenciate both.
+            return fileHandleBuilderFor(descriptor, component);
         }
 
         @Override
@@ -311,7 +337,7 @@ public interface StorageProvider
         }
 
         @Override
-        public FileHandle.Builder flushTimeFileHandleBuilderFor(IndexComponent.ForRead component)
+        public FileHandle.Builder indexBuildTimeFileHandleBuilderFor(IndexComponent.ForRead component)
         {
             // By default, no difference between accesses "at flush time" and "at query time", but subclasses may need
             // to differenciate both.

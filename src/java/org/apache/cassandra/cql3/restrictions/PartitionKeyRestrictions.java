@@ -20,6 +20,7 @@ package org.apache.cassandra.cql3.restrictions;
 import java.nio.ByteBuffer;
 import java.util.List;
 
+import org.apache.cassandra.index.IndexRegistry;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.statements.Bound;
@@ -31,7 +32,7 @@ import org.apache.cassandra.service.QueryState;
  */
 interface PartitionKeyRestrictions extends Restrictions
 {
-    public PartitionKeyRestrictions mergeWith(Restriction restriction);
+    public PartitionKeyRestrictions mergeWith(Restriction restriction, IndexRegistry indexRegistry);
 
     public List<ByteBuffer> values(QueryOptions options, QueryState queryState);
 

@@ -19,9 +19,11 @@ package org.apache.cassandra.transport.messages;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 
 import io.netty.buffer.ByteBuf;
 
+import org.apache.cassandra.auth.IAuthenticator;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
@@ -72,7 +74,12 @@ public class StartupMessage extends Message.Request
     }
 
     @Override
-    protected Message.Response execute(QueryState state, long queryStartNanoTime, boolean traceRequest)
+    protected CompletableFuture<Response> maybeExecuteAsync(QueryState queryState, long queryStartNanoTime, boolean traceRequest)
+    {
+        return CompletableFuture.completedFuture(executeSync(queryState, queryStartNanoTime, traceRequest));
+    }
+
+    private Message.Response executeSync(QueryState state, long queryStartNanoTime, boolean traceRequest)
     {
         String cqlVersion = options.get(CQL_VERSION);
         if (cqlVersion == null)
@@ -121,8 +128,9 @@ public class StartupMessage extends Message.Request
             clientState.setDriverVersion(options.get(DRIVER_VERSION));
         }
 
-        if (DatabaseDescriptor.getAuthenticator().requireAuthentication())
-            return new AuthenticateMessage(DatabaseDescriptor.getAuthenticator().getClass().getName());
+        IAuthenticator authenticator = DatabaseDescriptor.getAuthenticator();
+        if (authenticator.requireAuthentication())
+            return authenticator.getAuthenticateMessage(clientState);
         else
             return new ReadyMessage();
     }

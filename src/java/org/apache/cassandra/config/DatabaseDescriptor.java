@@ -87,6 +87,7 @@ public class DatabaseDescriptor
 {
     static
     {
+        System.setProperty("chronicle.analytics.disable", "true");
         // This static block covers most usages
         FBUtilities.preventIllegalAccessWarnings();
         System.setProperty("io.netty.transport.estimateSizeOnSubmit", "false");
@@ -157,7 +158,6 @@ public class DatabaseDescriptor
     private static final int searchConcurrencyFactor = Integer.parseInt(System.getProperty(Config.PROPERTY_PREFIX + "search_concurrency_factor", "1"));
 
     private static volatile boolean disableSTCSInL0 = Boolean.getBoolean(Config.PROPERTY_PREFIX + "disable_stcs_in_l0");
-    private static final boolean unsafeSystem = Boolean.getBoolean(Config.PROPERTY_PREFIX + "unsafesystem");
 
     // turns some warnings into exceptions for testing
     private static final boolean strictRuntimeChecks = Boolean.getBoolean("cassandra.strict.runtime.checks");
@@ -529,6 +529,16 @@ public class DatabaseDescriptor
         if (conf.concurrent_writes < 2 && System.getProperty("cassandra.test.fail_mv_locks_count", "").isEmpty())
         {
             throw new ConfigurationException("concurrent_writes must be at least 2, but was " + conf.concurrent_writes, false);
+        }
+
+        if (conf.concurrent_coordinator_reads < 2)
+        {
+            throw new ConfigurationException("concurrent_coordinator_reads must be at least 2, but was " + conf.concurrent_coordinator_reads, false);
+        }
+
+        if (conf.concurrent_coordinator_writes < 2)
+        {
+            throw new ConfigurationException("concurrent_coordinator_writes must be at least 2, but was " + conf.concurrent_coordinator_writes, false);
         }
 
         if (conf.concurrent_counter_writes < 2)
@@ -1814,6 +1824,34 @@ public class DatabaseDescriptor
         conf.phi_convict_threshold = phiConvictThreshold;
     }
 
+    public static int getConcurrentCoordinatorReaders()
+    {
+        return conf.concurrent_coordinator_reads;
+    }
+
+    public static void setConcurrentCoordinatorReaders(int concurrent_reads)
+    {
+        if (concurrent_reads < 0)
+        {
+            throw new IllegalArgumentException("Concurrent coordinator readers must be non-negative");
+        }
+        conf.concurrent_coordinator_reads = concurrent_reads;
+    }
+
+    public static int getConcurrentCoordinatorWriters()
+    {
+        return conf.concurrent_coordinator_writes;
+    }
+
+    public static void setConcurrentCoordinatorWriters(int concurrent_writers)
+    {
+        if (concurrent_writers < 0)
+        {
+            throw new IllegalArgumentException("Concurrent coordinator writers must be non-negative");
+        }
+        conf.concurrent_coordinator_writes = concurrent_writers;
+    }
+
     public static int getConcurrentReaders()
     {
         return conf.concurrent_reads;
@@ -1823,7 +1861,7 @@ public class DatabaseDescriptor
     {
         if (concurrent_reads < 0)
         {
-            throw new IllegalArgumentException("Concurrent reads must be non-negative");
+            throw new IllegalArgumentException("Concurrent readers must be non-negative");
         }
         conf.concurrent_reads = concurrent_reads;
     }
@@ -1837,7 +1875,7 @@ public class DatabaseDescriptor
     {
         if (concurrent_writers < 0)
         {
-            throw new IllegalArgumentException("Concurrent reads must be non-negative");
+            throw new IllegalArgumentException("Concurrent writers must be non-negative");
         }
         conf.concurrent_writes = concurrent_writers;
     }
@@ -2080,7 +2118,9 @@ public class DatabaseDescriptor
 
     public static Config.FlushCompression getFlushCompression()
     {
-        return conf.flush_compression;
+        return Objects.requireNonNullElseGet(conf.flush_compression, () -> shouldUseAdaptiveCompressionByDefault()
+                                                                           ? Config.FlushCompression.adaptive
+                                                                           : Config.FlushCompression.fast);
     }
 
     public static void setFlushCompression(Config.FlushCompression compression)
@@ -2088,7 +2128,12 @@ public class DatabaseDescriptor
         conf.flush_compression = compression;
     }
 
-   /**
+    public static boolean shouldUseAdaptiveCompressionByDefault()
+    {
+        return CassandraRelevantProperties.DEFAULT_SSTABLE_COMPRESSION.getString().equals("adaptive");
+    }
+
+    /**
     * Maximum number of buffers in the compression pool. The default value is 3, it should not be set lower than that
     * (one segment in compression, one written to, one in reserve); delays in compression may cause the log to use
     * more, depending on how soon the sync policy stops all writing threads.
@@ -2775,6 +2820,11 @@ public class DatabaseDescriptor
         return conf.file_cache_size_in_mb;
     }
 
+    public static void disableChunkCache()
+    {
+        conf.file_cache_enabled = false;
+    }
+
     public static void enableChunkCache(int sizeInMB)
     {
         conf.file_cache_enabled = true;
@@ -3290,11 +3340,6 @@ public class DatabaseDescriptor
         return searchConcurrencyFactor;
     }
 
-    public static boolean isUnsafeSystem()
-    {
-        return unsafeSystem;
-    }
-
     public static boolean diagnosticEventsEnabled()
     {
         return conf.diagnostic_events_enabled;
@@ -3644,7 +3689,7 @@ public class DatabaseDescriptor
 
     public static int getSAISegmentWriteBufferSpace()
     {
-        return conf.sai_options.segment_write_buffer_space_mb;
+        return conf == null ? StorageAttachedIndexOptions.DEFAULT_SEGMENT_BUFFER_MB : conf.sai_options.segment_write_buffer_space_mb;
     }
 
     public static void setSAISegmentWriteBufferSpace(int bufferSpace)
@@ -3705,5 +3750,15 @@ public class DatabaseDescriptor
         Preconditions.checkArgument(factor > 0.0, "ANN brute force expense factor must be greater than zero");
         Preconditions.checkArgument(factor <= StorageAttachedIndexOptions.MAXIMUM_ANN_BRUTE_FORCE_FACTOR, "ANN brute force expense factor must be at most " + StorageAttachedIndexOptions.MAXIMUM_ANN_BRUTE_FORCE_FACTOR);
         conf.sai_options.ann_brute_force_factor = factor;
+    }
+
+    public static long getNativeTransportTimeout(TimeUnit timeUnit)
+    {
+        return timeUnit.convert(conf.native_transport_timeout_in_ms, TimeUnit.MILLISECONDS);
+    }
+
+    public static void setNativeTransportTimeout(long timeout, TimeUnit timeUnit)
+    {
+        conf.native_transport_timeout_in_ms = timeUnit.toMillis(timeout);
     }
 }

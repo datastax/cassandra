@@ -23,6 +23,7 @@ import java.util.UUID;
 import javax.annotation.Nullable;
 
 import org.apache.cassandra.db.compaction.OperationType;
+import org.apache.cassandra.db.lifecycle.View;
 import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 

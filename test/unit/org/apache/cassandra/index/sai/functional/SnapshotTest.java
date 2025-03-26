@@ -52,7 +52,6 @@ public class SnapshotTest extends SAITester
         // Insert some initial data and create the index over it
         execute("INSERT INTO %s (id1, v1) VALUES ('0', 0);");
         IndexContext numericIndexContext = createIndexContext(createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1")), Int32Type.instance);
-        waitForIndexQueryable();
         flush();
         verifyIndexFiles(numericIndexContext, null, 1, 1, 0, 1, 0);
         // Note: This test will fail here if it is run on its own because the per-index validation
@@ -130,7 +129,6 @@ public class SnapshotTest extends SAITester
 
         // create index
         IndexContext numericIndexContext = createIndexContext(createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1")), Int32Type.instance);
-        waitForIndexQueryable();
         verifyIndexFiles(numericIndexContext, null, 2, 0);
         assertValidationCount(0, 0);
 
@@ -150,7 +148,7 @@ public class SnapshotTest extends SAITester
 
         // Truncate the table
         truncate(false);
-        waitForAssert(() -> verifyNoIndexFiles());
+        waitForAssert(this::verifyNoIndexFiles);
         assertNumRows(0, "SELECT * FROM %%s WHERE v1 >= 0");
         assertValidationCount(0, 0);
 

@@ -18,12 +18,13 @@
 package org.apache.cassandra.index.sai.disk;
 
 import java.nio.ByteBuffer;
+import java.util.List;
 import java.util.NoSuchElementException;
 
 import com.google.common.annotations.VisibleForTesting;
 
+import org.agrona.collections.Int2IntHashMap;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
-import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.lucene.util.ArrayUtil;
 import org.apache.lucene.util.ByteBlockPool;
 import org.apache.lucene.util.BytesRef;
@@ -43,12 +44,15 @@ public class RAMStringIndexer
     // counters need to be separate so that we can trigger flushes if either ByteBlockPool hits maximum size
     private final Counter termsBytesUsed;
     private final Counter slicesBytesUsed;
-    
-    private int rowCount = 0;
+
     private int[] lastSegmentRowID = new int[RAMPostingSlices.DEFAULT_TERM_DICT_SIZE];
 
-    public RAMStringIndexer()
+    private final boolean writeFrequencies;
+    private final Int2IntHashMap docLengths = new Int2IntHashMap(Integer.MIN_VALUE);
+
+    public RAMStringIndexer(boolean writeFrequencies)
     {
+        this.writeFrequencies = writeFrequencies;
         termsBytesUsed = Counter.newCounter();
         slicesBytesUsed = Counter.newCounter();
 
@@ -56,7 +60,7 @@ public class RAMStringIndexer
 
         termsHash = new BytesRefHash(termsPool);
 
-        slices = new RAMPostingSlices(slicesBytesUsed);
+        slices = new RAMPostingSlices(slicesBytesUsed, writeFrequencies);
     }
 
     public long estimatedBytesUsed()
@@ -76,14 +80,19 @@ public class RAMStringIndexer
 
     public boolean isEmpty()
     {
-        return rowCount == 0;
+        return docLengths.isEmpty();
+    }
+
+    public Int2IntHashMap getDocLengths()
+    {
+        return docLengths;
     }
 
     /**
      * EXPENSIVE OPERATION due to sorting the terms, only call once.
      */
     // TODO: assert or throw and exception if getTermsWithPostings is called > 1
-    public TermsIterator getTermsWithPostings(ByteBuffer minTerm, ByteBuffer maxTerm)
+    public TermsIterator getTermsWithPostings(ByteBuffer minTerm, ByteBuffer maxTerm, ByteComparable.Version byteComparableVersion)
     {
         final int[] sortedTermIDs = termsHash.sort();
 
@@ -136,41 +145,63 @@ public class RAMStringIndexer
             private ByteComparable asByteComparable(byte[] bytes, int offset, int length)
             {
                 // The bytes were encoded when they were inserted into the termsHash.
-                return v -> ByteSource.fixedLength(bytes, offset, length);
+                return ByteComparable.preencoded(byteComparableVersion, bytes, offset, length);
             }
         };
     }
 
-    public long add(BytesRef term, int segmentRowId)
+    /**
+     * @return bytes allocated.  may be zero if the (term, row) pair is a duplicate
+     */
+    public long addAll(List<BytesRef> terms, int segmentRowId)
     {
         long startBytes = estimatedBytesUsed();
-        int termID = termsHash.add(term);
+        Int2IntHashMap frequencies = new Int2IntHashMap(Integer.MIN_VALUE);
+        Int2IntHashMap deltas = new Int2IntHashMap(Integer.MIN_VALUE);
 
-        if (termID >= 0)
+        for (BytesRef term : terms)
         {
-            // firs time seeing this term, create the term's first slice !
-            slices.createNewSlice(termID);
+            int termID = termsHash.add(term);
+            boolean firstOccurrence = termID >= 0;
+
+            if (firstOccurrence)
+            {
+                // first time seeing this term in any row, create the term's first slice !
+                slices.createNewSlice(termID);
+                // grow the termID -> last segment array if necessary
+                if (termID >= lastSegmentRowID.length - 1)
+                    lastSegmentRowID = ArrayUtil.grow(lastSegmentRowID, termID + 1);
+                if (writeFrequencies)
+                    frequencies.put(termID, 1);
+            }
+            else
+            {
+                termID = (-termID) - 1;
+                // compaction should call this method only with increasing segmentRowIds
+                assert segmentRowId >= lastSegmentRowID[termID];
+                // increment frequency
+                if (writeFrequencies)
+                    frequencies.put(termID, frequencies.getOrDefault(termID, 0) + 1);
+                // Skip computing a delta if we've already seen this term in this row
+                if (segmentRowId == lastSegmentRowID[termID])
+                    continue;
+            }
+
+            // Compute the delta from the last time this term was seen, to this row
+            int delta = segmentRowId - lastSegmentRowID[termID];
+            // sanity check that we're advancing the row id, i.e. no duplicate entries.
+            assert firstOccurrence || delta > 0;
+            deltas.put(termID, delta);
+            lastSegmentRowID[termID] = segmentRowId;
         }
-        else
-        {
-            termID = (-termID) - 1;
-        }
 
-        if (termID >= lastSegmentRowID.length - 1)
-        {
-            lastSegmentRowID = ArrayUtil.grow(lastSegmentRowID, termID + 1);
-        }
+        // add the postings now that we know the frequencies
+        deltas.forEachInt((termID, delta) -> {
+            slices.writePosting(termID, delta, frequencies.get(termID));
+        });
 
-        int delta = segmentRowId - lastSegmentRowID[termID];
+        docLengths.put(segmentRowId, terms.size());
 
-        lastSegmentRowID[termID] = segmentRowId;
-
-        slices.writeVInt(termID, delta);
-
-        long allocatedBytes = estimatedBytesUsed() - startBytes;
-
-        rowCount++;
-
-        return allocatedBytes;
+        return estimatedBytesUsed() - startBytes;
     }
 }

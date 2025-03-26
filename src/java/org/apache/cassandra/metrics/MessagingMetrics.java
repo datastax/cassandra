@@ -62,7 +62,8 @@ public class MessagingMetrics implements InboundMessageHandlers.GlobalMetricCall
             this.allLatency = allLatency;
         }
 
-        public void accept(long timeTaken, TimeUnit units)
+        @Override
+        public void accept(Verb verb, long timeTaken, TimeUnit units)
         {
             if (timeTaken > 0)
             {
@@ -142,6 +143,18 @@ public class MessagingMetrics implements InboundMessageHandlers.GlobalMetricCall
     public void recordInternodeDroppedMessage(Verb verb, long timeElapsed, TimeUnit timeUnit)
     {
         recordDroppedMessage(verb, timeElapsed, timeUnit, true);
+    }
+
+    @Override
+    public void recordMessageStageProcessingTime(Verb verb, InetAddressAndPort from, long timeElapsed, TimeUnit unit)
+    {
+        // NOOP
+    }
+
+    @Override
+    public void recordTotalMessageProcessingTime(Verb verb, InetAddressAndPort from, long timeElapsed, TimeUnit unit)
+    {
+        // NOOP
     }
 
     public void recordDroppedMessage(Message<?> message, long timeElapsed, TimeUnit timeUnit)

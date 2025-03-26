@@ -66,6 +66,8 @@ public class CompactionMetrics
     public final Counter totalCompactionsFailed;
     /** Total number of bytes processed by operations since server [re]start */
     public final Counter bytesCompacted;
+    /** Recent/current throughput of compactions take */
+    public final Meter bytesCompactedThroughput;
 
     /**
      * The compaction strategy information for each table. Cached, because its computation might be fairly expensive.
@@ -100,6 +102,8 @@ public class CompactionMetrics
     public final Meter removedExpiredSSTables;
     /** Total number compactions that consisted of only expired SSTables */
     public final Meter deleteOnlyCompactions;
+
+    public final Gauge<Map<String, Map<String, Map<String, String>>>> overlapsMap;
 
     public CompactionMetrics(final ThreadPoolExecutor... collectors)
     {
@@ -190,6 +194,7 @@ public class CompactionMetrics
         totalCompactionsCompleted = Metrics.meter(factory.createMetricName("TotalCompactionsCompleted"));
         totalCompactionsFailed = Metrics.counter(factory.createMetricName("FailedCompactions"));
         bytesCompacted = Metrics.counter(factory.createMetricName("BytesCompacted"));
+        bytesCompactedThroughput = Metrics.meter(factory.createMetricName("BytesCompactedThroughput"));
 
         // compaction failure metrics
         compactionsReduced = Metrics.counter(factory.createMetricName("CompactionsReduced"));
@@ -219,6 +224,26 @@ public class CompactionMetrics
                                                         return ret;
                                                     }
                                                 });
+
+        overlapsMap = Metrics.register(factory.createMetricName("MaxOverlapsMap"),
+                                    new CachedGauge<Map<String, Map<String, Map<String, String>>>>(50, TimeUnit.MILLISECONDS)
+                                    {
+                                        public Map<String, Map<String, Map<String, String>>> loadValue()
+                                        {
+                                            Map<String, Map<String, Map<String, String>>> ret = new HashMap<>();
+                                            for (String keyspaceName : Schema.instance.getKeyspaces())
+                                            {
+                                                Map<String, Map<String, String>> ksMap = new HashMap<>();
+                                                ret.put(keyspaceName, ksMap);
+                                                for (ColumnFamilyStore cfs : Keyspace.open(keyspaceName).getColumnFamilyStores())
+                                                {
+                                                    Map<String, String> overlaps = cfs.getCompactionStrategy().getMaxOverlapsMap();
+                                                    ksMap.put(cfs.getTableName(), overlaps);
+                                                }
+                                            }
+                                            return ret;
+                                        }
+                                    });
 
         runningCompactions = Metrics.register(factory.createMetricName("RunningCompactions"),
                                               new DerivativeGauge<List<CompactionStrategyStatistics>, Integer>(aggregateCompactions)

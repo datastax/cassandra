@@ -31,7 +31,7 @@ public class IndexInputReader extends IndexInput
     private final RandomAccessReader input;
     private final Runnable doOnClose;
 
-    private IndexInputReader(RandomAccessReader input, Runnable doOnClose)
+    protected IndexInputReader(RandomAccessReader input, Runnable doOnClose)
     {
         super(input.getFile().toString(), input.order());
         this.input = input;

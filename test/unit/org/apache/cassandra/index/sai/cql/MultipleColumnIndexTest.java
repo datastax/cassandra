@@ -40,12 +40,30 @@ public class MultipleColumnIndexTest extends SAITester
     }
 
     @Test
-    public void cannotHaveMultipleLiteralIndexesWithDifferentOptions() throws Throwable
+    public void canHaveAnalyzedAndUnanalyzedIndexesOnSameColumn() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int, value text, PRIMARY KEY(pk))");
+        createIndex("CREATE CUSTOM INDEX ON %s(value) USING 'StorageAttachedIndex' WITH OPTIONS = { 'case_sensitive' : true }");
+        createIndex("CREATE CUSTOM INDEX ON %s(value) USING 'StorageAttachedIndex' WITH OPTIONS = { 'case_sensitive' : false, 'equals_behaviour_when_analyzed': 'unsupported' }");
+
+        execute("INSERT INTO %s (pk, value) VALUES (?, ?)", 1, "a");
+        execute("INSERT INTO %s (pk, value) VALUES (?, ?)", 2, "A");
+        beforeAndAfterFlush(() -> {
+            assertRows(execute("SELECT pk FROM %s WHERE value = 'a'"),
+                       row(1));
+            assertRows(execute("SELECT pk FROM %s WHERE value : 'a'"),
+                       row(1),
+                       row(2));
+        });
+    }
+
+    @Test
+    public void cannotHaveMultipleAnalyzingIndexesOnSameColumn() throws Throwable
     {
         createTable("CREATE TABLE %s (pk int, ck int, value text, PRIMARY KEY(pk, ck))");
-        createIndex("CREATE CUSTOM INDEX ON %s(value) USING 'StorageAttachedIndex' WITH OPTIONS = { 'case_sensitive' : true }");
-        assertThatThrownBy(() -> createIndex("CREATE CUSTOM INDEX ON %s(value) USING 'StorageAttachedIndex' WITH OPTIONS = { 'case_sensitive' : false }"))
-                .isInstanceOf(InvalidRequestException.class);
+        createIndex("CREATE CUSTOM INDEX ON %s(value) USING 'StorageAttachedIndex' WITH OPTIONS = { 'case_sensitive' : false }");
+        assertThatThrownBy(() -> createIndex("CREATE CUSTOM INDEX ON %s(value) USING 'StorageAttachedIndex' WITH OPTIONS = { 'normalize' : true }"))
+        .isInstanceOf(InvalidRequestException.class);
     }
 
     @Test
@@ -61,8 +79,6 @@ public class MultipleColumnIndexTest extends SAITester
         createIndex("CREATE CUSTOM INDEX text_map ON %s(keys(text_map)) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(values(text_map)) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(entries(text_map)) USING 'StorageAttachedIndex'");
-
-        waitForIndexQueryable();
 
         beforeAndAfterFlush(() -> {
             assertEquals(1, execute("SELECT * FROM %s WHERE text_map['k1'] = 'v1' AND text_map['k2'] = 'v2'").size());

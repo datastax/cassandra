@@ -32,6 +32,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 
 import org.apache.cassandra.concurrent.InfiniteLoopExecutor;
+import org.apache.cassandra.exceptions.UnaccessibleFieldException;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -39,6 +41,7 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 
 import org.apache.cassandra.concurrent.NamedThreadFactory;
+import jdk.internal.ref.Cleaner;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.lifecycle.View;
@@ -48,6 +51,8 @@ import org.apache.cassandra.io.util.SafeMemory;
 import org.apache.cassandra.utils.ExecutorUtils;
 import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.utils.Pair;
+import sun.misc.Unsafe;
+import sun.nio.ch.DirectBuffer;
 import org.cliffc.high_scale_lib.NonBlockingHashMap;
 
 import static java.util.Collections.emptyList;
@@ -68,10 +73,10 @@ import static org.apache.cassandra.utils.Throwables.merge;
  *   - encapsulates a Ref, we'll call selfRef, to which it proxies all calls to RefCounted behaviours
  *   - users must ensure no references to the selfRef leak, or are retained outside of a method scope.
  *     (to ensure the selfRef is collected with the object, so that leaks may be detected and corrected)
- *
+ * <p>
  * This class' functionality is achieved by what may look at first glance like a complex web of references,
  * but boils down to:
- *
+ * <p>
  * {@code
  * Target --> selfRef --> [Ref.State] <--> Ref.GlobalState --> Tidy
  *                                             ^
@@ -81,10 +86,10 @@ import static org.apache.cassandra.utils.Throwables.merge;
  * Global -------------------------------------
  * }
  * So that, if Target is collected, Impl is collected and, hence, so is selfRef.
- *
+ * <p>
  * Once ref or selfRef are collected, the paired Ref.State's release method is called, which if it had
  * not already been called will update Ref.GlobalState and log an error.
- *
+ * <p>
  * Once the Ref.GlobalState has been completely released, the Tidy method is called and it removes the global reference
  * to itself so it may also be collected.
  */
@@ -392,7 +397,7 @@ public final class Ref<T> implements RefCounted<T>
         }
     }
 
-    static final Deque<InProgressVisit> inProgressVisitPool = new ArrayDeque<InProgressVisit>();
+    static final Deque<InProgressVisit> inProgressVisitPool = new ArrayDeque<>();
 
     @SuppressWarnings({ "rawtypes", "unchecked" })
     static InProgressVisit newInProgressVisit(Object o, List<Field> fields, Field field, String name)
@@ -517,16 +522,16 @@ public final class Ref<T> implements RefCounted<T>
                 if (o instanceof WeakReference & nextField.getDeclaringClass() == Reference.class)
                     continue;
 
-                Object nextObject = nextField.get(o);
+                Object nextObject = getFieldValue(o, nextField);
                 if (nextObject != null)
-                    return Pair.create(nextField.get(o), nextField);
+                    return Pair.create(getFieldValue(o, nextField), nextField);
             }
         }
 
         @Override
         public String toString()
         {
-            return field == null ? name : field.toString() + "-" + o.getClass().getName();
+            return field == null ? name : field + "-" + o.getClass().getName();
         }
     }
 
@@ -603,7 +608,6 @@ public final class Ref<T> implements RefCounted<T>
                     {
                         path.offer(inProgress);
                         inProgress = newInProgressVisit(child, getFields(child.getClass()), field, null);
-                        continue;
                     }
                     else if (visiting == child)
                     {
@@ -621,7 +625,6 @@ public final class Ref<T> implements RefCounted<T>
                     {
                         returnInProgressVisit(inProgress);
                         inProgress = null;
-                        continue;
                     }
                 }
                 catch (IllegalAccessException e)
@@ -645,11 +648,66 @@ public final class Ref<T> implements RefCounted<T>
         {
             if (field.getType().isPrimitive() || Modifier.isStatic(field.getModifiers()))
                 continue;
-            field.setAccessible(true);
             fields.add(field);
         }
         fields.addAll(getFields(clazz.getSuperclass()));
         return fields;
+    }
+
+    /**
+     * The unsafe instance used to access object protected by the Module System
+     */
+    private static final Unsafe unsafe = loadUnsafe();
+
+    private static Unsafe loadUnsafe()
+    {
+        try
+        {
+            return Unsafe.getUnsafe();
+        }
+        catch (final Exception ex)
+        {
+            try
+            {
+                Field field = Unsafe.class.getDeclaredField("theUnsafe");
+                field.setAccessible(true);
+                return (Unsafe) field.get(null);
+            }
+            catch (Exception e)
+            {
+                return null;
+            }
+        }
+    }
+
+    public static Object getFieldValue(Object object, Field field)
+    {
+        try
+        {
+            // This call will unfortunately emit a warning for some scenario (which was a weird decision from the JVM designer)
+            if (field.trySetAccessible())
+            {
+                // The field is accessible lets use reflection.
+                return field.get(object);
+            }
+
+            // The access to the field is being restricted by the module system. Let's try to go around it through Unsafe.
+            if (unsafe == null)
+                throw new UnaccessibleFieldException("The value of the '" + field.getName() + "' field from " + object.getClass().getName()
+                                                     + " cannot be retrieved as the field cannot be made accessible and Unsafe is unavailable");
+
+            long offset = unsafe.objectFieldOffset(field);
+
+            boolean isFinal = Modifier.isFinal(field.getModifiers());
+            boolean isVolatile = Modifier.isVolatile(field.getModifiers());
+
+            return isFinal || isVolatile ? unsafe.getObjectVolatile(object, offset) : unsafe.getObject(object, offset);
+
+        }
+        catch (Throwable e)
+        {
+            throw new UnaccessibleFieldException("The value of the '" + field.getName() + "' field from " + object.getClass().getName() + " cannot be retrieved", e);
+        }
     }
 
     public static class IdentityCollection
@@ -724,5 +782,58 @@ public final class Ref<T> implements RefCounted<T>
     public static void shutdownReferenceReaper(long timeout, TimeUnit unit) throws InterruptedException, TimeoutException
     {
         ExecutorUtils.shutdownNowAndWait(timeout, unit, EXEC, STRONG_LEAK_DETECTOR);
+    }
+
+    /**
+     * A version of {@link Ref} for objects that implement {@link DirectBuffer}.
+     */
+    public static final class DirectBufferRef<T extends DirectBuffer> implements RefCounted<T>, DirectBuffer
+    {
+        private final Ref<T> wrappedRef;
+        
+        public DirectBufferRef(T referent, Tidy tidy)
+        {
+            wrappedRef = new Ref<>(referent, tidy);
+        }
+
+        @Override
+        public long address()
+        {
+            return wrappedRef.referent != null ? wrappedRef.referent.address() : 0;
+        }
+
+        @Override
+        public Object attachment()
+        {
+            return wrappedRef.referent != null ? wrappedRef.referent.attachment() : null;
+        }
+
+        @Override
+        public Cleaner cleaner()
+        {
+            return wrappedRef.referent != null ? wrappedRef.referent.cleaner() : null;
+        }
+
+        @Override
+        public Ref<T> tryRef()
+        {
+            return wrappedRef.tryRef();
+        }
+
+        @Override
+        public Ref<T> ref()
+        {
+            return wrappedRef.ref();
+        }
+
+        public void release()
+        {
+            wrappedRef.release();
+        }
+
+        public T get()
+        {
+            return wrappedRef.get();
+        }
     }
 }

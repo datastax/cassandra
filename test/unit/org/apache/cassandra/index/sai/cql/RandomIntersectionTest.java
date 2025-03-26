@@ -84,7 +84,6 @@ public class RandomIntersectionTest extends SAITester
         createTable("CREATE TABLE %s (pk int, ck int, v1 int, v2 int, PRIMARY KEY(pk, ck))");
         createIndex("CREATE CUSTOM INDEX ON %s(v1) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(v2) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         numRows = getRandom().nextIntBetween(50000, 200000);
     }

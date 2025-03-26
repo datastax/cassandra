@@ -67,7 +67,7 @@ class SSTableSimpleWriter extends AbstractSSTableSimpleWriter
             if (update != null)
                 writePartition(update.build());
             currentKey = key;
-            update = new PartitionUpdate.Builder(metadata.get(), currentKey, columns, 4);
+            update = PartitionUpdate.builder(metadata.get(), currentKey, columns, 4);
         }
 
         assert update != null;

@@ -120,6 +120,17 @@ public abstract class Guardrails
                     format("%s has a vector of %s dimensions, this exceeds the %s threshold of %s.",
                           what, value, isWarning ? "warning" : "failure", threshold));
 
+    /**
+     * Guardrail on the maximum value for the rerank_k parameter, an ANN query option.
+     */
+    public static final Threshold annRerankKMaxValue =
+            factory.threshold("sai_ann_rerank_k_max_value",
+                    () -> config.sai_ann_rerank_k_warn_threshold,
+                    () -> config.sai_ann_rerank_k_fail_threshold,
+                    (isWarning, what, value, threshold) ->
+                    format("%s specifies rerank_k=%s, this exceeds the %s threshold of %s.",
+                          what, value, isWarning ? "warning" : "failure", threshold));
+
     public static final DisableFlag readBeforeWriteListOperationsEnabled =
             factory.disableFlag("read_before_write_list_operations",
                             () -> !config.read_before_write_list_operations_enabled,
@@ -263,6 +274,17 @@ public abstract class Guardrails
                       () -> config.offset_rows_failure_threshold,
                       (isWarning, what, value, threshold) ->
                       format("%s requested to skip %s rows, this exceeds the %s threshold of %s.",
+                             what, value, isWarning ? "warning" : "failure", threshold));
+
+    /**
+     * Guardrail on the number of query filtering operations per SELECT query (after analysis).
+     */
+    public static final Threshold queryFilters =
+    factory.threshold("query_filters",
+                      () -> config.query_filters_warn_threshold,
+                      () -> config.query_filters_fail_threshold,
+                      (isWarning, what, value, threshold) ->
+                      format("%s has %s column value filters after analysis, this exceeds the %s threshold of %s.",
                              what, value, isWarning ? "warning" : "failure", threshold));
 
     private static String formatSize(long size)

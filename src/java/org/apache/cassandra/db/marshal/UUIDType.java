@@ -54,6 +54,12 @@ public class UUIDType extends AbstractType<UUID>
         super(ComparisonType.CUSTOM);
     }
 
+    @Override
+    public boolean allowsEmpty()
+    {
+        return true;
+    }
+
     public boolean isEmptyValueMeaningless()
     {
         return true;
@@ -124,7 +130,7 @@ public class UUIDType extends AbstractType<UUID>
         swizzled.putLong(8, accessor.getLong(data, 8));
 
         // fixed-length thus prefix-free
-        return ByteSource.fixedLength(swizzled);
+        return ByteSource.preencoded(swizzled);
     }
 
     @Override

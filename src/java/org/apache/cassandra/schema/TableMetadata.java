@@ -36,6 +36,7 @@ import org.apache.cassandra.cql3.CqlBuilder;
 import org.apache.cassandra.cql3.SchemaElement;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.marshal.*;
+import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -50,7 +51,7 @@ import static com.google.common.collect.Maps.transformValues;
 import static java.lang.String.format;
 import static java.util.stream.Collectors.toList;
 import static java.util.stream.Collectors.toSet;
-import static org.apache.cassandra.schema.IndexMetadata.isNameValid;
+import static org.apache.cassandra.schema.SchemaConstants.isValidName;
 
 @Unmetered
 public class TableMetadata implements SchemaElement
@@ -421,6 +422,16 @@ public class TableMetadata implements SchemaElement
         return !staticColumns().isEmpty();
     }
 
+    public boolean hasVectorType()
+    {
+        for (ColumnMetadata column : columns.values())
+        {
+            if (column.type.isVector())
+                return true;
+        }
+        return false;
+    }
+
     public final void validate()
     {
         validate(false);
@@ -428,11 +439,11 @@ public class TableMetadata implements SchemaElement
 
     public void validate(boolean durationLegacyMode)
     {
-        if (!isNameValid(keyspace))
-            except("Keyspace name must not be empty, more than %s characters long, or contain non-alphanumeric-underscore characters (got \"%s\")", SchemaConstants.NAME_LENGTH, keyspace);
+        if (!isValidName(keyspace, true))
+            except("Keyspace name must not be empty or contain non-alphanumeric-underscore characters (got \"%s\")", keyspace);
 
-        if (!isNameValid(name))
-            except("Table name must not be empty, more than %s characters long, or contain non-alphanumeric-underscore characters (got \"%s\")", SchemaConstants.NAME_LENGTH, name);
+        if (!isValidName(name, true))
+            except("Table name must not be empty or contain non-alphanumeric-underscore characters (got \"%s\")", name);
 
         params.validate();
 
@@ -717,7 +728,12 @@ public class TableMetadata implements SchemaElement
 
     protected void except(String format, Object... args)
     {
-        throw new ConfigurationException(keyspace + "." + name + ": " + format(format, args));
+        throw new ConfigurationException(keyspace + '.' + name + ": " + format(format, args));
+    }
+
+    public PartitionUpdate.Factory partitionUpdateFactory()
+    {
+        return params.memtable.factory.partitionUpdateFactory();
     }
 
     @Override
@@ -1106,8 +1122,7 @@ public class TableMetadata implements SchemaElement
 
         public Builder addColumn(ColumnMetadata column)
         {
-            if (columns.containsKey(column.name.bytes))
-                throw new IllegalArgumentException();
+            assert !columns.containsKey(column.name.bytes) : column.name + " is already present";
 
             switch (column.kind)
             {

@@ -36,6 +36,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.SerializationHeader;
+import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.io.FSReadError;
@@ -77,6 +78,8 @@ public class TrieIndexSSTableWriter extends SortedTableWriter
     private final IndexWriter iwriter;
     private final TransactionalProxy txnProxy;
 
+    private final OperationType operationType;
+
     private static final SequentialWriterOption WRITER_OPTION = SequentialWriterOption.newBuilder()
                                                                                       .trickleFsync(DatabaseDescriptor.getTrickleFsync())
                                                                                       .trickleFsyncByteInterval(DatabaseDescriptor.getTrickleFsyncIntervalInKb() * 1024)
@@ -97,6 +100,7 @@ public class TrieIndexSSTableWriter extends SortedTableWriter
     {
         super(descriptor, components(metadata.getLocal(), indexComponents), lifecycleNewTracker, WRITER_OPTION, keyCount, repairedAt, pendingRepair, isTransient, metadata, metadataCollector, header, observers);
 
+        operationType = lifecycleNewTracker.opType();
         iwriter = new IndexWriter(metadata.get());
         partitionWriter = new PartitionWriter(this.header, metadata().comparator, dataFile, iwriter.rowIndexFile, descriptor.version, this.observers);
         txnProxy = new TransactionalProxy();
@@ -179,17 +183,19 @@ public class TrieIndexSSTableWriter extends SortedTableWriter
     @SuppressWarnings("resource")
     public boolean openEarly(Consumer<SSTableReader> callWhenReady)
     {
-        long dataLength = dataFile.position();
+        // Because the partition index writer is one partition behind, we want the file to stop at the start of the
+        // last partition that was written.
+        long dataLength = partitionWriter.partitionStart();
 
         return iwriter.buildPartial(dataLength, partitionIndex ->
         {
             StatsMetadata stats = statsMetadata();
             FileHandle ifile = iwriter.rowIndexFHBuilder.complete(iwriter.rowIndexFile.getLastFlushOffset());
             if (compression)
-                dbuilder.withCompressionMetadata(((CompressedSequentialWriter) dataFile).open(dataFile.getLastFlushOffset()));
+                dbuilder.withCompressionMetadata(((CompressedSequentialWriter) dataFile).open(dataLength));
             int dataBufferSize = optimizationStrategy.bufferSize(stats.estimatedPartitionSize.percentile(DatabaseDescriptor.getDiskOptimizationEstimatePercentile()));
-            FileHandle dfile = dbuilder.bufferSize(dataBufferSize).complete(dataFile.getLastFlushOffset());
-            invalidateCacheAtBoundary(dfile);
+            FileHandle dfile = dbuilder.bufferSize(dataBufferSize).complete(dataLength);
+            invalidateCacheAtPreviousBoundary(dfile, dataLength);
             SSTableReader sstable = TrieIndexSSTableReader.internalOpen(descriptor,
                                                                components(), metadata,
                                                                ifile, dfile, partitionIndex, iwriter.bf.sharedCopy(),
@@ -227,9 +233,9 @@ public class TrieIndexSSTableWriter extends SortedTableWriter
         FileHandle rowIndexFile = iwriter.rowIndexFHBuilder.complete();
         int dataBufferSize = optimizationStrategy.bufferSize(stats.estimatedPartitionSize.percentile(DatabaseDescriptor.getDiskOptimizationEstimatePercentile()));
         if (compression)
-            dbuilder.withCompressionMetadata(((CompressedSequentialWriter) dataFile).open(dataFile.getLastFlushOffset()));
+            dbuilder.withCompressionMetadata(((CompressedSequentialWriter) dataFile).open(0));
         FileHandle dfile = dbuilder.bufferSize(dataBufferSize).complete();
-        invalidateCacheAtBoundary(dfile);
+        invalidateCacheAtPreviousBoundary(dfile, Long.MAX_VALUE);
         SSTableReader sstable = TrieIndexSSTableReader.internalOpen(descriptor,
                                                             components(),
                                                             this.metadata,
@@ -310,9 +316,9 @@ public class TrieIndexSSTableWriter extends SortedTableWriter
         IndexWriter(TableMetadata table)
         {
             rowIndexFile = new SequentialWriter(descriptor.fileFor(Component.ROW_INDEX), WRITER_OPTION);
-            rowIndexFHBuilder = SSTableReaderBuilder.defaultIndexHandleBuilder(descriptor, Component.ROW_INDEX);
+            rowIndexFHBuilder = SSTableReaderBuilder.primaryIndexWriteTimeBuilder(descriptor, Component.ROW_INDEX, operationType);
             partitionIndexFile = new SequentialWriter(descriptor.fileFor(Component.PARTITION_INDEX), WRITER_OPTION);
-            partitionIndexFHBuilder = SSTableReaderBuilder.defaultIndexHandleBuilder(descriptor, Component.PARTITION_INDEX);
+            partitionIndexFHBuilder = SSTableReaderBuilder.primaryIndexWriteTimeBuilder(descriptor, Component.PARTITION_INDEX, operationType);
             partitionIndex = new PartitionIndexBuilder(partitionIndexFile, partitionIndexFHBuilder, descriptor.version.getByteComparableVersion());
             bf = FilterFactory.getFilter(keyCount, table.params.bloomFilterFpChance);
             // register listeners to be alerted when the data files are flushed

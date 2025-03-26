@@ -45,6 +45,12 @@ public class DateRangeType extends AbstractType<DateRange>
     }
 
     @Override
+    public boolean allowsEmpty()
+    {
+        return true;
+    }
+
+    @Override
     public ByteBuffer fromString(String source) throws MarshalException
     {
         if (source.isEmpty())

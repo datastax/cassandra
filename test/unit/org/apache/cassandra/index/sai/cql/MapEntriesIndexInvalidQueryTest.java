@@ -26,11 +26,10 @@ public class MapEntriesIndexInvalidQueryTest extends SAITester
 {
 
     @Test
-    public void testConflictingBounds() throws Throwable
+    public void testConflictingBounds()
     {
         createTable("CREATE TABLE %s (partition int primary key, item_cost map<text, int>)");
         createIndex("CREATE CUSTOM INDEX ON %s(entries(item_cost)) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         // Invalid queries
         assertInvalidMessage("More than one restriction was found for the end bound on item_cost",

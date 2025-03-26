@@ -43,10 +43,24 @@ public abstract class Selection
     private static final Predicate<ColumnMetadata> STATIC_COLUMN_FILTER = (column) -> column.isStatic();
 
     private final TableMetadata table;
+
+    // Full list of columns needed for processing the query, including selected columns, ordering columns,
+    // and columns needed for restrictions.  Wildcard columns are fully materialized here.
+    //
+    // This also includes synthetic columns, because unlike all the other not-physical-columns selectables, they are
+    // computed on the replica instead of the coordinator and so, like physical columns, they need to be sent back
+    // as part of the result.
     private final List<ColumnMetadata> columns;
+
+    // maps ColumnSpecifications (columns, function calls, aliases) to the columns backing them
     private final SelectionColumnMapping columnMapping;
+
+    // metadata matching the ColumnSpcifications
     protected final ResultSet.ResultMetadata metadata;
+
+    // creates a ColumnFilter that breaks columns into `queried` and `fetched`
     protected final ColumnFilterFactory columnFilterFactory;
+
     protected final boolean isJson;
 
     // Columns used to order the result set for JSON queries with post ordering.
@@ -127,20 +141,31 @@ public abstract class Selection
 
     public static Selection wildcard(TableMetadata table, boolean isJson, boolean returnStaticContentOnPartitionWithNoRows)
     {
+        return wildcard(table, Collections.emptySet(), isJson, returnStaticContentOnPartitionWithNoRows);
+    }
+
+    public static Selection wildcard(TableMetadata table, Set<ColumnMetadata> orderingColumns, boolean isJson, boolean returnStaticContentOnPartitionWithNoRows)
+    {
+        // Add all table columns, but skip orderingColumns:
         List<ColumnMetadata> all = new ArrayList<>(table.columns().size());
         Iterators.addAll(all, table.allColumnsInSelectOrder());
-        return new SimpleSelection(table, all, Collections.emptySet(), true, isJson, returnStaticContentOnPartitionWithNoRows);
+
+        Set<ColumnMetadata> newOrderingColumns = new HashSet<>(orderingColumns);
+        all.forEach(newOrderingColumns::remove);
+
+        return new SimpleSelection(table, all, newOrderingColumns, true, isJson, returnStaticContentOnPartitionWithNoRows);
     }
 
     public static Selection wildcardWithGroupBy(TableMetadata table,
                                                 VariableSpecifications boundNames,
+                                                Set<ColumnMetadata> orderingColumns,
                                                 boolean isJson,
                                                 boolean returnStaticContentOnPartitionWithNoRows)
     {
         return fromSelectors(table,
                              Lists.newArrayList(table.allColumnsInSelectOrder()),
                              boundNames,
-                             Collections.emptySet(),
+                             orderingColumns,
                              Collections.emptySet(),
                              true,
                              isJson,
@@ -336,38 +361,40 @@ public abstract class Selection
         return Arrays.asList(jsonRow);
     }
 
-    public static interface Selectors
+    public interface Selectors
     {
         /**
          * Returns the {@code ColumnFilter} corresponding to those selectors
          *
          * @return the {@code ColumnFilter} corresponding to those selectors
          */
-        public ColumnFilter getColumnFilter();
+        ColumnFilter getColumnFilter();
 
         /**
          * Checks if one of the selectors perform some aggregations.
          * @return {@code true} if one of the selectors perform some aggregations, {@code false} otherwise.
          */
-        public boolean isAggregate();
+        boolean isAggregate();
+
+        List<ColumnMetadata> getColumns();
 
         /**
          * Returns the number of fetched columns
          * @return the number of fetched columns
          */
-        public int numberOfFetchedColumns();
+        int numberOfFetchedColumns();
 
         /**
          * Checks if one of the selectors collect TTLs.
          * @return {@code true} if one of the selectors collect TTLs, {@code false} otherwise.
          */
-        public boolean collectTTLs();
+        boolean collectTTLs();
 
         /**
          * Checks if one of the selectors collect timestamps.
          * @return {@code true} if one of the selectors collect timestamps, {@code false} otherwise.
          */
-        public boolean collectTimestamps();
+        boolean collectTimestamps();
 
         /**
          * Adds the current row of the specified <code>ResultSetBuilder</code>.
@@ -375,11 +402,11 @@ public abstract class Selection
          * @param rs the <code>ResultSetBuilder</code>
          * @throws InvalidRequestException
          */
-        public void addInputRow(ResultSetBuilder rs);
+        void addInputRow(ResultSetBuilder rs);
 
-        public List<ByteBuffer> getOutputRow();
+        List<ByteBuffer> getOutputRow();
 
-        public void reset();
+        void reset();
     }
 
     // Special cased selection for when only columns are selected.
@@ -398,7 +425,7 @@ public abstract class Selection
                  selectedColumns,
                  orderingColumns,
                  SelectionColumnMapping.simpleMapping(selectedColumns),
-                 isWildcard ? ColumnFilterFactory.wildcard(table)
+                 isWildcard ? ColumnFilterFactory.wildcard(table, orderingColumns)
                             : ColumnFilterFactory.fromColumns(table, selectedColumns, orderingColumns, Collections.emptySet(), returnStaticContentOnPartitionWithNoRows),
                  isWildcard,
                  isJson);
@@ -475,6 +502,12 @@ public abstract class Selection
                 public boolean isAggregate()
                 {
                     return false;
+                }
+
+                @Override
+                public List<ColumnMetadata> getColumns()
+                {
+                    return SimpleSelection.this.getColumns();
                 }
 
                 @Override
@@ -585,7 +618,13 @@ public abstract class Selection
                 public void addInputRow(ResultSetBuilder rs) throws InvalidRequestException
                 {
                     for (Selector selector : selectors)
-                        selector.addInput(options.getProtocolVersion(), rs);
+                        selector.addInput(rs);
+                }
+
+                @Override
+                public List<ColumnMetadata> getColumns()
+                {
+                    return SelectionWithProcessing.this.getColumns();
                 }
 
                 @Override

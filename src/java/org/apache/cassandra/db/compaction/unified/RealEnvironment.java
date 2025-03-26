@@ -19,9 +19,12 @@ package org.apache.cassandra.db.compaction.unified;
 import java.util.concurrent.TimeUnit;
 
 import org.apache.cassandra.cache.ChunkCache;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.compaction.CompactionPick;
 import org.apache.cassandra.db.compaction.CompactionRealm;
+import org.apache.cassandra.db.compaction.CompactionSSTable;
 import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.utils.ExpMovingAverage;
@@ -33,11 +36,11 @@ import org.apache.cassandra.utils.PageAware;
  * An implementation of {@link Environment} that returns
  * real values.
  */
-class RealEnvironment implements Environment
+public class RealEnvironment implements Environment
 {
     private final CompactionRealm realm;
 
-    RealEnvironment(CompactionRealm realm)
+    public RealEnvironment(CompactionRealm realm)
     {
         assert realm != null;
         this.realm = realm;
@@ -57,7 +60,7 @@ class RealEnvironment implements Environment
     @Override
     public double cacheMissRatio()
     {
-        double hitRate = ChunkCache.instance.metrics.hitRate();
+        double hitRate = ChunkCache.instance != null ? ChunkCache.instance.metrics.hitRate() : Double.NaN;
         if (Double.isNaN(hitRate))
             return 1; // if the cache is not yet initialized then assume all requests are a cache miss
 
@@ -125,7 +128,7 @@ class RealEnvironment implements Environment
     @Override
     public int maxConcurrentCompactions()
     {
-        return DatabaseDescriptor.getConcurrentCompactors();
+        return CompactionManager.instance.getMaximumCompactorThreads();
     }
 
     @Override
@@ -137,11 +140,39 @@ class RealEnvironment implements Environment
         return compactionThroughputMbPerSec * 1024.0 * 1024.0;
     }
 
-    @Override
-    public long getOverheadSizeInBytes(CompactionPick compactionPick)
+    /**
+     * @return the compaction overhead size in bytes of the given sstables, i.e. the value used to determine how many
+     * compactions we can run without exceeding the available space.
+     * This is configurable via {@link CassandraRelevantProperties#UCS_COMPACTION_INCLUDE_NON_DATA_FILES_SIZE} to
+     * either report only the data file size, or the total size of all sstable components on disk.
+     */
+    public static long getCompactionOverheadSizeInBytes(Iterable<? extends CompactionSSTable> sstables)
     {
-        // The estimate the compaction overhead to be the same as the size of the input sstables
-        return compactionPick.totSizeInBytes();
+        if (CassandraRelevantProperties.UCS_COMPACTION_INCLUDE_NON_DATA_FILES_SIZE.getBoolean())
+            return CompactionSSTable.getTotalOnDiskComponentsBytes(sstables);
+        else
+            return CompactionSSTable.getTotalDataBytes(sstables); // only includes data file size
+    }
+
+    /**
+     * @return the compaction overhead size in bytes of the given sstables, i.e. the value used to determine how many
+     * compactions we can run without exceeding the available space.
+     * This is configurable via {@link CassandraRelevantProperties#UCS_COMPACTION_INCLUDE_NON_DATA_FILES_SIZE} to
+     * either report only the data file size, or the total size of all sstable components on disk.
+     * This variation of the method uses a pre-calculated total data size.
+     */
+    public static long getCompactionOverheadSizeInBytes(Iterable<? extends CompactionSSTable> sstables, long totalDataSize)
+    {
+        if (CassandraRelevantProperties.UCS_COMPACTION_INCLUDE_NON_DATA_FILES_SIZE.getBoolean())
+            return CompactionSSTable.getTotalOnDiskComponentsBytes(sstables);
+        else
+            return totalDataSize; // only includes data file size
+    }
+
+    @Override
+    public long getOverheadSizeInBytes(Iterable<? extends CompactionSSTable> sstables, long totalDataSize)
+    {
+        return getCompactionOverheadSizeInBytes(sstables, totalDataSize);
     }
 
     @Override

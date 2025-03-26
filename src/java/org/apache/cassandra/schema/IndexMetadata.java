@@ -20,9 +20,11 @@ package org.apache.cassandra.schema;
 
 import java.io.IOException;
 import java.lang.reflect.InvocationTargetException;
-import java.util.*;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import com.google.common.base.Objects;
@@ -41,10 +43,16 @@ import org.apache.cassandra.exceptions.UnknownIndexException;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.internal.CassandraIndex;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.UUIDSerializer;
+
+import javax.annotation.Nullable;
+
+import static org.apache.cassandra.schema.SchemaConstants.PATTERN_NON_WORD_CHAR;
+import static org.apache.cassandra.schema.SchemaConstants.isValidName;
 
 /**
  * An immutable representation of secondary index metadata.
@@ -53,12 +61,9 @@ public final class IndexMetadata
 {
     private static final Logger logger = LoggerFactory.getLogger(IndexMetadata.class);
 
-    private static final Pattern PATTERN_NON_WORD_CHAR = Pattern.compile("\\W");
-    private static final Pattern PATTERN_WORD_CHARS = Pattern.compile("\\w+");
-
-
     public static final Serializer serializer = new Serializer();
 
+    static final String INDEX_POSTFIX = "_idx";
     /**
      * A mapping of user-friendly index names to their fully qualified index class names.
      */
@@ -103,30 +108,60 @@ public final class IndexMetadata
     {
         Map<String, String> newOptions = new HashMap<>(options);
         newOptions.put(IndexTarget.TARGET_OPTION_NAME, targets.stream()
-                                                              .map(target -> target.asCqlString())
+                                                              .map(IndexTarget::asCqlString)
                                                               .collect(Collectors.joining(", ")));
         return new IndexMetadata(name, newOptions, kind);
     }
 
-    public static boolean isNameValid(String name)
+    /**
+     * Generates a default index name from the table and column names.
+     * Characters other than alphanumeric and underscore are removed.
+     * Long index names are truncated to fit the length allowing constructing filenames.
+     *
+     * @param table  the table name
+     * @param column the column identifier. Can be null if the index is not column specific.
+     * @return the generated index name
+     */
+    public static String generateDefaultIndexName(String table, @Nullable ColumnIdentifier column)
     {
-        return name != null && !name.isEmpty() && PATTERN_WORD_CHARS.matcher(name).matches();
+        String indexNameUncleaned = table;
+        if (column != null)
+            indexNameUncleaned += '_' + column.toString();
+        String indexNameUntrimmed = PATTERN_NON_WORD_CHAR.matcher(indexNameUncleaned).replaceAll("");
+        String indexNameTrimmed = indexNameUntrimmed
+                                  .substring(0,
+                                             Math.min(calculateGeneratedIndexNameMaxLength(),
+                                                      indexNameUntrimmed.length()));
+        return indexNameTrimmed + INDEX_POSTFIX;
     }
 
-    public static String generateDefaultIndexName(String table, ColumnIdentifier column)
+    /**
+     * Calculates the maximum length of the generated index name to fit file names.
+     * It includes the generated suffixes in account.
+     * The calculation depends on how index implements file names construciton from index names.
+     * This needs to be addressed, see CNDB-13240.
+     *
+     * @return the allowed length of the generated index name
+     */
+    private static int calculateGeneratedIndexNameMaxLength()
     {
-        return PATTERN_NON_WORD_CHAR.matcher(table + "_" + column.toString() + "_idx").replaceAll("");
-    }
+        // Speculative assumption that uniqueness breaker will fit into 999.
+        // The value is used for trimming the index name if needed.
+        // Introducing validation of index name length is TODO for CNDB-13198.
+        int uniquenessSuffixLength = 4;
+        int indexNameAddition = uniquenessSuffixLength + INDEX_POSTFIX.length();
+        int allowedIndexNameLength = Version.calculateIndexNameAllowedLength();
 
-    public static String generateDefaultIndexName(String table)
-    {
-        return PATTERN_NON_WORD_CHAR.matcher(table + "_" + "idx").replaceAll("");
+        assert allowedIndexNameLength >= indexNameAddition : "cannot happen with current implementation as allowedIndexNameLength is approximately 255 - ~76. However, allowedIndexNameLength was " + allowedIndexNameLength + " and  indexNameAddition was " + indexNameAddition;
+
+        return allowedIndexNameLength - indexNameAddition;
     }
 
     public void validate(TableMetadata table)
     {
-        if (!isNameValid(name))
-            throw new ConfigurationException("Illegal index name " + name);
+        if (!isValidName(name, true))
+            throw new ConfigurationException(String.format("Index name must not be empty, or contain non-alphanumeric-underscore characters (got \"%s\")",
+                                                           name));
 
         if (kind == null)
             throw new ConfigurationException("Index kind is null for index " + name);

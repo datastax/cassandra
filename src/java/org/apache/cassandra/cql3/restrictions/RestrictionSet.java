@@ -20,6 +20,8 @@ package org.apache.cassandra.cql3.restrictions;
 import java.util.*;
 import java.util.stream.Collectors;
 
+import javax.annotation.Nullable;
+
 import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.Multimap;
 
@@ -28,6 +30,7 @@ import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.cql3.restrictions.SingleColumnRestriction.ContainsRestriction;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.db.filter.ANNOptions;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.IndexRegistry;
 import org.apache.cassandra.schema.ColumnMetadata;
@@ -53,8 +56,9 @@ public abstract class RestrictionSet implements Restrictions
         }
 
         @Override
-        public void addToRowFilter(RowFilter.Builder rowFilter, IndexRegistry indexRegistry, QueryOptions options) throws InvalidRequestException
+        public void addToRowFilter(RowFilter.Builder rowFilter, IndexRegistry indexRegistry, QueryOptions options, ANNOptions annOptions)
         {
+            // nothing to do here, since there are no restrictions
         }
 
         @Override
@@ -96,12 +100,6 @@ public abstract class RestrictionSet implements Restrictions
         public boolean hasSupportingIndex(IndexRegistry indexRegistry)
         {
             return false;
-        }
-
-        @Override
-        public Index findSupportingIndex(IndexRegistry indexRegistry)
-        {
-            return null;
         }
 
         @Override
@@ -229,10 +227,11 @@ public abstract class RestrictionSet implements Restrictions
         @Override
         public void addToRowFilter(RowFilter.Builder rowFilter,
                                    IndexRegistry indexRegistry,
-                                   QueryOptions options) throws InvalidRequestException
+                                   QueryOptions options,
+                                   ANNOptions annOptions) throws InvalidRequestException
         {
             for (SingleRestriction restriction : restrictionsMap.values())
-                restriction.addToRowFilter(rowFilter, indexRegistry, options);
+                rowFilter.addAllAsConjunction(b -> restriction.addToRowFilter(b, indexRegistry, options, annOptions));
         }
 
         @Override
@@ -279,18 +278,6 @@ public abstract class RestrictionSet implements Restrictions
                 if (restriction.hasSupportingIndex(indexRegistry))
                     return true;
             return false;
-        }
-
-        @Override
-        public Index findSupportingIndex(IndexRegistry indexRegistry)
-        {
-            for (SingleRestriction restriction : restrictionsMap.values())
-            {
-                Index index = restriction.findSupportingIndex(indexRegistry);
-                if (index != null)
-                    return index;
-            }
-            return null;
         }
 
         @Override
@@ -418,26 +405,35 @@ public abstract class RestrictionSet implements Restrictions
             if (isDisjunction)
             {
                 // If this restriction is part of a disjunction query then we don't want
-                // to merge the restrictions (if that is possible), we just add the
-                // restriction to the set of restrictions for the column.
-                addRestrictionForColumns(columnDefs, restriction, false);
+                // to merge the restrictions, we just add the new restriction
+                addRestrictionForColumns(columnDefs, restriction, null);
             }
             else
             {
-                // If this restriction isn't part of a disjunction then we need to get
-                // the set of existing restrictions for the column and merge them with the
-                // new restriction
+                // ANDed together restrictions against the same columns should be merged.
                 Set<SingleRestriction> existingRestrictions = getRestrictions(newRestrictions, columnDefs);
 
-                SingleRestriction merged = restriction;
-                for (SingleRestriction existing : existingRestrictions)
-                    merged = existing.mergeWith(merged);
+                // merge the new restriction into an existing one.  note that there is only ever a single
+                // restriction (per column), UNLESS one is ORDER BY BM25 and the other is MATCH.
+                for (var existing : existingRestrictions)
+                {
+                    // shouldMerge exists for the BM25/MATCH case
+                    if (existing.shouldMerge(restriction))
+                    {
+                        var merged = existing.mergeWith(restriction);
+                        addRestrictionForColumns(merged.getColumnDefs(), merged, Set.of(existing));
+                        return;
+                    }
+                }
 
-                addRestrictionForColumns(merged.getColumnDefs(), merged, true);
+                // no existing restrictions that we should merge the new one with, add a new one
+                addRestrictionForColumns(columnDefs, restriction, null);
             }
         }
 
-        private void addRestrictionForColumns(List<ColumnMetadata> columnDefs, SingleRestriction restriction, boolean replace)
+        private void addRestrictionForColumns(List<ColumnMetadata> columnDefs,
+                                              SingleRestriction restriction,
+                                              @Nullable Set<SingleRestriction> replacedRestrictions)
         {
             for (int i = 0; i < columnDefs.size(); i++)
             {
@@ -449,8 +445,12 @@ public abstract class RestrictionSet implements Restrictions
                 }
                 // If the restriction is a merger of new restriction and existing restrictions then
                 // we need to remove the existing restrictions for the column before adding it
-                if (replace)
-                    newRestrictions.removeAll(column);
+                if (replacedRestrictions != null)
+                {
+                    for (SingleRestriction r : replacedRestrictions)
+                        newRestrictions.remove(column, r);
+                }
+
                 newRestrictions.put(column, restriction);
             }
 

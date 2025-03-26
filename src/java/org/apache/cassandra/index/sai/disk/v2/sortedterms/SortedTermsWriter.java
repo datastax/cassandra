@@ -31,6 +31,7 @@ import org.apache.cassandra.index.sai.disk.io.IndexOutputWriter;
 import org.apache.cassandra.index.sai.disk.v1.MetadataWriter;
 import org.apache.cassandra.index.sai.disk.v1.bitpack.NumericValuesWriter;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
+import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.tries.IncrementalTrieWriter;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
@@ -109,7 +110,7 @@ public class SortedTermsWriter implements Closeable
         this.metadataWriter = metadataWriter;
         this.trieOutput = trieComponent.openOutput();
         SAICodecUtils.writeHeader(this.trieOutput);
-        this.trieWriter = IncrementalTrieWriter.open(trieSerializer, trieOutput.asSequentialWriter(), ByteComparable.Version.OSS41);
+        this.trieWriter = IncrementalTrieWriter.open(trieSerializer, trieOutput.asSequentialWriter(), TypeUtil.BYTE_COMPARABLE_VERSION);
         this.termsOutput = termsDataComponent.openOutput();
         SAICodecUtils.writeHeader(termsOutput);
         this.bytesStartFP = termsOutput.getFilePointer();
@@ -198,7 +199,7 @@ public class SortedTermsWriter implements Closeable
      */
     private void copyBytes(ByteComparable source, BytesRefBuilder dest)
     {
-        ByteSource byteSource = source.asComparableBytes(ByteComparable.Version.OSS41);
+        ByteSource byteSource = source.asComparableBytes(TypeUtil.BYTE_COMPARABLE_VERSION);
         int val;
         while ((val = byteSource.next()) != ByteSource.END_OF_STREAM)
             dest.append((byte) val);

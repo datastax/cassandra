@@ -100,16 +100,26 @@ public interface IndexComponents
     @Nullable IndexContext context();
 
     /**
-     * Version used by the components of the groups.
+     * The build id of the components of this group.
      */
-    Version version();
+    ComponentsBuildId buildId();
 
     /**
-     * Generation used by the components of the groups.
-     * <p>
-     * The result of flush or compaction is always at generation 0; only rebuilding can generate higher generations.
+     * Version used by the components of the groups (part of the {@link #buildId()} but exposed directly because often
+     * used).
      */
-    int generation();
+    default Version version()
+    {
+        return buildId().version();
+    }
+
+    /**
+     * The on-disk format used by the these components.
+     */
+    default OnDiskFormat onDiskFormat()
+    {
+        return version().onDiskFormat();
+    }
 
     /**
      * Whether that's a per-index group, that is one with components specific to a given index. Otherwise, it is a
@@ -165,13 +175,8 @@ public interface IndexComponents
     default Set<IndexComponentType> expectedComponentsForVersion()
     {
         return isPerIndexGroup()
-               ? version().onDiskFormat().perIndexComponentTypes(context())
-               : version().onDiskFormat().perSSTableComponentTypes();
-    }
-
-    default boolean hasSameVersionAndGenerationThan(IndexComponents other)
-    {
-        return version().equals(other.version()) && generation() == other.generation();
+               ? onDiskFormat().perIndexComponentTypes(context())
+               : onDiskFormat().perSSTableComponentTypes();
     }
 
     default ByteComparable.Version byteComparableVersionFor(IndexComponentType component)

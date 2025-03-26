@@ -240,9 +240,8 @@ public class BackgroundCompactions
         UUID id = progress.operationId();
         CompactionPick compaction = compactions.computeIfAbsent(id,
                                                                 uuid ->
-                                                                CompactionPick.create(id,
-                                                                                      -1,
-                                                                                      progress.inSSTables()));
+                                                                CompactionPick.createWithUnknownParent(id,
+                                                                                                       progress.inSSTables()));
 
         logger.debug("Setting background compaction {} as in progress", id);
         compaction.setProgress(progress);
@@ -275,8 +274,13 @@ public class BackgroundCompactions
 
     private void updateCompactionRate(CompactionProgress progress)
     {
-        if (progress != null && progress.durationInNanos() > 0 && progress.outputDiskSize() > 0)
-            compactionRate.update(progress.outputDiskSize() * 1.e9 / progress.durationInNanos());
+        if (progress != null)
+        {
+            final long durationInMillis = progress.durationInMillis();
+            final long outputDiskSize = progress.outputDiskSize();
+            if (durationInMillis > 0 && outputDiskSize > 0)
+                compactionRate.update(outputDiskSize * 1.e3 / durationInMillis);
+        }
     }
 
     public Collection<CompactionAggregate> getAggregates()

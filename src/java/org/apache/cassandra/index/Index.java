@@ -23,7 +23,6 @@ package org.apache.cassandra.index;
 import java.nio.ByteBuffer;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -36,8 +35,6 @@ import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import org.apache.cassandra.cql3.Operator;
-import org.apache.cassandra.cql3.QueryOptions;
-import org.apache.cassandra.cql3.restrictions.Restriction;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
@@ -60,8 +57,6 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.TableMetadata;
-
-import org.apache.commons.lang3.NotImplementedException;
 
 
 /**
@@ -436,6 +431,41 @@ public interface Index
     }
 
     /**
+     * Returns the write-time {@link Analyzer} for this index, if any. If the index doesn't transform the column values,
+     * this method will return an empty optional.
+     *
+     * @return the write-time transforming column value analyzer for the index, if any
+     */
+    default Optional<Analyzer> getIndexAnalyzer()
+    {
+        return Optional.empty();
+    }
+
+    /**
+     * Returns the query-time {@link Analyzer} for this index, if any. If the index doesn't transform the column values,
+     * this method will return an empty optional.
+     *
+     * @return the query-time transforming column value analyzer for the index, if any
+     */
+    default Optional<Analyzer> getQueryAnalyzer()
+    {
+        return Optional.empty();
+    }
+
+    /**
+     * Class representing a transformation of the indexed values done by the index.
+     * </p>
+     * This is used by the CQL operators when a filtering expression supported by an index is evaluated outside the
+     * index. It can be used to perform the same transformation on values that the index does when indexing. That way,
+     * the CQL operator can replicate the index behaviour when filtering results.
+     */
+    @FunctionalInterface
+    interface Analyzer
+    {
+        List<ByteBuffer> analyze(ByteBuffer value);
+    }
+
+    /**
      * Transform an initial RowFilter into the filter that will still need to applied
      * to a set of Rows after the index has performed it's initial scan.
      * Used in ReadCommand#executeLocal to reduce the amount of filtering performed on the
@@ -445,55 +475,7 @@ public interface Index
      * @return the (hopefully) reduced filter that would still need to be applied after
      *         the index was used to narrow the initial result set
      */
-    public RowFilter getPostIndexQueryFilter(RowFilter filter);
-
-    /**
-     * Returns a {@link Comparator} of CQL result rows, so they can be ordered by the
-     * coordinator before sending them to client.
-     *
-     * @param restriction restriction that requires current index
-     * @param columnIndex idx of the indexed column in returned row
-     * @param options     query options
-     * @return a comparator of rows
-     */
-    default Comparator<List<ByteBuffer>> postQueryComparator(Restriction restriction, int columnIndex, QueryOptions options)
-    {
-        throw new NotImplementedException();
-    }
-
-    /**
-     * Returns a {@link Scorer} to give a similarity/proximity score to CQL result rows, so they can be ordered by the
-     * coordinator before sending them to client.
-     *
-     * @param restriction restriction that requires current index
-     * @param columnIndex idx of the indexed column in returned row
-     * @param options     query options
-     * @return a scorer to score the rows
-     */
-    default Scorer postQueryScorer(Restriction restriction, int columnIndex, QueryOptions options)
-    {
-        throw new NotImplementedException();
-    }
-
-    /**
-     * Gives a similarity/proximity score to CQL result rows.
-     */
-    interface Scorer
-    {
-        /**
-         * @param row a CQL result row
-         * @return the similarity/proximity score for the row
-         */
-        float score(List<ByteBuffer> row);
-
-        /**
-         * @return {@code true} if higher scores are considered better, {@code false} otherwise
-         */
-        default boolean reversed()
-        {
-            return false;
-        }
-    }
+    RowFilter getPostIndexQueryFilter(RowFilter filter);
 
     /**
      * Return an estimate of the number of results this index is expected to return for any given
@@ -503,7 +485,7 @@ public interface Index
      *
      * @return the estimated average number of results a Searcher may return for any given query
      */
-    public long getEstimatedResultRows();
+    long getEstimatedResultRows();
 
     /**
      * Check if current index is queryable based on the index status.
@@ -718,27 +700,15 @@ public interface Index
          * @return partitions from the base table matching the criteria of the search.
          */
         public UnfilteredPartitionIterator search(ReadExecutionController executionController);
-
-        /**
-         * Replica filtering protection may fetch data that doesn't match query conditions.
-         *
-         * On coordinator, we need to filter the replicas' responses again.
-         *
-         * @return filtered response that satisfied query conditions
-         */
-        default PartitionIterator filterReplicaFilteringProtection(PartitionIterator fullResponse)
-        {
-            return command().rowFilter().filter(fullResponse, command().metadata(), command().nowInSec());
-        }
     }
 
     /**
      * Class providing grouped operations for indexes that communicate with each other.
-     *
+     * </p>
      * Index implementations should provide a {@code Group} implementation calling to
-     * {@link SecondaryIndexManager#registerIndex(Index, Object, Supplier)} during index registering
+     * {@link IndexRegistry#registerIndex(Index, Key, Supplier)}
      * at {@link #register(IndexRegistry)} method and provide {@code groupKey} calling to
-     * {@link SecondaryIndexManager#unregisterIndex(Index, Object)} during index unregistering
+     * {@link IndexRegistry#unregisterIndex(Index, Key)} during index unregistering
      * at {@link #unregister(IndexRegistry)} method
      */
     interface Group

@@ -118,7 +118,7 @@ public class AbstractPrimaryKeyTest extends SaiRandomizedTest
     {
         assertEquals(expected, ByteComparable.compare(v -> a.asComparableBytes(v),
                                                       v -> b.asComparableBytes(v),
-                                                      ByteComparable.Version.OSS41));
+                                                      TypeUtil.BYTE_COMPARABLE_VERSION));
     }
 
     void assertCompareToAndEquals(PrimaryKey a, PrimaryKey b, int expected)

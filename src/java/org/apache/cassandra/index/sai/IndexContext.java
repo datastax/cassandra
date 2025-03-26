@@ -33,7 +33,6 @@ import java.util.concurrent.TimeUnit;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
-import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.MoreObjects;
 import com.google.common.collect.ImmutableSet;
 
@@ -56,7 +55,6 @@ import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.db.marshal.DecimalType;
 import org.apache.cassandra.db.marshal.InetAddressType;
 import org.apache.cassandra.db.marshal.IntegerType;
-import org.apache.cassandra.db.marshal.SimpleDateType;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.marshal.UUIDType;
 import org.apache.cassandra.db.marshal.VectorType;
@@ -71,29 +69,33 @@ import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
 import org.apache.cassandra.index.sai.disk.vector.VectorValidation;
+import org.apache.cassandra.index.sai.iterators.KeyRangeAntiJoinIterator;
+import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
+import org.apache.cassandra.index.sai.iterators.KeyRangeUnionIterator;
 import org.apache.cassandra.index.sai.memory.MemtableIndex;
-import org.apache.cassandra.index.sai.memory.MemtableRangeIterator;
+import org.apache.cassandra.index.sai.memory.MemtableKeyRangeIterator;
 import org.apache.cassandra.index.sai.metrics.ColumnQueryMetrics;
 import org.apache.cassandra.index.sai.metrics.IndexMetrics;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.plan.Orderer;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
-import org.apache.cassandra.index.sai.utils.RangeAntiJoinIterator;
-import org.apache.cassandra.index.sai.utils.RangeIterator;
-import org.apache.cassandra.index.sai.utils.RangeUnionIterator;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.index.sai.view.IndexViewManager;
 import org.apache.cassandra.index.sai.view.View;
+import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
+import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.concurrent.OpOrder;
+
+import static org.apache.cassandra.config.CassandraRelevantProperties.VALIDATE_MAX_TERM_SIZE_AT_COORDINATOR;
 
 /**
  * Manage metadata for each column index.
@@ -127,10 +129,11 @@ public class IndexContext
 
     private final String keyspace;
     private final String table;
+    private final TableId tableId;
     private final ColumnMetadata column;
     private final IndexTarget.Type indexType;
     private final AbstractType<?> validator;
-    private final ColumnFamilyStore owner;
+    private final ColumnFamilyStore cfs;
 
     // Config can be null if the column context is "fake" (i.e. created for a filtering expression).
     private final IndexMetadata config;
@@ -150,52 +153,64 @@ public class IndexContext
 
     private final int maxTermSize;
 
+    private volatile boolean dropped = false;
+
     public IndexContext(@Nonnull String keyspace,
                         @Nonnull String table,
+                        @Nonnull TableId tableId,
                         @Nonnull AbstractType<?> partitionKeyType,
                         @Nonnull ClusteringComparator clusteringComparator,
                         @Nonnull ColumnMetadata column,
                         @Nonnull IndexTarget.Type indexType,
                         IndexMetadata config,
-                        @Nonnull ColumnFamilyStore owner)
+                        @Nonnull ColumnFamilyStore cfs)
     {
         this.keyspace = keyspace;
         this.table = table;
+        this.tableId = tableId;
         this.partitionKeyType = partitionKeyType;
         this.clusteringComparator = clusteringComparator;
         this.column = column;
         this.indexType = indexType;
         this.config = config;
         this.viewManager = new IndexViewManager(this);
-        this.indexMetrics = new IndexMetrics(this);
         this.validator = TypeUtil.cellValueType(column, indexType);
-        this.owner = owner;
-
-        this.columnQueryMetrics = isLiteral() ? new ColumnQueryMetrics.TrieIndexMetrics(keyspace, table, getIndexName())
-                                              : new ColumnQueryMetrics.BKDIndexMetrics(keyspace, table, getIndexName());
-
+        this.cfs = cfs;
         this.primaryKeyFactory = Version.latest().onDiskFormat().newPrimaryKeyFactory(clusteringComparator);
+
+        String columnName = column.name.toString();
 
         if (config != null)
         {
             String fullIndexName = String.format("%s.%s.%s", this.keyspace, this.table, this.config.name);
             this.indexWriterConfig = IndexWriterConfig.fromOptions(fullIndexName, validator, config.options);
             this.isAnalyzed = AbstractAnalyzer.isAnalyzed(config.options);
-            this.analyzerFactory = AbstractAnalyzer.fromOptions(getValidator(), config.options);
+            this.analyzerFactory = AbstractAnalyzer.fromOptions(columnName, validator, config.options);
             this.queryAnalyzerFactory = AbstractAnalyzer.hasQueryAnalyzer(config.options)
-                                        ? AbstractAnalyzer.fromOptionsQueryAnalyzer(getValidator(), config.options)
+                                        ? AbstractAnalyzer.fromOptionsQueryAnalyzer(validator, config.options)
                                         : this.analyzerFactory;
             this.vectorSimilarityFunction = indexWriterConfig.getSimilarityFunction();
             this.hasEuclideanSimilarityFunc = vectorSimilarityFunction == VectorSimilarityFunction.EUCLIDEAN;
+
+            this.indexMetrics = new IndexMetrics(this);
+            this.columnQueryMetrics = isLiteral() ? new ColumnQueryMetrics.TrieIndexMetrics(keyspace, table, getIndexName())
+                                                  : new ColumnQueryMetrics.BKDIndexMetrics(keyspace, table, getIndexName());
+
         }
         else
         {
             this.indexWriterConfig = IndexWriterConfig.emptyConfig();
             this.isAnalyzed = AbstractAnalyzer.isAnalyzed(Collections.EMPTY_MAP);
-            this.analyzerFactory = AbstractAnalyzer.fromOptions(getValidator(), Collections.EMPTY_MAP);
+            this.analyzerFactory = AbstractAnalyzer.fromOptions(columnName, validator, Collections.EMPTY_MAP);
             this.queryAnalyzerFactory = this.analyzerFactory;
             this.vectorSimilarityFunction = null;
             this.hasEuclideanSimilarityFunc = false;
+
+            // null config indicates a "fake" index context. As such, it won't actually be used for indexing/accessing
+            // data, leaving these metrics unused. This also eliminates the overhead of creating these metrics on the
+            // query path.
+            this.indexMetrics = null;
+            this.columnQueryMetrics = null;
         }
 
         this.maxTermSize = isVector() ? MAX_VECTOR_TERM_SIZE
@@ -241,14 +256,19 @@ public class IndexContext
         return table;
     }
 
-    public Memtable.Owner owner()
+    public TableId getTableId()
     {
-        return owner;
+        return tableId;
+    }
+
+    public ColumnFamilyStore columnFamilyStore()
+    {
+        return cfs;
     }
 
     public IPartitioner getPartitioner()
     {
-        return owner.getPartitioner();
+        return cfs.getPartitioner();
     }
 
     public void index(DecoratedKey key, Row row, Memtable memtable, OpOrder.Group opGroup)
@@ -424,30 +444,55 @@ public class IndexContext
                             .orElse(null);
     }
 
-    public RangeIterator searchMemtable(QueryContext context, Expression e, AbstractBounds<PartitionPosition> keyRange, int limit)
+    // Returns an iterator for NEQ, NOT_CONTAINS_KEY, NOT_CONTAINS_VALUE, which
+    // 1. Either includes everything if the column type values can be truncated and
+    // thus the keys cannot be matched precisely,
+    // 2. or includes everything minus the keys matching the expression
+    // if the column type values cannot be truncated, i.e., matching the keys is always precise.
+    // (not matching precisely will lead to false negatives)
+    //
+    // keys k such that row(k) not contains v = (all keys) \ (keys k such that row(k) contains v)
+    //
+    // Note that rows in other indexes are not matched, so this can return false positives,
+    // but they are not a problem as post-filtering would get rid of them.
+    // The keys matched in other indexes cannot be safely subtracted
+    // as indexes may contain false positives caused by deletes and updates.
+    private KeyRangeIterator getNonEqIterator(QueryContext context, Expression expression, AbstractBounds<PartitionPosition> keyRange)
     {
-        if (e.getOp().isNonEquality())
+        KeyRangeIterator allKeys = scanMemtable(keyRange);
+        if (TypeUtil.supportsRounding(expression.validator))
         {
-            Expression negExpression = e.negated();
-            RangeIterator allKeys = scanMemtable(keyRange);
-            RangeIterator matchedKeys = searchMemtable(context, negExpression, keyRange, Integer.MAX_VALUE);
-            return RangeAntiJoinIterator.create(allKeys, matchedKeys);
+            return allKeys;
+        }
+        else
+        {
+            Expression negExpression = expression.negated();
+            KeyRangeIterator matchedKeys = searchMemtable(context, negExpression, keyRange, Integer.MAX_VALUE);
+            return KeyRangeAntiJoinIterator.create(allKeys, matchedKeys);
+        }
+    }
+
+    public KeyRangeIterator searchMemtable(QueryContext context, Expression expression, AbstractBounds<PartitionPosition> keyRange, int limit)
+    {
+        if (expression.getOp().isNonEquality())
+        {
+            return getNonEqIterator(context, expression, keyRange);
         }
 
         Collection<MemtableIndex> memtables = liveMemtables.values();
 
         if (memtables.isEmpty())
         {
-            return RangeIterator.empty();
+            return KeyRangeIterator.empty();
         }
 
-        RangeUnionIterator.Builder builder = RangeUnionIterator.builder();
+        KeyRangeUnionIterator.Builder builder = KeyRangeUnionIterator.builder();
 
         try
         {
             for (MemtableIndex index : memtables)
             {
-                builder.add(index.search(context, e, keyRange, limit));
+                builder.add(index.search(context, expression, keyRange, limit));
             }
 
             return builder.build();
@@ -459,21 +504,21 @@ public class IndexContext
         }
     }
 
-    private RangeIterator scanMemtable(AbstractBounds<PartitionPosition> keyRange)
+    private KeyRangeIterator scanMemtable(AbstractBounds<PartitionPosition> keyRange)
     {
         Collection<Memtable> memtables = liveMemtables.keySet();
         if (memtables.isEmpty())
         {
-            return RangeIterator.empty();
+            return KeyRangeIterator.empty();
         }
 
-        RangeIterator.Builder builder = RangeUnionIterator.builder(memtables.size());
+        KeyRangeIterator.Builder builder = KeyRangeUnionIterator.builder(memtables.size());
 
         try
         {
             for (Memtable memtable : memtables)
             {
-                RangeIterator memtableIterator = new MemtableRangeIterator(memtable, primaryKeyFactory, keyRange);
+                KeyRangeIterator memtableIterator = new MemtableKeyRangeIterator(memtable, primaryKeyFactory, keyRange);
                 builder.add(memtableIterator);
             }
 
@@ -527,9 +572,12 @@ public class IndexContext
     /**
      * @return A set of SSTables which have attached to them invalid index components.
      */
-    public Set<SSTableContext> onSSTableChanged(Collection<SSTableReader> oldSSTables, Collection<SSTableContext> newSSTables, boolean validate)
+    public Set<SSTableContext> onSSTableChanged(Collection<SSTableReader> oldSSTables,
+                                                Collection<SSTableReader> newSSTables,
+                                                Collection<SSTableContext> newContexts,
+                                                boolean validate)
     {
-        return viewManager.update(oldSSTables, newSSTables, validate);
+        return viewManager.update(oldSSTables, newSSTables, newContexts, validate);
     }
 
     public ColumnMetadata getDefinition()
@@ -567,6 +615,23 @@ public class IndexContext
         return this.config == null ? null : config.name;
     }
 
+    public int getIntOption(String name, int defaultValue)
+    {
+        String value = this.config.options.get(name);
+        if (value == null)
+            return defaultValue;
+
+        try
+        {
+            return Integer.parseInt(value);
+        }
+        catch (NumberFormatException e)
+        {
+            logger.error("Failed to parse index configuration " + name + " = " + value + " as integer");
+            return defaultValue;
+        }
+    }
+
     public AbstractAnalyzer.AnalyzerFactory getAnalyzerFactory()
     {
         return analyzerFactory;
@@ -602,7 +667,20 @@ public class IndexContext
 
     public boolean isIndexed()
     {
-        return config != null;
+        return config != null && !dropped;
+    }
+
+    public boolean isDropped()
+    {
+        return dropped;
+    }
+
+    /**
+     * @return whether the column is analyzed, meaning it uses an analyzer that isn't no-op.
+     */
+    public boolean isAnalyzed()
+    {
+        return isAnalyzed;
     }
 
     /**
@@ -613,6 +691,7 @@ public class IndexContext
      */
     public void invalidate(boolean obsolete)
     {
+        dropped = true;
         liveMemtables.clear();
         viewManager.invalidate(obsolete);
         indexMetrics.release();
@@ -625,18 +704,31 @@ public class IndexContext
         }
     }
 
-    @VisibleForTesting
     public ConcurrentMap<Memtable, MemtableIndex> getLiveMemtables()
     {
         return liveMemtables;
+    }
+
+    public @Nullable MemtableIndex getMemtableIndex(Memtable memtable)
+    {
+        return liveMemtables.get(memtable);
+    }
+
+    public @Nullable SSTableIndex getSSTableIndex(Descriptor descriptor)
+    {
+        return getView().getSSTableIndex(descriptor);
     }
 
     public boolean supports(Operator op)
     {
         if (op.isLike() || op == Operator.LIKE) return false;
         // Analyzed columns store the indexed result, so we are unable to compute raw equality.
-        // The only supported operator is ANALYZER_MATCHES.
-        if (op == Operator.ANALYZER_MATCHES) return isAnalyzed;
+        // The only supported operators are ANALYZER_MATCHES and BM25.
+        if (op == Operator.ANALYZER_MATCHES || op == Operator.BM25) return isAnalyzed;
+
+        // If the column is analyzed and the operator is EQ, we need to check if the analyzer supports it.
+        if (op == Operator.EQ && isAnalyzed && !analyzerFactory.supportsEquals())
+            return false;
 
         // ANN is only supported against vectors.
         // BOUNDED_ANN is only supported against vectors with a Euclidean similarity function.
@@ -656,7 +748,6 @@ public class IndexContext
                          || column.type instanceof IntegerType); // Currently truncates to 20 bytes
 
         Expression.Op operator = Expression.Op.valueOf(op);
-
         if (isNonFrozenCollection())
         {
             if (indexType == IndexTarget.Type.KEYS)
@@ -668,17 +759,12 @@ public class IndexContext
             return indexType == IndexTarget.Type.KEYS_AND_VALUES &&
                    (operator == Expression.Op.EQ || operator == Expression.Op.NOT_EQ || operator == Expression.Op.RANGE);
         }
-
         if (indexType == IndexTarget.Type.FULL)
             return operator == Expression.Op.EQ;
-
         AbstractType<?> validator = getValidator();
-
         if (operator == Expression.Op.IN)
             return true;
-
         if (operator != Expression.Op.EQ && EQ_ONLY_TYPES.contains(validator)) return false;
-
         // RANGE only applicable to non-literal indexes
         return (operator != null) && !(TypeUtil.isLiteral(validator) && operator == Expression.Op.RANGE);
     }
@@ -757,7 +843,8 @@ public class IndexContext
     public void validate(DecoratedKey key, Row row)
     {
         // Validate the size of the inserted term.
-        validateMaxTermSizeForRow(key, row);
+        if (VALIDATE_MAX_TERM_SIZE_AT_COORDINATOR.getBoolean())
+            validateMaxTermSizeForRow(key, row);
 
         // Verify vector is valid.
         if (isVector())
@@ -842,7 +929,7 @@ public class IndexContext
             var perIndexComponents = perSSTableComponents.indexDescriptor().perIndexComponents(this);
             if (!perSSTableComponents.isComplete() || !perIndexComponents.isComplete())
             {
-                logger.debug(logMessage("An on-disk index build for SSTable {} has not completed."), context.descriptor());
+                logger.debug(logMessage("An on-disk index build for SSTable {} has not completed (per-index components={})."), context.descriptor(), perIndexComponents.all());
                 return;
             }
 
@@ -850,7 +937,7 @@ public class IndexContext
             {
                 if (validate)
                 {
-                    if (!perIndexComponents.validateComponents(context.sstable, owner.getTracker(), false))
+                    if (!perIndexComponents.validateComponents(context.sstable, cfs.getTracker(), false))
                     {
                         // Note that a precise warning is already logged by the validation if there is an issue.
                         invalid.add(context);
@@ -859,7 +946,8 @@ public class IndexContext
                 }
 
                 SSTableIndex index = new SSTableIndex(context, perIndexComponents);
-                logger.debug(logMessage("Successfully created index for SSTable {}."), context.descriptor());
+                long count = context.primaryKeyMapFactory().count();
+                logger.debug(logMessage("Successfully created index for SSTable {} with {} rows."), context.descriptor(), count);
 
                 // Try to add new index to the set, if set already has such index, we'll simply release and move on.
                 // This covers situation when SSTable collection has the same SSTable multiple

@@ -20,10 +20,12 @@ package org.apache.cassandra.nodes;
 import java.util.Objects;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.utils.Throwables;
 
+@JsonIgnoreProperties(ignoreUnknown = true)
 public final class PeerInfo extends NodeInfo
 {
     private final InetAddressAndPort peer;

@@ -26,11 +26,11 @@ import java.util.Objects;
 import com.google.common.base.Joiner;
 import com.google.common.collect.ImmutableList;
 
+import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.ValueAccessor;
 import org.apache.cassandra.db.rows.Row;
-import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.io.sstable.format.big.IndexInfo;
 import org.apache.cassandra.serializers.MarshalException;
-
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 
@@ -38,8 +38,8 @@ import static org.apache.cassandra.utils.bytecomparable.ByteSource.EXCLUDED;
 import static org.apache.cassandra.utils.bytecomparable.ByteSource.NEXT_COMPONENT;
 import static org.apache.cassandra.utils.bytecomparable.ByteSource.NEXT_COMPONENT_NULL;
 import static org.apache.cassandra.utils.bytecomparable.ByteSource.NEXT_COMPONENT_NULL_REVERSED;
+import static org.apache.cassandra.utils.bytecomparable.ByteSource.NEXT_CLUSTERING_NULL;
 import static org.apache.cassandra.utils.bytecomparable.ByteSource.TERMINATOR;
-import org.apache.cassandra.io.sstable.format.big.IndexInfo;
 
 /**
  * A comparator of clustering prefixes (or more generally of {@link Clusterable}}.
@@ -56,8 +56,15 @@ public class ClusteringComparator implements Comparator<Clusterable>
     private final Comparator<IndexInfo> indexReverseComparator;
     private final Comparator<Clusterable> reverseComparator;
 
-    private final Comparator<Row> rowComparator = (r1, r2) -> compare((ClusteringPrefix<?>) r1.clustering(),
-                                                                      (ClusteringPrefix<?>) r2.clustering());
+    private final Comparator<Row> rowComparator = new Comparator<>()
+    {
+        @Override
+        public int compare(Row r1, Row r2)
+        {
+            return ClusteringComparator.this.compare((ClusteringPrefix<?>) r1.clustering(),
+                           (ClusteringPrefix<?>) r2.clustering());
+        }
+    };
 
     public ClusteringComparator(AbstractType<?>... clusteringTypes)
     {
@@ -69,11 +76,34 @@ public class ClusteringComparator implements Comparator<Clusterable>
         // copy the list to ensure despatch is monomorphic
         this.clusteringTypes = ImmutableList.copyOf(clusteringTypes);
 
-        this.indexComparator = (o1, o2) -> ClusteringComparator.this.compare((ClusteringPrefix<?>) o1.lastName,
-                                                                             (ClusteringPrefix<?>) o2.lastName);
-        this.indexReverseComparator = (o1, o2) -> ClusteringComparator.this.compare((ClusteringPrefix<?>) o1.firstName,
-                                                                                    (ClusteringPrefix<?>) o2.firstName);
-        this.reverseComparator = (c1, c2) -> ClusteringComparator.this.compare(c2, c1);
+        this.indexComparator = new Comparator<>()
+        {
+            @Override
+            public int compare(IndexInfo o1, IndexInfo o2)
+            {
+                return ClusteringComparator.this.compare((ClusteringPrefix<?>) o1.lastName,
+                               (ClusteringPrefix<?>) o2.lastName);
+            }
+        };
+
+        this.indexReverseComparator = new Comparator<>()
+        {
+            @Override
+            public int compare(IndexInfo o1, IndexInfo o2)
+            {
+                return ClusteringComparator.this.compare((ClusteringPrefix<?>) o1.firstName,
+                               (ClusteringPrefix<?>) o2.firstName);
+            }
+        };
+
+        this.reverseComparator = new Comparator<>()
+        {
+            @Override
+            public int compare(Clusterable o1, Clusterable o2)
+            {
+                return ClusteringComparator.this.compare(o2, o1);
+            }
+        };
     }
 
     /**
@@ -293,6 +323,7 @@ public class ClusteringComparator implements Comparator<Clusterable>
                 {
                     if (current != null)
                     {
+                        // Process bytes of the current component.
                         int b = current.next();
                         if (b > END_OF_STREAM)
                             return b;
@@ -300,20 +331,45 @@ public class ClusteringComparator implements Comparator<Clusterable>
                     }
 
                     int sz = src.size();
-                    if (srcnum == sz)
+                    if (srcnum == sz) // already produced the Kind byte, we are done
                         return END_OF_STREAM;
 
                     ++srcnum;
                     if (srcnum == sz)
                         return src.kind().asByteComparableValue(version);
+                    else
+                        return advanceToComponent(src.get(srcnum));
+                }
 
-                    current = subtype(srcnum).asComparableBytes(src.accessor(), src.get(srcnum), version);
+                private int advanceToComponent(V nextComponent)
+                {
+                    // We can have a null as the clustering component (this is a relic of COMPACT STORAGE, but also
+                    // can appear in indexed partitions with no rows but static content),
+                    if (nextComponent == null)
+                    {
+                        if (version == Version.OSS50)
+                            return NEXT_CLUSTERING_NULL; // always sorts before non-nulls, including for reversed types
+                        else
+                        {
+                            // legacy version did not permit nulls in clustering keys and treated these as null values
+                            return nextComponentNull(subtype(srcnum).isReversed());
+                        }
+                    }
+
+                    current = subtype(srcnum).asComparableBytes(src.accessor(), nextComponent, version);
+                    // and also null values for some types (e.g. int, varint but not text) that are encoded as empty
+                    // buffers.
                     if (current == null)
-                        return subtype(srcnum).isReversed() ? NEXT_COMPONENT_NULL_REVERSED : NEXT_COMPONENT_NULL;
+                        return nextComponentNull(subtype(srcnum).isReversed());
 
                     return NEXT_COMPONENT;
                 }
             };
+        }
+
+        private int nextComponentNull(boolean isReversed)
+        {
+            return isReversed ? NEXT_COMPONENT_NULL_REVERSED : NEXT_COMPONENT_NULL;
         }
 
         public String toString()
@@ -325,7 +381,7 @@ public class ClusteringComparator implements Comparator<Clusterable>
     /**
      * Produces a clustering from the given byte-comparable value. The method will throw an exception if the value
      * does not correctly encode a clustering of this type, including if it encodes a position before or after a
-     * clustering (i.e. a bound/boundary).
+     * clustering (i.e. a bound/boundary). Uses the OSS50 version of the byte-comparable encoding.
      *
      * @param accessor Accessor to use to construct components. Because this will be used to construct individual
      *                 arrays/buffers for each component, it may be sensible to use an accessor that allocates larger
@@ -335,7 +391,24 @@ public class ClusteringComparator implements Comparator<Clusterable>
     public <V> Clustering<?> clusteringFromByteComparable(ValueAccessor<V> accessor,
                                                           ByteComparable comparable)
     {
-        ByteComparable.Version version = ByteComparable.Version.OSS41;
+        return clusteringFromByteComparable(accessor, comparable, ByteComparable.Version.OSS50);
+    }
+
+    /**
+     * Produces a clustering from the given byte-comparable value. The method will throw an exception if the value
+     * does not correctly encode a clustering of this type, including if it encodes a position before or after a
+     * clustering (i.e. a bound/boundary). Uses the OSS50 version of the byte-comparable encoding.
+     *
+     * @param accessor Accessor to use to construct components. Because this will be used to construct individual
+     *                 arrays/buffers for each component, it may be sensible to use an accessor that allocates larger
+     *                 buffers in advance.
+     * @param comparable The clustering encoded as a byte-comparable sequence.
+     * @param version The version of the byte-comparable encoding.
+     */
+    public <V> Clustering<?> clusteringFromByteComparable(ValueAccessor<V> accessor,
+                                                          ByteComparable comparable,
+                                                          ByteComparable.Version version)
+    {
         ByteSource.Peekable orderedBytes = ByteSource.peekable(comparable.asComparableBytes(version));
         if (orderedBytes == null)
             return null;
@@ -360,11 +433,15 @@ public class ClusteringComparator implements Comparator<Clusterable>
         {
             switch (sep)
             {
+            case NEXT_CLUSTERING_NULL:
+                components[cc] = null;
+                break;
             case NEXT_COMPONENT_NULL:
             case NEXT_COMPONENT_NULL_REVERSED:
-                components[cc] = accessor.empty();
+                components[cc] = subtype(cc).fromComparableBytes(accessor, null, version);
                 break;
             case NEXT_COMPONENT:
+                // Decode the next component, consuming bytes from orderedBytes.
                 components[cc] = subtype(cc).fromComparableBytes(accessor, orderedBytes, version);
                 break;
             case TERMINATOR:
@@ -389,9 +466,7 @@ public class ClusteringComparator implements Comparator<Clusterable>
      * for a exclusive end and an inclusive start is the same, before the exact clustering). The type must be supplied
      * separately (in the bound... vs boundary... call and isEnd argument).
      *
-     * @param accessor Accessor to use to construct components. Because this will be used to construct individual
-     *                 arrays/buffers for each component, it may be sensible to use an accessor that allocates larger
-     *                 buffers in advance.
+     * @param accessor Accessor to use to construct components.
      * @param comparable The clustering position encoded as a byte-comparable sequence.
      * @param isEnd true if the bound marks the end of a range, false is it marks the start.
      */
@@ -399,10 +474,8 @@ public class ClusteringComparator implements Comparator<Clusterable>
                                                           ByteComparable comparable,
                                                           boolean isEnd)
     {
-        ByteComparable.Version version = ByteComparable.Version.OSS41;
+        ByteComparable.Version version = ByteComparable.Version.OSS50;
         ByteSource.Peekable orderedBytes = ByteSource.peekable(comparable.asComparableBytes(version));
-        if (orderedBytes == null)
-            return null;
 
         int sep = orderedBytes.next();
         int cc = 0;
@@ -412,11 +485,15 @@ public class ClusteringComparator implements Comparator<Clusterable>
         {
             switch (sep)
             {
+            case NEXT_CLUSTERING_NULL:
+                components[cc] = null;
+                break;
             case NEXT_COMPONENT_NULL:
             case NEXT_COMPONENT_NULL_REVERSED:
-                components[cc] = accessor.empty();
+                components[cc] = subtype(cc).fromComparableBytes(accessor, null, version);
                 break;
             case NEXT_COMPONENT:
+                // Decode the next component, consuming bytes from orderedBytes.
                 components[cc] = subtype(cc).fromComparableBytes(accessor, orderedBytes, version);
                 break;
             case ByteSource.LT_NEXT_COMPONENT:
@@ -449,20 +526,14 @@ public class ClusteringComparator implements Comparator<Clusterable>
      * for a exclusive end and an inclusive start is the same, before the exact clustering). The type must be supplied
      * separately (in the bound... vs boundary... call and isEnd argument).
      *
-     * @param accessor Accessor to use to construct components. Because this will be used to construct individual
-     *                 arrays/buffers for each component, it may be sensible to use an accessor that allocates larger
-     *                 buffers in advance.
+     * @param accessor Accessor to use to construct components.
      * @param comparable The clustering position encoded as a byte-comparable sequence.
      */
-    public <V> ClusteringBoundary<V> boundaryFromByteComparable(ValueAccessor<V> accessor,
-                                                                ByteComparable comparable)
+    public <V> ClusteringBoundary<V> boundaryFromByteComparable(ValueAccessor<V> accessor, ByteComparable comparable)
     {
-        ByteComparable.Version version = ByteComparable.Version.OSS41;
+        ByteComparable.Version version = ByteComparable.Version.OSS50;
         ByteSource.Peekable orderedBytes = ByteSource.peekable(comparable.asComparableBytes(version));
-        if (orderedBytes == null)
-            return null;
 
-        // First check for special cases (partition key only, static clustering) that can do without buffers.
         int sep = orderedBytes.next();
         int cc = 0;
         V[] components = accessor.createArray(size());
@@ -471,11 +542,15 @@ public class ClusteringComparator implements Comparator<Clusterable>
         {
             switch (sep)
             {
+            case NEXT_CLUSTERING_NULL:
+                components[cc] = null;
+                break;
             case NEXT_COMPONENT_NULL:
             case NEXT_COMPONENT_NULL_REVERSED:
-                components[cc] = accessor.empty();
+                components[cc] = subtype(cc).fromComparableBytes(accessor, null, version);
                 break;
             case NEXT_COMPONENT:
+                // Decode the next component, consuming bytes from orderedBytes.
                 components[cc] = subtype(cc).fromComparableBytes(accessor, orderedBytes, version);
                 break;
             case ByteSource.LT_NEXT_COMPONENT:

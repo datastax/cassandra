@@ -17,22 +17,54 @@
  */
 package org.apache.cassandra.index.sai.metrics;
 
-import org.junit.Before;
 import org.junit.BeforeClass;
+import org.junit.experimental.runners.Enclosed;
+import org.junit.runner.RunWith;
 
+import java.lang.reflect.Field;
+
+import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.cql3.CQLTester;
 
-public class TinySegmentFlushingFailureTest extends SegmentFlushingFailureTest
+
+@RunWith(Enclosed.class)
+public class TinySegmentFlushingFailureTest extends CQLTester
 {
-    @Before
-    public void setSegmentBufferSpace() throws Throwable
+    /**
+     * Set the necessary configuration before any tests run.
+     */
+    @BeforeClass
+    public static void setUpClass()
     {
-        setSegmentWriteBufferSpace(0);
+        try
+        {
+            Field confField = DatabaseDescriptor.class.getDeclaredField("conf");
+            confField.setAccessible(true);
+            Config conf = (Config) confField.get(null);
+            conf.sai_options.segment_write_buffer_space_mb = 0;
+
+            System.out.println("Configuration set: segment_write_buffer_space_mb = " + 0);
+        }
+        catch (NoSuchFieldException | IllegalAccessException e)
+        {
+            throw new RuntimeException("Failed to set configuration segment_write_buffer_space_mb = 0", e);
+        }
+        
+        CQLTester.setUpClass();
     }
 
-    @Override
-    protected long expectedBytesLimit()
+    /**
+     * These tests will run only after the outer class has completed its setup. Otherwise, SAITester assigns default
+     * value to segment_write_buffer_space_mb, and we cannot override it without reflection or using Unsafe.
+     */
+    public static class TinySegmentFlushingFailureInnerClassTest extends SegmentFlushingFailureTest
     {
-        return 0;
+
+        @Override
+        protected long expectedBytesLimit()
+        {
+            return 0;
+        }
     }
 }

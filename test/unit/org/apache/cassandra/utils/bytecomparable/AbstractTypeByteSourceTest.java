@@ -67,7 +67,8 @@ public class AbstractTypeByteSourceTest
     @Parameterized.Parameters(name = "version={0}")
     public static Iterable<ByteComparable.Version> versions()
     {
-        return ImmutableList.of(ByteComparable.Version.OSS41);
+        return ImmutableList.of(ByteComparable.Version.OSS41,
+                                ByteComparable.Version.OSS50);
     }
 
     private final ByteComparable.Version version;
@@ -389,21 +390,18 @@ public class AbstractTypeByteSourceTest
         String varintType = "org.apache.cassandra.db.marshal.IntegerType";
         ByteBuffer bytes = ByteBufferUtil.bytes(string);
         int totalSize = 0;
-        if (string != null)
+        // Take into account the string component data (BytesType is aliased)
+        totalSize += 2 + bytesType.length() + 2 + bytes.remaining() + 1;
+        if (uuid != null)
         {
-            // Take into account the string component data (BytesType is aliased)
-            totalSize += 2 + bytesType.length() + 2 + bytes.remaining() + 1;
-            if (uuid != null)
+            // Take into account the UUID component data (TimeUUIDType is aliased)
+            totalSize += 2 + timeUuidType.length() + 2 + 16 + 1;
+            if (i != -1)
             {
-                // Take into account the UUID component data (TimeUUIDType is aliased)
-                totalSize += 2 + timeUuidType.length() + 2 + 16 + 1;
-                if (i != -1)
-                {
-                    // Take into account the varint component data (IntegerType is _not_ aliased).
-                    // Notice that we account for a single byte of varint data, so we'll downcast the int payload
-                    // to byte and use only that as the actual varint payload.
-                    totalSize += 2 + varintType.length() + 2 + 1 + 1;
-                }
+                // Take into account the varint component data (IntegerType is _not_ aliased).
+                // Notice that we account for a single byte of varint data, so we'll downcast the int payload
+                // to byte and use only that as the actual varint payload.
+                totalSize += 2 + varintType.length() + 2 + 1 + 1;
             }
         }
 
@@ -411,30 +409,27 @@ public class AbstractTypeByteSourceTest
         ByteBuffer bb = ByteBuffer.allocate(totalSize);
 
         // 3. Write the key data for each component in the allocated buffer
-        if (string != null)
+        bb.putShort((short) bytesType.length());
+        bb.put(ByteBufferUtil.bytes(bytesType));
+        bb.putShort((short) bytes.remaining());
+        bb.put(bytes);
+        // Make the end-of-component byte 1 if requested and the time-UUID component is null.
+        bb.put(uuid == null ? lastEocByte : (byte) 0);
+        if (uuid != null)
         {
-            bb.putShort((short) bytesType.length());
-            bb.put(ByteBufferUtil.bytes(bytesType));
-            bb.putShort((short) bytes.remaining());
-            bb.put(bytes);
-            // Make the end-of-component byte 1 if requested and the time-UUID component is null.
-            bb.put(uuid == null ? lastEocByte : (byte) 0);
-            if (uuid != null)
+            bb.putShort((short) timeUuidType.length());
+            bb.put(ByteBufferUtil.bytes(timeUuidType));
+            bb.putShort((short) 16);
+            bb.put(UUIDGen.decompose(uuid));
+            // Set the end-of-component byte if requested and the varint component is null.
+            bb.put(i == -1 ? lastEocByte : (byte) 0);
+            if (i != -1)
             {
-                bb.putShort((short) timeUuidType.length());
-                bb.put(ByteBufferUtil.bytes(timeUuidType));
-                bb.putShort((short) 16);
-                bb.put(UUIDGen.decompose(uuid));
-                // Set the end-of-component byte if requested and the varint component is null.
-                bb.put(i == -1 ? lastEocByte : (byte) 0);
-                if (i != -1)
-                {
-                    bb.putShort((short) varintType.length());
-                    bb.put(ByteBufferUtil.bytes(varintType));
-                    bb.putShort((short) 1);
-                    bb.put((byte) i);
-                    bb.put(lastEocByte);
-                }
+                bb.putShort((short) varintType.length());
+                bb.put(ByteBufferUtil.bytes(varintType));
+                bb.putShort((short) 1);
+                bb.put((byte) i);
+                bb.put(lastEocByte);
             }
         }
         bb.rewind();
@@ -712,11 +707,11 @@ public class AbstractTypeByteSourceTest
         // Test how ReversedType handles null ByteSource.Peekable - here the choice of base type is important, as
         // the base type should also be able to handle null ByteSource.Peekable.
         ReversedType<BigInteger> reversedVarintType = (ReversedType<BigInteger>) ReversedType.getInstance(IntegerType.instance);
-        ByteBuffer decodedNull = reversedVarintType.fromComparableBytes(null, ByteComparable.Version.OSS41);
+        ByteBuffer decodedNull = reversedVarintType.fromComparableBytes(null, version);
         Assert.assertEquals(ByteBufferUtil.EMPTY_BYTE_BUFFER, decodedNull);
 
         // Test how ReversedType handles random data with some common and important base types.
-        Map<AbstractType, BiFunction<Random, Integer, ByteBuffer>> bufferGeneratorByType = new HashMap<>();
+        Map<AbstractType<?>, BiFunction<Random, Integer, ByteBuffer>> bufferGeneratorByType = new HashMap<>();
         bufferGeneratorByType.put(UTF8Type.instance, (prng, length) -> UTF8Type.instance.decompose(newRandomAlphanumeric(prng, length)));
         bufferGeneratorByType.put(BytesType.instance, (prng, length) ->
         {
@@ -746,9 +741,9 @@ public class AbstractTypeByteSourceTest
             return DecimalType.instance.decompose(randomDecimal);
         });
         Random prng = new Random();
-        for (Map.Entry<AbstractType, BiFunction<Random, Integer, ByteBuffer>> entry : bufferGeneratorByType.entrySet())
+        for (Map.Entry<AbstractType<?>, BiFunction<Random, Integer, ByteBuffer>> entry : bufferGeneratorByType.entrySet())
         {
-            ReversedType reversedType = (ReversedType) ReversedType.getInstance(entry.getKey());
+            ReversedType<?> reversedType = (ReversedType<?>) ReversedType.getInstance(entry.getKey());
             for (int length = 32; length <= 512; length *= 4)
             {
                 for (int i = 0; i < 100; ++i)

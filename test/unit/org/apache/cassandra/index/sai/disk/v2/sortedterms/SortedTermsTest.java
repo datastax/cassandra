@@ -43,6 +43,7 @@ import org.apache.cassandra.index.sai.disk.v1.bitpack.NumericValuesWriter;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.index.sai.utils.SaiRandomizedTest;
+import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
@@ -51,6 +52,9 @@ import org.apache.lucene.store.IndexInput;
 
 public class SortedTermsTest extends SaiRandomizedTest
 {
+
+    public static final ByteComparable.Version VERSION = TypeUtil.BYTE_COMPARABLE_VERSION;
+
     @Test
     public void testLexicographicException() throws Exception
     {
@@ -66,16 +70,16 @@ public class SortedTermsTest extends SaiRandomizedTest
                                                                   components.addOrGet(IndexComponentType.PRIMARY_KEY_TRIE)))
             {
                 ByteBuffer buffer = Int32Type.instance.decompose(99999);
-                ByteSource byteSource = Int32Type.instance.asComparableBytes(buffer, ByteComparable.Version.OSS41);
+                ByteSource byteSource = Int32Type.instance.asComparableBytes(buffer, VERSION);
                 byte[] bytes1 = ByteSourceInverse.readBytes(byteSource);
 
-                writer.add(ByteComparable.fixedLength(bytes1));
+                writer.add(ByteComparable.preencoded(VERSION, bytes1));
 
                 buffer = Int32Type.instance.decompose(444);
-                byteSource = Int32Type.instance.asComparableBytes(buffer, ByteComparable.Version.OSS41);
+                byteSource = Int32Type.instance.asComparableBytes(buffer, VERSION);
                 byte[] bytes2 = ByteSourceInverse.readBytes(byteSource);
 
-                assertThrows(IllegalArgumentException.class, () -> writer.add(ByteComparable.fixedLength(bytes2)));
+                assertThrows(IllegalArgumentException.class, () -> writer.add(ByteComparable.preencoded(VERSION, bytes2)));
             }
         }
     }
@@ -142,7 +146,7 @@ public class SortedTermsTest extends SaiRandomizedTest
             {
                 try (SortedTermsReader.Cursor cursor = reader.openCursor())
                 {
-                    long pointId = cursor.ceiling(ByteComparable.fixedLength(terms.get(x)));
+                    long pointId = cursor.ceiling(ByteComparable.preencoded(VERSION, terms.get(x)));
                     assertEquals(x, pointId);
                 }
             }
@@ -155,7 +159,7 @@ public class SortedTermsTest extends SaiRandomizedTest
             {
                 try (SortedTermsReader.Cursor cursor = reader.openCursor())
                 {
-                    long pointId = cursor.ceiling(ByteComparable.fixedLength(terms.get(x)));
+                    long pointId = cursor.ceiling(ByteComparable.preencoded(VERSION, terms.get(x)));
                     assertEquals(x, pointId);
                 }
             }
@@ -170,7 +174,7 @@ public class SortedTermsTest extends SaiRandomizedTest
 
                 try (SortedTermsReader.Cursor cursor = reader.openCursor())
                 {
-                    long pointId = cursor.ceiling(ByteComparable.fixedLength(terms.get(target)));
+                    long pointId = cursor.ceiling(ByteComparable.preencoded(VERSION, terms.get(target)));
                     assertEquals(target, pointId);
                 }
             }
@@ -253,7 +257,7 @@ public class SortedTermsTest extends SaiRandomizedTest
             {
                 ByteComparable term = cursor.term();
 
-                byte[] bytes = ByteSourceInverse.readBytes(term.asComparableBytes(ByteComparable.Version.OSS41));
+                byte[] bytes = ByteSourceInverse.readBytes(term.asComparableBytes(VERSION));
                 assertArrayEquals(terms.get(x), bytes);
 
                 x++;
@@ -278,11 +282,11 @@ public class SortedTermsTest extends SaiRandomizedTest
         {
             assertTrue(cursor.advance());
             assertTrue(cursor.advance());
-            String term1 = cursor.term().byteComparableAsString(ByteComparable.Version.OSS41);
+            String term1 = cursor.term().byteComparableAsString(VERSION);
             cursor.reset();
             assertTrue(cursor.advance());
             assertTrue(cursor.advance());
-            String term2 = cursor.term().byteComparableAsString(ByteComparable.Version.OSS41);
+            String term2 = cursor.term().byteComparableAsString(VERSION);
             assertEquals(term1, term2);
             assertEquals(1, cursor.pointId());
         });
@@ -304,7 +308,7 @@ public class SortedTermsTest extends SaiRandomizedTest
                 cursor.seekToPointId(x);
                 ByteComparable term = cursor.term();
 
-                byte[] bytes = ByteSourceInverse.readBytes(term.asComparableBytes(ByteComparable.Version.OSS41));
+                byte[] bytes = ByteSourceInverse.readBytes(term.asComparableBytes(VERSION));
                 assertArrayEquals(terms.get(x), bytes);
             }
         });
@@ -317,7 +321,7 @@ public class SortedTermsTest extends SaiRandomizedTest
                 cursor.seekToPointId(x);
                 ByteComparable term = cursor.term();
 
-                byte[] bytes = ByteSourceInverse.readBytes(term.asComparableBytes(ByteComparable.Version.OSS41));
+                byte[] bytes = ByteSourceInverse.readBytes(term.asComparableBytes(VERSION));
                 assertArrayEquals(terms.get(x), bytes);
             }
         });
@@ -331,7 +335,7 @@ public class SortedTermsTest extends SaiRandomizedTest
                 cursor.seekToPointId(target);
                 ByteComparable term = cursor.term();
 
-                byte[] bytes = ByteSourceInverse.readBytes(term.asComparableBytes(ByteComparable.Version.OSS41));
+                byte[] bytes = ByteSourceInverse.readBytes(term.asComparableBytes(VERSION));
                 assertArrayEquals(terms.get(target), bytes);
             }
         });
@@ -367,11 +371,11 @@ public class SortedTermsTest extends SaiRandomizedTest
                 for (int x = 0; x < 1000 * 4; x++)
                 {
                     ByteBuffer buffer = Int32Type.instance.decompose(x);
-                    ByteSource byteSource = Int32Type.instance.asComparableBytes(buffer, ByteComparable.Version.OSS41);
+                    ByteSource byteSource = Int32Type.instance.asComparableBytes(buffer, VERSION);
                     byte[] bytes = ByteSourceInverse.readBytes(byteSource);
                     terms.add(bytes);
 
-                    writer.add(ByteComparable.fixedLength(bytes));
+                    writer.add(ByteComparable.preencoded(VERSION, bytes));
                 }
             }
         }
@@ -409,13 +413,13 @@ public class SortedTermsTest extends SaiRandomizedTest
     private ByteSource intByteSource(int value)
     {
         ByteBuffer buffer = Int32Type.instance.decompose(value);
-        return Int32Type.instance.asComparableBytes(buffer, ByteComparable.Version.OSS41);
+        return Int32Type.instance.asComparableBytes(buffer, VERSION);
     }
 
     private ByteSource utfByteSource(String value)
     {
         ByteBuffer buffer = UTF8Type.instance.decompose(value);
-        return UTF8Type.instance.asComparableBytes(buffer, ByteComparable.Version.OSS41);
+        return UTF8Type.instance.asComparableBytes(buffer, VERSION);
     }
 
     @FunctionalInterface

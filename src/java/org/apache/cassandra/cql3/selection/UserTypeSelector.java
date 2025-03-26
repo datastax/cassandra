@@ -158,10 +158,10 @@ final class UserTypeSelector extends Selector
             field.addFetchedColumns(builder);
     }
 
-    public void addInput(ProtocolVersion protocolVersion, ResultSetBuilder rs) throws InvalidRequestException
+    public void addInput(ResultSetBuilder rs) throws InvalidRequestException
     {
         for (Selector field : fields.values())
-            field.addInput(protocolVersion, rs);
+            field.addInput(rs);
     }
 
     public ByteBuffer getOutput(ProtocolVersion protocolVersion) throws InvalidRequestException

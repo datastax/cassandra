@@ -23,6 +23,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.stream.Collectors;
 
+import org.agrona.collections.Int2IntHashMap;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -41,9 +42,10 @@ import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.KDTreeIndexBuilder;
 import org.apache.cassandra.index.sai.disk.v1.trie.InvertedIndexWriter;
+import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.plan.Expression;
-import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.SaiRandomizedTest;
+import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
@@ -84,6 +86,12 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
     }
 
     @Test
+    public void testPrimaryKeyMapFactoryCount()
+    {
+        assertEquals(Long.MAX_VALUE, KDTreeIndexBuilder.TEST_PRIMARY_KEY_MAP_FACTORY.count());
+    }
+
+    @Test
     public void testEqQueriesAgainstStringIndex() throws Exception
     {
         doTestEqQueriesAgainstStringIndex(version);
@@ -94,12 +102,12 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
         final int numTerms = randomIntBetween(64, 512), numPostings = randomIntBetween(256, 1024);
         final List<InvertedIndexBuilder.TermsEnum> termsEnum = buildTermsEnum(version, numTerms, numPostings);
 
-        try (IndexSearcher searcher = buildIndexAndOpenSearcher(numTerms, numPostings, termsEnum))
+        try (IndexSearcher searcher = buildIndexAndOpenSearcher(numTerms, termsEnum))
         {
             for (int t = 0; t < numTerms; ++t)
             {
-                try (RangeIterator results = searcher.search(new Expression(indexContext)
-                        .add(Operator.EQ, termsEnum.get(t).originalTermBytes), null, new QueryContext(), false, LIMIT))
+                try (KeyRangeIterator results = searcher.search(new Expression(indexContext)
+                        .add(Operator.EQ, termsEnum.get(t).originalTermBytes), null, new QueryContext(), false))
                 {
                     assertTrue(results.hasNext());
 
@@ -113,8 +121,8 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
                     assertFalse(results.hasNext());
                 }
 
-                try (RangeIterator results = searcher.search(new Expression(indexContext)
-                        .add(Operator.EQ, termsEnum.get(t).originalTermBytes), null, new QueryContext(), false, LIMIT))
+                try (KeyRangeIterator results = searcher.search(new Expression(indexContext)
+                        .add(Operator.EQ, termsEnum.get(t).originalTermBytes), null, new QueryContext(), false))
                 {
                     assertTrue(results.hasNext());
 
@@ -135,13 +143,13 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
 
             // try searching for terms that weren't indexed
             final String tooLongTerm = randomSimpleString(10, 12);
-            RangeIterator results = searcher.search(new Expression(indexContext)
-                                                    .add(Operator.EQ, UTF8Type.instance.decompose(tooLongTerm)), null, new QueryContext(), false, LIMIT);
+            KeyRangeIterator results = searcher.search(new Expression(indexContext)
+                                                    .add(Operator.EQ, UTF8Type.instance.decompose(tooLongTerm)), null, new QueryContext(), false);
             assertFalse(results.hasNext());
 
             final String tooShortTerm = randomSimpleString(1, 2);
             results = searcher.search(new Expression(indexContext)
-                                      .add(Operator.EQ, UTF8Type.instance.decompose(tooShortTerm)), null, new QueryContext(), false, LIMIT);
+                                      .add(Operator.EQ, UTF8Type.instance.decompose(tooShortTerm)), null, new QueryContext(), false);
             assertFalse(results.hasNext());
         }
     }
@@ -152,10 +160,10 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
         final int numTerms = randomIntBetween(5, 15), numPostings = randomIntBetween(5, 20);
         final List<InvertedIndexBuilder.TermsEnum> termsEnum = buildTermsEnum(version, numTerms, numPostings);
 
-        try (IndexSearcher searcher = buildIndexAndOpenSearcher(numTerms, numPostings, termsEnum))
+        try (IndexSearcher searcher = buildIndexAndOpenSearcher(numTerms, termsEnum))
         {
             searcher.search(new Expression(indexContext)
-                            .add(Operator.NEQ, UTF8Type.instance.decompose("a")), null, new QueryContext(), false, LIMIT);
+                            .add(Operator.NEQ, UTF8Type.instance.decompose("a")), null, new QueryContext(), false);
 
             fail("Expect IllegalArgumentException thrown, but didn't");
         }
@@ -165,30 +173,30 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
         }
     }
 
-    private IndexSearcher buildIndexAndOpenSearcher(int terms, int postings, List<InvertedIndexBuilder.TermsEnum> termsEnum) throws IOException
+    private IndexSearcher buildIndexAndOpenSearcher(int terms, List<InvertedIndexBuilder.TermsEnum> termsEnum) throws IOException
     {
-        final int size = terms * postings;
         final IndexDescriptor indexDescriptor = newIndexDescriptor();
         final String index = newIndex();
         final IndexContext indexContext = SAITester.createIndexContext(index, UTF8Type.instance);
 
-        SegmentMetadata.ComponentMetadataMap indexMetas;
         IndexComponents.ForWrite components = indexDescriptor.newPerIndexComponentsForWrite(indexContext);
+        SegmentMetadataBuilder metadataBuilder = new SegmentMetadataBuilder(0, components);
+        metadataBuilder.setRowIdRange(0, Long.MAX_VALUE);
+        metadataBuilder.setKeyRange(SAITester.TEST_FACTORY.createTokenOnly(DatabaseDescriptor.getPartitioner().getMinimumToken()),
+                                    SAITester.TEST_FACTORY.createTokenOnly(DatabaseDescriptor.getPartitioner().getMaximumToken()));
+        metadataBuilder.setTermRange(termsEnum.get(0).originalTermBytes,
+                                     termsEnum.get(terms - 1).originalTermBytes);
+
         try (InvertedIndexWriter writer = new InvertedIndexWriter(components))
         {
-            var iter = termsEnum.stream().map(InvertedIndexBuilder.TermsEnum::toPair).iterator();
-            indexMetas = writer.writeAll(new MemtableTermsIterator(null, null, iter));
+            var iter = termsEnum.stream().map(InvertedIndexBuilder::toTermWithFrequency).iterator();
+            Int2IntHashMap docLengths = createMockDocLengths(termsEnum);
+            MemtableTermsIterator termsIterator = new MemtableTermsIterator(null, null, iter);
+            SegmentMetadata.ComponentMetadataMap indexMetas = writer.writeAll(metadataBuilder.intercept(termsIterator), docLengths);
+            metadataBuilder.setComponentsMetadata(indexMetas);
         }
 
-        final SegmentMetadata segmentMetadata = new SegmentMetadata(0,
-                                                                    size,
-                                                                    0,
-                                                                    Long.MAX_VALUE,
-                                                                    SAITester.TEST_FACTORY.createTokenOnly(DatabaseDescriptor.getPartitioner().getMinimumToken()),
-                                                                    SAITester.TEST_FACTORY.createTokenOnly(DatabaseDescriptor.getPartitioner().getMaximumToken()),
-                                                                    termsEnum.get(0).originalTermBytes,
-                                                                    termsEnum.get(terms - 1).originalTermBytes,
-                                                                    indexMetas);
+        final SegmentMetadata segmentMetadata = metadataBuilder.build();
 
         try (PerIndexFiles indexFiles = new PerIndexFiles(components))
         {
@@ -209,8 +217,19 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
         return InvertedIndexBuilder.buildStringTermsEnum(version, terms, postings, () -> randomSimpleString(3, 5), () -> nextInt(0, Integer.MAX_VALUE));
     }
 
+    private Int2IntHashMap createMockDocLengths(List<InvertedIndexBuilder.TermsEnum> termsEnum)
+    {
+        Int2IntHashMap docLengths = new Int2IntHashMap(Integer.MIN_VALUE);
+        for (InvertedIndexBuilder.TermsEnum term : termsEnum)
+        {
+            for (var cursor : term.postings)
+                docLengths.put(cursor.value, 1);
+        }
+        return docLengths;
+    }
+
     private ByteBuffer wrap(ByteComparable bc)
     {
-        return ByteBuffer.wrap(ByteSourceInverse.readBytes(bc.asComparableBytes(ByteComparable.Version.OSS41)));
+        return ByteBuffer.wrap(ByteSourceInverse.readBytes(bc.asComparableBytes(TypeUtil.BYTE_COMPARABLE_VERSION)));
     }
 }

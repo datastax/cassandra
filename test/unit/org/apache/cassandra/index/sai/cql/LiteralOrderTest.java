@@ -18,11 +18,7 @@
 
 package org.apache.cassandra.index.sai.cql;
 
-import java.util.NavigableMap;
-import java.util.SortedMap;
-import java.util.SortedSet;
 import java.util.TreeMap;
-import java.util.stream.Collectors;
 
 import org.junit.Test;
 
@@ -37,7 +33,6 @@ public class LiteralOrderTest extends SAITester
         createTable("CREATE TABLE %s (pk int PRIMARY KEY, str_val text, num int)");
         createIndex("CREATE CUSTOM INDEX ON %s(str_val) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(num) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         // Each iteration overwrites the previous data, so this test deals with a lot of overwrites.
         for (int i = 0; i < 5; i++)

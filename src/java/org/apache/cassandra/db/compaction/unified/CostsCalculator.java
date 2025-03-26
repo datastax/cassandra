@@ -33,6 +33,8 @@ import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.MovingAverage;
 
+import static org.apache.cassandra.db.compaction.unified.DSECompatibilityUtils.getIntegerSystemProperty;
+
 /**
  * This class periodically retrieves delta values from the environment and stores them into exponentially weighted averages.
  * It then uses these values to calculate IO costs that are exported to {@link CompactionMetrics} and used by {@link AdaptiveController}
@@ -44,7 +46,7 @@ public class CostsCalculator
 
     /** How often values are sampled. Sampling for periods that are too short (<= 1 second) may not give good results since
      * we many not collect sufficient data. */
-    final static int samplingPeriodMs = Integer.getInteger(Controller.PREFIX + "sample_time_ms", 5000);
+    final static int samplingPeriodMs = getIntegerSystemProperty("sample_time_ms", 5000);
 
     private final Environment env;
     private final MovingAverageOfDelta partitionsReadPerPeriod;

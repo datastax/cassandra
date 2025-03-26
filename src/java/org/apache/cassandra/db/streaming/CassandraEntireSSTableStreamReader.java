@@ -53,6 +53,8 @@ public class CassandraEntireSSTableStreamReader implements IStreamReader
 {
     private static final Logger logger = LoggerFactory.getLogger(CassandraEntireSSTableStreamReader.class);
 
+    private static final boolean SKIP_MUTATING_STATS_AFTER_ZCS = Boolean.getBoolean("cassandra.skip_mutating_stats_after_zcs");
+
     private final TableId tableId;
     private final StreamSession session;
     private final StreamMessageHeader messageHeader;
@@ -135,11 +137,22 @@ public class CassandraEntireSSTableStreamReader implements IStreamReader
                              prettyPrintMemory(totalSize));
             }
 
-            UnaryOperator<StatsMetadata> transform = stats -> stats.mutateLevel(header.sstableLevel)
-                                                                   .mutateRepairedMetadata(messageHeader.repairedAt, messageHeader.pendingRepair, false);
-            String description = String.format("level %s and repairedAt time %s and pendingRepair %s",
-                                               header.sstableLevel, messageHeader.repairedAt, messageHeader.pendingRepair);
-            writer.descriptor.getMetadataSerializer().mutate(writer.descriptor, description, transform);
+            if (!SKIP_MUTATING_STATS_AFTER_ZCS)
+            {
+                UnaryOperator<StatsMetadata> transform = stats -> stats.mutateLevel(header.sstableLevel)
+                                                                       .mutateRepairedMetadata(messageHeader.repairedAt, messageHeader.pendingRepair, false);
+                String description = String.format("level %s and repairedAt time %s and pendingRepair %s",
+                                                   header.sstableLevel, messageHeader.repairedAt, messageHeader.pendingRepair);
+                writer.descriptor.getMetadataSerializer().mutate(writer.descriptor, description, transform);
+            }
+            else
+            {
+                logger.debug("[Stream #{}] Skipped mutating {} component from {} for sstable {} by config -Dcassandra.skip_mutating_stats_after_zcs",
+                             session.planId(),
+                             Component.STATS,
+                             session.peer,
+                             writer.descriptor);
+            }
             return writer;
         }
         catch (Throwable e)

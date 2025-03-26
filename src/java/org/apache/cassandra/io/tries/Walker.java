@@ -392,8 +392,14 @@ public class Walker<VALUE extends Walker<VALUE>> implements AutoCloseable
 
     public static class TransitionBytesCollector
     {
+        private final ByteComparable.Version byteComparableVersion;
         protected byte[] bytes = new byte[32];
         protected int pos = 0;
+
+        public TransitionBytesCollector(ByteComparable.Version byteComparableVersion)
+        {
+            this.byteComparableVersion = byteComparableVersion;
+        }
 
         public void add(int b)
         {
@@ -416,7 +422,7 @@ public class Walker<VALUE extends Walker<VALUE>> implements AutoCloseable
                 return null;
             byte[] value = new byte[pos];
             System.arraycopy(bytes, 0, value, 0, pos);
-            return v -> ByteSource.fixedLength(value, 0, value.length);
+            return ByteComparable.preencoded(byteComparableVersion, value, 0, value.length);
         }
 
         @Override

@@ -87,6 +87,7 @@ import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.MD5Digest;
 import org.apache.cassandra.utils.ObjectSizes;
+import org.apache.cassandra.utils.Pair;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.ENABLE_NODELOCAL_QUERIES;
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkTrue;
@@ -104,7 +105,11 @@ public class QueryProcessor implements QueryHandler
 
     private static final Logger logger = LoggerFactory.getLogger(QueryProcessor.class);
 
-    private static final Cache<MD5Digest, Prepared> preparedStatements;
+    // DSP-24330 heavy contention (almost deadlock) on Caffeine cache on insertions while measuring entry size. We
+    // precompute sizes instead to reduce contention on Caffeine's underlying stipped locking structures. We also avoid
+    // duplication of work as every statement was being measured 2 times: before instertion to check size limits and
+    // upon insertion by Caffeine
+    private static final Cache<MD5Digest, Pair<Prepared, Integer>> preparedStatements;
 
     // A map for prepared statements used internally (which we don't want to mix with user statement, in particular we don't
     // bother with expiration on those.
@@ -123,7 +128,7 @@ public class QueryProcessor implements QueryHandler
         preparedStatements = Caffeine.newBuilder()
                              .executor(MoreExecutors.directExecutor())
                              .maximumWeight(capacityToBytes(DatabaseDescriptor.getPreparedStatementsCacheSizeMB()))
-                             .weigher(QueryProcessor::measure)
+                             .weigher(QueryProcessor::getPrecomputedSize)
                              .removalListener((key, prepared, cause) -> {
                                  MD5Digest md5Digest = (MD5Digest) key;
                                  if (cause.wasEvicted())
@@ -179,11 +184,13 @@ public class QueryProcessor implements QueryHandler
                     clientState.setKeyspace(keyspace);
 
                 Prepared prepared = parseAndPrepare(query, clientState, false);
-                preparedStatements.put(id, prepared);
+                int precomputedCacheEntrySize = measurePStatementCacheEntrySize(id, prepared);
+                Pair<Prepared, Integer> cacheValue = Pair.create(prepared, precomputedCacheEntrySize);
+                preparedStatements.put(id, cacheValue);
 
                 // Preload `null` statement for non-fully qualified statements, since it can't be parsed if loaded from cache and will be dropped
                 if (!prepared.fullyQualified)
-                    preparedStatements.get(computeId(query, null), (ignored_) -> prepared);
+                    preparedStatements.get(computeId(query, null), (ignored_) -> cacheValue);
                 return true;
             }
             catch (RequestValidationException e)
@@ -236,12 +243,16 @@ public class QueryProcessor implements QueryHandler
 
     public HashMap<MD5Digest, Prepared> getPreparedStatements()
     {
-        return new HashMap<>(preparedStatements.asMap());
+        HashMap<MD5Digest, Prepared> res = new HashMap<>(preparedStatements.asMap().size());
+        for(Map.Entry<MD5Digest, Pair<Prepared, Integer>> entry: preparedStatements.asMap().entrySet())
+            res.put(entry.getKey(), entry.getValue().left());
+
+        return res;
     }
 
     public Prepared getPrepared(MD5Digest id)
     {
-        return preparedStatements.getIfPresent(id);
+        return extractPreparedFromPair(preparedStatements.getIfPresent(id));
     }
 
     public static void validateKey(ByteBuffer key) throws InvalidRequestException
@@ -272,6 +283,8 @@ public class QueryProcessor implements QueryHandler
     {
         logger.trace("Process {} @CL.{}", statement, options.getConsistency());
         ClientState clientState = queryState.getClientState();
+
+        Tracing.trace("Authorizing against client state");
         statement.authorize(clientState);
         statement.validate(queryState);
 
@@ -285,6 +298,7 @@ public class QueryProcessor implements QueryHandler
                 return result;
         }
 
+        Tracing.trace("Executing prepared statement");
         ResultMessage result = options.getConsistency() == ConsistencyLevel.NODE_LOCAL
                                ? processNodeLocalStatement(statement, queryState, options, queryStartNanoTime)
                                : statement.execute(queryState, options, queryStartNanoTime);
@@ -502,19 +516,29 @@ public class QueryProcessor implements QueryHandler
     public static UntypedResultSet execute(String query, ConsistencyLevel cl, QueryState state, Object... values)
     throws RequestExecutionException
     {
-        try
-        {
-            Prepared prepared = prepareInternal(query);
-            ResultMessage result = prepared.statement.execute(state, makeInternalOptions(prepared.statement, values, cl), System.nanoTime());
-            if (result instanceof ResultMessage.Rows)
-                return UntypedResultSet.create(((ResultMessage.Rows)result).result);
-            else
-                return null;
-        }
-        catch (RequestValidationException e)
-        {
-            throw new RuntimeException("Error validating " + query, e);
-        }
+        Prepared prepared = prepareInternal(query);
+        ResultMessage<?> result = prepared.statement.execute(state, makeInternalOptions(prepared.statement, values, cl), System.nanoTime());
+        if (result instanceof ResultMessage.Rows)
+            return UntypedResultSet.create(((ResultMessage.Rows)result).result);
+        else
+            return null;
+    }
+
+    /**
+     * Same than {@link #execute(String, ConsistencyLevel, Object...)}, but to use for queries we know are only executed
+     * once so that the created statement object is not cached.
+     */
+    @VisibleForTesting
+    static UntypedResultSet executeOnce(String query, ConsistencyLevel cl, Object... values)
+    {
+        QueryState queryState = internalQueryState();
+        CQLStatement statement = parseStatement(query, queryState.getClientState());
+        statement.validate(queryState);
+        ResultMessage<?> result = statement.execute(queryState, makeInternalOptions(statement, values, cl), System.nanoTime());
+        if (result instanceof ResultMessage.Rows)
+            return UntypedResultSet.create(((ResultMessage.Rows)result).result);
+        else
+            return null;
     }
 
     public static UntypedResultSet executeInternalWithPaging(String query, PageSize pageSize, Object... values)
@@ -604,11 +628,10 @@ public class QueryProcessor implements QueryHandler
 
         synchronized (this)
         {
-            CassandraVersion minVersion = Gossiper.instance.getMinVersion(DatabaseDescriptor.getWriteRpcTimeout(TimeUnit.MILLISECONDS), TimeUnit.MILLISECONDS);
-            if (minVersion != null &&
-                ((minVersion.major == 3 && minVersion.minor == 0 && minVersion.compareTo(NEW_PREPARED_STATEMENT_BEHAVIOUR_SINCE_30) >= 0) ||
-                 (minVersion.major == 3 && minVersion.minor > 0 && minVersion.compareTo(NEW_PREPARED_STATEMENT_BEHAVIOUR_SINCE_3X) >= 0) ||
-                 (minVersion.compareTo(NEW_PREPARED_STATEMENT_BEHAVIOUR_SINCE_40, true) >= 0)))
+            CassandraVersion minVersion = Gossiper.instance.getMinVersion();
+            if ((minVersion.major == 3 && minVersion.minor == 0 && minVersion.compareTo(NEW_PREPARED_STATEMENT_BEHAVIOUR_SINCE_30) >= 0) ||
+                (minVersion.major == 3 && minVersion.minor > 0 && minVersion.compareTo(NEW_PREPARED_STATEMENT_BEHAVIOUR_SINCE_3X) >= 0) ||
+                (minVersion.compareTo(NEW_PREPARED_STATEMENT_BEHAVIOUR_SINCE_40, true) >= 0))
             {
                 logger.info("Fully upgraded to at least {}", minVersion);
                 newPreparedStatementBehaviour = true;
@@ -643,8 +666,8 @@ public class QueryProcessor implements QueryHandler
         boolean useNewPreparedStatementBehaviour = useNewPreparedStatementBehaviour();
         MD5Digest hashWithoutKeyspace = computeId(queryString, null);
         MD5Digest hashWithKeyspace = computeId(queryString, clientState.getRawKeyspace());
-        Prepared cachedWithoutKeyspace = preparedStatements.getIfPresent(hashWithoutKeyspace);
-        Prepared cachedWithKeyspace = preparedStatements.getIfPresent(hashWithKeyspace);
+        Prepared cachedWithoutKeyspace = extractPreparedFromPair(preparedStatements.getIfPresent(hashWithoutKeyspace));
+        Prepared cachedWithKeyspace = extractPreparedFromPair(preparedStatements.getIfPresent(hashWithKeyspace));
         // We assume it is only safe to return cached prepare if we have both instances
         boolean safeToReturnCached = cachedWithoutKeyspace != null && cachedWithKeyspace != null;
 
@@ -714,7 +737,7 @@ public class QueryProcessor implements QueryHandler
     throws InvalidRequestException
     {
         MD5Digest statementId = computeId(queryString, clientKeyspace);
-        Prepared existing = preparedStatements.getIfPresent(statementId);
+        Prepared existing = extractPreparedFromPair(preparedStatements.getIfPresent(statementId));
         if (existing == null)
             return null;
 
@@ -739,16 +762,19 @@ public class QueryProcessor implements QueryHandler
     {
         // Concatenate the current keyspace so we don't mix prepared statements between keyspace (#5352).
         // (if the keyspace is null, queryString has to have a fully-qualified keyspace so it's fine.
-        long statementSize = ObjectSizes.measureDeep(prepared.statement);
+
+        MD5Digest statementId = computeId(queryString, keyspace);
+        int precomputedCacheEntrySize = measurePStatementCacheEntrySize(statementId, prepared);
         // don't execute the statement if it's bigger than the allowed threshold
-        if (statementSize > capacityToBytes(DatabaseDescriptor.getPreparedStatementsCacheSizeMB()))
+        if (precomputedCacheEntrySize > capacityToBytes(DatabaseDescriptor.getPreparedStatementsCacheSizeMB()))
             throw new InvalidRequestException(String.format("Prepared statement of size %d bytes is larger than allowed maximum of %d MB: %s...",
-                                                            statementSize,
+                                                            precomputedCacheEntrySize,
                                                             DatabaseDescriptor.getPreparedStatementsCacheSizeMB(),
                                                             queryString.substring(0, 200)));
-        MD5Digest statementId = computeId(queryString, keyspace);
-        Prepared previous = preparedStatements.get(statementId, (ignored_) -> prepared);
-        if (previous == prepared)
+
+        Pair<Prepared, Integer> cacheValue = Pair.create(prepared, precomputedCacheEntrySize);
+        Pair<Prepared, Integer> previous = preparedStatements.get(statementId, (ignored_) -> cacheValue);
+        if (previous != null && previous.left() == prepared)
             SystemKeyspace.writePreparedStatement(keyspace, statementId, queryString);
 
         ResultSet.PreparedMetadata preparedMetadata = ResultSet.PreparedMetadata.fromPrepared(prepared.statement);
@@ -806,9 +832,11 @@ public class QueryProcessor implements QueryHandler
                 return result;
         }
 
+        Tracing.trace("Authorizing batch");
         batch.authorize(clientState);
         batch.validate();
         batch.validate(queryState);
+        Tracing.trace("Executing batch");
         return batch.execute(queryState, options, queryStartNanoTime);
     }
 
@@ -870,9 +898,15 @@ public class QueryProcessor implements QueryHandler
         }
     }
 
-    private static int measure(Object key, Prepared value)
+    private static int measurePStatementCacheEntrySize(Object key, Prepared value)
     {
-        return Ints.checkedCast(ObjectSizes.measureDeep(key) + ObjectSizes.measureDeep(value));
+        Pair<Prepared, Integer> valuePair = Pair.create(value, 0);
+        return Ints.checkedCast(ObjectSizes.measureDeep(key) + ObjectSizes.measureDeep(valuePair));
+    }
+
+    private static int getPrecomputedSize(Object key, Pair<Prepared, Integer> value)
+    {
+        return value.right;
     }
 
     /**
@@ -890,6 +924,11 @@ public class QueryProcessor implements QueryHandler
         preparedStatements.asMap().clear();
     }
 
+    private static Prepared extractPreparedFromPair(Pair<Prepared, Integer> pair)
+    {
+        return pair != null ? pair.left : null;
+    }
+
     private static class StatementInvalidatingListener implements SchemaChangeListener
     {
         private static void removeInvalidPreparedStatements(String ksName, String cfName)
@@ -902,11 +941,11 @@ public class QueryProcessor implements QueryHandler
         {
             Predicate<Function> matchesFunction = f -> ksName.equals(f.name().keyspace) && functionName.equals(f.name().name);
 
-            for (Iterator<Map.Entry<MD5Digest, Prepared>> iter = preparedStatements.asMap().entrySet().iterator();
+            for (Iterator<Map.Entry<MD5Digest, Pair<Prepared, Integer>>> iter = preparedStatements.asMap().entrySet().iterator();
                  iter.hasNext();)
             {
-                Map.Entry<MD5Digest, Prepared> pstmt = iter.next();
-                if (Iterables.any(pstmt.getValue().statement.getFunctions(), matchesFunction))
+                Map.Entry<MD5Digest, Pair<Prepared, Integer>> pstmt = iter.next();
+                if (Iterables.any(pstmt.getValue().left().statement.getFunctions(), matchesFunction))
                 {
                     SystemKeyspace.removePreparedStatement(pstmt.getKey());
                     iter.remove();
@@ -918,13 +957,13 @@ public class QueryProcessor implements QueryHandler
                                statement -> Iterables.any(statement.statement.getFunctions(), matchesFunction));
         }
 
-        private static void removeInvalidPersistentPreparedStatements(Iterator<Map.Entry<MD5Digest, Prepared>> iterator,
+        private static void removeInvalidPersistentPreparedStatements(Iterator<Map.Entry<MD5Digest, Pair<Prepared, Integer>>> iterator,
                                                                       String ksName, String cfName)
         {
             while (iterator.hasNext())
             {
-                Map.Entry<MD5Digest, Prepared> entry = iterator.next();
-                if (shouldInvalidate(ksName, cfName, entry.getValue().statement))
+                Map.Entry<MD5Digest, Pair<Prepared, Integer>> entry = iterator.next();
+                if (shouldInvalidate(ksName, cfName, entry.getValue().left().statement))
                 {
                     SystemKeyspace.removePreparedStatement(entry.getKey());
                     iterator.remove();

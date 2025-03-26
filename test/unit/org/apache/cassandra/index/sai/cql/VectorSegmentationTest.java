@@ -54,7 +54,6 @@ public class VectorSegmentationTest extends VectorTester
 
         SegmentBuilder.updateLastValidSegmentRowId(17); // 17 rows per segment
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         int limit = 35;
         float[] queryVector = randomVector();
@@ -71,7 +70,6 @@ public class VectorSegmentationTest extends VectorTester
     {
         createTable("CREATE TABLE %s (pk int, val vector<float, " + dimension + ">, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         List<float[]> vectors = new ArrayList<>();
         int rowsPerSSTable = 10;

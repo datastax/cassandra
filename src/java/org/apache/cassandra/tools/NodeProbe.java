@@ -404,6 +404,11 @@ public class NodeProbe implements AutoCloseable
         ssProxy.forceKeyspaceCompaction(splitOutput, keyspaceName, tableNames);
     }
 
+    public void forceKeyspaceCompaction(boolean splitOutput, int parallelism, String keyspaceName, String... tableNames) throws IOException, ExecutionException, InterruptedException
+    {
+        ssProxy.forceKeyspaceCompaction(splitOutput, parallelism, keyspaceName, tableNames);
+    }
+
     public void relocateSSTables(int jobs, String keyspace, String[] cfnames) throws IOException, ExecutionException, InterruptedException
     {
         ssProxy.relocateSSTables(jobs, keyspace, cfnames);
@@ -1133,6 +1138,11 @@ public class NodeProbe implements AutoCloseable
         return ssProxy.getCompactionThroughputMbPerSec();
     }
 
+    public Map<String, String> getCurrentCompactionThroughputMiBPerSec()
+    {
+        return ssProxy.getCurrentCompactionThroughputMebibytesPerSec();
+    }
+
     public void setBatchlogReplayThrottle(int value)
     {
         ssProxy.setBatchlogReplayThrottleInKB(value);
@@ -1654,6 +1664,7 @@ public class NodeProbe implements AutoCloseable
                 case "PendingTasksByTableName":
                 case "WriteAmplificationByTableName":
                 case "AggregateCompactions":
+                case "MaxOverlapsMap":
                     return JMX.newMBeanProxy(mbeanServerConn,
                             new ObjectName("org.apache.cassandra.metrics:type=Compaction,name=" + metricName),
                             CassandraMetricsRegistry.JmxGaugeMBean.class).getValue();

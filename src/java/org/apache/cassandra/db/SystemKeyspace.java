@@ -80,6 +80,10 @@ import org.apache.cassandra.schema.Tables;
 import org.apache.cassandra.schema.Types;
 import org.apache.cassandra.schema.UserFunctions;
 import org.apache.cassandra.schema.Views;
+import org.apache.cassandra.sensors.Context;
+import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.RequestTracker;
+import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.service.paxos.Commit;
 import org.apache.cassandra.service.paxos.PaxosState;
 import org.apache.cassandra.streaming.StreamOperation;
@@ -93,6 +97,8 @@ import org.apache.cassandra.utils.UUIDGen;
 import static java.lang.String.format;
 import static java.util.Collections.emptyMap;
 import static java.util.Collections.singletonMap;
+import static org.apache.cassandra.config.CassandraRelevantProperties.PERSIST_PREPARED_STATEMENTS;
+import static org.apache.cassandra.config.CassandraRelevantProperties.UNSAFE_SYSTEM;
 import static org.apache.cassandra.cql3.QueryProcessor.executeInternal;
 import static org.apache.cassandra.cql3.QueryProcessor.executeOnceInternal;
 
@@ -171,6 +177,7 @@ public final class SystemKeyspace
                 + "PRIMARY KEY ((row_key), cf_id))")
                 .compaction(CompactionParams.lcs(emptyMap()))
                 .build();
+    private static final Context PaxosContext = Context.from(Paxos);
 
     private static final TableMetadata BuiltIndexes =
         parse(BUILT_INDEXES,
@@ -541,7 +548,7 @@ public final class SystemKeyspace
 
     public static void forceBlockingFlush(String ...cfnames)
     {
-        if (!DatabaseDescriptor.isUnsafeSystem())
+        if (!UNSAFE_SYSTEM.getBoolean())
         {
             List<ListenableFuture<CommitLogPosition>> futures = new ArrayList<>();
 
@@ -588,14 +595,21 @@ public final class SystemKeyspace
 
     public static PaxosState loadPaxosState(DecoratedKey key, TableMetadata metadata, int nowInSec)
     {
+        // Track bytes read from the Paxos system table for the commit that initiated Paxos
+        registerPaxosSensor(Type.READ_BYTES);
+
         String req = "SELECT * FROM system.%s WHERE row_key = ? AND cf_id = ?";
         UntypedResultSet results = QueryProcessor.executeInternalWithNow(nowInSec, System.nanoTime(), format(req, PAXOS), key.getKey(), metadata.id.asUUID());
+
+        // transfer bytes read off of Paxos system table to the user table for the commit that initiated Paxos
+        transferPaxosSensorBytes(metadata, Type.READ_BYTES);
+
         if (results.isEmpty())
             return new PaxosState(key, metadata);
         UntypedResultSet.Row row = results.one();
 
         Commit promised = row.has("in_progress_ballot")
-                        ? new Commit(row.getUUID("in_progress_ballot"), new PartitionUpdate.Builder(metadata, key, metadata.regularAndStaticColumns(), 1).build())
+                        ? new Commit(row.getUUID("in_progress_ballot"), PartitionUpdate.builder(metadata, key, metadata.regularAndStaticColumns(), 1).build())
                         : Commit.emptyCommit(key, metadata);
         // either we have both a recently accepted ballot and update or we have neither
         Commit accepted = row.has("proposal_version") && row.has("proposal")
@@ -613,24 +627,24 @@ public final class SystemKeyspace
     public static void savePaxosPromise(Commit promise)
     {
         String req = "UPDATE system.%s USING TIMESTAMP ? AND TTL ? SET in_progress_ballot = ? WHERE row_key = ? AND cf_id = ?";
-        executeInternal(format(req, PAXOS),
+        trackPaxosBytes(promise, () -> executeInternal(format(req, PAXOS),
                         UUIDGen.microsTimestamp(promise.ballot),
                         paxosTtlSec(promise.update.metadata()),
                         promise.ballot,
                         promise.update.partitionKey().getKey(),
-                        promise.update.metadata().id.asUUID());
+                        promise.update.metadata().id.asUUID()));
     }
 
     public static void savePaxosProposal(Commit proposal)
     {
-        executeInternal(format("UPDATE system.%s USING TIMESTAMP ? AND TTL ? SET proposal_ballot = ?, proposal = ?, proposal_version = ? WHERE row_key = ? AND cf_id = ?", PAXOS),
+        trackPaxosBytes(proposal, () -> executeInternal(format("UPDATE system.%s USING TIMESTAMP ? AND TTL ? SET proposal_ballot = ?, proposal = ?, proposal_version = ? WHERE row_key = ? AND cf_id = ?", PAXOS),
                         UUIDGen.microsTimestamp(proposal.ballot),
                         paxosTtlSec(proposal.update.metadata()),
                         proposal.ballot,
                         PartitionUpdate.toBytes(proposal.update, MessagingService.current_version),
                         MessagingService.current_version,
                         proposal.update.partitionKey().getKey(),
-                        proposal.update.metadata().id.asUUID());
+                        proposal.update.metadata().id.asUUID()));
     }
 
     public static int paxosTtlSec(TableMetadata metadata)
@@ -644,14 +658,48 @@ public final class SystemKeyspace
         // We always erase the last proposal (with the commit timestamp to no erase more recent proposal in case the commit is old)
         // even though that's really just an optimization  since SP.beginAndRepairPaxos will exclude accepted proposal older than the mrc.
         String cql = "UPDATE system.%s USING TIMESTAMP ? AND TTL ? SET proposal_ballot = null, proposal = null, most_recent_commit_at = ?, most_recent_commit = ?, most_recent_commit_version = ? WHERE row_key = ? AND cf_id = ?";
-        executeInternal(format(cql, PAXOS),
+        trackPaxosBytes(commit, () -> executeInternal(format(cql, PAXOS),
                         UUIDGen.microsTimestamp(commit.ballot),
                         paxosTtlSec(commit.update.metadata()),
                         commit.ballot,
                         PartitionUpdate.toBytes(commit.update, MessagingService.current_version),
                         MessagingService.current_version,
                         commit.update.partitionKey().getKey(),
-                        commit.update.metadata().id.asUUID());
+                        commit.update.metadata().id.asUUID()));
+    }
+
+    /**
+     * Decorates a paxos comit consumer with methods to track bytes written to the Paxos system table under the context of the user table that initiated Paxos.
+     */
+    private static void trackPaxosBytes(Commit commit, Runnable paxosCommitConsumer)
+    {
+        // Track bytes written to the Paxos system table for the commit that initiated Paxos
+        registerPaxosSensor(Type.WRITE_BYTES);
+        paxosCommitConsumer.run();
+        // transfer bytes written to the Paxos system table to the user table for the commit that initiated Paxos
+        transferPaxosSensorBytes(commit.update.metadata(), Type.WRITE_BYTES);
+    }
+
+    private static void registerPaxosSensor(Type type)
+    {
+        RequestSensors sensors = RequestTracker.instance.get();
+        if (sensors != null)
+        {
+            sensors.registerSensor(PaxosContext, type);
+        }
+    }
+
+    /**
+     * Populates sensor values of a given {@link Type} associated with the user commit that initiated Paxos.
+     */
+    private static void transferPaxosSensorBytes(TableMetadata targetSensorMetadata, Type type)
+    {
+        RequestSensors sensors = RequestTracker.instance.get();
+        if (sensors != null)
+            sensors.getSensor(PaxosContext, type).ifPresent(paxosSensor -> {
+                sensors.incrementSensor(Context.from(targetSensorMetadata), type, paxosSensor.getValue());
+                sensors.syncAllSensors();
+            });
     }
 
     /**
@@ -726,7 +774,7 @@ public final class SystemKeyspace
     {
         long timestamp = FBUtilities.timestampMicros();
         int nowInSec = FBUtilities.nowInSeconds();
-        PartitionUpdate.Builder update = new PartitionUpdate.Builder(LegacySizeEstimates, UTF8Type.instance.decompose(keyspace), LegacySizeEstimates.regularAndStaticColumns(), estimates.size());
+        PartitionUpdate.Builder update = PartitionUpdate.builder(LegacySizeEstimates, UTF8Type.instance.decompose(keyspace), LegacySizeEstimates.regularAndStaticColumns(), estimates.size());
         // delete all previous values with a single range tombstone.
         update.add(new RangeTombstone(Slice.make(LegacySizeEstimates.comparator, table), new DeletionTime(timestamp - 1, nowInSec)));
 
@@ -751,7 +799,7 @@ public final class SystemKeyspace
     {
         long timestamp = FBUtilities.timestampMicros();
         int nowInSec = FBUtilities.nowInSeconds();
-        PartitionUpdate.Builder update = new PartitionUpdate.Builder(TableEstimates, UTF8Type.instance.decompose(keyspace), TableEstimates.regularAndStaticColumns(), estimates.size());
+        PartitionUpdate.Builder update = PartitionUpdate.builder(TableEstimates, UTF8Type.instance.decompose(keyspace), TableEstimates.regularAndStaticColumns(), estimates.size());
 
         // delete all previous values with a single range tombstone.
         update.add(new RangeTombstone(Slice.make(TableEstimates.comparator, table, type), new DeletionTime(timestamp - 1, nowInSec)));
@@ -927,10 +975,15 @@ public final class SystemKeyspace
 
     public static void writePreparedStatement(String loggedKeyspace, MD5Digest key, String cql)
     {
-        executeInternal(format("INSERT INTO %s (logged_keyspace, prepared_id, query_string) VALUES (?, ?, ?)",
-                               PreparedStatements.toString()),
-                        loggedKeyspace, key.byteBuffer(), cql);
-        logger.debug("stored prepared statement for logged keyspace '{}': '{}'", loggedKeyspace, cql);
+        if (PERSIST_PREPARED_STATEMENTS.getBoolean())
+        {
+            executeInternal(format("INSERT INTO %s (logged_keyspace, prepared_id, query_string) VALUES (?, ?, ?)",
+                                   PreparedStatements.toString()),
+                            loggedKeyspace, key.byteBuffer(), cql);
+            logger.debug("stored prepared statement for logged keyspace '{}': '{}'", loggedKeyspace, cql);
+        }
+        else
+            logger.debug("not persisting prepared statement for logged keyspace '{}': '{}'", loggedKeyspace, cql);
     }
 
     public static void removePreparedStatement(MD5Digest key)

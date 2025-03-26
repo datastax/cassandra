@@ -41,6 +41,9 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.io.ByteStreams;
 import com.google.common.reflect.TypeToken;
 
+import org.eclipse.jdt.internal.compiler.lookup.LookupEnvironment;
+import org.eclipse.jdt.internal.compiler.lookup.ModuleBinding;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -143,9 +146,9 @@ public final class JavaBasedUDFunction extends UDFunction
         settings.put(CompilerOptions.OPTION_ReportDeprecation,
                      CompilerOptions.IGNORE);
         settings.put(CompilerOptions.OPTION_Source,
-                     CompilerOptions.VERSION_1_8);
+                     CompilerOptions.VERSION_11);
         settings.put(CompilerOptions.OPTION_TargetPlatform,
-                     CompilerOptions.VERSION_1_8);
+                     CompilerOptions.VERSION_11);
 
         compilerOptions = new CompilerOptions(settings);
         compilerOptions.parseLiteralExpressionsAsConstants = true;
@@ -530,6 +533,30 @@ public final class JavaBasedUDFunction extends UDFunction
         public boolean ignoreOptionalProblems()
         {
             return false;
+        }
+
+        @Override
+        public ModuleBinding module(LookupEnvironment environment)
+        {
+            return environment.getModule(this.getModuleName());
+        }
+
+        @Override
+        public char[] getModuleName()
+        {
+            return null;
+        }
+
+        @Override
+        public String getDestinationPath()
+        {
+            return null;
+        }
+
+        @Override
+        public String getExternalAnnotationPath(String qualifiedTypeName)
+        {
+            return null;
         }
 
         // ICompilerRequestor

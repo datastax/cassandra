@@ -85,6 +85,11 @@ public class ShardManagerNoDisks implements ShardManager
         return localSpaceCoverage();
     }
 
+    public double minimumPerPartitionSpan()
+    {
+        return localSpaceCoverage() / Math.max(1, localRanges.getRealm().estimatedPartitionCountInSSTables());
+    }
+
     @Override
     public ShardTracker boundaries(int shardCount)
     {

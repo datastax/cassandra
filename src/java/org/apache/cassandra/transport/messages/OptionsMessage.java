@@ -23,6 +23,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 
 import io.netty.buffer.ByteBuf;
@@ -67,7 +68,12 @@ public class OptionsMessage extends Message.Request
     }
 
     @Override
-    protected Message.Response execute(QueryState state, long queryStartNanoTime, boolean traceRequest)
+    protected CompletableFuture<Response> maybeExecuteAsync(QueryState queryState, long queryStartNanoTime, boolean traceRequest)
+    {
+        return CompletableFuture.completedFuture(executeSync(queryState, queryStartNanoTime, traceRequest));
+    }
+
+    private Message.Response executeSync(QueryState state, long queryStartNanoTime, boolean traceRequest)
     {
         List<String> cqlVersions = new ArrayList<String>();
         cqlVersions.add(QueryProcessor.CQL_VERSION.toString());

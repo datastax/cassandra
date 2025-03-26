@@ -40,4 +40,16 @@ public class CorruptBlockException extends IOException
     {
         super(String.format("(%s): corruption detected, chunk at %d of length %d.", filePath, offset, length), cause);
     }
+
+    public CorruptBlockException(String filePath, CompressionMetadata.Chunk chunk, int storedChecksum, int calculatedChecksum)
+    {
+        this(filePath, chunk.offset, chunk.length, storedChecksum, calculatedChecksum);
+    }
+
+    public CorruptBlockException(String filePath, long offset, int length, int storedChecksum, int calculatedChecksum)
+    {
+        super(String.format("(%s): corruption detected, chunk at %d of length %d has mismatched checksums. Expected %d, but calculated %d",
+                            filePath, offset, length, storedChecksum, calculatedChecksum));
+    }
+
 }

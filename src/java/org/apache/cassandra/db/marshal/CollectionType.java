@@ -191,6 +191,14 @@ public abstract class CollectionType<T> extends MultiCellCapableType<T>
         return kind == ((CollectionType<?>)that).kind;
     }
 
+    /**
+     * Checks if the specified serialized collection contains the specified serialized collection element.
+     *
+     * @param element a serialized collection element
+     * @return {@code true} if the collection contains the value, {@code false} otherwise
+     */
+    public abstract boolean contains(ByteBuffer collection, ByteBuffer element);
+
     private static class CollectionPathSerializer implements CellPath.Serializer
     {
         public void serialize(CellPath path, DataOutputPlus out) throws IOException

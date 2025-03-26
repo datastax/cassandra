@@ -67,14 +67,14 @@ public class CommitLogDescriptor
     // For compatibility with CNDB
     private static final int VERSION_DSE_68 = 680;
     // Stargazer 1.0 messaging
-    private static final int VERSION_SG_10 = 100;
+    static final int VERSION_DS_10 = MessagingService.VERSION_DS_10;
+    static final int VERSION_DS_11 = MessagingService.VERSION_DS_11;
 
     /**
      * Increment this number if there is a changes in the commit log disc layout or MessagingVersion changes.
      * Note: make sure to handle {@link #getMessagingVersion()}
      */
-    @VisibleForTesting
-    public static final int current_version = VERSION_SG_10;
+    public static final int CURRENT_VERSION = MessagingService.current_version;
 
     final int version;
     public final long id;
@@ -91,7 +91,7 @@ public class CommitLogDescriptor
 
     public CommitLogDescriptor(long id, ParameterizedClass compression, EncryptionContext encryptionContext)
     {
-        this(current_version, id, compression, encryptionContext);
+        this(CURRENT_VERSION, id, compression, encryptionContext);
     }
 
     public static void writeHeader(ByteBuffer out, CommitLogDescriptor descriptor)
@@ -218,8 +218,10 @@ public class CommitLogDescriptor
                 return MessagingService.VERSION_40;
             case VERSION_DSE_68:
                 return MessagingService.VERSION_DSE_68;
-            case VERSION_SG_10:
-                return MessagingService.VERSION_SG_10;
+            case VERSION_DS_10:
+                return MessagingService.VERSION_DS_10;
+            case VERSION_DS_11:
+                return MessagingService.VERSION_DS_11;
             default:
                 throw new IllegalStateException("Unknown commitlog version " + version);
         }

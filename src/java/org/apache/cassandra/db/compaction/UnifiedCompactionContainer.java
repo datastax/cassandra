@@ -18,6 +18,7 @@ package org.apache.cassandra.db.compaction;
 
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -49,6 +50,7 @@ public class UnifiedCompactionContainer implements CompactionStrategyContainer
     private final CompactionParams metadataParams;
     private final UnifiedCompactionStrategy strategy;
     private final boolean enableAutoCompaction;
+    private final boolean hasVector;
 
     AtomicBoolean enabled;
 
@@ -65,6 +67,7 @@ public class UnifiedCompactionContainer implements CompactionStrategyContainer
         this.strategy = new UnifiedCompactionStrategy(factory, backgroundCompactions, params.options());
         this.enabled = new AtomicBoolean(enabled);
         this.enableAutoCompaction = enableAutoCompaction;
+        this.hasVector = strategy.getController().hasVectorType();
 
         factory.getCompactionLogger().strategyCreated(this.strategy);
 
@@ -139,6 +142,14 @@ public class UnifiedCompactionContainer implements CompactionStrategyContainer
                                               ReloadReason reason)
     {
         return create(previous, factory, compactionParams, reason, enableAutoCompaction);
+    }
+
+    @Override
+    public boolean shouldReload(CompactionParams params, ReloadReason reason)
+    {
+        return reason != CompactionStrategyContainer.ReloadReason.METADATA_CHANGE
+               || !params.equals(getMetadataCompactionParams())
+               || hasVector != factory.getRealm().metadata().hasVectorType();
     }
 
     private static CompactionParams createMetadataParams(@Nullable CompactionStrategyContainer previous,
@@ -235,9 +246,9 @@ public class UnifiedCompactionContainer implements CompactionStrategyContainer
     }
 
     @Override
-    public CompactionTasks getMaximalTasks(int gcBefore, boolean splitOutput)
+    public CompactionTasks getMaximalTasks(int gcBefore, boolean splitOutput, int permittedParallelism)
     {
-        return strategy.getMaximalTasks(gcBefore, splitOutput);
+        return strategy.getMaximalTasks(gcBefore, splitOutput, permittedParallelism);
     }
 
     @Override
@@ -348,6 +359,12 @@ public class UnifiedCompactionContainer implements CompactionStrategyContainer
         strategy.periodicReport();
     }
 
+    @Override
+    public Map<String, String> getMaxOverlapsMap()
+    {
+        return strategy.getMaxOverlapsMap();
+    }
+
     BackgroundCompactions getBackgroundCompactions()
     {
         return strategy.backgroundCompactions;
@@ -360,9 +377,9 @@ public class UnifiedCompactionContainer implements CompactionStrategyContainer
     }
 
     @Override
-    public void onCompleted(UUID id, boolean isSuccess)
+    public void onCompleted(UUID id, Throwable err)
     {
-        strategy.onCompleted(id, isSuccess);
+        strategy.onCompleted(id, err);
     }
 
     @Override

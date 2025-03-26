@@ -38,7 +38,6 @@ import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.transactions.IndexTransaction;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
-import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.sstable.format.SSTableFlushObserver;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.TableMetadata;
@@ -109,7 +108,16 @@ public class SingletonIndexGroup implements Index.Group
     public Index.QueryPlan queryPlanFor(RowFilter rowFilter)
     {
         Preconditions.checkNotNull(delegate);
-        return SingletonIndexQueryPlan.create(delegate, rowFilter);
+
+        // Indexes using a singleton group don't support disjunctions,
+        // so we only consider the top-level AND expressions for index selection.
+        for (RowFilter.Expression e : rowFilter.withoutDisjunctions().expressions())
+        {
+            if (delegate.supportsExpression(e.column(), e.operator()))
+                return new SingletonIndexQueryPlan(delegate, delegate.getPostIndexQueryFilter(rowFilter));
+        }
+
+        return null;
     }
 
     @Override

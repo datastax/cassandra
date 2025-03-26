@@ -21,11 +21,13 @@ import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.Iterator;
 import java.util.List;
-import java.util.Map;
-import java.util.Set;
+
+import javax.annotation.Nullable;
 
 import org.apache.cassandra.db.marshal.*;
+import org.apache.cassandra.index.Index;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
 public enum Operator
@@ -39,8 +41,15 @@ public enum Operator
         }
 
         @Override
-        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        public boolean isSatisfiedBy(AbstractType<?> type,
+                                     ByteBuffer leftOperand,
+                                     ByteBuffer rightOperand,
+                                     @Nullable Index.Analyzer indexAnalyzer,
+                                     @Nullable Index.Analyzer queryAnalyzer)
         {
+            if (indexAnalyzer != null)
+                return ANALYZER_MATCHES.isSatisfiedBy(type, leftOperand, rightOperand, indexAnalyzer, queryAnalyzer);
+
             return type.compareForCQL(leftOperand, rightOperand) == 0;
         }
     },
@@ -53,7 +62,11 @@ public enum Operator
         }
 
         @Override
-        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        public boolean isSatisfiedBy(AbstractType<?> type,
+                                     ByteBuffer leftOperand,
+                                     ByteBuffer rightOperand,
+                                     @Nullable Index.Analyzer indexAnalyzer,
+                                     @Nullable Index.Analyzer queryAnalyzer)
         {
             return type.compareForCQL(leftOperand, rightOperand) < 0;
         }
@@ -67,7 +80,11 @@ public enum Operator
         }
 
         @Override
-        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        public boolean isSatisfiedBy(AbstractType<?> type, 
+                                     ByteBuffer leftOperand, 
+                                     ByteBuffer rightOperand, 
+                                     @Nullable Index.Analyzer indexAnalyzer,
+                                     @Nullable Index.Analyzer queryAnalyzer)
         {
             return type.compareForCQL(leftOperand, rightOperand) <= 0;
         }
@@ -81,7 +98,11 @@ public enum Operator
         }
 
         @Override
-        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        public boolean isSatisfiedBy(AbstractType<?> type, 
+                                     ByteBuffer leftOperand, 
+                                     ByteBuffer rightOperand, 
+                                     @Nullable Index.Analyzer indexAnalyzer,
+                                     @Nullable Index.Analyzer queryAnalyzer)
         {
             return type.compareForCQL(leftOperand, rightOperand) >= 0;
         }
@@ -95,7 +116,11 @@ public enum Operator
         }
 
         @Override
-        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        public boolean isSatisfiedBy(AbstractType<?> type, 
+                                     ByteBuffer leftOperand, 
+                                     ByteBuffer rightOperand, 
+                                     @Nullable Index.Analyzer indexAnalyzer,
+                                     @Nullable Index.Analyzer queryAnalyzer)
         {
             return type.compareForCQL(leftOperand, rightOperand) > 0;
         }
@@ -108,7 +133,11 @@ public enum Operator
             return "IN";
         }
 
-        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        public boolean isSatisfiedBy(AbstractType<?> type, 
+                                     ByteBuffer leftOperand, 
+                                     ByteBuffer rightOperand, 
+                                     @Nullable Index.Analyzer indexAnalyzer,
+                                     @Nullable Index.Analyzer queryAnalyzer)
         {
             List<?> inValues = ListType.getInstance(type, false).getSerializer().deserialize(rightOperand);
             return inValues.contains(type.getSerializer().deserialize(leftOperand));
@@ -123,25 +152,14 @@ public enum Operator
         }
 
         @Override
-        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        public boolean isSatisfiedBy(AbstractType<?> type, 
+                                     ByteBuffer leftOperand, 
+                                     ByteBuffer rightOperand, 
+                                     @Nullable Index.Analyzer indexAnalyzer,
+                                     @Nullable Index.Analyzer queryAnalyzer)
         {
-            switch(((CollectionType<?>) type).kind)
-            {
-                case LIST :
-                    ListType<?> listType = (ListType<?>) type;
-                    List<?> list = listType.getSerializer().deserialize(leftOperand);
-                    return list.contains(listType.getElementsType().getSerializer().deserialize(rightOperand));
-                case SET:
-                    SetType<?> setType = (SetType<?>) type;
-                    Set<?> set = setType.getSerializer().deserialize(leftOperand);
-                    return set.contains(setType.getElementsType().getSerializer().deserialize(rightOperand));
-                case MAP:
-                    MapType<?, ?> mapType = (MapType<?, ?>) type;
-                    Map<?, ?> map = mapType.getSerializer().deserialize(leftOperand);
-                    return map.containsValue(mapType.getValuesType().getSerializer().deserialize(rightOperand));
-                default:
-                    throw new AssertionError();
-            }
+            CollectionType<?> collectionType = (CollectionType<?>) type;
+            return collectionType.contains(leftOperand, rightOperand);
         }
     },
     CONTAINS_KEY(6)
@@ -153,11 +171,14 @@ public enum Operator
         }
 
         @Override
-        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        public boolean isSatisfiedBy(AbstractType<?> type, 
+                                     ByteBuffer leftOperand, 
+                                     ByteBuffer rightOperand, 
+                                     @Nullable Index.Analyzer indexAnalyzer,
+                                     @Nullable Index.Analyzer queryAnalyzer)
         {
             MapType<?, ?> mapType = (MapType<?, ?>) type;
-            Map<?, ?> map = mapType.getSerializer().deserialize(leftOperand);
-            return map.containsKey(mapType.getKeysType().getSerializer().deserialize(rightOperand));
+            return mapType.containsKey(leftOperand, rightOperand);
         }
     },
 
@@ -170,7 +191,11 @@ public enum Operator
         }
 
         @Override
-        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        public boolean isSatisfiedBy(AbstractType<?> type, 
+                                     ByteBuffer leftOperand, 
+                                     ByteBuffer rightOperand, 
+                                     @Nullable Index.Analyzer indexAnalyzer,
+                                     @Nullable Index.Analyzer queryAnalyzer)
         {
             return type.compareForCQL(leftOperand, rightOperand) != 0;
 
@@ -185,7 +210,11 @@ public enum Operator
         }
 
         @Override
-        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        public boolean isSatisfiedBy(AbstractType<?> type, 
+                                     ByteBuffer leftOperand, 
+                                     ByteBuffer rightOperand, 
+                                     @Nullable Index.Analyzer indexAnalyzer,
+                                     @Nullable Index.Analyzer queryAnalyzer)
         {
             throw new UnsupportedOperationException();
         }
@@ -199,7 +228,11 @@ public enum Operator
         }
 
         @Override
-        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        public boolean isSatisfiedBy(AbstractType<?> type,
+                                     ByteBuffer leftOperand,
+                                     ByteBuffer rightOperand,
+                                     @Nullable Index.Analyzer indexAnalyzer,
+                                     @Nullable Index.Analyzer queryAnalyzer)
         {
             return ByteBufferUtil.startsWith(leftOperand, rightOperand);
         }
@@ -213,7 +246,11 @@ public enum Operator
         }
 
         @Override
-        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        public boolean isSatisfiedBy(AbstractType<?> type,
+                                     ByteBuffer leftOperand,
+                                     ByteBuffer rightOperand,
+                                     @Nullable Index.Analyzer indexAnalyzer,
+                                     @Nullable Index.Analyzer queryAnalyzer)
         {
             return ByteBufferUtil.endsWith(leftOperand, rightOperand);
         }
@@ -227,7 +264,11 @@ public enum Operator
         }
 
         @Override
-        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        public boolean isSatisfiedBy(AbstractType<?> type,
+                                     ByteBuffer leftOperand,
+                                     ByteBuffer rightOperand,
+                                     @Nullable Index.Analyzer indexAnalyzer,
+                                     @Nullable Index.Analyzer queryAnalyzer)
         {
             return ByteBufferUtil.contains(leftOperand, rightOperand);
         }
@@ -240,7 +281,11 @@ public enum Operator
             return "LIKE '<term>'";
         }
 
-        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        public boolean isSatisfiedBy(AbstractType<?> type,
+                                     ByteBuffer leftOperand,
+                                     ByteBuffer rightOperand,
+                                     @Nullable Index.Analyzer indexAnalyzer,
+                                     @Nullable Index.Analyzer queryAnalyzer)
         {
             return ByteBufferUtil.contains(leftOperand, rightOperand);
         }
@@ -254,7 +299,11 @@ public enum Operator
         }
 
         @Override
-        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        public boolean isSatisfiedBy(AbstractType<?> type,
+                                     ByteBuffer leftOperand,
+                                     ByteBuffer rightOperand,
+                                     @Nullable Index.Analyzer indexAnalyzer,
+                                     @Nullable Index.Analyzer queryAnalyzer)
         {
             throw new UnsupportedOperationException();
         }
@@ -268,9 +317,13 @@ public enum Operator
         }
 
         @Override
-        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        public boolean isSatisfiedBy(AbstractType<?> type,
+                                     ByteBuffer leftOperand,
+                                     ByteBuffer rightOperand,
+                                     @Nullable Index.Analyzer indexAnalyzer,
+                                     @Nullable Index.Analyzer queryAnalyzer)
         {
-            return true;
+            throw new UnsupportedOperationException();
         }
     },
     NOT_IN(16)
@@ -281,9 +334,13 @@ public enum Operator
             return "NOT IN";
         }
 
-        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        public boolean isSatisfiedBy(AbstractType<?> type,
+                                     ByteBuffer leftOperand,
+                                     ByteBuffer rightOperand,
+                                     @Nullable Index.Analyzer indexAnalyzer,
+                                     @Nullable Index.Analyzer queryAnalyzer)
         {
-            return !IN.isSatisfiedBy(type, leftOperand, rightOperand);
+            return !IN.isSatisfiedBy(type, leftOperand, rightOperand, indexAnalyzer, queryAnalyzer);
         }
     },
     NOT_CONTAINS(17)
@@ -295,9 +352,13 @@ public enum Operator
         }
 
         @Override
-        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        public boolean isSatisfiedBy(AbstractType<?> type,
+                                     ByteBuffer leftOperand,
+                                     ByteBuffer rightOperand,
+                                     @Nullable Index.Analyzer indexAnalyzer,
+                                     @Nullable Index.Analyzer queryAnalyzer)
         {
-            return !CONTAINS.isSatisfiedBy(type, leftOperand, rightOperand);
+            return !CONTAINS.isSatisfiedBy(type, leftOperand, rightOperand, indexAnalyzer, queryAnalyzer);
         }
 
     },
@@ -310,9 +371,13 @@ public enum Operator
         }
 
         @Override
-        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        public boolean isSatisfiedBy(AbstractType<?> type,
+                                     ByteBuffer leftOperand,
+                                     ByteBuffer rightOperand,
+                                     @Nullable Index.Analyzer indexAnalyzer,
+                                     @Nullable Index.Analyzer queryAnalyzer)
         {
-            return !CONTAINS_KEY.isSatisfiedBy(type, leftOperand, rightOperand);
+            return !CONTAINS_KEY.isSatisfiedBy(type, leftOperand, rightOperand, indexAnalyzer, queryAnalyzer);
         }
     },
     NOT_LIKE_PREFIX(19)
@@ -324,9 +389,13 @@ public enum Operator
         }
 
         @Override
-        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        public boolean isSatisfiedBy(AbstractType<?> type,
+                                     ByteBuffer leftOperand,
+                                     ByteBuffer rightOperand,
+                                     @Nullable Index.Analyzer indexAnalyzer,
+                                     @Nullable Index.Analyzer queryAnalyzer)
         {
-            return !LIKE_PREFIX.isSatisfiedBy(type, leftOperand, rightOperand);
+            return !LIKE_PREFIX.isSatisfiedBy(type, leftOperand, rightOperand, indexAnalyzer, queryAnalyzer);
         }
     },
     NOT_LIKE_SUFFIX(20)
@@ -338,9 +407,13 @@ public enum Operator
         }
 
         @Override
-        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        public boolean isSatisfiedBy(AbstractType<?> type,
+                                     ByteBuffer leftOperand,
+                                     ByteBuffer rightOperand,
+                                     @Nullable Index.Analyzer indexAnalyzer,
+                                     @Nullable Index.Analyzer queryAnalyzer)
         {
-            return !LIKE_SUFFIX.isSatisfiedBy(type, leftOperand, rightOperand);
+            return !LIKE_SUFFIX.isSatisfiedBy(type, leftOperand, rightOperand, indexAnalyzer, queryAnalyzer);
         }
     },
     NOT_LIKE_CONTAINS(21)
@@ -352,9 +425,13 @@ public enum Operator
         }
 
         @Override
-        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        public boolean isSatisfiedBy(AbstractType<?> type,
+                                     ByteBuffer leftOperand,
+                                     ByteBuffer rightOperand,
+                                     @Nullable Index.Analyzer indexAnalyzer,
+                                     @Nullable Index.Analyzer queryAnalyzer)
         {
-            return !LIKE_CONTAINS.isSatisfiedBy(type, leftOperand, rightOperand);
+            return !LIKE_CONTAINS.isSatisfiedBy(type, leftOperand, rightOperand, indexAnalyzer, queryAnalyzer);
         }
     },
     NOT_LIKE_MATCHES(22)
@@ -365,9 +442,13 @@ public enum Operator
             return "NOT LIKE '<term>'";
         }
 
-        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        public boolean isSatisfiedBy(AbstractType<?> type,
+                                     ByteBuffer leftOperand,
+                                     ByteBuffer rightOperand,
+                                     @Nullable Index.Analyzer indexAnalyzer,
+                                     @Nullable Index.Analyzer queryAnalyzer)
         {
-            return !LIKE_MATCHES.isSatisfiedBy(type, leftOperand, rightOperand);
+            return !LIKE_MATCHES.isSatisfiedBy(type, leftOperand, rightOperand, indexAnalyzer, queryAnalyzer);
         }
     },
     NOT_LIKE(23)
@@ -379,9 +460,13 @@ public enum Operator
         }
 
         @Override
-        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        public boolean isSatisfiedBy(AbstractType<?> type,
+                                     ByteBuffer leftOperand,
+                                     ByteBuffer rightOperand,
+                                     @Nullable Index.Analyzer indexAnalyzer,
+                                     @Nullable Index.Analyzer queryAnalyzer)
         {
-            return !LIKE.isSatisfiedBy(type, leftOperand, rightOperand);
+            return !LIKE.isSatisfiedBy(type, leftOperand, rightOperand, indexAnalyzer, queryAnalyzer);
         }
     },
 
@@ -396,22 +481,55 @@ public enum Operator
             return ":";
         }
 
-        /**
-         * This method is not supported for this operator. The operator itself does not have the context to know
-         * the correct result because an analyzed column can be analyzed in different ways. Therefore, this operator
-         * relies on the index implementation to perform to determine satisfaction.
-         */
-        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        @Override
+        public boolean isSatisfiedBy(AbstractType<?> type,
+                                     ByteBuffer leftOperand,
+                                     ByteBuffer rightOperand,
+                                     @Nullable Index.Analyzer indexAnalyzer,
+                                     @Nullable Index.Analyzer queryAnalyzer)
         {
-            throw new UnsupportedOperationException(": operation can only be computed by an indexed column with a configured analyzer");
+            assert indexAnalyzer != null && queryAnalyzer != null : ": operation can only be computed by an indexed column with a configured analyzer";
+
+            List<ByteBuffer> rightTokens = queryAnalyzer.analyze(rightOperand);
+            return isSatisfiedBy(type, leftOperand, rightTokens, indexAnalyzer);
+        }
+
+        @Override
+        public boolean isSatisfiedBy(AbstractType<?> type,
+                                     ByteBuffer leftValue,
+                                     List<ByteBuffer> rightTokens,
+                                     Index.Analyzer indexAnalyzer)
+        {
+            List<ByteBuffer> leftTokens = indexAnalyzer.analyze(leftValue);
+            Iterator<ByteBuffer> it = rightTokens.iterator();
+
+            do
+            {
+                if (!it.hasNext())
+                    return true;
+            }
+            while (hasToken(type, leftTokens, it.next()));
+
+            return false;
+        }
+
+        private boolean hasToken(AbstractType<?> type, List<ByteBuffer> tokens, ByteBuffer token)
+        {
+            for (ByteBuffer t : tokens)
+            {
+                if (type.compareForCQL(t, token) == 0)
+                    return true;
+            }
+            return false;
         }
     },
+
     /**
      * An operator that performs a distance bounded approximate nearest neighbor search against a vector column such
      * that all result vectors are within a given distance of the query vector. The notable difference between this
      * operator and {@link #ANN} is that it does not introduce an arbitrary limit on the number of results returned,
      * and as a consequence, it can be logically combined with other predicates and even unioned with other
-     * {@link #BOUNDED_ANN} predicates.
+     * {@code #BOUNDED_ANN} predicates.
      */
     BOUNDED_ANN(101)
     {
@@ -422,7 +540,11 @@ public enum Operator
         }
 
         @Override
-        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        public boolean isSatisfiedBy(AbstractType<?> type,
+                                     ByteBuffer leftOperand,
+                                     ByteBuffer rightOperand,
+                                     @Nullable Index.Analyzer indexAnalyzer,
+                                     @Nullable Index.Analyzer queryAnalyzer)
         {
             throw new UnsupportedOperationException();
         }
@@ -437,7 +559,11 @@ public enum Operator
         }
 
         @Override
-        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        public boolean isSatisfiedBy(AbstractType<?> type, 
+                                     ByteBuffer leftOperand, 
+                                     ByteBuffer rightOperand, 
+                                     @Nullable Index.Analyzer indexAnalyzer,
+                                     @Nullable Index.Analyzer queryAnalyzer)
         {
             throw new UnsupportedOperationException();
         }
@@ -451,7 +577,29 @@ public enum Operator
         }
 
         @Override
-        public boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand)
+        public boolean isSatisfiedBy(AbstractType<?> type, 
+                                     ByteBuffer leftOperand, 
+                                     ByteBuffer rightOperand, 
+                                     @Nullable Index.Analyzer indexAnalyzer,
+                                     @Nullable Index.Analyzer queryAnalyzer)
+        {
+            throw new UnsupportedOperationException();
+        }
+    },
+    BM25(104)
+    {
+        @Override
+        public String toString()
+        {
+            return "BM25";
+        }
+
+        @Override
+        public boolean isSatisfiedBy(AbstractType<?> type,
+                                     ByteBuffer leftOperand,
+                                     ByteBuffer rightOperand,
+                                     @Nullable Index.Analyzer indexAnalyzer,
+                                     @Nullable Index.Analyzer queryAnalyzer)
         {
             throw new UnsupportedOperationException();
         }
@@ -466,7 +614,7 @@ public enum Operator
      * Creates a new <code>Operator</code> with the specified binary representation.
      * @param b the binary representation of this <code>Enum</code> value
      */
-    private Operator(int b)
+    Operator(int b)
     {
         this.b = b;
     }
@@ -506,8 +654,36 @@ public enum Operator
 
     /**
      * Whether 2 values satisfy this operator (given the type they should be compared with).
+     *
+     * @param type the type of the values to compare.
+     * @param leftOperand the left operand of the comparison.
+     * @param rightOperand the right operand of the comparison.
+     * @param indexAnalyzer an index-provided function to transform the left-side compared value before comparison,
+     * or {@code null} if the values don't need to be transformed.
+     * @param queryAnalyzer an index-provided function to transform the right-side compared value before comparison,
+     * or {@code null} if the values don't need to be transformed.
      */
-    public abstract boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer leftOperand, ByteBuffer rightOperand);
+    public abstract boolean isSatisfiedBy(AbstractType<?> type,
+                                          ByteBuffer leftOperand,
+                                          ByteBuffer rightOperand,
+                                          @Nullable Index.Analyzer indexAnalyzer,
+                                          @Nullable Index.Analyzer queryAnalyzer);
+    /**
+     * Whether 2 analyzable values satisfy this operator (given the type they should be compared with).
+     *
+     * @param type the type of the values to compare.
+     * @param leftOperand the left operand of the comparison.
+     * @param rightTokens the right operand of the comparison decomposed as analyzed tokens.
+     * @param indexAnalyzer an index-provided function to transform the left-side compared value before comparison,
+     * it shouldn't be {@code null}.
+     */
+    public boolean isSatisfiedBy(AbstractType<?> type,
+                                 ByteBuffer leftOperand,
+                                 List<ByteBuffer> rightTokens,
+                                 Index.Analyzer indexAnalyzer)
+    {
+        throw new UnsupportedOperationException();
+    }
 
     public int serializedSize()
     {

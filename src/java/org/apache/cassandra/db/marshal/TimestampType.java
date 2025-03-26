@@ -53,6 +53,12 @@ public class TimestampType extends TemporalType<Date>
 
     private TimestampType() {super(ComparisonType.CUSTOM);} // singleton
 
+    @Override
+    public boolean allowsEmpty()
+    {
+        return true;
+    }
+
     public boolean isEmptyValueMeaningless()
     {
         return true;

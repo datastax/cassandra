@@ -448,7 +448,7 @@ public class InsertUpdateIfConditionTest extends CQLTester
      * Migrated from cql_tests.py:TestCQL.conditional_ddl_index_test()
      */
     @Test
-    public void testDropCreateIndexIfNotExists() throws Throwable
+    public void testDropCreateIndexIfNotExists()
     {
         String tableName = createTable("CREATE TABLE %s (id text PRIMARY KEY, value1 blob, value2 blob)with comment = 'foo'");
 
@@ -457,8 +457,6 @@ public class InsertUpdateIfConditionTest extends CQLTester
 
         // create and confirm
         createIndex("CREATE INDEX IF NOT EXISTS myindex ON %s (value1)");
-
-        assertTrue(waitForIndex(KEYSPACE, tableName, "myindex"));
 
         // unsuccessful create since it's already there
         execute("CREATE INDEX IF NOT EXISTS myindex ON %s (value1)");

@@ -32,9 +32,9 @@ public class ValidationTest
     @Test
     public void testIsNameValidPositive()
     {
-         assertTrue(SchemaConstants.isValidName("abcdefghijklmnopqrstuvwxyz"));
-         assertTrue(SchemaConstants.isValidName("ABCDEFGHIJKLMNOPQRSTUVWXYZ"));
-         assertTrue(SchemaConstants.isValidName("_01234567890"));
+        assertTrue(SchemaConstants.isValidName("abcdefghijklmnopqrstuvwxyz"));
+        assertTrue(SchemaConstants.isValidName("ABCDEFGHIJKLMNOPQRSTUVWXYZ"));
+        assertTrue(SchemaConstants.isValidName("_01234567890"));
     }
     
     @Test

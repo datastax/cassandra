@@ -111,7 +111,7 @@ public class SASIIndex implements Index, INotificationConsumer
                                         });
                    });
 
-            return new SASIIndexBuilder(cfs, sstables);
+            return new SASIIndexBuilder(cfs, sstables, indexes);
         }
     }
 
@@ -143,7 +143,7 @@ public class SASIIndex implements Index, INotificationConsumer
             perSSTable.put(index.getDefinition(), index);
         }
 
-        CompactionManager.instance.submitIndexBuild(new SASIIndexBuilder(baseCfs, toRebuild));
+        CompactionManager.instance.submitIndexBuild(new SASIIndexBuilder(baseCfs, toRebuild, Collections.singleton(this)));
     }
 
     /**
@@ -253,7 +253,9 @@ public class SASIIndex implements Index, INotificationConsumer
 
     public RowFilter getPostIndexQueryFilter(RowFilter filter)
     {
-        return filter.withoutExpressions();
+        // This index doesn't support disjunctions, so if the query has any, we simply apply the entire filter.
+        // Otherwise, the index searcher should be able to handle the entire filter without postfiltering.
+        return filter.containsDisjunctions() ? filter : filter.withoutExpressions();
     }
 
     public long getEstimatedResultRows()

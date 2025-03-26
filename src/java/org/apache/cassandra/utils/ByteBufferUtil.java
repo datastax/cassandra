@@ -39,7 +39,6 @@ import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileUtils;
-import org.apache.cassandra.utils.bytecomparable.ByteSource;
 
 /**
  * Utility methods to make ByteBuffers less painful
@@ -906,28 +905,6 @@ public class ByteBufferUtil
         }
 
         return true;
-    }
-
-    public static int toBytes(ByteSource byteSource, byte[] bytes)
-    {
-        int n = 0;
-
-        while (true)
-        {
-            int b = byteSource.next();
-
-            if (b == ByteSource.END_OF_STREAM) break;
-
-            if (n >= bytes.length)
-            {
-                throw new RuntimeException(String.format("Number of bytes read, %d, exceeds the buffer size of %d.", n + 1, bytes.length));
-            }
-
-            bytes[n] = (byte)b;
-            n++;
-        }
-
-        return n;
     }
 
     /**

@@ -19,11 +19,13 @@
 package org.apache.cassandra.concurrent;
 
 import org.apache.cassandra.service.ClientWarn;
+import org.apache.cassandra.service.context.OperationContextTracker;
 import org.apache.cassandra.tracing.Tracing;
+import org.apache.cassandra.sensors.RequestTracker;
 
 public interface ExecutorLocal<T>
 {
-    ExecutorLocal[] all = { Tracing.instance, ClientWarn.instance };
+    ExecutorLocal[] all = { Tracing.instance, ClientWarn.instance, RequestTracker.instance, OperationContextTracker.instance };
 
     /**
      * This is called when scheduling the task, and also before calling {@link #set(Object)} when running on a

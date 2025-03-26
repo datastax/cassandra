@@ -138,7 +138,13 @@ public final class TokenRelation extends Relation
     @Override
     protected Restriction newAnnRestriction(TableMetadata table, VariableSpecifications boundNames)
     {
-        throw invalidRequest("%s cannot be used for toekn relations", operator());
+        throw invalidRequest("%s cannot be used for token relations", operator());
+    }
+
+    @Override
+    protected Restriction newBm25Restriction(TableMetadata table, VariableSpecifications boundNames)
+    {
+        throw invalidRequest("%s cannot be used for token relations", operator());
     }
 
     @Override

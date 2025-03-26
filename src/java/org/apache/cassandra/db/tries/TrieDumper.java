@@ -19,7 +19,7 @@ package org.apache.cassandra.db.tries;
 
 import java.util.function.Function;
 
-import org.agrona.concurrent.UnsafeBuffer;
+import org.agrona.DirectBuffer;
 
 /**
  * Simple utility class for dumping the structure of a trie to string.
@@ -69,7 +69,7 @@ class TrieDumper<T> implements Trie.Walker<T, String>
     }
 
     @Override
-    public void addPathBytes(UnsafeBuffer buffer, int pos, int count)
+    public void addPathBytes(DirectBuffer buffer, int pos, int count)
     {
         maybeIndent();
         for (int i = 0; i < count; ++i)

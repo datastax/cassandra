@@ -22,6 +22,7 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 
 import org.apache.cassandra.index.sai.disk.format.Version;
+import org.apache.cassandra.utils.ReflectionUtils;
 
 public class SAIUtil
 {
@@ -32,7 +33,7 @@ public class SAIUtil
         {
             latest = Version.class.getDeclaredField("LATEST");
             latest.setAccessible(true);
-            Field modifiersField = Field.class.getDeclaredField("modifiers");
+            Field modifiersField = ReflectionUtils.getField(Field.class, "modifiers");
             modifiersField.setAccessible(true);
             latest.set(null, version);
         }

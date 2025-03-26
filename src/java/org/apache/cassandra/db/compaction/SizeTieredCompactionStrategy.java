@@ -414,10 +414,9 @@ public class SizeTieredCompactionStrategy extends LegacyAbstractCompactionStrate
         @Override
         public CompactionAwareWriter getCompactionAwareWriter(CompactionRealm realm,
                                                               Directories directories,
-                                                              LifecycleTransaction txn,
                                                               Set<SSTableReader> nonExpiredSSTables)
         {
-            return new SplittingSizeTieredCompactionWriter(realm, directories, txn, nonExpiredSSTables);
+            return new SplittingSizeTieredCompactionWriter(realm, directories, transaction, nonExpiredSSTables);
         }
     }
 }

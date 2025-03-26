@@ -46,7 +46,6 @@ import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.IndexNotAvailableException;
 import org.apache.cassandra.index.sai.IndexContext;
-import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.disk.v1.SSTableIndexWriter;
 import org.apache.cassandra.index.sai.metrics.AbstractMetricsTest;
 import org.apache.cassandra.inject.ActionBuilder;
@@ -124,12 +123,11 @@ public class CompactionTest extends AbstractMetricsTest
     }
 
     @Test
-    public void testConcurrentQueryWithCompaction() throws Throwable
+    public void testConcurrentQueryWithCompaction()
     {
         createTable(CREATE_TABLE_TEMPLATE);
         String v1IndexName = createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
         String v2IndexName = createIndex(String.format(CREATE_INDEX_TEMPLATE, "v2"));
-        waitForIndexQueryable();
 
         int num = 10;
         for (int i = 0; i < num; i++)
@@ -151,7 +149,7 @@ public class CompactionTest extends AbstractMetricsTest
                     throw new RuntimeException(e);
                 }
             }
-        }, () -> upgradeSSTables());
+        }, this::upgradeSSTables);
 
         compactionTest.start();
 
@@ -166,8 +164,8 @@ public class CompactionTest extends AbstractMetricsTest
         try
         {
             createTable(CREATE_TABLE_TEMPLATE);
-            String v1IndexName = createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
-            String v2IndexName = createIndex(String.format(CREATE_INDEX_TEMPLATE, "v2"));
+            String v1IndexName = createIndexAsync(String.format(CREATE_INDEX_TEMPLATE, "v1"));
+            String v2IndexName = createIndexAsync(String.format(CREATE_INDEX_TEMPLATE, "v2"));
 
             int num = 10;
             for (int i = 0; i < num; i++)
@@ -185,7 +183,7 @@ public class CompactionTest extends AbstractMetricsTest
             verifySSTableIndexes(v2IndexName, 1);
 
             // But index queries should not be allowed.
-            assertThrows(IndexNotAvailableException.class, () -> execute("SELECT id1 FROM %s WHERE v1>=0"));
+            assertThrows(IndexNotAvailableException.class, () -> executeInternal("SELECT id1 FROM %s WHERE v1>=0"));
         }
         finally
         {
@@ -199,7 +197,6 @@ public class CompactionTest extends AbstractMetricsTest
         createTable(CREATE_TABLE_TEMPLATE);
         String v1IndexName = createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
         String v2IndexName = createIndex(String.format(CREATE_INDEX_TEMPLATE, "v2"));
-        waitForIndexQueryable();
 
         int sstables = 2;
         int num = 10;
@@ -302,7 +299,6 @@ public class CompactionTest extends AbstractMetricsTest
                             // build indexes on SSTables that will be compacted soon
                             createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
                             createIndex(String.format(CREATE_INDEX_TEMPLATE, "v2"));
-                            waitForIndexQueryable();
 
                             // continue in-progress compaction
                             compactionLatch.countDown();

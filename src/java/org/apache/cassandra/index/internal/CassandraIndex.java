@@ -57,6 +57,10 @@ import org.apache.cassandra.index.transactions.IndexTransaction;
 import org.apache.cassandra.io.sstable.ReducingKeyIterator;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.IndexMetadata;
+import org.apache.cassandra.sensors.Context;
+import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.RequestTracker;
+import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.concurrent.Refs;
@@ -77,10 +81,15 @@ public abstract class CassandraIndex implements Index
     protected ColumnMetadata indexedColumn;
     protected CassandraIndexFunctions functions;
 
+    private final RequestTracker requestTracker;
+    private final Context sensorContext;
+
     protected CassandraIndex(ColumnFamilyStore baseCfs, IndexMetadata indexDef)
     {
         this.baseCfs = baseCfs;
         setMetadata(indexDef);
+        this.requestTracker = RequestTracker.instance;
+        this.sensorContext = Context.from(baseCfs.metadata());
     }
 
     /**
@@ -207,7 +216,7 @@ public abstract class CassandraIndex implements Index
     @Override
     public void validate(ReadCommand command) throws InvalidRequestException
     {
-        Optional<RowFilter.Expression> target = getTargetExpression(command.rowFilter().getExpressions());
+        Optional<RowFilter.Expression> target = getTargetExpression(command.rowFilter());
 
         if (target.isPresent())
         {
@@ -272,18 +281,24 @@ public abstract class CassandraIndex implements Index
 
     public RowFilter getPostIndexQueryFilter(RowFilter filter)
     {
-        return getTargetExpression(filter.getExpressions()).map(filter::without)
-                                                           .orElse(filter);
+        // This index doesn't support disjunctions, so if the query has any, we simply apply the entire filter.
+        return filter.containsDisjunctions() ? filter : getTargetExpression(filter).map(filter::without).orElse(filter);
     }
 
-    private Optional<RowFilter.Expression> getTargetExpression(List<RowFilter.Expression> expressions)
+    private Optional<RowFilter.Expression> getTargetExpression(RowFilter rowFilter)
     {
-        return expressions.stream().filter(this::supportsExpression).findFirst();
+        // This index doesn't support disjunctions, so we only consider the top-level AND expressions.
+        for (RowFilter.Expression expression : rowFilter.withoutDisjunctions().expressions())
+        {
+            if (supportsExpression(expression))
+                return Optional.of(expression);
+        }
+        return Optional.empty();
     }
 
     public Index.Searcher searcherFor(ReadCommand command)
     {
-        Optional<RowFilter.Expression> target = getTargetExpression(command.rowFilter().getExpressions());
+        Optional<RowFilter.Expression> target = getTargetExpression(command.rowFilter());
 
         if (target.isPresent())
         {
@@ -318,7 +333,7 @@ public abstract class CassandraIndex implements Index
                 break;
             case REGULAR:
                 if (update.columns().regulars.contains(indexedColumn))
-                    validateRows(update);
+                    validateRows(update.rows());
                 break;
             case STATIC:
                 if (update.columns().statics.contains(indexedColumn))
@@ -437,6 +452,14 @@ public abstract class CassandraIndex implements Index
                        cell,
                        LivenessInfo.withExpirationTime(cell.timestamp(), cell.ttl(), cell.localDeletionTime()),
                        ctx);
+
+                RequestSensors sensors = requestTracker.get();
+                if (sensors != null)
+                {
+                    sensors.registerSensor(sensorContext, Type.INDEX_WRITE_BYTES);
+                    // estimate the size of the index entry as the data size of the cell before indexing
+                    sensors.incrementSensor(sensorContext, Type.INDEX_WRITE_BYTES, cell.dataSize());
+                }
             }
 
             private void removeCells(Clustering<?> clustering, Iterable<Cell<?>> cells)
@@ -575,7 +598,7 @@ public abstract class CassandraIndex implements Index
     private void validateClusterings(PartitionUpdate update) throws InvalidRequestException
     {
         assert indexedColumn.isClusteringColumn();
-        for (Row row : update)
+        for (Row row : update.rows())
             validateIndexedValue(getIndexedValue(null, row.clustering(), null));
     }
 

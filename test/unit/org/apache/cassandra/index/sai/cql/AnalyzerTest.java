@@ -18,21 +18,16 @@
 
 package org.apache.cassandra.index.sai.cql;
 
-import java.lang.reflect.Field;
-import java.lang.reflect.Modifier;
-
+import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.index.sai.SAITester;
+import org.apache.cassandra.index.sai.analyzer.NonTokenizingOptions;
+import org.assertj.core.api.Assertions;
 import org.junit.Test;
 
-import org.apache.cassandra.cql3.UntypedResultSet;
-import org.apache.cassandra.exceptions.InvalidRequestException;
-import org.apache.cassandra.index.sai.plan.QueryController;
+import javax.annotation.Nullable;
+import java.util.Arrays;
 
-import static org.apache.cassandra.index.sai.cql.VectorTypeTest.assertContainsInt;
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.fail;
-
-public class AnalyzerTest extends VectorTester
+public class AnalyzerTest extends SAITester
 {
     @Test
     public void createAnalyzerWrongTypeTest()
@@ -40,7 +35,6 @@ public class AnalyzerTest extends VectorTester
         createTable("CREATE TABLE %s (pk1 int, pk2 text, val int, val2 int, PRIMARY KEY((pk1, pk2)))");
         createIndex("CREATE CUSTOM INDEX ON %s(pk1) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(pk2) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         execute("INSERT INTO %s (pk1, pk2, val) VALUES (-1, 'b', 1)");
         execute("INSERT INTO %s (pk1, pk2, val) VALUES (0, 'b', 2)");
@@ -53,7 +47,6 @@ public class AnalyzerTest extends VectorTester
         flush();
 
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'index_analyzer': 'standard'};");
-        waitForIndexQueryable();
 
         execute("INSERT INTO %s (pk1, pk2, val) VALUES (-1, 'd', 1)");
         execute("INSERT INTO %s (pk1, pk2, val) VALUES (0, 'd', 2)");
@@ -62,5 +55,73 @@ public class AnalyzerTest extends VectorTester
         execute("INSERT INTO %s (pk1, pk2, val) VALUES (-1, 'c', -1)");
         execute("INSERT INTO %s (pk1, pk2, val) VALUES (0, 'c', -2)");
         execute("INSERT INTO %s (pk1, pk2, val) VALUES (1, 'c', -3)");
+    }
+
+    /**
+     * Test that we cannot use an analyzer, tokenizing or not, on a frozen collection.
+     */
+    @Test
+    public void analyzerOnFrozenCollectionTest()
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, l frozen<list<text>>, s frozen<set<text>>, m frozen<map<text, text>>)");
+
+        for (String column : Arrays.asList("l", "s", "m"))
+        {
+            assertRejectsNonFullIndexCreationOnFrozenCollection(column);
+            column = String.format("full(%s)", column);
+
+            // non-tokenizing options that produce an analyzer should be rejected
+            assertRejectsAnalyzerOnFrozenCollection(column, String.format("{'%s': %s}", NonTokenizingOptions.CASE_SENSITIVE, false));
+            assertRejectsAnalyzerOnFrozenCollection(column, String.format("{'%s': %s}", NonTokenizingOptions.NORMALIZE, true));
+            assertRejectsAnalyzerOnFrozenCollection(column, String.format("{'%s': %s}", NonTokenizingOptions.ASCII, true));
+
+            // non-tokenizing options that do not produce an analyzer should be accepted
+            assertAcceptsIndexOptions(column, String.format("{'%s': %s}", NonTokenizingOptions.CASE_SENSITIVE, true));
+            assertAcceptsIndexOptions(column, String.format("{'%s': %s}", NonTokenizingOptions.NORMALIZE, false));
+            assertAcceptsIndexOptions(column, String.format("{'%s': %s}", NonTokenizingOptions.ASCII, false));
+
+            // Lucene analyzer should always be rejected
+            assertRejectsAnalyzerOnFrozenCollection(column, "{'index_analyzer': 'standard'}");
+            assertRejectsAnalyzerOnFrozenCollection(column,
+                    "{'index_analyzer': " +
+                    "  '{\"tokenizer\":{\"name\":\"ngram\", \"args\":{\"minGramSize\":\"2\", \"maxGramSize\":\"3\"}}," +
+                    "    \"filters\":[{\"name\":\"lowercase\"}]}'}");
+            assertRejectsAnalyzerOnFrozenCollection(column,
+                    "{'index_analyzer':'\n" +
+                            "  {\"tokenizer\":{\"name\" : \"whitespace\"},\n" +
+                            "   \"filters\":[{\"name\":\"stop\", \"args\": {\"words\": \"the, test\", \"format\": \"wordset\"}}]}'}");
+
+            // no options should be accepted
+            assertAcceptsIndexOptions(column, null);
+            assertAcceptsIndexOptions(column, "{}");
+        }
+    }
+
+    private void assertRejectsNonFullIndexCreationOnFrozenCollection(String column)
+    {
+        Assertions.assertThatThrownBy(() -> createSAIIndex(column, null))
+                  .isInstanceOf(InvalidRequestException.class)
+                  .hasMessageContaining("Cannot create values() index on frozen column " + column);
+
+        Assertions.assertThatThrownBy(() -> createSAIIndex("KEYS(" + column + ')', null))
+                  .isInstanceOf(InvalidRequestException.class)
+                  .hasMessageContaining("Cannot create keys() index on frozen column " + column);
+
+        Assertions.assertThatThrownBy(() -> createSAIIndex("VALUES(" + column + ')', null))
+                  .isInstanceOf(InvalidRequestException.class)
+                  .hasMessageContaining("Cannot create values() index on frozen column " + column);
+    }
+
+    private void assertAcceptsIndexOptions(String column, @Nullable String options)
+    {
+        String index = createSAIIndex(column, options);
+        dropIndex("DROP INDEX %s." + index); // clear for further tests
+    }
+
+    private void assertRejectsAnalyzerOnFrozenCollection(String column, String options)
+    {
+        Assertions.assertThatThrownBy(() -> createSAIIndex(column, options))
+                  .isInstanceOf(InvalidRequestException.class)
+                  .hasMessageContaining("Cannot use an analyzer on " + column + " because it's a frozen collection.");
     }
 }

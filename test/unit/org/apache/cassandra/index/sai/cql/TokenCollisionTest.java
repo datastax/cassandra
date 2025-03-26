@@ -39,11 +39,10 @@ public class TokenCollisionTest extends SAITester
     }
 
     @Test
-    public void testSkippingWhenTokensCollide() throws Throwable
+    public void testSkippingWhenTokensCollide()
     {
         createTable("CREATE TABLE %s (pk blob, value text, PRIMARY KEY (pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(value) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         ByteBuffer prefix = ByteBufferUtil.bytes("key");
         final int numRows = 640; // 5 blocks x 128 postings, so skip table will contain 5 entries

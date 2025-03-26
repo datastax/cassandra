@@ -20,8 +20,10 @@ package org.apache.cassandra.net;
 import java.nio.channels.ClosedChannelException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -34,6 +36,7 @@ import org.slf4j.LoggerFactory;
 import io.netty.util.concurrent.Future;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.concurrent.Stage;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.locator.InetAddressAndPort;
@@ -41,6 +44,7 @@ import org.apache.cassandra.locator.Replica;
 import org.apache.cassandra.metrics.MessagingMetrics;
 import org.apache.cassandra.nodes.Nodes;
 import org.apache.cassandra.service.AbstractWriteResponseHandler;
+import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.ExecutorUtils;
 import org.apache.cassandra.utils.FBUtilities;
 
@@ -209,17 +213,29 @@ public class MessagingService extends MessagingServiceMBeanImpl
     public static final int VERSION_3014 = 11;
     public static final int VERSION_40 = 12;
     public static final int VERSION_41 = 13;
-    // Current Stargazer version while we have serialization differences
-    // If differences get merged upstream then we can revert to OS versioning
-    public static final int VERSION_SG_10 = 100;
+    // Current DataStax version while we have serialization differences.
+    // If differences get merged upstream then we can revert to OS versioning.
+    public static final int VERSION_DS_10 = 100;
+    public static final int VERSION_DS_11 = 101; // adds ann_options (CNDB-12456)
     public static final int minimum_version = VERSION_30;
-    public static final int current_version = VERSION_SG_10;
+    public static final int current_version = currentVersion();
     // DSE 6.8 version for backward compatibility
     public static final int VERSION_DSE_68 = 168;
 
     static AcceptVersions accept_messaging = new AcceptVersions(minimum_version, current_version, SUPPORTED_DSE_VERSION);
     static AcceptVersions accept_streaming = new AcceptVersions(current_version, current_version);
-    static Map<Integer, Integer> versionOrdinalMap = Arrays.stream(Version.values()).collect(Collectors.toMap(v -> v.value, v -> v.ordinal()));
+    static Map<Integer, Integer> versionOrdinalMap = Arrays.stream(Version.values()).collect(Collectors.toMap(v -> v.value, Enum::ordinal));
+
+    private static int currentVersion()
+    {
+        int version = CassandraRelevantProperties.DS_CURRENT_MESSAGING_VERSION.getInt();
+        for (Version v : Version.values())
+        {
+            if (v.value == version)
+                return version;
+        }
+        throw new IllegalArgumentException("Unsupported current messaging version: " + version);
+    }
 
     /**
      * This is an optimisation to speed up the translation of the serialization
@@ -247,7 +263,8 @@ public class MessagingService extends MessagingServiceMBeanImpl
         VERSION_3014(MessagingService.VERSION_3014),
         VERSION_40(MessagingService.VERSION_40),
         VERSION_41(MessagingService.VERSION_41),
-        STARGAZER_10(MessagingService.VERSION_SG_10),
+        VERSION_DS_10(MessagingService.VERSION_DS_10),
+        VERSION_DS_11(MessagingService.VERSION_DS_11),
         VERSION_DSE68(MessagingService.VERSION_DSE_68);
 
         public final int value;
@@ -379,7 +396,7 @@ public class MessagingService extends MessagingServiceMBeanImpl
         // expire the callback if the message failed to enqueue (failed to establish a connection or exceeded queue capacity)
         while (true)
         {
-            OutboundConnections connections = getOutbound(to);
+            OutboundConnections connections = getOutbound(to, true);
             try
             {
                 connections.enqueue(message, specifyConnection);
@@ -499,7 +516,7 @@ public class MessagingService extends MessagingServiceMBeanImpl
         isShuttingDown = true;
         logger.info("Waiting for messaging service to quiesce");
         // We may need to schedule hints on the mutation stage, so it's erroneous to shut down the mutation stage first
-        assert !MUTATION.executor().isShutdown();
+        assert !MUTATION.isShutdown();
 
         if (shutdownGracefully)
         {
@@ -567,7 +584,7 @@ public class MessagingService extends MessagingServiceMBeanImpl
         isShuttingDown = true;
         logger.info("Waiting for messaging service to quiesce");
         // We may need to schedule hints on the mutation stage, so it's erroneous to shut down the mutation stage first
-        assert !MUTATION.executor().isShutdown();
+        assert !MUTATION.isShutdown();
 
         callbacks.shutdownNow(false);
         inboundSockets.close();
@@ -585,10 +602,10 @@ public class MessagingService extends MessagingServiceMBeanImpl
         socketFactory.awaitTerminationUntil(deadlineNanos);
     }
 
-    private OutboundConnections getOutbound(InetAddressAndPort to)
+    private OutboundConnections getOutbound(InetAddressAndPort to, boolean tryRegister)
     {
         OutboundConnections connections = channelManagers.get(to);
-        if (connections == null)
+        if (connections == null && tryRegister)
             connections = OutboundConnections.tryRegister(channelManagers, to, new OutboundConnectionSettings(to).withDefaults(ConnectionCategory.MESSAGING));
         return connections;
     }
@@ -625,5 +642,48 @@ public class MessagingService extends MessagingServiceMBeanImpl
     public void waitUntilListening() throws InterruptedException
     {
         inboundSockets.open().await();
+    }
+
+    /**
+     * Returns the endpoints for the given keyspace that are known to be alive and are using a messaging version older
+     * than the given version.
+     *
+     * @param keyspace a keyspace
+     * @param version a messaging version
+     * @return a set of alive endpoints in the given keyspace with messaging version below the given version
+     */
+    public Set<InetAddressAndPort> endpointsWithVersionBelow(String keyspace, int version)
+    {
+        Set<InetAddressAndPort> nodes = new HashSet<>();
+        for (InetAddressAndPort node : StorageService.instance.getTokenMetadataForKeyspace(keyspace).getAllEndpoints())
+        {
+            if (versions.knows(node) && versions.getRaw(node) < version)
+                nodes.add(node);
+        }
+        return nodes;
+    }
+
+    /**
+     * Returns the endpoints for the given keyspace that are known to be alive and have a connection whose
+     * messaging version is older than the given version. To be used for example when we want to be sure a message
+     * can be serialized to all endpoints, according to their negotiated version at connection time.
+     *
+     * @param keyspace a keyspace
+     * @param version a messaging version
+     * @return a set of alive endpoints in the given keyspace with messaging version below the given version
+     */
+    public Set<InetAddressAndPort> endpointsWithConnectionsOnVersionBelow(String keyspace, int version)
+    {
+        Set<InetAddressAndPort> nodes = new HashSet<>();
+        for (InetAddressAndPort node : StorageService.instance.getTokenMetadataForKeyspace(keyspace).getAllEndpoints())
+        {
+            ConnectionType.MESSAGING_TYPES.forEach(type -> {
+                OutboundConnections connections = getOutbound(node, false);
+                OutboundConnection connection = connections != null ? connections.connectionFor(type) : null;
+                if (connection != null && connection.messagingVersion() < version)
+                    nodes.add(node);
+            });
+        }
+        return nodes;
     }
 }

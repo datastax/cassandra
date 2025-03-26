@@ -36,7 +36,7 @@ import com.google.common.collect.Iterators;
  * when multiple index segments produced by {@link PerSSTableIndexWriter} are stitched together
  * by {@link PerSSTableIndexWriter#complete()}.
  *
- * This class uses the RangeIterator, now provided by
+ * This class uses the KeyRangeIterator, now provided by
  * {@link CombinedTerm#getTokenIterator()}, to iterate the data twice.
  * The first iteration builds the tree with leaves that contain only enough
  * information to build the upper layers -- these leaves do not store more

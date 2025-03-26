@@ -35,6 +35,8 @@ import org.junit.Before;
 import org.junit.Ignore;
 import org.junit.Test;
 
+import io.micrometer.core.instrument.Tags;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.io.util.DataOutputBuffer;
@@ -48,6 +50,7 @@ import org.apache.cassandra.utils.KeyGenerator.RandomStringGenerator;
 import org.apache.cassandra.utils.obs.IBitSet;
 import org.apache.cassandra.utils.obs.MemoryLimiter;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.USE_MICROMETER;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertNotNull;
@@ -287,6 +290,7 @@ public class BloomFilterTest
             {
                 assertNotNull(blankFilter);
                 assertTrue(blankFilter instanceof AlwaysPresentFilter);
+                assertEquals(1, FilterFactory.metrics.oomErrors());
 
                 assertEquals(memBefore, memoryLimiter.memoryAllocated());
             }
@@ -325,6 +329,22 @@ public class BloomFilterTest
                 assertEquals(memBefore, memoryLimiter.memoryAllocated());
             }
         }
+    }
+
+    @Test
+    public void testBloomFilterMetrics()
+    {
+        FilterFactory.FilterFactoryMetrics metrics = FilterFactory.FilterFactoryMetrics.create();
+        assertTrue(metrics instanceof FilterFactory.FilterFactoryCodahaleMetrics);
+        long prev = metrics.oomErrors();
+        metrics.incrementOOMError();
+        assertEquals(prev + 1, metrics.oomErrors());
+        System.setProperty(USE_MICROMETER.getKey(), "true");
+        metrics = FilterFactory.FilterFactoryMetrics.create();
+        assertTrue(metrics instanceof FilterFactory.FilterFactoryMicormeterMetrics);
+        ((FilterFactory.FilterFactoryMicormeterMetrics) metrics).register(new SimpleMeterRegistry(), Tags.of("k", "v"));
+        metrics.incrementOOMError();
+        assertEquals(1, metrics.oomErrors());
     }
 
     @Test

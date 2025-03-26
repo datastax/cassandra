@@ -19,7 +19,10 @@
 package org.apache.cassandra.locator;
 
 import java.io.IOException;
+import java.net.InetAddress;
+import java.net.UnknownHostException;
 import java.util.*;
+import java.util.concurrent.ThreadLocalRandom;
 
 import org.junit.Assert;
 import org.junit.BeforeClass;
@@ -31,6 +34,7 @@ import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
 
+import static java.util.concurrent.TimeUnit.MICROSECONDS;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 
 public class DynamicEndpointSnitchTest
@@ -40,6 +44,9 @@ public class DynamicEndpointSnitchTest
     public static void setupDD()
     {
         DatabaseDescriptor.daemonInitialization();
+        DatabaseDescriptor.setDynamicBadnessThreshold(0.1);
+        DatabaseDescriptor.setDynamicUpdateInterval(1000000);
+        StorageService.instance.unsafeInitialize();
     }
 
     private static void setScores(DynamicEndpointSnitch dsnitch, int rounds, List<InetAddressAndPort> hosts, Integer... scores) throws InterruptedException
@@ -49,7 +56,7 @@ public class DynamicEndpointSnitchTest
             for (int i = 0; i < hosts.size(); i++)
                 dsnitch.receiveTiming(hosts.get(i), scores[i], MILLISECONDS);
         }
-        Thread.sleep(150);
+        dsnitch.updateScores();
     }
 
     private static EndpointsForRange full(InetAddressAndPort... endpoints)
@@ -66,8 +73,6 @@ public class DynamicEndpointSnitchTest
     public void testDynamicSnitchSetSeverity()
     {
         // do this because SS needs to be initialized before DES can work properly.
-        DatabaseDescriptor.setDynamicBadnessThreshold(0.1);
-        StorageService.instance.unsafeInitialize();
         SimpleSnitch ss = new SimpleSnitch();
 
         DynamicEndpointSnitch dsnitch = new DynamicEndpointSnitch(ss, String.valueOf(ss.hashCode()));
@@ -132,5 +137,155 @@ public class DynamicEndpointSnitchTest
         setScores(dsnitch, 20, hosts, 10, 10, 10);
         order = full(host4, host1, host2, host3);
         Util.assertRCEquals(order, dsnitch.sortedByProximity(self, full(host1, host2, host3, host4)));
+    }
+
+    @Test
+    public void testDynamicSnitchSetQuantizationToMillis()
+    {
+        // do this because SS needs to be initialized before DES can work properly.
+        SimpleSnitch ss = new SimpleSnitch();
+
+        DynamicEndpointSnitch dsnitch = new DynamicEndpointSnitch(ss, String.valueOf(ss.hashCode()));
+        boolean originalQuantization = dsnitch.getQuantizationToMillis();
+        dsnitch.setQuantizationToMillis(!originalQuantization);
+        Assert.assertEquals(!originalQuantization, dsnitch.getQuantizationToMillis());
+    }
+
+    @Test
+    public void testDynamicSnitchSetQuantile()
+    {
+        // do this because SS needs to be initialized before DES can work properly.
+        SimpleSnitch ss = new SimpleSnitch();
+
+        DynamicEndpointSnitch dsnitch = new DynamicEndpointSnitch(ss, String.valueOf(ss.hashCode()));
+        double quantile = ThreadLocalRandom.current().nextDouble();
+        dsnitch.setQuantile(quantile);
+        Assert.assertEquals(quantile, dsnitch.getQuantile(), 0.01);
+    }
+
+    @Test
+    public void testDynamicSnitchQuantilePicking() throws UnknownHostException
+    {
+        // do this because SS needs to be initialized before DES can work properly.
+        SimpleSnitch ss = new SimpleSnitch();
+
+        DynamicEndpointSnitch dsnitch = new DynamicEndpointSnitch(ss, String.valueOf(ss.hashCode()));
+        dsnitch.setQuantile(0.9);
+
+        // add a slow replica, that always reports 100ms
+        for (int i = 0; i < 100; i++)
+        {
+            dsnitch.receiveTiming(InetAddressAndPort.getByName("127.0.0.1"), 100, MILLISECONDS);
+        }
+        // add a replica that has p90 = 90ms
+        for (int i = 1; i <= 100; i++)
+        {
+            dsnitch.receiveTiming(InetAddressAndPort.getByName("127.0.0.2"), i, MILLISECONDS);
+        }
+
+        dsnitch.updateScores();
+
+        // the score for the slow replica should be 1, and the score for the fast replica should be 9/10 = 0.9
+        Map<InetAddress, Double> scores = dsnitch.getScores();
+
+        Assert.assertEquals(1.0, scores.get(InetAddress.getByName("127.0.0.1")), 0.01);
+        Assert.assertEquals(0.9, scores.get(InetAddress.getByName("127.0.0.2")), 0.01);
+    }
+
+    @Test
+    public void testQuantizationToMillisEnabled() throws UnknownHostException
+    {
+        // do this because SS needs to be initialized before DES can work properly.
+        SimpleSnitch ss = new SimpleSnitch();
+
+        DynamicEndpointSnitch dsnitch = new DynamicEndpointSnitch(ss, String.valueOf(ss.hashCode()));
+
+        dsnitch.setQuantizationToMillis(true);
+        // add a slow replica, that always reports 1999us
+        for (int i = 0; i < 100; i++)
+        {
+            dsnitch.receiveTiming(InetAddressAndPort.getByName("127.0.0.1"), 1999, MICROSECONDS);
+        }
+        // add a fast replica, that always reports 1001us
+        for (int i = 0; i < 100; i++)
+        {
+            dsnitch.receiveTiming(InetAddressAndPort.getByName("127.0.0.2"), 1001, MICROSECONDS);
+        }
+
+        dsnitch.updateScores();
+
+        // the score for both replicas should be 1 because the quantization should round to 1ms
+        Map<InetAddress, Double> scores = dsnitch.getScores();
+
+        Assert.assertEquals(1.0, scores.get(InetAddress.getByName("127.0.0.1")), 0.01);
+        Assert.assertEquals(1.0, scores.get(InetAddress.getByName("127.0.0.2")), 0.01);
+    }
+
+    @Test
+    public void testQuantizationToMillisDisabled() throws UnknownHostException
+    {
+        // do this because SS needs to be initialized before DES can work properly.
+        SimpleSnitch ss = new SimpleSnitch();
+
+        DynamicEndpointSnitch dsnitch = new DynamicEndpointSnitch(ss, String.valueOf(ss.hashCode()));
+
+        dsnitch.setQuantizationToMillis(false);
+        dsnitch.setQuantile(0.9);
+        // add a slow replica, that always reports 100us
+        for (int i = 0; i < 100; i++)
+        {
+            dsnitch.receiveTiming(InetAddressAndPort.getByName("127.0.0.1"), 100, MICROSECONDS);
+        }
+        // add a fast replica, that always reports 10us
+        for (int i = 0; i < 100; i++)
+        {
+            dsnitch.receiveTiming(InetAddressAndPort.getByName("127.0.0.2"), 10, MICROSECONDS);
+        }
+
+        dsnitch.updateScores();
+
+        // the score for the slow replica should be 1, and the score for the fast replica should be 10/100 = 0.1
+        // there should be no quantization rounding to 1ms
+        Map<InetAddress, Double> scores = dsnitch.getScores();
+
+        Assert.assertEquals(1.0, scores.get(InetAddress.getByName("127.0.0.1")), 0.01);
+        Assert.assertEquals(0.1, scores.get(InetAddress.getByName("127.0.0.2")), 0.01);
+    }
+
+    @Test
+    public void testScoresAreUpdatedPeriodically() throws UnknownHostException, InterruptedException
+    {
+        // do this because SS needs to be initialized before DES can work properly.
+        SimpleSnitch ss = new SimpleSnitch();
+
+        int updateInterval = DatabaseDescriptor.getDynamicUpdateInterval();
+        try
+        {
+            DynamicEndpointSnitch dsnitch = new DynamicEndpointSnitch(ss, String.valueOf(ss.hashCode()));
+
+            // add a slow replica, that always reports 100ms
+            for (int i = 0; i < 100; i++)
+            {
+                dsnitch.receiveTiming(InetAddressAndPort.getByName("127.0.0.1"), 100, MILLISECONDS);
+            }
+            // add a fast replica, that always reports 1ms
+            for (int i = 0; i < 100; i++)
+            {
+                dsnitch.receiveTiming(InetAddressAndPort.getByName("127.0.0.2"), 1, MILLISECONDS);
+            }
+
+            Assert.assertTrue(dsnitch.getScores().isEmpty());
+
+            DatabaseDescriptor.setDynamicUpdateInterval(100);
+            dsnitch.applyConfigChanges();
+
+            Thread.sleep(150);
+
+            Assert.assertFalse(dsnitch.getScores().isEmpty());
+        }
+        finally
+        {
+            DatabaseDescriptor.setDynamicUpdateInterval(updateInterval);
+        }
     }
 }

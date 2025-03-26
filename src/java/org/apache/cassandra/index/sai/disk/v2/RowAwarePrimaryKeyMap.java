@@ -32,8 +32,8 @@ import org.apache.cassandra.db.marshal.ByteBufferAccessor;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
-import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
+import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.v1.LongArray;
 import org.apache.cassandra.index.sai.disk.v1.MetadataSource;
 import org.apache.cassandra.index.sai.disk.v1.bitpack.BlockPackedReader;
@@ -41,12 +41,12 @@ import org.apache.cassandra.index.sai.disk.v1.bitpack.NumericValuesMeta;
 import org.apache.cassandra.index.sai.disk.v2.sortedterms.SortedTermsMeta;
 import org.apache.cassandra.index.sai.disk.v2.sortedterms.SortedTermsReader;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.sstable.SSTableId;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.Throwables;
-import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
 
@@ -74,6 +74,7 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
         private final IndexComponents.ForRead perSSTableComponents;
         private final LongArray.Factory tokenReaderFactory;
         private final SortedTermsReader sortedTermsReader;
+        private final long count;
         private FileHandle token = null;
         private FileHandle termsDataBlockOffsets = null;
         private FileHandle termsData = null;
@@ -90,6 +91,7 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
                 this.perSSTableComponents = perSSTableComponents;
                 MetadataSource metadataSource = MetadataSource.loadMetadata(perSSTableComponents);
                 NumericValuesMeta tokensMeta = new NumericValuesMeta(metadataSource.get(perSSTableComponents.get(IndexComponentType.TOKEN_VALUES)));
+                count = tokensMeta.valueCount;
                 SortedTermsMeta sortedTermsMeta = new SortedTermsMeta(metadataSource.get(perSSTableComponents.get(IndexComponentType.PRIMARY_KEY_BLOCKS)));
                 NumericValuesMeta blockOffsetsMeta = new NumericValuesMeta(metadataSource.get(perSSTableComponents.get(IndexComponentType.PRIMARY_KEY_BLOCK_OFFSETS)));
 
@@ -128,6 +130,12 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
             {
                 throw new UncheckedIOException(e);
             }
+        }
+
+        @Override
+        public long count()
+        {
+            return count;
         }
 
         @Override
@@ -253,10 +261,10 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
         try
         {
             cursor.seekToPointId(sstableRowId);
-            ByteSource.Peekable peekable = cursor.term().asPeekableBytes(ByteComparable.Version.OSS41);
+            ByteSource.Peekable peekable = cursor.term().asPeekableBytes(TypeUtil.BYTE_COMPARABLE_VERSION);
 
             Token token = partitioner.getTokenFactory().fromComparableBytes(ByteSourceInverse.nextComponentSource(peekable),
-                                                                            ByteComparable.Version.OSS41);
+                                                                            TypeUtil.BYTE_COMPARABLE_VERSION);
             byte[] keyBytes = ByteSourceInverse.getUnescapedBytes(ByteSourceInverse.nextComponentSource(peekable));
 
             if (keyBytes == null)
@@ -267,7 +275,8 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
             Clustering clustering = clusteringComparator.size() == 0
                                     ? Clustering.EMPTY
                                     : clusteringComparator.clusteringFromByteComparable(ByteBufferAccessor.instance,
-                                                                                        v -> ByteSourceInverse.nextComponentSource(peekable));
+                                                                                        v -> ByteSourceInverse.nextComponentSource(peekable),
+                                                                                        TypeUtil.BYTE_COMPARABLE_VERSION);
 
             return primaryKeyFactory.create(partitionKey, clustering);
         }

@@ -221,6 +221,9 @@ public class ColumnIndex
         if (op == Operator.LIKE)
             return isLiteral();
 
+        if (op == Operator.ANALYZER_MATCHES)
+            return false;
+
         Op operator = Op.valueOf(op);
         return !(isTokenized && operator == Op.EQ) // EQ is only applicable to non-tokenized indexes
                && !(isTokenized && mode.mode == OnDiskIndexBuilder.Mode.CONTAINS && operator == Op.PREFIX) // PREFIX not supported on tokenized CONTAINS mode indexes

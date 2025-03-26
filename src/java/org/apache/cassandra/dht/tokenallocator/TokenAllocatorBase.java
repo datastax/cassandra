@@ -23,6 +23,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.NavigableMap;
 import java.util.Random;
+import java.util.function.Supplier;
 
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
@@ -38,14 +39,24 @@ public abstract class TokenAllocatorBase<Unit> implements TokenAllocator<Unit>
     final NavigableMap<Token, Unit> sortedTokens;
     final ReplicationStrategy<Unit> strategy;
     final IPartitioner partitioner;
+    final Supplier<Token> seedTokenSupplier;
 
     protected TokenAllocatorBase(NavigableMap<Token, Unit> sortedTokens,
-                             ReplicationStrategy<Unit> strategy,
-                             IPartitioner partitioner)
+                                 ReplicationStrategy<Unit> strategy,
+                                 IPartitioner partitioner)
+    {
+        this(sortedTokens, strategy, partitioner, partitioner::getRandomToken);
+    }
+
+    protected TokenAllocatorBase(NavigableMap<Token, Unit> sortedTokens,
+                                 ReplicationStrategy<Unit> strategy,
+                                 IPartitioner partitioner,
+                                 Supplier<Token> seedTokenSupplier)
     {
         this.sortedTokens = sortedTokens;
         this.strategy = strategy;
         this.partitioner = partitioner;
+        this.seedTokenSupplier = seedTokenSupplier;
     }
 
     public abstract int getReplicas();
@@ -107,9 +118,10 @@ public abstract class TokenAllocatorBase<Unit> implements TokenAllocator<Unit>
 
         if (sortedTokens.isEmpty())
         {
-            // Select a random start token. This has no effect on distribution, only on where the local ring is "centered".
+            // Select a start token using the configured seedTokenSupplier. By default, the token is random. It can also
+            // be supplied by the subclass. This has no effect on distribution, only on where the local ring is "centered".
             // Using a random start decreases the chances of clash with the tokens of other datacenters in the ring.
-            Token t = partitioner.getRandomToken();
+            Token t = seedTokenSupplier.get();
             tokens.add(t);
             sortedTokens.put(t, newUnit);
         }

@@ -83,7 +83,7 @@ public class NativeDecoratedKey extends DecoratedKey
     @Override
     protected ByteSource keyComparableBytes(Version version)
     {
-        return ByteSource.of(address(), length(), version);
+        return ByteSource.ofMemory(address(), length(), version);
     }
 
     /**

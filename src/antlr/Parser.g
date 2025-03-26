@@ -260,6 +260,7 @@ selectStatement returns [SelectStatement.RawStatement expr]
         List<ColumnIdentifier> groups = new ArrayList<>();
         boolean allowFiltering = false;
         boolean isJson = false;
+        SelectOptions options = new SelectOptions();
     }
     : K_SELECT
         // json is a valid column name. By consequence, we need to resolve the ambiguity for "json - json"
@@ -271,6 +272,7 @@ selectStatement returns [SelectStatement.RawStatement expr]
       ( K_PER K_PARTITION K_LIMIT rows=intValue { perPartitionLimit = rows; } )?
       ( K_LIMIT rows=intValue { limit = rows; } ( K_OFFSET rows=intValue { offset = rows; } )? )?
       ( K_ALLOW K_FILTERING  { allowFiltering = true; } )?
+      ( K_WITH properties[options] )?
       {
           SelectStatement.Parameters params = new SelectStatement.Parameters(orderings,
                                                                              groups,
@@ -278,7 +280,7 @@ selectStatement returns [SelectStatement.RawStatement expr]
                                                                              allowFiltering,
                                                                              isJson);
           WhereClause where = wclause == null ? WhereClause.empty() : wclause.build();
-          $expr = new SelectStatement.RawStatement(cf, params, $sclause.selectors, where, limit, perPartitionLimit, offset);
+          $expr = new SelectStatement.RawStatement(cf, params, $sclause.selectors, where, limit, perPartitionLimit, offset, options);
       }
     ;
 
@@ -404,11 +406,11 @@ simpleUnaliasedSelector returns [Selectable.Raw s]
     ;
 
 selectionFunction returns [Selectable.Raw s]
-    : K_COUNT '(' '\*' ')'                      { $s = Selectable.WithFunction.Raw.newCountRowsFunction(); }
-    | K_WRITETIME '(' c=sident ')'              { $s = new Selectable.WritetimeOrTTL.Raw(c, true); }
-    | K_TTL       '(' c=sident ')'              { $s = new Selectable.WritetimeOrTTL.Raw(c, false); }
-    | K_CAST      '(' sn=unaliasedSelector K_AS t=native_type ')' {$s = new Selectable.WithCast.Raw(sn, t);}
-    | f=functionName args=selectionFunctionArgs { $s = new Selectable.WithFunction.Raw(f, args); }
+    : K_COUNT '(' '\*' ')'                                           { $s = Selectable.WithFunction.Raw.newCountRowsFunction(); }
+    | K_WRITETIME    '(' c=sident m=selectorModifier[c] ')'          { $s = new Selectable.WritetimeOrTTL.Raw(c, m, Selectable.WritetimeOrTTL.Kind.WRITE_TIME); }
+    | K_TTL          '(' c=sident m=selectorModifier[c] ')'          { $s = new Selectable.WritetimeOrTTL.Raw(c, m, Selectable.WritetimeOrTTL.Kind.TTL); }
+    | K_CAST         '(' sn=unaliasedSelector K_AS t=native_type ')' { $s = new Selectable.WithCast.Raw(sn, t);}
+    | f=functionName args=selectionFunctionArgs                      { $s = new Selectable.WithFunction.Raw(f, args); }
     ;
 
 selectionLiteral returns [Term.Raw value]
@@ -457,14 +459,18 @@ customIndexExpression [WhereClause.Builder clause]
     ;
 
 orderByClause[List<Ordering.Raw> orderings]
-    @init{
+    @init {
         Ordering.Direction direction = Ordering.Direction.ASC;
+        Ordering.Raw.Expression expr = null;
     }
-    : c=cident (K_ANN_OF t=term)? (K_ASC | K_DESC { direction = Ordering.Direction.DESC; })?
+    : c=cident
+        ( K_ANN K_OF t=term { expr = new Ordering.Raw.Ann(c, t); }
+        | K_BM25 K_OF t=term { expr = new Ordering.Raw.Bm25(c, t); }
+        )?
+        (K_ASC | K_DESC { direction = Ordering.Direction.DESC; })?
     {
-        Ordering.Raw.Expression expr = (t == null)
-            ? new Ordering.Raw.SingleColumn(c)
-            : new Ordering.Raw.Ann(c, t);
+        if (expr == null)
+            expr = new Ordering.Raw.SingleColumn(c);
         orderings.add(new Ordering.Raw(expr, direction));
     }
     ;
@@ -1966,7 +1972,8 @@ basic_unreserved_keyword returns [String str]
         | K_DROPPED
         | K_COLUMN
         | K_RECORD
-        | K_ANN_OF
+        | K_ANN
+        | K_BM25
         | K_OFFSET
         ) { $str = $k.text; }
     ;

@@ -34,7 +34,7 @@ import org.apache.cassandra.db.DiskBoundaries;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.compaction.CompactionRealm;
 import org.apache.cassandra.db.compaction.CompactionTask;
-import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
+import org.apache.cassandra.db.lifecycle.ILifecycleTransaction;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.dht.Token;
@@ -64,17 +64,27 @@ public abstract class CompactionAwareWriter extends Transactional.AbstractTransa
     protected final boolean isTransient;
 
     protected final SSTableRewriter sstableWriter;
-    protected final LifecycleTransaction txn;
+    protected final ILifecycleTransaction txn;
     private final List<Directories.DataDirectory> locations;
     private final List<Token> diskBoundaries;
     private int locationIndex;
     protected Directories.DataDirectory currentDirectory;
 
-    public CompactionAwareWriter(CompactionRealm realm,
-                                 Directories directories,
-                                 LifecycleTransaction txn,
-                                 Set<SSTableReader> nonExpiredSSTables,
-                                 boolean keepOriginals)
+    protected CompactionAwareWriter(CompactionRealm realm,
+                                    Directories directories,
+                                    ILifecycleTransaction txn,
+                                    Set<SSTableReader> nonExpiredSSTables,
+                                    boolean keepOriginals)
+    {
+        this(realm, directories, txn, nonExpiredSSTables, keepOriginals, true);
+    }
+
+    protected CompactionAwareWriter(CompactionRealm realm,
+                                    Directories directories,
+                                    ILifecycleTransaction txn,
+                                    Set<SSTableReader> nonExpiredSSTables,
+                                    boolean keepOriginals,
+                                    boolean earlyOpenAllowed)
     {
         this.realm = realm;
         this.directories = directories;
@@ -83,7 +93,7 @@ public abstract class CompactionAwareWriter extends Transactional.AbstractTransa
 
         estimatedTotalKeys = SSTableReader.getApproximateKeyCount(nonExpiredSSTables);
         maxAge = CompactionTask.getMaxDataAge(nonExpiredSSTables);
-        sstableWriter = SSTableRewriter.construct(realm, txn, keepOriginals, maxAge);
+        sstableWriter = SSTableRewriter.construct(realm, txn, keepOriginals, maxAge, earlyOpenAllowed);
         minRepairedAt = CompactionTask.getMinRepairedAt(nonExpiredSSTables);
         pendingRepair = CompactionTask.getPendingRepair(nonExpiredSSTables);
         isTransient = CompactionTask.getIsTransient(nonExpiredSSTables);

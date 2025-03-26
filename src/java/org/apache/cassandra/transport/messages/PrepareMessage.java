@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.transport.messages;
 
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
 import com.google.common.collect.ImmutableMap;
@@ -112,7 +113,12 @@ public class PrepareMessage extends Message.Request
     }
 
     @Override
-    protected Message.Response execute(QueryState state, long queryStartNanoTime, boolean traceRequest)
+    protected CompletableFuture<Response> maybeExecuteAsync(QueryState queryState, long queryStartNanoTime, boolean traceRequest)
+    {
+        return CompletableFuture.completedFuture(executeSync(queryState, queryStartNanoTime, traceRequest));
+    }
+
+    private Message.Response executeSync(QueryState state, long queryStartNanoTime, boolean traceRequest)
     {
         try
         {

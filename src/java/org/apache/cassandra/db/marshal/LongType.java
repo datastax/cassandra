@@ -38,6 +38,12 @@ public class LongType extends NumberType<Long>
 
     LongType() {super(ComparisonType.CUSTOM);} // singleton
 
+    @Override
+    public boolean allowsEmpty()
+    {
+        return true;
+    }
+
     public boolean isEmptyValueMeaningless()
     {
         return true;
@@ -63,13 +69,23 @@ public class LongType extends NumberType<Long>
     @Override
     public <V> ByteSource asComparableBytes(ValueAccessor<V> accessor, V data, ByteComparable.Version version)
     {
-        return ByteSource.optionalSignedFixedLengthNumber(accessor, data);
+        if (accessor.isEmpty(data))
+            return null;
+        if (version != ByteComparable.Version.OSS50)
+            return ByteSource.signedFixedLengthNumber(accessor, data);
+        else
+            return ByteSource.variableLengthInteger(accessor.getLong(data, 0));
     }
 
     @Override
     public <V> V fromComparableBytes(ValueAccessor<V> accessor, ByteSource.Peekable comparableBytes, ByteComparable.Version version)
     {
-        return ByteSourceInverse.getOptionalSignedFixedLength(accessor, comparableBytes, 8);
+        if (comparableBytes == null)
+            return accessor.empty();
+        if (version != ByteComparable.Version.OSS50)
+            return ByteSourceInverse.getSignedFixedLength(accessor, comparableBytes, 8);
+        else
+            return accessor.valueOf(ByteSourceInverse.getVariableLengthInteger(comparableBytes));
     }
 
     public ByteBuffer fromString(String source) throws MarshalException

@@ -37,7 +37,7 @@ public class MixedIndexImplementationsTest extends SAITester
      * Tests that storage-attached indexes can be dropped when there are other indexes in the same table, and vice versa.
      */
     @Test
-    public void shouldDropOtherIndex() throws Throwable
+    public void shouldDropOtherIndex()
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v1 int, v2 int)");
 
@@ -57,21 +57,18 @@ public class MixedIndexImplementationsTest extends SAITester
      * Tests that storage-attached index queries can include restrictions over columns indexed by other indexes.
      */
     @Test
-    public void shouldAcceptColumnsWithOtherIndex() throws Throwable
+    public void shouldAcceptColumnsWithOtherIndex()
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v1 int, v2 int)");
 
         createIndex("CREATE INDEX ON %s(v1)");
         createIndex(String.format("CREATE CUSTOM INDEX ON %%s(v2) USING '%s'", StorageAttachedIndex.class.getName()));
-        waitForIndexQueryable();
 
         String insert = "INSERT INTO %s(k, v1, v2) VALUES (?, ?, ?)";
         execute(insert, 0, 0, 0);
         execute(insert, 1, 0, 1);
         execute(insert, 2, 1, 0);
         execute(insert, 3, 1, 1);
-
-        waitForIndexQueryable();
 
         String ossSelect = "SELECT * FROM %s WHERE v1 = ?";
         assertRowsIgnoringOrder(execute(ossSelect, 0), new Object[][]{{0, 0, 0}, {1, 0, 1}});
@@ -88,7 +85,7 @@ public class MixedIndexImplementationsTest extends SAITester
      * Tests that storage-attached indexes are not selected when the query contains a custom expression targeted to another index.
      */
     @Test
-    public void shouldNotBeSelectedForCustomExpressions() throws Throwable
+    public void shouldNotBeSelectedForCustomExpressions()
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v1 int, v2 int)");
 
@@ -104,8 +101,6 @@ public class MixedIndexImplementationsTest extends SAITester
         execute(insert, 1, 0, 1);
         execute(insert, 2, 1, 0);
         execute(insert, 3, 1, 1);
-
-        waitForIndexQueryable();
 
         String ndiSelect = "SELECT * FROM %s WHERE v1 = ?";
         assertRowsIgnoringOrder(execute(ndiSelect, 0), new Object[][]{{0, 0, 0}, {1, 0, 1}});
@@ -128,7 +123,7 @@ public class MixedIndexImplementationsTest extends SAITester
     }
 
     @Test
-    public void shouldRequireAllowFilteringWithOtherIndex() throws Throwable
+    public void shouldRequireAllowFilteringWithOtherIndex()
     {
         createTable("CREATE TABLE %s (" +
                     "k1 int, k2 int, " +
@@ -225,7 +220,7 @@ public class MixedIndexImplementationsTest extends SAITester
         testAllowFiltering("SELECT * FROM %s WHERE s1=0 AND c2=0 AND c3=0 AND r1=0 AND r2=0", true);
     }
 
-    private void testAllowFiltering(String query, boolean requiresAllowFiltering) throws Throwable
+    private void testAllowFiltering(String query, boolean requiresAllowFiltering)
     {
         if (requiresAllowFiltering)
             assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE, query);

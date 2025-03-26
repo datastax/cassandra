@@ -21,7 +21,20 @@ import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
@@ -54,7 +67,10 @@ import com.google.common.base.Joiner;
 import com.google.common.base.Predicate;
 import com.google.common.base.Predicates;
 import com.google.common.base.Throwables;
-import com.google.common.collect.*;
+import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Iterables;
+import com.google.common.collect.Lists;
+import com.google.common.collect.Sets;
 import com.google.common.primitives.Longs;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
@@ -86,6 +102,8 @@ import org.apache.cassandra.db.compaction.CompactionStrategyOptions;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.compaction.TableOperation;
 import org.apache.cassandra.db.compaction.Verifier;
+import org.apache.cassandra.db.compaction.unified.Environment;
+import org.apache.cassandra.db.compaction.unified.RealEnvironment;
 import org.apache.cassandra.db.filter.ClusteringIndexFilter;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
@@ -100,7 +118,6 @@ import org.apache.cassandra.db.memtable.ShardBoundaries;
 import org.apache.cassandra.db.partitions.CachedPartition;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.repair.CassandraTableRepairManager;
-import org.apache.cassandra.db.rows.CellPath;
 import org.apache.cassandra.db.streaming.CassandraStreamManager;
 import org.apache.cassandra.db.view.TableViews;
 import org.apache.cassandra.dht.AbstractBounds;
@@ -120,9 +137,9 @@ import org.apache.cassandra.io.sstable.BloomFilterTracker;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTable;
-import org.apache.cassandra.io.sstable.SSTableMultiWriter;
 import org.apache.cassandra.io.sstable.SSTableId;
 import org.apache.cassandra.io.sstable.SSTableIdFactory;
+import org.apache.cassandra.io.sstable.SSTableMultiWriter;
 import org.apache.cassandra.io.sstable.StorageHandler;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
@@ -138,7 +155,6 @@ import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.nodes.Nodes;
 import org.apache.cassandra.repair.TableRepairManager;
 import org.apache.cassandra.repair.consistent.admin.PendingStat;
-import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.CompactionParams;
 import org.apache.cassandra.schema.CompactionParams.TombstoneOption;
 import org.apache.cassandra.schema.CompressionParams;
@@ -149,6 +165,10 @@ import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.schema.TableParams;
+import org.apache.cassandra.sensors.Context;
+import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.RequestTracker;
+import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.service.CacheService;
 import org.apache.cassandra.service.StorageService;
@@ -169,6 +189,7 @@ import org.json.simple.JSONObject;
 
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 import static org.apache.cassandra.config.CassandraRelevantProperties.DISABLED_AUTO_COMPACTION_PROPERTY;
+import static org.apache.cassandra.config.CassandraRelevantProperties.UNSAFE_SYSTEM;
 import static org.apache.cassandra.utils.Throwables.maybeFail;
 import static org.apache.cassandra.utils.Throwables.merge;
 import static org.apache.cassandra.utils.Throwables.perform;
@@ -365,6 +386,8 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     // BloomFilterTracker is updated from corresponding {@link SSTableReader}s. Metrics are queried via CFS instance.
     private final BloomFilterTracker bloomFilterTracker = BloomFilterTracker.createMeterTracker();
 
+    private final RequestTracker requestTracker = RequestTracker.instance;
+
     public static void shutdownPostFlushExecutor() throws InterruptedException
     {
         postFlushExecutor.shutdown();
@@ -426,7 +449,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     private void reloadCompactionStrategy(CompactionParams compactionParams, CompactionStrategyContainer.ReloadReason reason)
     {
         CompactionStrategyContainer previous = strategyContainer;
-        strategyContainer = strategyFactory.reload(strategyContainer, compactionParams, reason, !storageHandler.isRemote());
+        strategyContainer = strategyFactory.reload(strategyContainer, compactionParams, reason, storageHandler.enableAutoCompaction());
         if (strategyContainer != previous)
         {
             getTracker().subscribe(strategyContainer);
@@ -559,6 +582,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
             this.directories = new Directories(metadata.get());
 
         storageHandler = StorageHandler.create(metadata, directories, data);
+        logger.debug("Initialized storage handler with {} for {}.{}", storageHandler.getClass().getSimpleName(), keyspace.getName(), name);
 
         Collection<SSTableReader> sstables = null;
         // scan for sstables corresponding to this cf and load them
@@ -570,7 +594,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         this.strategyContainer = strategyFactory.reload(null,
                                                         metadata.get().params.compaction,
                                                         CompactionStrategyContainer.ReloadReason.FULL,
-                                                        !storageHandler.isRemote());
+                                                        storageHandler.enableAutoCompaction());
         getTracker().subscribe(strategyContainer);
 
         if (!strategyContainer.isEnabled() || DISABLED_AUTO_COMPACTION_PROPERTY.getBoolean())
@@ -656,6 +680,12 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     public TableRepairManager getRepairManager()
     {
         return repairManager;
+    }
+
+    @Override
+    public Environment makeUCSEnvironment()
+    {
+        return new RealEnvironment(this);
     }
 
     public TableMetadata metadata()
@@ -1339,11 +1369,18 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
 
             if (memtable.isClean() || truncate)
             {
-                cfs.replaceFlushed(memtable, Collections.emptyList(), Optional.empty());
-                reclaim(memtable);
-                return Collections.emptyList();
+                try
+                {
+                    cfs.replaceFlushed(memtable, Collections.emptyList(), Optional.empty());
+                    return Collections.emptyList();
+                }
+                finally
+                {
+                    if (!cfs.getTracker().getView().flushingMemtables.contains(memtable))
+                        reclaim(memtable);
+                }
             }
-
+            long start = System.nanoTime();
             List<Future<SSTableMultiWriter>> futures = new ArrayList<>();
             long totalBytesOnDisk = 0;
             long maxBytesOnDisk = 0;
@@ -1430,8 +1467,12 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
                 }
 
                 Throwable accumulate = null;
+
                 for (SSTableMultiWriter writer : flushResults)
+                {
                     accumulate = writer.commit(accumulate);
+                    metric.flushSizeOnDisk().update(writer.getOnDiskBytesWritten());
+                }
 
                 maybeFail(txn.commit(accumulate));
 
@@ -1450,10 +1491,15 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
                         }
                     }
                 }
+                metric.memTableFlushCompleted(System.nanoTime() - start);
 
                 cfs.replaceFlushed(memtable, sstables, Optional.of(txn.opId()));
             }
-            reclaim(memtable);
+            finally
+            {
+                if (!cfs.getTracker().getView().flushingMemtables.contains(memtable))
+                    reclaim(memtable);
+            }
             cfs.strategyFactory.getCompactionLogger().flush(sstables);
             if (logger.isTraceEnabled())
             {
@@ -1554,9 +1600,10 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
             DecoratedKey key = update.partitionKey();
             invalidateCachedPartition(key);
             metric.topWritePartitionFrequency.addSample(key.getKey(), 1);
+            int dataSize = update.dataSize();
             if (metric.topWritePartitionSize.isEnabled()) // dont compute datasize if not needed
-                metric.topWritePartitionSize.addSample(key.getKey(), update.dataSize());
-            metric.bytesInserted.inc(update.dataSize());
+                metric.topWritePartitionSize.addSample(key.getKey(), dataSize);
+            metric.bytesInserted.inc(dataSize);
             StorageHook.instance.reportWrite(metadata.id, update);
             metric.writeLatency.addNano(System.nanoTime() - start);
             // CASSANDRA-11117 - certain resolution paths on memtable put can result in very
@@ -1566,6 +1613,17 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
             // to update.
             if(timeDelta < Long.MAX_VALUE)
                 metric.colUpdateTimeDeltaHistogram.update(Math.min(18165375903306L, timeDelta));
+
+            if (!isIndex())
+            {
+                RequestSensors sensors = requestTracker.get();
+                if (sensors != null)
+                {
+                    Context puContext = Context.from(this.metadata.get());
+                    sensors.registerSensor(puContext, Type.WRITE_BYTES);
+                    sensors.incrementSensor(puContext, Type.WRITE_BYTES, dataSize);
+                }
+            }
         }
         catch (RuntimeException e)
         {
@@ -1734,7 +1792,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     {
         if (operation != OperationType.CLEANUP || isIndex())
         {
-            return CompactionSSTable.getTotalBytes(sstables);
+            return CompactionSSTable.getTotalDataBytes(sstables);
         }
 
         // cleanup size estimation only counts bytes for keys local to this node
@@ -1834,6 +1892,9 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         maybeFail(data.dropSSTables(Predicates.in(sstables), compactionType, null));
     }
 
+    /**
+     * Beware, this code doesn't have noexcept guarantees
+     */
     void replaceFlushed(Memtable memtable, Collection<SSTableReader> sstables, Optional<UUID> operationId)
     {
         data.replaceFlushed(memtable, sstables, operationId);
@@ -1862,6 +1923,12 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         return data;
     }
 
+
+    /**
+     * Convenience method for getting the set of live sstables associated with this ColumnFamilyStore. Note that this
+     * will also contain any early-opened sstables.
+     * @return the tracker's current view's {@link SSTableSet#LIVE} sstables
+     */
     public Set<SSTableReader> getLiveSSTables()
     {
         return data.getLiveSSTables();
@@ -1890,6 +1957,12 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     public Iterable<Memtable> getAllMemtables()
     {
         return data.getView().getAllMemtables();
+    }
+
+    @Override
+    public OpOrder readOrdering()
+    {
+        return readOrdering;
     }
 
     public Map<UUID, PendingStat> getPendingRepairStats()
@@ -2416,6 +2489,16 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     public void forceMajorCompaction(boolean splitOutput)
     {
         CompactionManager.instance.performMaximal(this, splitOutput);
+    }
+
+    public void forceMajorCompaction(int parallelism)
+    {
+        CompactionManager.instance.performMaximal(this, false, parallelism);
+    }
+
+    public void forceMajorCompaction(boolean splitOutput, int parallelism)
+    {
+        CompactionManager.instance.performMaximal(this, splitOutput, parallelism);
     }
 
     public void forceCompactionForTokenRange(Collection<Range<Token>> tokenRanges) throws ExecutionException, InterruptedException
@@ -3417,9 +3500,12 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         }
         else
         {
-            if (logger.isTraceEnabled())
-                logger.trace("Recycling CL segments for dropping {}", metadata);
-            CommitLog.instance.forceRecycleAllSegments(Collections.singleton(metadata.id));
+            if (!UNSAFE_SYSTEM.getBoolean())
+            {
+                if (logger.isTraceEnabled())
+                    logger.trace("Recycling CL segments for dropping {}", metadata);
+                CommitLog.instance.forceRecycleAllSegments(Collections.singleton(metadata.id));
+            }
         }
 
         if (logger.isTraceEnabled())

@@ -45,6 +45,12 @@ public abstract class AbstractCompositeType extends AbstractType<ByteBuffer>
         super(ComparisonType.CUSTOM, false, subTypes);
     }
 
+    @Override
+    public boolean allowsEmpty()
+    {
+        return true;
+    }
+
     public <VL, VR> int compareCustom(VL left, ValueAccessor<VL> accessorL, VR right, ValueAccessor<VR> accessorR)
     {
         if (accessorL.isEmpty(left) || accessorR.isEmpty(right))

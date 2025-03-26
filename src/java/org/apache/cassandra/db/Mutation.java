@@ -50,6 +50,8 @@ import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.RequestTracker;
 import org.apache.cassandra.service.AbstractWriteResponseHandler;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
@@ -57,7 +59,8 @@ import static org.apache.cassandra.net.MessagingService.VERSION_30;
 import static org.apache.cassandra.net.MessagingService.VERSION_3014;
 import static org.apache.cassandra.net.MessagingService.VERSION_40;
 import static org.apache.cassandra.net.MessagingService.VERSION_41;
-import static org.apache.cassandra.net.MessagingService.VERSION_SG_10;
+import static org.apache.cassandra.net.MessagingService.VERSION_DS_10;
+import static org.apache.cassandra.net.MessagingService.VERSION_DS_11;
 import static org.apache.cassandra.utils.MonotonicClock.approxTime;
 
 public class Mutation implements IMutation
@@ -78,6 +81,7 @@ public class Mutation implements IMutation
     final AtomicLong viewLockAcquireStart = new AtomicLong(0);
 
     private final boolean cdcEnabled;
+    private final RequestTracker requestTracker;
 
     private static final int SERIALIZATION_VERSION_COUNT = MessagingService.Version.values().length;
     // Contains serialized representations of this mutation.
@@ -105,6 +109,7 @@ public class Mutation implements IMutation
         this.modifications = modifications;
         this.cdcEnabled = cdcEnabled;
         this.approxCreatedAtNanos = approxCreatedAtNanos;
+        this.requestTracker = RequestTracker.instance;
     }
 
     private static boolean cdcEnabled(Iterable<PartitionUpdate> modifications)
@@ -228,7 +233,7 @@ public class Mutation implements IMutation
             if (updates.isEmpty())
                 continue;
 
-            modifications.put(table, updates.size() == 1 ? updates.get(0) : PartitionUpdate.merge(updates));
+            modifications.put(table, PartitionUpdate.merge(updates));
             updates.clear();
         }
         return new Mutation(ks, key, modifications.build(), approxTime.now());
@@ -237,12 +242,20 @@ public class Mutation implements IMutation
     public CompletableFuture<?> applyFuture(WriteOptions writeOptions)
     {
         Keyspace ks = Keyspace.open(keyspaceName);
-        return ks.applyFuture(this, writeOptions, true);
+        return ks.applyFuture(this, writeOptions, true).thenRun(() -> {
+            RequestSensors sensors = requestTracker.get();
+            if (sensors != null)
+                sensors.syncAllSensors();
+        });
     }
 
     public void apply(WriteOptions writeOptions)
     {
         Keyspace.open(keyspaceName).apply(this, writeOptions);
+
+        RequestSensors sensors = requestTracker.get();
+        if (sensors != null)
+            sensors.syncAllSensors();
     }
 
     /*
@@ -309,7 +322,8 @@ public class Mutation implements IMutation
     private int serializedSize3014;
     private int serializedSize40;
     private int serializedSize41;
-    private int serializedSizeSG10;
+    private int serializedSizeDS10;
+    private int serializedSizeDS11;
 
     public int serializedSize(int version)
     {
@@ -331,10 +345,14 @@ public class Mutation implements IMutation
                 if (serializedSize41 == 0)
                     serializedSize41 = (int) serializer.serializedSize(this, VERSION_41);
                 return serializedSize41;
-            case VERSION_SG_10:
-                if (serializedSizeSG10 == 0)
-                    serializedSizeSG10 = (int) serializer.serializedSize(this, VERSION_SG_10);
-                return serializedSizeSG10;
+            case VERSION_DS_10:
+                if (serializedSizeDS10 == 0)
+                    serializedSizeDS10 = (int) serializer.serializedSize(this, VERSION_DS_10);
+                return serializedSizeDS10;
+            case VERSION_DS_11:
+                if (serializedSizeDS11 == 0)
+                    serializedSizeDS11 = (int) serializer.serializedSize(this, VERSION_DS_11);
+                return serializedSizeDS11;
             default:
                 throw new IllegalStateException("Unknown serialization version: " + version);
         }

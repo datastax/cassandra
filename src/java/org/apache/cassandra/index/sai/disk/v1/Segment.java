@@ -36,10 +36,10 @@ import org.apache.cassandra.index.sai.SSTableContext;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher;
 import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
+import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.plan.Orderer;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
-import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
 import org.apache.cassandra.io.util.FileUtils;
@@ -79,10 +79,13 @@ public class Segment implements Closeable
 
         var version = indexFiles.usedPerIndexComponents().version();
         IndexSearcher searcher = version.onDiskFormat().newIndexSearcher(sstableContext, indexContext, indexFiles, metadata);
-        logger.info("Opened searcher {} for segment {}:{} for index [{}] on column [{}] at version {}",
+        logger.info("Opened searcher {} for segment {} with row id meta ({},{},{},{}) for index [{}] on column [{}] at version {}",
                     searcher.getClass().getSimpleName(),
                     sstableContext.descriptor(),
                     metadata.segmentRowIdOffset,
+                    metadata.numRows,
+                    metadata.minSSTableRowId,
+                    metadata.maxSSTableRowId,
                     indexContext.getIndexName(),
                     indexContext.getColumnName(),
                     version);
@@ -139,9 +142,9 @@ public class Segment implements Closeable
      * @param limit      the num of rows to returned, used by ANN index
      * @return range iterator of {@link PrimaryKey} that matches given expression
      */
-    public RangeIterator search(Expression expression, AbstractBounds<PartitionPosition> keyRange, QueryContext context, boolean defer, int limit) throws IOException
+    public KeyRangeIterator search(Expression expression, AbstractBounds<PartitionPosition> keyRange, QueryContext context, boolean defer, int limit) throws IOException
     {
-        return index.search(expression, keyRange, context, defer, limit);
+        return index.search(expression, keyRange, context, defer);
     }
 
     /**
@@ -202,11 +205,11 @@ public class Segment implements Closeable
      * the number of candidates, the more nodes we expect to visit just to find
      * results that are in that set.)
      */
-    public int estimateAnnNodesVisited(int limit, int candidates)
+    public double estimateAnnSearchCost(Orderer orderer, int limit, int candidates)
     {
-        IndexSearcher searcher = getIndexSearcher();
-        assert searcher instanceof V2VectorIndexSearcher : searcher;
-        return ((V2VectorIndexSearcher) searcher).estimateNodesVisited(limit, candidates);
+        V2VectorIndexSearcher searcher = (V2VectorIndexSearcher) getIndexSearcher();
+        int rerankK = orderer.rerankKFor(limit, searcher.getCompression());
+        return searcher.estimateAnnSearchCost(rerankK, candidates);
     }
 
     /**
@@ -230,5 +233,10 @@ public class Segment implements Closeable
         int proportionalLimit = (int) Math.ceil(limit * ((double) segmentRows / totalRows));
         assert proportionalLimit >= 1 : proportionalLimit;
         return proportionalLimit;
+    }
+
+    public long estimateMatchingRowsCount(Expression predicate, AbstractBounds<PartitionPosition> keyRange)
+    {
+        return metadata.estimateNumRowsMatching(predicate);
     }
 }

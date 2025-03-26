@@ -19,15 +19,15 @@ package org.apache.cassandra.index.sai.disk.v1;
 
 import java.io.IOException;
 import java.lang.invoke.MethodHandles;
+import java.util.Arrays;
 import java.util.Collections;
-import java.util.Iterator;
 import java.util.concurrent.TimeUnit;
 
 import com.google.common.base.Stopwatch;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.carrotsearch.hppc.IntArrayList;
+import org.agrona.collections.Int2IntHashMap;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.rows.Row;
@@ -35,17 +35,18 @@ import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.disk.MemtableTermsIterator;
 import org.apache.cassandra.index.sai.disk.PerIndexWriter;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
-import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.ImmutableOneDimPointValues;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.NumericIndexWriter;
 import org.apache.cassandra.index.sai.disk.v1.trie.InvertedIndexWriter;
+import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
 import org.apache.cassandra.index.sai.memory.MemtableIndex;
 import org.apache.cassandra.index.sai.memory.RowMapping;
+import org.apache.cassandra.index.sai.memory.TrieMemoryIndex;
+import org.apache.cassandra.index.sai.memory.TrieMemtableIndex;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.utils.ByteBufferUtil;
-import org.apache.cassandra.utils.Pair;
-import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 /**
  * Column index writer that flushes indexed data directly from the corresponding Memtable index, without buffering index
@@ -125,8 +126,7 @@ public class MemtableIndexWriter implements PerIndexWriter
             }
             else
             {
-                final Iterator<Pair<ByteComparable, IntArrayList>> iterator = rowMapping.merge(memtableIndex);
-
+                var iterator = rowMapping.merge(memtableIndex);
                 try (MemtableTermsIterator terms = new MemtableTermsIterator(memtableIndex.getMinTerm(), memtableIndex.getMaxTerm(), iterator))
                 {
                     long cellCount = flush(minKey, maxKey, indexContext().getValidator(), terms, rowMapping.maxSegmentRowId);
@@ -147,13 +147,25 @@ public class MemtableIndexWriter implements PerIndexWriter
     private long flush(DecoratedKey minKey, DecoratedKey maxKey, AbstractType<?> termComparator, MemtableTermsIterator terms, int maxSegmentRowId) throws IOException
     {
         long numRows;
+        SegmentMetadataBuilder metadataBuilder = new SegmentMetadataBuilder(0, perIndexComponents);
         SegmentMetadata.ComponentMetadataMap indexMetas;
-
         if (TypeUtil.isLiteral(termComparator))
         {
-            try (InvertedIndexWriter writer = new InvertedIndexWriter(perIndexComponents))
+            try (InvertedIndexWriter writer = new InvertedIndexWriter(perIndexComponents, writeFrequencies()))
             {
-                indexMetas = writer.writeAll(terms);
+                // Convert PrimaryKey->length map to rowId->length using RowMapping
+                var docLengths = new Int2IntHashMap(Integer.MIN_VALUE);
+                Arrays.stream(((TrieMemtableIndex) memtableIndex).getRangeIndexes())
+                      .map(TrieMemoryIndex.class::cast)
+                      .forEach(trieMemoryIndex -> 
+                          trieMemoryIndex.getDocLengths().forEach((pk, length) -> {
+                              int rowId = rowMapping.get(pk);
+                              if (rowId >= 0)
+                                  docLengths.put(rowId, (int) length);
+                          })
+                      );
+                
+                indexMetas = writer.writeAll(metadataBuilder.intercept(terms), docLengths);
                 numRows = writer.getPostingsCount();
             }
         }
@@ -166,7 +178,8 @@ public class MemtableIndexWriter implements PerIndexWriter
                                                                     Integer.MAX_VALUE,
                                                                     indexContext().getIndexWriterConfig()))
             {
-                indexMetas = writer.writeAll(ImmutableOneDimPointValues.fromTermEnum(terms, termComparator));
+                ImmutableOneDimPointValues values = ImmutableOneDimPointValues.fromTermEnum(terms, termComparator);
+                indexMetas = writer.writeAll(metadataBuilder.intercept(values));
                 numRows = writer.getPointCount();
             }
         }
@@ -179,16 +192,11 @@ public class MemtableIndexWriter implements PerIndexWriter
             return 0;
         }
 
-        // During index memtable flush, the data is sorted based on terms.
-        SegmentMetadata metadata = new SegmentMetadata(0,
-                                                       numRows,
-                                                       terms.getMinSSTableRowId(),
-                                                       terms.getMaxSSTableRowId(),
-                                                       pkFactory.createPartitionKeyOnly(minKey),
-                                                       pkFactory.createPartitionKeyOnly(maxKey),
-                                                       terms.getMinTerm(),
-                                                       terms.getMaxTerm(),
-                                                       indexMetas);
+        metadataBuilder.setKeyRange(pkFactory.createPartitionKeyOnly(minKey), pkFactory.createPartitionKeyOnly(maxKey));
+        metadataBuilder.setRowIdRange(terms.getMinSSTableRowId(), terms.getMaxSSTableRowId());
+        metadataBuilder.setTermRange(terms.getMinTerm(), terms.getMaxTerm());
+        metadataBuilder.setComponentsMetadata(indexMetas);
+        SegmentMetadata metadata = metadataBuilder.build();
 
         try (MetadataWriter writer = new MetadataWriter(perIndexComponents))
         {
@@ -196,6 +204,11 @@ public class MemtableIndexWriter implements PerIndexWriter
         }
 
         return numRows;
+    }
+
+    private boolean writeFrequencies()
+    {
+        return indexContext().isAnalyzed() && Version.latest().onOrAfter(Version.EC);
     }
 
     private void flushVectorIndex(DecoratedKey minKey, DecoratedKey maxKey, long startTime, Stopwatch stopwatch) throws IOException
@@ -219,6 +232,7 @@ public class MemtableIndexWriter implements PerIndexWriter
                                                        pkFactory.createPartitionKeyOnly(maxKey),
                                                        ByteBufferUtil.bytes(0), // VSTODO by pass min max terms for vectors
                                                        ByteBufferUtil.bytes(0), // VSTODO by pass min max terms for vectors
+                                                       null,
                                                        metadataMap);
 
         try (MetadataWriter writer = new MetadataWriter(perIndexComponents))

@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.metrics;
 
+import java.lang.ref.WeakReference;
 import java.nio.BufferUnderflowException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
@@ -30,6 +31,8 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.LongSupplier;
 import java.util.function.Predicate;
 import java.util.stream.Stream;
 
@@ -44,6 +47,7 @@ import org.apache.commons.lang3.ArrayUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.codahale.metrics.CachedGauge;
 import com.codahale.metrics.Counter;
 import com.codahale.metrics.Gauge;
 import com.codahale.metrics.Histogram;
@@ -55,6 +59,7 @@ import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.lifecycle.View;
@@ -73,6 +78,8 @@ import org.apache.cassandra.utils.ExpMovingAverage;
 import org.apache.cassandra.utils.Hex;
 import org.apache.cassandra.utils.MovingAverage;
 import org.apache.cassandra.utils.Pair;
+import org.apache.cassandra.utils.concurrent.OpOrder;
+import org.apache.cassandra.utils.concurrent.Refs;
 
 import static org.apache.cassandra.io.sstable.format.SSTableReader.selectOnlyBigTableReaders;
 import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
@@ -173,6 +180,12 @@ public class TableMetrics
     public final Gauge<long[]> estimatedPartitionSizeHistogram;
     /** Approximate number of keys in table. */
     public final Gauge<Long> estimatedPartitionCount;
+    /** This function is used to calculate estimated partition count in sstables and store the calculated value for the
+     *  current set of sstables. */
+    public final LongSupplier estimatedPartitionCountInSSTables;
+    /** A cached version of the estimated partition count in sstables, used by compaction. This value will be more
+     *  precise when the table has a small number of partitions that keep getting written to. */
+    public final Gauge<Long> estimatedPartitionCountInSSTablesCached;
     /** Histogram of estimated number of columns. */
     public final Gauge<long[]> estimatedColumnCountHistogram;
 
@@ -208,6 +221,13 @@ public class TableMetrics
     public final MovingAverage flushSegmentCount;
     /** The average duration per 1Kb of data flushed, in nanoseconds. */
     public final MovingAverage flushTimePerKb;
+    /** Time spent in flushing memtables */
+    public final Counter flushTime;
+    public final Counter storageAttachedIndexBuildTime;
+    public final Counter storageAttachedIndexWritingTimeForIndexBuild;
+    public final Counter storageAttachedIndexWritingTimeForCompaction;
+    public final Counter storageAttachedIndexWritingTimeForFlush;
+    public final Counter storageAttachedIndexWritingTimeForOther;
     /** Total number of bytes inserted into memtables since server [re]start. */
     public final Counter bytesInserted;
     /** Total number of bytes written by compaction since server [re]start */
@@ -216,6 +236,8 @@ public class TableMetrics
     public final Counter compactionBytesRead;
     /** The average duration per 1Kb of data compacted, in nanoseconds. */
     public final MovingAverage compactionTimePerKb;
+    /** Time spent in writing sstables during compaction  */
+    public final Counter compactionTime;
     /** Estimate of number of pending compactions for this table */
     public final Gauge<Integer> pendingCompactions;
     /** Number of SSTables on disk for this CF */
@@ -595,46 +617,89 @@ public class TableMetrics
         estimatedPartitionSizeHistogram = createTableGauge("EstimatedPartitionSizeHistogram", "EstimatedRowSizeHistogram",
                                                            () -> combineHistograms(cfs.getSSTables(SSTableSet.CANONICAL),
                                                                                    SSTableReader::getEstimatedPartitionSize), null);
-        
+
+        estimatedPartitionCountInSSTables = new LongSupplier()
+        {
+            // Since the sstables only change when the tracker view changes, we can cache the value.
+            AtomicReference<Pair<WeakReference<View>, Long>> collected = new AtomicReference<>(Pair.create(new WeakReference<>(null), 0L));
+
+            public long getAsLong()
+            {
+                final View currentView = cfs.getTracker().getView();
+                final Pair<WeakReference<View>, Long> currentCollected = collected.get();
+                if (currentView != currentCollected.left.get())
+                {
+                    Refs<SSTableReader> refs = Refs.tryRef(currentView.select(SSTableSet.CANONICAL));
+                    if (refs != null)
+                    {
+                        try (refs)
+                        {
+                            long collectedValue = SSTableReader.getApproximateKeyCount(refs);
+                            final Pair<WeakReference<View>, Long> newCollected = Pair.create(new WeakReference<>(currentView), collectedValue);
+                            collected.compareAndSet(currentCollected, newCollected); // okay if failed, a different thread did it
+                            return collectedValue;
+                        }
+                    }
+                    // If we can't reference, simply return the previous collected value; it can only result in a delay
+                    // in reporting the correct key count.
+                }
+                return currentCollected.right;
+            }
+        };
         estimatedPartitionCount = createTableGauge("EstimatedPartitionCount", "EstimatedRowCount", new Gauge<Long>()
         {
             public Long getValue()
             {
-                long memtablePartitions = 0;
+                long estimatedPartitions = estimatedPartitionCountInSSTables.getAsLong();
                 for (Memtable memtable : cfs.getTracker().getView().getAllMemtables())
-                   memtablePartitions += memtable.partitionCount();
-                try(ColumnFamilyStore.RefViewFragment refViewFragment = cfs.selectAndReference(View.selectFunction(SSTableSet.CANONICAL)))
-                {
-                    return SSTableReader.getApproximateKeyCount(refViewFragment.sstables) + memtablePartitions;
-                }
+                    estimatedPartitions += memtable.partitionCount();
+                return estimatedPartitions;
             }
         }, null);
+        estimatedPartitionCountInSSTablesCached = new CachedGauge<Long>(1, TimeUnit.SECONDS)
+        {
+            public Long loadValue()
+            {
+                return estimatedPartitionCountInSSTables.getAsLong();
+            }
+        };
+
         estimatedColumnCountHistogram = createTableGauge("EstimatedColumnCountHistogram", "EstimatedColumnCountHistogram",
                                                          () -> combineHistograms(cfs.getSSTables(SSTableSet.CANONICAL), 
                                                                                  SSTableReader::getEstimatedCellPerPartitionCount), null);
 
-        estimatedRowCount = createTableGauge("EstimatedRowCount", "EstimatedRowCount", new Gauge<Long>()
+        estimatedRowCount = createTableGauge("EstimatedRowCount", "EstimatedRowCount", new CachedGauge<>(1, TimeUnit.SECONDS)
         {
-            public Long getValue()
+            public Long loadValue()
             {
                 long memtableRows = 0;
-                for (Memtable memtable : cfs.getTracker().getView().getAllMemtables())
+                OpOrder.Group readGroup = null;
+                try
                 {
-                    if (memtable instanceof TrieMemtable)
+                    for (Memtable memtable : cfs.getTracker().getView().getAllMemtables())
                     {
-                        ColumnFilter.Builder builder = ColumnFilter.allRegularColumnsBuilder(cfs.metadata(), true);
-                        memtableRows += ((TrieMemtable) memtable).rowCount(builder.build(), DataRange.allData(cfs.getPartitioner()));
+                        if (readGroup == null)
+                        {
+                            readGroup = memtable.readOrdering().start();
+                        }
+                        memtableRows += Memtable.estimateRowCount(memtable);
                     }
                 }
+                finally
+                {
+                    if (readGroup != null)
+                        readGroup.close();
+                }
+
+                long sstableRows = 0;
                 try(ColumnFamilyStore.RefViewFragment refViewFragment = cfs.selectAndReference(View.selectFunction(SSTableSet.CANONICAL)))
                 {
-                    long total = 0;
                     for (SSTableReader reader: refViewFragment.sstables)
                     {
-                        total += reader.getTotalRows();
+                        sstableRows += reader.getTotalRows();
                     }
-                    return total + memtableRows;
                 }
+                return sstableRows + memtableRows;
             }
         }, null);
         
@@ -725,11 +790,18 @@ public class TableMetrics
         flushSizeOnDisk = ExpMovingAverage.decayBy1000();
         flushSegmentCount = ExpMovingAverage.decayBy1000();
         flushTimePerKb = ExpMovingAverage.decayBy100();
+        flushTime = createTableCounter("FlushTime");
+        storageAttachedIndexBuildTime = createTableCounter("StorageAttachedIndexBuildTime");
+        storageAttachedIndexWritingTimeForIndexBuild = createTableCounter("StorageAttachedIndexWritingTimeForIndexBuild");
+        storageAttachedIndexWritingTimeForCompaction = createTableCounter("StorageAttachedIndexWritingTimeForCompaction");
+        storageAttachedIndexWritingTimeForFlush = createTableCounter("StorageAttachedIndexWritingTimeForFlush");
+        storageAttachedIndexWritingTimeForOther= createTableCounter("StorageAttachedIndexWritingTimeForOther");
         bytesInserted = createTableCounter("BytesInserted");
 
         compactionBytesWritten = createTableCounter("CompactionBytesWritten");
         compactionBytesRead = createTableCounter("CompactionBytesRead");
         compactionTimePerKb = ExpMovingAverage.decayBy100();
+        compactionTime = createTableCounter("CompactionTime");
         pendingCompactions = createTableGauge("PendingCompactions", () -> cfs.getCompactionStrategy().getEstimatedRemainingTasks());
         liveSSTableCount = createTableGauge("LiveSSTableCount", () -> cfs.getLiveSSTables().size());
         oldVersionSSTableCount = createTableGauge("OldVersionSSTableCount", new Gauge<Integer>()
@@ -1100,13 +1172,42 @@ public class TableMetrics
         flushTimePerKb.update(elapsedNanos / (double) Math.max(1, inputSize / 1024L));
     }
 
-    public void incBytesCompacted(long inputDiskSize, long outputDiskSize, long elapsedNanos)
+    public void updateStorageAttachedIndexBuildTime(long totalTimeSpentNanos)
+    {
+        storageAttachedIndexBuildTime.inc(TimeUnit.NANOSECONDS.toMicros(totalTimeSpentNanos));
+    }
+
+    public void updateStorageAttachedIndexWritingTime(long totalTimeSpentNanos, OperationType opType)
+    {
+        long totalTimeSpentMicros = TimeUnit.NANOSECONDS.toMicros(totalTimeSpentNanos);
+        switch (opType)
+        {
+            case INDEX_BUILD:
+                storageAttachedIndexWritingTimeForIndexBuild.inc(totalTimeSpentMicros);
+                break;
+            case COMPACTION:
+                storageAttachedIndexWritingTimeForCompaction.inc(totalTimeSpentMicros);
+                break;
+            case FLUSH:
+                storageAttachedIndexWritingTimeForFlush.inc(totalTimeSpentMicros);
+                break;
+            default:
+                storageAttachedIndexWritingTimeForOther.inc(totalTimeSpentMicros);
+        }
+    }
+
+    public void memTableFlushCompleted(long totalTimeSpentNanos) {
+        flushTime.inc(TimeUnit.NANOSECONDS.toMicros(totalTimeSpentNanos));
+    }
+
+    public void incBytesCompacted(long inputDiskSize, long outputDiskSize, long elapsedMillis)
     {
         compactionBytesRead.inc(inputDiskSize);
         compactionBytesWritten.inc(outputDiskSize);
+        compactionTime.inc(TimeUnit.MILLISECONDS.toMicros(elapsedMillis));
         // only update compactionTimePerKb when there are non-expired sstables (inputDiskSize > 0)
         if (inputDiskSize > 0)
-            compactionTimePerKb.update(1024.0 * elapsedNanos / inputDiskSize);
+            compactionTimePerKb.update(1024.0 * elapsedMillis / inputDiskSize);
     }
 
     public void updateSSTableIterated(int count, int intersectingCount, long elapsedNanos)

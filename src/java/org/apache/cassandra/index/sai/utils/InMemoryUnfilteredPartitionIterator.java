@@ -21,7 +21,6 @@ package org.apache.cassandra.index.sai.utils;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.SortedMap;
-import java.util.TreeMap;
 import java.util.TreeSet;
 
 import org.apache.cassandra.db.DecoratedKey;

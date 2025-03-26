@@ -36,12 +36,12 @@ import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SSTableContext;
 import org.apache.cassandra.index.sai.disk.SearchableIndex;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
+import org.apache.cassandra.index.sai.iterators.KeyRangeConcatIterator;
+import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.plan.Orderer;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
-import org.apache.cassandra.index.sai.utils.RangeConcatIterator;
-import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileUtils;
@@ -87,7 +87,7 @@ public class V1SearchableIndex implements SearchableIndex
 
             final MetadataSource source = MetadataSource.loadMetadata(perIndexComponents);
 
-            metadatas = SegmentMetadata.load(source, sstableContext.primaryKeyFactory());
+            metadatas = SegmentMetadata.load(source, indexContext);
 
             for (SegmentMetadata metadata : metadatas)
             {
@@ -166,13 +166,13 @@ public class V1SearchableIndex implements SearchableIndex
     }
 
     @Override
-    public RangeIterator search(Expression expression,
-                                AbstractBounds<PartitionPosition> keyRange,
-                                QueryContext context,
-                                boolean defer,
-                                int limit) throws IOException
+    public KeyRangeIterator search(Expression expression,
+                                   AbstractBounds<PartitionPosition> keyRange,
+                                   QueryContext context,
+                                   boolean defer,
+                                   int limit) throws IOException
     {
-        RangeConcatIterator.Builder rangeConcatIteratorBuilder = RangeConcatIterator.builder(segments.size());
+        KeyRangeConcatIterator.Builder rangeConcatIteratorBuilder = KeyRangeConcatIterator.builder(segments.size());
 
         try
         {
@@ -207,6 +207,8 @@ public class V1SearchableIndex implements SearchableIndex
             {
                 if (segment.intersects(keyRange))
                 {
+                    // Note that the proportionality is not used when the user supplies a rerank_k value in the
+                    // ANN_OPTIONS map.
                     var segmentLimit = segment.proportionalAnnLimit(limit, totalRows);
                     iterators.add(segment.orderBy(orderer, slice, keyRange, context, segmentLimit));
                 }
@@ -272,6 +274,19 @@ public class V1SearchableIndex implements SearchableIndex
                    .column(MAX_TERM, maxTerm)
                    .column(COMPONENT_METADATA, metadata.componentMetadatas.asMap());
         }
+    }
+
+    @Override
+    public long estimateMatchingRowsCount(Expression predicate, AbstractBounds<PartitionPosition> keyRange)
+    {
+        long rowCount = 0;
+        for (Segment segment: segments)
+        {
+            long c = segment.estimateMatchingRowsCount(predicate, keyRange);
+            assert c >= 0 : "Estimated row count must not be negative: " + c + " (predicate: " + predicate + ')';
+            rowCount += c;
+        }
+        return rowCount;
     }
 
     /** Create a sublist of the keys within (inclusive) the segment's bounds */

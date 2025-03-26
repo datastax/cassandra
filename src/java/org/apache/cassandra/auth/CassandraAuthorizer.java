@@ -22,12 +22,15 @@ import java.util.*;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
+import com.google.common.collect.Sets;
+
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.*;
+import org.apache.cassandra.cql3.UntypedResultSet.Row;
 import org.apache.cassandra.cql3.statements.BatchStatement;
 import org.apache.cassandra.cql3.statements.ModificationStatement;
 import org.apache.cassandra.cql3.statements.SelectStatement;
@@ -83,18 +86,37 @@ public class CassandraAuthorizer implements IAuthorizer
         }
     }
 
-    public void grant(AuthenticatedUser performer, Set<Permission> permissions, IResource resource, RoleResource grantee)
+    public Set<Permission> grant(AuthenticatedUser performer, Set<Permission> permissions, IResource resource, RoleResource grantee)
     throws RequestValidationException, RequestExecutionException
     {
-        modifyRolePermissions(permissions, resource, grantee, "+");
-        addLookupEntry(resource, grantee);
+        String roleName = escape(grantee.getRoleName());
+        String resourceName = escape(resource.getName());
+        Set<Permission> existingPermissions = getExistingPermissions(roleName, resourceName, permissions);
+        Set<Permission> nonExistingPermissions = Sets.difference(permissions, existingPermissions);
+
+        if (!nonExistingPermissions.isEmpty())
+        {
+            modifyRolePermissions(nonExistingPermissions, resource, grantee, "+");
+            addLookupEntry(resource, grantee);
+        }
+
+        return nonExistingPermissions;
     }
 
-    public void revoke(AuthenticatedUser performer, Set<Permission> permissions, IResource resource, RoleResource revokee)
+    public Set<Permission> revoke(AuthenticatedUser performer, Set<Permission> permissions, IResource resource, RoleResource revokee)
     throws RequestValidationException, RequestExecutionException
     {
-        modifyRolePermissions(permissions, resource, revokee, "-");
-        removeLookupEntry(resource, revokee);
+        String roleName = escape(revokee.getRoleName());
+        String resourceName = escape(resource.getName());
+        Set<Permission> existingPermissions = getExistingPermissions(roleName, resourceName, permissions);
+
+        if (!existingPermissions.isEmpty())
+        {
+            modifyRolePermissions(existingPermissions, resource, revokee, "-");
+            removeLookupEntry(resource, revokee);
+        }
+
+        return existingPermissions;
     }
 
     // Called when deleting a role with DROP ROLE query.
@@ -179,6 +201,39 @@ public class CassandraAuthorizer implements IAuthorizer
         }
 
         return affectedRoles;
+    }
+
+    /**
+     * Checks that the specified role has at least one of the expected permissions on the resource.
+     *
+     * @param roleName the role name
+     * @param resourceName the resource name
+     * @param expectedPermissions the permissions to check for
+     * @return The existing permissions
+     */
+    private Set<Permission> getExistingPermissions(String roleName,
+                                                   String resourceName,
+                                                   Set<Permission> expectedPermissions)
+    {
+        UntypedResultSet rs = process(String.format("SELECT permissions FROM %s.%s WHERE role = '%s' AND resource = '%s'",
+                                                    SchemaConstants.AUTH_KEYSPACE_NAME,
+                                                    AuthKeyspace.ROLE_PERMISSIONS,
+                                                    roleName,
+                                                    resourceName));
+
+        if (rs.isEmpty())
+            return Collections.emptySet();
+
+        Row one = rs.one();
+
+        Set<Permission> existingPermissions = Sets.newHashSetWithExpectedSize(expectedPermissions.size());
+        for (String permissionName : one.getSet("permissions", UTF8Type.instance))
+        {
+            Permission permission = Permission.valueOf(permissionName);
+            if (expectedPermissions.contains(permission))
+                existingPermissions.add(permission);
+        }
+        return existingPermissions;
     }
 
     private void executeLoggedBatch(List<CQLStatement> statements)

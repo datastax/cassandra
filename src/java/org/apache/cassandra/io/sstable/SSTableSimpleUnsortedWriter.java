@@ -28,6 +28,8 @@ import com.google.common.base.Throwables;
 
 import io.netty.util.concurrent.FastThreadLocalThread;
 import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.DeletionTime;
+import org.apache.cassandra.db.RangeTombstone;
 import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
@@ -36,6 +38,7 @@ import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.SerializationHelper;
 import org.apache.cassandra.db.rows.UnfilteredSerializer;
 import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 
@@ -115,14 +118,58 @@ class SSTableSimpleUnsortedWriter extends AbstractSSTableSimpleWriter
 
     private PartitionUpdate.Builder createPartitionUpdateBuilder(DecoratedKey key)
     {
-        return new PartitionUpdate.Builder(metadata.get(), key, columns, 4)
+        PartitionUpdate.Builder wrapped = PartitionUpdate.builder(metadata.get(), key, columns, 4);
+
+        return new PartitionUpdate.Builder()
         {
             @Override
             public void add(Row row)
             {
-                super.add(row);
+                wrapped.add(row);
                 countRow(row);
                 maybeSync();
+            }
+
+            @Override
+            public void addPartitionDeletion(DeletionTime deletionTime)
+            {
+                wrapped.addPartitionDeletion(deletionTime);
+            }
+
+            @Override
+            public void add(RangeTombstone range)
+            {
+                wrapped.add(range);
+            }
+
+            @Override
+            public DecoratedKey partitionKey()
+            {
+                return wrapped.partitionKey();
+            }
+
+            @Override
+            public TableMetadata metadata()
+            {
+                return wrapped.metadata();
+            }
+
+            @Override
+            public PartitionUpdate build()
+            {
+                return wrapped.build();
+            }
+
+            @Override
+            public RegularAndStaticColumns columns()
+            {
+                return wrapped.columns();
+            }
+
+            @Override
+            public DeletionTime partitionLevelDeletion()
+            {
+                return wrapped.partitionLevelDeletion();
             }
         };
     }

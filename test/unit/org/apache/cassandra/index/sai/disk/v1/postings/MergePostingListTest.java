@@ -29,7 +29,7 @@ import java.util.stream.IntStream;
 import org.junit.Test;
 
 import org.apache.cassandra.index.sai.disk.PostingList;
-import org.apache.cassandra.index.sai.utils.ArrayPostingList;
+import org.apache.cassandra.index.sai.postings.IntArrayPostingList;
 import org.apache.cassandra.index.sai.utils.SaiRandomizedTest;
 
 public class MergePostingListTest extends SaiRandomizedTest
@@ -38,62 +38,62 @@ public class MergePostingListTest extends SaiRandomizedTest
     public void shouldMergeInterleavedPostingLists() throws IOException
     {
         var lists = listOfLists(
-                new ArrayPostingList(new int[]{ 1, 4, 6 }),
-                new ArrayPostingList(new int[]{ 2, 3, 4 }),
-                new ArrayPostingList(new int[]{ 1, 6 }),
-                new ArrayPostingList(new int[]{ 2, 5 }),
-                new ArrayPostingList(new int[]{ 3, 6 }),
-                new ArrayPostingList(new int[]{ 3, 5, 6 }));
+                new IntArrayPostingList(new int[]{ 1, 4, 6 }),
+                new IntArrayPostingList(new int[]{ 2, 3, 4 }),
+                new IntArrayPostingList(new int[]{ 1, 6 }),
+                new IntArrayPostingList(new int[]{ 2, 5 }),
+                new IntArrayPostingList(new int[]{ 3, 6 }),
+                new IntArrayPostingList(new int[]{ 3, 5, 6 }));
 
         final PostingList merged = MergePostingList.merge(lists);
 
-        assertPostingListEquals(new ArrayPostingList(new int[]{ 1, 2, 3, 4, 5, 6 }), merged);
+        assertPostingListEquals(new IntArrayPostingList(new int[]{ 1, 2, 3, 4, 5, 6 }), merged);
     }
 
     @Test
     public void shouldMergeDisjointPostingLists() throws IOException
     {
         var lists = listOfLists(
-                new ArrayPostingList(new int[]{ 1, 6 }),
-                new ArrayPostingList(new int[]{ 8, 9, 11 }),
-                new ArrayPostingList(new int[]{ 15 }));
+                new IntArrayPostingList(new int[]{ 1, 6 }),
+                new IntArrayPostingList(new int[]{ 8, 9, 11 }),
+                new IntArrayPostingList(new int[]{ 15 }));
 
         final PostingList merged = MergePostingList.merge(lists);
 
-        assertPostingListEquals(new ArrayPostingList(new int[]{ 1, 6, 8, 9, 11, 15 }), merged);
+        assertPostingListEquals(new IntArrayPostingList(new int[]{ 1, 6, 8, 9, 11, 15 }), merged);
     }
 
     @Test
     public void shouldMergeSinglePostingList() throws IOException
     {
-        var lists = listOfLists(new ArrayPostingList(new int[]{ 1, 4, 6 }));
+        var lists = listOfLists(new IntArrayPostingList(new int[]{ 1, 4, 6 }));
 
         final PostingList merged = MergePostingList.merge(lists);
 
-        assertPostingListEquals(new ArrayPostingList(new int[]{ 1, 4, 6 }), merged);
+        assertPostingListEquals(new IntArrayPostingList(new int[]{ 1, 4, 6 }), merged);
     }
 
     @Test
     public void shouldMergeSamePostingLists() throws IOException
     {
-        var lists = listOfLists(new ArrayPostingList(new int[]{ 0 }),
-                                                                                 new ArrayPostingList(new int[]{ 0 }));
+        var lists = listOfLists(new IntArrayPostingList(new int[]{ 0 }),
+                                                                                 new IntArrayPostingList(new int[]{ 0 }));
 
         final PostingList merged = MergePostingList.merge(lists);
 
-        assertPostingListEquals(new ArrayPostingList(new int[]{ 0 }), merged);
+        assertPostingListEquals(new IntArrayPostingList(new int[]{ 0 }), merged);
     }
 
     @Test
     public void shouldAdvanceAllMergedLists() throws IOException
     {
         var lists = listOfLists(
-                new ArrayPostingList(new int[]{ 1, 5, 10 }),
-                new ArrayPostingList(new int[]{ 2, 3, 8 }),
-                new ArrayPostingList(new int[]{ 3, 5, 9 }));
+                new IntArrayPostingList(new int[]{ 1, 5, 10 }),
+                new IntArrayPostingList(new int[]{ 2, 3, 8 }),
+                new IntArrayPostingList(new int[]{ 3, 5, 9 }));
 
         final PostingList merged = MergePostingList.merge(lists);
-        final PostingList expected = new ArrayPostingList(new int[]{ 1, 2, 3, 5, 8, 9, 10 });
+        final PostingList expected = new IntArrayPostingList(new int[]{ 1, 2, 3, 5, 8, 9, 10 });
 
         assertEquals(expected.advance(9),
                      merged.advance(9));
@@ -106,26 +106,26 @@ public class MergePostingListTest extends SaiRandomizedTest
     public void shouldConsumeDuplicatedPostingOnAdvance() throws IOException
     {
         var lists = listOfLists(
-                new ArrayPostingList(new int[]{ 1, 4, 6 }),
-                new ArrayPostingList(new int[]{ 2, 3, 4 }),
-                new ArrayPostingList(new int[]{ 1, 6 }),
-                new ArrayPostingList(new int[]{ 2, 5 }),
-                new ArrayPostingList(new int[]{ 3, 6 }),
-                new ArrayPostingList(new int[]{ 3, 5, 6 }));
+                new IntArrayPostingList(new int[]{ 1, 4, 6 }),
+                new IntArrayPostingList(new int[]{ 2, 3, 4 }),
+                new IntArrayPostingList(new int[]{ 1, 6 }),
+                new IntArrayPostingList(new int[]{ 2, 5 }),
+                new IntArrayPostingList(new int[]{ 3, 6 }),
+                new IntArrayPostingList(new int[]{ 3, 5, 6 }));
 
         final PostingList merged = MergePostingList.merge(lists);
 
         assertEquals(2, merged.advance(2));
         assertEquals(4, merged.advance(4));
-        assertPostingListEquals(new ArrayPostingList(new int[]{ 5, 6 }), merged);
+        assertPostingListEquals(new IntArrayPostingList(new int[]{ 5, 6 }), merged);
     }
 
     @Test
     public void handleEmptyLists() throws IOException
     {
         var lists = listOfLists(
-        new ArrayPostingList(new int[]{ }),
-        new ArrayPostingList(new int[]{ }));
+        new IntArrayPostingList(new int[]{ }),
+        new IntArrayPostingList(new int[]{ }));
 
         final PostingList merged = MergePostingList.merge(lists);
 
@@ -137,12 +137,12 @@ public class MergePostingListTest extends SaiRandomizedTest
     public void shouldInterleaveNextAndAdvance() throws IOException
     {
         var lists = listOfLists(
-                new ArrayPostingList(new int[]{ 1, 4, 6 }),
-                new ArrayPostingList(new int[]{ 2, 3, 4 }),
-                new ArrayPostingList(new int[]{ 1, 6 }),
-                new ArrayPostingList(new int[]{ 2, 5 }),
-                new ArrayPostingList(new int[]{ 3, 6 }),
-                new ArrayPostingList(new int[]{ 3, 5, 6 }));
+                new IntArrayPostingList(new int[]{ 1, 4, 6 }),
+                new IntArrayPostingList(new int[]{ 2, 3, 4 }),
+                new IntArrayPostingList(new int[]{ 1, 6 }),
+                new IntArrayPostingList(new int[]{ 2, 5 }),
+                new IntArrayPostingList(new int[]{ 3, 6 }),
+                new IntArrayPostingList(new int[]{ 3, 5, 6 }));
 
         final PostingList merged = MergePostingList.merge(lists);
 
@@ -162,8 +162,8 @@ public class MergePostingListTest extends SaiRandomizedTest
     public void shouldNotSkipUnconsumedElementOnAdvance() throws IOException
     {
         var lists = listOfLists(
-                new ArrayPostingList(new int[]{ 1, 2 }),
-                new ArrayPostingList(new int[]{ 3 }));
+                new IntArrayPostingList(new int[]{ 1, 2 }),
+                new IntArrayPostingList(new int[]{ 3 }));
 
         final PostingList merged = MergePostingList.merge(lists);
         assertEquals(1, merged.nextPosting());
@@ -175,8 +175,8 @@ public class MergePostingListTest extends SaiRandomizedTest
     public void shouldNotReadFromExhaustedChild() throws IOException
     {
         var lists = listOfLists(
-                new ArrayPostingList(new int[]{ 2 }),
-                new ArrayPostingList(new int[]{ 1, 3, 4 }));
+                new IntArrayPostingList(new int[]{ 2 }),
+                new IntArrayPostingList(new int[]{ 1, 3, 4 }));
 
         final PostingList merged = MergePostingList.merge(lists);
         assertEquals(1, merged.nextPosting());
@@ -224,11 +224,11 @@ public class MergePostingListTest extends SaiRandomizedTest
         {
             // Remove any duplicates in each individual set
             int[] data = split.stream().distinct().mapToInt(Integer::intValue).toArray();
-            splitPostingLists.add(new ArrayPostingList(data));
+            splitPostingLists.add(new IntArrayPostingList(data));
         }
 
         final PostingList merge = MergePostingList.merge(splitPostingLists);
-        final PostingList expected = new ArrayPostingList(postingsWithoutDuplicates);
+        final PostingList expected = new IntArrayPostingList(postingsWithoutDuplicates);
 
         final List<PostingListAdvance> actions = new ArrayList<>();
         for (int idx = 0; idx < postingsWithoutDuplicates.length; idx++)
@@ -287,7 +287,7 @@ public class MergePostingListTest extends SaiRandomizedTest
                                               .sorted()
                                               .toArray();
 
-        var lists = listOfLists(new ArrayPostingList(postings1), new ArrayPostingList(postings2));
+        var lists = listOfLists(new IntArrayPostingList(postings1), new IntArrayPostingList(postings2));
 
         final PostingList merged = MergePostingList.merge(lists);
 

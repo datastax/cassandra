@@ -35,6 +35,7 @@ import org.apache.cassandra.db.BufferDecoratedKey;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DiskBoundaries;
 import org.apache.cassandra.db.SortedLocalRanges;
+import org.apache.cassandra.db.compaction.unified.RealEnvironment;
 import org.apache.cassandra.db.lifecycle.Tracker;
 import org.apache.cassandra.db.marshal.AsciiType;
 import org.apache.cassandra.dht.IPartitioner;
@@ -135,9 +136,11 @@ public class BaseCompactionStrategyTest
         localRanges = SortedLocalRanges.forTestingFull(realm);
 
         when(realm.metadata()).thenReturn(metadata);
+        when(realm.makeUCSEnvironment()).thenAnswer(invocation -> new RealEnvironment(realm));
         when(realm.getKeyspaceName()).thenReturn(keyspace);
         when(realm.getTableName()).thenReturn(table);
         when(realm.getDiskBoundaries()).thenReturn(diskBoundaries);
+        when(realm.buildShardManager()).thenCallRealMethod();
         when(diskBoundaries.getLocalRanges()).thenReturn(localRanges);
         when(diskBoundaries.isOutOfDate()).thenReturn(false);
         when(realm.getLiveSSTables()).thenAnswer(request -> dataTracker.getLiveSSTables());
@@ -259,6 +262,8 @@ public class BaseCompactionStrategyTest
         when(ret.getMinTTL()).thenReturn(ttl);
         when(ret.getMaxTTL()).thenReturn(ttl);
 
+        when(ret.estimatedKeys()).thenReturn(ShardManager.PER_PARTITION_SPAN_THRESHOLD * 2);
+
         diskIndexMap.put(ret, diskIndex);
         if (diskIndex >= diskIndexes)
             diskIndexes = diskIndex + 1;
@@ -272,13 +277,18 @@ public class BaseCompactionStrategyTest
 
     List<SSTableReader> mockSSTables(int numSSTables, long bytesOnDisk, double hotness, long timestamp, int diskIndex, boolean repaired, UUID pendingRepair)
     {
-        DecoratedKey first = new BufferDecoratedKey(partitioner.getMinimumToken(), ByteBuffer.allocate(0));
-        DecoratedKey last = new BufferDecoratedKey(partitioner.getMinimumToken(), ByteBuffer.allocate(0));
+        final Token minimumToken = partitioner.getMinimumToken();
+        final Token maximumToken = partitioner.getMaximumToken();
+        DecoratedKey first = new BufferDecoratedKey(partitioner.split(minimumToken, maximumToken, 0.000001 + random.nextDouble() * 0.0002),
+                                                    ByteBuffer.allocate(0));
+        DecoratedKey last = new BufferDecoratedKey(partitioner.split(minimumToken, maximumToken, 0.999999 - random.nextDouble() * 0.0002),
+                                                   ByteBuffer.allocate(0));
+        // Span may be a few fractions of percent smaller, thus density may be greater than the size by that amount
 
         List<SSTableReader> sstables = new ArrayList<>();
         for (int i = 0; i < numSSTables; i++)
         {
-            long b = (long)(bytesOnDisk * 0.95 + bytesOnDisk * 0.05 * random.nextDouble()); // leave 5% variability
+            long b = (long)(bytesOnDisk * 0.94 + bytesOnDisk * 0.05 * random.nextDouble()); // leave 5% variability and 1% for density
             double h = hotness * 0.95 + hotness * 0.05 * random.nextDouble(); // leave 5% variability
             sstables.add(mockSSTable(0, b, timestamp, h, first, last, diskIndex, repaired, pendingRepair, 0));
         }
@@ -297,8 +307,8 @@ public class BaseCompactionStrategyTest
         List<SSTableReader> sstables = new ArrayList<>(numSSTables);
         for (int i = 0; i < numSSTables; i++)
         {
-            DecoratedKey first = new BufferDecoratedKey(boundary(numSSTables, i).nextValidToken(), emptyBuffer);
-            DecoratedKey last =  new BufferDecoratedKey(boundary(numSSTables, i+1), emptyBuffer);
+            DecoratedKey first = new BufferDecoratedKey(boundary(numSSTables, i + 0.0001), emptyBuffer);
+            DecoratedKey last =  new BufferDecoratedKey(boundary(numSSTables, i + 0.9999), emptyBuffer);
             sstables.add(mockSSTable(level, bytesOnDisk, timestamp, 0., first, last));
 
             timestamp+=10;
@@ -307,9 +317,9 @@ public class BaseCompactionStrategyTest
         return sstables;
     }
 
-    private Token boundary(int numSSTables, int i)
+    private Token boundary(int numSSTables, double i)
     {
-        return partitioner.split(partitioner.getMinimumToken(), partitioner.getMaximumToken(), i * 1.0 / numSSTables);
+        return partitioner.split(partitioner.getMinimumToken(), partitioner.getMaximumToken(), i / numSSTables);
     }
 
     CompactionProgress mockCompletedCompactionProgress(Set<SSTableReader> compacting, UUID id)
@@ -321,7 +331,7 @@ public class BaseCompactionStrategyTest
         when(progress.inSSTables()).thenReturn(compacting);
         when(progress.uncompressedBytesRead()).thenReturn(compactingLen);
         when(progress.uncompressedBytesWritten()).thenReturn(compactingLen);
-        when(progress.durationInNanos()).thenReturn(TimeUnit.SECONDS.toNanos(30));
+        when(progress.durationInMillis()).thenReturn(TimeUnit.SECONDS.toMillis(30));
 
         return progress;
     }

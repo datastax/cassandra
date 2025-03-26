@@ -36,6 +36,9 @@ import javax.annotation.Nullable;
 import com.google.common.annotations.VisibleForTesting;
 
 import org.apache.cassandra.config.Config;
+import org.apache.cassandra.db.compaction.CompactionSSTable;
+import org.apache.cassandra.io.FSError;
+import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -46,6 +49,7 @@ import org.apache.cassandra.db.compaction.CompactionPick;
 import org.apache.cassandra.db.compaction.CompactionRealm;
 import org.apache.cassandra.db.compaction.CompactionStrategy;
 import org.apache.cassandra.db.compaction.UnifiedCompactionStrategy;
+import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileWriter;
@@ -59,6 +63,8 @@ import org.apache.cassandra.utils.Overlaps;
 import org.json.simple.JSONArray;
 import org.json.simple.JSONObject;
 
+import static org.apache.cassandra.db.compaction.unified.DSECompatibilityUtils.getBooleanSystemProperty;
+import static org.apache.cassandra.db.compaction.unified.DSECompatibilityUtils.getSystemProperty;
 import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
 
 /**
@@ -70,6 +76,8 @@ public abstract class Controller
     private static final ConcurrentMap<TableMetadata, Controller.Metrics> allMetrics = new ConcurrentHashMap<>();
 
     static final String PREFIX = "unified_compaction.";
+    static final String LEGACY_PREFIX = "dse.unified_compaction.";
+    static final String VECTOR_PREFIX = "vector_";
 
     /**
      * The data size in GB, it will be assumed that the node will have on disk roughly this size of data when it
@@ -80,7 +88,7 @@ public abstract class Controller
     @Deprecated
     public static final String DATASET_SIZE_OPTION_GB = "dataset_size_in_gb";
     static final long DEFAULT_DATASET_SIZE =
-        FBUtilities.parseHumanReadableBytes(System.getProperty(PREFIX + DATASET_SIZE_OPTION,
+        FBUtilities.parseHumanReadableBytes(getSystemProperty(DATASET_SIZE_OPTION,
                                                               DatabaseDescriptor.getDataFileDirectoriesMinTotalSpaceInGB() + "GiB"));
 
     /**
@@ -105,7 +113,7 @@ public abstract class Controller
      * and replayers in CNDB without having to change the schema for each tenant.
      */
     @Deprecated
-    static final Optional<Integer> DEFAULT_NUM_SHARDS = Optional.ofNullable(System.getProperty(PREFIX + NUM_SHARDS_OPTION)).map(Integer::valueOf);
+    static final Optional<Integer> DEFAULT_NUM_SHARDS = Optional.ofNullable(getSystemProperty(NUM_SHARDS_OPTION)).map(Integer::valueOf);
 
     /**
      * The minimum sstable size. Sharded writers split sstables over shard only if they are at least as large as the
@@ -120,7 +128,8 @@ public abstract class Controller
     static final String MIN_SSTABLE_SIZE_OPTION_MB = "min_sstable_size_in_mb";
     static final String MIN_SSTABLE_SIZE_OPTION_AUTO = "auto";
 
-    static final long DEFAULT_MIN_SSTABLE_SIZE = FBUtilities.parseHumanReadableBytes(System.getProperty(PREFIX + MIN_SSTABLE_SIZE_OPTION, "100MiB"));
+    static final long DEFAULT_MIN_SSTABLE_SIZE = FBUtilities.parseHumanReadableBytes(getSystemProperty(MIN_SSTABLE_SIZE_OPTION, "100MiB"));
+    static final long DEFAULT_VECTOR_MIN_SSTABLE_SIZE = FBUtilities.parseHumanReadableBytes(getSystemProperty(VECTOR_PREFIX + MIN_SSTABLE_SIZE_OPTION, "1024MiB"));
     /**
      * Value to use to set the min sstable size from the flush size.
      */
@@ -143,27 +152,31 @@ public abstract class Controller
      * behind, higher read amplification, and other problems of that nature.
      */
     public static final String MAX_SPACE_OVERHEAD_OPTION = "max_space_overhead";
-    static final double DEFAULT_MAX_SPACE_OVERHEAD = FBUtilities.parsePercent(System.getProperty(PREFIX + MAX_SPACE_OVERHEAD_OPTION, "0.2"));
+    static final double DEFAULT_MAX_SPACE_OVERHEAD = FBUtilities.parsePercent(getSystemProperty(MAX_SPACE_OVERHEAD_OPTION, "0.2"));
     static final double MAX_SPACE_OVERHEAD_LOWER_BOUND = 0.01;
     static final double MAX_SPACE_OVERHEAD_UPPER_BOUND = 1.0;
 
     static final String BASE_SHARD_COUNT_OPTION = "base_shard_count";
     /**
-     * Default base shard count, used when a base count is not explicitly supplied. This value applies as long as the
-     * table is not a system one, and directories are not defined.
+     * Default base shard count, used when a base count is not explicitly supplied. This value applies to all tables as
+     * long as they are larger than the minimum sstable size.
      *
      * For others a base count of 1 is used as system tables are usually small and do not need as much compaction
      * parallelism, while having directories defined provides for parallelism in a different way.
      */
-    public static final int DEFAULT_BASE_SHARD_COUNT = Integer.parseInt(System.getProperty(PREFIX + BASE_SHARD_COUNT_OPTION, "4"));
+    public static final int DEFAULT_BASE_SHARD_COUNT = Integer.parseInt(getSystemProperty(BASE_SHARD_COUNT_OPTION, "4"));
+    public static final int DEFAULT_VECTOR_BASE_SHARD_COUNT = Integer.parseInt(getSystemProperty(VECTOR_PREFIX + BASE_SHARD_COUNT_OPTION, "1"));
 
     /**
      * The target SSTable size. This is the size of the SSTables that the controller will try to create.
      */
     static final String TARGET_SSTABLE_SIZE_OPTION = "target_sstable_size";
-    public static final long DEFAULT_TARGET_SSTABLE_SIZE = FBUtilities.parseHumanReadableBytes(System.getProperty(PREFIX + TARGET_SSTABLE_SIZE_OPTION, "5GiB"));
+    public static final long DEFAULT_TARGET_SSTABLE_SIZE = FBUtilities.parseHumanReadableBytes(getSystemProperty(TARGET_SSTABLE_SIZE_OPTION, "1GiB"));
+    public static final long DEFAULT_VECTOR_TARGET_SSTABLE_SIZE = FBUtilities.parseHumanReadableBytes(getSystemProperty(VECTOR_PREFIX + TARGET_SSTABLE_SIZE_OPTION, "5GiB"));
     static final long MIN_TARGET_SSTABLE_SIZE = 1L << 20;
 
+    static final String IS_REPLICA_AWARE_OPTION = "is_replica_aware";
+    public static final boolean DEFAULT_IS_REPLICA_AWARE = Boolean.parseBoolean(System.getProperty(PREFIX + IS_REPLICA_AWARE_OPTION));
 
     /**
      * Provision for growth of the constructed SSTables as the size of the data grows. By default the target SSTable
@@ -191,7 +204,8 @@ public abstract class Controller
      * a growth value of 0.333, and 64 (~16GiB each) for a growth value of 0.5.
      */
     static final String SSTABLE_GROWTH_OPTION = "sstable_growth";
-    static final double DEFAULT_SSTABLE_GROWTH = FBUtilities.parsePercent(System.getProperty(PREFIX + SSTABLE_GROWTH_OPTION, "0.5"));
+    static final double DEFAULT_SSTABLE_GROWTH = FBUtilities.parsePercent(getSystemProperty(SSTABLE_GROWTH_OPTION, "0.333"));
+    static final double DEFAULT_VECTOR_SSTABLE_GROWTH = FBUtilities.parsePercent(getSystemProperty(VECTOR_PREFIX + SSTABLE_GROWTH_OPTION, "1.0"));
 
     /**
      * Number of reserved threads to keep for each compaction level. This is used to ensure that there are always
@@ -205,7 +219,8 @@ public abstract class Controller
      * The default value is max, all compaction threads are distributed among the levels.
      */
     static final String RESERVED_THREADS_OPTION = "reserved_threads";
-    public static final int DEFAULT_RESERVED_THREADS = FBUtilities.parseIntAllowingMax(System.getProperty(PREFIX + RESERVED_THREADS_OPTION, "max"));
+    public static final int DEFAULT_RESERVED_THREADS = FBUtilities.parseIntAllowingMax(getSystemProperty(RESERVED_THREADS_OPTION, "max"));
+    public static final int DEFAULT_VECTOR_RESERVED_THREADS = FBUtilities.parseIntAllowingMax(getSystemProperty(VECTOR_PREFIX + RESERVED_THREADS_OPTION, "max"));
 
     /**
      * Reservation type, defining whether reservations can be used by lower levels. If set to `per_level`, the
@@ -216,20 +231,20 @@ public abstract class Controller
      */
     static final String RESERVATIONS_TYPE_OPTION = "reservations_type";
     public static final Reservations.Type DEFAULT_RESERVED_THREADS_TYPE =
-        Reservations.Type.valueOf(System.getProperty(PREFIX + RESERVATIONS_TYPE_OPTION,
+        Reservations.Type.valueOf(getSystemProperty(RESERVATIONS_TYPE_OPTION,
                                                      Reservations.Type.LEVEL_OR_BELOW.name()).toUpperCase());
 
     /**
      * This parameter is intended to modify the shape of the LSM by taking into account the survival ratio of data, for now it is fixed to one.
      */
-    static final double DEFAULT_SURVIVAL_FACTOR = Double.parseDouble(System.getProperty(PREFIX + "survival_factor", "1"));
+    static final double DEFAULT_SURVIVAL_FACTOR = Double.parseDouble(getSystemProperty("survival_factor", "1"));
     static final double[] DEFAULT_SURVIVAL_FACTORS = new double[] { DEFAULT_SURVIVAL_FACTOR };
 
     /**
      * Either true or false. This parameter determines which controller will be used.
      */
     static final String ADAPTIVE_OPTION = "adaptive";
-    static final boolean DEFAULT_ADAPTIVE = Boolean.parseBoolean(System.getProperty(PREFIX + ADAPTIVE_OPTION, "false"));
+    static final boolean DEFAULT_ADAPTIVE = Boolean.parseBoolean(getSystemProperty(ADAPTIVE_OPTION, "false"));
 
     /**
      * The maximum number of sstables to compact in one operation.
@@ -247,6 +262,14 @@ public abstract class Controller
     static final String ALLOW_UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION_PROPERTY = Config.PROPERTY_PREFIX + "allow_unsafe_aggressive_sstable_expiration";
     static final boolean ALLOW_UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION = Boolean.parseBoolean(System.getProperty(ALLOW_UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION_PROPERTY));
     static final boolean DEFAULT_ALLOW_UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION = false;
+
+    /**
+     * This property allows seperate defaults for vector and non-vector tables.  If this property is set to true
+     * and the table has a {@link VectorType}, the "vector" defaults are used over the regular defaults.  For instance,
+     * "-Dunified_compaction.vector_sstable_growth" will be used over "-Dunified_compaction.sstable_growth".
+     */
+    static final String OVERRIDE_UCS_CONFIG_FOR_VECTOR_TABLES_PROPERTY = PREFIX + "override_ucs_config_for_vector_tables";
+    static final boolean OVERRIDE_UCS_CONFIG_FOR_VECTOR_TABLES = Boolean.parseBoolean(System.getProperty(OVERRIDE_UCS_CONFIG_FOR_VECTOR_TABLES_PROPERTY, "false"));
 
     static final int DEFAULT_EXPIRED_SSTABLE_CHECK_FREQUENCY_SECONDS = 60 * 10;
     static final String EXPIRED_SSTABLE_CHECK_FREQUENCY_SECONDS_OPTION = "expired_sstable_check_frequency_seconds";
@@ -271,8 +294,17 @@ public abstract class Controller
      */
     static final String OVERLAP_INCLUSION_METHOD_OPTION = "overlap_inclusion_method";
     static final Overlaps.InclusionMethod DEFAULT_OVERLAP_INCLUSION_METHOD =
-        Overlaps.InclusionMethod.valueOf(System.getProperty(PREFIX + OVERLAP_INCLUSION_METHOD_OPTION,
+        Overlaps.InclusionMethod.valueOf(getSystemProperty(OVERLAP_INCLUSION_METHOD_OPTION,
                                                           Overlaps.InclusionMethod.TRANSITIVE.toString()).toUpperCase());
+
+    /**
+     * Whether to create subtask for the output shards of individual compactions and execute them in parallel.
+     * Defaults to true for improved parallelization and efficiency.
+     */
+    static final String PARALLELIZE_OUTPUT_SHARDS_OPTION = "parallelize_output_shards";
+    static final boolean DEFAULT_PARALLELIZE_OUTPUT_SHARDS =
+        Boolean.parseBoolean(getSystemProperty(PARALLELIZE_OUTPUT_SHARDS_OPTION,
+                                               "true"));
 
     /**
      * The scaling parameters W, one per bucket index and separated by a comma.
@@ -293,10 +325,12 @@ public abstract class Controller
     protected final int maxSSTablesToCompact;
     protected final long expiredSSTableCheckFrequency;
     protected final boolean ignoreOverlapsInExpirationCheck;
+    protected final boolean parallelizeOutputShards;
     protected String keyspaceName;
     protected String tableName;
 
     protected final int baseShardCount;
+    private final boolean isReplicaAware;
 
     protected final long targetSSTableSize;
     protected final double sstableGrowthModifier;
@@ -310,6 +344,7 @@ public abstract class Controller
     protected final Overlaps.InclusionMethod overlapInclusionMethod;
 
     final boolean l0ShardsEnabled;
+    final boolean hasVectorType;
 
     Controller(MonotonicClock clock,
                Environment env,
@@ -323,11 +358,14 @@ public abstract class Controller
                long expiredSSTableCheckFrequency,
                boolean ignoreOverlapsInExpirationCheck,
                int baseShardCount,
+               boolean isReplicaAware,
                long targetSStableSize,
                double sstableGrowthModifier,
                int reservedThreads,
                Reservations.Type reservationsType,
-               Overlaps.InclusionMethod overlapInclusionMethod)
+               Overlaps.InclusionMethod overlapInclusionMethod,
+               boolean parallelizeOutputShards,
+               boolean hasVectorType)
     {
         this.clock = clock;
         this.env = env;
@@ -338,13 +376,16 @@ public abstract class Controller
         this.currentFlushSize = currentFlushSize;
         this.expiredSSTableCheckFrequency = TimeUnit.MILLISECONDS.convert(expiredSSTableCheckFrequency, TimeUnit.SECONDS);
         this.baseShardCount = baseShardCount;
+        this.isReplicaAware = isReplicaAware;
         this.targetSSTableSize = targetSStableSize;
         this.overlapInclusionMethod = overlapInclusionMethod;
         this.sstableGrowthModifier = sstableGrowthModifier;
         this.reservedThreads = reservedThreads;
         this.reservationsType = reservationsType;
         this.maxSpaceOverhead = maxSpaceOverhead;
-        this.l0ShardsEnabled = Boolean.parseBoolean(System.getProperty(PREFIX + L0_SHARDS_ENABLED_OPTION, "false")); // FIXME VECTOR-23
+        this.l0ShardsEnabled = Boolean.parseBoolean(getSystemProperty(L0_SHARDS_ENABLED_OPTION, "false")); // FIXME VECTOR-23
+        this.parallelizeOutputShards = parallelizeOutputShards;
+        this.hasVectorType = hasVectorType;
 
         if (maxSSTablesToCompact <= 0)  // use half the maximum permitted compaction size as upper bound by default
             maxSSTablesToCompact = (int) (dataSetSize * this.maxSpaceOverhead * 0.5 / getMinSstableSizeBytes());
@@ -385,9 +426,14 @@ public abstract class Controller
 
             logger.debug(String.format("Writing current scaling parameters and flush size to file %s: %s", f.toPath().toString(), jsonObject));
         }
-        catch(IOException e)
+        catch (IOException | FSError e)
         {
             logger.warn("Unable to save current scaling parameters and flush size. Current controller configuration will be lost if a node restarts: ", e);
+        }
+        catch (Throwable e)
+        {
+            logger.warn("Unable to save current scaling parameters and flush size. Current controller configuration will be lost if a node restarts: ", e);
+            JVMStabilityInspector.inspectThrowable(e);
         }
     }
 
@@ -543,6 +589,16 @@ public abstract class Controller
             }
             return shards;
         }
+    }
+
+    public boolean parallelizeOutputShards()
+    {
+        return parallelizeOutputShards;
+    }
+
+    public boolean isReplicaAware()
+    {
+        return isReplicaAware;
     }
 
     /**
@@ -725,6 +781,11 @@ public abstract class Controller
         logger.debug("Stopped compaction controller {}", this);
     }
 
+    public boolean hasVectorType()
+    {
+        return hasVectorType;
+    }
+
     /**
      * @return true if the controller is running
      */
@@ -847,13 +908,27 @@ public abstract class Controller
 
     public static Controller fromOptions(CompactionRealm realm, Map<String, String> options)
     {
+        // Note: These options have been validated, but the defaults are configured with -D options that may be
+        // different. We thus may end up with configurations combinations that do not make sense.
+        // We will attempt to correct such combinations and issue warnings where possible.
+
+        boolean hasVectorType = realm.metadata().hasVectorType();
+        boolean vectorOverride = OVERRIDE_UCS_CONFIG_FOR_VECTOR_TABLES;
+        boolean useVectorOptions = hasVectorType && vectorOverride;
+        if (logger.isTraceEnabled())
+        {
+            if (useVectorOptions)
+                logger.trace("Using UCS configuration optimized for vector for {}.{}", realm.getKeyspaceName(), realm.getTableName());
+            else
+                logger.trace("Using non-vector UCS configuration for {}.{}", realm.getKeyspaceName(), realm.getTableName());
+        }
         boolean adaptive = options.containsKey(ADAPTIVE_OPTION) ? Boolean.parseBoolean(options.get(ADAPTIVE_OPTION)) : DEFAULT_ADAPTIVE;
         long dataSetSize = getSizeWithAlt(options, DATASET_SIZE_OPTION, DATASET_SIZE_OPTION_GB, 30, DEFAULT_DATASET_SIZE);
         long flushSizeOverride = getSizeWithAlt(options, FLUSH_SIZE_OVERRIDE_OPTION, FLUSH_SIZE_OVERRIDE_OPTION_MB, 20, 0);
         double maxSpaceOverhead = options.containsKey(MAX_SPACE_OVERHEAD_OPTION)
                 ? FBUtilities.parsePercent(options.get(MAX_SPACE_OVERHEAD_OPTION))
                 : DEFAULT_MAX_SPACE_OVERHEAD;
-        int maxSSTablesToCompact = Integer.parseInt(options.getOrDefault(MAX_SSTABLES_TO_COMPACT_OPTION, "0"));
+        int maxSSTablesToCompact = Integer.parseInt(options.getOrDefault(MAX_SSTABLES_TO_COMPACT_OPTION, "32"));
         long expiredSSTableCheckFrequency = options.containsKey(EXPIRED_SSTABLE_CHECK_FREQUENCY_SECONDS_OPTION)
                 ? Long.parseLong(options.get(EXPIRED_SSTABLE_CHECK_FREQUENCY_SECONDS_OPTION))
                 : DEFAULT_EXPIRED_SSTABLE_CHECK_FREQUENCY_SECONDS;
@@ -868,21 +943,34 @@ public abstract class Controller
         }
         else
         {
-            baseShardCount = DEFAULT_BASE_SHARD_COUNT;
+            baseShardCount = useVectorOptions ? DEFAULT_VECTOR_BASE_SHARD_COUNT : DEFAULT_BASE_SHARD_COUNT;
         }
+
+        boolean isReplicaAware = options.containsKey(IS_REPLICA_AWARE_OPTION)
+                                 ? Boolean.parseBoolean(options.get(IS_REPLICA_AWARE_OPTION))
+                                 : DEFAULT_IS_REPLICA_AWARE;
 
         long targetSStableSize = options.containsKey(TARGET_SSTABLE_SIZE_OPTION)
                                  ? FBUtilities.parseHumanReadableBytes(options.get(TARGET_SSTABLE_SIZE_OPTION))
-                                 : DEFAULT_TARGET_SSTABLE_SIZE;
-        long minSSTableSize = getSizeWithAltAndSpecial(options, MIN_SSTABLE_SIZE_OPTION, MIN_SSTABLE_SIZE_OPTION_MB, 20, MIN_SSTABLE_SIZE_OPTION_AUTO, MIN_SSTABLE_SIZE_AUTO, DEFAULT_MIN_SSTABLE_SIZE);
+                                 : useVectorOptions ? DEFAULT_VECTOR_TARGET_SSTABLE_SIZE : DEFAULT_TARGET_SSTABLE_SIZE;
 
-        double sstableGrowthModifier = DEFAULT_SSTABLE_GROWTH;
+        long minSSTableSize;
+        if (MIN_SSTABLE_SIZE_OPTION_AUTO.equalsIgnoreCase(options.get(MIN_SSTABLE_SIZE_OPTION)))
+            minSSTableSize = MIN_SSTABLE_SIZE_AUTO;
+        else
+            minSSTableSize = getSizeWithAlt(options,
+                                            MIN_SSTABLE_SIZE_OPTION,
+                                            MIN_SSTABLE_SIZE_OPTION_MB,
+                                            20,
+                                            useVectorOptions ? DEFAULT_VECTOR_MIN_SSTABLE_SIZE : DEFAULT_MIN_SSTABLE_SIZE);
+
+        double sstableGrowthModifier = useVectorOptions ? DEFAULT_VECTOR_SSTABLE_GROWTH : DEFAULT_SSTABLE_GROWTH;
         if (options.containsKey(SSTABLE_GROWTH_OPTION))
             sstableGrowthModifier = FBUtilities.parsePercent(options.get(SSTABLE_GROWTH_OPTION));
 
         int reservedThreadsPerLevel = options.containsKey(RESERVED_THREADS_OPTION)
                                       ? FBUtilities.parseIntAllowingMax(options.get(RESERVED_THREADS_OPTION))
-                                      : DEFAULT_RESERVED_THREADS;
+                                      : useVectorOptions ? DEFAULT_VECTOR_RESERVED_THREADS : DEFAULT_RESERVED_THREADS;
         Reservations.Type reservationsType = options.containsKey(RESERVATIONS_TYPE_OPTION)
                                                   ? Reservations.Type.valueOf(options.get(RESERVATIONS_TYPE_OPTION).toUpperCase())
                                                   : DEFAULT_RESERVED_THREADS_TYPE;
@@ -919,17 +1007,33 @@ public abstract class Controller
             }
         }
 
-        Environment env = new RealEnvironment(realm);
+        if (baseShardCount > 1 && sstableGrowthModifier != 1.0 && minSSTableSize != MIN_SSTABLE_SIZE_AUTO && minSSTableSize > targetSStableSize * INVERSE_SQRT_2)
+        {
+            // Note: not checked for baseShardCount == 1 as min size is irrelevant when the base count is 1.
+            // Note: not checked for sstableGrowthModifier = 1.0 as target size is irrelevant when the growth is 1.
+            long newTargetSize = (long) (minSSTableSize / INVERSE_SQRT_2);
+            logger.warn("Minimum sstable size {} is larger than target sstable size's minimum bound {}. Adjusting target size to {}.",
+                        FBUtilities.prettyPrintMemory(minSSTableSize),
+                        FBUtilities.prettyPrintMemory((long) (targetSStableSize * INVERSE_SQRT_2)),
+                        FBUtilities.prettyPrintMemory(newTargetSize));
+            targetSStableSize = newTargetSize;
+        }
+
+        Environment env = realm.makeUCSEnvironment();
 
         // For remote storage, the sstables on L0 are created by the different replicas, and therefore it is likely
         // that there are RF identical copies, so here we adjust the survival factor for L0
-        double[] survivalFactors = System.getProperty(PREFIX + SHARED_STORAGE) == null || !Boolean.getBoolean(PREFIX + SHARED_STORAGE)
+        double[] survivalFactors = getSystemProperty(SHARED_STORAGE) == null || !getBooleanSystemProperty(SHARED_STORAGE)
                                    ? DEFAULT_SURVIVAL_FACTORS
                                    : new double[] { DEFAULT_SURVIVAL_FACTOR / realm.getKeyspaceReplicationStrategy().getReplicationFactor().allReplicas, DEFAULT_SURVIVAL_FACTOR };
 
         Overlaps.InclusionMethod overlapInclusionMethod = options.containsKey(OVERLAP_INCLUSION_METHOD_OPTION)
                                                           ? Overlaps.InclusionMethod.valueOf(options.get(OVERLAP_INCLUSION_METHOD_OPTION).toUpperCase())
                                                           : DEFAULT_OVERLAP_INCLUSION_METHOD;
+
+        boolean parallelizeOutputShards = options.containsKey(PARALLELIZE_OUTPUT_SHARDS_OPTION)
+                                          ? Boolean.parseBoolean(options.get(PARALLELIZE_OUTPUT_SHARDS_OPTION))
+                                          : DEFAULT_PARALLELIZE_OUTPUT_SHARDS;
 
         return adaptive
                ? AdaptiveController.fromOptions(env,
@@ -942,11 +1046,14 @@ public abstract class Controller
                                                 expiredSSTableCheckFrequency,
                                                 ignoreOverlapsInExpirationCheck,
                                                 baseShardCount,
+                                                isReplicaAware,
                                                 targetSStableSize,
                                                 sstableGrowthModifier,
                                                 reservedThreadsPerLevel,
                                                 reservationsType,
                                                 overlapInclusionMethod,
+                                                parallelizeOutputShards,
+                                                hasVectorType,
                                                 realm.getKeyspaceName(),
                                                 realm.getTableName(),
                                                 options)
@@ -960,28 +1067,34 @@ public abstract class Controller
                                               expiredSSTableCheckFrequency,
                                               ignoreOverlapsInExpirationCheck,
                                               baseShardCount,
+                                              isReplicaAware,
                                               targetSStableSize,
                                               sstableGrowthModifier,
                                               reservedThreadsPerLevel,
                                               reservationsType,
                                               overlapInclusionMethod,
+                                              parallelizeOutputShards,
+                                              hasVectorType,
                                               realm.getKeyspaceName(),
                                               realm.getTableName(),
-                                              options);
+                                              options,
+                                              useVectorOptions);
     }
 
     public static Map<String, String> validateOptions(Map<String, String> options) throws ConfigurationException
     {
+        // Note: Validation must ignore the defaults set with -D options, because this node may be getting a configuration
+        // applied via a different coordinator which had different -D settings. If we abort because of such differences,
+        // we may cause schema mismatches between nodes which can quickly become a serious problem.
+
         String nonPositiveErr = "Invalid configuration, %s should be positive: %d";
-        String booleanParseErr = "%s should either be 'true' or 'false', not %s";
         String intParseErr = "%s is not a parsable int (base10) for %s";
         String longParseErr = "%s is not a parsable long (base10) for %s";
         String floatParseErr = "%s is not a parsable float for %s";
         options = new HashMap<>(options);
         String s;
-        boolean adaptive = DEFAULT_ADAPTIVE;
         long minSSTableSize = -1;
-        long targetSSTableSize = DEFAULT_TARGET_SSTABLE_SIZE;
+        long targetSSTableSize = -1;
 
         s = options.remove(NUM_SHARDS_OPTION);
         if (s != null)
@@ -990,8 +1103,8 @@ public abstract class Controller
             {
                 int numShards = Integer.parseInt(s);
                 if (numShards <= 0 && numShards != -1)
-                    throw new ConfigurationException(String.format("Invalid configuration, %s should be positive: %d or -1 " +
-                                                                   "if static sharding is explicitly disabled for this table.",
+                    throw new ConfigurationException(String.format("Invalid configuration, %s=%d should be positive, or -1 " +
+                                                                   "to explicitly disable static sharding for this table.",
                                                                    NUM_SHARDS_OPTION,
                                                                    numShards));
                 if (numShards != -1)
@@ -1011,17 +1124,10 @@ public abstract class Controller
             }
         }
 
-        s = options.remove(ADAPTIVE_OPTION);
-        if (s != null)
-        {
-            if (!s.equalsIgnoreCase("true") && !s.equalsIgnoreCase("false"))
-            {
-                throw new ConfigurationException(String.format(booleanParseErr, ADAPTIVE_OPTION, s));
-            }
-            adaptive = Boolean.parseBoolean(s);
-        }
+        boolean adaptive = validateBoolean(options, ADAPTIVE_OPTION, DEFAULT_ADAPTIVE);
+        validateBoolean(options, IS_REPLICA_AWARE_OPTION, DEFAULT_IS_REPLICA_AWARE);
+        validateBoolean(options, PARALLELIZE_OUTPUT_SHARDS_OPTION, DEFAULT_PARALLELIZE_OUTPUT_SHARDS);
 
-        minSSTableSize = validateSizeWithAlt(options, MIN_SSTABLE_SIZE_OPTION, MIN_SSTABLE_SIZE_OPTION_MB, 20, MIN_SSTABLE_SIZE_OPTION_AUTO, -1, DEFAULT_MIN_SSTABLE_SIZE);
         validateSizeWithAlt(options, FLUSH_SIZE_OVERRIDE_OPTION, FLUSH_SIZE_OVERRIDE_OPTION_MB, 20);
         validateSizeWithAlt(options, DATASET_SIZE_OPTION, DATASET_SIZE_OPTION_GB, 30);
 
@@ -1082,11 +1188,26 @@ public abstract class Controller
             }
         }
 
-        s = options.remove(ALLOW_UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION_OPTION);
-        if (s != null && !s.equalsIgnoreCase("true") && !s.equalsIgnoreCase("false"))
+        validateBoolean(options, ALLOW_UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION_OPTION, false);
+
+        s = options.remove(SSTABLE_GROWTH_OPTION);
+        if (s != null)
         {
-            throw new ConfigurationException(String.format(booleanParseErr,
-                                                           ALLOW_UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION_OPTION, s));
+            try
+            {
+                double ssTableGrowthModifier = FBUtilities.parsePercent(s);
+                if (ssTableGrowthModifier < 0 || ssTableGrowthModifier > 1)
+                    throw new ConfigurationException(String.format("%s %s must be between 0 and 1",
+                                                                   SSTABLE_GROWTH_OPTION,
+                                                                   s));
+            }
+            catch (NumberFormatException e)
+            {
+                throw new ConfigurationException(String.format("%s is not a valid number between 0 and 1: %s",
+                                                               SSTABLE_GROWTH_OPTION,
+                                                               e.getMessage()),
+                                                 e);
+            }
         }
 
         s = options.remove(BASE_SHARD_COUNT_OPTION);
@@ -1094,11 +1215,11 @@ public abstract class Controller
         {
             try
             {
-                int numShards = Integer.parseInt(s);
-                if (numShards <= 0)
+                int baseShardCount = Integer.parseInt(s);
+                if (baseShardCount <= 0)
                     throw new ConfigurationException(String.format(nonPositiveErr,
                                                                    BASE_SHARD_COUNT_OPTION,
-                                                                   numShards));
+                                                                   baseShardCount));
             }
             catch (NumberFormatException e)
             {
@@ -1127,25 +1248,12 @@ public abstract class Controller
             }
         }
 
-        s = options.remove(SSTABLE_GROWTH_OPTION);
-        if (s != null)
-        {
-            try
-            {
-                double targetSSTableGrowth = FBUtilities.parsePercent(s);
-                if (targetSSTableGrowth < 0 || targetSSTableGrowth > 1)
-                    throw new ConfigurationException(String.format("%s %s must be between 0 and 1",
-                                                                   SSTABLE_GROWTH_OPTION,
-                                                                   s));
-            }
-            catch (NumberFormatException e)
-            {
-                throw new ConfigurationException(String.format("%s is not a valid number between 0 and 1: %s",
-                                                               SSTABLE_GROWTH_OPTION,
-                                                               e.getMessage()),
-                                                 e);
-            }
-        }
+        minSSTableSize = validateSizeWithAlt(options, MIN_SSTABLE_SIZE_OPTION, MIN_SSTABLE_SIZE_OPTION_MB, 20, MIN_SSTABLE_SIZE_OPTION_AUTO, -1, -1);
+        // If both target and min sstable size are defined, check that they are compatible.
+        if (minSSTableSize > 0 && targetSSTableSize > 0 && minSSTableSize > targetSSTableSize * INVERSE_SQRT_2)
+            throw new ConfigurationException(String.format("The minimum sstable size %s cannot be larger than the target size's lower bound %s.",
+                                                           FBUtilities.prettyPrintMemory(minSSTableSize),
+                                                           FBUtilities.prettyPrintMemory((long) (targetSSTableSize * INVERSE_SQRT_2))));
 
         s = options.remove(RESERVED_THREADS_OPTION);
         if (s != null)
@@ -1197,11 +1305,6 @@ public abstract class Controller
             }
         }
 
-        if (minSSTableSize > targetSSTableSize * INVERSE_SQRT_2)
-            throw new ConfigurationException(String.format("The minimum sstable size %s cannot be larger than the target size's lower bound %s.",
-                                                           FBUtilities.prettyPrintMemory(minSSTableSize),
-                                                           FBUtilities.prettyPrintMemory((long) (targetSSTableSize * INVERSE_SQRT_2))));
-
         return adaptive ? AdaptiveController.validateOptions(options) : StaticController.validateOptions(options);
     }
 
@@ -1215,12 +1318,16 @@ public abstract class Controller
             return defaultValue;
     }
 
-    private static long getSizeWithAltAndSpecial(Map<String, String> options, String optionHumanReadable, String optionAlt, int altShift, String specialText, long specialValue, long defaultValue)
+    private static boolean validateBoolean(Map<String, String> options, String option, boolean defaultValue) throws ConfigurationException
     {
-        if (specialText.equalsIgnoreCase(options.get(optionHumanReadable)))
-            return specialValue;
-        else
-            return getSizeWithAlt(options, optionHumanReadable, optionAlt, altShift, defaultValue);
+        var s = options.remove(option);
+        if (s != null)
+        {
+            if (!s.equalsIgnoreCase("true") && !s.equalsIgnoreCase("false"))
+                throw new ConfigurationException(String.format("%s should either be 'true' or 'false', not %s", option, s));
+            return Boolean.parseBoolean(s);
+        }
+        return defaultValue;
     }
 
     private static void validateSizeWithAlt(Map<String, String> options, String optionHumanReadable, String optionAlt, int altShift)
@@ -1311,9 +1418,9 @@ public abstract class Controller
         return env.maxThroughput();
     }
 
-    public long getOverheadSizeInBytes(CompactionPick compactionPick)
+    public long getOverheadSizeInBytes(Iterable<? extends CompactionSSTable> sstables, long totalDataSize)
     {
-        return env.getOverheadSizeInBytes(compactionPick);
+        return env.getOverheadSizeInBytes(sstables, totalDataSize);
     }
 
     public int maxConcurrentCompactions()

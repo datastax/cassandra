@@ -83,7 +83,6 @@ public class GenericOrderByUpdateDeleteTest extends SAITester
     {
         createTable("CREATE TABLE %s (pk int PRIMARY KEY, str_val text)");
         createIndex("CREATE CUSTOM INDEX ON %s(str_val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         execute("INSERT INTO %s (pk, str_val) VALUES (0, 'a')");
         execute("INSERT INTO %s (pk, str_val) VALUES (1, 'z')");
@@ -107,7 +106,6 @@ public class GenericOrderByUpdateDeleteTest extends SAITester
     {
         createTable("CREATE TABLE %s (pk int PRIMARY KEY, str_val int)");
         createIndex("CREATE CUSTOM INDEX ON %s(str_val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         execute("INSERT INTO %s (pk, str_val) VALUES (0, -10)");
         execute("INSERT INTO %s (pk, str_val) VALUES (1, 0)");
@@ -142,7 +140,6 @@ public class GenericOrderByUpdateDeleteTest extends SAITester
     {
         createTable("CREATE TABLE %s (pk int PRIMARY KEY, str_val text)");
         createIndex("CREATE CUSTOM INDEX ON %s(str_val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
         disableCompaction();
 
         execute("INSERT INTO %s (pk, str_val) VALUES (0, 'a')");
@@ -172,7 +169,6 @@ public class GenericOrderByUpdateDeleteTest extends SAITester
     {
         createTable("CREATE TABLE %s (pk int PRIMARY KEY, str_val int)");
         createIndex("CREATE CUSTOM INDEX ON %s(str_val) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         execute("INSERT INTO %s (pk, str_val) VALUES (0, 1)");
         execute("INSERT INTO %s (pk, str_val) VALUES (1, 2)");

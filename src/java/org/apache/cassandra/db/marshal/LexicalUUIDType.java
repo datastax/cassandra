@@ -45,6 +45,12 @@ public class LexicalUUIDType extends AbstractType<UUID>
         super(ComparisonType.CUSTOM);
     } // singleton
 
+    @Override
+    public boolean allowsEmpty()
+    {
+        return true;
+    }
+
     public boolean isEmptyValueMeaningless()
     {
         return true;

@@ -292,13 +292,7 @@ public class DataResolver<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<
 
     private  UnaryOperator<PartitionIterator> preCountFilterForReplicaFilteringProtection()
     {
-        return results -> {
-            Index.Searcher searcher = command.indexSearcher();
-            // in case of "ALLOW FILTERING" without index
-            if (searcher == null)
-                return command.rowFilter().filter(results, command.metadata(), command.nowInSec());
-            return searcher.filterReplicaFilteringProtection(results);
-        };
+        return results -> command.rowFilter().filter(results, command.metadata(), command.nowInSec());
     }
 
     @SuppressWarnings("resource")

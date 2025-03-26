@@ -20,6 +20,8 @@ package org.apache.cassandra.nodes.virtual;
 import java.util.concurrent.TimeUnit;
 
 import org.apache.cassandra.cql3.statements.schema.CreateTableStatement;
+import org.apache.cassandra.db.marshal.BooleanType;
+import org.apache.cassandra.db.marshal.SetType;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableId;
@@ -63,6 +65,12 @@ public class NodesSystemViews
                   + "truncated_at map<uuid, blob>,"
                   + "PRIMARY KEY ((key)))"
                   ).recordDeprecatedSystemColumn("thrift_version", UTF8Type.instance)
+                   // the following columns come from DSE 5.1
+                   .recordDeprecatedSystemColumn("dse_version", UTF8Type.instance)
+                   .recordDeprecatedSystemColumn("graph", BooleanType.instance)
+                   .recordDeprecatedSystemColumn("server_id", UTF8Type.instance)
+                   .recordDeprecatedSystemColumn("workload", UTF8Type.instance)
+                   .recordDeprecatedSystemColumn("workloads", SetType.getInstance(UTF8Type.instance, false))
                    .build();
 
     public static final TableMetadata PeersV2Metadata =
@@ -98,7 +106,13 @@ public class NodesSystemViews
                   + "schema_version uuid,"
                   + "tokens set<varchar>,"
                   + "PRIMARY KEY ((peer)))"
-            ).build();
+                  )// the following columns come from DSE 5.1
+                   .recordDeprecatedSystemColumn("dse_version", UTF8Type.instance)
+                   .recordDeprecatedSystemColumn("graph", BooleanType.instance)
+                   .recordDeprecatedSystemColumn("server_id", UTF8Type.instance)
+                   .recordDeprecatedSystemColumn("workload", UTF8Type.instance)
+                   .recordDeprecatedSystemColumn("workloads", SetType.getInstance(UTF8Type.instance, false))
+                   .build();
 
     private static TableMetadata.Builder parse(String table, String description, String cql)
     {

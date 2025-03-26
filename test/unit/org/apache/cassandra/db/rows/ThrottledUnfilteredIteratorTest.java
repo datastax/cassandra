@@ -22,7 +22,6 @@ import static org.apache.cassandra.SchemaLoader.standardCFMD;
 import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
 import static org.junit.Assert.*;
 
-import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Iterator;
@@ -51,11 +50,10 @@ import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.ReadExecutionController;
 import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.RowUpdateBuilder;
-import org.apache.cassandra.db.marshal.ByteBufferAccessor;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.partitions.AbstractUnfilteredPartitionIterator;
-import org.apache.cassandra.db.partitions.ImmutableBTreePartition;
+import org.apache.cassandra.db.partitions.TrieBackedPartition;
 import org.apache.cassandra.db.partitions.Partition;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.dht.Murmur3Partitioner;
@@ -654,7 +652,7 @@ public class ThrottledUnfilteredIteratorTest extends CQLTester
                 while (throttled.hasNext())
                 {
                     UnfilteredRowIterator next = throttled.next();
-                    ImmutableBTreePartition materializedPartition = ImmutableBTreePartition.create(next);
+                    TrieBackedPartition materializedPartition = TrieBackedPartition.fromIterator(next);
                     int unfilteredCount = Iterators.size(materializedPartition.unfilteredIterator());
 
                     System.out.println("batchsize " + batchSize + " unfilteredCount " + unfilteredCount + " materializedPartition " + materializedPartition);
@@ -683,7 +681,7 @@ public class ThrottledUnfilteredIteratorTest extends CQLTester
             }
 
             // Verify throttled data after merge
-            Partition partition = ImmutableBTreePartition.create(UnfilteredRowIterators.merge(unfilteredRowIterators));
+            Partition partition = TrieBackedPartition.fromIterator(UnfilteredRowIterators.merge(unfilteredRowIterators));
 
             int nowInSec = FBUtilities.nowInSeconds();
 

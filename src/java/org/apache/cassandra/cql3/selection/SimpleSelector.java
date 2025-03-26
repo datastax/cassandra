@@ -99,6 +99,8 @@ public final class SimpleSelector extends Selector
     public final ColumnMetadata column;
     private final int idx;
     private ByteBuffer current;
+    private ColumnTimestamps writetimes;
+    private ColumnTimestamps ttls;
     private boolean isSet;
 
     public static Factory newFactory(final ColumnMetadata def, final int idx)
@@ -113,11 +115,13 @@ public final class SimpleSelector extends Selector
     }
 
     @Override
-    public void addInput(ProtocolVersion protocolVersion, ResultSetBuilder rs) throws InvalidRequestException
+    public void addInput(ResultSetBuilder rs) throws InvalidRequestException
     {
         if (!isSet)
         {
             isSet = true;
+            writetimes = rs.timestamps.get(idx);
+            ttls = rs.ttls.get(idx);
             current = rs.current.get(idx);
         }
     }
@@ -129,10 +133,24 @@ public final class SimpleSelector extends Selector
     }
 
     @Override
+    protected ColumnTimestamps getWritetimes(ProtocolVersion protocolVersion)
+    {
+        return writetimes;
+    }
+
+    @Override
+    protected ColumnTimestamps getTTLs(ProtocolVersion protocolVersion)
+    {
+        return ttls;
+    }
+
+    @Override
     public void reset()
     {
         isSet = false;
         current = null;
+        writetimes = null;
+        ttls = null;
     }
 
     @Override

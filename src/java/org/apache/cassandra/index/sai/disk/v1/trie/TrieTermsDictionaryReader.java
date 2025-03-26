@@ -161,7 +161,7 @@ public class TrieTermsDictionaryReader extends ValueIterator<TrieTermsDictionary
 
     public ByteComparable getMaxTerm()
     {
-        final TransitionBytesCollector collector = new TransitionBytesCollector();
+        final TransitionBytesCollector collector = new TransitionBytesCollector(byteComparableVersion);
         go(root);
         while (true)
         {
@@ -178,7 +178,7 @@ public class TrieTermsDictionaryReader extends ValueIterator<TrieTermsDictionary
 
     public ByteComparable getMinTerm()
     {
-        final TransitionBytesCollector collector = new TransitionBytesCollector();
+        final TransitionBytesCollector collector = new TransitionBytesCollector(byteComparableVersion);
         go(root);
         while (true)
         {

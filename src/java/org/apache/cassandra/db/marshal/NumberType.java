@@ -58,7 +58,7 @@ public abstract class NumberType<T extends Number> extends AbstractType<T>
      * @param value the value to convert
      * @return the converted value
      */
-    protected BigDecimal toBigDecimal(ByteBuffer value)
+    public BigDecimal toBigDecimal(ByteBuffer value)
     {
         double d = toDouble(value);
 

@@ -101,6 +101,7 @@ public class Expression
                     return IN;
 
                 case ANN:
+                case BM25:
                 case ORDER_BY_ASC:
                 case ORDER_BY_DESC:
                     return ORDER_BY;
@@ -150,7 +151,9 @@ public class Expression
     private float searchRadiusMeters = 0;
     private float searchRadiusDegreesSquared = 0;
     public int topK;
-    public boolean upperInclusive, lowerInclusive;
+    // These variables are only meant to be used for final validation of the range search. They are not
+    // meant to be used when searching the index. See the 'add' method below for additional explanation.
+    private boolean upperInclusive, lowerInclusive;
 
     final List<ByteBuffer> exclusions = new ArrayList<>();
 
@@ -248,6 +251,7 @@ public class Expression
                 boundedAnnEuclideanDistanceThreshold = GeoUtil.amplifiedEuclideanSimilarityThreshold(lower.value.vector, searchRadiusMeters);
                 break;
             case ANN:
+            case BM25:
             case ORDER_BY_ASC:
             case ORDER_BY_DESC:
                 // If we alread have an operation on the column, we don't need to set the ORDER_BY op because

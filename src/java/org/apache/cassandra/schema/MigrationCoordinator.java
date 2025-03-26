@@ -54,6 +54,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.ScheduledExecutors;
+import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.exceptions.RequestFailureReason;
@@ -223,7 +224,7 @@ public class MigrationCoordinator
     private final Supplier<UUID> schemaVersion;
     private final BiConsumer<InetAddressAndPort, Collection<Mutation>> schemaUpdateCallback;
 
-    final ExecutorService executor;
+    final Stage executor;
 
     /**
      * Creates but does not start migration coordinator instance.
@@ -232,7 +233,7 @@ public class MigrationCoordinator
      * @param periodicCheckExecutor executor on which the periodic checks are scheduled
      */
     MigrationCoordinator(MessagingService messagingService,
-                         ExecutorService executor,
+                         Stage executor,
                          ScheduledExecutorService periodicCheckExecutor,
                          int maxOutstandingVersionRequests,
                          Gossiper gossiper,
@@ -619,7 +620,7 @@ public class MigrationCoordinator
         }
         else
         {
-            return CompletableFuture.runAsync(task, executor);
+            return executor.submit(task);
         }
     }
 

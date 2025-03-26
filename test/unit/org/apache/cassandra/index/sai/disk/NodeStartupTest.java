@@ -26,14 +26,15 @@ import java.util.Objects;
 import java.util.stream.Stream;
 
 import com.google.common.collect.ObjectArrays;
+import org.apache.cassandra.cql3.CQLTester;
 import org.junit.Assert;
 import org.junit.Before;
+import org.junit.BeforeClass;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
 import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.index.SecondaryIndexManager;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SAITester;
@@ -197,6 +198,14 @@ public class NodeStartupTest extends SAITester
         }
     }
 
+    // TODO: Disable the coordinator execution used by SAITester until we have a way to simulate node restarts combined
+    //  with CQLTester#requireNetwork and CQLTester#requireNetworkWithoutDriver. This should be improved in CNDB-13125.
+    @BeforeClass
+    public static void setUpClass()
+    {
+        CQLTester.setUpClass();
+    }
+
     @Before
     public void setup() throws Throwable
     {
@@ -266,7 +275,7 @@ public class NodeStartupTest extends SAITester
     {
         populator.populate(this);
 
-        assertTrue(isIndexQueryable());
+        assertTrue(areAllTableIndexesQueryable());
         assertTrue(isGroupIndexComplete());
         assertTrue(isColumnIndexComplete());
         Assert.assertEquals(expectedDocuments, execute("SELECT * FROM %s WHERE v1 >= 0").size());
@@ -277,7 +286,7 @@ public class NodeStartupTest extends SAITester
 
         simulateNodeRestart();
 
-        assertTrue(isIndexQueryable());
+        assertTrue(areAllTableIndexesQueryable());
         assertTrue(isGroupIndexComplete());
         assertTrue(isColumnIndexComplete());
         Assert.assertEquals(expectedDocuments, execute("SELECT * FROM %s WHERE v1 >= 0").size());

@@ -41,7 +41,7 @@ public class AsciiType extends AbstractType<String>
 
     AsciiType() {super(ComparisonType.BYTE_ORDER);} // singleton
 
-    private final FastThreadLocal<CharsetEncoder> encoder = new FastThreadLocal<CharsetEncoder>()
+    private final FastThreadLocal<CharsetEncoder> encoder = new FastThreadLocal<>()
     {
         @Override
         protected CharsetEncoder initialValue()
@@ -49,6 +49,12 @@ public class AsciiType extends AbstractType<String>
             return StandardCharsets.US_ASCII.newEncoder();
         }
     };
+
+    @Override
+    public boolean allowsEmpty()
+    {
+        return true;
+    }
 
     public ByteBuffer fromString(String source)
     {

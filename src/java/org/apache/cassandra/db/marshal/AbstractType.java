@@ -118,8 +118,21 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
             throw new IllegalStateException();
         }
 
-        comparatorSet = new ValueComparators((l, r) -> compare(l, ByteArrayAccessor.instance, r, ByteArrayAccessor.instance),
-                                             (l, r) -> compare(l, ByteBufferAccessor.instance, r, ByteBufferAccessor.instance));
+        comparatorSet = new ValueComparators(new Comparator<>()
+        {
+            @Override
+            public int compare(byte[] l, byte[] r)
+            {
+                return AbstractType.this.compare(l, ByteArrayAccessor.instance, r, ByteArrayAccessor.instance);
+            }
+        }, new Comparator<>()
+        {
+            @Override
+            public int compare(ByteBuffer l, ByteBuffer r)
+            {
+                return AbstractType.this.compare(l, ByteBufferAccessor.instance, r, ByteBufferAccessor.instance);
+            }
+        });
 
         this.isMultiCell = isMultiCell;
 
@@ -550,6 +563,19 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
     public final boolean isValueLengthFixed()
     {
         return valueLengthIfFixed() != VARIABLE_LENGTH;
+    }
+
+    /**
+     * Defines if the type allows an empty set of bytes ({@code new byte[0]}) as valid input.  The {@link #validate(Object, ValueAccessor)}
+     * and {@link #compose(Object, ValueAccessor)} methods must allow empty bytes when this returns true, and must reject empty bytes
+     * when this is false.
+     * <p/>
+     * As of this writing, the main user of this API is for testing to know what types allow empty values and what types don't,
+     * so that the data that gets generated understands when {@link ByteBufferUtil#EMPTY_BYTE_BUFFER} is allowed as valid data.
+     */
+    public boolean allowsEmpty()
+    {
+        return false;
     }
 
     public boolean isNull(ByteBuffer bb)

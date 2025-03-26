@@ -20,9 +20,13 @@ package org.apache.cassandra.index.sai.cql;
 import org.junit.Test;
 
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
+import org.apache.cassandra.index.IndexBuildInProgressException;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
+import org.apache.cassandra.inject.Injections;
+import org.apache.cassandra.inject.InvokePointBuilder;
 
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertNotNull;
 
 /**
@@ -31,12 +35,11 @@ import static org.junit.Assert.assertNotNull;
 public class AllowFilteringTest extends SAITester
 {
     @Test
-    public void testAllowFilteringOnFirstClusteringKeyColumn() throws Throwable
+    public void testAllowFilteringOnFirstClusteringKeyColumn()
     {
         createTable("CREATE TABLE %s (k1 int, k2 int, c1 int, c2 int, c3 int, v1 int, " +
                     "PRIMARY KEY ((k1, k2), c1, c2, c3))");
         createIndex(String.format("CREATE CUSTOM INDEX ON %%s(c1) USING '%s'", StorageAttachedIndex.class.getName()));
-        waitForIndexQueryable();
 
         // with only index restrictions
         test("SELECT * FROM %s WHERE c1=0", false);
@@ -76,12 +79,11 @@ public class AllowFilteringTest extends SAITester
     }
 
     @Test
-    public void testAllowFilteringOnNotFirstClusteringKeyColumn() throws Throwable
+    public void testAllowFilteringOnNotFirstClusteringKeyColumn()
     {
         createTable("CREATE TABLE %s (k1 int, k2 int, c1 int, c2 int, c3 int, c4 int, v1 int, " +
                     "PRIMARY KEY ((k1, k2), c1, c2, c3, c4))");
         createIndex(String.format("CREATE CUSTOM INDEX ON %%s(c3) USING '%s'", StorageAttachedIndex.class.getName()));
-        waitForIndexQueryable();
 
         // with only index restrictions
         test("SELECT * FROM %s WHERE c3=0", false);
@@ -122,13 +124,12 @@ public class AllowFilteringTest extends SAITester
     }
 
     @Test
-    public void testAllowFilteringOnMultipleClusteringKeyColumns() throws Throwable
+    public void testAllowFilteringOnMultipleClusteringKeyColumns()
     {
         createTable("CREATE TABLE %s (k1 int, k2 int, c1 int, c2 int, c3 int, c4 int, v1 int, " +
                     "PRIMARY KEY ((k1, k2), c1, c2, c3, c4))");
         createIndex(String.format("CREATE CUSTOM INDEX ON %%s(c2) USING '%s'", StorageAttachedIndex.class.getName()));
         createIndex(String.format("CREATE CUSTOM INDEX ON %%s(c4) USING '%s'", StorageAttachedIndex.class.getName()));
-        waitForIndexQueryable();
 
         // with only index restrictions
         test("SELECT * FROM %s WHERE c2=0 AND c4=0", false);
@@ -171,11 +172,10 @@ public class AllowFilteringTest extends SAITester
     }
 
     @Test
-    public void testAllowFilteringOnSingleRegularColumn() throws Throwable
+    public void testAllowFilteringOnSingleRegularColumn()
     {
         createTable("CREATE TABLE %s (k1 int, k2 int, c1 int, c2 int, v1 int, v2 int, PRIMARY KEY ((k1, k2), c1, c2))");
         createIndex(String.format("CREATE CUSTOM INDEX ON %%s(v1) USING '%s'", StorageAttachedIndex.class.getName()));
-        waitForIndexQueryable();
 
         // with only index restrictions
         test("SELECT * FROM %s WHERE v1=0", false);
@@ -214,13 +214,12 @@ public class AllowFilteringTest extends SAITester
     }
 
     @Test
-    public void testAllowFilteringOnMultipleRegularColumns() throws Throwable
+    public void testAllowFilteringOnMultipleRegularColumns()
     {
         createTable("CREATE TABLE %s (k1 int, k2 int, c1 int, c2 int, v1 int, v2 int, v3 int, " +
                     "PRIMARY KEY ((k1, k2), c1, c2))");
         createIndex(String.format("CREATE CUSTOM INDEX ON %%s(v1) USING '%s'", StorageAttachedIndex.class.getName()));
         createIndex(String.format("CREATE CUSTOM INDEX ON %%s(v2) USING '%s'", StorageAttachedIndex.class.getName()));
-        waitForIndexQueryable();
 
         // with only index restrictions
         test("SELECT * FROM %s WHERE v1=0 AND v2=0", false);
@@ -262,7 +261,7 @@ public class AllowFilteringTest extends SAITester
     }
 
     @Test
-    public void testAllowFilteringOnClusteringAndRegularColumns() throws Throwable
+    public void testAllowFilteringOnClusteringAndRegularColumns()
     {
         createTable("CREATE TABLE %s (k1 int, k2 int, c1 int, c2 int, c3 int, c4 int, v1 int, v2 int, v3 int, " +
                     "PRIMARY KEY ((k1, k2), c1, c2, c3, c4))");
@@ -270,7 +269,6 @@ public class AllowFilteringTest extends SAITester
         createIndex(String.format("CREATE CUSTOM INDEX ON %%s(c4) USING '%s'", StorageAttachedIndex.class.getName()));
         createIndex(String.format("CREATE CUSTOM INDEX ON %%s(v1) USING '%s'", StorageAttachedIndex.class.getName()));
         createIndex(String.format("CREATE CUSTOM INDEX ON %%s(v2) USING '%s'", StorageAttachedIndex.class.getName()));
-        waitForIndexQueryable();
 
         // with only index restrictions
         test("SELECT * FROM %s WHERE c2=0 AND c4=0 AND v1=0 AND v2=0", false);
@@ -307,7 +305,7 @@ public class AllowFilteringTest extends SAITester
     }
 
     @Test
-    public void testAllowFilteringOnCollectionColumn() throws Throwable
+    public void testAllowFilteringOnCollectionColumn()
     {
         createTable("CREATE TABLE %s (k1 int, k2 int, c1 int, c2 int, l list<int>, s set<int>, m_k map<int,int>,"
                     + " m_v map<int,int>, m_en map<int, int>, not_indexed list<int>, PRIMARY KEY ((k1, k2), c1, c2))");
@@ -316,7 +314,6 @@ public class AllowFilteringTest extends SAITester
         createIndex("CREATE CUSTOM INDEX ON %s(keys(m_k)) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(values(m_v)) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(entries(m_en)) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         // single contains
         test("SELECT * FROM %s WHERE l contains 1", false);
@@ -350,7 +347,7 @@ public class AllowFilteringTest extends SAITester
         test("SELECT * FROM %s WHERE m_en[1] = 1 and not_indexed contains 2", true);
     }
 
-    private void test(String query, boolean requiresAllowFiltering) throws Throwable
+    private void test(String query, boolean requiresAllowFiltering)
     {
         if (requiresAllowFiltering)
             assertInvalidMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE, query);
@@ -361,30 +358,29 @@ public class AllowFilteringTest extends SAITester
     }
 
     @Test
-    public void testUnsupportedIndexRestrictions() throws Throwable
+    public void testUnsupportedIndexRestrictions()
     {
         createTable("CREATE TABLE %s (a text, b text, c text, d text, PRIMARY KEY (a, b))");
         createIndex(String.format("CREATE CUSTOM INDEX ON %%s(b) USING '%s'", StorageAttachedIndex.class.getName()));
         createIndex(String.format("CREATE CUSTOM INDEX ON %%s(c) USING '%s'", StorageAttachedIndex.class.getName()));
         createIndex(String.format("CREATE CUSTOM INDEX ON %%s(d) USING '%s'", StorageAttachedIndex.class.getName()));
-        waitForIndexQueryable();
 
         execute("INSERT INTO %s (a, b, c, d) VALUES ('Test1', 'Test1', 'Test1', 'Test1')");
         execute("INSERT INTO %s (a, b, c, d) VALUES ('Test2', 'Test2', 'Test2', 'Test2')");
         execute("INSERT INTO %s (a, b, c, d) VALUES ('Test3', 'Test3', 'Test3', 'Test3')");
 
         // Single restriction
-        assertInvalidMessage(String.format(StatementRestrictions.HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_SINGLE, "b"), "SELECT * FROM %s WHERE b > 'Test'");
-        assertInvalidMessage(String.format(StatementRestrictions.HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_SINGLE, "c"), "SELECT * FROM %s WHERE c > 'Test'");
-        assertInvalidMessage(String.format(StatementRestrictions.HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_SINGLE, "d"), "SELECT * FROM %s WHERE d > 'Test'");
+        assertInvalidMessage(String.format(StatementRestrictions.HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_SINGLE, 'b'), "SELECT * FROM %s WHERE b > 'Test'");
+        assertInvalidMessage(String.format(StatementRestrictions.HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_SINGLE, 'c'), "SELECT * FROM %s WHERE c > 'Test'");
+        assertInvalidMessage(String.format(StatementRestrictions.HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_SINGLE, 'd'), "SELECT * FROM %s WHERE d > 'Test'");
 
         // Supported and unsupported restriction
-        assertInvalidMessage(String.format(StatementRestrictions.HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_SINGLE, "b"), "SELECT * FROM %s WHERE b > 'Test' AND c = 'Test1'");
-        assertInvalidMessage(String.format(StatementRestrictions.HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_SINGLE, "c"), "SELECT * FROM %s WHERE c > 'Test' AND d = 'Test1'");
-        assertInvalidMessage(String.format(StatementRestrictions.HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_SINGLE, "d"), "SELECT * FROM %s WHERE d > 'Test' AND b = 'Test1'");
+        assertInvalidMessage(String.format(StatementRestrictions.HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_SINGLE, 'b'), "SELECT * FROM %s WHERE b > 'Test' AND c = 'Test1'");
+        assertInvalidMessage(String.format(StatementRestrictions.HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_SINGLE, 'c'), "SELECT * FROM %s WHERE c > 'Test' AND d = 'Test1'");
+        assertInvalidMessage(String.format(StatementRestrictions.HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_SINGLE, 'd'), "SELECT * FROM %s WHERE d > 'Test' AND b = 'Test1'");
 
         // Two unsupported restrictions
-        assertInvalidMessage(String.format(StatementRestrictions.HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_SINGLE, "b"), "SELECT * FROM %s WHERE b > 'Test' AND b < 'Test3'");
+        assertInvalidMessage(String.format(StatementRestrictions.HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_SINGLE, 'b'), "SELECT * FROM %s WHERE b > 'Test' AND b < 'Test3'");
         assertInvalidMessage(String.format(StatementRestrictions.HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_MULTI, "[b, c]"), "SELECT * FROM %s WHERE c > 'Test' AND b < 'Test3'");
         assertInvalidMessage(String.format(StatementRestrictions.HAS_UNSUPPORTED_INDEX_RESTRICTION_MESSAGE_MULTI, "[b, d]"), "SELECT * FROM %s WHERE d > 'Test' AND b < 'Test3'");
 
@@ -416,7 +412,7 @@ public class AllowFilteringTest extends SAITester
     }
 
     @Test
-    public void testIndexedColumnDoesNotSupportLikeRestriction() throws Throwable
+    public void testIndexedColumnDoesNotSupportLikeRestriction()
     {
         createTable("CREATE TABLE %s (a text, b text, c text, d text, PRIMARY KEY (a, b))");
         createIndex(String.format("CREATE CUSTOM INDEX ON %%s(b) USING '%s'", StorageAttachedIndex.class.getName()));
@@ -424,13 +420,13 @@ public class AllowFilteringTest extends SAITester
         createIndex(String.format("CREATE CUSTOM INDEX ON %%s(d) USING '%s'", StorageAttachedIndex.class.getName()));
 
         // LIKE restriction
-        assertInvalidMessage(String.format(StatementRestrictions.INDEX_DOES_NOT_SUPPORT_LIKE_MESSAGE, "b"), "SELECT * FROM %s WHERE b LIKE 'Test'");
-        assertInvalidMessage(String.format(StatementRestrictions.INDEX_DOES_NOT_SUPPORT_LIKE_MESSAGE, "c"), "SELECT * FROM %s WHERE c LIKE 'Test'");
-        assertInvalidMessage(String.format(StatementRestrictions.INDEX_DOES_NOT_SUPPORT_LIKE_MESSAGE, "d"), "SELECT * FROM %s WHERE d LIKE 'Test'");
+        assertInvalidMessage(String.format(StatementRestrictions.INDEX_DOES_NOT_SUPPORT_LIKE_MESSAGE, 'b'), "SELECT * FROM %s WHERE b LIKE 'Test'");
+        assertInvalidMessage(String.format(StatementRestrictions.INDEX_DOES_NOT_SUPPORT_LIKE_MESSAGE, 'c'), "SELECT * FROM %s WHERE c LIKE 'Test'");
+        assertInvalidMessage(String.format(StatementRestrictions.INDEX_DOES_NOT_SUPPORT_LIKE_MESSAGE, 'd'), "SELECT * FROM %s WHERE d LIKE 'Test'");
     }
 
     @Test
-    public void testIndexedColumnDoesNotSupportAnalyzerRestriction() throws Throwable
+    public void testIndexedColumnDoesNotSupportAnalyzerRestriction()
     {
         createTable("CREATE TABLE %s (a text, b text, c text, d text, PRIMARY KEY (a, b))");
         createIndex(String.format("CREATE CUSTOM INDEX ON %%s(b) USING '%s'", StorageAttachedIndex.class.getName()));
@@ -438,27 +434,26 @@ public class AllowFilteringTest extends SAITester
         createIndex(String.format("CREATE CUSTOM INDEX ON %%s(d) USING '%s'", StorageAttachedIndex.class.getName()));
 
         // Analyzer restriction
-        assertInvalidMessage(String.format(": restriction is only supported on properly indexed columns. a : 'Test' is not valid."), "SELECT * FROM %s WHERE a : 'Test'");
+        assertInvalidMessage(": restriction is only supported on properly indexed columns. a : 'Test' is not valid.", "SELECT * FROM %s WHERE a : 'Test'");
         assertInvalidMessage(String.format(StatementRestrictions.INDEX_DOES_NOT_SUPPORT_ANALYZER_MATCHES_MESSAGE, 'b'), "SELECT * FROM %s WHERE b : 'Test'");
         assertInvalidMessage(String.format(StatementRestrictions.INDEX_DOES_NOT_SUPPORT_ANALYZER_MATCHES_MESSAGE, 'c'), "SELECT * FROM %s WHERE c : 'Test'");
         assertInvalidMessage(String.format(StatementRestrictions.INDEX_DOES_NOT_SUPPORT_ANALYZER_MATCHES_MESSAGE, 'd'), "SELECT * FROM %s WHERE d : 'Test'");
     }
 
     @Test
-    public void testQueryRequiresFilteringButHasANNRestriction() throws Throwable
+    public void testQueryRequiresFilteringButHasANNRestriction()
     {
         createTable("CREATE TABLE %s (pk text, i int, j int, k int, vec vector<float, 3>, PRIMARY KEY((pk, i), j))");
         createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         // Should not fail because allow filtering is set but not required
         assertRows(execute("SELECT * FROM %s ORDER BY vec ANN OF [1,1,1] LIMIT 10 ALLOW FILTERING;"));
 
-        // Do not recommend ALLOW FILTERING for non primary key, non clustering column restrictions
+        // Do not recommend ALLOW FILTERING for non-primary key, non clustering column restrictions
         assertInvalidMessage(StatementRestrictions.NON_CLUSTER_ORDERING_REQUIRES_ALL_RESTRICTED_NON_PARTITION_KEY_COLUMNS_INDEXED_MESSAGE,
                              "SELECT * FROM %s WHERE k > 0 ORDER BY vec ANN OF [2.5, 3.5, 4.5] LIMIT 10;");
 
-        // Do not let ALLOW FILTERING to lead to query execution for non primary key, non clustering column restrictions
+        // Do not let ALLOW FILTERING to lead to query execution for non-primary key, non clustering column restrictions
         assertInvalidMessage(StatementRestrictions.NON_CLUSTER_ORDERING_REQUIRES_ALL_RESTRICTED_NON_PARTITION_KEY_COLUMNS_INDEXED_MESSAGE,
                              "SELECT * FROM %s WHERE k > 0 ORDER BY vec ANN OF [2.5, 3.5, 4.5] LIMIT 10 ALLOW FILTERING;");
 
@@ -488,12 +483,11 @@ public class AllowFilteringTest extends SAITester
     }
 
     @Test
-    public void testMapRangeQueries() throws Throwable
+    public void testMapRangeQueries()
     {
         createTable("CREATE TABLE %s (partition int primary key, item_cost map<text, int>)");
         createIndex("CREATE CUSTOM INDEX ON %s(keys(item_cost)) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(values(item_cost)) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         // Insert data for later
         execute("INSERT INTO %s (partition, item_cost) VALUES (0, {'apple': 2, 'orange': 1})");
@@ -520,9 +514,35 @@ public class AllowFilteringTest extends SAITester
 
 
         createIndex("CREATE CUSTOM INDEX ON %s(entries(item_cost)) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         // Show that we're now able to execute the query.
         assertRows(execute("SELECT partition FROM %s WHERE item_cost['apple'] < 3 AND item_cost['apple'] > 1"), row(0));
+    }
+
+    private final Injections.Barrier blockIndexBuild = Injections.newBarrier("block_index_build", 2, false)
+                                                                 .add(InvokePointBuilder.newInvokePoint().onClass(StorageAttachedIndex.class)
+                                                                 .onMethod("startInitialBuild"))
+                                                                 .build();
+
+    @Test
+    public void testAllowFilteringDuringIndexBuild() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v int)");
+        Injections.inject(blockIndexBuild);
+        String idx = createIndexAsync(String.format("CREATE CUSTOM INDEX ON %%s(v) USING '%s'", StorageAttachedIndex.class.getName()));
+
+        assertThatThrownBy(() -> executeInternal("SELECT * FROM %s WHERE v=0"))
+                .hasMessage("The secondary index '" + idx + "' is not yet available as it is building")
+                .isInstanceOf(IndexBuildInProgressException.class);
+
+        assertThatThrownBy(() -> executeInternal("SELECT * FROM %s WHERE v=0 ALLOW FILTERING"))
+                .hasMessage("The secondary index '" + idx + "' is not yet available as it is building")
+                .isInstanceOf(IndexBuildInProgressException.class);
+
+        blockIndexBuild.countDown();
+        blockIndexBuild.disable();
+        waitForIndexQueryable(idx);
+        execute("SELECT * FROM %s WHERE v=0");
+        execute("SELECT * FROM %s WHERE v=0 ALLOW FILTERING");
     }
 }

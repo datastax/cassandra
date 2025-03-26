@@ -84,7 +84,7 @@ public class TermSelector extends Selector
     {
     }
 
-    public void addInput(ProtocolVersion protocolVersion, ResultSetBuilder rs) throws InvalidRequestException
+    public void addInput(ResultSetBuilder rs) throws InvalidRequestException
     {
     }
 

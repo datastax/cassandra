@@ -31,6 +31,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.SerializationHeader;
+import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.sstable.Descriptor;
@@ -104,6 +105,11 @@ public abstract class SSTableReaderBuilder
     public static FileHandle.Builder defaultIndexHandleBuilder(Descriptor descriptor, Component component)
     {
         return StorageProvider.instance.fileHandleBuilderFor(descriptor, component);
+    }
+
+    public static FileHandle.Builder primaryIndexWriteTimeBuilder(Descriptor descriptor, Component component, OperationType operationType)
+    {
+        return StorageProvider.instance.primaryIndexWriteTimeFileHandleBuilderFor(descriptor, component, operationType);
     }
 
     @SuppressWarnings("resource")

@@ -19,8 +19,15 @@
 package org.apache.cassandra.transport;
 
 import java.nio.ByteBuffer;
-import java.util.*;
-import java.util.concurrent.*;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.Lock;
@@ -31,7 +38,12 @@ import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 
-import com.datastax.driver.core.*;
+import com.datastax.driver.core.Cluster;
+import com.datastax.driver.core.ProtocolOptions;
+import com.datastax.driver.core.ResultSetFuture;
+import com.datastax.driver.core.Row;
+import com.datastax.driver.core.Session;
+import com.datastax.driver.core.SimpleStatement;
 import io.netty.buffer.ByteBuf;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.service.NativeTransportService;
@@ -77,18 +89,20 @@ public class DriverBurnTest extends CQLTester
             {
                 QueryMessage queryMessage = QueryMessage.codec.decode(body, version);
                 return new QueryMessage(queryMessage.query, queryMessage.options) {
-                    protected Message.Response execute(QueryState state, long queryStartNanoTime, boolean traceRequest)
+
+                    @Override
+                    protected CompletableFuture<Response> maybeExecuteAsync(QueryState state, long queryStartNanoTime, boolean traceRequest)
                     {
                         try
                         {
                             int idx = Integer.parseInt(queryMessage.query);
                             SizeCaps caps = idx % largeMessageFrequency == 0 ? largeMessageCap : smallMessageCap;
-                            return generateRows(idx, caps);
+                            return CompletableFuture.completedFuture(generateRows(idx, caps));
                         }
                         catch (NumberFormatException e)
                         {
                             // for the requests driver issues under the hood
-                            return super.execute(state, queryStartNanoTime, traceRequest);
+                            return super.maybeExecuteAsync(state, queryStartNanoTime, traceRequest);
                         }
                     }
                 };
@@ -337,17 +351,19 @@ public class DriverBurnTest extends CQLTester
             {
                 QueryMessage queryMessage = QueryMessage.codec.decode(body, version);
                 return new QueryMessage(queryMessage.query, queryMessage.options) {
-                    protected Message.Response execute(QueryState state, long queryStartNanoTime, boolean traceRequest)
+
+                    @Override
+                    protected CompletableFuture<Response> maybeExecuteAsync(QueryState state, long queryStartNanoTime, boolean traceRequest)
                     {
                         try
                         {
                             int idx = Integer.parseInt(queryMessage.query); // unused
-                            return generateRows(idx, responseCaps);
+                            return CompletableFuture.completedFuture(generateRows(idx, responseCaps));
                         }
                         catch (NumberFormatException e)
                         {
                             // for the requests driver issues under the hood
-                            return super.execute(state, queryStartNanoTime, traceRequest);
+                            return super.maybeExecuteAsync(state, queryStartNanoTime, traceRequest);
                         }
                     }
                 };

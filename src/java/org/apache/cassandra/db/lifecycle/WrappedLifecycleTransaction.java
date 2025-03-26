@@ -20,6 +20,7 @@ package org.apache.cassandra.db.lifecycle;
 
 import java.util.Collection;
 import java.util.Set;
+import java.util.UUID;
 
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.io.sstable.SSTable;
@@ -99,6 +100,12 @@ public class WrappedLifecycleTransaction implements ILifecycleTransaction
         delegate.trackNew(table);
     }
 
+    @Override
+    public void trackNewWritten(SSTable table)
+    {
+        delegate.trackNewWritten(table);
+    }
+
     public void untrackNew(SSTable table)
     {
         delegate.untrackNew(table);
@@ -112,5 +119,17 @@ public class WrappedLifecycleTransaction implements ILifecycleTransaction
     public boolean isOffline()
     {
         return delegate.isOffline();
+    }
+
+    @Override
+    public UUID opId()
+    {
+        return delegate.opId();
+    }
+
+    @Override
+    public void cancel(SSTableReader removedSSTable)
+    {
+        delegate.cancel(removedSSTable);
     }
 }

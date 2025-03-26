@@ -75,6 +75,7 @@
                  <exclude name="**/tools/cqlstress-example.yaml"/>
                  <exclude name="**/tools/cqlstress-insanity-example.yaml"/>
                  <exclude name="**/tools/cqlstress-lwt-example.yaml"/>
+                 <exclude name=".github/**"/>
                  <!-- Documentation files -->
                  <exclude NAME="**/doc/modules/**/*"/>
                  <!-- NOTICE files -->

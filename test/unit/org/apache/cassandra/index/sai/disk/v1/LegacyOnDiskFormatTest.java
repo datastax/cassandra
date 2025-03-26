@@ -97,7 +97,7 @@ public class LegacyOnDiskFormatTest
                                      .addRegularColumn("text_value", UTF8Type.instance)
                                      .build();
         sstable = TrieIndexFormat.instance.getReaderFactory().openNoValidation(descriptor, TableMetadataRef.forOfflineTools(tableMetadata));
-        indexDescriptor = IndexDescriptor.empty(sstable.descriptor).reload(Set.of(intContext, textContext));
+        indexDescriptor = IndexDescriptor.empty(sstable.descriptor).reload(sstable, Set.of(intContext, textContext));
         pkFactory = indexDescriptor.perSSTableComponents().version().onDiskFormat().newPrimaryKeyFactory(tableMetadata.comparator);
     }
 
@@ -134,7 +134,7 @@ public class LegacyOnDiskFormatTest
         IndexComponents.ForRead components = indexDescriptor.perIndexComponents(intContext);
         final MetadataSource source = MetadataSource.loadMetadata(components);
 
-        List<SegmentMetadata> metadatas = SegmentMetadata.load(source, pkFactory);
+        List<SegmentMetadata> metadatas = SegmentMetadata.load(source, intContext);
 
         assertEquals(1, metadatas.size());
         assertEquals(100, metadatas.get(0).numRows);
@@ -144,9 +144,14 @@ public class LegacyOnDiskFormatTest
     public void canCreateAndUsePrimaryKeyMapWithLegacyFormat() throws Throwable
     {
         var perSSTableComponents = indexDescriptor.perSSTableComponents();
-        PrimaryKeyMap.Factory primaryKeyMapFactory = perSSTableComponents.version().onDiskFormat().newPrimaryKeyMapFactory(perSSTableComponents, pkFactory, sstable);
+        PrimaryKeyMap.Factory primaryKeyMapFactory = perSSTableComponents.onDiskFormat().newPrimaryKeyMapFactory(perSSTableComponents, pkFactory, sstable);
+
+        long countFromFactory = primaryKeyMapFactory.count();
 
         PrimaryKeyMap primaryKeyMap = primaryKeyMapFactory.newPerSSTablePrimaryKeyMap();
+
+        long countFromMap = primaryKeyMap.count();
+        assertEquals(countFromFactory, countFromMap);
 
         PrimaryKey expected = pkFactory.createTokenOnly(Murmur3Partitioner.instance.decorateKey(Int32Type.instance.decompose(23)).getToken());
 
@@ -162,7 +167,7 @@ public class LegacyOnDiskFormatTest
 
         final MetadataSource source = MetadataSource.loadMetadata(components);
 
-        List<SegmentMetadata> metadatas = SegmentMetadata.load(source, pkFactory);
+        List<SegmentMetadata> metadatas = SegmentMetadata.load(source, intContext);
 
         BKDReader bkdReader = new BKDReader(intContext,
                                             components.get(IndexComponentType.KD_TREE).createFileHandle(),
@@ -183,22 +188,23 @@ public class LegacyOnDiskFormatTest
 
         final MetadataSource source = MetadataSource.loadMetadata(components);
 
-        SegmentMetadata metadata = SegmentMetadata.load(source, pkFactory).get(0);
+        SegmentMetadata metadata = SegmentMetadata.load(source, textContext).get(0);
 
         long root = metadata.getIndexRoot(IndexComponentType.TERMS_DATA);
         Map<String,String> map = metadata.componentMetadatas.get(IndexComponentType.TERMS_DATA).attributes;
         String footerPointerString = map.get(SAICodecUtils.FOOTER_POINTER);
         long footerPointer = footerPointerString == null ? -1 : Long.parseLong(footerPointerString);
 
+        ByteComparable.Version byteComparableVersion = components.byteComparableVersionFor(IndexComponentType.TERMS_DATA);
         TermsReader termsReader = new TermsReader(textContext,
                                                   components.get(IndexComponentType.TERMS_DATA).createFileHandle(),
-                                                  components.byteComparableVersionFor(IndexComponentType.TERMS_DATA),
+                                                  byteComparableVersion,
                                                   components.get(IndexComponentType.POSTING_LISTS).createFileHandle(),
                                                   root,
                                                   footerPointer,
                                                   Version.AA); // These tests are for AA, so no need to parameterize
         Expression expression = new Expression(textContext).add(Operator.EQ, UTF8Type.instance.decompose("10"));
-        ByteComparable term = ByteComparable.fixedLength(expression.lower.value.encoded);
+        ByteComparable term = ByteComparable.preencoded(byteComparableVersion, expression.lower.value.encoded);
 
         PostingList result = termsReader.exactMatch(term, QueryEventListeners.NO_OP_TRIE_LISTENER, new QueryContext());
 

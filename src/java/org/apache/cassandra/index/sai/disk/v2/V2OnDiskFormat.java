@@ -28,6 +28,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.ClusteringComparator;
+import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SSTableContext;
 import org.apache.cassandra.index.sai.disk.PerSSTableWriter;
@@ -78,6 +79,12 @@ public class V2OnDiskFormat extends V1OnDiskFormat
         {
             return false;
         }
+
+        @Override
+        public boolean hasTermsHistogram()
+        {
+            return false;
+        }
     };
 
     protected V2OnDiskFormat()
@@ -108,7 +115,7 @@ public class V2OnDiskFormat extends V1OnDiskFormat
                                           SegmentMetadata segmentMetadata) throws IOException
     {
         if (indexContext.isVector())
-            return new V2VectorIndexSearcher(sstableContext.primaryKeyMapFactory(), indexFiles, segmentMetadata, indexContext);
+            throw new IllegalStateException("V2 (HNSW) vector index support has been removed");
         if (indexContext.isLiteral())
             return new V2InvertedIndexSearcher(sstableContext, indexFiles, segmentMetadata, indexContext);
         return super.newIndexSearcher(sstableContext, indexContext, indexFiles, segmentMetadata);
@@ -121,11 +128,11 @@ public class V2OnDiskFormat extends V1OnDiskFormat
     }
 
     @Override
-    public Set<IndexComponentType> perIndexComponentTypes(IndexContext indexContext)
+    public Set<IndexComponentType> perIndexComponentTypes(AbstractType<?> validator)
     {
-        if (indexContext.isVector())
+        if (validator.isVector())
             return VECTOR_COMPONENTS_V2;
-        return super.perIndexComponentTypes(indexContext);
+        return super.perIndexComponentTypes(validator);
     }
 
     @Override

@@ -42,9 +42,9 @@ import org.apache.cassandra.index.sai.disk.PerIndexWriter;
 import org.apache.cassandra.index.sai.disk.PerSSTableWriter;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.SearchableIndex;
-import org.apache.cassandra.index.sai.disk.format.IndexComponents;
-import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
+import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
+import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
 import org.apache.cassandra.index.sai.disk.format.OnDiskFormat;
@@ -83,10 +83,11 @@ public class V1OnDiskFormat implements OnDiskFormat
                                                                                  IndexComponentType.META,
                                                                                  IndexComponentType.TERMS_DATA,
                                                                                  IndexComponentType.POSTING_LISTS);
-    private static final Set<IndexComponentType> NUMERIC_COMPONENTS = EnumSet.of(IndexComponentType.COLUMN_COMPLETION_MARKER,
-                                                                                 IndexComponentType.META,
-                                                                                 IndexComponentType.KD_TREE,
-                                                                                 IndexComponentType.KD_TREE_POSTING_LISTS);
+
+    public static final Set<IndexComponentType> NUMERIC_COMPONENTS = EnumSet.of(IndexComponentType.COLUMN_COMPLETION_MARKER,
+                                                                                IndexComponentType.META,
+                                                                                IndexComponentType.KD_TREE,
+                                                                                IndexComponentType.KD_TREE_POSTING_LISTS);
 
     /**
      * Global limit on heap consumed by all index segment building that occurs outside the context of Memtable flush.
@@ -132,6 +133,12 @@ public class V1OnDiskFormat implements OnDiskFormat
 
         @Override
         public boolean hasVectorIndexChecksum()
+        {
+            return false;
+        }
+
+        @Override
+        public boolean hasTermsHistogram()
         {
             return false;
         }
@@ -230,7 +237,7 @@ public class V1OnDiskFormat implements OnDiskFormat
         // starting with v3, vector components include proper headers and checksum; skip for earlier versions
         IndexContext context = component.parent().context();
         if (isVectorDataComponent(context, component.componentType())
-            && !component.parent().version().onDiskFormat().indexFeatureSet().hasVectorIndexChecksum())
+            && !component.parent().onDiskFormat().indexFeatureSet().hasVectorIndexChecksum())
         {
             return true;
         }
@@ -265,9 +272,9 @@ public class V1OnDiskFormat implements OnDiskFormat
     }
 
     @Override
-    public Set<IndexComponentType> perIndexComponentTypes(IndexContext indexContext)
+    public Set<IndexComponentType> perIndexComponentTypes(AbstractType<?> validator)
     {
-        if (TypeUtil.isLiteral(indexContext.getValidator()))
+        if (TypeUtil.isLiteral(validator))
             return LITERAL_COMPONENTS;
         return NUMERIC_COMPONENTS;
     }
@@ -294,8 +301,16 @@ public class V1OnDiskFormat implements OnDiskFormat
     @Override
     public ByteComparable encodeForTrie(ByteBuffer input, AbstractType<?> type)
     {
-        return TypeUtil.isLiteral(type) ? ByteComparable.fixedLength(input)
+        return TypeUtil.isLiteral(type) ? v -> ByteSource.preencoded(input)
                                         : TypeUtil.asComparableBytes(input, type);
+    }
+
+    @Override
+    public ByteBuffer decodeFromTrie(ByteComparable value, AbstractType<?> type)
+    {
+        return TypeUtil.isLiteral(type)
+               ? ByteBuffer.wrap(ByteSourceInverse.readBytes(value.asComparableBytes(ByteComparable.Version.OSS41)))
+               : TypeUtil.fromComparableBytes(value, type, ByteComparable.Version.OSS41);
     }
 
     /** vector data components (that did not have checksums before v3) */

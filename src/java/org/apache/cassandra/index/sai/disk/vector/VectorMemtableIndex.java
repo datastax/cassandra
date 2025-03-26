@@ -23,23 +23,23 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.NavigableSet;
-import java.util.PriorityQueue;
 import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.function.ToIntFunction;
 import javax.annotation.Nullable;
 
-import com.google.common.collect.Iterators;
-import com.google.common.collect.Lists;
+import com.google.common.util.concurrent.Runnables;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.github.jbellis.jvector.graph.SearchResult;
 import io.github.jbellis.jvector.util.Bits;
+import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import io.github.jbellis.jvector.vector.VectorizationProvider;
 import io.github.jbellis.jvector.vector.types.VectorFloat;
 import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
@@ -53,21 +53,21 @@ import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
+import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
+import org.apache.cassandra.index.sai.memory.MemoryIndex;
 import org.apache.cassandra.index.sai.memory.MemtableIndex;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.plan.Orderer;
-import org.apache.cassandra.index.sai.plan.Plan;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithScore;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
-import org.apache.cassandra.index.sai.utils.PriorityQueueIterator;
-import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.Pair;
+import org.apache.cassandra.utils.SortingIterator;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 
@@ -85,6 +85,8 @@ public class VectorMemtableIndex implements MemtableIndex
     private final IndexContext indexContext;
     private final CassandraOnHeapGraph<PrimaryKey> graph;
     private final LongAdder writeCount = new LongAdder();
+    private final LongAdder overwriteCount = new LongAdder();
+    private final LongAdder removedCount = new LongAdder();
 
     private PrimaryKey minimumKey;
     private PrimaryKey maximumKey;
@@ -95,7 +97,7 @@ public class VectorMemtableIndex implements MemtableIndex
     public VectorMemtableIndex(IndexContext indexContext, Memtable mt)
     {
         this.indexContext = indexContext;
-        this.graph = new CassandraOnHeapGraph<>(indexContext, true);
+        this.graph = new CassandraOnHeapGraph<>(indexContext, true, mt);
         this.mt = mt;
     }
 
@@ -156,13 +158,19 @@ public class VectorMemtableIndex implements MemtableIndex
 
             // make the changes in this order so we don't have a window where the row is not in the index at all
             if (newRemaining > 0)
+            {
                 graph.add(newValue, primaryKey);
+                overwriteCount.increment();
+            }
             if (oldRemaining > 0)
                 graph.remove(oldValue, primaryKey);
 
             // remove primary key if it's no longer indexed
             if (newRemaining <= 0 && oldRemaining > 0)
+            {
                 primaryKeys.remove(primaryKey);
+                removedCount.increment();
+            }
         }
     }
 
@@ -184,24 +192,31 @@ public class VectorMemtableIndex implements MemtableIndex
     }
 
     @Override
-    public RangeIterator search(QueryContext context, Expression expr, AbstractBounds<PartitionPosition> keyRange, int limit)
+    public KeyRangeIterator search(QueryContext context, Expression expr, AbstractBounds<PartitionPosition> keyRange, int limit)
     {
         if (expr.getOp() != Expression.Op.BOUNDED_ANN)
             throw new IllegalArgumentException(indexContext.logMessage("Only BOUNDED_ANN is supported, received: " + expr));
         var qv = vts.createFloatVector(expr.lower.value.vector);
         float threshold = expr.getEuclideanSearchThreshold();
 
-        PriorityQueue<PrimaryKey> keyQueue;
-        try (var pkIterator = searchInternal(context, qv, keyRange, graph.size(), threshold))
+        SortingIterator.Builder<PrimaryKey> keyQueue;
+        try (var pkIterator = searchInternal(context, qv, keyRange, graph.size(), graph.size(), threshold))
         {
-            // Leverage PQ's O(N) complexity for building a PQ from a list.
-            var list = Lists.newArrayList(Iterators.transform(pkIterator, PrimaryKeyWithSortKey::primaryKey));
-            keyQueue = new PriorityQueue<>(list);
+            keyQueue = new SortingIterator.Builder<>();
+            while (pkIterator.hasNext())
+                keyQueue.add(pkIterator.next().primaryKey());
         }
 
-        if (keyQueue.isEmpty())
-            return RangeIterator.empty();
-        return new ReorderingRangeIterator(keyQueue);
+        if (keyQueue.size() == 0)
+            return KeyRangeIterator.empty();
+        return new ReorderingKeyRangeIterator(keyQueue.build(Comparator.naturalOrder()), keyQueue.size());
+    }
+
+    @Override
+    public long estimateMatchingRowsCount(Expression expression, AbstractBounds<PartitionPosition> keyRange)
+    {
+        // For BOUNDED_ANN we use the old way of estimating cardinality - by running the search.
+        throw new UnsupportedOperationException("Cardinality estimation not supported by vector indexes");
     }
 
     @Override
@@ -214,15 +229,17 @@ public class VectorMemtableIndex implements MemtableIndex
         assert slice == null : "ANN does not support index slicing";
         assert orderer.isANN() : "Only ANN is supported for vector search, received " + orderer.operator;
 
-        var qv = vts.createFloatVector(orderer.vector);
+        var qv = vts.createFloatVector(orderer.getVectorTerm());
+        var rerankK = orderer.rerankKFor(limit, VectorCompression.NO_COMPRESSION);
 
-        return List.of(searchInternal(context, qv, keyRange, limit, 0));
+        return List.of(searchInternal(context, qv, keyRange, limit, rerankK, 0));
     }
 
     private CloseableIterator<PrimaryKeyWithSortKey> searchInternal(QueryContext context,
                                                                   VectorFloat<?> queryVector,
                                                                   AbstractBounds<PartitionPosition> keyRange,
                                                                   int limit,
+                                                                  int rerankK,
                                                                   float threshold)
     {
         Bits bits;
@@ -248,11 +265,11 @@ public class VectorMemtableIndex implements MemtableIndex
             if (resultKeys.isEmpty())
                 return CloseableIterator.emptyIterator();
 
-            int bruteForceRows = maxBruteForceRows(limit, resultKeys.size(), graph.size());
-            logger.trace("Search range covers {} rows; max brute force rows is {} for memtable index with {} nodes, LIMIT {}",
-                         resultKeys.size(), bruteForceRows, graph.size(), limit);
-            Tracing.trace("Search range covers {} rows; max brute force rows is {} for memtable index with {} nodes, LIMIT {}",
-                          resultKeys.size(), bruteForceRows, graph.size(), limit);
+            int bruteForceRows = maxBruteForceRows(rerankK, resultKeys.size(), graph.size());
+            logger.trace("Search range covers {} rows; max brute force rows is {} for memtable index with {} nodes, rerankK {}, LIMIT {}",
+                         resultKeys.size(), bruteForceRows, graph.size(), rerankK, limit);
+            Tracing.trace("Search range covers {} rows; max brute force rows is {} for memtable index with {} nodes, rerankK {}, LIMIT {}",
+                          resultKeys.size(), bruteForceRows, graph.size(), rerankK, limit);
             if (resultKeys.size() <= bruteForceRows)
                 // When we have a threshold, we only need to filter the results, not order them, because it means we're
                 // evaluating a boolean predicate in the SAI pipeline that wants to collate by PK
@@ -264,7 +281,7 @@ public class VectorMemtableIndex implements MemtableIndex
                 bits = new KeyRangeFilteringBits(keyRange);
         }
 
-        var nodeScoreIterator = graph.search(context, queryVector, limit, threshold, bits);
+        var nodeScoreIterator = graph.search(context, queryVector, limit, rerankK, threshold, bits);
         return new NodeScoreToScoredPrimaryKeyIterator(nodeScoreIterator);
     }
 
@@ -289,16 +306,21 @@ public class VectorMemtableIndex implements MemtableIndex
             if (v == null)
                 return;
             var i = graph.getOrdinal(v);
+            if (i < 0)
+                // might happen if the vector and/or its postings have been removed in the meantime between getting the
+                // vector and getting the ordinal (graph#vectorForKey and graph#getOrdinal are not synchronized)
+                return;
             keysInGraph.add(k);
             relevantOrdinals.add(i);
         });
 
-        int maxBruteForceRows = maxBruteForceRows(limit, relevantOrdinals.size(), graph.size());
-        Tracing.logAndTrace(logger, "{} rows relevant to current memtable out of {} materialized by SAI; max brute force rows is {} for memtable index with {} nodes, LIMIT {}",
-                            relevantOrdinals.size(), keys.size(), maxBruteForceRows, graph.size(), limit);
+        int rerankK = orderer.rerankKFor(limit, VectorCompression.NO_COMPRESSION);
+        int maxBruteForceRows = maxBruteForceRows(rerankK, relevantOrdinals.size(), graph.size());
+        Tracing.logAndTrace(logger, "{} rows relevant to current memtable out of {} materialized by SAI; max brute force rows is {} for memtable index with {} nodes, rerankK {}",
+                            relevantOrdinals.size(), keys.size(), maxBruteForceRows, graph.size(), rerankK);
 
         // convert the expression value to query vector
-        var qv = vts.createFloatVector(orderer.vector);
+        var qv = vts.createFloatVector(orderer.getVectorTerm());
         // brute force path
         if (keysInGraph.size() <= maxBruteForceRows)
         {
@@ -307,7 +329,7 @@ public class VectorMemtableIndex implements MemtableIndex
             return orderByBruteForce(qv, keysInGraph);
         }
         // indexed path
-        var nodeScoreIterator = graph.search(context, qv, limit, 0, relevantOrdinals::contains);
+        var nodeScoreIterator = graph.search(context, qv, limit, rerankK, 0, relevantOrdinals::contains);
         return new NodeScoreToScoredPrimaryKeyIterator(nodeScoreIterator);
     }
 
@@ -330,10 +352,12 @@ public class VectorMemtableIndex implements MemtableIndex
 
     private CloseableIterator<PrimaryKeyWithSortKey> orderByBruteForce(VectorFloat<?> queryVector, Collection<PrimaryKey> keys)
     {
-        // Use a priority queue because we often don't need to consume the entire iterator
-        var scoredPrimaryKeys = new PriorityQueue<PrimaryKeyWithSortKey>(keys.size());
-        scoreKeysAndAddToCollector(queryVector, keys, 0, scoredPrimaryKeys);
-        return new PriorityQueueIterator<>(scoredPrimaryKeys);
+        // Use a sorting iterator because we often don't need to consume the entire iterator
+        var similarityFunction = indexContext.getIndexWriterConfig().getSimilarityFunction();
+        return SortingIterator.createCloseable(Comparator.naturalOrder(),
+                                               keys,
+                                               key -> scoreKey(similarityFunction, queryVector, key, 0),
+                                               Runnables.doNothing());
     }
 
     private void scoreKeysAndAddToCollector(VectorFloat<?> queryVector,
@@ -344,33 +368,46 @@ public class VectorMemtableIndex implements MemtableIndex
         var similarityFunction = indexContext.getIndexWriterConfig().getSimilarityFunction();
         for (var key : keys)
         {
-            var vector = graph.vectorForKey(key);
-            if (vector == null)
-                continue;
-            var score = similarityFunction.compare(queryVector, vector);
-            if (score >= threshold)
-                collector.add(new PrimaryKeyWithScore(indexContext, mt, key, score));
+            var scored = scoreKey(similarityFunction, queryVector, key, threshold);
+            if (scored != null)
+                collector.add(scored);
         }
     }
 
-    private int maxBruteForceRows(int limit, int nPermittedOrdinals, int graphSize)
+    private PrimaryKeyWithScore scoreKey(VectorSimilarityFunction similarityFunction, VectorFloat<?> queryVector, PrimaryKey key, float threshold)
     {
-        int expectedNodesVisited = expectedNodesVisited(limit, nPermittedOrdinals, graphSize);
-        int expectedComparisons = indexContext.getIndexWriterConfig().getAnnMaxDegree() * expectedNodesVisited;
-        return (int) min(max(limit, Plan.memoryToDiskFactor() * expectedComparisons), GLOBAL_BRUTE_FORCE_ROWS);
+        var vector = graph.vectorForKey(key);
+        if (vector == null)
+            return null;
+        var score = similarityFunction.compare(queryVector, vector);
+        if (score < threshold)
+            return null;
+        return new PrimaryKeyWithScore(indexContext, mt, key, score);
     }
 
-    public int estimateAnnNodesVisited(int limit, int nPermittedOrdinals)
+    private int maxBruteForceRows(int rerankK, int nPermittedOrdinals, int graphSize)
     {
-        return expectedNodesVisited(limit, nPermittedOrdinals, graph.size());
+        int expectedNodesVisited = expectedNodesVisited(rerankK, nPermittedOrdinals, graphSize);
+        return min(max(rerankK, expectedNodesVisited), GLOBAL_BRUTE_FORCE_ROWS);
+    }
+
+    public int estimateAnnNodesVisited(int rerankK, int nPermittedOrdinals)
+    {
+        return expectedNodesVisited(rerankK, nPermittedOrdinals, graph.size());
     }
 
     /**
      * All parameters must be greater than zero.  nPermittedOrdinals may be larger than graphSize.
+     * <p>
+     * Returns the expected number of nodes visited by an ANN search.
+     * !!!
+     * !!! "Visted" means we compute the coarse similarity with the query vector.  This is
+     * !!! roughly `degree` times larger than the number of nodes whose edge lists we load!
+     * !!!
      */
-    public static int expectedNodesVisited(int limit, int nPermittedOrdinals, int graphSize)
+    public static int expectedNodesVisited(int rerankK, int nPermittedOrdinals, int graphSize)
     {
-        var K = limit;
+        var K = rerankK;
         var B = min(nPermittedOrdinals, graphSize);
         var N = graphSize;
         // These constants come from running many searches on a variety of datasets and graph sizes.
@@ -385,17 +422,17 @@ public class VectorMemtableIndex implements MemtableIndex
         // If we need to make this even more accurate, the relationship to B and to log(N) may be the best
         // places to start.
         var raw = (int) (100 + 0.025 * pow(log(N), 2) * pow(K, 0.95) * ((double) N / B));
-        return ensureSaneEstimate(raw, limit, graphSize);
+        return ensureSaneEstimate(raw, rerankK, graphSize);
     }
 
-    public static int ensureSaneEstimate(int rawEstimate, int limit, int graphSize)
+    public static int ensureSaneEstimate(int rawEstimate, int rerankK, int graphSize)
     {
-        // we will always visit at least min(limit, graphSize) nodes, and we can't visit more nodes than exist in the graph
-        return min(max(rawEstimate, min(limit, graphSize)), graphSize);
+        // we will always visit at least min(rerankK, graphSize) nodes, and we can't visit more nodes than exist in the graph
+        return min(max(rawEstimate, min(rerankK, graphSize)), graphSize);
     }
 
     @Override
-    public Iterator<Pair<ByteComparable, Iterator<PrimaryKey>>> iterator(DecoratedKey min, DecoratedKey max)
+    public Iterator<Pair<ByteComparable, List<MemoryIndex.PkWithFrequency>>> iterator(DecoratedKey min, DecoratedKey max)
     {
         // This method is only used when merging an in-memory index with a RowMapping. This is done a different
         // way with the graph using the writeData method below.
@@ -415,13 +452,17 @@ public class VectorMemtableIndex implements MemtableIndex
 
     public SegmentMetadata.ComponentMetadataMap writeData(IndexComponents.ForWrite perIndexComponents) throws IOException
     {
+        // Note that range deletions won't show up in the removed count, which is why it's just named removedCount and
+        // not deleted count.
+        logger.debug("Writing {} nodes to disk after {} inserts, {} overwrites, and {} removals for {}", graph.size(),
+                     writeCount.longValue(), overwriteCount.longValue(), removedCount.longValue(), perIndexComponents.descriptor());
         return graph.flush(perIndexComponents);
     }
 
     @Override
     public long writeCount()
     {
-        return writeCount.longValue();
+        return writeCount.longValue() + overwriteCount.longValue();
     }
 
     @Override
@@ -477,21 +518,20 @@ public class VectorMemtableIndex implements MemtableIndex
         }
     }
 
-    private class ReorderingRangeIterator extends RangeIterator
+    private class ReorderingKeyRangeIterator extends KeyRangeIterator
     {
-        private final PriorityQueue<PrimaryKey> keyQueue;
+        private final SortingIterator<PrimaryKey> keyQueue;
 
-        ReorderingRangeIterator(PriorityQueue<PrimaryKey> keyQueue)
+        ReorderingKeyRangeIterator(SortingIterator<PrimaryKey> keyQueue, int expectedSize)
         {
-            super(minimumKey, maximumKey, keyQueue.size());
+            super(minimumKey, maximumKey, expectedSize);
             this.keyQueue = keyQueue;
         }
 
         @Override
         protected void performSkipTo(PrimaryKey nextKey)
         {
-            while (!keyQueue.isEmpty() && keyQueue.peek().compareTo(nextKey) < 0)
-                keyQueue.poll();
+            keyQueue.skipTo(nextKey);
         }
 
         @Override
@@ -500,9 +540,9 @@ public class VectorMemtableIndex implements MemtableIndex
         @Override
         protected PrimaryKey computeNext()
         {
-            if (keyQueue.isEmpty())
+            if (!keyQueue.hasNext())
                 return endOfData();
-            return keyQueue.poll();
+            return keyQueue.next();
         }
     }
 

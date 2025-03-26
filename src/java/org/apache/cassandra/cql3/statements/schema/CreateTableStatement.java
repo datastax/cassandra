@@ -109,6 +109,10 @@ public final class CreateTableStatement extends AlterSchemaStatement
     {
         super.validate(state);
 
+        if (!state.getClientState().isInternal && tableName.length() > SchemaConstants.NAME_LENGTH - keyspaceName.length())
+            throw ire("Table name is too long, it needs to fit %s characters (got table name of %s chars for %s.%s)",
+                      SchemaConstants.NAME_LENGTH - keyspaceName.length(), tableName.length(), keyspaceName, tableName);
+
         // Some tools use CreateTableStatement, and the guardrails below both don't make too much sense for tools and
         // require the server to be initialized, so skipping them if it isn't.
         if (Guardrails.ready())

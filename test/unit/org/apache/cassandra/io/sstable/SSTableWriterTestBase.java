@@ -40,6 +40,7 @@ import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.rows.EncodingStats;
 import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
 import org.apache.cassandra.io.util.File;
@@ -171,6 +172,12 @@ public class SSTableWriterTestBase extends SchemaLoader
     public static SSTableWriter getWriter(ColumnFamilyStore cfs, File directory, LifecycleTransaction txn)
     {
         return getWriter(cfs, directory, txn, 0, null, false);
+    }
+
+    public static SSTableWriter getWriter(SSTableFormat.Type format, ColumnFamilyStore cfs, File directory, LifecycleTransaction txn)
+    {
+        Descriptor desc = cfs.newSSTableDescriptor(directory, format);
+        return SSTableWriter.create(desc, 0, 0, null, false, new SerializationHeader(true, cfs.metadata(), cfs.metadata().regularAndStaticColumns(), EncodingStats.NO_STATS), cfs.indexManager.listIndexGroups(), txn);
     }
 
     public static ByteBuffer random(int i, int size)

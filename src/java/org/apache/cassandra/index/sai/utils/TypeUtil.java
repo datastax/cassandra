@@ -67,6 +67,12 @@ public class TypeUtil
      */
     public static final int DECIMAL_APPROXIMATION_BYTES = 24;
 
+    /**
+     * Byte comparable version currently used for all SAI files and structures, with the exception of terms data in
+     * the early AA on-disk format.
+     */
+    public static final ByteComparable.Version BYTE_COMPARABLE_VERSION = ByteComparable.Version.OSS41;
+
     private TypeUtil() {}
 
     /**
@@ -122,7 +128,7 @@ public class TypeUtil
      */
     public static ByteComparable min(ByteComparable a, ByteComparable b)
     {
-        return a == null ?  b : (b == null || ByteComparable.compare(b, a, ByteComparable.Version.OSS41) > 0) ? a : b;
+        return a == null ?  b : (b == null || ByteComparable.compare(b, a, BYTE_COMPARABLE_VERSION) > 0) ? a : b;
     }
 
     /**
@@ -131,7 +137,7 @@ public class TypeUtil
      */
     public static ByteComparable max(ByteComparable a, ByteComparable b)
     {
-        return a == null ?  b : (b == null || ByteComparable.compare(b, a, ByteComparable.Version.OSS41) < 0) ? a : b;
+        return a == null ?  b : (b == null || ByteComparable.compare(b, a, BYTE_COMPARABLE_VERSION) < 0) ? a : b;
     }
 
     /**
@@ -203,6 +209,14 @@ public class TypeUtil
         return type.fromString(value);
     }
 
+    public static ByteBuffer fromComparableBytes(ByteComparable value, AbstractType<?> type, ByteComparable.Version version)
+    {
+        if (type instanceof InetAddressType || type instanceof IntegerType || type instanceof DecimalType)
+            return ByteBuffer.wrap(ByteSourceInverse.readBytes(value.asComparableBytes(version)));
+
+        return type.fromComparableBytes(ByteSource.peekable(value.asComparableBytes(version)), version);
+    }
+
     public static ByteComparable asComparableBytes(ByteBuffer value, AbstractType<?> type)
     {
         return version -> asComparableBytes(value, type, version);
@@ -223,6 +237,7 @@ public class TypeUtil
     {
         return v -> type.asComparableBytes(ByteBufferAccessor.instance, value, v, terminator);
     }
+
 
     /**
      * Fills a byte array with the comparable bytes for a type.
@@ -245,7 +260,7 @@ public class TypeUtil
         else if (type instanceof DecimalType)
             ByteBufferUtil.arrayCopy(value, value.hasArray() ? value.arrayOffset() + value.position() : value.position(), bytes, 0, DECIMAL_APPROXIMATION_BYTES);
         else
-            ByteBufferUtil.toBytes(type.asComparableBytes(value, ByteComparable.Version.OSS41), bytes);
+            ByteSourceInverse.readBytesMustFit(type.asComparableBytes(value, BYTE_COMPARABLE_VERSION), bytes);
     }
 
     /**
@@ -255,8 +270,8 @@ public class TypeUtil
      */
     public static ByteBuffer encode(ByteBuffer value, AbstractType<?> type)
     {
-        if (value == null)
-            return null;
+        if (value == null || value.remaining() == 0)
+            return value;
 
         if (isInetAddress(type))
             return encodeInetAddress(value);
@@ -264,6 +279,25 @@ public class TypeUtil
             return encodeBigInteger(value);
         else if (type instanceof DecimalType)
             return encodeDecimal(value);
+        return value;
+    }
+
+    /**
+     * Tries its best to return the inverse of {@link #encode}.
+     * For most of the types it returns the exact inverse.
+     * For big integers and decimals, which could be truncated by encode, some precision loss is possible.
+     */
+    public static ByteBuffer decode(ByteBuffer value, AbstractType<?> type)
+    {
+        if (value == null)
+            return null;
+
+        if (isInetAddress(type))
+            return decodeInetAddress(value);
+        else if (isBigInteger(type))
+            return decodeBigInteger(value);
+        else if (type instanceof DecimalType)
+            return decodeDecimal(value);
         return value;
     }
 
@@ -412,6 +446,12 @@ public class TypeUtil
         return value;
     }
 
+    private static ByteBuffer decodeInetAddress(ByteBuffer value)
+    {
+        throw new UnsupportedOperationException("Decoding InetAddress not implemented yet");
+    }
+
+
     /**
      * Encode a {@link BigInteger} into a fixed width 20 byte encoded value.
      *
@@ -456,6 +496,41 @@ public class TypeUtil
         bytes[0] ^= 0x80;
         return ByteBuffer.wrap(bytes);
     }
+
+
+    public static ByteBuffer decodeBigInteger(ByteBuffer encoded)
+    {
+        byte[] bytes = new byte[20];
+        encoded.get(bytes);
+        encoded.rewind();
+
+        // Undo the XOR operation on the first byte
+        bytes[0] ^= 0x80;
+
+        // Extract the size (the first 4 bytes)
+        int size = ((bytes[0] & 0xff) << 24) | ((bytes[1] & 0xff) << 16) | ((bytes[2] & 0xff) << 8) | (bytes[3] & 0xff);
+
+        boolean isNegative = size < 0;
+        if (isNegative)
+            size = -size;
+
+        ByteBuffer result;
+        if (size < 16)
+        {
+            int offset = 20 - size;
+            result = ByteBuffer.wrap(Arrays.copyOfRange(bytes, offset, 20));
+        }
+        else
+        {
+            // Size >= 16 means we extract 16 bytes starting from index 4
+            var resultBytes = new byte[size];
+            System.arraycopy(bytes, 4, resultBytes, 0, 16);
+            result = ByteBuffer.wrap(resultBytes);
+        }
+
+        return result;
+    }
+
 
     /* Type comparison to get rid of ReversedType */
 
@@ -558,6 +633,14 @@ public class TypeUtil
     }
 
     /**
+     * @return {@code true} if the empty values of the given type should be excluded from indexing, {@code false} otherwise.
+     */
+    public static boolean skipsEmptyValue(AbstractType<?> type)
+    {
+        return !type.allowsEmpty() || !isLiteral(type);
+    }
+
+    /**
      * @return base type if given type is reversed, otherwise return itself
      */
     private static AbstractType<?> baseType(AbstractType<?> type)
@@ -567,8 +650,15 @@ public class TypeUtil
 
     public static ByteBuffer encodeDecimal(ByteBuffer value)
     {
-        ByteSource bs = DecimalType.instance.asComparableBytes(value, ByteComparable.Version.OSS41);
-        bs = ByteSource.cutOrRightPad(bs, DECIMAL_APPROXIMATION_BYTES, 0);
-        return ByteBuffer.wrap(ByteSourceInverse.readBytes(bs, DECIMAL_APPROXIMATION_BYTES));
+        ByteSource bs = DecimalType.instance.asComparableBytes(value, BYTE_COMPARABLE_VERSION);
+        byte[] data = new byte[DECIMAL_APPROXIMATION_BYTES];    // initialized with 0s
+        bs.nextBytes(data); // reads up to the number of bytes in the array, leaving 0s in the remaining bytes
+        return ByteBuffer.wrap(data);
+    }
+
+    public static ByteBuffer decodeDecimal(ByteBuffer value)
+    {
+        var peekableValue = ByteSource.peekable(ByteSource.preencoded(value));
+        return DecimalType.instance.fromComparableBytes(peekableValue, BYTE_COMPARABLE_VERSION);
     }
 }

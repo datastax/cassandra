@@ -17,6 +17,9 @@
  */
 package org.apache.cassandra.gms;
 
+import java.io.ByteArrayInputStream;
+import java.io.DataInputStream;
+import java.io.IOException;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -28,6 +31,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.Objects;
 import java.util.Random;
 import java.util.Set;
 import java.util.UUID;
@@ -39,6 +43,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
@@ -54,29 +59,17 @@ import com.google.common.collect.Iterables;
 import com.google.common.collect.Sets;
 import com.google.common.util.concurrent.ListenableFutureTask;
 import com.google.common.util.concurrent.Uninterruptibles;
-
-import org.apache.cassandra.concurrent.JMXEnabledSingleThreadExecutor;
-import org.apache.cassandra.config.CassandraRelevantProperties;
-import org.apache.cassandra.exceptions.RequestFailureReason;
-import org.apache.cassandra.locator.InetAddressAndPort;
-import org.apache.cassandra.net.NoPayload;
-import org.apache.cassandra.net.Verb;
-import org.apache.cassandra.utils.CassandraVersion;
-import org.apache.cassandra.utils.ExecutorUtils;
-import org.apache.cassandra.utils.ExpiringMemoizingSupplier;
-import org.apache.cassandra.utils.MBeanWrapper;
-import org.apache.cassandra.utils.NoSpamLogger;
-import org.apache.cassandra.utils.Pair;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.DebuggableScheduledThreadPoolExecutor;
-import org.apache.cassandra.concurrent.JMXEnabledSingleThreadExecutor;
-import org.apache.cassandra.concurrent.JMXEnabledThreadPoolExecutor;
 import org.apache.cassandra.concurrent.Stage;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.SystemKeyspace;
+import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
@@ -90,8 +83,12 @@ import org.apache.cassandra.utils.ExecutorUtils;
 import org.apache.cassandra.utils.ExpiringMemoizingSupplier;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JVMStabilityInspector;
-import org.apache.cassandra.utils.RecomputingSupplier;
+import org.apache.cassandra.utils.MBeanWrapper;
+import org.apache.cassandra.utils.NoSpamLogger;
+import org.apache.cassandra.utils.Pair;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.CLUSTER_VERSION_PROVIDER_CLASS_NAME;
+import static org.apache.cassandra.config.CassandraRelevantProperties.CLUSTER_VERSION_PROVIDER_MIN_STABLE_DURATION;
 import static org.apache.cassandra.config.CassandraRelevantProperties.GOSSIPER_QUARANTINE_DELAY;
 import static org.apache.cassandra.net.NoPayload.noPayload;
 import static org.apache.cassandra.net.Verb.ECHO_REQ;
@@ -191,15 +188,6 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
 
     private volatile long lastProcessedMessageAt = System.currentTimeMillis();
 
-    /**
-     * This property is initially set to {@code true} which means that we have no information about the other nodes.
-     * Once all nodes are on at least this node version, it becomes {@code false}, which means that we are not
-     * upgrading from the previous version (major, minor).
-     *
-     * This property and anything that checks it should be removed in 5.0
-     */
-    private volatile boolean upgradeInProgressPossible = true;
-
     public void clearUnsafe()
     {
         unreachableEndpoints.clear();
@@ -211,59 +199,122 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
         seedsInShadowRound.clear();
     }
 
-    // returns true when the node does not know the existence of other nodes.
-    private static boolean isLoneNode(Map<InetAddressAndPort, EndpointState> epStates)
+    private class DefaultClusterVersionProvider implements IClusterVersionProvider
     {
-        return epStates.isEmpty() || epStates.keySet().equals(Collections.singleton(FBUtilities.getBroadcastAddressAndPort()));
+        // -1L means that the cluster may be in upgrading state; positive value is the timestamp when the cluster
+        // was detected as fully upgraded
+        private final AtomicLong notUpgradingSinceMillis = new AtomicLong(-1L);
+
+        // minimum time that needs to pass after the cluster is detected as fully upgraded
+        // to report that there is no upgrade in progress
+        private final long MIN_STABLE_DURATION_MS = CLUSTER_VERSION_PROVIDER_MIN_STABLE_DURATION.getLong();
+
+        private final Supplier<ExpiringMemoizingSupplier.ReturnValue<CassandraVersion>> upgradeFromVersionSupplier = () ->
+        {
+            long notUpgradingSinceMillis = this.notUpgradingSinceMillis.get();
+            long stableDuration = notUpgradingSinceMillis < 0 ? -1 : System.currentTimeMillis() - notUpgradingSinceMillis;
+
+            // The cluster is upgraded
+            if (stableDuration > 0)
+                return new ExpiringMemoizingSupplier.Memoized<>(SystemKeyspace.CURRENT_VERSION);
+
+            if (!isEnabled())
+            {
+                // start the stabilisation period by setting the current timestamp in notUpgradingSinceMillis
+                // if Gossiper is going to be enabled, it will be enabled quickly
+                if (DatabaseDescriptor.isDaemonInitialized())
+                {
+                    if (CassandraRelevantProperties.CLUSTER_VERSION_PROVIDER_SKIP_WAIT_FOR_GOSSIP.getBoolean())
+                        this.notUpgradingSinceMillis.compareAndSet(notUpgradingSinceMillis, System.currentTimeMillis());
+
+                    return new ExpiringMemoizingSupplier.NotMemoized<>(SystemKeyspace.CURRENT_VERSION);
+                }
+                else
+                {
+                    // it is not going to be enabled because we are not running in server mode
+                    if (this.notUpgradingSinceMillis.compareAndSet(notUpgradingSinceMillis, 0)) // set 0 to make it stable
+                        return new ExpiringMemoizingSupplier.Memoized<>(SystemKeyspace.CURRENT_VERSION);
+                    else
+                        return new ExpiringMemoizingSupplier.NotMemoized<>(SystemKeyspace.CURRENT_VERSION);
+                }
+            }
+
+            // Check the release version of all the peers it heard of. Not necessary the peer that it has/had contacted with.
+            CassandraVersion minVersion = SystemKeyspace.CURRENT_VERSION;
+            boolean allHostsHaveKnownVersion = true;
+            for (InetAddressAndPort host : endpointStateMap.keySet())
+            {
+                CassandraVersion version = getReleaseVersion(host);
+
+                //Raced with changes to gossip state, wait until next iteration
+                if (version == null)
+                    allHostsHaveKnownVersion = false;
+                else if (version.compareTo(minVersion) < 0)
+                    minVersion = version;
+            }
+
+            // remember the minimum version for the expiration duration
+            if (minVersion.compareTo(SystemKeyspace.CURRENT_VERSION) < 0)
+                return new ExpiringMemoizingSupplier.Memoized<>(minVersion);
+
+            // don't remember the minimum version and recheck whenever requested
+            if (!allHostsHaveKnownVersion)
+                return new ExpiringMemoizingSupplier.NotMemoized<>(minVersion);
+
+            // all hosts have known versions and == CURRENT_VERSION, we can stop checking - the cluster is fully upgraded
+            // start the stability period by setting the current timestamp in notUpgradingSinceMillis
+            if (this.notUpgradingSinceMillis.compareAndSet(notUpgradingSinceMillis, System.currentTimeMillis()))
+                return new ExpiringMemoizingSupplier.Memoized<>(minVersion);
+            else
+                return new ExpiringMemoizingSupplier.NotMemoized<>(minVersion);
+        };
+
+        private final ExpiringMemoizingSupplier<CassandraVersion> minVersionMemoized = ExpiringMemoizingSupplier.memoizeWithExpiration(upgradeFromVersionSupplier, 60, TimeUnit.SECONDS);
+
+        @Override
+        public void reset()
+        {
+            notUpgradingSinceMillis.set(-1L);
+            minVersionMemoized.expire();
+        }
+
+        @Override
+        public CassandraVersion getMinClusterVersion()
+        {
+            return minVersionMemoized.get();
+        }
+
+        @Override
+        public boolean isUpgradeInProgress()
+        {
+            long notUpgradingSince = this.notUpgradingSinceMillis.get();
+            long stableDuration = notUpgradingSince < 0 ? -1 : System.currentTimeMillis() - notUpgradingSince;
+            return stableDuration < MIN_STABLE_DURATION_MS;
+        }
     }
 
-    final Supplier<ExpiringMemoizingSupplier.ReturnValue<CassandraVersion>> upgradeFromVersionSupplier = () ->
+    // For testing only
+    @VisibleForTesting
+    public void setNotUpgradingSinceMillisUnsafe(long notUpgradingSinceMillis)
     {
-        // Once there are no prior version nodes we don't need to keep rechecking
-        if (!upgradeInProgressPossible)
-            return new ExpiringMemoizingSupplier.Memoized<>(null);
-
-        CassandraVersion minVersion = SystemKeyspace.CURRENT_VERSION;
-
-        // Skip the round if the gossiper has not started yet
-        // Otherwise, upgradeInProgressPossible can be set to false wrongly.
-        // If we don't know any epstate we don't know anything about the cluster.
-        // If we only know about ourselves, we can assume that version is CURRENT_VERSION
-        if (!isEnabled() || isLoneNode(endpointStateMap))
-        {
-            return new ExpiringMemoizingSupplier.NotMemoized<>(minVersion);
-        }
-
-        // Check the release version of all the peers it heard of. Not necessary the peer that it has/had contacted with.
-        boolean allHostsHaveKnownVersion = true;
-        for (InetAddressAndPort host : endpointStateMap.keySet())
-        {
-            CassandraVersion version = getReleaseVersion(host);
-
-            //Raced with changes to gossip state, wait until next iteration
-            if (version == null)
-                allHostsHaveKnownVersion = false;
-            else if (version.compareTo(minVersion) < 0)
-                minVersion = version;
-        }
-
-        if (minVersion.compareTo(SystemKeyspace.CURRENT_VERSION) < 0)
-            return new ExpiringMemoizingSupplier.Memoized<>(minVersion);
-
-        if (!allHostsHaveKnownVersion)
-            return new ExpiringMemoizingSupplier.NotMemoized<>(minVersion);
-
-        upgradeInProgressPossible = false;
-        return new ExpiringMemoizingSupplier.Memoized<>(null);
-    };
-
-    private final Supplier<CassandraVersion> upgradeFromVersionMemoized = ExpiringMemoizingSupplier.memoizeWithExpiration(upgradeFromVersionSupplier, 1, TimeUnit.MINUTES);
+        ((DefaultClusterVersionProvider) clusterVersionProvider).notUpgradingSinceMillis.set(notUpgradingSinceMillis);
+    }
 
     @VisibleForTesting
-    public void expireUpgradeFromVersion()
+    public final IClusterVersionProvider clusterVersionProvider;
+
+    private static IClusterVersionProvider maybeCustomClusterVersionProvider()
     {
-        upgradeInProgressPossible = true;
-        ((ExpiringMemoizingSupplier<CassandraVersion>) upgradeFromVersionMemoized).expire();
+        IClusterVersionProvider clusterVersionProvider = null;
+        String className = CLUSTER_VERSION_PROVIDER_CLASS_NAME.getString();
+        if (className != null)
+        {
+            clusterVersionProvider = FBUtilities.instanceOrConstruct(className,"Custom implementation of " + IClusterVersionProvider.class.getSimpleName());
+            if (clusterVersionProvider != null)
+                logger.info("Using custom implementation of {}: {} - {}", IClusterVersionProvider.class.getSimpleName(), className, clusterVersionProvider);
+        }
+
+        return clusterVersionProvider;
     }
 
     private static final boolean disableThreadValidation = Boolean.getBoolean(Props.DISABLE_THREAD_VALIDATION);
@@ -281,7 +332,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
 
     private static boolean isInGossipStage()
     {
-        return ((JMXEnabledSingleThreadExecutor) Stage.GOSSIP.executor()).isExecutedBy(Thread.currentThread());
+        return Stage.GOSSIP.runsInSingleThread(Thread.currentThread());
     }
 
     private static void checkProperThreadForStateMutation()
@@ -364,11 +415,17 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
         }
     }
 
-    private final RecomputingSupplier<CassandraVersion> minVersionSupplier = new RecomputingSupplier<>(this::computeMinVersion, executor);
-
-    @VisibleForTesting
     public Gossiper(boolean registerJmx)
     {
+        this(registerJmx, maybeCustomClusterVersionProvider());
+    }
+
+    @VisibleForTesting
+    public Gossiper(boolean registerJmx, IClusterVersionProvider customClusterVersionProvider)
+    {
+        this.clusterVersionProvider = Objects.requireNonNullElseGet(customClusterVersionProvider, DefaultClusterVersionProvider::new);
+        logger.info("Using cluster version provider {}: {}", this.clusterVersionProvider.getClass().getName(), clusterVersionProvider);
+
         // half of QUARATINE_DELAY, to ensure justRemovedEndpoints has enough leeway to prevent re-gossip
         fatClientTimeout = (QUARANTINE_DELAY / 2);
         /* register with the Failure Detector for receiving Failure detector events */
@@ -382,11 +439,13 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
 
         subscribers.add(new IEndpointStateChangeSubscriber()
         {
+            @Override
             public void onJoin(InetAddressAndPort endpoint, EndpointState state)
             {
                 maybeRecompute(state);
             }
 
+            @Override
             public void onAlive(InetAddressAndPort endpoint, EndpointState state)
             {
                 maybeRecompute(state);
@@ -395,13 +454,14 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
             private void maybeRecompute(EndpointState state)
             {
                 if (state.getApplicationState(ApplicationState.RELEASE_VERSION) != null)
-                    minVersionSupplier.recompute();
+                    Gossiper.this.clusterVersionProvider.reset();
             }
 
+            @Override
             public void onChange(InetAddressAndPort endpoint, ApplicationState state, VersionedValue value)
             {
                 if (state == ApplicationState.RELEASE_VERSION)
-                    minVersionSupplier.recompute();
+                    Gossiper.this.clusterVersionProvider.reset();
             }
         });
     }
@@ -881,6 +941,130 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
         });
     }
 
+    public void reviveEndpoint(String address) throws UnknownHostException
+    {
+        InetAddressAndPort endpoint = InetAddressAndPort.getByName(address);
+        EndpointState epState = endpointStateMap.get(endpoint);
+        logger.warn("Reviving {} via gossip", endpoint);
+
+        if (epState == null)
+            throw new RuntimeException("Cannot revive endpoint " + endpoint + ": no endpoint-state");
+
+        int generation = epState.getHeartBeatState().getGeneration();
+        int heartbeat = epState.getHeartBeatState().getHeartBeatVersion();
+
+        logger.info("Have endpoint-state for {}: status={}, generation={}, heartbeat={}",
+                endpoint, epState.getStatus(), generation, heartbeat);
+
+        if (!isSilentShutdownState(epState))
+            throw new RuntimeException("Cannot revive endpoint " + endpoint + ": not in a (silent) shutdown state: " + epState.getStatus());
+
+        if (FailureDetector.instance.isAlive(endpoint))
+            throw new RuntimeException("Cannot revive endpoint " + endpoint + ": still alive (failure-detector)");
+
+        logger.info("Sleeping for {}ms to ensure {} does not change", StorageService.RING_DELAY_MILLIS, endpoint);
+        Uninterruptibles.sleepUninterruptibly(StorageService.RING_DELAY_MILLIS, TimeUnit.MILLISECONDS);
+        // make sure the endpoint state did not change
+        EndpointState newState = endpointStateMap.get(endpoint);
+        if (newState == null)
+            throw new RuntimeException("Cannot revive endpoint " + endpoint + ": endpoint-state disappeared");
+        if (newState.getHeartBeatState().getGeneration() != generation)
+            throw new RuntimeException("Cannot revive endpoint " + endpoint + ": still alive, generation changed while trying to reviving it");
+        if (newState.getHeartBeatState().getHeartBeatVersion() != heartbeat)
+            throw new RuntimeException("Cannot revive endpoint " + endpoint + ": still alive, heartbeat changed while trying to reviving it");
+
+        epState.updateTimestamp(); // make sure we don't evict it too soon
+        epState.getHeartBeatState().forceNewerGenerationUnsafe();
+
+        // using the tokens from the endpoint-state as that is the real source of truth
+        Collection<Token> tokens = getTokensFromEndpointState(epState, DatabaseDescriptor.getPartitioner());
+        if (tokens == null || tokens.isEmpty())
+            throw new RuntimeException("Cannot revive endpoint " + endpoint + ": no tokens from TokenMetadata");
+
+        epState.addApplicationState(ApplicationState.STATUS, StorageService.instance.valueFactory.normal(tokens));
+        epState.addApplicationState(ApplicationState.STATUS_WITH_PORT, StorageService.instance.valueFactory.normal(tokens));
+        handleMajorStateChange(endpoint, epState);
+        Uninterruptibles.sleepUninterruptibly(intervalInMillis * 4, TimeUnit.MILLISECONDS);
+        logger.warn("Finished reviving {}, status={}, generation={}, heartbeat={}",
+                endpoint, epState.getStatus(), generation, heartbeat);
+    }
+
+    public void unsafeSetEndpointState(String address, String status) throws UnknownHostException
+    {
+        logger.warn("Forcibly changing gossip status of " + address + " to " + status);
+
+        InetAddressAndPort endpoint = InetAddressAndPort.getByName(address);
+        EndpointState epState = endpointStateMap.get(endpoint);
+
+        if (epState == null)
+            throw new RuntimeException("No state for endpoint " + endpoint);
+
+        int generation = epState.getHeartBeatState().getGeneration();
+        int heartbeat = epState.getHeartBeatState().getHeartBeatVersion();
+
+        logger.info("Have endpoint-state for {}: status={}, generation={}, heartbeat={}",
+                endpoint, epState.getStatus(), generation, heartbeat);
+
+        if (FailureDetector.instance.isAlive(endpoint))
+            throw new RuntimeException("Cannot update status for endpoint " + endpoint + ": still alive (failure-detector)");
+
+        Collection<Token> tokens = getTokensFromEndpointState(epState, DatabaseDescriptor.getPartitioner());
+
+        VersionedValue newStatus;
+        switch (status.toLowerCase())
+        {
+            case "hibernate":
+                newStatus = StorageService.instance.valueFactory.hibernate(true);
+                break;
+            case "normal":
+                newStatus = StorageService.instance.valueFactory.normal(tokens);
+                break;
+            case "left":
+                newStatus = StorageService.instance.valueFactory.left(tokens, computeExpireTime());
+                break;
+            case "shutdown":
+                newStatus = StorageService.instance.valueFactory.shutdown(true);
+                break;
+            default:
+                throw new IllegalArgumentException("Unknown status '" + status + '\'');
+        }
+
+        epState.updateTimestamp(); // make sure we don't evict it too soon
+        epState.getHeartBeatState().forceNewerGenerationUnsafe();
+
+        epState.addApplicationState(ApplicationState.STATUS, newStatus);
+        epState.addApplicationState(ApplicationState.STATUS_WITH_PORT, newStatus);
+
+        handleMajorStateChange(endpoint, epState);
+
+        logger.warn("Forcibly changed gossip status of " + endpoint + " to " + newStatus);
+    }
+
+    public Collection<Token> getTokensFor(InetAddressAndPort endpoint, IPartitioner partitioner)
+    {
+        EndpointState state = getEndpointStateForEndpoint(endpoint);
+        if (state == null)
+            return Collections.emptyList();
+
+        return getTokensFromEndpointState(state, partitioner);
+    }
+
+    private Collection<Token> getTokensFromEndpointState(EndpointState state, IPartitioner partitioner)
+    {
+        try
+        {
+            VersionedValue versionedValue = state.getApplicationState(ApplicationState.TOKENS);
+            if (versionedValue == null)
+                return Collections.emptyList();
+
+            return TokenSerializer.deserialize(partitioner, new DataInputStream(new ByteArrayInputStream(versionedValue.toBytes())));
+        }
+        catch (IOException e)
+        {
+            throw new RuntimeException(e);
+        }
+    }
+
     public boolean isKnownEndpoint(InetAddressAndPort endpoint)
     {
         return endpointStateMap.containsKey(endpoint);
@@ -1048,7 +1232,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
         long now = System.currentTimeMillis();
         long nowNano = System.nanoTime();
 
-        long pending = ((JMXEnabledThreadPoolExecutor) Stage.GOSSIP.executor()).metrics.pendingTasks.getValue();
+        long pending = Stage.GOSSIP.getPendingTaskCount();
         if (pending > 0 && lastProcessedMessageAt < now - 1000)
         {
             // if some new messages just arrived, give the executor some time to work on them
@@ -1404,11 +1588,13 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
 
     /**
      * This method is called whenever there is a "big" change in ep state (a generation change for a known node).
+     * It is public as the state change simulation is needed in testing, otherwise should not be used directly.
      *
      * @param ep      endpoint
      * @param epState EndpointState for the endpoint
      */
-    private void handleMajorStateChange(InetAddressAndPort ep, EndpointState epState)
+    @VisibleForTesting
+    public void handleMajorStateChange(InetAddressAndPort ep, EndpointState epState)
     {
         checkProperThreadForStateMutation();
         EndpointState localEpState = endpointStateMap.get(ep);
@@ -1806,7 +1992,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
         maybeInitializeLocalState(generationNbr);
         EndpointState localState = endpointStateMap.get(FBUtilities.getBroadcastAddressAndPort());
         localState.addApplicationStates(preloadLocalStates);
-        minVersionSupplier.recompute();
+        clusterVersionProvider.reset();
 
         //notify snitches that Gossiper is about to start
         DatabaseDescriptor.getEndpointSnitch().gossiperStarting();
@@ -2081,18 +2267,27 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
         EndpointState mystate = endpointStateMap.get(FBUtilities.getBroadcastAddressAndPort());
         if (mystate != null && !isSilentShutdownState(mystate) && StorageService.instance.isJoined())
         {
-            logger.info("Announcing shutdown");
-            addLocalApplicationState(ApplicationState.STATUS_WITH_PORT, StorageService.instance.valueFactory.shutdown(true));
-            addLocalApplicationState(ApplicationState.STATUS, StorageService.instance.valueFactory.shutdown(true));
-            Message message = Message.out(Verb.GOSSIP_SHUTDOWN, noPayload);
-            for (InetAddressAndPort ep : liveEndpoints)
-                MessagingService.instance().send(message, ep);
-            Uninterruptibles.sleepUninterruptibly(Integer.getInteger("cassandra.shutdown_announce_in_ms", 2000), TimeUnit.MILLISECONDS);
+            announceShutdown();
         }
         else
             logger.warn("No local state, state is in silent shutdown, or node hasn't joined, not announcing shutdown");
         if (scheduledGossipTask != null)
             scheduledGossipTask.cancel(false);
+    }
+
+    /**
+     * This method sends the node shutdown status to all live endpoints.
+     * It does not close the gossiper itself.
+     */
+    public void announceShutdown()
+    {
+        logger.info("Announcing shutdown");
+        addLocalApplicationState(ApplicationState.STATUS_WITH_PORT, StorageService.instance.valueFactory.shutdown(true));
+        addLocalApplicationState(ApplicationState.STATUS, StorageService.instance.valueFactory.shutdown(true));
+        Message message = Message.out(Verb.GOSSIP_SHUTDOWN, noPayload);
+        for (InetAddressAndPort ep : liveEndpoints)
+            MessagingService.instance().send(message, ep);
+        Uninterruptibles.sleepUninterruptibly(Integer.getInteger("cassandra.shutdown_announce_in_ms", 2000), TimeUnit.MILLISECONDS);
     }
 
     public boolean isEnabled()
@@ -2343,10 +2538,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
      */
     public boolean hasMajorVersion3Nodes()
     {
-        return isUpgradingFromVersionLowerThan(CassandraVersion.CASSANDRA_4_0) || // this is quite obvious
-               // however if we discovered only nodes at current version so far (in particular only this node),
-               // but still there are nodes with unknown version, we also want to report that the cluster may have nodes at 3.x
-               upgradeInProgressPossible && !isUpgradingFromVersionLowerThan(SystemKeyspace.CURRENT_VERSION.familyLowerBound.get());
+        return isUpgradingFromVersionLowerThan(CassandraVersion.CASSANDRA_4_0);
     }
 
     /**
@@ -2354,11 +2546,28 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
      */
     public boolean isUpgradingFromVersionLowerThan(CassandraVersion referenceVersion)
     {
-        CassandraVersion v = upgradeFromVersionMemoized.get();
-        if (CassandraVersion.NULL_VERSION.equals(v) && scheduledGossipTask == null)
-            return false;
+        return getMinVersion().compareTo(referenceVersion) < 0;
+    }
 
-        return v != null && v.compareTo(referenceVersion) < 0;
+    /**
+     * This is a safe way to get the version we are upgrading from. It will return the current version if the cluster
+     * is not in the upgrade state. If the cluster is in upgrade state, it will return NULL_VERSION, if there is no
+     * information about the other nodes yet. Otherwise, it will just return the minimum cluster version.
+     */
+    public CassandraVersion getMinVersion()
+    {
+        CassandraVersion v = clusterVersionProvider.getMinClusterVersion();
+        assert v != null : "API contract violation: cluster version provider implementation should never return null";
+
+        if (!clusterVersionProvider.isUpgradeInProgress())
+            return v;
+
+        // we are in the upgrade state but since the minimum reported version is current version, we do not know
+        // anything about the other nodes
+        if (v.compareTo(SystemKeyspace.CURRENT_VERSION) < 0)
+            return v;
+        else
+            return CassandraVersion.NULL_VERSION;
     }
 
     private boolean nodesAgreeOnSchema(Collection<InetAddressAndPort> nodes)
@@ -2387,69 +2596,4 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
         ExecutorUtils.shutdownAndWait(timeout, unit, executor);
     }
 
-    @Nullable
-    public CassandraVersion getMinVersion(long delay, TimeUnit timeUnit)
-    {
-        try
-        {
-            return minVersionSupplier.get(delay, timeUnit);
-        }
-        catch (TimeoutException e)
-        {
-            // Timeouts here are harmless: they won't cause reprepares and may only
-            // cause the old version of the hash to be kept for longer
-            return null;
-        }
-        catch (Throwable e)
-        {
-            logger.error("Caught an exception while waiting for min version", e);
-            return null;
-        }
-    }
-
-    @Nullable
-    private String getReleaseVersionString(InetAddressAndPort ep)
-    {
-        EndpointState state = getEndpointStateForEndpoint(ep);
-        if (state == null)
-            return null;
-
-        VersionedValue value = state.getApplicationState(ApplicationState.RELEASE_VERSION);
-        return value == null ? null : value.value;
-    }
-
-    private CassandraVersion computeMinVersion()
-    {
-        CassandraVersion minVersion = null;
-
-        for (InetAddressAndPort addr : Iterables.concat(Gossiper.instance.getLiveMembers(),
-                                                        Gossiper.instance.getUnreachableMembers()))
-        {
-            String versionString = getReleaseVersionString(addr);
-            // Raced with changes to gossip state, wait until next iteration
-            if (versionString == null)
-                return null;
-
-            CassandraVersion version;
-
-            try
-            {
-                version = new CassandraVersion(versionString);
-            }
-            catch (Throwable t)
-            {
-                JVMStabilityInspector.inspectThrowable(t);
-                String message = String.format("Can't parse version string %s", versionString);
-                logger.warn(message);
-                if (logger.isDebugEnabled())
-                    logger.debug(message, t);
-                return null;
-            }
-
-            if (minVersion == null || version.compareTo(minVersion) < 0)
-                minVersion = version;
-        }
-
-        return minVersion;
-    }
 }

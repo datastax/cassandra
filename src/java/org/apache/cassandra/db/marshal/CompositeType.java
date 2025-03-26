@@ -258,7 +258,7 @@ public class CompositeType extends AbstractCompositeType
         if (i * 2 + 1 < srcs.length)
             srcs = Arrays.copyOfRange(srcs, 0, i * 2 + 1);
 
-        return ByteSource.withTerminator(version == Version.LEGACY ? ByteSource.END_OF_STREAM : terminator, srcs);
+        return ByteSource.withTerminatorMaybeLegacy(version, ByteSource.END_OF_STREAM, srcs);
     }
 
     @Override

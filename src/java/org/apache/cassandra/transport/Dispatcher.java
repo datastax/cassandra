@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.transport;
 
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
@@ -29,16 +30,16 @@ import org.slf4j.LoggerFactory;
 import io.netty.channel.Channel;
 import io.netty.channel.EventLoop;
 import io.netty.util.AttributeKey;
-import org.apache.cassandra.concurrent.LocalAwareExecutorService;
 import org.apache.cassandra.concurrent.Stage;
-import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.net.FrameEncoder;
 import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.service.QueryState;
+import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.transport.ClientResourceLimits.Overload;
 import org.apache.cassandra.transport.Flusher.FlushItem;
 import org.apache.cassandra.transport.messages.ErrorMessage;
 import org.apache.cassandra.transport.messages.EventMessage;
+import org.apache.cassandra.transport.messages.StartupMessage;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.NoSpamLogger;
 
@@ -72,10 +73,41 @@ public class Dispatcher
         Stage.NATIVE_TRANSPORT_REQUESTS.submit(() -> processRequest(channel, request, forFlusher, backpressure));
     }
 
-    /**
-     * Note: this method may be executed on the netty event loop, during initial protocol negotiation
-     */
-    static Message.Response processRequest(ServerConnection connection, Message.Request request, Overload backpressure)
+    void processRequest(Channel channel, Message.Request request, FlushItemConverter forFlusher, Overload backpressure)
+    {
+        assert request.connection() instanceof ServerConnection;
+        ServerConnection connection = (ServerConnection) request.connection();
+        try
+        {
+            this.processRequest(connection, request, backpressure)
+                .whenComplete((response, ex) -> {
+                    FlushItem<?> toFlush;
+                    if (ex == null)
+                    {
+                        toFlush = forFlusher.toFlushItem(channel, request, response);
+                        Message.logger.trace("Responding: {}, v={}", response, connection.getVersion());
+                    }
+                    else
+                    {
+                        JVMStabilityInspector.inspectThrowable(ex);
+                        ExceptionHandlers.UnexpectedChannelExceptionHandler handler = new ExceptionHandlers.UnexpectedChannelExceptionHandler(channel, true);
+                        ErrorMessage error = ErrorMessage.fromException(ex, handler);
+                        error.setStreamId(request.getStreamId());
+                        toFlush = forFlusher.toFlushItem(channel, request, error);
+                    }
+                    flush(toFlush);
+                });
+        }
+        finally
+        {
+            // As the warnings and trace state has been potentially propagated and "reset" in another stage, we do reset
+            // again here on the "originating" stage to make sure the next request starts from a clean slate:
+            ClientWarn.instance.resetWarnings();
+            Tracing.instance.set(null);
+        }
+    }
+
+    CompletableFuture<Message.Response> processRequest(ServerConnection connection, Message.Request request, Overload backpressure)
     {
         long queryStartNanoTime = System.nanoTime();
         if (connection.getVersion().isGreaterOrEqualTo(ProtocolVersion.V4))
@@ -102,43 +134,38 @@ public class Dispatcher
 
         Message.logger.trace("Received: {}, v={}", request, connection.getVersion());
         connection.requests.inc();
-        Message.Response response = request.execute(qstate, queryStartNanoTime);
-        response.setStreamId(request.getStreamId());
-        response.setWarnings(ClientWarn.instance.getWarnings());
-        response.attach(connection);
-        connection.applyStateTransition(request.type, response.type);
-        return response;
+        return request.execute(qstate, queryStartNanoTime)
+                      .whenComplete((result, ignored) -> {
+                          try
+                          {
+                              result.setStreamId(request.getStreamId());
+                              result.setWarnings(ClientWarn.instance.getWarnings());
+                              result.attach(connection);
+                              connection.applyStateTransition(request.type, result.type);
+                          }
+                          finally
+                          {
+                              ClientWarn.instance.resetWarnings();
+                          }
+                      });
     }
 
-    /**
-     * Note: this method is not expected to execute on the netty event loop.
-     */
-    void processRequest(Channel channel, Message.Request request, FlushItemConverter forFlusher, Overload backpressure)
+    static CompletableFuture<Message.Response> processInit(ServerConnection connection, StartupMessage request)
     {
-        final Message.Response response;
-        final ServerConnection connection;
-        FlushItem<?> toFlush;
-        try
-        {
-            assert request.connection() instanceof ServerConnection;
-            connection = (ServerConnection) request.connection();
-            response = processRequest(connection, request, backpressure);
-            toFlush = forFlusher.toFlushItem(channel, request, response);
-            Message.logger.trace("Responding: {}, v={}", response, connection.getVersion());
-        }
-        catch (Throwable t)
-        {
-            JVMStabilityInspector.inspectThrowable(t);
-            ExceptionHandlers.UnexpectedChannelExceptionHandler handler = new ExceptionHandlers.UnexpectedChannelExceptionHandler(channel, true);
-            ErrorMessage error = ErrorMessage.fromException(t, handler);
-            error.setStreamId(request.getStreamId());
-            toFlush = forFlusher.toFlushItem(channel, request, error);
-        }
-        finally
-        {
-            ClientWarn.instance.resetWarnings();
-        }
-        flush(toFlush);
+        long queryStartNanoTime = System.nanoTime();
+        if (connection.getVersion().isGreaterOrEqualTo(ProtocolVersion.V4))
+            ClientWarn.instance.captureWarnings();
+
+        QueryState qstate = connection.validateNewMessage(request.type, connection.getVersion());
+
+        Message.logger.trace("Received: {}, v={}", request, connection.getVersion());
+        connection.requests.inc();
+        return request.execute(qstate, queryStartNanoTime).whenComplete((result, ignored) -> {
+            result.setStreamId(request.getStreamId());
+            result.setWarnings(ClientWarn.instance.getWarnings());
+            result.attach(connection);
+            connection.applyStateTransition(request.type, result.type);
+        });
     }
 
     private void flush(FlushItem<?> item)

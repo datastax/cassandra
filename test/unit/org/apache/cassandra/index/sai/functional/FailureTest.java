@@ -60,7 +60,7 @@ public class FailureTest extends SAITester
         flush();
 
         // Verify that, while the node is still operational, the index is not.
-        Assertions.assertThatThrownBy(() -> execute("SELECT * FROM %s WHERE v1 > 1"))
+        Assertions.assertThatThrownBy(() -> executeInternal("SELECT * FROM %s WHERE v1 > 1"))
                   .isInstanceOf(IndexNotAvailableException.class);
 
         ssTableContextCreationFailure.disable();
@@ -97,7 +97,7 @@ public class FailureTest extends SAITester
         compact();
 
         // Verify that the index is not available.
-        Assertions.assertThatThrownBy(() -> execute("SELECT * FROM %s WHERE v1 > 1"))
+        Assertions.assertThatThrownBy(() -> executeInternal("SELECT * FROM %s WHERE v1 > 1"))
                   .isInstanceOf(IndexNotAvailableException.class);
     }
 
@@ -116,7 +116,7 @@ public class FailureTest extends SAITester
         Injection ssTableContextCreationFailure = newFailureOnEntry("context_failure_on_creation", SSTableContext.class, "<init>", RuntimeException.class);
         Injections.inject(ssTableContextCreationFailure);
 
-        String v2IndexName = createIndex(String.format(CREATE_INDEX_TEMPLATE, "v2"));
+        String v2IndexName = createIndexAsync(String.format(CREATE_INDEX_TEMPLATE, "v2"));
 
         // Verify that the initial index build fails...
         verifyInitialIndexFailed(v2IndexName);
@@ -124,7 +124,7 @@ public class FailureTest extends SAITester
         verifySSTableIndexes(v2IndexName, 0);
 
         // ...and then verify that, while the node is still operational, the index is not.
-        Assertions.assertThatThrownBy(() -> execute("SELECT * FROM %s WHERE v2 = '1'"))
+        Assertions.assertThatThrownBy(() -> executeInternal("SELECT * FROM %s WHERE v2 = '1'"))
                   .isInstanceOf(IndexNotAvailableException.class);
     }
 }

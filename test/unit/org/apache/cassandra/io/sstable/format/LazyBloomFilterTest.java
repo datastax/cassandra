@@ -46,6 +46,7 @@ import org.apache.cassandra.db.RowUpdateBuilder;
 import org.apache.cassandra.db.SinglePartitionReadCommand;
 import org.apache.cassandra.db.Slices;
 import org.apache.cassandra.metrics.RestorableMeter;
+import org.apache.cassandra.schema.CachingParams;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.utils.AlwaysPresentFilter;
 import org.apache.cassandra.utils.BloomFilter;
@@ -74,7 +75,8 @@ public class LazyBloomFilterTest
         SchemaLoader.prepareServer();
         SchemaLoader.createKeyspace(KEYSPACE1,
                                     KeyspaceParams.simple(1),
-                                    SchemaLoader.standardCFMD(KEYSPACE1, CF_STANDARD).bloomFilterFpChance(0.1));
+                                    SchemaLoader.standardCFMD(KEYSPACE1, CF_STANDARD).bloomFilterFpChance(0.1)
+                                                .caching(new CachingParams(false, 0)));
 
         store = Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD);
     }

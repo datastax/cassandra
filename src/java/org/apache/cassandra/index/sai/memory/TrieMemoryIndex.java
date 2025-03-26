@@ -25,47 +25,58 @@
 package org.apache.cassandra.index.sai.memory;
 
 import java.io.IOException;
+import java.math.BigDecimal;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashSet;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.Objects;
 import java.util.SortedSet;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.function.Consumer;
 import java.util.function.LongConsumer;
-
 import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.github.jbellis.jvector.util.Accountable;
+import io.github.jbellis.jvector.util.RamUsageEstimator;
 import io.netty.util.concurrent.FastThreadLocal;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
+import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.memtable.TrieMemtable;
 import org.apache.cassandra.db.tries.Direction;
-import org.apache.cassandra.db.tries.MemtableTrie;
+import org.apache.cassandra.db.tries.InMemoryTrie;
 import org.apache.cassandra.db.tries.Trie;
+import org.apache.cassandra.db.tries.TrieSpaceExhaustedException;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
+import org.apache.cassandra.index.sai.analyzer.NoOpAnalyzer;
 import org.apache.cassandra.index.sai.disk.format.Version;
+import org.apache.cassandra.index.sai.disk.v6.TermsDistribution;
+import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.plan.Orderer;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithByteComparable;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeys;
-import org.apache.cassandra.index.sai.utils.RangeIterator;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.utils.AbstractIterator;
+import org.apache.cassandra.utils.BinaryHeap;
 import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.Throwables;
@@ -77,11 +88,14 @@ public class TrieMemoryIndex extends MemoryIndex
     private static final Logger logger = LoggerFactory.getLogger(TrieMemoryIndex.class);
     private static final int MINIMUM_QUEUE_SIZE = 128;
     private static final int MAX_RECURSIVE_KEY_LENGTH = 128;
-    private final MemtableTrie<PrimaryKeys> data;
+
+    private final InMemoryTrie<PrimaryKeys> data;
     private final LongAdder heapAllocations;
     private final PrimaryKeysAccumulator primaryKeysAccumulator;
     private final PrimaryKeysRemover primaryKeysRemover;
     private final boolean analyzerTransformsValue;
+    private final Map<PkWithTerm, Integer> termFrequencies;
+    private final Map<PrimaryKey, Integer> docLengths = new HashMap<>();
 
     private final Memtable memtable;
     private AbstractBounds<PartitionPosition> keyBounds;
@@ -107,12 +121,54 @@ public class TrieMemoryIndex extends MemoryIndex
     {
         super(indexContext);
         this.keyBounds = keyBounds;
-        this.data = new MemtableTrie<>(TrieMemtable.BUFFER_TYPE);
         this.heapAllocations = new LongAdder();
         this.primaryKeysAccumulator = new PrimaryKeysAccumulator(heapAllocations);
         this.primaryKeysRemover = new PrimaryKeysRemover(heapAllocations);
         this.analyzerTransformsValue = indexContext.getAnalyzerFactory().create().transformValue();
+        this.data = InMemoryTrie.longLived(TypeUtil.BYTE_COMPARABLE_VERSION, TrieMemtable.BUFFER_TYPE, indexContext.columnFamilyStore().readOrdering());
         this.memtable = memtable;
+        termFrequencies = new ConcurrentHashMap<>();
+    }
+
+    public synchronized Map<PrimaryKey, Integer> getDocLengths()
+    {
+        return docLengths;
+    }
+
+    private static class PkWithTerm implements Accountable
+    {
+        private final PrimaryKey pk;
+        private final ByteComparable term;
+
+        private PkWithTerm(PrimaryKey pk, ByteComparable term)
+        {
+            this.pk = pk;
+            this.term = term;
+        }
+
+        @Override
+        public long ramBytesUsed()
+        {
+            return RamUsageEstimator.NUM_BYTES_OBJECT_HEADER + 
+                   2L * RamUsageEstimator.NUM_BYTES_OBJECT_REF + 
+                   pk.ramBytesUsed() +
+                   ByteComparable.length(term, TypeUtil.BYTE_COMPARABLE_VERSION);
+        }
+
+        @Override
+        public int hashCode()
+        {
+            return Objects.hash(pk, ByteComparable.length(term, TypeUtil.BYTE_COMPARABLE_VERSION));
+        }
+
+        @Override
+        public boolean equals(Object o)
+        {
+            if (o == null || getClass() != o.getClass()) return false;
+            PkWithTerm that = (PkWithTerm) o;
+            return Objects.equals(pk, that.pk)
+                   && ByteComparable.compare(term, that.term, TypeUtil.BYTE_COMPARABLE_VERSION) == 0;
+        }
     }
 
     public synchronized void add(DecoratedKey key,
@@ -203,48 +259,88 @@ public class TrieMemoryIndex extends MemoryIndex
                                   ByteBuffer value,
                                   LongConsumer onHeapAllocationsTracker,
                                   LongConsumer offHeapAllocationsTracker,
-                                  MemtableTrie.UpsertTransformer<PrimaryKeys, PrimaryKey> transformer)
+                                  InMemoryTrie.UpsertTransformer<PrimaryKeys, PrimaryKey> transformer)
     {
         AbstractAnalyzer analyzer = indexContext.getAnalyzerFactory().create();
         try
         {
             value = TypeUtil.encode(value, indexContext.getValidator());
             analyzer.reset(value);
-            final long initialSizeOnHeap = data.sizeOnHeap();
-            final long initialSizeOffHeap = data.sizeOffHeap();
+            final long initialSizeOnHeap = data.usedSizeOnHeap();
+            final long initialSizeOffHeap = data.usedSizeOffHeap();
             final long reducerHeapSize = heapAllocations.longValue();
 
+            if (docLengths.containsKey(primaryKey) && !(analyzer instanceof NoOpAnalyzer))
+            {
+                AtomicLong heapReclaimed = new AtomicLong();
+                // we're overwriting an existing cell, clear out the old term counts
+                for (Map.Entry<ByteComparable, PrimaryKeys> entry : data.entrySet())
+                {
+                    var termInTrie = entry.getKey();
+                    entry.getValue().forEach(pkInTrie -> {
+                        if (pkInTrie.equals(primaryKey))
+                        {
+                            var t = new PkWithTerm(pkInTrie, termInTrie);
+                            termFrequencies.remove(t);
+                            heapReclaimed.addAndGet(RamUsageEstimator.HASHTABLE_RAM_BYTES_PER_ENTRY + t.ramBytesUsed() + Integer.BYTES);
+                        }
+                    });
+                }
+            }
+
+            int tokenCount = 0;
             while (analyzer.hasNext())
             {
                 final ByteBuffer term = analyzer.next();
                 if (!indexContext.validateMaxTermSize(primaryKey.partitionKey(), term))
                     continue;
 
+                tokenCount++;
+
                 // Note that this term is already encoded once by the TypeUtil.encode call above.
                 setMinMaxTerm(term.duplicate());
 
-                final ByteComparable encodedTerm = encode(term.duplicate());
+                final ByteComparable encodedTerm = asByteComparable(term.duplicate());
 
                 try
                 {
-                    if (term.limit() <= MAX_RECURSIVE_KEY_LENGTH)
-                    {
-                        data.putRecursive(encodedTerm, primaryKey, transformer);
-                    }
-                    else
-                    {
-                        data.apply(Trie.singleton(encodedTerm, primaryKey), transformer);
-                    }
+                    data.putSingleton(encodedTerm, primaryKey, (existing, update) -> {
+                        // First do the normal primary keys reduction
+                        PrimaryKeys result = transformer.apply(existing, update);
+                        if (analyzer instanceof NoOpAnalyzer)
+                            return result;
+
+                        // Then update term frequency
+                        var pkbc = new PkWithTerm(update, encodedTerm);
+                        termFrequencies.compute(pkbc, (k, oldValue) -> {
+                            if (oldValue == null) {
+                                // New key added, track heap allocation 
+                                onHeapAllocationsTracker.accept(RamUsageEstimator.HASHTABLE_RAM_BYTES_PER_ENTRY + k.ramBytesUsed() + Integer.BYTES);
+                                return 1;
+                            }
+                            return oldValue + 1;
+                        });
+
+                        return result;
+                    }, term.limit() <= MAX_RECURSIVE_KEY_LENGTH);
                 }
-                catch (MemtableTrie.SpaceExhaustedException e)
+                catch (TrieSpaceExhaustedException e)
                 {
                     Throwables.throwAsUncheckedException(e);
                 }
             }
 
-            onHeapAllocationsTracker.accept((data.sizeOnHeap() - initialSizeOnHeap) +
+            docLengths.put(primaryKey, tokenCount);
+            // heap used for term frequencies and doc lengths
+            long heapUsed = RamUsageEstimator.HASHTABLE_RAM_BYTES_PER_ENTRY
+                            + primaryKey.ramBytesUsed()
+                            + Integer.BYTES;
+            onHeapAllocationsTracker.accept(heapUsed);
+
+            // memory used by the trie
+            onHeapAllocationsTracker.accept((data.usedSizeOnHeap() - initialSizeOnHeap) +
                                             (heapAllocations.longValue() - reducerHeapSize));
-            offHeapAllocationsTracker.accept(data.sizeOffHeap() - initialSizeOffHeap);
+            offHeapAllocationsTracker.accept(data.usedSizeOffHeap() - initialSizeOffHeap);
         }
         finally
         {
@@ -253,10 +349,10 @@ public class TrieMemoryIndex extends MemoryIndex
     }
 
     @Override
-    public Iterator<Pair<ByteComparable, PrimaryKeys>> iterator()
+    public Iterator<Pair<ByteComparable, List<PkWithFrequency>>> iterator()
     {
         Iterator<Map.Entry<ByteComparable, PrimaryKeys>> iterator = data.entrySet().iterator();
-        return new Iterator<Pair<ByteComparable, PrimaryKeys>>()
+        return new Iterator<>()
         {
             @Override
             public boolean hasNext()
@@ -265,10 +361,17 @@ public class TrieMemoryIndex extends MemoryIndex
             }
 
             @Override
-            public Pair<ByteComparable, PrimaryKeys> next()
+            public Pair<ByteComparable, List<PkWithFrequency>> next()
             {
                 Map.Entry<ByteComparable, PrimaryKeys> entry = iterator.next();
-                return Pair.create(entry.getKey(), entry.getValue());
+                var pairs = new ArrayList<PkWithFrequency>(entry.getValue().size());
+                for (PrimaryKey pk : entry.getValue().keys())
+                {
+                    var frequencyRaw = termFrequencies.get(new PkWithTerm(pk, entry.getKey()));
+                    int frequency = frequencyRaw == null ? 1 : frequencyRaw;
+                    pairs.add(new PkWithFrequency(pk, frequency));
+                }
+                return Pair.create(entry.getKey(), pairs);
             }
         };
     }
@@ -285,7 +388,7 @@ public class TrieMemoryIndex extends MemoryIndex
     }
 
     @Override
-    public RangeIterator search(Expression expression, AbstractBounds<PartitionPosition> keyRange)
+    public KeyRangeIterator search(Expression expression, AbstractBounds<PartitionPosition> keyRange)
     {
         if (logger.isTraceEnabled())
             logger.trace("Searching memtable index on expression '{}'...", expression);
@@ -304,23 +407,23 @@ public class TrieMemoryIndex extends MemoryIndex
         }
     }
 
-    public RangeIterator exactMatch(Expression expression, AbstractBounds<PartitionPosition> keyRange)
+    public KeyRangeIterator exactMatch(Expression expression, AbstractBounds<PartitionPosition> keyRange)
     {
-        final ByteComparable prefix = expression.lower == null ? ByteComparable.EMPTY : encode(expression.lower.value.encoded);
+        final ByteComparable prefix = expression.lower == null ? ByteComparable.EMPTY : asByteComparable(expression.lower.value.encoded);
         final PrimaryKeys primaryKeys = data.get(prefix);
         if (primaryKeys == null)
         {
-            return RangeIterator.empty();
+            return KeyRangeIterator.empty();
         }
-        return new FilteringKeyRangeIterator(new SortedSetRangeIterator(primaryKeys.keys()), keyRange);
+        return new FilteringKeyRangeIterator(new SortedSetKeyRangeIterator(primaryKeys.keys()), keyRange);
     }
 
-    private RangeIterator rangeMatch(Expression expression, AbstractBounds<PartitionPosition> keyRange)
+    private KeyRangeIterator rangeMatch(Expression expression, AbstractBounds<PartitionPosition> keyRange)
     {
         Trie<PrimaryKeys> subtrie = getSubtrie(expression);
 
         var capacity = Math.max(MINIMUM_QUEUE_SIZE, lastQueueSize.get());
-        var mergingIteratorBuilder = MergingRangeIterator.builder(keyBounds, indexContext.keyFactory(), capacity);
+        var mergingIteratorBuilder = MergingKeyRangeIterator.builder(keyBounds, indexContext.keyFactory(), capacity);
         lastQueueSize.set(mergingIteratorBuilder.size());
 
         if (!Version.latest().onOrAfter(Version.DB) && TypeUtil.isComposite(expression.validator))
@@ -328,7 +431,7 @@ public class TrieMemoryIndex extends MemoryIndex
                 // Before version DB, we encoded composite types using a non order-preserving function. In order to
                 // perform a range query on a map, we use the bounds to get all entries for a given map key and then
                 // only keep the map entries that satisfy the expression.
-                byte[] key = ByteSourceInverse.readBytes(entry.getKey().asComparableBytes(ByteComparable.Version.OSS41));
+                byte[] key = ByteSourceInverse.readBytes(entry.getKey().asComparableBytes(TypeUtil.BYTE_COMPARABLE_VERSION));
                 if (expression.isSatisfiedBy(ByteBuffer.wrap(key)))
                     mergingIteratorBuilder.add(entry.getValue());
             });
@@ -336,8 +439,123 @@ public class TrieMemoryIndex extends MemoryIndex
             subtrie.values().forEach(mergingIteratorBuilder::add);
 
         return mergingIteratorBuilder.isEmpty()
-               ? RangeIterator.empty()
+               ? KeyRangeIterator.empty()
                : new FilteringKeyRangeIterator(mergingIteratorBuilder.build(), keyRange);
+    }
+
+    @Override
+    public long estimateMatchingRowsCount(Expression expression, AbstractBounds<PartitionPosition> keyRange)
+    {
+        switch (expression.getOp())
+        {
+            case MATCH:
+            case EQ:
+            case CONTAINS_KEY:
+            case CONTAINS_VALUE:
+                return estimateNumRowsMatchingExact(expression);
+            case NOT_EQ:
+            case NOT_CONTAINS_KEY:
+            case NOT_CONTAINS_VALUE:
+                if (TypeUtil.supportsRounding(expression.validator))
+                    return Memtable.estimateRowCount(memtable);
+                else
+                    // need to clamp at 0, because row count is imprecise
+                    return Math.max(0, Memtable.estimateRowCount(memtable) - estimateNumRowsMatchingExact(expression));
+            case RANGE:
+                return estimateNumRowsMatchingRange(expression);
+            default:
+                throw new IllegalArgumentException("Unsupported expression: " + expression);
+        }
+    }
+
+
+    private int estimateNumRowsMatchingExact(Expression expression)
+    {
+        final ByteComparable prefix = expression.lower == null ? ByteComparable.EMPTY : asByteComparable(expression.lower.value.encoded);
+        final PrimaryKeys primaryKeys = data.get(prefix);
+        return primaryKeys == null ? 0 : primaryKeys.size();
+    }
+
+    private long estimateNumRowsMatchingRange(Expression expression)
+    {
+        final Trie<PrimaryKeys> subtrie = getSubtrie(expression);
+
+        // We could compute the number of matching rows by iterating the subtrie
+        // and summing the sizes of PrimaryKeys collections. But this could be very costly
+        // if the subtrie is large. Instead, we iterate a limited number of entries, and then we
+        // check how far we got by inspecting the term and comparing it to the start term and the end term.
+        // For now, we assume that term values are distributed uniformly.
+
+        var iterator = subtrie.entryIterator();
+        if (!iterator.hasNext())
+            return 0;
+
+        AbstractType<?> termType = indexContext.getValidator();
+        ByteBuffer endTerm = expression.upper != null && TypeUtil.compare(expression.upper.value.encoded, maxTerm, termType, Version.latest()) < 0
+                             ? expression.upper.value.encoded
+                             : maxTerm;
+
+        long pointCount = 0;
+        long keyCount = 0;
+
+        ByteComparable startTerm = null;
+        ByteComparable currentTerm = null;
+
+        while (iterator.hasNext() && pointCount < 64)
+        {
+            var entry = iterator.next();
+            pointCount += 1;
+            keyCount += entry.getValue().size();
+            currentTerm = entry.getKey();
+            if (startTerm == null)
+                startTerm = currentTerm;
+        }
+        assert currentTerm != null;
+
+        // We iterated all points matched by the query, so keyCount contains the exact value of keys.
+        // This is a happy path, because the returned value will be accurate.
+        if (!iterator.hasNext())
+            return keyCount;
+
+        // There are some points remaining; let's estimate their count by extrapolation.
+        // Express the distance we iterated as a double value and the whole subtrie range also as a double.
+        // Then the ratio of those two values would give us a hint on how many total points there
+        // are in the subtrie. This should be fairly accurate assuming values are distributed uniformly.
+        BigDecimal startValue = toBigDecimal(startTerm);
+        BigDecimal endValue = toBigDecimal(endTerm);
+        BigDecimal currentValue = toBigDecimal(currentTerm);
+        double totalDistance = endValue.subtract(startValue).doubleValue() + Double.MIN_NORMAL;
+        double iteratedDistance = currentValue.subtract(startValue).doubleValue() + Double.MIN_NORMAL;
+        assert totalDistance > 0.0;
+        assert iteratedDistance > 0.0;
+
+        double extrapolatedPointCount = Math.min((pointCount - 1) * (totalDistance / iteratedDistance), this.data.valuesCount());
+        double keysPerPoint = (double) keyCount / pointCount;
+        return (long) (extrapolatedPointCount * keysPerPoint);
+    }
+
+    /**
+     * Converts the term to a BigDecimal in a way that it keeps the sort order
+     * (so terms comparing larger yield larger numbers).
+     * Works on raw representation (as passed to the index).
+     *
+     * @see #toBigDecimal(ByteComparable)
+     */
+    private BigDecimal toBigDecimal(ByteBuffer endTerm)
+    {
+        ByteComparable bc = Version.latest().onDiskFormat().encodeForTrie(endTerm, indexContext.getValidator());
+        return toBigDecimal(bc);
+    }
+
+    /**
+     * Converts the term to a BigDecimal in a way that it keeps the sort order
+     * (so terms comparing larger yield larger numbers).
+     * @see TermsDistribution#toBigDecimal(ByteComparable, AbstractType, Version, ByteComparable.Version)
+     */
+    private BigDecimal toBigDecimal(ByteComparable term)
+    {
+        AbstractType<?> type = indexContext.getValidator();
+        return TermsDistribution.toBigDecimal(term, type, Version.latest(), TypeUtil.BYTE_COMPARABLE_VERSION);
     }
 
     private Trie<PrimaryKeys> getSubtrie(@Nullable Expression expression)
@@ -394,16 +612,15 @@ public class TrieMemoryIndex extends MemoryIndex
         maxTerm = TypeUtil.max(term, maxTerm, indexContext.getValidator(), Version.latest());
     }
 
-    private ByteComparable encode(ByteBuffer input)
+    private ByteComparable asByteComparable(ByteBuffer input)
     {
         return Version.latest().onDiskFormat().encodeForTrie(input, indexContext.getValidator());
     }
 
-
     /**
      * Accumulator that adds a primary key to the primary keys set.
      */
-    static class PrimaryKeysAccumulator implements MemtableTrie.UpsertTransformer<PrimaryKeys, PrimaryKey>
+    static class PrimaryKeysAccumulator implements InMemoryTrie.UpsertTransformer<PrimaryKeys, PrimaryKey>
     {
         private final LongAdder heapAllocations;
         private Consumer<PrimaryKeys> consumer;
@@ -442,7 +659,7 @@ public class TrieMemoryIndex extends MemoryIndex
     /**
      * Transformer that removes a primary key from the primary keys set, if present.
      */
-    static class PrimaryKeysRemover implements MemtableTrie.UpsertTransformer<PrimaryKeys, PrimaryKey>
+    static class PrimaryKeysRemover implements InMemoryTrie.UpsertTransformer<PrimaryKeys, PrimaryKey>
     {
         private final LongAdder heapAllocations;
         private Set<PrimaryKeys> modifiedPrimaryKeys;
@@ -483,30 +700,105 @@ public class TrieMemoryIndex extends MemoryIndex
         }
     }
 
-    static class MergingRangeIterator extends RangeIterator
+    /**
+     * A sorting iterator over items that can either be singleton PrimaryKey or a SortedSetKeyRangeIterator.
+     */
+    static class SortingSingletonOrSetIterator extends BinaryHeap
     {
-        org.apache.lucene.util.PriorityQueue<Object> keySets;  // class invariant: each object placed in this queue contains at least one key
+        public SortingSingletonOrSetIterator(Collection<Object> data)
+        {
+            super(data.toArray());
+            heapify();
+        }
 
-        MergingRangeIterator(Collection<Object> keySets,
-                             PrimaryKey minKey,
-                             PrimaryKey maxKey,
-                             long count)
+        @Override
+        protected boolean greaterThan(Object a, Object b)
+        {
+            if (a == null || b == null)
+                return b != null;
+
+            return peek(a).compareTo(peek(b)) > 0;
+        }
+
+        public PrimaryKey nextOrNull()
+        {
+            Object key = top();
+            if (key == null)
+                return null;
+            PrimaryKey result = peek(key);
+            assert result != null;
+            replaceTop(advanceItem(key));
+            return result;
+        }
+
+        public void skipTo(PrimaryKey target)
+        {
+            advanceTo(target);
+        }
+
+        /**
+         * Advance the given keys object to the next key.
+         * If the keys object contains a single key, null is returned.
+         * If the keys object contains more than one key, the first key is dropped and the iterator to the
+         * remaining keys is returned.
+         */
+        @Override
+        protected @Nullable Object advanceItem(Object keys)
+        {
+            if (keys instanceof PrimaryKey)
+                return null;
+
+            SortedSetKeyRangeIterator iterator = (SortedSetKeyRangeIterator) keys;
+            assert iterator.hasNext();
+            iterator.next();
+            return iterator.hasNext() ? iterator : null;
+        }
+
+        /**
+         * Advance the given keys object to the first element that is greater than or equal to the target key.
+         * This is only called when the given item is known to be before the target key.
+         * If the keys object contains a single key, null is returned.
+         * If the keys object contains more than one key, it is skipped to the given target and the iterator to the
+         * remaining keys is returned.
+         */
+        @Override
+        protected @Nullable Object advanceItemTo(Object keys, Object target)
+        {
+            if (keys instanceof PrimaryKey)
+                return null;
+
+            SortedSetKeyRangeIterator iterator = (SortedSetKeyRangeIterator) keys;
+            iterator.skipTo((PrimaryKey) target);
+            return iterator.hasNext() ? iterator : null;
+        }
+
+        /**
+         * Resolve a keys object to either its singleton value or the current element in the iterator.
+         */
+        static PrimaryKey peek(Object keys)
+        {
+            if (keys instanceof PrimaryKey)
+                return (PrimaryKey) keys;
+            if (keys instanceof SortedSetKeyRangeIterator)
+                return ((SortedSetKeyRangeIterator) keys).peek();
+
+            throw new AssertionError("Unreachable");
+        }
+    }
+
+    static class MergingKeyRangeIterator extends KeyRangeIterator
+    {
+        // A sorting iterator of items that can be either singletons or SortedSetKeyRangeIterator
+        SortingSingletonOrSetIterator keySets;  // class invariant: each object placed in this queue contains at least one key
+
+        MergingKeyRangeIterator(Collection<Object> keySets,
+                                PrimaryKey minKey,
+                                PrimaryKey maxKey,
+                                long count)
         {
             super(minKey, maxKey, count);
 
-            // Use Lucene PriorityQueue because:
-            // - it has optimized O(n) addAll
-            // - it allows for a single-operation fast update of the top of the queue instead of poll+offer
-            this.keySets = new org.apache.lucene.util.PriorityQueue<>(keySets.size())
-            {
-                @Override
-                protected boolean lessThan(Object keys1, Object keys2)
-                {
-                    return peek(keys1).compareTo(peek(keys2)) < 0;
-                }
-            };
-
-            this.keySets.addAll(keySets);
+            this.keySets = new SortingSingletonOrSetIterator(keySets);
         }
 
         static Builder builder(AbstractBounds<PartitionPosition> keyRange, PrimaryKey.Factory factory, int capacity)
@@ -517,85 +809,22 @@ public class TrieMemoryIndex extends MemoryIndex
         @Override
         protected void performSkipTo(PrimaryKey nextKey)
         {
-            while (true)
-            {
-                // Preview the next key, but don't change the state of this iterator yet.
-                // We cannot use `this.peek()` to preview the key, because it may actually
-                // change the internal state of this iterator and would cause the keySets to no longer contain
-                // the previewed key.
-                Object keys = keySets.top();
-                if (keys == null || peek(keys).compareTo(nextKey) >= 0)
-                    break;
-
-                if (keys instanceof SortedSetRangeIterator)
-                {
-                    // If we got an iterator, skip to the correct key and,
-                    // if there are any keys left, update the position of the iterator in the queue.
-                    var iterator = (SortedSetRangeIterator) keys;
-                    iterator.skipTo(nextKey);
-                    if (iterator.hasNext())
-                        keySets.updateTop(iterator);
-                    else
-                        keySets.pop();
-                }
-                else
-                {
-                    // We got a single key so just pop it from the queue.
-                    assert keys instanceof PrimaryKey;
-                    keySets.pop();
-                }
-            }
+            keySets.skipTo(nextKey);
         }
 
         @Override
         protected PrimaryKey computeNext()
         {
-            Object keys = keySets.top();
-            if (keys == null)
+            PrimaryKey result = keySets.nextOrNull();
+            if (result == null)
                 return endOfData();
-
-            PrimaryKey result = peek(keys);
-            assert result != null;
-
-            SortedSetRangeIterator iterator = dropFirst(keys);
-            if (iterator != null)
-                keySets.updateTop(iterator);
             else
-                keySets.pop();
-
-            return result;
+                return result;
         }
 
         @Override
         public void close() throws IOException
         {
-        }
-
-        /**
-         * The purpose of this method is to avoid unnecessary allocation of iterators for singleton sets.
-         * If the keys object contains a single key, null is returned.
-         * If the keys object contains more than one key, the first key is dropped and the iterator to the
-         * remaining keys is returned.
-         */
-        private static @Nullable SortedSetRangeIterator dropFirst(Object keys)
-        {
-            if (keys instanceof PrimaryKey)
-                return null;
-
-            SortedSetRangeIterator iterator = (SortedSetRangeIterator) keys;
-            assert iterator.hasNext();
-            iterator.next();
-            return iterator.hasNext() ? iterator : null;
-        }
-
-        static PrimaryKey peek(Object keys)
-        {
-            if (keys instanceof PrimaryKey)
-                return (PrimaryKey) keys;
-            if (keys instanceof SortedSetRangeIterator)
-                return ((SortedSetRangeIterator) keys).peek();
-
-            throw new AssertionError("Unreachable");
         }
 
         static class Builder
@@ -624,7 +853,7 @@ public class TrieMemoryIndex extends MemoryIndex
                 if (size == 1)
                     keySets.add(keys.first());
                 else
-                    keySets.add(new SortedSetRangeIterator(keys, min, max, size));
+                    keySets.add(new SortedSetKeyRangeIterator(keys, min, max, size));
 
                 count += size;
             }
@@ -639,26 +868,26 @@ public class TrieMemoryIndex extends MemoryIndex
                 return keySets.isEmpty();
             }
 
-            public MergingRangeIterator build()
+            public MergingKeyRangeIterator build()
             {
-                return new MergingRangeIterator(keySets, min, max, count);
+                return new MergingKeyRangeIterator(keySets, min, max, count);
             }
         }
     }
 
-    static class SortedSetRangeIterator extends RangeIterator
+    static class SortedSetKeyRangeIterator extends KeyRangeIterator
     {
         private SortedSet<PrimaryKey> primaryKeySet;
         private Iterator<PrimaryKey> iterator;
         private PrimaryKey lastComputedKey;
 
-        public SortedSetRangeIterator(SortedSet<PrimaryKey> source)
+        public SortedSetKeyRangeIterator(SortedSet<PrimaryKey> source)
         {
             super(source.first(), source.last(), source.size());
             this.primaryKeySet = source;
         }
 
-        private SortedSetRangeIterator(SortedSet<PrimaryKey> source, PrimaryKey min, PrimaryKey max, long count)
+        private SortedSetKeyRangeIterator(SortedSet<PrimaryKey> source, PrimaryKey min, PrimaryKey max, long count)
         {
             super(min, max, count);
             this.primaryKeySet = source;
@@ -692,6 +921,13 @@ public class TrieMemoryIndex extends MemoryIndex
         }
     }
 
+    /**
+     * Iterator that provides ordered access to all indexed terms and their associated primary keys
+     * in the TrieMemoryIndex. For each term in the index, yields PrimaryKeyWithSortKey objects that
+     * combine a primary key with its associated term.
+     * <p>
+     * A more verbose name could be KeysMatchingTermsByTermIterator.
+     */
     private class AllTermsIterator extends AbstractIterator<PrimaryKeyWithSortKey>
     {
         private final Iterator<Map.Entry<ByteComparable, PrimaryKeys>> iterator;

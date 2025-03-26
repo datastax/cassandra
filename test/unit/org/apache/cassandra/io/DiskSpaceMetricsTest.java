@@ -22,6 +22,7 @@ import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
 
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
@@ -29,6 +30,7 @@ import org.junit.Assert;
 import org.junit.Assume;
 import org.junit.Test;
 
+import org.apache.cassandra.Util;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.compaction.CompactionInterruptedException;
@@ -40,8 +42,12 @@ import org.apache.cassandra.io.sstable.IndexSummaryRedistribution;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.TableId;
+import org.apache.cassandra.utils.ExpMovingAverage;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.MovingAverage;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.psjava.util.AssertStatus.assertTrue;
 import static org.hamcrest.Matchers.is;
 import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
 
@@ -92,6 +98,29 @@ public class DiskSpaceMetricsTest extends CQLTester
         }
     }
 
+    @Test
+    public void testFlushSize() throws Throwable
+    {
+        createTable(KEYSPACE_PER_TEST, "CREATE TABLE %s (pk bigint, PRIMARY KEY (pk))");
+        ColumnFamilyStore cfs = getCurrentColumnFamilyStore(KEYSPACE_PER_TEST);
+        assertTrue(Double.isNaN(cfs.metric.flushSizeOnDisk().get()));
+
+        // disable compaction so nothing changes between calculations
+        cfs.disableAutoCompaction();
+
+        for (int i = 0; i < 3; i++)
+            insertN(KEYSPACE_PER_TEST, cfs, 1000, 55);
+
+        final List<SSTableReader> liveSSTables = cfs.getLiveSSTables().stream()
+                                                    .sorted(SSTableReader.idComparator)
+                                                    .collect(Collectors.toList());
+        MovingAverage expectedMetrics = ExpMovingAverage.decayBy1000();
+        for (SSTableReader rdr : liveSSTables)
+            expectedMetrics.update(rdr.onDiskLength());
+        assertThat(cfs.metric.flushSizeOnDisk().get()).isEqualTo(expectedMetrics.get());
+    }
+
+
     private void insert(ColumnFamilyStore cfs, long value) throws Throwable
     {
         insertN(cfs, 1, value);
@@ -105,6 +134,16 @@ public class DiskSpaceMetricsTest extends CQLTester
         // flush to write the sstable
         cfs.forceBlockingFlush(UNIT_TESTS);
     }
+
+    private void insertN(String keyspace, ColumnFamilyStore cfs, int n, long base) throws Throwable
+    {
+        for (int i = 0; i < n; i++)
+            executeFormattedQuery(formatQuery(keyspace, "INSERT INTO %s (pk) VALUES (?)"), base + i);
+
+        // flush to write the sstable
+        Util.flush(cfs);
+    }
+
 
     private void assertDiskSpaceEqual(ColumnFamilyStore cfs)
     {

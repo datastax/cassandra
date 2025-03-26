@@ -32,19 +32,18 @@ public class CompositePartitionKeyIndexTest extends SAITester
         createTable("CREATE TABLE %s (pk1 int, pk2 text, val int, PRIMARY KEY((pk1, pk2)))");
         createIndex("CREATE CUSTOM INDEX ON %s(pk1) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(pk2) USING 'StorageAttachedIndex'");
-        waitForIndexQueryable();
 
         disableCompaction();
     }
 
-    private void insertData1() throws Throwable
+    private void insertData1()
     {
         execute("INSERT INTO %s (pk1, pk2, val) VALUES (1, '1', 1)");
         execute("INSERT INTO %s (pk1, pk2, val) VALUES (2, '2', 2)");
         execute("INSERT INTO %s (pk1, pk2, val) VALUES (3, '3', 3)");
     }
 
-    private void insertData2() throws Throwable
+    private void insertData2()
     {
         execute("INSERT INTO %s (pk1, pk2, val) VALUES (4, '4', 4)");
         execute("INSERT INTO %s (pk1, pk2, val) VALUES (5, '5', 5)");

@@ -17,6 +17,9 @@
  */
 package org.apache.cassandra.metrics;
 
+import java.util.HashMap;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import javax.annotation.Nonnull;
 
@@ -42,6 +45,7 @@ public class MicrometerChunkCacheMetrics extends MicrometerMetrics implements Ch
     private volatile MicrometerCacheMetrics metrics;
     private volatile Timer missLatency;
     private volatile Counter evictions;
+    private final ConcurrentHashMap<RemovalCause, Counter> evitictionByRemovalCause = new ConcurrentHashMap<>();
 
     public MicrometerChunkCacheMetrics(CacheSize cache, String metricsPrefix)
     {
@@ -58,6 +62,11 @@ public class MicrometerChunkCacheMetrics extends MicrometerMetrics implements Ch
 
         this.missLatency = timer(metricsPrefix + "_miss_latency_seconds");
         this.evictions = counter(metricsPrefix + "_evictions");
+
+        for (RemovalCause cause : RemovalCause.values())
+        {
+            evitictionByRemovalCause.put(cause, counter(metricsPrefix + "_evictions_" + cause.toString().toLowerCase()));
+        }
     }
 
     @Override
@@ -86,7 +95,14 @@ public class MicrometerChunkCacheMetrics extends MicrometerMetrics implements Ch
 
     @Override
     public void recordEviction(int weight, RemovalCause removalCause) {
-        evictions.increment(weight);
+        if (removalCause.wasEvicted())
+        {
+            evictions.increment(1);
+        }
+        Counter counter = evitictionByRemovalCause.get(removalCause);
+        if (counter != null) {
+            counter.increment(1);
+        }
     }
 
     @Override
@@ -194,5 +210,15 @@ public class MicrometerChunkCacheMetrics extends MicrometerMetrics implements Ch
                "Num entries: " + entries() + System.lineSeparator() +
                "Size in memory: " + FBUtilities.prettyPrintMemory(size()) + System.lineSeparator() +
                "Capacity: " + FBUtilities.prettyPrintMemory(capacity());
+    }
+
+    public Map<RemovalCause, Double> getEvictionCountByRemovalCause()
+    {
+        Map<RemovalCause, Double> result = new HashMap<>();
+        for (Map.Entry<RemovalCause, Counter> entry : evitictionByRemovalCause.entrySet())
+        {
+            result.put(entry.getKey(), entry.getValue().count());
+        }
+        return result;
     }
 }

@@ -43,7 +43,6 @@ import java.util.Optional;
 import java.util.Random;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -53,6 +52,7 @@ import java.util.function.Consumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import javax.annotation.Nullable;
 import javax.management.MBeanServerConnection;
 import javax.management.remote.JMXConnector;
 import javax.management.remote.JMXConnectorFactory;
@@ -60,7 +60,6 @@ import javax.management.remote.JMXConnectorServer;
 import javax.management.remote.JMXServiceURL;
 import javax.management.remote.rmi.RMIConnectorServer;
 
-import com.datastax.shaded.netty.channel.EventLoopGroup;
 import com.google.common.base.Objects;
 import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableList;
@@ -71,6 +70,7 @@ import org.junit.AfterClass;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.BeforeClass;
+import org.junit.Ignore;
 import org.junit.Rule;
 import org.junit.rules.TestWatcher;
 import org.junit.runner.Description;
@@ -92,19 +92,23 @@ import com.datastax.driver.core.Session;
 import com.datastax.driver.core.SimpleStatement;
 import com.datastax.driver.core.SocketOptions;
 import com.datastax.driver.core.Statement;
+import com.datastax.shaded.netty.channel.EventLoopGroup;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.ServerTestUtils;
 import org.apache.cassandra.auth.CassandraAuthorizer;
 import org.apache.cassandra.auth.CassandraRoleManager;
 import org.apache.cassandra.auth.PasswordAuthenticator;
-import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.EncryptionOptions;
 import org.apache.cassandra.cql3.functions.FunctionName;
+import org.apache.cassandra.cql3.functions.types.ParseUtils;
+import org.apache.cassandra.cql3.statements.SelectStatement;
 import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.BooleanType;
 import org.apache.cassandra.db.marshal.ByteType;
@@ -135,6 +139,7 @@ import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.SyntaxException;
+import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.SecondaryIndexManager;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
@@ -146,6 +151,7 @@ import org.apache.cassandra.nodes.Nodes;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.KeyspaceMetadata;
+import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
@@ -165,6 +171,7 @@ import org.apache.cassandra.utils.JMXServerUtils;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.TimeUUID;
+import org.assertj.core.api.Assertions;
 import org.awaitility.Awaitility;
 
 import static com.datastax.driver.core.SocketOptions.DEFAULT_CONNECT_TIMEOUT_MILLIS;
@@ -193,7 +200,18 @@ public abstract class CQLTester
     public static final String DATA_CENTER = ServerTestUtils.DATA_CENTER;
     public static final String DATA_CENTER_REMOTE = ServerTestUtils.DATA_CENTER_REMOTE;
     public static final String RACK1 = ServerTestUtils.RACK1;
+    private static final int ASSERTION_TIMEOUT_SECONDS = 15;
     private static final User SUPER_USER = new User("cassandra", "cassandra");
+
+    /**
+     * Whether to use coordinator execution in {@link #execute(String, Object...)}, so queries get full validation and
+     * go through reconciliation. When enabled, calls to {@link #execute(String, Object...)} will behave as calls to
+     * {@link #executeWithCoordinator(String, Object...)}. Otherwise, they will behave as calls to
+     * {@link #executeInternal(String, Object...)}.
+     *
+     * @see #execute
+     */
+    private static boolean coordinatorExecution = false;
 
     private static org.apache.cassandra.transport.Server server;
     private static JMXConnectorServer jmxServer;
@@ -216,11 +234,12 @@ public abstract class CQLTester
     public static final List<ProtocolVersion> PROTOCOL_VERSIONS = new ArrayList<>(ProtocolVersion.SUPPORTED.size());
 
     private static final String CREATE_INDEX_NAME_REGEX = "(\\s*(\\w*|\"\\w*\")\\s*)";
+    private static final String CREATE_INDEX_NAME_QUOTED_REGEX = "(\\s*(\\w*|\"[^\"]*\")\\s*)";
     private static final String CREATE_INDEX_REGEX = String.format("\\A\\s*CREATE(?:\\s+CUSTOM)?\\s+INDEX" +
                                                                    "(?:\\s+IF\\s+NOT\\s+EXISTS)?\\s*" +
                                                                    "%s?\\s*ON\\s+(%<s\\.)?%<s\\s*" +
-                                                                   "(\\((?:\\s*\\w+\\s*\\()?%<s\\))?",
-                                                                   CREATE_INDEX_NAME_REGEX);
+                                                                   "(\\((?:\\s*\\w+\\s*\\()?%s\\))?",
+                                                                   CREATE_INDEX_NAME_REGEX, CREATE_INDEX_NAME_QUOTED_REGEX);
     private static final Pattern CREATE_INDEX_PATTERN = Pattern.compile(CREATE_INDEX_REGEX, Pattern.CASE_INSENSITIVE);
 
     public static final NettyOptions IMMEDIATE_CONNECTION_SHUTDOWN_NETTY_OPTIONS = new NettyOptions()
@@ -261,6 +280,7 @@ public abstract class CQLTester
     private List<String> types = new ArrayList<>();
     private List<String> functions = new ArrayList<>();
     private List<String> aggregates = new ArrayList<>();
+    private List<String> indexes = new ArrayList<>();
     private User user;
 
     // We don't use USE_PREPARED_VALUES in the code below so some test can foce value preparation (if the result
@@ -369,6 +389,8 @@ public abstract class CQLTester
     @BeforeClass
     public static void setUpClass()
     {
+        DatabaseDescriptor.setAutoSnapshot(false);
+
         if (ROW_CACHE_SIZE_IN_MB > 0)
             DatabaseDescriptor.setRowCacheSizeInMB(ROW_CACHE_SIZE_IN_MB);
         StorageService.instance.setPartitionerUnsafe(Murmur3Partitioner.instance);
@@ -412,15 +434,13 @@ public abstract class CQLTester
     @Before
     public void beforeTest() throws Throwable
     {
-        schemaChange(String.format("CREATE KEYSPACE IF NOT EXISTS %s WITH replication = {'class': 'SimpleStrategy', 'replication_factor': '1'}", KEYSPACE));
-        schemaChange(String.format("CREATE KEYSPACE IF NOT EXISTS %s WITH replication = {'class': 'SimpleStrategy', 'replication_factor': '1'}", KEYSPACE_PER_TEST));
+        Schema.instance.transform(schema -> schema.withAddedOrUpdated(KeyspaceMetadata.create(KEYSPACE_PER_TEST, KeyspaceParams.simple(1)))
+                                                  .withAddedOrUpdated(KeyspaceMetadata.create(KEYSPACE, KeyspaceParams.simple(1))), false);
     }
 
     @After
     public void afterTest() throws Throwable
     {
-        dropPerTestKeyspace();
-
         // Restore standard behavior in case it was changed
         usePrepared = USE_PREPARED_VALUES;
         reusePrepared = REUSE_PREPARED;
@@ -428,9 +448,6 @@ public abstract class CQLTester
         final List<String> keyspacesToDrop = copy(keyspaces);
         final List<String> tablesToDrop = copy(tables);
         final List<String> viewsToDrop = copy(views);
-        final List<String> typesToDrop = copy(types);
-        final List<String> functionsToDrop = copy(functions);
-        final List<String> aggregatesToDrop = copy(aggregates);
         keyspaces = null;
         tables = null;
         views = null;
@@ -439,51 +456,16 @@ public abstract class CQLTester
         aggregates = null;
         user = null;
 
-        // We want to clean up after the test, but dropping a table is rather long so just do that asynchronously
-        schemaCleanup.execute(() -> {
-            try
-            {
-                logger.debug("Dropping {} materialized view created in previous test", viewsToDrop.size());
-                for (int i = viewsToDrop.size() - 1; i >= 0; i--)
-                    schemaChange(String.format("DROP MATERIALIZED VIEW IF EXISTS %s.%s", KEYSPACE, viewsToDrop.get(i)));
-
-                for (int i = tablesToDrop.size() - 1; i >= 0; i--)
-                    schemaChange(String.format("DROP TABLE IF EXISTS %s.%s", KEYSPACE, tablesToDrop.get(i)));
-
-                for (int i = aggregatesToDrop.size() - 1; i >= 0; i--)
-                    schemaChange(String.format("DROP AGGREGATE IF EXISTS %s", aggregatesToDrop.get(i)));
-
-                for (int i = functionsToDrop.size() - 1; i >= 0; i--)
-                    schemaChange(String.format("DROP FUNCTION IF EXISTS %s", functionsToDrop.get(i)));
-
-                for (int i = typesToDrop.size() - 1; i >= 0; i--)
-                    schemaChange(String.format("DROP TYPE IF EXISTS %s.%s", KEYSPACE, typesToDrop.get(i)));
-
-                for (int i = keyspacesToDrop.size() - 1; i >= 0; i--)
-                    schemaChange(String.format("DROP KEYSPACE IF EXISTS %s", keyspacesToDrop.get(i)));
-
-                // Dropping doesn't delete the sstables. It's not a huge deal but it's cleaner to cleanup after us
-                // Thas said, we shouldn't delete blindly before the TransactionLogs.SSTableTidier for the table we drop
-                // have run or they will be unhappy. Since those taks are scheduled on StorageService.tasks and that's
-                // mono-threaded, just push a task on the queue to find when it's empty. No perfect but good enough.
-
-                final CountDownLatch latch = new CountDownLatch(1);
-                ScheduledExecutors.nonPeriodicTasks.execute(new Runnable()
-                {
-                    public void run()
-                    {
-                        latch.countDown();
-                    }
-                });
-                latch.await(2, TimeUnit.SECONDS);
-
-                removeAllSSTables(KEYSPACE, tablesToDrop);
-            }
-            catch (Exception e)
-            {
-                throw new RuntimeException(e);
-            }
-        });
+        try
+        {
+            Schema.instance.transform(schema -> schema.without(List.of(KEYSPACE_PER_TEST))
+                                                      .withAddedOrUpdated(KeyspaceMetadata.create(KEYSPACE, KeyspaceParams.simple(1)))
+                                                      .without(keyspacesToDrop), false);
+        }
+        catch (Exception e)
+        {
+            throw new RuntimeException(e);
+        }
     }
 
     /**
@@ -534,6 +516,9 @@ public abstract class CQLTester
 
     protected static void requireNetworkWithoutDriver()
     {
+        if (server != null)
+            return;
+
         startServices();
         startServer(server -> {});
     }
@@ -789,6 +774,18 @@ public abstract class CQLTester
         return keyspaces.get(keyspaces.size() - 1);
     }
 
+    protected String currentIndex()
+    {
+        if (indexes.isEmpty())
+            return null;
+        return indexes.get(indexes.size() - 1);
+    }
+
+    protected String getIndex(int i)
+    {
+        return indexes.get(i);
+    }
+
     protected Collection<String> currentTables()
     {
         if (tables == null || tables.isEmpty())
@@ -995,113 +992,269 @@ public abstract class CQLTester
         schemaChange(formattedQuery);
     }
 
+    /**
+     * Creates a secondary index, waiting for it to become queryable.
+     *
+     * @param query the index creation query
+     * @return the name of the created index
+     */
     public String createIndex(String query)
     {
         return createIndex(KEYSPACE, query);
     }
 
+    /**
+     * Creates a secondary index, waiting for it to become queryable.
+     *
+     * @param keyspace the keyspace the created index should belong to
+     * @param query the index creation query
+     * @return the name of the created index
+     */
     protected String createIndex(String keyspace, String query)
     {
         String formattedQuery = formatQuery(keyspace, query);
-        return createFormattedIndex(formattedQuery);
+        Pair<String, String> qualifiedIndexName = createFormattedIndex(keyspace, formattedQuery);
+        waitForIndexQueryable(qualifiedIndexName.left, qualifiedIndexName.right);
+        return qualifiedIndexName.right;
     }
 
-    protected String createFormattedIndex(String formattedQuery)
+    /**
+     * Creates a secondary index without waiting for it to become queryable.
+     *
+     * @param query the index creation query
+     * @return the name of the created index
+     */
+    protected String createIndexAsync(String query)
+    {
+        return createIndexAsync(KEYSPACE, query);
+    }
+
+    /**
+     * Creates a secondary index without waiting for it to become queryable.
+     *
+     * @param keyspace the keyspace the created index should belong to
+     * @param query the index creation query
+     * @return the name of the created index
+     */
+    protected String createIndexAsync(String keyspace, String query)
+    {
+        String formattedQuery = formatQuery(keyspace, query);
+        return createFormattedIndex(keyspace, formattedQuery).right;
+    }
+
+    private Pair<String, String> createFormattedIndex(String keyspace, String formattedQuery)
     {
         logger.info(formattedQuery);
-        String indexName = getCreateIndexName(formattedQuery);
+        Pair<String, String> qualifiedIndexName = getCreateIndexName(keyspace, formattedQuery);
+        indexes.add(qualifiedIndexName.right);
         schemaChange(formattedQuery);
-        return indexName;
+        return qualifiedIndexName;
     }
 
-    protected static String getCreateIndexName(String formattedQuery)
+    protected static Pair<String, String> getCreateIndexName(String keyspace, String formattedQuery)
     {
         Matcher matcher = CREATE_INDEX_PATTERN.matcher(formattedQuery);
         if (!matcher.find())
             throw new IllegalArgumentException("Expected valid create index query but found: " + formattedQuery);
 
+        String parsedKeyspace = matcher.group(5);
+        if (!Strings.isNullOrEmpty(parsedKeyspace))
+            keyspace = parsedKeyspace;
+
         String index = matcher.group(2);
-        if (!Strings.isNullOrEmpty(index))
-            return index;
-
-        String keyspace = matcher.group(5);
-        if (Strings.isNullOrEmpty(keyspace))
-            throw new IllegalArgumentException("Keyspace name should be specified: " + formattedQuery);
-
-        String table = matcher.group(7);
-        if (Strings.isNullOrEmpty(table))
-            throw new IllegalArgumentException("Table name should be specified: " + formattedQuery);
-
-        String column = matcher.group(9);
-
-        String baseName = Strings.isNullOrEmpty(column)
-                        ? IndexMetadata.generateDefaultIndexName(table)
-                        : IndexMetadata.generateDefaultIndexName(table, new ColumnIdentifier(column, true));
-
-        KeyspaceMetadata ks = Schema.instance.getKeyspaceMetadata(keyspace);
-        return ks.findAvailableIndexName(baseName);
-    }
-
-    /**
-     * Index creation is asynchronous, this method searches in the system table IndexInfo
-     * for the specified index and returns true if it finds it, which indicates the
-     * index was built. If we haven't found it after 5 seconds we give-up.
-     */
-    protected boolean waitForIndex(String keyspace, String table, String index) throws Throwable
-    {
-        long start = System.currentTimeMillis();
-        boolean indexCreated = false;
-        while (!indexCreated)
+        boolean isQuotedGeneratedIndexName = false;
+        if (Strings.isNullOrEmpty(index))
         {
-            Object[][] results = getRows(execute("select index_name from system.\"IndexInfo\" where table_name = ?", keyspace));
-            for(int i = 0; i < results.length; i++)
-            {
-                if (index.equals(results[i][0]))
-                {
-                    indexCreated = true;
-                    break;
-                }
-            }
+            String table = matcher.group(7);
+            if (Strings.isNullOrEmpty(table))
+                throw new IllegalArgumentException("Table name should be specified: " + formattedQuery);
 
-            if (System.currentTimeMillis() - start > 5000)
-                break;
+            String column = matcher.group(9);
+            isQuotedGeneratedIndexName = ParseUtils.isQuoted(column, '\"');
 
-            Thread.sleep(10);
+            String baseName = Strings.isNullOrEmpty(column)
+                              ? IndexMetadata.generateDefaultIndexName(table, null)
+                              : IndexMetadata.generateDefaultIndexName(table, new ColumnIdentifier(column, true));
+
+            KeyspaceMetadata ks = Schema.instance.getKeyspaceMetadata(keyspace);
+            assertNotNull(ks);
+            index = ks.findAvailableIndexName(baseName);
         }
+        index = ParseUtils.isQuoted(index, '\"')
+                ? ParseUtils.unDoubleQuote(index)
+                : isQuotedGeneratedIndexName ? index : index.toLowerCase();
 
-        return indexCreated;
+        return Pair.create(keyspace, index);
+    }
+
+    public void waitForTableIndexesQueryable()
+    {
+        waitForTableIndexesQueryable(60);
+    }
+
+    public void waitForTableIndexesQueryable(int seconds)
+    {
+        waitForTableIndexesQueryable(currentTable(), seconds);
+    }
+
+    public void waitForTableIndexesQueryable(String table, int seconds)
+    {
+        waitForTableIndexesQueryable(KEYSPACE, table, seconds);
+    }
+
+    public void waitForTableIndexesQueryable(String keyspace, String table)
+    {
+        waitForTableIndexesQueryable(keyspace, table, 60);
     }
 
     /**
-     * Index creation is asynchronous, this method waits until the specified index hasn't any building task running.
-     * <p>
-     * This method differs from {@link #waitForIndex(String, String, String)} in that it doesn't require the index to be
-     * fully nor successfully built, so it can be used to wait for failing index builds.
+     * Index creation is asynchronous. This method waits until all the indexes in the specified table are queryable.
+     *
+     * @param keyspace the table keyspace name
+     * @param table the table name
+     * @param seconds the maximum time to wait for the indexes to be queryable
+     */
+    public void waitForTableIndexesQueryable(String keyspace, String table, int seconds)
+    {
+        waitForAssert(() -> Assertions.assertThat(getNotQueryableIndexes(keyspace, table)).isEmpty(), seconds, TimeUnit.SECONDS);
+    }
+
+    public void waitForIndexQueryable(String index)
+    {
+        waitForIndexQueryable(KEYSPACE, index);
+    }
+
+    /**
+     * Index creation is asynchronous. This method waits until the specified index is queryable.
      *
      * @param keyspace the index keyspace name
-     * @param indexName the index name
-     * @return {@code true} if the index build tasks have finished in 5 seconds, {@code false} otherwise
+     * @param index the index name
      */
-    protected boolean waitForIndexBuilds(String keyspace, String indexName) throws InterruptedException
+    public void waitForIndexQueryable(String keyspace, String index)
     {
-        long start = System.currentTimeMillis();
-        SecondaryIndexManager indexManager = getCurrentColumnFamilyStore(keyspace).indexManager;
+        waitForIndexQueryable(keyspace, index, 1, TimeUnit.MINUTES);
+    }
 
-        while (true)
+    /**
+     * Index creation is asynchronous. This method waits until the specified index is queryable.
+     *
+     * @param keyspace the index keyspace name
+     * @param index the index name
+     * @param timeout the timeout
+     * @param unit the timeout unit
+     */
+    public void waitForIndexQueryable(String keyspace, String index, long timeout, TimeUnit unit)
+    {
+        waitForAssert(() -> assertTrue(isIndexQueryable(keyspace, index)), timeout, unit);
+    }
+
+    protected void waitForIndexBuilds(String index)
+    {
+        waitForIndexBuilds(KEYSPACE, index);
+    }
+
+    /**
+     * Index creation is asynchronous. This method waits until the specified index hasn't any building task running.
+     * <p>
+     * This method differs from {@link #waitForIndexQueryable(String, String)} in that it doesn't require the
+     * index to be fully nor successfully built, so it can be used to wait for failing index builds.
+     *
+     * @param keyspace the index keyspace name
+     * @param index the index name
+     */
+    protected void waitForIndexBuilds(String keyspace, String index)
+    {
+        waitForAssert(() -> assertFalse(isIndexBuilding(keyspace, index)), 60, TimeUnit.SECONDS);
+    }
+
+    /**
+     * @return the names of the indexes in the current table that are not queryable
+     */
+    protected Set<String> getNotQueryableIndexes()
+    {
+        return getNotQueryableIndexes(KEYSPACE, currentTable());
+    }
+
+    /**
+     * @param keyspace the table keyspace name
+     * @param table the table name
+     * @return the names of the indexes in the specified table that are not queryable
+     */
+    protected Set<String> getNotQueryableIndexes(String keyspace, String table)
+    {
+        SecondaryIndexManager sim = Keyspace.open(keyspace).getColumnFamilyStore(table).indexManager;
+        return sim.listIndexes()
+                  .stream()
+                  .filter(index -> !sim.isIndexQueryable(index))
+                  .map(index -> index.getIndexMetadata().name)
+                  .collect(Collectors.toSet());
+    }
+
+    protected boolean isIndexBuilding(String keyspace, String indexName)
+    {
+        SecondaryIndexManager manager = getIndexManager(keyspace, indexName);
+        assertNotNull(manager);
+
+        return manager.isIndexBuilding(indexName);
+    }
+
+    protected boolean isIndexQueryable(String keyspace, String indexName)
+    {
+        SecondaryIndexManager manager = getIndexManager(keyspace, indexName);
+        assertNotNull(manager);
+
+        Index index = manager.getIndexByName(indexName);
+        return manager.isIndexQueryable(index);
+    }
+
+    protected boolean areAllTableIndexesQueryable()
+    {
+        return areAllTableIndexesQueryable(KEYSPACE, currentTable());
+    }
+
+    protected boolean areAllTableIndexesQueryable(String keyspace, String table)
+    {
+        ColumnFamilyStore cfs = Keyspace.open(keyspace).getColumnFamilyStore(table);
+        for (Index index : cfs.indexManager.listIndexes())
         {
-            if (!indexManager.isIndexBuilding(indexName))
-            {
-                return true;
-            }
-            else if (System.currentTimeMillis() - start > 5000)
-            {
+            if (!cfs.indexManager.isIndexQueryable(index))
                 return false;
-            }
-            else
-            {
-                Thread.sleep(10);
-            }
         }
+        return true;
+    }
+
+    protected boolean indexNeedsFullRebuild(String index)
+    {
+        ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(currentTable());
+        return cfs.indexManager.needsFullRebuild(index);
+    }
+
+    protected void verifyInitialIndexFailed(String indexName)
+    {
+        // Verify that the initial index build fails...
+        waitForAssert(() -> assertTrue(indexNeedsFullRebuild(indexName)));
+    }
+
+    @Nullable
+    protected SecondaryIndexManager getIndexManager(String keyspace, String indexName)
+    {
+        for (ColumnFamilyStore cfs : Keyspace.open(keyspace).getColumnFamilyStores())
+        {
+            Index index = cfs.indexManager.getIndexByName(indexName);
+            if (index != null)
+                return cfs.indexManager;
+        }
+        return null;
+    }
+
+    protected void waitForAssert(Runnable runnableAssert, long timeout, TimeUnit unit)
+    {
+        Awaitility.await().dontCatchUncaughtExceptions().atMost(timeout, unit).untilAsserted(runnableAssert::run);
+    }
+
+    protected void waitForAssert(Runnable assertion)
+    {
+        waitForAssert(assertion, ASSERTION_TIMEOUT_SECONDS, TimeUnit.SECONDS);
     }
 
     protected void createIndexMayThrow(String query) throws Throwable
@@ -1126,7 +1279,7 @@ public abstract class CQLTester
     {
         try
         {
-            Stage.TRACING.executor().submit(() -> {}).get();
+            Stage.TRACING.submit(() -> {}).get();
         }
         catch (Throwable t)
         {
@@ -1154,15 +1307,33 @@ public abstract class CQLTester
 
     protected static void assertWarningsContain(Message.Response response, String message)
     {
-        List<String> warnings = response.getWarnings();
+        assertWarningsContain(response.getWarnings(), message);
+    }
+
+    protected static void assertWarningsContain(List<String> warnings, String message)
+    {
         Assert.assertNotNull(warnings);
         assertTrue(warnings.stream().anyMatch(s -> s.contains(message)));
     }
 
+    protected static void assertWarningsEquals(ResultSet rs, String... messages)
+    {
+        assertWarningsEquals(rs.getExecutionInfo().getWarnings(), messages);
+    }
+
+    protected static void assertWarningsEquals(List<String> warnings, String... messages)
+    {
+        Assert.assertNotNull(warnings);
+        Assertions.assertThat(messages).hasSameElementsAs(warnings);
+    }
+
     protected static void assertNoWarningContains(Message.Response response, String message)
     {
-        List<String> warnings = response.getWarnings();
+        assertNoWarningContains(response.getWarnings(), message);
+    }
 
+    protected static void assertNoWarningContains(List<String> warnings, String message)
+    {
         if (warnings != null)
         {
             assertFalse(warnings.stream().anyMatch(s -> s.contains(message)));
@@ -1358,7 +1529,7 @@ public abstract class CQLTester
                .connect(false, false);
     }
 
-    protected String formatQuery(String query)
+    public String formatQuery(String query)
     {
         return formatQuery(KEYSPACE, query);
     }
@@ -1369,26 +1540,118 @@ public abstract class CQLTester
         return currentTable == null ? query : String.format(query, keyspace + "." + currentTable);
     }
 
+    protected CQLStatement parseStatement(String query)
+    {
+        String formattedQuery = formatQuery(query);
+        return QueryProcessor.parseStatement(formattedQuery, ClientState.forInternalCalls());
+    }
+
+    protected ReadCommand parseReadCommand(String query)
+    {
+        SelectStatement select = (SelectStatement) parseStatement(query);
+        return  (ReadCommand) select.getQuery(QueryState.forInternalCalls(), QueryOptions.DEFAULT, FBUtilities.nowInSeconds());
+    }
+
     protected ResultMessage.Prepared prepare(String query) throws Throwable
     {
         return QueryProcessor.instance.prepare(formatQuery(query), ClientState.forInternalCalls());
     }
 
+    /**
+     * Enables coordinator execution in {@link #execute(String, Object...)}, so queries get full validation and go
+     * through reconciliation. This makes calling {@link #execute(String, Object...)} equivalent to calling
+     * {@link #executeWithCoordinator(String, Object...)}.
+     */
+    protected static void enableCoordinatorExecution()
+    {
+        requireNetworkWithoutDriver();
+        coordinatorExecution = true;
+    }
+
+    /**
+     * Disables coordinator execution in {@link #execute(String, Object...)}, so queries won't get full validation nor
+     * go through reconciliation.This makes calling {@link #execute(String, Object...)} equivalent to calling
+     * {@link #executeInternal(String, Object...)}.
+     */
+    protected static void disableCoordinatorExecution()
+    {
+        coordinatorExecution = false;
+    }
+
+    /**
+     * Execute the specified query as either an internal query or a coordinator query depending on the value of
+     * {@link #coordinatorExecution}.
+     *
+     * @param query a CQL query
+     * @param values the values to bind to the query
+     * @return the query results
+     * @see #execute
+     * @see #executeInternal
+     */
     public UntypedResultSet execute(String query, Object... values)
     {
-        return executeFormattedQuery(formatQuery(query), values);
+        return coordinatorExecution
+               ? executeWithCoordinator(query, values)
+               : executeInternal(query, values);
+    }
+
+    /**
+     * Execute the specified query as an internal query only for the local node. This will skip reconciliation and some
+     * validation.
+     * </p>
+     * For the particular case of {@code SELECT} queries using secondary indexes, the skipping of reconciliation means
+     * that the query {@link org.apache.cassandra.db.filter.RowFilter} might not be fully applied to the index results.
+     *
+     * @param query a CQL query
+     * @param values the values to bind to the query
+     * @return the query results
+     * @see CQLStatement#executeLocally
+     */
+    public UntypedResultSet executeInternal(String query, Object... values)
+    {
+        return executeFormattedQuery(formatQuery(query), false, values);
+    }
+
+    /**
+     * Execute the specified query as an coordinator-side query meant for all the relevant nodes in the cluster, even if
+     * {@link CQLTester} tests are single-node. This won't skip reconciliation and will do full validation.
+     * </p>
+     * For the particular case of {@code SELECT} queries using secondary indexes, applying reconciliation means that the
+     * query {@link org.apache.cassandra.db.filter.RowFilter} will be fully applied to the index results.
+     *
+     * @param query a CQL query
+     * @param values the values to bind to the query
+     * @return the query results
+     * @see CQLStatement#execute
+     */
+    public UntypedResultSet executeWithCoordinator(String query, Object... values)
+    {
+        return executeFormattedQuery(formatQuery(query), true, values);
     }
 
     public UntypedResultSet executeFormattedQuery(String query, Object... values)
     {
+        return executeFormattedQuery(query, coordinatorExecution, values);
+    }
+
+    private UntypedResultSet executeFormattedQuery(String query, boolean useCoordinator, Object... values)
+    {        
+        if (useCoordinator)
+            requireNetworkWithoutDriver();
+        
         UntypedResultSet rs;
         if (usePrepared)
         {
             if (logger.isTraceEnabled())
                 logger.trace("Executing: {} with values {}", query, formatAllValues(values));
+
+            Object[] transformedValues = transformValues(values);
+
             if (reusePrepared)
             {
-                rs = QueryProcessor.executeInternal(query, transformValues(values));
+                rs = useCoordinator
+                     ? QueryProcessor.execute(query, ConsistencyLevel.ONE, transformedValues)
+                     : QueryProcessor.executeInternal(query, transformedValues);
 
                 // If a test uses a "USE ...", then presumably its statements use relative table. In that case, a USE
                 // change the meaning of the current keyspace, so we don't want a following statement to reuse a previously
@@ -1399,15 +1662,21 @@ public abstract class CQLTester
             }
             else
             {
-                rs = QueryProcessor.executeOnceInternal(query, transformValues(values));
+                rs = useCoordinator
+                     ? QueryProcessor.executeOnce(query, ConsistencyLevel.ONE, transformedValues)
+                     : QueryProcessor.executeOnceInternal(query, transformedValues);
             }
         }
         else
         {
             query = replaceValues(query, values);
+
             if (logger.isTraceEnabled())
                 logger.trace("Executing: {}", query);
-            rs = QueryProcessor.executeOnceInternal(query);
+
+            rs = useCoordinator
+                 ? QueryProcessor.executeOnce(query, ConsistencyLevel.ONE)
+                 : QueryProcessor.executeOnceInternal(query);
         }
         if (rs != null)
         {
@@ -1770,7 +2039,7 @@ public abstract class CQLTester
         return expected;
     }
 
-    protected void assertEmpty(UntypedResultSet result) throws Throwable
+    protected void assertEmpty(UntypedResultSet result)
     {
         if (result != null && !result.isEmpty())
             throw new AssertionError(String.format("Expected empty result but got %d rows: %s \n", result.size(), makeRowStrings(result)));
@@ -1922,6 +2191,29 @@ public abstract class CQLTester
         catch (Throwable t)
         {
             throw new AssertionError("Test failed after flush:\n" + t, t);
+        }
+    }
+
+    /**
+     * Runs the given function before a flush, after a flush, and finally after a compaction of the table. This is
+     * useful for checking that behavior is the same whether data is in memtables, memtable-flushed-sstbales,
+     * compaction-built-sstables.
+     * @param runnable
+     * @throws Throwable
+     */
+    public void runThenFlushThenCompact(CheckedFunction runnable) throws Throwable
+    {
+        beforeAndAfterFlush(runnable);
+
+        compact();
+
+        try
+        {
+            runnable.apply();
+        }
+        catch (Throwable t)
+        {
+            throw new AssertionError("Test failed after compact:\n" + t, t);
         }
     }
 
@@ -2271,6 +2563,7 @@ public abstract class CQLTester
         return metrics.get(metricName);
     }
 
+    @Ignore // Check TinySegmentFlushingFailureTest for details why this annotation is needed here despite this is not a test
     public static class Vector<T> extends AbstractList<T>
     {
         private final T[] values;
@@ -2478,6 +2771,7 @@ public abstract class CQLTester
         }
     }
 
+    @Ignore // Check TinySegmentFlushingFailureTest for details why this annotation is needed here despite this is not a test
     public static class Randomization
     {
         private long seed;
@@ -2574,6 +2868,7 @@ public abstract class CQLTester
         }
     }
 
+    @Ignore // Check TinySegmentFlushingFailureTest for details why this annotation is needed here despite this is not a test
     public static class FailureWatcher extends TestWatcher
     {
         @Override

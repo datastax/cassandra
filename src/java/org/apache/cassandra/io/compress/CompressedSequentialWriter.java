@@ -310,8 +310,10 @@ public class CompressedSequentialWriter extends SequentialWriter
             crcCheckBuffer.clear();
             readChannel.read(crcCheckBuffer);
             crcCheckBuffer.flip();
-            if (crcCheckBuffer.getInt() != (int) checksum.getValue())
-                throw new CorruptBlockException(getFile().toString(), chunkOffset, chunkSize);
+            int storedChecksum = crcCheckBuffer.getInt();
+            int computedChecksum = (int) checksum.getValue();
+            if (storedChecksum != computedChecksum)
+                throw new CorruptBlockException(getFile().toString(), chunkOffset, chunkSize, storedChecksum, computedChecksum);
         }
         catch (CorruptBlockException e)
         {

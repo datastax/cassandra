@@ -88,6 +88,7 @@ import static java.lang.String.format;
 import static java.util.stream.Collectors.toList;
 import static java.util.stream.Collectors.toSet;
 import static org.apache.cassandra.config.CassandraRelevantProperties.DURATION_IN_MAPS_COMPATIBILITY_MODE;
+import static org.apache.cassandra.config.CassandraRelevantProperties.UNSAFE_SYSTEM;
 import static org.apache.cassandra.cql3.QueryProcessor.executeInternal;
 import static org.apache.cassandra.cql3.QueryProcessor.executeOnceInternal;
 import static org.apache.cassandra.schema.SchemaKeyspaceTables.AGGREGATES;
@@ -117,7 +118,6 @@ public final class SchemaKeyspace
 
     private static final Logger logger = LoggerFactory.getLogger(SchemaKeyspace.class);
 
-    private static final boolean FLUSH_SCHEMA_TABLES = CassandraRelevantProperties.FLUSH_LOCAL_SCHEMA_CHANGES.getBoolean();
     private static final boolean IGNORE_CORRUPTED_SCHEMA_TABLES = Boolean.parseBoolean(System.getProperty("cassandra.ignore_corrupted_schema_tables", "false"));
 
     /**
@@ -378,7 +378,7 @@ public final class SchemaKeyspace
 
     private static void flush()
     {
-        if (!DatabaseDescriptor.isUnsafeSystem())
+        if (!UNSAFE_SYSTEM.getBoolean())
             ALL.forEach(table -> FBUtilities.waitOnFuture(getSchemaCFS(table).forceFlush(ColumnFamilyStore.FlushReason.INTERNALLY_FORCED)));
     }
 
@@ -841,7 +841,11 @@ public final class SchemaKeyspace
                .add("language", function.language())
                .add("return_type", function.returnType().asCQL3Type().toString())
                .add("called_on_null_input", function.isCalledOnNullInput())
-               .add("argument_names", function.argNames().stream().map((c) -> bbToString(c.bytes)).collect(toList()));
+               .add("argument_names", function.argNames().stream().map((c) -> bbToString(c.bytes)).collect(toList()))
+               // below values (deterministic, monotonic, monotonic_on) are needed to keep the backward compatibility with some drivers (C# driver for instance)
+               .add("deterministic", false)
+               .add("monotonic", false)
+               .add("monotonic_on", Collections.emptyList());
     }
 
     private static String bbToString(ByteBuffer bb)
@@ -869,6 +873,8 @@ public final class SchemaKeyspace
                .add("state_func", aggregate.stateFunction().name().name)
                .add("state_type", aggregate.stateType().asCQL3Type().toString())
                .add("final_func", aggregate.finalFunction() != null ? aggregate.finalFunction().name().name : null)
+                // below value (deterministic) is needed to keep the backward compatibility with some drivers (C# driver for instance)
+               .add("deterministic", false)
                .add("initcond", aggregate.initialCondition() != null
                                 // must use the frozen state type here, as 'null' for unfrozen collections may mean 'empty'
                                 ? aggregate.stateType().freeze().asCQL3Type().toCQLLiteral(aggregate.initialCondition(), ProtocolVersion.CURRENT)
@@ -1312,8 +1318,7 @@ public final class SchemaKeyspace
     static void applyChanges(Collection<Mutation> mutations)
     {
         mutations.forEach(Mutation::apply);
-        if (SchemaKeyspace.FLUSH_SCHEMA_TABLES)
-            SchemaKeyspace.flush();
+        SchemaKeyspace.flush();
     }
 
     static Keyspaces fetchKeyspaces(Set<String> toFetch)

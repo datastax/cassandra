@@ -21,6 +21,7 @@ package org.apache.cassandra.io.sstable.format;
 import java.io.IOException;
 import java.util.Collection;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
@@ -43,6 +44,7 @@ import org.apache.cassandra.db.rows.Rows;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.guardrails.Guardrails;
 import org.apache.cassandra.io.FSWriteError;
+import org.apache.cassandra.io.compress.AdaptiveCompressor;
 import org.apache.cassandra.io.compress.CompressedSequentialWriter;
 import org.apache.cassandra.io.compress.ICompressor;
 import org.apache.cassandra.io.sstable.Component;
@@ -91,7 +93,7 @@ public abstract class SortedTableWriter extends SSTableWriter
                                 SerializationHeader header,
                                 Collection<SSTableFlushObserver> observers)
     {
-        super(descriptor, components, keyCount, repairedAt, pendingRepair, isTransient, metadata, metadataCollector, header, observers);
+        super(descriptor, components, lifecycleNewTracker, keyCount, repairedAt, pendingRepair, isTransient, metadata, metadataCollector, header, observers);
         lifecycleNewTracker.trackNew(this); // must track before any files are created
 
         dataFile = constructDataFileWriter(descriptor, metadata, metadataCollector, lifecycleNewTracker, writerOption);
@@ -153,13 +155,21 @@ public abstract class SortedTableWriter extends SSTableWriter
                 case fast:
                     if (!compressor.recommendedUses().contains(ICompressor.Uses.FAST_COMPRESSION))
                     {
-                        // The default compressor is generally fast (LZ4 with 16KiB block size)
-                        compressionParams = CompressionParams.DEFAULT;
+                        compressionParams = CompressionParams.FAST;
+                        break;
+                    }
+                    // else fall through
+                case adaptive:
+                    if (!compressor.recommendedUses().contains(ICompressor.Uses.FAST_COMPRESSION))
+                    {
+                        compressionParams = CompressionParams.FAST_ADAPTIVE;
                         break;
                     }
                     // else fall through
                 case table:
                 default:
+                    compressionParams = Optional.ofNullable(compressionParams.forUse(ICompressor.Uses.FAST_COMPRESSION))
+                                                .orElse(compressionParams);
                     break;
             }
         }
@@ -279,15 +289,15 @@ public abstract class SortedTableWriter extends SSTableWriter
     {
         assert decoratedKey != null : "Keys must not be null"; // empty keys ARE allowed b/c of indexed row values
         if (currentKey != null && currentKey.compareTo(decoratedKey) >= 0)
-            throw new RuntimeException("Last written key " + currentKey + " >= current key " + decoratedKey + " writing into " + getDataFile());
+            throw new AssertionError("Last written key " + currentKey + " >= current key " + decoratedKey + " writing into " + getDataFile());
     }
 
-    protected void invalidateCacheAtBoundary(FileHandle dfile)
+    protected void invalidateCacheAtPreviousBoundary(FileHandle dfile, long newBoundary)
     {
-        if (lastEarlyOpenLength != 0 && dfile.dataLength() > lastEarlyOpenLength)
+        if (lastEarlyOpenLength != 0 && newBoundary > lastEarlyOpenLength)
             dfile.invalidateIfCached(lastEarlyOpenLength);
 
-        lastEarlyOpenLength = dfile.dataLength();
+        lastEarlyOpenLength = newBoundary;
     }
 
     public long getFilePointer()

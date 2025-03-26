@@ -35,7 +35,7 @@ import org.apache.cassandra.utils.btree.BTree;
 
 import static org.apache.cassandra.utils.btree.BTree.Dir.desc;
 
-public abstract class AbstractBTreePartition implements Partition, Iterable<Row>
+public abstract class AbstractBTreePartition implements Partition
 {
     protected final DecoratedKey partitionKey;
 
@@ -354,24 +354,7 @@ public abstract class AbstractBTreePartition implements Partition, Iterable<Row>
     @Override
     public String toString()
     {
-        StringBuilder sb = new StringBuilder();
-
-        sb.append(String.format("[%s] key=%s partition_deletion=%s columns=%s",
-                                metadata(),
-                                metadata().partitionKeyType.getString(partitionKey().getKey()),
-                                partitionLevelDeletion(),
-                                columns()));
-
-        if (staticRow() != Rows.EMPTY_STATIC_ROW)
-            sb.append("\n    ").append(staticRow().toString(metadata(), true));
-
-        try (UnfilteredRowIterator iter = unfilteredIterator())
-        {
-            while (iter.hasNext())
-                sb.append("\n    ").append(iter.next().toString(metadata(), true));
-        }
-
-        return sb.toString();
+        return Partition.toString(this);
     }
 
     public int rowCount()
@@ -379,7 +362,7 @@ public abstract class AbstractBTreePartition implements Partition, Iterable<Row>
         return BTree.size(holder().tree);
     }
 
-    public Iterator<Row> iterator()
+    public Iterator<Row> rowIterator()
     {
         return BTree.<Row>iterator(holder().tree);
     }

@@ -27,13 +27,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class AnalyzerQueryLongTest extends CQLTester
 {
     @Test
-    public void manyWritesTest() throws Throwable
+    public void manyWritesTest()
     {
         createTable("CREATE TABLE %s (pk int PRIMARY KEY, not_analyzed int, val text)");
         createIndex("CREATE CUSTOM INDEX ON %s(val) " +
                     "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
                     "WITH OPTIONS = { 'index_analyzer': 'standard' }");
-        waitForIndex(KEYSPACE, currentTable(), "val");
         var iterations = 15000;
         for (int i = 0; i < iterations; i++)
         {
@@ -63,13 +62,12 @@ public class AnalyzerQueryLongTest extends CQLTester
     }
 
     @Test
-    public void manyWritesAndUpsertsTest() throws Throwable
+    public void manyWritesAndUpsertsTest()
     {
         createTable("CREATE TABLE %s (pk int PRIMARY KEY, val text)");
         createIndex("CREATE CUSTOM INDEX ON %s(val) " +
                     "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
                     "WITH OPTIONS = { 'index_analyzer': 'standard' }");
-        waitForIndex(KEYSPACE, currentTable(), "val");
         var iterations = 15000;
         for (int i = 0; i < iterations; i++)
         {
@@ -94,13 +92,12 @@ public class AnalyzerQueryLongTest extends CQLTester
         assertThat(result).hasSize(iterations / 2 + 1);
     }
     @Test
-    public void manyWritesUpsertsAndDeletesForSamePKTest() throws Throwable
+    public void manyWritesUpsertsAndDeletesForSamePKTest()
     {
         createTable("CREATE TABLE %s (pk int PRIMARY KEY, val text)");
         createIndex("CREATE CUSTOM INDEX ON %s(val) " +
                     "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
                     "WITH OPTIONS = { 'index_analyzer': 'standard' }");
-        waitForIndex(KEYSPACE, currentTable(), "val");
         var iterations = 15000;
         for (int i = 0; i < iterations; i++)
         {

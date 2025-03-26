@@ -24,6 +24,7 @@ import java.io.EOFException;
 import java.io.IOError;
 import java.io.IOException;
 import java.lang.reflect.Field;
+import java.lang.reflect.Modifier;
 import java.math.BigInteger;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
@@ -59,6 +60,7 @@ import com.google.common.base.Preconditions;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Iterators;
 import org.apache.commons.lang3.StringUtils;
+import org.junit.Assume;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -155,8 +157,6 @@ import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.equalTo;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.hamcrest.MatcherAssert.assertThat;
-import static org.hamcrest.Matchers.equalTo;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
@@ -443,7 +443,7 @@ public class Util
         }
     }
 
-    public static List<ImmutableBTreePartition> getAllUnfiltered(ReadCommand command)
+    public static List<Partition> getAllUnfiltered(ReadCommand command)
     {
         try (ReadExecutionController controller = command.executionController())
         {
@@ -451,9 +451,9 @@ public class Util
         }
     }
 
-    public static List<ImmutableBTreePartition> getAllUnfiltered(ReadCommand command, ReadExecutionController controller)
+    public static List<Partition> getAllUnfiltered(ReadCommand command, ReadExecutionController controller)
     {
-        List<ImmutableBTreePartition> results = new ArrayList<>();
+        List<Partition> results = new ArrayList<>();
         try (UnfilteredPartitionIterator iterator = command.executeLocally(controller))
         {
             while (iterator.hasNext())
@@ -526,7 +526,7 @@ public class Util
         }
     }
 
-    public static ImmutableBTreePartition getOnlyPartitionUnfiltered(ReadCommand cmd)
+    public static Partition getOnlyPartitionUnfiltered(ReadCommand cmd)
     {
         try (ReadExecutionController controller = cmd.executionController())
         {
@@ -534,7 +534,7 @@ public class Util
         }
     }
 
-    public static ImmutableBTreePartition getOnlyPartitionUnfiltered(ReadCommand cmd, ReadExecutionController controller)
+    public static Partition getOnlyPartitionUnfiltered(ReadCommand cmd, ReadExecutionController controller)
     {
         try (UnfilteredPartitionIterator iterator = cmd.executeLocally(controller))
         {
@@ -1141,6 +1141,9 @@ public class Util
      */
     public static void setUpgradeFromVersion(String version)
     {
+        if (!Gossiper.instance.isEnabled())
+            Gossiper.instance.maybeInitializeLocalState(0);
+
         int v = Optional.ofNullable(Gossiper.instance.getEndpointStateForEndpoint(FBUtilities.getBroadcastAddressAndPort()))
                         .map(ep -> ep.getApplicationState(ApplicationState.RELEASE_VERSION))
                         .map(rv -> rv.version)
@@ -1148,16 +1151,8 @@ public class Util
 
         Gossiper.instance.addLocalApplicationState(ApplicationState.RELEASE_VERSION,
                                                    VersionedValue.unsafeMakeVersionedValue(version, v + 1));
-        try
-        {
-            // add dummy host to avoid returning early in Gossiper.instance.upgradeFromVersionSupplier
-            Gossiper.instance.initializeNodeUnsafe(InetAddressAndPort.getByName("127.0.0.2"), UUID.randomUUID(), 1);
-        }
-        catch (UnknownHostException e)
-        {
-            throw new RuntimeException(e);
-        }
-        Gossiper.instance.expireUpgradeFromVersion();
+
+        Gossiper.instance.clusterVersionProvider.reset();
     }
 
     public static Supplier<SequenceBasedSSTableId> newSeqGen(int ... existing)
@@ -1240,6 +1235,11 @@ public class Util
         return new File(targetBasePath.toPath().resolve(relative));
     }
 
+    public static void flush(ColumnFamilyStore cfs)
+    {
+        cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
+    }
+
     public static void assertSSTableIds(SSTableId v1, SSTableId v2, IntFunction<Boolean> predicate)
     {
         Assertions.assertThat(Pair.create(v1, v2))
@@ -1314,4 +1314,23 @@ public class Util
         }
         return new UserType(ks, UTF8Type.instance.decompose(name), fieldNames, fieldTypes, multicell);
     }
+
+    public static void assumeAssertsEnabled()
+    {
+        Assume.assumeTrue("Asserts must be enabled for this test", assertsEnabled());
+    }
+
+    public static boolean assertsEnabled()
+    {
+        try
+        {
+            assert false;
+            return false;
+        }
+        catch (AssertionError e)
+        {
+            return true;
+        }
+    }
+
 }

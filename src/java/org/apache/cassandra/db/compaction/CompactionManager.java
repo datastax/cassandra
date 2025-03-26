@@ -65,7 +65,7 @@ import com.google.common.util.concurrent.RateLimiter;
 import com.google.common.util.concurrent.Uninterruptibles;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
+import com.codahale.metrics.Meter;
 import io.netty.util.concurrent.FastThreadLocal;
 import org.apache.cassandra.cache.AutoSavingCache;
 import org.apache.cassandra.concurrent.DebuggableThreadPoolExecutor;
@@ -290,6 +290,11 @@ public class CompactionManager implements CompactionManagerMBean
             compactionRateLimiter.setRate(throughput);
     }
 
+    public Meter getCompactionThroughput()
+    {
+        return metrics.bytesCompactedThroughput;
+    }
+
     /**
      * Call this whenever a compaction might be needed on the given column family store.
      * It's okay to over-call (within reason) if a call is unnecessary, it will
@@ -314,7 +319,7 @@ public class CompactionManager implements CompactionManagerMBean
     {
         return backgroundCompactionRunner.startCompactionTasks(cfs, tasks);
     }
-    
+
     public int getOngoingBackgroundUpgradesCount()
     {
         return backgroundCompactionRunner.getOngoingUpgradesCount();
@@ -781,7 +786,7 @@ public class CompactionManager implements CompactionManagerMBean
 
         Set<SSTableReader> fullyContainedSSTables = findSSTablesToAnticompact(sstableIterator, normalizedRanges, sessionID);
 
-        cfs.metric.bytesMutatedAnticompaction.inc(CompactionSSTable.getTotalBytes(fullyContainedSSTables));
+        cfs.metric.bytesMutatedAnticompaction.inc(CompactionSSTable.getTotalDataBytes(fullyContainedSSTables));
         cfs.mutateRepaired(fullyContainedSSTables, UNREPAIRED_SSTABLE, sessionID, isTransient);
         // since we're just re-writing the sstable metdata for the fully contained sstables, we don't want
         // them obsoleted when the anti-compaction is complete. So they're removed from the transaction here
@@ -894,19 +899,43 @@ public class CompactionManager implements CompactionManagerMBean
         FBUtilities.waitOnFutures(submitMaximal(cfStore, getDefaultGcBefore(cfStore, FBUtilities.nowInSeconds()), splitOutput));
     }
 
+    public void performMaximal(final ColumnFamilyStore cfStore, boolean splitOutput, int parallelism)
+    {
+        FBUtilities.waitOnFutures(submitMaximal(cfStore, getDefaultGcBefore(cfStore, FBUtilities.nowInSeconds()), splitOutput, parallelism, active));
+    }
+
     public List<Future<?>> submitMaximal(final ColumnFamilyStore cfStore, final int gcBefore, boolean splitOutput)
     {
         return submitMaximal(cfStore, gcBefore, splitOutput, active);
     }
 
+    public List<Future<?>> submitMaximal(final ColumnFamilyStore cfStore,
+                                         final int gcBefore,
+                                         boolean splitOutput,
+                                         TableOperationObserver obs)
+    {
+        return submitMaximal(cfStore, gcBefore, splitOutput, -1, obs);
+    }
+
     @VisibleForTesting
     @SuppressWarnings("resource") // the tasks are executed in parallel on the executor, making sure that they get closed
-    public List<Future<?>> submitMaximal(final ColumnFamilyStore cfStore, final int gcBefore, boolean splitOutput, TableOperationObserver obs)
+    public List<Future<?>> submitMaximal(final ColumnFamilyStore cfStore,
+                                         final int gcBefore,
+                                         boolean splitOutput,
+                                         int permittedParallelism,
+                                         TableOperationObserver obs)
     {
+        // The default parallelism is half the number of compaction threads to leave enough room for other compactions.
+        if (permittedParallelism < 0)
+            permittedParallelism = getCoreCompactorThreads() / 2;
+        else if (permittedParallelism == 0)
+            permittedParallelism = Integer.MAX_VALUE;
+
         // here we compute the task off the compaction executor, so having that present doesn't
         // confuse runWithCompactionsDisabled -- i.e., we don't want to deadlock ourselves, waiting
         // for ourselves to finish/acknowledge cancellation before continuing.
-        CompactionTasks tasks = cfStore.getCompactionStrategy().getMaximalTasks(gcBefore, splitOutput);
+
+        CompactionTasks tasks = cfStore.getCompactionStrategy().getMaximalTasks(gcBefore, splitOutput, permittedParallelism);
 
         if (tasks.isEmpty())
             return Collections.emptyList();
@@ -930,9 +959,18 @@ public class CompactionManager implements CompactionManagerMBean
             Future<?> fut = executor.submitIfRunning(runnable, "maximal task");
             if (!fut.isCancelled())
                 futures.add(fut);
+            else
+            {
+                Throwable error = task.rejected(new RejectedExecutionException("rejected by executor"));
+                if (error != null)
+                    futures.add(Futures.immediateFailedFuture(error));
+            }
         }
         if (nonEmptyTasks > 1)
-            logger.info("Major compaction will not result in a single sstable - repaired and unrepaired data is kept separate and compaction runs per data_file_directory.");
+            logger.info("Major compaction of {}.{} will not result in a single sstable - " +
+                        "repaired and unrepaired data is kept separate, compaction runs per data_file_directory, " +
+                        "and some compaction strategies will construct multiple non-overlapping sstables.",
+                        cfStore.getKeyspaceName(), cfStore.getTableName());
 
         return futures;
     }
@@ -1340,7 +1378,7 @@ public class CompactionManager implements CompactionManagerMBean
 
     }
 
-    static boolean compactionRateLimiterAcquire(RateLimiter limiter, long bytesScanned, long lastBytesScanned, double compressionRatio)
+    protected boolean compactionRateLimiterAcquire(RateLimiter limiter, long bytesScanned, long lastBytesScanned, double compressionRatio)
     {
         if (DatabaseDescriptor.getCompactionThroughputMbPerSec() == 0)
             return false;
@@ -1353,8 +1391,9 @@ public class CompactionManager implements CompactionManagerMBean
         return actuallyAcquire(limiter, lengthRead);
     }
 
-    private static boolean actuallyAcquire(RateLimiter limiter, long lengthRead)
+    private boolean actuallyAcquire(RateLimiter limiter, long lengthRead)
     {
+        metrics.bytesCompactedThroughput.mark(lengthRead);
         while (lengthRead >= Integer.MAX_VALUE)
         {
             limiter.acquire(Integer.MAX_VALUE);
@@ -1555,7 +1594,7 @@ public class CompactionManager implements CompactionManagerMBean
         // repairedAt values for these, we still avoid anti-compacting already repaired sstables, as we currently don't
         // make use of any actual repairedAt value and splitting up sstables just for that is not worth it at this point.
         Set<SSTableReader> unrepairedSSTables = sstables.stream().filter((s) -> !s.isRepaired()).collect(Collectors.toSet());
-        cfs.metric.bytesAnticompacted.inc(CompactionSSTable.getTotalBytes(unrepairedSSTables));
+        cfs.metric.bytesAnticompacted.inc(CompactionSSTable.getTotalDataBytes(unrepairedSSTables));
         Collection<Collection<CompactionSSTable>> groupedSSTables = cfs.getCompactionStrategy().groupSSTablesForAntiCompaction(unrepairedSSTables);
 
         // iterate over sstables to check if the full / transient / unrepaired ranges intersect them.
@@ -1739,9 +1778,9 @@ public class CompactionManager implements CompactionManagerMBean
     {
         return new CompactionIterator(OperationType.ANTICOMPACTION, scanners, controller, nowInSec, timeUUID) {
             @Override
-            public TableOperation createOperation()
+            public TableOperation createOperation(CompactionProgress progress)
             {
-                return getAntiCompactionOperation(super.createOperation(), isCancelled);
+                return getAntiCompactionOperation(super.createOperation(progress), isCancelled);
             }
         };
     }
@@ -1758,7 +1797,7 @@ public class CompactionManager implements CompactionManagerMBean
             }
 
             @Override
-            public OperationProgress getProgress()
+            public Progress getProgress()
             {
                 return compaction.getProgress();
             }
@@ -2298,7 +2337,7 @@ public class CompactionManager implements CompactionManagerMBean
         Set<TableOperation> interrupted = new HashSet<>();
         for (TableOperation operationSource : active.getTableOperations())
         {
-            AbstractTableOperation.OperationProgress info = operationSource.getProgress();
+            TableOperation.Progress info = operationSource.getProgress();
 
             if (Iterables.contains(tables, info.metadata()) && opPredicate.test(info.operationType()))
             {
@@ -2348,7 +2387,7 @@ public class CompactionManager implements CompactionManagerMBean
         boolean interrupted = false;
         for (TableOperation operationSource : active.getTableOperations())
         {
-            AbstractTableOperation.OperationProgress info = operationSource.getProgress();
+            TableOperation.Progress info = operationSource.getProgress();
             if ((info.operationType() == OperationType.VALIDATION) && !interruptValidation)
                 continue;
 
@@ -2396,7 +2435,7 @@ public class CompactionManager implements CompactionManagerMBean
     }
 
 
-    public List<AbstractTableOperation.OperationProgress> getSSTableTasks()
+    public List<TableOperation.Progress> getSSTableTasks()
     {
         return active.getTableOperations()
                      .stream()

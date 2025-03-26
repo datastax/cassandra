@@ -24,6 +24,8 @@ import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 
 import com.google.common.annotations.VisibleForTesting;
 
@@ -33,10 +35,15 @@ import io.netty.channel.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.exceptions.OverloadedException;
+import org.apache.cassandra.metrics.ClientMetrics;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.transport.messages.*;
 import org.apache.cassandra.service.QueryState;
+import org.apache.cassandra.utils.MonotonicClock;
+import org.apache.cassandra.utils.ReflectionUtils;
 import org.apache.cassandra.utils.UUIDGen;
 
 /**
@@ -131,7 +138,7 @@ public abstract class Message
             Codec<?> original = this.codec;
             Field field = Type.class.getDeclaredField("codec");
             field.setAccessible(true);
-            Field modifiers = Field.class.getDeclaredField("modifiers");
+            Field modifiers = ReflectionUtils.getField(Field.class, "modifiers");
             modifiers.setAccessible(true);
             modifiers.setInt(field, field.getModifiers() & ~Modifier.FINAL);
             field.set(this, codec);
@@ -200,6 +207,7 @@ public abstract class Message
     public static abstract class Request extends Message
     {
         private boolean tracingRequested;
+        private final long creationTimeNanos = MonotonicClock.approxTime.now();
 
         protected Request(Type type)
         {
@@ -214,10 +222,31 @@ public abstract class Message
             return false;
         }
 
-        protected abstract Response execute(QueryState queryState, long queryStartNanoTime, boolean traceRequest);
-
-        public final Response execute(QueryState queryState, long queryStartNanoTime)
+        /**
+         * Returns the time elapsed since this request was created. Note that this is the total lifetime of the request
+         * in the system, so we expect increasing returned values across multiple calls to elapsedTimeSinceCreation.
+         *
+         * @param timeUnit the time unit in which to return the elapsed time
+         * @return the time elapsed since this request was created
+         */
+        protected long elapsedTimeSinceCreation(TimeUnit timeUnit)
         {
+            return timeUnit.convert(MonotonicClock.approxTime.now() - creationTimeNanos, TimeUnit.NANOSECONDS);
+        }
+
+        protected abstract CompletableFuture<Response> maybeExecuteAsync(QueryState queryState, long queryStartNanoTime, boolean traceRequest);
+
+        public final CompletableFuture<Response> execute(QueryState queryState, long queryStartNanoTime)
+        {
+            // at the time of the check, this is approximately the time spent in the NTR stage's queue
+            long elapsedTimeSinceCreation = elapsedTimeSinceCreation(TimeUnit.NANOSECONDS);
+            ClientMetrics.instance.recordQueueTime(elapsedTimeSinceCreation, TimeUnit.NANOSECONDS);
+            if (elapsedTimeSinceCreation > DatabaseDescriptor.getNativeTransportTimeout(TimeUnit.NANOSECONDS))
+            {
+                ClientMetrics.instance.markTimedOutBeforeProcessing();
+                return CompletableFuture.completedFuture(ErrorMessage.fromException(new OverloadedException("Query timed out before it could start")));
+            }
+
             boolean shouldTrace = false;
             UUID tracingSessionId = null;
 
@@ -236,21 +265,17 @@ public abstract class Message
                 }
             }
 
-            Response response;
-            try
-            {
-                response = execute(queryState, queryStartNanoTime, shouldTrace);
-            }
-            finally
-            {
-                if (shouldTrace)
-                    Tracing.instance.stopSession();
-            }
+            Tracing.trace("Initialized tracing in execute. Already elapsed {} ns", (System.nanoTime() - queryStartNanoTime));
+            boolean finalShouldTrace = shouldTrace;
+            UUID finalTracingSessionId = tracingSessionId;
+            return maybeExecuteAsync(queryState, queryStartNanoTime, shouldTrace)
+                   .whenComplete((result, ignored) -> {
+                       if (finalShouldTrace)
+                           Tracing.instance.stopSession();
 
-            if (isTraceable() && isTracingRequested())
-                response.setTracingId(tracingSessionId);
-
-            return response;
+                       if (isTraceable() && isTracingRequested())
+                           result.setTracingId(finalTracingSessionId);
+                   });
         }
 
         public void setTracingRequested()

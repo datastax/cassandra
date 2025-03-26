@@ -24,7 +24,9 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.ConcurrentModificationException;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
@@ -914,7 +916,7 @@ public class CompactionStrategyManager implements CompactionStrategyContainer
     }
 
     @Override
-    public CompactionTasks getMaximalTasks(final int gcBefore, final boolean splitOutput)
+    public CompactionTasks getMaximalTasks(final int gcBefore, final boolean splitOutput, int permittedParallelism)
     {
         maybeReloadDiskBoundaries();
         // runWithCompactionsDisabled cancels active compactions and disables them, then we are able
@@ -927,14 +929,14 @@ public class CompactionStrategyManager implements CompactionStrategyContainer
             {
                 for (AbstractStrategyHolder holder : holders)
                 {
-                    tasks.addAll(holder.getMaximalTasks(gcBefore, splitOutput));
+                    tasks.addAll(holder.getMaximalTasks(gcBefore, splitOutput, permittedParallelism));
                 }
             }
             finally
             {
                 readLock.unlock();
             }
-            return CompactionTasks.create(tasks);
+            return CompactionTasks.create(CompositeCompactionTask.applyParallelismLimit(tasks, permittedParallelism));
         }, false, false, TableOperation.StopTrigger.COMPACTION);
     }
 
@@ -1150,8 +1152,20 @@ public class CompactionStrategyManager implements CompactionStrategyContainer
     }
 
     @Override
-    public void onCompleted(UUID id, boolean isSuccess)
+    public void onCompleted(UUID id, Throwable err)
     {
 
+    }
+
+    @Override
+    public Map<String, String> getMaxOverlapsMap()
+    {
+        Map<String, String> result = new LinkedHashMap<>();
+
+        for (AbstractStrategyHolder holder : holders)
+            for (LegacyAbstractCompactionStrategy strategy : holder.allStrategies())
+                result.putAll(strategy.getMaxOverlapsMap());
+
+        return result;
     }
 }

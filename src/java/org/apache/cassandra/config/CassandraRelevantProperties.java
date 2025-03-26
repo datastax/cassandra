@@ -20,8 +20,14 @@ package org.apache.cassandra.config;
 
 import java.util.concurrent.TimeUnit;
 
+import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.io.compress.AdaptiveCompressor;
+import org.apache.cassandra.io.compress.LZ4Compressor;
 import org.apache.cassandra.metrics.TableMetrics;
+import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.sensors.SensorsFactory;
+import org.apache.cassandra.service.context.OperationContext;
 import org.apache.cassandra.service.reads.range.EndpointGroupingRangeCommandIterator;
 
 /** A class that extracts system properties for the cassandra node it runs within. */
@@ -208,14 +214,24 @@ public enum CassandraRelevantProperties
     UCS_COMPACTION_AGGREGATE_PRIORITIZER("unified_compaction.custom_compaction_aggregate_prioritizer"),
 
     /**
-     * The handler of the storage of sstables, and possibly other files such as txn logs.
+     * whether to include non-data files size into compaction space estimaton in UCS
      */
-    REMOTE_STORAGE_HANDLER("cassandra.remote_storage_handler"),
+    UCS_COMPACTION_INCLUDE_NON_DATA_FILES_SIZE("unified_compaction.include_non_data_files_size", "true"),
+
+    /**
+     * The factory for handler of the storage of sstables
+     */
+    REMOTE_STORAGE_HANDLER_FACTORY("cassandra.remote_storage_handler_factory"),
 
     /**
      * To provide a provider to a different implementation of the truncate statement.
      */
     TRUNCATE_STATEMENT_PROVIDER("cassandra.truncate_statement_provider"),
+
+    /**
+     * whether to persist prepared statements in the system table
+     */
+    PERSIST_PREPARED_STATEMENTS("cassandra.persist_prepared_statements", "true"),
 
     /**
      * custom native library for os access
@@ -253,6 +269,8 @@ public enum CassandraRelevantProperties
     /** what class to use for mbean registeration */
     MBEAN_REGISTRATION_CLASS("org.apache.cassandra.mbean_registration_class"),
 
+    MEMTABLE_TRIE_SIZE_LIMIT("cassandra.trie_size_limit_mb"),
+
     /** This property indicates if the code is running under the in-jvm dtest framework */
     DTEST_IS_IN_JVM_DTEST("org.apache.cassandra.dtest.is_in_jvm_dtest"),
 
@@ -278,11 +296,11 @@ public enum CassandraRelevantProperties
      * when the JVM terminates. Therefore, we can use such optimization and not wait unnecessarily. */
     NON_GRACEFUL_SHUTDOWN("cassandra.test.messagingService.nonGracefulShutdown"),
 
-    /** Flush changes of {@link org.apache.cassandra.schema.SchemaKeyspace} after each schema modification. In production,
-     * we always do that. However, tests which do not restart nodes may disable this functionality in order to run
-     * faster. Note that this is disabled for unit tests but if an individual test requires schema to be flushed, it
-     * can be also done manually for that particular case: {@code flush(SchemaConstants.SCHEMA_KEYSPACE_NAME);}. */
-    FLUSH_LOCAL_SCHEMA_CHANGES("cassandra.test.flush_local_schema_changes", "true"),
+    /** Disables flush changes to local and schema keyspaces. Also, disables recycling all segments of commitlog after
+     * dropping a table. Tests which do not restart nodes may enable this option in order to run faster. Note that this
+     * is enabled for unit tests but if an individual test requires schema to be flushed, it can be also done manually
+     * for that particular case: {@code flush(SchemaConstants.SCHEMA_KEYSPACE_NAME);}. */
+    UNSAFE_SYSTEM("cassandra.unsafesystem", "false"),
 
     /**
      * Delay before checking if gossip is settled.
@@ -326,6 +344,11 @@ public enum CassandraRelevantProperties
     CUSTOM_GUARDRAILS_FACTORY_PROPERTY("cassandra.custom_guardrails_factory_class"),
 
     /**
+     * Which class to use when notifying about stage task execution
+     */
+    CUSTOM_TASK_EXECUTION_CALLBACK_CLASS("cassandra.custom_task_execution_callback_class"),
+
+    /**
      * Used to support directory creation for different file system and remote/local conversion
      */
     CUSTOM_STORAGE_PROVIDER("cassandra.custom_storage_provider"),
@@ -341,6 +364,9 @@ public enum CassandraRelevantProperties
 
     /** Whether to allow the user to specify custom options to the hnsw index */
     SAI_HNSW_ALLOW_CUSTOM_PARAMETERS("cassandra.sai.hnsw.allow_custom_parameters", "false"),
+
+    /** Whether to validate terms that will be SAI indexed at the coordinator */
+    SAI_VALIDATE_TERMS_AT_COORDINATOR("cassandra.sai.validate_terms_at_coordinator", "true"),
 
     /** Whether vector type only allows float vectors. True by default. **/
     VECTOR_FLOAT_ONLY("cassandra.float_only_vectors", "true"),
@@ -412,6 +438,12 @@ public enum CassandraRelevantProperties
     USE_PARALLEL_INDEX_READ("cassandra.index_read.parallel", "true"),
     PARALLEL_INDEX_READ_NUM_THREADS("cassandra.index_read.parallel_thread_num"),
 
+    // The quantile used by the dynamic endpoint snitch to compute the score for a replica.
+    DYNAMIC_ENDPOINT_SNITCH_QUANTILE("cassandra.dynamic_endpoint_snitch_quantile", "0.5"),
+
+    // whether to quantize the dynamic endpoint snitch score to milliseconds; if set to false the nanosecond measurement
+    // is used
+    DYNAMIC_ENDPOINT_SNITCH_QUANTIZE_TO_MILLIS("cassandra.dynamic_endpoint_snitch_quantize_to_millis", "true"),
     // bloom filter lazy loading
     /**
      * true if non-local table's bloom filter should be deserialized on read instead of when opening sstable
@@ -447,6 +479,7 @@ public enum CassandraRelevantProperties
     CUSTOM_KEYSPACES_FILTER_PROVIDER("cassandra.custom_keyspaces_filter_provider_class"),
 
     LWT_LOCKS_PER_THREAD("cassandra.lwt_locks_per_thread", "1024"),
+    LWT_MAX_BACKOFF_MS("cassandra.lwt_max_backoff_ms", "50"),
     COUNTER_LOCK_NUM_STRIPES_PER_THREAD("cassandra.counter_lock.num_stripes_per_thread", "1024"),
     COUNTER_LOCK_FAIR_LOCK("cassandra.counter_lock.fair_lock", "false"),
 
@@ -476,11 +509,105 @@ public enum CassandraRelevantProperties
     DURATION_IN_MAPS_COMPATIBILITY_MODE("cassandra.types.map.duration_in_map_compatibility_mode", "false"),
 
     /**
+     * If this is true, compaction will not verify that sstables selected for compaction are in the same repair
+     * state. This check is done to ensure that incremental repair is not improperly carried out (potentially causing
+     * data loss) if a node has somehow entered an invalid state. The flag should only be used to recover from
+     * situations where sstables are brought in from outside and carry over stale and unapplicable repair state.
+     */
+    COMPACTION_SKIP_REPAIR_STATE_CHECKING("cassandra.compaction.skip_repair_state_checking", "false"),
+
+    /**
+     * If this is true, compaction will not verify that sstables selected for compaction are marked compacted.
+     */
+    COMPACTION_SKIP_COMPACTING_STATE_CHECKING("cassandra.compaction.skip_compacting_state_checking", "false"),
+
+    /**
      * If true, the searcher object created when opening a SAI index will be replaced by a dummy object and index
      * are never marked queriable (querying one will fail). This is obviously usually undesirable, but can be used if
      * the node only compact sstables to avoid loading heavy index data structures in memory that are not used.
      */
-    SAI_INDEX_READS_DISABLED("cassandra.sai.disabled_reads", "false");
+    SAI_INDEX_READS_DISABLED("cassandra.sai.disabled_reads", "false"),
+
+    /**
+     * Allows custom implementation of {@link SensorsFactory} to optionally create
+     * and configure {@link org.apache.cassandra.sensors.RequestSensors} instances.
+     */
+    SENSORS_FACTORY("cassandra.sensors_factory_class"),
+
+    /**
+     * This property allows configuring the maximum time that CachingRebufferer.rebuffer will wait when waiting for a
+     * CompletableFuture fetched from the cache to complete. This is part of a migitation for DBPE-13261.
+     */
+    CHUNK_CACHE_REBUFFER_WAIT_TIMEOUT_MS("cassandra.chunk_cache_rebuffer_wait_timeout_ms", "30000"),
+
+    /** Class used to discover/load the proper SAI index components file for a given sstable. */
+    CUSTOM_SAI_INDEX_COMPONENTS_DISCOVERY("cassandra.sai.custom_components_discovery_class"),
+
+    /**
+     * If true, while creating or altering schema, NetworkTopologyStrategy won't check if the DC exists.
+     * This is to remain compatible with older workflows that first change the replication before adding the nodes.
+     * Otherwise, it will validate that the names match existing DCs before allowing replication change.
+     */
+    DATACENTER_SKIP_NAME_VALIDATION("cassandra.dc_skip_name_validation", "false"),
+    /**
+     * If provided, this custom factory class will be used to create stage executor for a couple of stages.
+     * @see Stage for details
+     */
+    CUSTOM_STAGE_EXECUTOR_FACTORY_PROPERTY("cassandra.custom_stage_executor_factory_class"),
+
+    /**
+     * If true, makes read and write CQL statements async, splitting them from the {@link org.apache.cassandra.concurrent.Stage#NATIVE_TRANSPORT_REQUESTS}
+     * stage and into the {@link org.apache.cassandra.concurrent.Stage#COORDINATE_READ} and {@link org.apache.cassandra.concurrent.Stage#COORDINATE_MUTATION}
+     * stages respectively; in other words, the native transport stage will not block, offloading request processing
+     * (and any related blocking behaviour) to the specific read and write stages.
+     */
+    NATIVE_TRANSPORT_ASYNC_READ_WRITE_ENABLED("cassandra.transport.async.read_write", "false"),
+
+    /**
+     * Minimum time that needs to pass after the cluster is detected as fully upgraded to report that there is
+     * no upgrade in progress (when using the default cluster version provider).
+     */
+    CLUSTER_VERSION_PROVIDER_MIN_STABLE_DURATION("cassandra.cluster_version_provider.min_stable_duration_ms", "60000"),
+
+    /**
+     * The class name of the custom cluster version provider to use.
+     */
+    CLUSTER_VERSION_PROVIDER_CLASS_NAME("cassandra.cluster_version_provider.class_name"),
+
+    /**
+     * Do not wait for gossip to be enabled before starting stabilisation period. This is required especially for tests
+     * which do not enable gossip at all.
+     */
+    CLUSTER_VERSION_PROVIDER_SKIP_WAIT_FOR_GOSSIP("cassandra.test.cluster_version_provider.skip_wait_for_gossip"),
+
+    /**
+     * If true, the coordinator will propagate sensors via the native protocol custom payload bytes map.
+     */
+    SENSORS_VIA_NATIVE_PROTOCOL("cassandra.sensors_via_native_protocol", "false"),
+
+    /**
+     * The current messaging version. This is used when we add new messaging versions without adopting them immediately,
+     * or to force the node to use a specific version for testing purposes.
+     */
+    DS_CURRENT_MESSAGING_VERSION("ds.current_messaging_version", Integer.toString(MessagingService.VERSION_DS_11)),
+
+    /**
+     * Which compression algorithm to use for SSTable compression when not specified explicitly in the sstable options.
+     * Can be "fast", which selects {@link LZ4Compressor}, or "adaptive" which selects {@link AdaptiveCompressor}.
+     */
+    DEFAULT_SSTABLE_COMPRESSION("cassandra.default_sstable_compression", "fast"),
+
+    /**
+     * Do not try to calculate optimal streaming candidates. This can take a lot of time in some configs specially
+     * with vnodes.
+     */
+    SKIP_OPTIMAL_STREAMING_CANDIDATES_CALCULATION("cassandra.skip_optimal_streaming_candidates_calculation", "false"),
+
+    /**
+     * Allows custom implementation of {@link OperationContext.Factory} to optionally create and configure custom
+     * {@link OperationContext} instances.
+     */
+    OPERATION_CONTEXT_FACTORY("cassandra.operation_context_factory_class");
 
     CassandraRelevantProperties(String key, String defaultVal)
     {

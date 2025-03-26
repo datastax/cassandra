@@ -32,6 +32,7 @@ import com.google.common.collect.ImmutableSet;
 
 import org.apache.cassandra.db.compaction.TableOperation;
 import org.apache.cassandra.db.memtable.Memtable;
+import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.index.TargetParser;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -47,7 +48,6 @@ import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.lifecycle.View;
 import org.apache.cassandra.db.marshal.AbstractType;
-import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -55,7 +55,6 @@ import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.IndexRegistry;
 import org.apache.cassandra.index.SecondaryIndexBuilder;
 import org.apache.cassandra.index.transactions.IndexTransaction;
-import org.apache.cassandra.index.transactions.UpdateTransaction;
 import org.apache.cassandra.io.sstable.ReducingKeyIterator;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.IndexMetadata;
@@ -222,13 +221,17 @@ public class CustomCassandraIndex implements Index
 
     public RowFilter getPostIndexQueryFilter(RowFilter filter)
     {
-        return getTargetExpression(filter.getExpressions()).map(filter::without)
-                                                           .orElse(filter);
+        return getTargetExpression(filter).map(filter::without).orElse(filter);
     }
 
-    private Optional<RowFilter.Expression> getTargetExpression(List<RowFilter.Expression> expressions)
+    private Optional<RowFilter.Expression> getTargetExpression(RowFilter rowFilter)
     {
-        return expressions.stream().filter(this::supportsExpression).findFirst();
+        for (RowFilter.Expression expression : rowFilter.expressions())
+        {
+            if (supportsExpression(expression))
+                return Optional.of(expression);
+        }
+        return Optional.empty();
     }
 
     public Index.Searcher searcherFor(ReadCommand command)
@@ -247,7 +250,7 @@ public class CustomCassandraIndex implements Index
                 validateClusterings(update);
                 break;
             case REGULAR:
-                validateRows(update);
+                validateRows(update.rows());
                 break;
             case STATIC:
                 validateRows(Collections.singleton(update.staticRow()));
@@ -524,7 +527,7 @@ public class CustomCassandraIndex implements Index
     private void validateClusterings(PartitionUpdate update) throws InvalidRequestException
     {
         assert indexedColumn.isClusteringColumn();
-        for (Row row : update)
+        for (Row row : update.rows())
             validateIndexedValue(getIndexedValue(null, row.clustering(), null));
     }
 

@@ -46,10 +46,10 @@ import org.assertj.core.util.Lists;
 /**
  * This test produces a random schema, loads it with random data and then runs a series of
  * random queries against it.
- *
+ * </p>
  * The purpose of the test is to test that the <code>RowFilter</code> and <code>Operation</code>
  * classes correctly support complex queries.
- *
+ * </p>
  * At present the test only supports ascii and int datatypes and only supports EQ expressions.
  * It is intended that this can be extended in the future to support more functionality.
  */
@@ -71,9 +71,7 @@ public class RandomisedComplexQueryTest extends SAITester
 
         createTable(schema.toTableDefinition());
 
-        schema.generateIndexStrings().stream().forEach(index -> createIndex(index));
-
-        waitForIndexQueryable();
+        schema.generateIndexStrings().forEach(this::createIndex);
 
         List<RandomRow> data = schema.generateDataset();
 

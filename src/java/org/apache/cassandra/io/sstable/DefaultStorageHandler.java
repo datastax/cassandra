@@ -66,9 +66,9 @@ public class DefaultStorageHandler extends StorageHandler
     }
 
     @Override
-    public boolean isRemote()
+    public boolean enableAutoCompaction()
     {
-        return false;
+        return true;
     }
 
     @Override

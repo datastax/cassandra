@@ -93,6 +93,15 @@ public final class CreateIndexStatement extends AlterSchemaStatement
     {
         super.validate(state);
 
+        // Check the length of a valid index name.
+        // Non-valid indexes are validated in IndexMetadata#validate.
+        if (!state.getClientState().isInternal
+            && SchemaConstants.isValidName(indexName, true)
+            && indexName.length() > SchemaConstants.INDEX_NAME_LENGTH)
+
+            throw ire("Index name shouldn't be more than %s characters long (got %s chars for %s)",
+                      SchemaConstants.INDEX_NAME_LENGTH, indexName.length(), indexName);
+
         // save the query state to use it for guardrails validation in #apply
         this.state = state;
     }
@@ -180,7 +189,7 @@ public final class CreateIndexStatement extends AlterSchemaStatement
             long indexesOnAllTables = StreamSupport.stream(Keyspace.all().spliterator(), false).flatMap(ks -> ks.getColumnFamilyStores().stream())
                                                    .flatMap(ks -> ks.indexManager.listIndexes().stream())
                                                    .map(i -> i.getIndexMetadata().getIndexClassName())
-                                                   .filter(otherClassName -> className.equals(otherClassName)).count();
+                                                   .filter(className::equals).count();
             guardRails.totalThreshold.guard(indexesOnAllTables + 1, indexDescription, false, state);
         }
 
@@ -223,10 +232,6 @@ public final class CreateIndexStatement extends AlterSchemaStatement
 
         if (null == column)
             throw ire("Column '%s' doesn't exist", target.column);
-
-        if ((kind == IndexMetadata.Kind.CUSTOM) && !SchemaConstants.isValidName(target.column.toString()))
-            throw ire("Column '%s' is longer than the permissible name length of %d characters or" +
-                      " contains non-alphanumeric-underscore characters", target.column, SchemaConstants.NAME_LENGTH);
 
         if (column.type.referencesDuration())
         {
@@ -275,7 +280,7 @@ public final class CreateIndexStatement extends AlterSchemaStatement
     {
         String baseName = targets.size() == 1
                         ? IndexMetadata.generateDefaultIndexName(tableName, targets.get(0).column)
-                        : IndexMetadata.generateDefaultIndexName(tableName);
+                        : IndexMetadata.generateDefaultIndexName(tableName, null);
         return keyspace.findAvailableIndexName(baseName);
     }
 

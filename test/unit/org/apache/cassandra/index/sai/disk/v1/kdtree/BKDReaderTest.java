@@ -18,9 +18,7 @@
 package org.apache.cassandra.index.sai.disk.v1.kdtree;
 
 import java.io.IOException;
-import java.util.List;
 
-import com.google.common.collect.ImmutableList;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -29,11 +27,10 @@ import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.disk.PostingList;
-import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
+import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
-import org.apache.cassandra.index.sai.disk.v1.MergeOneDimPointValues;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.metrics.QueryEventListener;
 import org.apache.cassandra.index.sai.utils.SaiRandomizedTest;
@@ -41,7 +38,6 @@ import org.apache.cassandra.io.util.FileHandle;
 import org.apache.lucene.index.PointValues.Relation;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.NumericUtils;
-import org.assertj.core.util.Lists;
 
 import static org.apache.cassandra.index.sai.metrics.QueryEventListeners.NO_OP_BKD_LISTENER;
 import static org.apache.lucene.index.PointValues.Relation.CELL_CROSSES_QUERY;
@@ -115,75 +111,6 @@ public class BKDReaderTest extends SaiRandomizedTest
         doTestInts1D();
     }
 
-    @Test
-    public void testMerge() throws Exception
-    {
-        // Start by testing that the iteratorState returns rowIds in order
-        BKDReader reader1 = createReader(10);
-        BKDReader.IteratorState it1 = reader1.iteratorState();
-        int expectedRowId = 0;
-        while (it1.hasNext())
-        {
-            assertEquals(expectedRowId++, (int) it1.next());
-        }
-        it1.close();
-
-        // Next test that an intersection only returns the query values
-        List<Integer> expected = Lists.list(8, 9);
-        int expectedCount = 0;
-        PostingList intersection = reader1.intersect(buildQuery(8, 9), (QueryEventListener.BKDIndexEventListener)NO_OP_BKD_LISTENER, new QueryContext());
-        for (Integer id = intersection.nextPosting(); id != PostingList.END_OF_STREAM; id = intersection.nextPosting())
-        {
-            assertEquals(expected.get(expectedCount++), id);
-        }
-        intersection.close();
-        reader1.close();
-
-        // Finally test that merger returns the correct values
-        expected = Lists.list(8, 9, 18, 19);
-        expectedCount = 0;
-
-        reader1 = createReader(10);
-        BKDReader reader2 = createReader(10);
-
-        List<BKDReader.IteratorState> iterators = ImmutableList.of(reader1.iteratorState(), reader2.iteratorState((rowID) -> rowID + 10));
-        MergeOneDimPointValues merger = new MergeOneDimPointValues(iterators, Int32Type.instance);
-        final BKDReader reader = finishAndOpenReaderOneDim(2, merger, 20);
-
-        final int queryMin = 8;
-        final int queryMax = 9;
-
-        intersection = reader.intersect(buildQuery(queryMin, queryMax), (QueryEventListener.BKDIndexEventListener)NO_OP_BKD_LISTENER, new QueryContext());
-
-        for (Integer id = intersection.nextPosting(); id != PostingList.END_OF_STREAM; id = intersection.nextPosting())
-        {
-            assertEquals(expected.get(expectedCount++), id);
-        }
-
-        intersection.close();
-
-        for (BKDReader.IteratorState iterator : iterators)
-        {
-            iterator.close();
-        }
-
-        reader1.close();
-        reader2.close();
-        reader.close();
-    }
-
-    private BKDReader createReader(int numRows) throws IOException
-    {
-        final BKDTreeRamBuffer buffer = new BKDTreeRamBuffer(1, Integer.BYTES);
-        byte[] scratch = new byte[4];
-        for (int docID = 0; docID < numRows; docID++)
-        {
-            NumericUtils.intToSortableBytes(docID, scratch, 0);
-            buffer.addPackedValue(docID, new BytesRef(scratch));
-        }
-        return finishAndOpenReaderOneDim(2, buffer);
-    }
-
     private void doTestInts1D() throws IOException
     {
         final int numRows = between(100, 400);
@@ -247,6 +174,120 @@ public class BKDReaderTest extends SaiRandomizedTest
     }
 
     @Test
+    public void testForwardIteration() throws IOException
+    {
+        final int numRows = between(100, 400);
+        final BKDTreeRamBuffer buffer = new BKDTreeRamBuffer(1, Integer.BYTES);
+
+        byte[] scratch = new byte[4];
+        for (int docID = 0; docID < numRows; docID++)
+        {
+            NumericUtils.intToSortableBytes(docID, scratch, 0);
+            buffer.addPackedValue(docID, new BytesRef(scratch));
+        }
+
+        try (BKDReader reader = finishAndOpenReaderOneDim(2, buffer);
+             BKDReader.IteratorState iterator = reader.iteratorState(BKDReader.Direction.FORWARD, null))
+        {
+            int docId = 0;
+            while (iterator.hasNext())
+            {
+                int value = NumericUtils.sortableBytesToInt(iterator.scratch, 0);
+                assertEquals(docId++, value);
+                iterator.next();
+            }
+            assertEquals(numRows, docId);
+        }
+    }
+
+    @Test
+    public void testForwardIterationWithQuery() throws IOException
+    {
+        final int numRows = between(100, 400);
+        final int queryMin = between(2, 20);
+        final int queryMax = between(numRows - 20, numRows - 2);
+        final BKDTreeRamBuffer buffer = new BKDTreeRamBuffer(1, Integer.BYTES);
+
+        byte[] scratch = new byte[4];
+        for (int docID = 0; docID < numRows; docID++)
+        {
+            NumericUtils.intToSortableBytes(docID, scratch, 0);
+            buffer.addPackedValue(docID, new BytesRef(scratch));
+        }
+
+        try (BKDReader reader = finishAndOpenReaderOneDim(2, buffer);
+             BKDReader.IteratorState iterator = reader.iteratorState(BKDReader.Direction.FORWARD, buildQuery(queryMin, queryMax)))
+        {
+            int docId = Math.max(0, queryMin);
+            while (iterator.hasNext())
+            {
+                int value = NumericUtils.sortableBytesToInt(iterator.scratch, 0);
+                assertEquals(docId++, value);
+                iterator.next();
+            }
+            assertEquals(Math.min(queryMax + 1, numRows), docId);
+        }
+    }
+
+
+    @Test
+    public void testBackwardIteration() throws IOException
+    {
+        final int numRows = between(100, 400);
+        final BKDTreeRamBuffer buffer = new BKDTreeRamBuffer(1, Integer.BYTES);
+
+        byte[] scratch = new byte[4];
+        for (int docID = 0; docID < numRows; docID++)
+        {
+            NumericUtils.intToSortableBytes(docID, scratch, 0);
+            buffer.addPackedValue(docID, new BytesRef(scratch));
+        }
+
+        try (BKDReader reader = finishAndOpenReaderOneDim(2, buffer);
+             BKDReader.IteratorState iterator = reader.iteratorState(BKDReader.Direction.BACKWARD, null))
+        {
+            int docId = numRows;
+            while (iterator.hasNext())
+            {
+                int value = NumericUtils.sortableBytesToInt(iterator.scratch, 0);
+                assertEquals(--docId, value);
+                iterator.next();
+            }
+            assertEquals(0, docId);
+        }
+
+    }
+
+    @Test
+    public void testBackwardIterationWithQuery() throws IOException
+    {
+        final int numRows = between(100, 400);
+        final int queryMin = between(2, 20);
+        final int queryMax = between(numRows - 20, numRows - 2);
+        final BKDTreeRamBuffer buffer = new BKDTreeRamBuffer(1, Integer.BYTES);
+
+        byte[] scratch = new byte[4];
+        for (int docID = 0; docID < numRows; docID++)
+        {
+            NumericUtils.intToSortableBytes(docID, scratch, 0);
+            buffer.addPackedValue(docID, new BytesRef(scratch));
+        }
+
+        try (BKDReader reader = finishAndOpenReaderOneDim(2, buffer);
+             BKDReader.IteratorState iterator = reader.iteratorState(BKDReader.Direction.BACKWARD, buildQuery(queryMin, queryMax)))
+        {
+            int docId = Math.min(numRows, queryMax);
+            while (iterator.hasNext())
+            {
+                int value = NumericUtils.sortableBytesToInt(iterator.scratch, 0);
+                assertEquals(docId--, value);
+                iterator.next();
+            }
+            assertEquals(Math.max(queryMin - 1, 0), docId);
+        }
+    }
+
+    @Test
     public void testAdvance() throws IOException
     {
         doTestAdvance(false);
@@ -290,6 +331,7 @@ public class BKDReaderTest extends SaiRandomizedTest
         assertEquals(PostingList.END_OF_STREAM, intersection.advance(numRows + 1));
 
         intersection.close();
+        reader.close();
     }
 
     @Test
@@ -310,9 +352,12 @@ public class BKDReaderTest extends SaiRandomizedTest
         }
 
         final BKDReader reader = finishAndOpenReaderOneDim(50, buffer);
-
         final PostingList intersection = reader.intersect(buildQuery(1017, 1096), (QueryEventListener.BKDIndexEventListener)NO_OP_BKD_LISTENER, new QueryContext());
+
         assertEquals(PostingList.EMPTY, intersection);
+
+        intersection.close();
+        reader.close();
     }
 
     private BKDReader.IntersectVisitor buildQuery(int queryMin, int queryMax)

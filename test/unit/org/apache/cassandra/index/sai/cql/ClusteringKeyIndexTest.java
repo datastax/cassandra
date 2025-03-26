@@ -29,24 +29,25 @@ public class ClusteringKeyIndexTest extends SAITester
     @Before
     public void createTableAndIndex()
     {
-        createTable("CREATE TABLE %s (pk1 int, pk2 text, val int, PRIMARY KEY((pk1), pk2)) WITH CLUSTERING ORDER BY (pk2 DESC)");
+        createTable("CREATE TABLE %s (pk1 int, pk2 text, val int, val2 int, PRIMARY KEY((pk1), pk2)) WITH CLUSTERING ORDER BY (pk2 DESC)");
         createIndex("CREATE CUSTOM INDEX pk2_idx ON %s(pk2) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX val2_idx ON %s(val2) USING 'StorageAttachedIndex'");
 
         disableCompaction();
     }
 
     private void insertData1() throws Throwable
     {
-        execute("INSERT INTO %s (pk1, pk2, val) VALUES (1, '1', 1)");
-        execute("INSERT INTO %s (pk1, pk2, val) VALUES (2, '2', 2)");
-        execute("INSERT INTO %s (pk1, pk2, val) VALUES (3, '3', 3)");
+        execute("INSERT INTO %s (pk1, pk2, val, val2) VALUES (1, '1', 1, 1)");
+        execute("INSERT INTO %s (pk1, pk2, val, val2) VALUES (2, '2', 2, 2)");
+        execute("INSERT INTO %s (pk1, pk2, val, val2) VALUES (3, '3', 3, 3)");
     }
 
     private void insertData2() throws Throwable
     {
-        execute("INSERT INTO %s (pk1, pk2, val) VALUES (4, '4', 4)");
-        execute("INSERT INTO %s (pk1, pk2, val) VALUES (5, '5', 5)");
-        execute("INSERT INTO %s (pk1, pk2, val) VALUES (6, '6', 6)");
+        execute("INSERT INTO %s (pk1, pk2, val, val2) VALUES (4, '4', 4, 4)");
+        execute("INSERT INTO %s (pk1, pk2, val, val2) VALUES (5, '5', 5, 5)");
+        execute("INSERT INTO %s (pk1, pk2, val, val2) VALUES (6, '6', 6, 6)");
     }
 
     @Test
@@ -98,7 +99,7 @@ public class ClusteringKeyIndexTest extends SAITester
 
     private Object[] expectedRow(int index)
     {
-        return row(index, Integer.toString(index), index);
+        return row(index, Integer.toString(index), index, index);
     }
 
     private void runQueries() throws Throwable
@@ -111,5 +112,7 @@ public class ClusteringKeyIndexTest extends SAITester
 
         assertThatThrownBy(()->execute("SELECT * FROM %s WHERE pk1 = -1 AND val = 2")).hasMessageContaining("use ALLOW FILTERING");
 
+        // Add an assertion that covers searching a non-primary key column
+        assertRowsIgnoringOrder(execute("SELECT * FROM %s WHERE val2 = 1"), expectedRow(1));
     }
 }

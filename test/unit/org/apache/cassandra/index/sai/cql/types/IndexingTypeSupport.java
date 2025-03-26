@@ -17,7 +17,6 @@
  */
 package org.apache.cassandra.index.sai.cql.types;
 
-import java.util.Arrays;
 import java.util.Collection;
 import java.util.LinkedList;
 import java.util.List;
@@ -106,7 +105,6 @@ public abstract class IndexingTypeSupport extends SAITester
         {
             for (String index : dataset.decorateIndexColumn("value"))
                 createIndex(String.format("CREATE CUSTOM INDEX ON %%s(%s) USING 'StorageAttachedIndex'", index));
-            waitForIndexQueryable();
         }
 
         insertData(this, allRows, scenario);
@@ -124,7 +122,6 @@ public abstract class IndexingTypeSupport extends SAITester
                 flush();
                 for (String index : dataset.decorateIndexColumn("value"))
                     createIndex(String.format("CREATE CUSTOM INDEX ON %%s(%s) USING 'StorageAttachedIndex'", index));
-                waitForIndexQueryable();
                 break;
         }
 

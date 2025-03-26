@@ -52,12 +52,12 @@ public class ActiveOperations implements TableOperationObserver
         /**
          * Called when compaction started
          */
-        default void onStarted(AbstractTableOperation.OperationProgress progress) {}
+        default void onStarted(TableOperation.Progress progress) {}
 
         /**
          * Called when compaction completed
          */
-        default void onCompleted(AbstractTableOperation.OperationProgress progressOnCompleted) {}
+        default void onCompleted(TableOperation.Progress progressOnCompleted) {}
     }
 
     public void registerListener(CompactionProgressListener listener)
@@ -87,7 +87,7 @@ public class ActiveOperations implements TableOperationObserver
     @Override
     public NonThrowingCloseable onOperationStart(TableOperation op)
     {
-        AbstractTableOperation.OperationProgress progress = op.getProgress();
+        TableOperation.Progress progress = op.getProgress();
         for (CompactionProgressListener listener : listeners)
         {
             try
@@ -102,26 +102,29 @@ public class ActiveOperations implements TableOperationObserver
             }
         }
         operations.add(op);
-        return () -> {
-            operations.remove(op);
-            AbstractTableOperation.OperationProgress progressOnCompleted = op.getProgress();
-            CompactionManager.instance.getMetrics().bytesCompacted.inc(progressOnCompleted.total());
-            CompactionManager.instance.getMetrics().totalCompactionsCompleted.mark();
+        return () -> completeOperation(op);
+    }
 
-            for (CompactionProgressListener listener : listeners)
+    private void completeOperation(TableOperation op)
+    {
+        operations.remove(op);
+        TableOperation.Progress progressOnCompleted = op.getProgress();
+        CompactionManager.instance.getMetrics().bytesCompacted.inc(progressOnCompleted.total());
+        CompactionManager.instance.getMetrics().totalCompactionsCompleted.mark();
+
+        for (CompactionProgressListener listener : listeners)
+        {
+            try
             {
-                try
-                {
-                    listener.onCompleted(progressOnCompleted);
-                }
-                catch (Throwable t)
-                {
-                    String listenerName = listener.getClass().getName();
-                    logger.error("Unable to notify listener {} while trying to complete compaction {} on table {}",
-                                 listenerName, progressOnCompleted.operationType(), progressOnCompleted.metadata(), t);
-                }
+                listener.onCompleted(progressOnCompleted);
             }
-        };
+            catch (Throwable t)
+            {
+                String listenerName = listener.getClass().getName();
+                logger.error("Unable to notify listener {} while trying to complete compaction {} on table {}",
+                             listenerName, progressOnCompleted.operationType(), progressOnCompleted.metadata(), t);
+            }
+        }
     }
 
     /**
@@ -129,15 +132,15 @@ public class ActiveOperations implements TableOperationObserver
      *
      * Number of entries in operations should be small (< 10) but avoid calling in any time-sensitive context
      */
-    public Collection<AbstractTableOperation.OperationProgress> getOperationsForSSTable(SSTableReader sstable, OperationType operationType)
+    public Collection<TableOperation.Progress> getOperationsForSSTable(SSTableReader sstable, OperationType operationType)
     {
-        List<AbstractTableOperation.OperationProgress> toReturn = null;
+        List<TableOperation.Progress> toReturn = null;
 
         synchronized (operations)
         {
             for (TableOperation op : operations)
             {
-                AbstractTableOperation.OperationProgress progress = op.getProgress();
+                TableOperation.Progress progress = op.getProgress();
                 if (progress.sstables().contains(sstable) && progress.operationType() == operationType)
                 {
                     if (toReturn == null)

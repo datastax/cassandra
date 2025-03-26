@@ -53,6 +53,7 @@ import static org.apache.cassandra.db.lifecycle.Helpers.*;
 import static org.apache.cassandra.db.lifecycle.View.updateCompacting;
 import static org.apache.cassandra.db.lifecycle.View.updateLiveSet;
 import static org.apache.cassandra.utils.Throwables.maybeFail;
+import static org.apache.cassandra.utils.Throwables.merge;
 import static org.apache.cassandra.utils.concurrent.Refs.release;
 import static org.apache.cassandra.utils.concurrent.Refs.selfRefs;
 
@@ -204,11 +205,6 @@ public class LifecycleTransaction extends Transactional.AbstractTransactional im
     public UUID opId()
     {
         return log.id();
-    }
-
-    public Set<SSTableReader> getCompacting()
-    {
-        return tracker.getCompacting();
     }
 
     public void doPrepare()
@@ -366,6 +362,10 @@ public class LifecycleTransaction extends Transactional.AbstractTransactional im
 
         // check the current versions of the readers we're replacing haven't somehow been replaced by someone else
         checkNotReplaced(filterIn(toUpdate, staged.update));
+
+        // notify the tracker of the new readers are about to be added and visible
+        if (!fresh.isEmpty())
+            accumulate = merge(accumulate, tracker.notifyAdding(fresh, null, null, opType(), Optional.of(opId())));
 
         // ensure any new readers are in the compacting set, since we aren't done with them yet
         // and don't want anyone else messing with them
@@ -585,6 +585,7 @@ public class LifecycleTransaction extends Transactional.AbstractTransactional im
     }
 
     // convenience method for callers that know only one sstable is involved in the transaction
+    // overridden to avoid defensive copying
     public SSTableReader onlyOne()
     {
         assert originals.size() == 1;
@@ -597,6 +598,12 @@ public class LifecycleTransaction extends Transactional.AbstractTransactional im
     public void trackNew(SSTable table)
     {
         log.trackNew(table);
+    }
+
+    @Override
+    public void trackNewWritten(SSTable table)
+    {
+        log.trackNewWritten(table);
     }
 
     @Override

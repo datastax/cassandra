@@ -19,6 +19,7 @@ package org.apache.cassandra.db;
 
 import java.util.Collections;
 import java.util.Iterator;
+import java.util.SortedSet;
 
 import com.google.common.base.Objects;
 
@@ -33,7 +34,7 @@ import org.apache.cassandra.utils.memory.ByteBufferCloner;
  */
 public class MutableDeletionInfo implements DeletionInfo
 {
-    private static final long EMPTY_SIZE = ObjectSizes.measure(new MutableDeletionInfo(0, 0));
+    protected static final long EMPTY_SIZE = ObjectSizes.measure(new MutableDeletionInfo(0, 0));
 
     /**
      * This represents a deletion of the entire partition. We can't represent this within the RangeTombstoneList, so it's
@@ -87,11 +88,16 @@ public class MutableDeletionInfo implements DeletionInfo
     @Override
     public MutableDeletionInfo clone(ByteBufferCloner cloner)
     {
+        return new MutableDeletionInfo(partitionDeletion, copyRanges(cloner));
+    }
+
+    @Override
+    public RangeTombstoneList copyRanges(ByteBufferCloner cloner)
+    {
         RangeTombstoneList rangesCopy = null;
         if (ranges != null)
-             rangesCopy = ranges.clone(cloner);
-
-        return new MutableDeletionInfo(partitionDeletion, rangesCopy);
+            rangesCopy = ranges.clone(cloner);
+        return rangesCopy;
     }
 
     /**
@@ -161,6 +167,11 @@ public class MutableDeletionInfo implements DeletionInfo
         return ranges == null ? Collections.emptyIterator() : ranges.iterator(slice, reversed);
     }
 
+    public Iterator<RangeTombstone> rangeIterator(SortedSet<Clustering<?>> names, boolean reversed)
+    {
+        return ranges == null ? Collections.emptyIterator() : ranges.iterator(names, reversed);
+    }
+
     public RangeTombstone rangeCovering(Clustering<?> name)
     {
         return ranges == null ? null : ranges.search(name);
@@ -168,7 +179,7 @@ public class MutableDeletionInfo implements DeletionInfo
 
     public int dataSize()
     {
-        int size = TypeSizes.sizeof(partitionDeletion.markedForDeleteAt());
+        int size = (int) DeletionTime.serializer.serializedSize(partitionDeletion); // small enough so cast is okay
         return size + (ranges == null ? 0 : ranges.dataSize());
     }
 

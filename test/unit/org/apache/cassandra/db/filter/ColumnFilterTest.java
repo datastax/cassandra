@@ -48,8 +48,10 @@ import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.CassandraVersion;
 import org.apache.cassandra.utils.Throwables;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.assertEquals;
 
 @RunWith(Parameterized.class)
@@ -102,6 +104,7 @@ public class ColumnFilterTest
     public void before()
     {
         Util.setUpgradeFromVersion(clusterMinVersion);
+        assertThat(Gossiper.instance.getMinVersion()).isEqualTo(new CassandraVersion(clusterMinVersion));
     }
 
     // Select all

@@ -64,7 +64,7 @@ public abstract class IndexFcts
 
             LuceneAnalyzer luceneAnalyzer = null;
             List<String> tokens = new ArrayList<>();
-            try (Analyzer analyzer = JSONAnalyzerParser.parse(json))
+            try (Analyzer analyzer = JSONAnalyzerParser.parse(json).left)
             {
                 luceneAnalyzer = new LuceneAnalyzer(UTF8Type.instance, analyzer, new HashMap<>());
 

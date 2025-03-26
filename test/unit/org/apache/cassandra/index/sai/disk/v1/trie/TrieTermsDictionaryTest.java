@@ -32,11 +32,12 @@ import org.junit.Test;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SAITester;
-import org.apache.cassandra.index.sai.disk.format.IndexComponents;
-import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
+import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
+import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.utils.SaiRandomizedTest;
+import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Pair;
@@ -44,12 +45,11 @@ import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 
 import static org.apache.cassandra.index.sai.disk.v1.trie.TrieTermsDictionaryReader.NOT_FOUND;
-import static org.apache.cassandra.utils.bytecomparable.ByteComparable.Version.OSS41;
 import static org.apache.cassandra.utils.bytecomparable.ByteComparable.compare;
 
 public class TrieTermsDictionaryTest extends SaiRandomizedTest
 {
-    public final static ByteComparable.Version VERSION = OSS41;
+    public final static ByteComparable.Version VERSION = TypeUtil.BYTE_COMPARABLE_VERSION;
 
     private IndexDescriptor indexDescriptor;
     private String index;
@@ -392,7 +392,7 @@ public class TrieTermsDictionaryTest extends SaiRandomizedTest
         {
             assertTrue(expected.hasNext()); // verify that hasNext is idempotent
             final Pair<ByteComparable, Long> actual = iterator.next();
-            assertEquals(0, compare(expected.next(), actual.left, OSS41));
+            assertEquals(0, compare(expected.next(), actual.left, VERSION));
             assertEquals(offset, actual.right.longValue());
             offset += ascending ? 1 : -1;
         }
@@ -425,11 +425,11 @@ public class TrieTermsDictionaryTest extends SaiRandomizedTest
         {
             final ByteComparable expectedMaxTerm = byteComparables.get(byteComparables.size() - 1);
             final ByteComparable actualMaxTerm = reader.getMaxTerm();
-            assertEquals(0, compare(expectedMaxTerm, actualMaxTerm, OSS41));
+            assertEquals(0, compare(expectedMaxTerm, actualMaxTerm, VERSION));
 
             final ByteComparable expectedMinTerm = byteComparables.get(0);
             final ByteComparable actualMinTerm = reader.getMinTerm();
-            assertEquals(0, compare(expectedMinTerm, actualMinTerm, OSS41));
+            assertEquals(0, compare(expectedMinTerm, actualMinTerm, VERSION));
         }
     }
 
@@ -503,7 +503,7 @@ public class TrieTermsDictionaryTest extends SaiRandomizedTest
      */
     private void testForDifferentByteComparableEncodings(ThrowingConsumer<Function<String, ByteComparable>> test) throws Exception
     {
-        test.accept(s -> ByteComparable.fixedLength(ByteBufferUtil.bytes(s)));
+        test.accept(s -> ByteComparable.preencoded(VERSION, ByteBufferUtil.bytes(s)));
         test.accept(ByteComparable::of);
     }
 

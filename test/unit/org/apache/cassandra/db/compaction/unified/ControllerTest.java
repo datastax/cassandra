@@ -23,6 +23,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Predicate;
 
 import org.junit.Assert;
 import org.junit.Before;
@@ -105,10 +106,14 @@ public abstract class ControllerTest
 
     protected String keyspaceName = "TestKeyspace";
     protected int numDirectories = 1;
+    protected boolean useVector = false;
 
     @BeforeClass
     public static void setUpClass()
     {
+        // The def below should match Controller.PREFIX + Controller.OVERRIDE_UCS_CONFIG_FOR_VECTOR_TABLES
+        // We can't reference these, because it would initialize Controller (and get the value before we modify it).
+        System.setProperty("unified_compaction.override_ucs_config_for_vector_tables", "true");
         DatabaseDescriptor.daemonInitialization();
     }
 
@@ -122,15 +127,20 @@ public abstract class ControllerTest
 
         when(metadata.toString()).thenReturn("");
         when(replicationStrategy.getReplicationFactor()).thenReturn(ReplicationFactor.fullOnly(3));
+        when(cfs.makeUCSEnvironment()).thenAnswer(invocation -> new RealEnvironment(cfs));
         when(cfs.getKeyspaceReplicationStrategy()).thenReturn(replicationStrategy);
         when(cfs.getKeyspaceName()).thenAnswer(invocation -> keyspaceName);
         when(cfs.getDiskBoundaries()).thenReturn(boundaries);
+        when(cfs.buildShardManager()).thenCallRealMethod();
+        when(cfs.makeUCSEnvironment()).thenCallRealMethod();
         when(cfs.getTableName()).thenReturn(tableName);
         when(boundaries.getNumBoundaries()).thenAnswer(invocation -> numDirectories);
 
         when(executorService.scheduleAtFixedRate(any(Runnable.class), anyLong(), anyLong(), any(TimeUnit.class))).thenReturn(fut);
 
         when(env.flushSize()).thenReturn((double) (sstableSizeMB << 20));
+        when(cfs.metadata()).thenReturn(metadata);
+        when(metadata.hasVectorType()).thenAnswer(invocation -> useVector);
     }
 
     Controller testFromOptions(boolean adaptive, Map<String, String> options)
@@ -161,6 +171,25 @@ public abstract class ControllerTest
             assertEquals(numShards, controller.getNumShards(numShards * minSSTableSize));
             assertEquals(numShards, controller.getNumShards(16 * 100 << 20));
         }
+
+        return controller;
+    }
+
+    Controller testFromOptionsVector(boolean adaptive, Map<String, String> options)
+    {
+        useVector = true;
+        addOptions(adaptive, options);
+        Controller.validateOptions(options);
+
+        Controller controller = Controller.fromOptions(cfs, options);
+        assertNotNull(controller);
+        assertNotNull(controller.toString());
+
+        assertEquals(dataSizeGB << 30, controller.getDataSetSizeBytes());
+        assertFalse(controller.isRunning());
+        for (int i = 0; i < 5; i++) // simulate 5 levels
+            assertEquals(Controller.DEFAULT_SURVIVAL_FACTOR, controller.getSurvivalFactor(i), epsilon);
+        assertNull(controller.getCalculator());
 
         return controller;
     }
@@ -582,6 +611,33 @@ public abstract class ControllerTest
         // sanity check
         assertEquals(3, controller.getNumShards(Math.scalb(600, 20)));
         assertEquals(6, controller.getNumShards(Math.scalb(2400, 20)));
+    }
+
+    @Test
+    public void testParallelizeOutputShards()
+    {
+        testBooleanOption(Controller.PARALLELIZE_OUTPUT_SHARDS_OPTION, Controller.DEFAULT_PARALLELIZE_OUTPUT_SHARDS, Controller::parallelizeOutputShards);
+    }
+
+    public void testBooleanOption(String name, boolean defaultValue, Predicate<Controller> getter, String... extraSettings)
+    {
+        Controller controller = Controller.fromOptions(cfs, newOptions(extraSettings));
+        assertEquals(defaultValue, getter.test(controller));
+        for (boolean b : new boolean[] { true, false })
+        {
+            Map<String, String> options = newOptions(extraSettings);
+            options.put(name, Boolean.toString(b));
+            controller = Controller.fromOptions(cfs, options);
+            assertEquals(b, getter.test(controller));
+        }
+    }
+
+    private HashMap<String, String> newOptions(String... settings)
+    {
+        HashMap<String, String> options = new HashMap<>();
+        for (int i = 0; i < settings.length; i += 2)
+            options.put(settings[i], settings[i + 1]);
+        return options;
     }
 
     void testValidateCompactionStrategyOptions(boolean testLogType)

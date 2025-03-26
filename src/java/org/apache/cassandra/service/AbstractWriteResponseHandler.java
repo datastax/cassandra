@@ -44,6 +44,8 @@ import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.RequestCallback;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.RequestTracker;
 import org.apache.cassandra.utils.concurrent.SimpleCondition;
 
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
@@ -65,6 +67,8 @@ public abstract class AbstractWriteResponseHandler<T> implements RequestCallback
     protected volatile int failures = 0;
     protected final Map<InetAddressAndPort, RequestFailureReason> failureReasonByEndpoint;
     private final long queryStartNanoTime;
+
+    private final RequestSensors requestSensors;
 
     /**
       * Delegate to another WriteResponseHandler or possibly this one to track if the ideal consistency level was reached.
@@ -93,6 +97,7 @@ public abstract class AbstractWriteResponseHandler<T> implements RequestCallback
         this.writeType = writeType;
         this.failureReasonByEndpoint = new ConcurrentHashMap<>();
         this.queryStartNanoTime = queryStartNanoTime;
+        this.requestSensors = RequestTracker.instance.get();
     }
 
     public void get() throws WriteTimeoutException, WriteFailureException
@@ -308,6 +313,12 @@ public abstract class AbstractWriteResponseHandler<T> implements RequestCallback
     public boolean invokeOnFailure()
     {
         return true;
+    }
+
+    @Override
+    public RequestSensors getRequestSensors()
+    {
+        return requestSensors;
     }
 
     /**

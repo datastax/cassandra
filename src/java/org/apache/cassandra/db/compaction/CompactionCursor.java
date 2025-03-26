@@ -32,6 +32,8 @@ import org.apache.cassandra.db.compaction.writers.SSTableDataSink;
 import org.apache.cassandra.db.rows.BTreeRow;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Unfiltered;
+import org.apache.cassandra.dht.Range;
+import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.compaction.SortedStringTableCursor;
 import org.apache.cassandra.io.sstable.compaction.IteratorFromCursor;
 import org.apache.cassandra.io.sstable.compaction.PurgeCursor;
@@ -51,8 +53,6 @@ public class CompactionCursor implements SSTableCursorMerger.MergeListener, Auto
 
     private final OperationType type;
     private final CompactionController controller;
-    private final ImmutableSet<SSTableReader> sstables;
-    private final UUID compactionId;
     private final SSTableCursor cursor;
     private final Row.Builder rowBuilder;
 
@@ -69,26 +69,21 @@ public class CompactionCursor implements SSTableCursorMerger.MergeListener, Auto
     private final long[] mergedPartitionsHistogram;
     private final long[] mergedRowsHistogram;
 
-    private final long totalCompressedSize;
-
-    @SuppressWarnings("resource")
-    public CompactionCursor(OperationType type, Collection<SSTableReader> readers, CompactionController controller, RateLimiter limiter, int nowInSec, UUID compactionId)
+    public CompactionCursor(OperationType type, Collection<SSTableReader> readers, Range<Token> tokenRange, CompactionController controller, RateLimiter limiter, int nowInSec)
     {
         this.controller = controller;
         this.type = type;
-        this.compactionId = compactionId;
-        this.totalCompressedSize = readers.stream().mapToLong(SSTableReader::onDiskLength).sum();
         this.mergedPartitionsHistogram = new long[readers.size()];
         this.mergedRowsHistogram = new long[readers.size()];
         this.rowBuilder = BTreeRow.sortedBuilder();
-        this.sstables = ImmutableSet.copyOf(readers);
-        this.cursor = makeMergedAndPurgedCursor(readers, controller, limiter, nowInSec);
+        this.cursor = makeMergedAndPurgedCursor(readers, tokenRange, controller, limiter, nowInSec);
         this.totalBytes = cursor.bytesTotal();
         this.currentBytes = 0;
         this.currentProgressMillisSinceStartup = System.currentTimeMillis();
     }
 
     private SSTableCursor makeMergedAndPurgedCursor(Collection<SSTableReader> readers,
+                                                    Range<Token> tokenRange,
                                                     CompactionController controller,
                                                     RateLimiter limiter,
                                                     int nowInSec)
@@ -97,7 +92,7 @@ public class CompactionCursor implements SSTableCursorMerger.MergeListener, Auto
             return SSTableCursor.empty();
 
         SSTableCursor merged = new SSTableCursorMerger(readers.stream()
-                                                              .map(r -> new SortedStringTableCursor(r, limiter))
+                                                              .map(r -> new SortedStringTableCursor(r, tokenRange, limiter))
                                                               .collect(Collectors.toList()),
                                                        metadata(),
                                                        this);
@@ -196,19 +191,14 @@ public class CompactionCursor implements SSTableCursorMerger.MergeListener, Auto
      * metrics in the compaction manager. The caller is responsible for registering the operation and checking
      * {@link TableOperation#isStopRequested()}.
      */
-    public TableOperation createOperation()
+    public TableOperation createOperation(TableOperation.Progress progress)
     {
         return new AbstractTableOperation() {
 
             @Override
-            public OperationProgress getProgress()
+            public Progress getProgress()
             {
-                return new OperationProgress(controller.realm.metadata(),
-                                             type,
-                                             bytesRead(),
-                                             totalBytes(),
-                                             compactionId,
-                                             sstables);
+                return progress;
             }
 
             @Override
@@ -245,11 +235,6 @@ public class CompactionCursor implements SSTableCursorMerger.MergeListener, Auto
     long totalSourceRows()
     {
         return Arrays.stream(mergedRowsHistogram).reduce(0L, Long::sum);
-    }
-
-    public long getTotalCompressedSize()
-    {
-        return totalCompressedSize;
     }
 
     long[] mergedPartitionsHistogram()

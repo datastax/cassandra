@@ -31,6 +31,7 @@ import org.apache.cassandra.cql3.Term;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.SyntaxException;
+import org.apache.cassandra.serializers.CollectionSerializer;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.serializers.SetSerializer;
 import org.apache.cassandra.transport.ProtocolVersion;
@@ -189,5 +190,11 @@ public class SetType<T> extends CollectionType<Set<T>>
     public String toJSONString(ByteBuffer buffer, ProtocolVersion protocolVersion)
     {
         return ListType.setOrListToJsonString(buffer, getElementsType(), protocolVersion);
+    }
+
+    @Override
+    public boolean contains(ByteBuffer set, ByteBuffer element)
+    {
+        return CollectionSerializer.contains(getElementsType(), set, element, false, false, ProtocolVersion.V3);
     }
 }

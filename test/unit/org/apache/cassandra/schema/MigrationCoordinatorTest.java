@@ -40,6 +40,7 @@ import org.junit.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.Mutation;
@@ -138,7 +139,7 @@ public class MigrationCoordinatorTest
             when(versions.knows(any())).thenReturn(true);
             when(versions.getRaw(any())).thenReturn(MessagingService.current_version);
             this.coordinator = new MigrationCoordinator(messagingService,
-                                                        MoreExecutors.newDirectExecutorService(),
+                                                        Stage.IMMEDIATE,
                                                         oneTimeExecutor,
                                                         maxOutstandingRequests,
                                                         gossiper,

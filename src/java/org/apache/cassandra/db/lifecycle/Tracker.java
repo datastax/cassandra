@@ -248,12 +248,12 @@ public class Tracker
 
     public void addInitialSSTables(Iterable<SSTableReader> sstables)
     {
-        addSSTablesInternal(sstables, OperationType.UNKNOWN, true, false, true);
+        addSSTablesInternal(sstables, OperationType.INITIAL_LOAD, true, false, true);
     }
 
     public void addInitialSSTablesWithoutUpdatingSize(Iterable<SSTableReader> sstables)
     {
-        addSSTablesInternal(sstables, OperationType.UNKNOWN, true, false, false);
+        addSSTablesInternal(sstables, OperationType.INITIAL_LOAD, true, false, false);
     }
 
     public void updateInitialSSTableSize(Iterable<SSTableReader> sstables)
@@ -328,7 +328,7 @@ public class Tracker
      */
     public Throwable dropSSTables(final Predicate<SSTableReader> remove, OperationType operationType, Throwable accumulate)
     {
-        logger.debug("Dropping sstables for {} with operation {}: {}", 
+        logger.debug("Dropping sstables for {} with operation {}: {}",
                      metadata.name, operationType, accumulate == null ? "null" : accumulate.getMessage());
 
         try (AbstractLogTransaction txnLogs = ILogTransactionsFactory.instance.createLogTransaction(operationType,
@@ -390,7 +390,7 @@ public class Tracker
             accumulate = Throwables.merge(accumulate, t);
         }
 
-        logger.debug("Sstables for {} dropped with operation {}: {}", 
+        logger.debug("Sstables for {} dropped with operation {}: {}",
                      metadata.name, operationType, accumulate == null ? "null" : accumulate.getMessage());
         return accumulate;
     }

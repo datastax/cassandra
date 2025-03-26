@@ -56,6 +56,7 @@ public class ToolRunner
 
     private static final ImmutableList<String> DEFAULT_CLEANERS = ImmutableList.of("(?im)^picked up.*\\R",
                                                                                    "(?im)^.*`USE <keyspace>` with prepared statements is.*\\R");
+    private static final ImmutableList<String> STDOUT_CLEANERS = ImmutableList.of("^DEBUG .*\\R");
 
     public static int runClassAsTool(String clazz, String... args)
     {
@@ -433,10 +434,14 @@ public class ToolRunner
          */
         public String getCleanedStderr(List<String> regExpCleaners)
         {
-            String sanitizedStderr = getStderr();
+            return applyCleaners(getStderr(), regExpCleaners);
+        }
+
+        private static String applyCleaners(String input, List<String> regExpCleaners)
+        {
             for (String regExp : regExpCleaners)
-                sanitizedStderr = sanitizedStderr.replaceAll(regExp, "");
-            return sanitizedStderr;
+                input = input.replaceAll(regExp, "");
+            return input;
         }
 
         /**
@@ -447,6 +452,11 @@ public class ToolRunner
         public String getCleanedStderr()
         {
             return getCleanedStderr(DEFAULT_CLEANERS);
+        }
+
+        public String getCleanedStdout()
+        {
+            return applyCleaners(getStdout(), STDOUT_CLEANERS);
         }
         
         public void assertOnCleanExit()

@@ -39,18 +39,17 @@ import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
-import org.agrona.collections.IntArrayList;
 import org.apache.cassandra.db.compaction.unified.Controller;
 import org.apache.cassandra.dht.Bounds;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.Overlaps;
 import org.apache.cassandra.utils.Pair;
 import org.mockito.Mockito;
 
 import static org.apache.cassandra.db.compaction.LeveledManifest.MAX_COMPACTING_L0;
 import static org.junit.Assert.*;
-import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
@@ -99,11 +98,14 @@ public class CompactionStrategyStatisticsTest extends BaseCompactionStrategyTest
         when(controller.getSurvivalFactor(anyInt())).thenReturn(1.0);
         when(controller.getBaseSstableSize(anyInt())).thenReturn((double) minSstableSizeBytes);
         when(controller.getMaxLevelDensity(anyInt(), anyDouble())).thenCallRealMethod();
+        when(controller.overlapInclusionMethod()).thenReturn(Overlaps.InclusionMethod.TRANSITIVE);
+        when(controller.parallelizeOutputShards()).thenReturn(true);
         when(controller.maxConcurrentCompactions()).thenReturn(1000); // let it generate as many candidates as it can
         when(controller.prioritize(anyList())).thenAnswer(answ -> answ.getArgument(0));
         when(controller.maxCompactionSpaceBytes()).thenReturn(Long.MAX_VALUE);
         when(controller.maxThroughput()).thenReturn(Double.MAX_VALUE);
         when(controller.random()).thenCallRealMethod();
+        when(controller.getNumShards(anyDouble())).thenReturn(1);
         // Calculate the minimum shard size such that the top bucket compactions won't be considered "oversized" and
         // all will be allowed to run. The calculation below assumes (1) that compactions are considered "oversized"
         // if they are more than 1/2 of the max shard size; (2) that mockSSTables uses 15% less than the max SSTable
@@ -161,11 +163,14 @@ public class CompactionStrategyStatisticsTest extends BaseCompactionStrategyTest
         when(controller.getSurvivalFactor(anyInt())).thenReturn(1.0);
         when(controller.getBaseSstableSize(anyInt())).thenReturn((double) minSize);
         when(controller.getMaxLevelDensity(anyInt(), anyDouble())).thenCallRealMethod();
+        when(controller.overlapInclusionMethod()).thenReturn(Overlaps.InclusionMethod.TRANSITIVE);
+        when(controller.parallelizeOutputShards()).thenReturn(true);
         when(controller.maxConcurrentCompactions()).thenReturn(1000); // let it generate as many candidates as it can
         when(controller.prioritize(anyList())).thenAnswer(answ -> answ.getArgument(0));
         when(controller.maxCompactionSpaceBytes()).thenReturn(Long.MAX_VALUE);
         when(controller.maxThroughput()).thenReturn(Double.MAX_VALUE);
         when(controller.random()).thenCallRealMethod();
+        when(controller.getNumShards(anyDouble())).thenReturn(1);
 
         UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(strategyFactory, controller);
 
@@ -473,7 +478,7 @@ public class CompactionStrategyStatisticsTest extends BaseCompactionStrategyTest
         for (AbstractCompactionTask task : tasks)
         {
             assertNotNull(task);
-            UUID id = task.transaction().opId();
+            UUID id = task.getTransaction().opId();
 
             verifyStatistics(strategy,
                              1,
@@ -596,7 +601,7 @@ public class CompactionStrategyStatisticsTest extends BaseCompactionStrategyTest
                 i++;
 
                 assertNotNull(task);
-                UUID id = task.transaction().opId();
+                UUID id = task.getTransaction().opId();
 
                 numCompactionsInProgress++;
                 numSSTablesCompacting += candidates.size();
@@ -655,7 +660,7 @@ public class CompactionStrategyStatisticsTest extends BaseCompactionStrategyTest
         {
             Set<SSTableReader> compSSTables = pair.left;
             long totSSTablesLen = totUncompressedLength(compSSTables);
-            strategy.onCompleted(pair.right, true);
+            strategy.onCompleted(pair.right, null);
 
             numCompactions--;
             numCompactionsInProgress--;

@@ -44,7 +44,7 @@ public class IndexGroupRemovalTest extends SAITester
     @Test
     public void testDropAndRecreate() throws Throwable
     {
-        String tableName = createTable("CREATE TABLE %s (pk text, value text, PRIMARY KEY (pk))");
+        createTable("CREATE TABLE %s (pk text, value text, PRIMARY KEY (pk))");
         populateOneSSTable();
 
         ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
@@ -53,7 +53,6 @@ public class IndexGroupRemovalTest extends SAITester
 
         // create index and drop it: StorageAttachedIndexGroup should be removed
         createIndex("CREATE CUSTOM INDEX sai ON %s(value) USING 'StorageAttachedIndex'");
-        waitForIndex(keyspace(), tableName, "sai");
 
         StorageAttachedIndexGroup group = (StorageAttachedIndexGroup) cfs.indexManager.getIndexGroup(StorageAttachedIndexGroup.GROUP_KEY);
         assertTrue(tracker.contains(group));
@@ -70,7 +69,6 @@ public class IndexGroupRemovalTest extends SAITester
 
         // create index again: expect a new StorageAttachedIndexGroup to be registered into tracker
         createIndex("CREATE CUSTOM INDEX sai ON %s(value) USING 'StorageAttachedIndex'");
-        waitForIndex(keyspace(), tableName, "sai");
 
         StorageAttachedIndexGroup newGroup = (StorageAttachedIndexGroup) cfs.indexManager.getIndexGroup(StorageAttachedIndexGroup.GROUP_KEY);
         assertNotSame(group, newGroup);

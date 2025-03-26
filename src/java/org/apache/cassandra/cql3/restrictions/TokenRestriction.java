@@ -22,6 +22,7 @@ import java.util.*;
 
 import com.google.common.base.Joiner;
 
+import org.apache.cassandra.db.filter.ANNOptions;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
@@ -124,18 +125,13 @@ public abstract class TokenRestriction implements PartitionKeyRestrictions
     }
 
     @Override
-    public Index findSupportingIndex(IndexRegistry indexRegistry)
-    {
-        return null;
-    }
-    @Override
     public boolean needsFiltering(Index.Group indexGroup)
     {
         return false;
     }
 
     @Override
-    public void addToRowFilter(RowFilter.Builder filter, IndexRegistry indexRegistry, QueryOptions options)
+    public void addToRowFilter(RowFilter.Builder filter, IndexRegistry indexRegistry, QueryOptions options, ANNOptions annOptions)
     {
         throw new UnsupportedOperationException("Index expression cannot be created for token restriction");
     }
@@ -163,10 +159,10 @@ public abstract class TokenRestriction implements PartitionKeyRestrictions
     }
 
     @Override
-    public final PartitionKeyRestrictions mergeWith(Restriction otherRestriction) throws InvalidRequestException
+    public final PartitionKeyRestrictions mergeWith(Restriction otherRestriction, IndexRegistry indexRegistry) throws InvalidRequestException
     {
         if (!otherRestriction.isOnToken())
-            return TokenFilter.create(toPartitionKeyRestrictions(otherRestriction), this);
+            return TokenFilter.create(toPartitionKeyRestrictions(otherRestriction, indexRegistry), this);
 
         return doMergeWith((TokenRestriction) otherRestriction);
     }
@@ -184,14 +180,14 @@ public abstract class TokenRestriction implements PartitionKeyRestrictions
      * @return a <code>PartitionKeyRestrictions</code>
      * @throws InvalidRequestException if a problem occurs while converting the restriction
      */
-    private PartitionKeyRestrictions toPartitionKeyRestrictions(Restriction restriction) throws InvalidRequestException
+    private PartitionKeyRestrictions toPartitionKeyRestrictions(Restriction restriction, IndexRegistry indexRegistry) throws InvalidRequestException
     {
         if (restriction instanceof PartitionKeyRestrictions)
             return (PartitionKeyRestrictions) restriction;
 
         return PartitionKeySingleRestrictionSet.builder(metadata.partitionKeyAsClusteringComparator())
                                                .addRestriction(restriction)
-                                               .build();
+                                               .build(indexRegistry);
     }
 
     public static final class EQRestriction extends TokenRestriction

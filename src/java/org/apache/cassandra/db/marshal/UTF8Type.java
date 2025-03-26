@@ -38,6 +38,12 @@ public class UTF8Type extends AbstractType<String>
 
     UTF8Type() {super(ComparisonType.BYTE_ORDER);} // singleton
 
+    @Override
+    public boolean allowsEmpty()
+    {
+        return true;
+    }
+
     public ByteBuffer fromString(String source)
     {
         return decompose(source);

@@ -20,6 +20,7 @@ package org.apache.cassandra.db;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.concurrent.ExecutorLocals;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.dht.Token;
@@ -28,7 +29,11 @@ import org.apache.cassandra.locator.Replica;
 import org.apache.cassandra.net.IVerbHandler;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
-import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.sensors.SensorsCustomParams;
+import org.apache.cassandra.sensors.Context;
+import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.SensorsFactory;
+import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.tracing.Tracing;
 
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
@@ -50,6 +55,17 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
         ReadCommand command = message.payload;
         validateTransientStatus(message);
 
+        // Initialize the sensor and set ExecutorLocals
+        RequestSensors requestSensors = SensorsFactory.instance.createRequestSensors(command.metadata().keyspace);
+        Context context = Context.from(command);
+        requestSensors.registerSensor(context, Type.READ_BYTES);
+        ExecutorLocals locals = ExecutorLocals.create(requestSensors);
+        ExecutorLocals.set(locals);
+
+        // Initialize internode bytes with the inbound message size:
+        requestSensors.registerSensor(context, Type.INTERNODE_BYTES);
+        requestSensors.incrementSensor(context, Type.INTERNODE_BYTES, message.payloadSize(MessagingService.current_version));
+
         long timeout = message.expiresAtNanos() - message.createdAtNanos();
         command.setMonitoringTime(message.createdAtNanos(), message.isCrossNode(), timeout, DatabaseDescriptor.getSlowQueryTimeout(NANOSECONDS));
 
@@ -67,9 +83,14 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
             return;
         }
 
+        Message.Builder<ReadResponse> reply = message.responseWithBuilder(response);
+        int size = reply.currentPayloadSize(MessagingService.current_version);
+        requestSensors.incrementSensor(context, Type.INTERNODE_BYTES, size);
+        requestSensors.syncAllSensors();
+        SensorsCustomParams.addSensorsToInternodeResponse(requestSensors, reply);
+
         Tracing.trace("Enqueuing response to {}", message.from());
-        Message<ReadResponse> reply = message.responseWith(response);
-        MessagingService.instance().send(reply, message.from());
+        MessagingService.instance().send(reply.build(), message.from());
     }
 
     private void validateTransientStatus(Message<ReadCommand> message)
