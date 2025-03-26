@@ -182,7 +182,6 @@ public abstract class EncryptedChunkReader extends AbstractReaderFileProxy imple
             assert buffer.capacity() >= CHUNK_SIZE;
 
             ByteBuffer input;
-            CompletableFuture<ByteBuffer> future = new CompletableFuture<>();
 
             if (encryptor.canDecompressInPlace())
             {
