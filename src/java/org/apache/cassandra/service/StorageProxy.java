@@ -38,7 +38,6 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
-import java.util.stream.Collectors;
 import javax.annotation.Nullable;
 
 import com.google.common.base.Preconditions;
@@ -123,14 +122,13 @@ import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.sensors.ActiveRequestSensors;
 import org.apache.cassandra.sensors.Context;
-import org.apache.cassandra.sensors.NoOpRequestSensors;
 import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.sensors.SensorsFactory;
 import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.service.paxos.Commit;
 import org.apache.cassandra.service.paxos.PaxosState;
+import org.apache.cassandra.service.paxos.PaxosUtils;
 import org.apache.cassandra.service.paxos.PrepareCallback;
 import org.apache.cassandra.service.paxos.ProposeCallback;
 import org.apache.cassandra.service.reads.AbstractReadExecutor;
@@ -360,6 +358,8 @@ public class StorageProxy implements StorageProxyMBean
         Boolean.parseBoolean(System.getProperty(DISABLE_SERIAL_READ_LINEARIZABILITY_KEY, "false"));
 
     private static volatile Integer maxPaxosBackoffMillis = CassandraRelevantProperties.LWT_MAX_BACKOFF_MS.getInt();
+    private static volatile Integer minPaxosBackoffMillis = CassandraRelevantProperties.LWT_MIN_BACKOFF_MS.getInt();
+
 
     private StorageProxy()
     {
@@ -715,9 +715,7 @@ public class StorageProxy implements StorageProxyMBean
 
                 Tracing.trace("Paxos proposal not accepted (pre-empted by a higher ballot)");
                 contentions++;
-                int sleepInMillis = ThreadLocalRandom.current().nextInt(maxPaxosBackoffMillis);
-                Uninterruptibles.sleepUninterruptibly(sleepInMillis, TimeUnit.MILLISECONDS);
-                casMetrics.contentionBackoffLatency.addNano(sleepInMillis * 1000);
+                PaxosUtils.applyPaxosContentionBackoff(casMetrics);
                 // continue to retry
             }
         }
@@ -785,9 +783,7 @@ public class StorageProxy implements StorageProxyMBean
                     Tracing.trace("Some replicas have already promised a higher ballot than ours; aborting");
                     contentions++;
                     // sleep a random amount to give the other proposer a chance to finish
-                    int sleepInMillis = ThreadLocalRandom.current().nextInt(maxPaxosBackoffMillis);
-                    Uninterruptibles.sleepUninterruptibly(sleepInMillis, MILLISECONDS);
-                    casMetrics.contentionBackoffLatency.addNano(sleepInMillis * 1000);
+                    PaxosUtils.applyPaxosContentionBackoff(casMetrics);
                     continue;
                 }
 
@@ -826,9 +822,7 @@ public class StorageProxy implements StorageProxyMBean
                         Tracing.trace("Some replicas have already promised a higher ballot than ours; aborting");
                         // sleep a random amount to give the other proposer a chance to finish
                         contentions++;
-                        int sleepInMillis = ThreadLocalRandom.current().nextInt(maxPaxosBackoffMillis);
-                        Uninterruptibles.sleepUninterruptibly(sleepInMillis, MILLISECONDS);
-                        casMetrics.contentionBackoffLatency.addNano(sleepInMillis * 1000);
+                        PaxosUtils.applyPaxosContentionBackoff(casMetrics);
                     }
                     continue;
                 }
@@ -3049,17 +3043,5 @@ public class StorageProxy implements StorageProxyMBean
     public void disableCheckForDuplicateRowsDuringCompaction()
     {
         DatabaseDescriptor.setCheckForDuplicateRowsDuringCompaction(false);
-    }
-
-    @Override
-    public int getMaxPaxosBackoffMillis()
-    {
-        return maxPaxosBackoffMillis;
-    }
-
-    @Override
-    public void setMaxPaxosBackoffMillis(int maxPaxosBackoffMillis)
-    {
-        StorageProxy.maxPaxosBackoffMillis = maxPaxosBackoffMillis;
     }
 }
