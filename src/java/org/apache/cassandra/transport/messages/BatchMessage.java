@@ -44,6 +44,7 @@ import org.apache.cassandra.exceptions.PreparedQueryNotFoundException;
 import org.apache.cassandra.metrics.ClientMetrics;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
+import org.apache.cassandra.service.reads.thresholds.CoordinatorWarnings;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.transport.CBUtil;
 import org.apache.cassandra.transport.Dispatcher;
@@ -199,9 +200,9 @@ public class BatchMessage extends Message.Request
                 }
                 else
                 {
-                    p = handler.getPrepared((MD5Digest)query);
+                    p = handler.getPrepared((MD5Digest) query);
                     if (null == p)
-                        throw new PreparedQueryNotFoundException((MD5Digest)query);
+                        throw new PreparedQueryNotFoundException((MD5Digest) query);
                 }
 
                 List<ByteBuffer> queryValues = values.get(i);
@@ -239,11 +240,19 @@ public class BatchMessage extends Message.Request
             Optional<Stage> asyncStage = Stage.fromStatement(batch);
             if (asyncStage.isPresent())
             {
+                // Execution will continue on a new thread, but Dispatcher already called CoordinatorWarnings.init
+                // on the current thread; the Dispatcher.processRequest request.execute() callback must call
+                // CoordinatorWarnings.done() on the same thread that called init(). Reset CoordinatorWarnings on the
+                // current thread, and init on the new thread. See CNDB-13432 and CNDB-10759.
+                CoordinatorWarnings.reset();
                 List<QueryHandler.Prepared> finalPrepared = prepared;
                 return asyncStage.get().submit(() ->
                                                {
                                                    try
                                                    {
+                                                       if (isTrackable())
+                                                           CoordinatorWarnings.init();
+
                                                        // at the time of the check, this includes the time spent in the NTR queue, basic query parsing/set up,
                                                        // and any time spent in the queue for the async stage
                                                        long elapsedTime = elapsedTimeSinceCreation(TimeUnit.NANOSECONDS);
