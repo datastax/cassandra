@@ -688,7 +688,7 @@ public class TrieMemoryIndex extends MemoryIndex
 
             // This PrimaryKeys object was updated during the add part of this update,
             // so we skip removing the PrimaryKey from the PrimaryKeys class.
-            if (modifiedPrimaryKeys.contains(existing))
+            if (modifiedPrimaryKeys != null && modifiedPrimaryKeys.contains(existing))
                 return existing;
 
             heapAllocations.add(existing.remove(neww));
