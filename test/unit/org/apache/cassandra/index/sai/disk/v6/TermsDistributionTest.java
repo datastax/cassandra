@@ -42,12 +42,13 @@ import static org.junit.Assert.*;
 
 public class TermsDistributionTest
 {
+    ByteComparable.Version VERSION = ByteComparable.Version.OSS41;
 
     @Test
     public void testEmpty()
     {
         AbstractType<Integer> type = Int32Type.instance;
-        TermsDistribution td = new TermsDistribution.Builder(type, 10, 10).build();
+        TermsDistribution td = new TermsDistribution.Builder(type, VERSION,10, 10).build();
         assertEquals(0, td.estimateNumRowsMatchingExact(encode(1)));
         assertEquals(0, td.estimateNumRowsInRange(encode(0), encode(1000)));
     }
@@ -56,7 +57,7 @@ public class TermsDistributionTest
     public void testExactMatch()
     {
         AbstractType<Integer> type = Int32Type.instance;
-        var builder = new TermsDistribution.Builder(type, 10, 10);
+        var builder = new TermsDistribution.Builder(type, VERSION,10, 10);
         for (int i = 0; i < 1000; i++)
             builder.add(encode(i), 1);
         var td = builder.build();
@@ -75,7 +76,7 @@ public class TermsDistributionTest
     public void testRangeMatch()
     {
         AbstractType<Integer> type = Int32Type.instance;
-        var builder = new TermsDistribution.Builder(type, 10, 10);
+        var builder = new TermsDistribution.Builder(type, VERSION,10, 10);
         for (int i = 0; i < 1000; i++)
             builder.add(encode(i), 1);
         var td = builder.build();
@@ -119,7 +120,7 @@ public class TermsDistributionTest
         int frequentCount = 100; // whatever > 1
 
         AbstractType<Integer> type = Int32Type.instance;
-        var builder = new TermsDistribution.Builder(type, 10, 10);
+        var builder = new TermsDistribution.Builder(type, VERSION,10, 10);
         for (int i = 0; i < 1000; i++)
             builder.add(encode(i), (i == frequentValue) ? frequentCount : 1);
         var td = builder.build();
@@ -151,7 +152,7 @@ public class TermsDistributionTest
         // Test if we get reasonable range estimates when selecting a fraction of a single bucket:
 
         AbstractType<Double> type = DoubleType.instance;
-        var builder = new TermsDistribution.Builder(type, 13, 13);
+        var builder = new TermsDistribution.Builder(type, VERSION,13, 13);
         var COUNT = 100000;
         for (int i = 0; i < COUNT; i++)
             builder.add(encode((double) i / COUNT), 1);
@@ -189,7 +190,7 @@ public class TermsDistributionTest
         // Test if we get reasonable range estimates when selecting a fraction of a single bucket:
 
         AbstractType<BigInteger> type = IntegerType.instance;
-        var builder = new TermsDistribution.Builder(type, 13, 13);
+        var builder = new TermsDistribution.Builder(type, VERSION,13, 13);
         var COUNT = 100000;
         for (int i = 0; i < COUNT; i++)
             builder.add(encodeAsBigInt(i), 1);
@@ -218,7 +219,7 @@ public class TermsDistributionTest
         // Test if we get reasonable range estimates when selecting a fraction of a single bucket:
 
         AbstractType<BigDecimal> type = DecimalType.instance;
-        var builder = new TermsDistribution.Builder(type, 13, 13);
+        var builder = new TermsDistribution.Builder(type, VERSION,13, 13);
         var COUNT = 100000;
         for (int i = 0; i < COUNT; i++)
             builder.add(encodeAsDecimal((double) i / COUNT), 1);
@@ -253,7 +254,7 @@ public class TermsDistributionTest
     public void testSerde() throws IOException
     {
         AbstractType<Double> type = DoubleType.instance;
-        var builder = new TermsDistribution.Builder(type, 10, 10);
+        var builder = new TermsDistribution.Builder(type, VERSION,10, 10);
         var COUNT = 100000;
         for (int i = 0; i < COUNT; i++)
             builder.add(encode((double) i / COUNT), 1);
