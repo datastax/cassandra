@@ -357,10 +357,6 @@ public class StorageProxy implements StorageProxyMBean
     private static final boolean disableSerialReadLinearizability =
         Boolean.parseBoolean(System.getProperty(DISABLE_SERIAL_READ_LINEARIZABILITY_KEY, "false"));
 
-    private static volatile Integer maxPaxosBackoffMillis = CassandraRelevantProperties.LWT_MAX_BACKOFF_MS.getInt();
-    private static volatile Integer minPaxosBackoffMillis = CassandraRelevantProperties.LWT_MIN_BACKOFF_MS.getInt();
-
-
     private StorageProxy()
     {
     }
