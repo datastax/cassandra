@@ -560,9 +560,6 @@ public class BM25Test extends SAITester
 
         var result = execute("SELECT * FROM %s ORDER BY v BM25 OF 'apple' LIMIT 3");
         assertThat(result).hasSize(1);
-
-        var result2 = execute("SELECT * FROM %s GROUP BY k, c ORDER BY v BM25 OF 'apple' LIMIT 3");
-        assertThat(result2).hasSize(1);
     }
 
     @Test
@@ -575,19 +572,19 @@ public class BM25Test extends SAITester
         execute("INSERT INTO %s (k, v) VALUES (3, '2')");
         execute("INSERT INTO %s (k, v) VALUES (4, '1')");
 
-        assertThatThrownBy(() -> execute("SELECT max(v) FROM %s ORDER BY v LIMIT 4"))
+        assertThatThrownBy(() -> execute("SELECT max(v) FROM %s ORDER BY v BM25 OF 'apple' LIMIT 4"))
                 .isInstanceOf(InvalidRequestException.class)
                 .hasMessage(SelectStatement.TOPK_AGGREGATION_ERROR);
 
-        assertThatThrownBy(() -> execute("SELECT max(v) FROM %s WHERE k = 1 ORDER BY v LIMIT 4"))
+        assertThatThrownBy(() -> execute("SELECT max(v) FROM %s WHERE k = 1 ORDER BY v BM25 OF 'apple' LIMIT 4"))
                 .isInstanceOf(InvalidRequestException.class)
                 .hasMessage(SelectStatement.TOPK_AGGREGATION_ERROR);
 
-        assertThatThrownBy(() -> execute("SELECT * FROM %s GROUP BY k ORDER BY v LIMIT 4"))
+        assertThatThrownBy(() -> execute("SELECT * FROM %s GROUP BY k ORDER BY v BM25 OF 'apple' LIMIT 4"))
                 .isInstanceOf(InvalidRequestException.class)
                 .hasMessage(SelectStatement.TOPK_AGGREGATION_ERROR);
 
-        assertThatThrownBy(() -> execute("SELECT count(*) FROM %s ORDER BY v LIMIT 4"))
+        assertThatThrownBy(() -> execute("SELECT count(*) FROM %s ORDER BY v BM25 OF 'apple' LIMIT 4"))
                 .isInstanceOf(InvalidRequestException.class)
                 .hasMessage(SelectStatement.TOPK_AGGREGATION_ERROR);
     }
