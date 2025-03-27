@@ -150,12 +150,12 @@ public class TrieMemoryIndex extends MemoryIndex
         {
             if (analyzerTransformsValue)
             {
-                // Because an update can add and remove the same term, we collect the set of the modified PrimaryKeys
+                // Because an update can add and remove the same term, we collect the set of the seen PrimaryKeys
                 // objects touched by the new values and pass it to the remover to prevent removing the PrimaryKey from
                 // the PrimaryKeys object if it was updated during the add part of this update.
-                var modifiedPrimaryKeys = new HashSet<PrimaryKeys>();
-                primaryKeysAccumulator.setModifiedPrimaryKeys(modifiedPrimaryKeys);
-                primaryKeysRemover.setModifiedPrimaryKeys(modifiedPrimaryKeys);
+                var seenPrimaryKeys = new HashSet<PrimaryKeys>();
+                primaryKeysAccumulator.setSeenPrimaryKeys(seenPrimaryKeys);
+                primaryKeysRemover.setSeenPrimaryKeys(seenPrimaryKeys);
             }
 
             // Add before removing to prevent a period where the value is not available in the index
@@ -167,8 +167,8 @@ public class TrieMemoryIndex extends MemoryIndex
         finally
         {
             // Return the accumulator and remover to their default state.
-            primaryKeysAccumulator.setModifiedPrimaryKeys(null);
-            primaryKeysRemover.setModifiedPrimaryKeys(null);
+            primaryKeysAccumulator.setSeenPrimaryKeys(null);
+            primaryKeysRemover.setSeenPrimaryKeys(null);
         }
     }
 
@@ -182,12 +182,12 @@ public class TrieMemoryIndex extends MemoryIndex
         final PrimaryKey primaryKey = indexContext.keyFactory().create(key, clustering);
         try
         {
-            // Because an update can add and remove the same term, we collect the set of the modified PrimaryKeys
+            // Because an update can add and remove the same term, we collect the set of the seen PrimaryKeys
             // objects touched by the new values and pass it to the remover to prevent removing the PrimaryKey from
             // the PrimaryKeys object if it was updated during the add part of this update.
-            var modifiedPrimaryKeys = new HashSet<PrimaryKeys>();
-            primaryKeysAccumulator.setModifiedPrimaryKeys(modifiedPrimaryKeys);
-            primaryKeysRemover.setModifiedPrimaryKeys(modifiedPrimaryKeys);
+            var seenPrimaryKeys = new HashSet<PrimaryKeys>();
+            primaryKeysAccumulator.setSeenPrimaryKeys(seenPrimaryKeys);
+            primaryKeysRemover.setSeenPrimaryKeys(seenPrimaryKeys);
 
             // Add before removing to prevent a period where the values are not available in the index
             while (newValues != null && newValues.hasNext())
@@ -207,8 +207,8 @@ public class TrieMemoryIndex extends MemoryIndex
         finally
         {
             // Return the accumulator and remover to their default state.
-            primaryKeysAccumulator.setModifiedPrimaryKeys(null);
-            primaryKeysRemover.setModifiedPrimaryKeys(null);
+            primaryKeysAccumulator.setSeenPrimaryKeys(null);
+            primaryKeysRemover.setSeenPrimaryKeys(null);
         }
     }
 
@@ -548,7 +548,7 @@ public class TrieMemoryIndex extends MemoryIndex
     static class PrimaryKeysAccumulator implements InMemoryTrie.UpsertTransformer<PrimaryKeys, PrimaryKey>
     {
         private final LongAdder heapAllocations;
-        private HashSet<PrimaryKeys> modifiedPrimaryKeys;
+        private HashSet<PrimaryKeys> seenPrimaryKeys;
 
         PrimaryKeysAccumulator(LongAdder heapAllocations)
         {
@@ -559,11 +559,11 @@ public class TrieMemoryIndex extends MemoryIndex
          * Set the PrimaryKeys set to check for each PrimaryKeys object updated by this transformer.
          * Warning: This method is not thread-safe and should only be called from within the synchronized block
          * of the TrieMemoryIndex class.
-         * @param modifiedPrimaryKeys the set of PrimaryKeys objects updated so far
+         * @param seenPrimaryKeys the set of PrimaryKeys objects updated so far
          */
-        private void setModifiedPrimaryKeys(HashSet<PrimaryKeys> modifiedPrimaryKeys)
+        private void setSeenPrimaryKeys(HashSet<PrimaryKeys> seenPrimaryKeys)
         {
-            this.modifiedPrimaryKeys = modifiedPrimaryKeys;
+            this.seenPrimaryKeys = seenPrimaryKeys;
         }
 
         @Override
@@ -575,11 +575,12 @@ public class TrieMemoryIndex extends MemoryIndex
                 heapAllocations.add(PrimaryKeys.unsharedHeapSize());
             }
 
-            // If we are tracking PrimaryKeys via the modifiedPrimaryKeys set, then we need to reset the
-            // counter on the first time seeing a PrimaryKeys object.
+            // If we are tracking PrimaryKeys via the seenPrimaryKeys set, then we need to reset the
+            // counter on the first time seeing each PrimaryKeys object since an update means that the
+            // frequency should be reset.
             boolean shouldResetFrequency = false;
-            if (modifiedPrimaryKeys != null)
-                shouldResetFrequency = modifiedPrimaryKeys.add(existing);
+            if (seenPrimaryKeys != null)
+                shouldResetFrequency = seenPrimaryKeys.add(existing);
 
             long bytesAdded = shouldResetFrequency ? existing.addAndResetFrequency(neww)
                                                    : existing.addAndIncrementFrequency(neww);
@@ -594,7 +595,7 @@ public class TrieMemoryIndex extends MemoryIndex
     static class PrimaryKeysRemover implements InMemoryTrie.UpsertTransformer<PrimaryKeys, PrimaryKey>
     {
         private final LongAdder heapAllocations;
-        private Set<PrimaryKeys> modifiedPrimaryKeys;
+        private Set<PrimaryKeys> seenPrimaryKeys;
 
         PrimaryKeysRemover(LongAdder heapAllocations)
         {
@@ -602,14 +603,14 @@ public class TrieMemoryIndex extends MemoryIndex
         }
 
         /**
-         * Set the set of modifiedPrimaryKeys.
+         * Set the set of seenPrimaryKeys.
          * Warning: This method is not thread-safe and should only be called from within the synchronized block
          * of the TrieMemoryIndex class.
-         * @param modifiedPrimaryKeys
+         * @param seenPrimaryKeys
          */
-        private void setModifiedPrimaryKeys(Set<PrimaryKeys> modifiedPrimaryKeys)
+        private void setSeenPrimaryKeys(Set<PrimaryKeys> seenPrimaryKeys)
         {
-            this.modifiedPrimaryKeys = modifiedPrimaryKeys;
+            this.seenPrimaryKeys = seenPrimaryKeys;
         }
 
         @Override
@@ -618,9 +619,9 @@ public class TrieMemoryIndex extends MemoryIndex
             if (existing == null)
                 return null;
 
-            // This PrimaryKeys object was updated during the add part of this update,
+            // This PrimaryKeys object was already seen during the add part of this update,
             // so we skip removing the PrimaryKey from the PrimaryKeys class.
-            if (modifiedPrimaryKeys != null && modifiedPrimaryKeys.contains(existing))
+            if (seenPrimaryKeys != null && seenPrimaryKeys.contains(existing))
                 return existing;
 
             heapAllocations.add(existing.remove(neww));
