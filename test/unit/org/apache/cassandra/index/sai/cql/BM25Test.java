@@ -27,6 +27,8 @@ import org.junit.Before;
 import org.junit.Test;
 
 import org.apache.cassandra.cql3.UntypedResultSet;
+import org.apache.cassandra.cql3.statements.SelectStatement;
+import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.SAIUtil;
 import org.apache.cassandra.index.sai.disk.format.Version;
@@ -34,6 +36,7 @@ import org.apache.cassandra.index.sai.disk.v1.SegmentBuilder;
 import org.apache.cassandra.index.sai.plan.QueryController;
 
 import static org.apache.cassandra.index.sai.analyzer.AnalyzerEqOperatorSupport.EQ_AMBIGUOUS_ERROR;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.AssertionsForInterfaceTypes.assertThat;
 import static org.junit.Assert.assertEquals;
 
@@ -597,8 +600,32 @@ public class BM25Test extends SAITester
 
         var result = execute("SELECT * FROM %s ORDER BY v BM25 OF 'apple' LIMIT 3");
         assertThat(result).hasSize(1);
+    }
 
-        var result2 = execute("SELECT * FROM %s GROUP BY k, c ORDER BY v BM25 OF 'apple' LIMIT 3");
-        assertThat(result2).hasSize(1);
+    @Test
+    public void cannotHaveAggregationOnBM25Query()
+    {
+        createSimpleTable();
+
+        execute("INSERT INTO %s (k, v) VALUES (1, '4')");
+        execute("INSERT INTO %s (k, v) VALUES (2, '3')");
+        execute("INSERT INTO %s (k, v) VALUES (3, '2')");
+        execute("INSERT INTO %s (k, v) VALUES (4, '1')");
+
+        assertThatThrownBy(() -> execute("SELECT max(v) FROM %s ORDER BY v BM25 OF 'apple' LIMIT 4"))
+                .isInstanceOf(InvalidRequestException.class)
+                .hasMessage(SelectStatement.TOPK_AGGREGATION_ERROR);
+
+        assertThatThrownBy(() -> execute("SELECT max(v) FROM %s WHERE k = 1 ORDER BY v BM25 OF 'apple' LIMIT 4"))
+                .isInstanceOf(InvalidRequestException.class)
+                .hasMessage(SelectStatement.TOPK_AGGREGATION_ERROR);
+
+        assertThatThrownBy(() -> execute("SELECT * FROM %s GROUP BY k ORDER BY v BM25 OF 'apple' LIMIT 4"))
+                .isInstanceOf(InvalidRequestException.class)
+                .hasMessage(SelectStatement.TOPK_AGGREGATION_ERROR);
+
+        assertThatThrownBy(() -> execute("SELECT count(*) FROM %s ORDER BY v BM25 OF 'apple' LIMIT 4"))
+                .isInstanceOf(InvalidRequestException.class)
+                .hasMessage(SelectStatement.TOPK_AGGREGATION_ERROR);
     }
 }
