@@ -24,27 +24,11 @@ import java.nio.ByteBuffer;
 
 abstract class PreencodedByteComparable implements ByteComparable.Preencoded
 {
-    static final boolean DEBUG = true;
-
     private final Version version;
-    private final Exception stackTrace;
 
     PreencodedByteComparable(Version version)
     {
         this.version = version;
-        this.stackTrace = DEBUG ? new Exception("Constructed at") : null;
-    }
-
-    @Override
-    public ByteSource.Duplicatable asComparableBytes(Version version)
-    {
-        if (version == this.version)
-            return getPreencodedBytes();
-
-        IllegalArgumentException e = new IllegalArgumentException("Preencoded byte-comparable at version " + this.version + " queried at version " + version);
-        if (DEBUG)
-            e.addSuppressed(stackTrace);
-        throw e;
     }
 
     @Override
