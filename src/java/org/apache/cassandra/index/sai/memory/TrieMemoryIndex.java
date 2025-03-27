@@ -35,20 +35,16 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.Objects;
 import java.util.SortedSet;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.LongAdder;
-import java.util.function.Consumer;
 import java.util.function.LongConsumer;
 import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.collect.Iterators;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.github.jbellis.jvector.util.Accountable;
 import io.github.jbellis.jvector.util.RamUsageEstimator;
 import io.netty.util.concurrent.FastThreadLocal;
 import org.apache.cassandra.db.Clustering;
@@ -64,7 +60,6 @@ import org.apache.cassandra.db.tries.TrieSpaceExhaustedException;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
-import org.apache.cassandra.index.sai.analyzer.NoOpAnalyzer;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v6.TermsDistribution;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
@@ -94,7 +89,6 @@ public class TrieMemoryIndex extends MemoryIndex
     private final PrimaryKeysAccumulator primaryKeysAccumulator;
     private final PrimaryKeysRemover primaryKeysRemover;
     private final boolean analyzerTransformsValue;
-    private final Map<PkWithTerm, Integer> termFrequencies;
     private final Map<PrimaryKey, Integer> docLengths = new HashMap<>();
 
     private final Memtable memtable;
@@ -127,48 +121,11 @@ public class TrieMemoryIndex extends MemoryIndex
         this.analyzerTransformsValue = indexContext.getAnalyzerFactory().create().transformValue();
         this.data = InMemoryTrie.longLived(TypeUtil.BYTE_COMPARABLE_VERSION, TrieMemtable.BUFFER_TYPE, indexContext.columnFamilyStore().readOrdering());
         this.memtable = memtable;
-        termFrequencies = new ConcurrentHashMap<>();
     }
 
     public synchronized Map<PrimaryKey, Integer> getDocLengths()
     {
         return docLengths;
-    }
-
-    private static class PkWithTerm implements Accountable
-    {
-        private final PrimaryKey pk;
-        private final ByteComparable term;
-
-        private PkWithTerm(PrimaryKey pk, ByteComparable term)
-        {
-            this.pk = pk;
-            this.term = term;
-        }
-
-        @Override
-        public long ramBytesUsed()
-        {
-            return RamUsageEstimator.NUM_BYTES_OBJECT_HEADER + 
-                   2L * RamUsageEstimator.NUM_BYTES_OBJECT_REF + 
-                   pk.ramBytesUsed() +
-                   ByteComparable.length(term, TypeUtil.BYTE_COMPARABLE_VERSION);
-        }
-
-        @Override
-        public int hashCode()
-        {
-            return Objects.hash(pk, ByteComparable.length(term, TypeUtil.BYTE_COMPARABLE_VERSION));
-        }
-
-        @Override
-        public boolean equals(Object o)
-        {
-            if (o == null || getClass() != o.getClass()) return false;
-            PkWithTerm that = (PkWithTerm) o;
-            return Objects.equals(pk, that.pk)
-                   && ByteComparable.compare(term, that.term, TypeUtil.BYTE_COMPARABLE_VERSION) == 0;
-        }
     }
 
     public synchronized void add(DecoratedKey key,
@@ -197,7 +154,7 @@ public class TrieMemoryIndex extends MemoryIndex
                 // objects touched by the new values and pass it to the remover to prevent removing the PrimaryKey from
                 // the PrimaryKeys object if it was updated during the add part of this update.
                 var modifiedPrimaryKeys = new HashSet<PrimaryKeys>();
-                primaryKeysAccumulator.setPrimaryKeysConsumer(modifiedPrimaryKeys::add);
+                primaryKeysAccumulator.setModifiedPrimaryKeys(modifiedPrimaryKeys);
                 primaryKeysRemover.setModifiedPrimaryKeys(modifiedPrimaryKeys);
             }
 
@@ -210,7 +167,7 @@ public class TrieMemoryIndex extends MemoryIndex
         finally
         {
             // Return the accumulator and remover to their default state.
-            primaryKeysAccumulator.setPrimaryKeysConsumer(null);
+            primaryKeysAccumulator.setModifiedPrimaryKeys(null);
             primaryKeysRemover.setModifiedPrimaryKeys(null);
         }
     }
@@ -229,7 +186,7 @@ public class TrieMemoryIndex extends MemoryIndex
             // objects touched by the new values and pass it to the remover to prevent removing the PrimaryKey from
             // the PrimaryKeys object if it was updated during the add part of this update.
             var modifiedPrimaryKeys = new HashSet<PrimaryKeys>();
-            primaryKeysAccumulator.setPrimaryKeysConsumer(modifiedPrimaryKeys::add);
+            primaryKeysAccumulator.setModifiedPrimaryKeys(modifiedPrimaryKeys);
             primaryKeysRemover.setModifiedPrimaryKeys(modifiedPrimaryKeys);
 
             // Add before removing to prevent a period where the values are not available in the index
@@ -250,7 +207,7 @@ public class TrieMemoryIndex extends MemoryIndex
         finally
         {
             // Return the accumulator and remover to their default state.
-            primaryKeysAccumulator.setPrimaryKeysConsumer(null);
+            primaryKeysAccumulator.setModifiedPrimaryKeys(null);
             primaryKeysRemover.setModifiedPrimaryKeys(null);
         }
     }
@@ -270,24 +227,6 @@ public class TrieMemoryIndex extends MemoryIndex
             final long initialSizeOffHeap = data.usedSizeOffHeap();
             final long reducerHeapSize = heapAllocations.longValue();
 
-            if (docLengths.containsKey(primaryKey) && !(analyzer instanceof NoOpAnalyzer))
-            {
-                AtomicLong heapReclaimed = new AtomicLong();
-                // we're overwriting an existing cell, clear out the old term counts
-                for (Map.Entry<ByteComparable, PrimaryKeys> entry : data.entrySet())
-                {
-                    var termInTrie = entry.getKey();
-                    entry.getValue().forEach(pkInTrie -> {
-                        if (pkInTrie.equals(primaryKey))
-                        {
-                            var t = new PkWithTerm(pkInTrie, termInTrie);
-                            termFrequencies.remove(t);
-                            heapReclaimed.addAndGet(RamUsageEstimator.HASHTABLE_RAM_BYTES_PER_ENTRY + t.ramBytesUsed() + Integer.BYTES);
-                        }
-                    });
-                }
-            }
-
             int tokenCount = 0;
             while (analyzer.hasNext())
             {
@@ -304,25 +243,7 @@ public class TrieMemoryIndex extends MemoryIndex
 
                 try
                 {
-                    data.putSingleton(encodedTerm, primaryKey, (existing, update) -> {
-                        // First do the normal primary keys reduction
-                        PrimaryKeys result = transformer.apply(existing, update);
-                        if (analyzer instanceof NoOpAnalyzer)
-                            return result;
-
-                        // Then update term frequency
-                        var pkbc = new PkWithTerm(update, encodedTerm);
-                        termFrequencies.compute(pkbc, (k, oldValue) -> {
-                            if (oldValue == null) {
-                                // New key added, track heap allocation 
-                                onHeapAllocationsTracker.accept(RamUsageEstimator.HASHTABLE_RAM_BYTES_PER_ENTRY + k.ramBytesUsed() + Integer.BYTES);
-                                return 1;
-                            }
-                            return oldValue + 1;
-                        });
-
-                        return result;
-                    }, term.limit() <= MAX_RECURSIVE_KEY_LENGTH);
+                    data.putSingleton(encodedTerm, primaryKey, transformer, term.limit() <= MAX_RECURSIVE_KEY_LENGTH);
                 }
                 catch (TrieSpaceExhaustedException e)
                 {
@@ -331,7 +252,7 @@ public class TrieMemoryIndex extends MemoryIndex
             }
 
             docLengths.put(primaryKey, tokenCount);
-            // heap used for term frequencies and doc lengths
+            // heap used for doc lengths
             long heapUsed = RamUsageEstimator.HASHTABLE_RAM_BYTES_PER_ENTRY
                             + primaryKey.ramBytesUsed()
                             + Integer.BYTES;
@@ -365,12 +286,7 @@ public class TrieMemoryIndex extends MemoryIndex
             {
                 Map.Entry<ByteComparable, PrimaryKeys> entry = iterator.next();
                 var pairs = new ArrayList<PkWithFrequency>(entry.getValue().size());
-                for (PrimaryKey pk : entry.getValue().keys())
-                {
-                    var frequencyRaw = termFrequencies.get(new PkWithTerm(pk, entry.getKey()));
-                    int frequency = frequencyRaw == null ? 1 : frequencyRaw;
-                    pairs.add(new PkWithFrequency(pk, frequency));
-                }
+                Iterators.addAll(pairs, entry.getValue().iterator());
                 return Pair.create(entry.getKey(), pairs);
             }
         };
@@ -623,7 +539,7 @@ public class TrieMemoryIndex extends MemoryIndex
     static class PrimaryKeysAccumulator implements InMemoryTrie.UpsertTransformer<PrimaryKeys, PrimaryKey>
     {
         private final LongAdder heapAllocations;
-        private Consumer<PrimaryKeys> consumer;
+        private HashSet<PrimaryKeys> modifiedPrimaryKeys;
 
         PrimaryKeysAccumulator(LongAdder heapAllocations)
         {
@@ -631,14 +547,14 @@ public class TrieMemoryIndex extends MemoryIndex
         }
 
         /**
-         * Set the PrimaryKeys consumer to call for each PrimaryKeys object updated by this transformer.
+         * Set the PrimaryKeys set to check for each PrimaryKeys object updated by this transformer.
          * Warning: This method is not thread-safe and should only be called from within the synchronized block
          * of the TrieMemoryIndex class.
-         * @param consumer the consumer to call
+         * @param modifiedPrimaryKeys the set of PrimaryKeys objects updated so far
          */
-        private void setPrimaryKeysConsumer(Consumer<PrimaryKeys> consumer)
+        private void setModifiedPrimaryKeys(HashSet<PrimaryKeys> modifiedPrimaryKeys)
         {
-            this.consumer = consumer;
+            this.modifiedPrimaryKeys = modifiedPrimaryKeys;
         }
 
         @Override
@@ -649,9 +565,16 @@ public class TrieMemoryIndex extends MemoryIndex
                 existing = new PrimaryKeys();
                 heapAllocations.add(PrimaryKeys.unsharedHeapSize());
             }
-            heapAllocations.add(existing.add(neww));
-            if (consumer != null)
-                consumer.accept(existing);
+
+            // If we are tracking PrimaryKeys via the modifiedPrimaryKeys set, then we need to reset the
+            // counter on the first time seeing a PrimaryKeys object.
+            boolean shouldResetFrequency = false;
+            if (modifiedPrimaryKeys != null)
+                shouldResetFrequency = modifiedPrimaryKeys.add(existing);
+
+            long bytesAdded = shouldResetFrequency ? existing.addAndResetFrequency(neww)
+                                                   : existing.addAndIncrementFrequency(neww);
+            heapAllocations.add(bytesAdded);
             return existing;
         }
     }

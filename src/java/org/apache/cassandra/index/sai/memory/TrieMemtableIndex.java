@@ -23,6 +23,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
@@ -215,26 +216,24 @@ public class TrieMemtableIndex implements MemtableIndex
         if (oldRemaining == 0 && newRemaining == 0)
             return;
 
-        boolean differentByteBuffers = oldRemaining != newRemaining || validator.compare(oldValue, newValue) != 0;
+        if (oldRemaining == newRemaining && validator.compare(oldValue, newValue) == 0)
+            return;
 
         // The terms inserted into the index could still be the same in the case of certain analyzer configs.
         // We don't know yet though, and instead of eagerly determining it, we leave it to the index to handle it.
-        if (differentByteBuffers)
-        {
-            rangeIndexes[boundaries.getShardForKey(key)].update(key,
-                                                                clustering,
-                                                                oldValue,
-                                                                newValue,
-                                                                allocatedBytes -> {
-                                                                    memtable.markExtraOnHeapUsed(allocatedBytes, opGroup);
-                                                                    estimatedOnHeapMemoryUsed.add(allocatedBytes);
-                                                                    },
-                                                                allocatedBytes -> {
-                                                                    memtable.markExtraOffHeapUsed(allocatedBytes, opGroup);
-                                                                    estimatedOffHeapMemoryUsed.add(allocatedBytes);
-                                                                });
-            writeCount.increment();
-        }
+        rangeIndexes[boundaries.getShardForKey(key)].update(key,
+                                                            clustering,
+                                                            oldValue,
+                                                            newValue,
+                                                            allocatedBytes -> {
+                                                                memtable.markExtraOnHeapUsed(allocatedBytes, opGroup);
+                                                                estimatedOnHeapMemoryUsed.add(allocatedBytes);
+                                                                },
+                                                            allocatedBytes -> {
+                                                                memtable.markExtraOffHeapUsed(allocatedBytes, opGroup);
+                                                                estimatedOffHeapMemoryUsed.add(allocatedBytes);
+                                                            });
+        writeCount.increment();
     }
 
     @Override

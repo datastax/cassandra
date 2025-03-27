@@ -724,7 +724,10 @@ public class IndexContext
         if (op.isLike() || op == Operator.LIKE) return false;
         // Analyzed columns store the indexed result, so we are unable to compute raw equality.
         // The only supported operators are ANALYZER_MATCHES and BM25.
-        if (op == Operator.ANALYZER_MATCHES || op == Operator.BM25) return isAnalyzed;
+        if (op == Operator.ANALYZER_MATCHES) return isAnalyzed;
+        // BM25 frequency calculations only work on non-collection columns because it assumes a 1:1 mapping from PrK
+        // to frequency, but collections have mulitple documents.
+        if (op == Operator.BM25) return isAnalyzed && !isCollection();
 
         // If the column is analyzed and the operator is EQ, we need to check if the analyzer supports it.
         if (op == Operator.EQ && isAnalyzed && !analyzerFactory.supportsEquals())
