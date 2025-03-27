@@ -23,8 +23,12 @@ import java.util.TreeMap;
 import org.junit.Test;
 
 import org.apache.cassandra.cql3.CQLTester;
+import org.apache.cassandra.cql3.statements.SelectStatement;
+import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.plan.QueryController;
+
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 public class GenericOrderByTest extends SAITester
 {
@@ -226,4 +230,31 @@ public class GenericOrderByTest extends SAITester
         testSelectionAndOrderByOnTheSameColumnWithLargeRowCount(false);
     }
 
+    @Test
+    public void cannotHaveAggregationOnOrderByQuery()
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v int)");
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
+
+        execute("INSERT INTO %s (k, v) VALUES (1, 4)");
+        execute("INSERT INTO %s (k, v) VALUES (2, 3)");
+        execute("INSERT INTO %s (k, v) VALUES (3, 2)");
+        execute("INSERT INTO %s (k, v) VALUES (4, 1)");
+
+        assertThatThrownBy(() -> execute("SELECT sum(v) FROM %s ORDER BY v LIMIT 4"))
+                .isInstanceOf(InvalidRequestException.class)
+                .hasMessage(SelectStatement.TOPK_AGGREGATION_ERROR);
+
+        assertThatThrownBy(() -> execute("SELECT sum(v) FROM %s WHERE k = 1 ORDER BY v LIMIT 4"))
+                .isInstanceOf(InvalidRequestException.class)
+                .hasMessage(SelectStatement.TOPK_AGGREGATION_ERROR);
+
+        assertThatThrownBy(() -> execute("SELECT * FROM %s GROUP BY k ORDER BY v LIMIT 4"))
+                .isInstanceOf(InvalidRequestException.class)
+                .hasMessage(SelectStatement.TOPK_AGGREGATION_ERROR);
+
+        assertThatThrownBy(() -> execute("SELECT count(*) FROM %s ORDER BY v LIMIT 4"))
+                .isInstanceOf(InvalidRequestException.class)
+                .hasMessage(SelectStatement.TOPK_AGGREGATION_ERROR);
+    }
 }
