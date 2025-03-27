@@ -338,7 +338,9 @@ public class TableMetrics
     public final Gauge<Double> mutatedAnticompactionGauge;
 
     public final TableTimer coordinatorReadLatency;
+    public final TableTimer coordinatorCasReadLatency;
     public final TableTimer coordinatorScanLatency;
+    public final TableTimer coordinatorCasWriteLatency;
     public final TableTimer coordinatorWriteLatency;
 
     /** Time spent waiting for free memtable space, either on- or off-heap */
@@ -1056,8 +1058,10 @@ public class TableMetrics
         liveScannedHistogram = createTableHistogram("LiveScannedHistogram", cfs.getKeyspaceMetrics().liveScannedHistogram, false);
         colUpdateTimeDeltaHistogram = createTableHistogram("ColUpdateTimeDeltaHistogram", cfs.getKeyspaceMetrics().colUpdateTimeDeltaHistogram, false);
         coordinatorReadLatency = createTableTimer("CoordinatorReadLatency", cfs.getKeyspaceMetrics().coordinatorReadLatency);
+        coordinatorCasReadLatency = createTableTimer("CoordinatorCasReadLatency", cfs.getKeyspaceMetrics().coordinatorCasReadLatency);
         coordinatorScanLatency = createTableTimer("CoordinatorScanLatency", cfs.getKeyspaceMetrics().coordinatorScanLatency);
         coordinatorWriteLatency = createTableTimer("CoordinatorWriteLatency", cfs.getKeyspaceMetrics().coordinatorWriteLatency);
+        coordinatorCasWriteLatency = createTableTimer("CoordinatorCasWriteLatency", cfs.getKeyspaceMetrics().coordinatorCasWriteLatency);
         waitingOnFreeMemtableSpace = createTableHistogram("WaitingOnFreeMemtableSpace", cfs.getKeyspaceMetrics().waitingOnFreeMemtableSpace, false);
         coordinatorReadSize = createTableHistogram("CoordinatorReadSize", cfs.getKeyspaceMetrics().coordinatorReadSize, false);
 
