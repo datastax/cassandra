@@ -25,10 +25,12 @@ import java.nio.ByteBuffer;
 abstract class PreencodedByteComparable implements ByteComparable.Preencoded
 {
     private final Version version;
+    private final Exception stackTrace;
 
     PreencodedByteComparable(Version version)
     {
         this.version = version;
+        this.stackTrace = new Exception();
     }
 
     public ByteSource.Duplicatable asComparableBytes(Version version)
