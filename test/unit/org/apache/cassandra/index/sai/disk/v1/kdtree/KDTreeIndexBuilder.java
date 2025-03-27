@@ -150,12 +150,12 @@ public class KDTreeIndexBuilder
         final TermsIterator termEnum = new MemtableTermsIterator(null, null, new AbstractGuavaIterator<>()
         {
             @Override
-            protected Pair<ByteComparable, List<RowMapping.RowIdWithFrequency>> computeNext()
+            protected Pair<ByteComparable.Preencoded, List<RowMapping.RowIdWithFrequency>> computeNext()
             {
                 if (!terms.hasNext())
                     return endOfData();
 
-                Pair<ByteComparable, IntArrayList> pair = terms.next();
+                Pair<ByteComparable.Preencoded, IntArrayList> pair = terms.next();
                 List<RowMapping.RowIdWithFrequency> postings = new ArrayList<>(pair.right.size());
                 for (int i = 0; i < pair.right.size(); i++)
                     postings.add(new RowMapping.RowIdWithFrequency(pair.right.get(i), 1));
