@@ -85,7 +85,7 @@ public class TrieMemoryIndex extends MemoryIndex
     private static final int MAX_RECURSIVE_KEY_LENGTH = 128;
 
     private final InMemoryTrie<PrimaryKeys> data;
-    private final LongAdder heapAllocations;
+    private final LongAdder primaryKeysHeapAllocations;
     private final PrimaryKeysAccumulator primaryKeysAccumulator;
     private final PrimaryKeysRemover primaryKeysRemover;
     private final boolean analyzerTransformsValue;
@@ -115,9 +115,9 @@ public class TrieMemoryIndex extends MemoryIndex
     {
         super(indexContext);
         this.keyBounds = keyBounds;
-        this.heapAllocations = new LongAdder();
-        this.primaryKeysAccumulator = new PrimaryKeysAccumulator(heapAllocations);
-        this.primaryKeysRemover = new PrimaryKeysRemover(heapAllocations);
+        this.primaryKeysHeapAllocations = new LongAdder();
+        this.primaryKeysAccumulator = new PrimaryKeysAccumulator(primaryKeysHeapAllocations);
+        this.primaryKeysRemover = new PrimaryKeysRemover(primaryKeysHeapAllocations);
         this.analyzerTransformsValue = indexContext.getAnalyzerFactory().create().transformValue();
         this.data = InMemoryTrie.longLived(TypeUtil.BYTE_COMPARABLE_VERSION, TrieMemtable.BUFFER_TYPE, indexContext.columnFamilyStore().readOrdering());
         this.memtable = memtable;
@@ -225,7 +225,7 @@ public class TrieMemoryIndex extends MemoryIndex
             analyzer.reset(value);
             final long initialSizeOnHeap = data.usedSizeOnHeap();
             final long initialSizeOffHeap = data.usedSizeOffHeap();
-            final long reducerHeapSize = heapAllocations.longValue();
+            final long initialPrimaryKeysHeapAllocations = primaryKeysHeapAllocations.longValue();
 
             int tokenCount = 0;
             while (analyzer.hasNext())
@@ -251,16 +251,19 @@ public class TrieMemoryIndex extends MemoryIndex
                 }
             }
 
-            docLengths.put(primaryKey, tokenCount);
-            // heap used for doc lengths
-            long heapUsed = RamUsageEstimator.HASHTABLE_RAM_BYTES_PER_ENTRY
-                            + primaryKey.ramBytesUsed()
-                            + Integer.BYTES;
-            onHeapAllocationsTracker.accept(heapUsed);
+            Object prev = docLengths.put(primaryKey, tokenCount);
+            if (prev != null)
+            {
+                // heap used for doc lengths
+                long heapUsed = RamUsageEstimator.HASHTABLE_RAM_BYTES_PER_ENTRY
+                                + primaryKey.ramBytesUsed() // TODO do we count these bytes?
+                                + Integer.BYTES;
+                onHeapAllocationsTracker.accept(heapUsed);
+            }
 
             // memory used by the trie
             onHeapAllocationsTracker.accept((data.usedSizeOnHeap() - initialSizeOnHeap) +
-                                            (heapAllocations.longValue() - reducerHeapSize));
+                                            (primaryKeysHeapAllocations.longValue() - initialPrimaryKeysHeapAllocations));
             offHeapAllocationsTracker.accept(data.usedSizeOffHeap() - initialSizeOffHeap);
         }
         finally
@@ -290,6 +293,12 @@ public class TrieMemoryIndex extends MemoryIndex
                 return Pair.create(entry.getKey(), pairs);
             }
         };
+    }
+
+    @VisibleForTesting
+    long estimatedTrieValuesMemoryUsed()
+    {
+        return primaryKeysHeapAllocations.longValue();
     }
 
     @Override

@@ -36,7 +36,7 @@ public class PrimaryKeys implements Iterable<MemoryIndex.PkWithFrequency>
     private static final long EMPTY_SIZE = ObjectSizes.measure(new PrimaryKeys());
 
     // from https://github.com/gaul/java-collection-overhead
-    private static final long MAP_ENTRY_OVERHEAD = 40;
+    private static final long MAP_ENTRY_OVERHEAD = 40 + Integer.BYTES;
 
     private final ConcurrentSkipListMap<PrimaryKey, Integer> keys = new ConcurrentSkipListMap<>();
 

@@ -263,18 +263,18 @@ public abstract class TrieMemtableIndexTestBase extends SAITester
         // Use one shard to test shared keys in the trie
         memtableIndex = new TrieMemtableIndex(integerListIndexContext, memtable, 1);
         assertEquals(0, memtable.getAllocator().onHeap().owns());
-        assertEquals(0, memtableIndex.estimatedOnHeapMemoryUsed() + memtableIndex.estimatedOffHeapMemoryUsed());
+        assertEquals(0, memtableIndex.estimatedOnHeapMemoryUsed());
+        assertEquals(0, memtableIndex.estimatedOffHeapMemoryUsed());
+        var trieMemoryIndex = (TrieMemoryIndex) memtableIndex.getRangeIndexes()[0];
+        assertEquals(0, trieMemoryIndex.estimatedTrieValuesMemoryUsed());
 
         addRowWithCollection(1, 1, 2, 3); // row 1, values 1, 2, 3
         addRowWithCollection(2, 4, 5, 6); // row 2, values 4, 5, 6
         addRowWithCollection(3, 2, 6);    // row 3, values 2, 6
 
-        // 8 total pk entries at 36 bytes, 6 unique trie keys at 4 bytes, 6 PrimaryKeys objects with
-        var expectedOnHeap = 8 * 36 + 6 * 4 + 6 * PrimaryKeys.unsharedHeapSize();
-        assertEquals(expectedOnHeap, memtableIndex.estimatedOnHeapMemoryUsed());
-        assertEquals(expectedOnHeap, memtable.getAllocator().onHeap().owns());
-        // Hard coded cost from trie
-        assertEquals(96, memtableIndex.estimatedOffHeapMemoryUsed());
+        // 8 total pk entries at 44 bytes, 6 PrimaryKeys objects with
+        var expectedOnHeap = 8 * 44 + 6 * PrimaryKeys.unsharedHeapSize();
+        assertEquals(expectedOnHeap, trieMemoryIndex.estimatedTrieValuesMemoryUsed());
 
         // Query values
         assertEqualsQuery(2, 1, 3);
@@ -282,21 +282,20 @@ public abstract class TrieMemtableIndexTestBase extends SAITester
         assertEqualsQuery(3, 1);
         assertEqualsQuery(6, 2, 3);
 
-        assertEquals(expectedOnHeap, memtable.getAllocator().onHeap().owns());
+        assertEquals(expectedOnHeap, trieMemoryIndex.estimatedTrieValuesMemoryUsed());
 
         // Update row 1 to remove 2 and 3, keep 1, add 7 and 8 (note we have to manually match the 1,2,3 from above)
         updateRowWithCollection(1, List.of(1, 2, 3).iterator(), List.of(1, 7, 8).iterator());
 
-        // We net 1 new PrimaryKeys object and 2 new trie memtable entries. The current implementation
-        // does not remove trie keys, so those are still present.
-        expectedOnHeap += PrimaryKeys.unsharedHeapSize() + 4 * 2;
-        assertEquals(expectedOnHeap, memtable.getAllocator().onHeap().owns());
+        // We net 1 new PrimaryKeys object.
+        expectedOnHeap += PrimaryKeys.unsharedHeapSize();
+        assertEquals(expectedOnHeap, trieMemoryIndex.estimatedTrieValuesMemoryUsed());
 
         updateRowWithCollection(1, List.of(1, 7, 8).iterator(), List.of(1, 4, 8).iterator());
 
         // We remove a PrimaryKeys object without adding any new keys to the trie.
         expectedOnHeap -= PrimaryKeys.unsharedHeapSize();
-        assertEquals(expectedOnHeap, memtable.getAllocator().onHeap().owns());
+        assertEquals(expectedOnHeap, trieMemoryIndex.estimatedTrieValuesMemoryUsed());
 
         // Run additional queries to ensure values
         assertEqualsQuery(1, 1);
@@ -334,10 +333,10 @@ public abstract class TrieMemtableIndexTestBase extends SAITester
         assertTrue(iter.hasNext());
         Pair<ByteComparable, List<MemoryIndex.PkWithFrequency>> entry = iter.next();
         assertEquals(term, termFromComparable(entry.left));
-        for (int value : primaryKeys)
+        for (int i = 0; i < primaryKeys.length; i++)
         {
             assertFalse(entry.right.isEmpty());
-            assertEquals(makeKey(cfs.metadata(), value), entry.right.get(0).pk.partitionKey());
+            assertEquals(makeKey(cfs.metadata(), primaryKeys[i]), entry.right.get(i).pk.partitionKey());
         }
     }
 
