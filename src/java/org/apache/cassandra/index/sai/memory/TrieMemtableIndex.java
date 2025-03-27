@@ -340,7 +340,13 @@ public class TrieMemtableIndex implements MemtableIndex
         var analyzer = indexContext.getAnalyzerFactory().create();
         var queryTerms = orderer.getQueryTerms();
         var docStats = computeDocumentFrequencies(queryContext, queryTerms);
-        var it = keys.stream().map(pk -> BM25Utils.DocTF.createFromDocument(pk, getCellForKey(pk), analyzer, queryTerms)).iterator();
+        var it = keys.stream().map(pk -> {
+            Cell<?> cellForKey = getCellForKey(pk);
+            if (cellForKey == null)
+                // skip deleted rows
+                return null;
+            return BM25Utils.DocTF.createFromDocument(pk, cellForKey, analyzer, queryTerms);
+        }).filter(Objects::nonNull).iterator();
         return BM25Utils.computeScores(CloseableIterator.wrap(it),
                                        queryTerms,
                                        docStats,
