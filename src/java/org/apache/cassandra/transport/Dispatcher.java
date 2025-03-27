@@ -349,7 +349,42 @@ public class Dispatcher implements CQLMessageHandler.MessageConsumer<Message.Req
         return requestExecutor.oldestTaskQueueTime() < (DatabaseDescriptor.getNativeTransportTimeout(TimeUnit.NANOSECONDS) * threshold);
     }
 
-    private static Message.Response processRequest(ServerConnection connection, Message.Request request, Overload backpressure, RequestTime requestTime)
+    void processRequest(Channel channel, Message.Request request, FlushItemConverter forFlusher, Overload backpressure, RequestTime requestTime)
+    {
+        assert request.connection() instanceof ServerConnection;
+        ServerConnection connection = (ServerConnection) request.connection();
+        try
+        {
+            this.processRequest(connection, request, backpressure, requestTime)
+                .addCallback((response, ex) -> {
+                    FlushItem<?> toFlush;
+                    if (ex == null)
+                    {
+                        toFlush = forFlusher.toFlushItem(channel, request, response);
+                        Message.logger.trace("Responding: {}, v={}", response, connection.getVersion());
+                    }
+                    else
+                    {
+                        JVMStabilityInspector.inspectThrowable(ex);
+                        Predicate<Throwable> handler = ExceptionHandlers.getUnexpectedExceptionHandler(channel, true);
+                        ErrorMessage error = ErrorMessage.fromException(ex, handler);
+                        error.setStreamId(request.getStreamId());
+                        error.setWarnings(ClientWarn.instance.getWarnings());
+                        toFlush = forFlusher.toFlushItem(channel, request, error);
+                    }
+                    flush(toFlush);
+                });
+        }
+        finally
+        {
+            // As the warnings and trace state has been potentially propagated and "reset" in another stage, we do reset
+            // again here on the "originating" stage to make sure the next request starts from a clean slate:
+            ClientWarn.instance.resetWarnings();
+            Tracing.instance.set(null);
+        }
+    }
+
+    Future<Message.Response> processRequest(ServerConnection connection, Message.Request request, Overload backpressure, RequestTime requestTime)
     {
         long queueTime = requestTime.timeSpentInQueueNanos();
 
@@ -406,14 +441,35 @@ public class Dispatcher implements CQLMessageHandler.MessageConsumer<Message.Req
 
         Message.logger.trace("Received: {}, v={}", request, connection.getVersion());
         connection.requests.inc();
-        Message.Response response = request.execute(qstate, requestTime).syncUninterruptibly().getNow();
+        ExecutorLocals executorLocals = ExecutorLocals.current();
+        try
+        {
+            return request.execute(qstate, requestTime).addCallback((result, ignored) -> {
+                // If the request was executed on a different Stage, we need to restore the ExecutorLocals
+                // on the current thread. See CNDB-13432 and CNDB-10759.
+                try (Closeable close = executorLocals.get())
+                {
+                    if (request.isTrackable())
+                        CoordinatorWarnings.done();
 
-        if (request.isTrackable())
-            CoordinatorWarnings.done();
-
-        response.attach(connection);
-        connection.applyStateTransition(request.type, response.type);
-        return response;
+                    result.setStreamId(request.getStreamId());
+                    result.setWarnings(ClientWarn.instance.getWarnings());
+                    result.attach(connection);
+                    connection.applyStateTransition(request.type, result.type);
+                }
+                finally
+                {
+                    CoordinatorWarnings.reset();
+                    ClientWarn.instance.resetWarnings();
+                }
+            });
+        }
+        catch (Throwable t)
+        {
+            CoordinatorWarnings.reset();
+            ClientWarn.instance.resetWarnings();
+            return ImmediateFuture.failure(t);
+        }
     }
 
     static Message.Response processRequest(Channel channel, Message.Request request, Overload backpressure, RequestTime requestTime)
