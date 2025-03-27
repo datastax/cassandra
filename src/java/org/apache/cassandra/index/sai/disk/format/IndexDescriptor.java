@@ -427,6 +427,10 @@ public class IndexDescriptor
             boolean isValid = true;
             for (IndexComponentType expected : expectedComponentsForVersion())
             {
+                // Compression components may not exist when compression is not used
+                if (onDiskFormat().compressionInfoComponentTypes().contains(expected))
+                    continue;
+
                 var component = components.get(expected);
                 if (component == null)
                 {
@@ -526,7 +530,12 @@ public class IndexDescriptor
             Preconditions.checkArgument(!sealed, "Should not add components for SSTable %s at this point; the completion marker has already been written", descriptor);
             // When a sstable doesn't have any complete group, we use a marker empty one with a generation of -1:
             Preconditions.checkArgument(buildId != EMPTY_GROUP_MARKER, "Should not be adding component to empty components");
-            return components.computeIfAbsent(component, IndexComponentImpl::new);
+
+            var result =  components.computeIfAbsent(component, IndexComponentImpl::new);
+            if (result.isCompressed())
+                components.computeIfAbsent(component.compressionMetadata, IndexComponentImpl::new);
+
+            return result;
         }
 
         @Override
@@ -629,17 +638,46 @@ public class IndexDescriptor
                 return file;
             }
 
-            @Override
-            public File compressionMetaFile()
+            private CompressionMetadata compressionMetadata(boolean forIndexBuildTime)
             {
-                return IndexFileUtils.addSuffix(file(), "CompressionInfo");
+                var compressionMetaFile = forIndexBuildTime
+                        ? indexBuildTimeCompressionMetadataFile()
+                        : compressionMetadataFile();
+
+                return (compressionMetaFile != null && compressionMetaFile.exists())
+                       ? new CompressionMetadata(compressionMetaFile, file().length(), true)
+                       : null;
             }
 
-            public CompressionMetadata compressionMetadata()
+            private File compressionMetadataFile()
             {
-                var compressionMetaFile = compressionMetaFile();
-                return (compressionMetaFile.exists())
-                       ? new CompressionMetadata(compressionMetaFile, file().length(), true)
+                var compressionComponent = compressionMetadataComponent();
+                return compressionComponent != null
+                       ? descriptor.fileFor(compressionComponent.asCustomComponent())
+                       : null;
+            }
+
+            private File indexBuildTimeCompressionMetadataFile()
+            {
+                if (!getCompressionParams().isEnabled())
+                    return null;
+
+                var compressionComponent = compressionMetadataComponent();
+                if (compressionComponent == null)
+                    return null;
+
+                // Compression metadata must exist here
+                try (FileHandle fh = compressionComponent.createIndexBuildTimeFileHandle())
+                {
+                    return new File(fh.path());
+                }
+            }
+
+            @Override
+            public IndexComponentImpl compressionMetadataComponent()
+            {
+                return component.compressionMetadata != null
+                       ? new IndexComponentImpl(component.compressionMetadata)
                        : null;
             }
 
@@ -649,7 +687,7 @@ public class IndexDescriptor
                 try (var builder = StorageProvider.instance.fileHandleBuilderFor(this))
                 {
                     return builder.order(byteOrder())
-                                  .withCompressionMetadata(compressionMetadata())
+                                  .withCompressionMetadata(compressionMetadata(false))
                                   .complete();
                 }
             }
@@ -660,7 +698,7 @@ public class IndexDescriptor
                 try (final FileHandle.Builder builder = StorageProvider.instance.indexBuildTimeFileHandleBuilderFor(this))
                 {
                     return builder.order(byteOrder())
-                                  .withCompressionMetadata(compressionMetadata())
+                                  .withCompressionMetadata(compressionMetadata(true))
                                   .complete();
                 }
             }
@@ -699,10 +737,18 @@ public class IndexDescriptor
             @Override
             public IndexOutputWriter openOutput(boolean append) throws IOException
             {
+                CompressionParams compression = getCompressionParams();
+                return openOutput(append, compression);
+            }
+
+            private CompressionParams getCompressionParams()
+            {
                 CompressionParams compression = context() != null
                                                 ? context().getValueCompression()
                                                 : CompressionParams.noCompression();
-                return openOutput(append, compression);
+                if (!component.isCompressed())
+                    compression = CompressionParams.noCompression();
+                return compression;
             }
 
             @Override
@@ -715,9 +761,20 @@ public class IndexDescriptor
                                  component,
                                  file);
 
-                return IndexFileUtils.instance.openOutput(file, byteOrder(), append, compressionMetaFile(), compression);
+                File compressionMetaFile = compressionMetadataFile();
+                return IndexFileUtils.instance.openOutput(file, byteOrder(), append, compressionMetaFile, compression);
             }
 
+            public boolean isCompressed()
+            {
+                if (file().exists())
+                {
+                    var compressionMetadataFile = compressionMetadataFile();
+                    return compressionMetadataFile != null && compressionMetadataFile.exists();
+                }
+
+                return getCompressionParams().isEnabled();
+            }
 
             @Override
             public void createEmpty() throws IOException

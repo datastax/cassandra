@@ -93,7 +93,8 @@ public class NumericIndexWriter implements Closeable
                                     maxPointsInLeafNode,
                                     BKDWriter.DEFAULT_MAX_MB_SORT_IN_HEAP,
                                     numRows,
-                                    true, null,
+                                    true,
+                                    null,
                                     components.addOrGet(IndexComponentType.KD_TREE).byteOrder());
     }
 

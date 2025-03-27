@@ -93,6 +93,7 @@ import org.apache.cassandra.index.sai.analyzer.LuceneAnalyzer;
 import org.apache.cassandra.index.sai.analyzer.NonTokenizingOptions;
 import org.apache.cassandra.index.sai.disk.StorageAttachedIndexWriter;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.index.sai.view.View;
@@ -321,7 +322,7 @@ public class StorageAttachedIndex implements Index
             throw new InvalidRequestException(String.format("Cannot create duplicate storage-attached index on column: %s", target.left));
 
         // Get to validate only; will throw IRE if option is invalid
-        getCompressionOptionChecked(options, IndexContext.VALUE_COMPRESSION_OPTION_NAME);
+        CompressionParams valueCompression = getCompressionOptionChecked(options, IndexContext.VALUE_COMPRESSION_OPTION_NAME);
 
         // Check for existence of other indexes with different key_compression:
         CompressionParams keyCompression = getCompressionOptionChecked(options, IndexContext.KEY_COMPRESSION_OPTION_NAME);
@@ -335,6 +336,11 @@ public class StorageAttachedIndex implements Index
                                                                  target.left, other.name, keyCompression.asMap()));
             }
         }
+
+        if ((valueCompression.isEnabled() || keyCompression.isEnabled()) && !Version.latest().onOrAfter(Version.EC))
+            throw new InvalidRequestException("Cannot create compressed storage-attached index. " +
+                                              "Enabling index compression requires at least SAI version 'ec'. " +
+                                              "Your current index version is set to '" + Version.latest() + '\'');
 
         // Analyzer is not supported against PK columns
         if (isAnalyzed)
