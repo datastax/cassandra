@@ -22,6 +22,7 @@ import java.io.IOException;
 import java.lang.invoke.MethodHandles;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.util.Collections;
 import java.util.EnumSet;
 import java.util.Set;
 
@@ -312,6 +313,12 @@ public class V1OnDiskFormat implements OnDiskFormat
         return TypeUtil.isLiteral(type)
                ? ByteBuffer.wrap(ByteSourceInverse.readBytes(value.asComparableBytes(ByteComparable.Version.OSS41)))
                : TypeUtil.fromComparableBytes(value, type, ByteComparable.Version.OSS41);
+    }
+
+    @Override
+    public Set<IndexComponentType> compressionInfoComponentTypes()
+    {
+        return Collections.emptySet();
     }
 
     /** vector data components (that did not have checksums before v3) */

@@ -216,5 +216,5 @@ public interface OnDiskFormat
     ByteBuffer decodeFromTrie(ByteComparable value, AbstractType<?> type);
 
 
-
+    Set<IndexComponentType> compressionInfoComponentTypes();
 }

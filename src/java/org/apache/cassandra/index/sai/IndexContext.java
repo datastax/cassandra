@@ -1033,5 +1033,4 @@ public class IndexContext
         getView().getIndexes().stream().map(SSTableIndex::indexFeatureSet).forEach(set -> accumulator.accumulate(set));
         return accumulator.complete();
     }
-
 }

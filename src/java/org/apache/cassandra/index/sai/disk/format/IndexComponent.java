@@ -23,7 +23,6 @@ import java.nio.ByteOrder;
 
 import org.apache.cassandra.index.sai.disk.io.IndexInput;
 import org.apache.cassandra.index.sai.disk.io.IndexOutputWriter;
-import org.apache.cassandra.io.compress.CompressionMetadata;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
@@ -43,7 +42,11 @@ public interface IndexComponent
 
     File file();
 
-    File compressionMetaFile();
+    /**
+     * Returns the compression metadata component associated with this component.
+     * Compression information is needed to decompress this component.
+     */
+    IndexComponent compressionMetadataComponent();
 
     default boolean isCompletionMarker()
     {

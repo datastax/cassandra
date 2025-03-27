@@ -32,21 +32,23 @@ public enum IndexComponentType
      *
      * V1
      */
-    META("Meta", false),
+    META("Meta"),
     /**
      * KDTree written by {@code BKDWriter} indexes mappings of term to one ore more segment row IDs
      * (segment row ID = SSTable row ID - segment row ID offset).
      *
      * V1
      */
-    KD_TREE("KDTree", true),
-    KD_TREE_POSTING_LISTS("KDTreePostingLists", true),
+    KD_TREE_COMPRESSION_INFO("KDTreeCompressionInfo"),
+    KD_TREE("KDTree", KD_TREE_COMPRESSION_INFO),
+    KD_TREE_POSTING_LISTS_COMPRESSION_INFO("KDTreePostingListsCompressionInfo"),
+    KD_TREE_POSTING_LISTS("KDTreePostingLists", KD_TREE_POSTING_LISTS_COMPRESSION_INFO),
 
     /**
      * Vector index components
      */
-    VECTOR("Vector", false),
-    PQ("PQ", false),
+    VECTOR("Vector"),
+    PQ("PQ"),
 
     /**
      * Term dictionary written by {@code TrieTermsDictionaryWriter} stores mappings of term and
@@ -54,19 +56,22 @@ public enum IndexComponentType
      *
      * V1
      */
-    TERMS_DATA("TermsData", true),
+    TERMS_DATA_COMPRESSION_INFO("TermsDataCompressionInfo"),
+    TERMS_DATA("TermsData", TERMS_DATA_COMPRESSION_INFO),
+
     /**
      * Stores postings written by {@code PostingsWriter}
      *
      * V1
      */
-    POSTING_LISTS("PostingLists", true),
+    POSTING_LISTS_COMPRESSION_INFO("PostingListsCompressionInfo"),
+    POSTING_LISTS("PostingLists", POSTING_LISTS_COMPRESSION_INFO),
     /**
      * If present indicates that the column index build completed successfully
      *
      * V1
      */
-    COLUMN_COMPLETION_MARKER("ColumnComplete", false),
+    COLUMN_COMPLETION_MARKER("ColumnComplete"),
 
     // per-sstable components
     /**
@@ -74,57 +79,64 @@ public enum IndexComponentType
      *
      * V1 V2
      */
-    TOKEN_VALUES("TokenValues", false),
+    TOKEN_VALUES("TokenValues"),
     /**
      * Partition key offset in sstable data file for rows including row tombstone and static row. (access key is
      * rowId)
      *
      * V1
      */
-    OFFSETS_VALUES("OffsetsValues", false),
+    OFFSETS_VALUES("OffsetsValues"),
     /**
      * An on-disk trie containing the primary keys used for looking up the rowId from a partition key
      *
      * V2
      */
-    PRIMARY_KEY_TRIE("PrimaryKeyTrie", true),
+    PRIMARY_KEY_TRIE_COMPRESSION_INFO("PrimaryKeyTrieCompressionInfo"),
+    PRIMARY_KEY_TRIE("PrimaryKeyTrie", PRIMARY_KEY_TRIE_COMPRESSION_INFO),
     /**
      * Prefix-compressed blocks of primary keys used for rowId to partition key lookups
      *
      * V2
      */
-    PRIMARY_KEY_BLOCKS("PrimaryKeyBlocks", true),
+    PRIMARY_KEY_BLOCKS_COMPRESSION_INFO("PrimaryKeyBlocksCompressionInfo"),
+    PRIMARY_KEY_BLOCKS("PrimaryKeyBlocks", PRIMARY_KEY_BLOCKS_COMPRESSION_INFO),
     /**
      * Encoded sequence of offsets to primary key blocks
      *
      * V2
      */
-    PRIMARY_KEY_BLOCK_OFFSETS("PrimaryKeyBlockOffsets", false),
+    PRIMARY_KEY_BLOCK_OFFSETS("PrimaryKeyBlockOffsets"),
     /**
      * Stores per-sstable metadata.
      *
      * V1
      */
-    GROUP_META("GroupMeta", false),
+    GROUP_META("GroupMeta"),
     /**
      * If present indicates that the per-sstable index build completed successfully
      *
      * V1 V2
      */
-    GROUP_COMPLETION_MARKER("GroupComplete", false),
+    GROUP_COMPLETION_MARKER("GroupComplete"),
 
     /**
      * Stores document length information for BM25 scoring
      */
-    DOC_LENGTHS("DocLengths", false);
+    DOC_LENGTHS("DocLengths");
 
     public final String representation;
-    public final boolean compressed;
+    public final IndexComponentType compressionMetadata;
 
-    IndexComponentType(String representation, boolean compressed)
+    IndexComponentType(String representation)
+    {
+        this(representation, null);
+    }
+
+    IndexComponentType(String representation, IndexComponentType compressionMetadata)
     {
         this.representation = representation;
-        this.compressed = compressed;
+        this.compressionMetadata = compressionMetadata;
     }
 
     static final Map<String, IndexComponentType> byRepresentation = new HashMap<>();
@@ -137,5 +149,10 @@ public enum IndexComponentType
     public static @Nullable IndexComponentType fromRepresentation(String representation)
     {
         return byRepresentation.get(representation);
+    }
+
+    public boolean isCompressed()
+    {
+        return compressionMetadata != null;
     }
 }
