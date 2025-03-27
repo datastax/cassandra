@@ -19,11 +19,7 @@
 package org.apache.cassandra.utils.bytecomparable;
 
 import java.nio.ByteBuffer;
-import java.util.Arrays;
 
-import com.google.common.primitives.UnsignedBytes;
-
-import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FastByteOperations;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -79,6 +75,11 @@ public interface ByteComparable
         return ByteSourceInverse.readBytes(asComparableBytes(version));
     }
 
+    default Preencoded preencode(Version version)
+    {
+        return preencoded(version, asByteComparableArray(version));
+    }
+
     // Simple factories used for testing
 
     @VisibleForTesting
@@ -102,8 +103,17 @@ public interface ByteComparable
     {
         Version encodingVersion();
 
+        ByteSource.Duplicatable getPreencodedBytes();
+
         @Override
-        ByteSource.Duplicatable asComparableBytes(Version version);
+        default ByteSource.Duplicatable asComparableBytes(Version version)
+        {
+            Preconditions.checkState(version == encodingVersion(),
+                                     "Preprocessed byte-source at version %s queried at version %s",
+                                     encodingVersion(),
+                                     version);
+            return getPreencodedBytes();
+        }
 
         @Override
         default ByteSource.Peekable asPeekableBytes(Version version)
@@ -116,6 +126,15 @@ public interface ByteComparable
         {
             return asComparableBytes(version).remainingBytesToArray();
         }
+    }
+
+    static int compare(Preencoded a, Preencoded b)
+    {
+        Preconditions.checkArgument(a.encodingVersion() == b.encodingVersion(),
+                                    "Cannot compare preencoded byte-comparables of different versions %s vs %s",
+                                    a.encodingVersion(),
+                                    b.encodingVersion());
+        return ByteSource.compare(a.getPreencodedBytes(), b.getPreencodedBytes());
     }
 
     /**
@@ -191,30 +210,7 @@ public interface ByteComparable
      */
     static int compare(ByteComparable bytes1, ByteComparable bytes2, Version version)
     {
-        ByteSource s1 = bytes1.asComparableBytes(version);
-        ByteSource s2 = bytes2.asComparableBytes(version);
-
-        if (s1 == null || s2 == null)
-            return Boolean.compare(s1 != null, s2 != null);
-
-        while (true)
-        {
-            int b1 = s1.next();
-            int b2 = s2.next();
-            int cmp = Integer.compare(b1, b2);
-            if (cmp != 0)
-                return cmp;
-            if (b1 == ByteSource.END_OF_STREAM)
-                return 0;
-        }
-    }
-
-    /**
-     * Compares two bytecomparable encodings lexicographically
-     */
-    static int compare(ByteBuffer value1, ByteBuffer value2)
-    {
-        return FastByteOperations.compareUnsigned(value1, value2);
+        return ByteSource.compare(bytes1.asComparableBytes(version), bytes2.asComparableBytes(version));
     }
 
     /**

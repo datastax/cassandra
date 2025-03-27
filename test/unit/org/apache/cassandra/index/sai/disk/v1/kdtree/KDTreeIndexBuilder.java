@@ -66,6 +66,7 @@ import org.apache.cassandra.utils.AbstractGuavaIterator;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
+import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
 
 import static org.hamcrest.Matchers.instanceOf;
 import static org.hamcrest.Matchers.is;
@@ -123,14 +124,14 @@ public class KDTreeIndexBuilder
 
     private final IndexDescriptor indexDescriptor;
     private final AbstractType<?> type;
-    private final AbstractGuavaIterator<Pair<ByteComparable, IntArrayList>> terms;
+    private final AbstractGuavaIterator<Pair<ByteComparable.Preencoded, IntArrayList>> terms;
     private final int size;
     private final int minSegmentRowId;
     private final int maxSegmentRowId;
 
     public KDTreeIndexBuilder(IndexDescriptor indexDescriptor,
                               AbstractType<?> type,
-                              AbstractGuavaIterator<Pair<ByteComparable, IntArrayList>> terms,
+                              AbstractGuavaIterator<Pair<ByteComparable.Preencoded, IntArrayList>> terms,
                               int size,
                               int minSegmentRowId,
                               int maxSegmentRowId)
@@ -290,15 +291,15 @@ public class KDTreeIndexBuilder
      * Returns inverted index where each posting list contains exactly one element equal to the terms ordinal number +
      * given offset.
      */
-    public static AbstractGuavaIterator<Pair<ByteComparable, IntArrayList>> singleOrd(Iterator<ByteBuffer> terms, AbstractType<?> type, int segmentRowIdOffset, int size)
+    public static AbstractGuavaIterator<Pair<ByteComparable.Preencoded, IntArrayList>> singleOrd(Iterator<ByteBuffer> terms, AbstractType<?> type, int segmentRowIdOffset, int size)
     {
-        return new AbstractGuavaIterator<Pair<ByteComparable, IntArrayList>>()
+        return new AbstractGuavaIterator<Pair<ByteComparable.Preencoded, IntArrayList>>()
         {
             private long currentTerm = 0;
             private int currentSegmentRowId = segmentRowIdOffset;
 
             @Override
-            protected Pair<ByteComparable, IntArrayList> computeNext()
+            protected Pair<ByteComparable.Preencoded, IntArrayList> computeNext()
             {
                 if (currentTerm++ >= size)
                 {
@@ -310,7 +311,7 @@ public class KDTreeIndexBuilder
                 assertTrue(terms.hasNext());
 
                 final ByteSource encoded = TypeUtil.asComparableBytes(terms.next(), type, TypeUtil.BYTE_COMPARABLE_VERSION);
-                return Pair.create(v -> encoded, postings);
+                return Pair.create(ByteComparable.preencoded(TypeUtil.BYTE_COMPARABLE_VERSION, ByteSourceInverse.readBytes(encoded)), postings);
             }
         };
     }
