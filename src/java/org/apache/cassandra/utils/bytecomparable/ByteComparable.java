@@ -98,48 +98,51 @@ public interface ByteComparable
         return v -> ByteSource.of(value);
     }
 
-    private static void checkVersion(Version expected, Version actual)
+    interface Preencoded extends ByteComparable
     {
-        Preconditions.checkState(actual == expected,
-                                 "Preprocessed byte-source at version %s queried at version %s",
-                                 actual,
-                                 expected);
+        Version encodingVersion();
+
+        @Override
+        ByteSource.Duplicatable asComparableBytes(Version version);
+
+        @Override
+        default ByteSource.Peekable asPeekableBytes(Version version)
+        {
+            return asComparableBytes(version);
+        }
+
+        @Override
+        default byte[] asByteComparableArray(Version version)
+        {
+            return asComparableBytes(version).remainingBytesToArray();
+        }
     }
 
     /**
      * A ByteComparable value that is already encoded for a specific version. Requesting the source with a different
      * version will result in an exception.
      */
-    static ByteComparable preencoded(Version version, ByteBuffer bytes)
+    static Preencoded preencoded(Version version, ByteBuffer bytes)
     {
-        return v -> {
-            checkVersion(version, v);
-            return ByteSource.preencoded(bytes);
-        };
+        return new PreencodedByteComparable.Buffer(version, bytes);
     }
 
     /**
      * A ByteComparable value that is already encoded for a specific version. Requesting the source with a different
      * version will result in an exception.
      */
-    static ByteComparable preencoded(Version version, byte[] bytes)
+    static Preencoded preencoded(Version version, byte[] bytes)
     {
-        return v -> {
-            checkVersion(version, v);
-            return ByteSource.preencoded(bytes);
-        };
+        return new PreencodedByteComparable.Array(version, bytes);
     }
 
     /**
      * A ByteComparable value that is already encoded for a specific version. Requesting the source with a different
      * version will result in an exception.
      */
-    static ByteComparable preencoded(Version version, byte[] bytes, int offset, int len)
+    static Preencoded preencoded(Version version, byte[] bytes, int offset, int len)
     {
-        return v -> {
-            checkVersion(version, v);
-            return ByteSource.preencoded(bytes, offset, len);
-        };
+        return new PreencodedByteComparable.Array(version, bytes, offset, len);
     }
 
     /**
