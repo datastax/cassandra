@@ -126,7 +126,7 @@ public class MemtableIndexWriter implements PerIndexWriter
             }
             else
             {
-                final Iterator<Pair<ByteComparable, IntArrayList>> iterator = rowMapping.merge(memtableIndex);
+                final Iterator<Pair<ByteComparable.Preencoded, IntArrayList>> iterator = rowMapping.merge(memtableIndex);
                 try (MemtableTermsIterator terms = new MemtableTermsIterator(memtableIndex.getMinTerm(), memtableIndex.getMaxTerm(), iterator))
                 {
                     long cellCount = flush(minKey, maxKey, indexContext().getValidator(), terms, rowMapping.maxSegmentRowId);

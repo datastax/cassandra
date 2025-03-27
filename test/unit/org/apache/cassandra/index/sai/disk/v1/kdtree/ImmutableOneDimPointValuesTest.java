@@ -111,12 +111,12 @@ public class ImmutableOneDimPointValuesTest
         final ByteBuffer minTerm = Int32Type.instance.decompose(from);
         final ByteBuffer maxTerm = Int32Type.instance.decompose(to);
 
-        final AbstractGuavaIterator<Pair<ByteComparable, IntArrayList>> iterator = new AbstractGuavaIterator<Pair<ByteComparable, IntArrayList>>()
+        final AbstractGuavaIterator<Pair<ByteComparable.Preencoded, IntArrayList>> iterator = new AbstractGuavaIterator<Pair<ByteComparable.Preencoded, IntArrayList>>()
         {
             private int currentTerm = from;
 
             @Override
-            protected Pair<ByteComparable, IntArrayList> computeNext()
+            protected Pair<ByteComparable.Preencoded, IntArrayList> computeNext()
             {
                 if (currentTerm <= to)
                 {
@@ -125,7 +125,7 @@ public class ImmutableOneDimPointValuesTest
                 final ByteBuffer term = Int32Type.instance.decompose(currentTerm++);
                 IntArrayList postings = new IntArrayList();
                 postings.add(0, 1, 2);
-                return Pair.create(v -> ByteSource.preencoded(term), postings);
+                return Pair.create(ByteComparable.preencoded(TypeUtil.BYTE_COMPARABLE_VERSION, term), postings);
             }
         };
 
