@@ -24,35 +24,33 @@ import java.nio.ByteBuffer;
 
 abstract class PreencodedByteComparable implements ByteComparable.Preencoded
 {
+    static final boolean DEBUG = true;
+
     private final Version version;
     private final Exception stackTrace;
 
     PreencodedByteComparable(Version version)
     {
         this.version = version;
-        this.stackTrace = new Exception();
+        this.stackTrace = DEBUG ? new Exception("Constructed at") : null;
     }
 
+    @Override
     public ByteSource.Duplicatable asComparableBytes(Version version)
     {
-        checkVersion(version);
-        return getBytes();
-    }
+        if (version == this.version)
+            return getPreencodedBytes();
 
-    abstract ByteSource.Duplicatable getBytes();
+        IllegalArgumentException e = new IllegalArgumentException("Preencoded byte-comparable at version " + this.version + " queried at version " + version);
+        if (DEBUG)
+            e.addSuppressed(stackTrace);
+        throw e;
+    }
 
     @Override
     public Version encodingVersion()
     {
         return version;
-    }
-
-    private void checkVersion(Version actual)
-    {
-        Preconditions.checkState(actual == version,
-                                 "Preprocessed byte-source at version %s queried at version %s",
-                                 version,
-                                 actual);
     }
 
     static class Array extends PreencodedByteComparable
@@ -75,7 +73,7 @@ abstract class PreencodedByteComparable implements ByteComparable.Preencoded
         }
 
         @Override
-        ByteSource.Duplicatable getBytes()
+        public ByteSource.Duplicatable getPreencodedBytes()
         {
             return ByteSource.preencoded(bytes, offset, length);
         }
@@ -92,7 +90,7 @@ abstract class PreencodedByteComparable implements ByteComparable.Preencoded
         }
 
         @Override
-        ByteSource.Duplicatable getBytes()
+        public ByteSource.Duplicatable getPreencodedBytes()
         {
             return ByteSource.preencoded(bytes);
         }
