@@ -432,9 +432,15 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
 
             // We don't support offset for top-k queries.
             checkFalse(userOffset != NO_OFFSET, String.format(TOPK_OFFSET_ERROR, userOffset));
+
+            // We don't support aggregation for top-k queries because we don't support paging.
+            checkFalse(aggregationSpec != null, TOPK_AGGREGATION_ERROR);
         }
 
         selectOptions.validate(queryState, table.keyspace, userLimit);
+
+        // If there's a secondary index that the command can use, have it validate the request parameters.
+        query.maybeValidateIndexes();
 
         return query;
     }
@@ -784,18 +790,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         if (keyBounds == null)
             return ReadQuery.empty(table);
 
-        ReadQuery command =
-            PartitionRangeReadQuery.create(table, nowInSec, columnFilter, rowFilter, limit, new DataRange(keyBounds, clusteringIndexFilter));
-
-        if (command.isTopK())
-        {
-            checkFalse(aggregationSpec != null, TOPK_AGGREGATION_ERROR);
-        }
-
-        // If there's a secondary index that the command can use, have it validate the request parameters.
-        command.maybeValidateIndexes();
-
-        return command;
+        return PartitionRangeReadQuery.create(table, nowInSec, columnFilter, rowFilter, limit, new DataRange(keyBounds, clusteringIndexFilter));
     }
 
     private ClusteringIndexFilter makeClusteringIndexFilter(QueryOptions options, ColumnFilter columnFilter, QueryState queryState)
