@@ -45,6 +45,7 @@ import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.memtable.AbstractShardedMemtable;
 import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.memtable.ShardBoundaries;
+import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Bounds;
@@ -268,7 +269,15 @@ public class TrieMemtableIndex implements MemtableIndex
         // Compute BM25 scores
         var docStats = computeDocumentFrequencies(queryContext, queryTerms);
         var analyzer = indexContext.getAnalyzerFactory().create();
-        var it = Iterators.transform(intersectedIterator, pk -> BM25Utils.DocTF.createFromDocument(pk, getCellForKey(pk), analyzer, queryTerms));
+        var it = Iterators.filter(Iterators.transform(intersectedIterator, pk ->
+        {
+            Cell<?> cellForKey = getCellForKey(pk);
+            if (cellForKey == null)
+                // skip deleted rows
+                return null;
+            return BM25Utils.DocTF.createFromDocument(pk, cellForKey, analyzer, queryTerms);
+        }), Objects::nonNull);
+
         return List.of(BM25Utils.computeScores(CloseableIterator.wrap(it),
                                                queryTerms,
                                                docStats,
@@ -333,7 +342,13 @@ public class TrieMemtableIndex implements MemtableIndex
         var analyzer = indexContext.getAnalyzerFactory().create();
         var queryTerms = orderer.getQueryTerms();
         var docStats = computeDocumentFrequencies(queryContext, queryTerms);
-        var it = keys.stream().map(pk -> BM25Utils.DocTF.createFromDocument(pk, getCellForKey(pk), analyzer, queryTerms)).iterator();
+        var it = keys.stream().map(pk -> {
+            Cell<?> cellForKey = getCellForKey(pk);
+            if (cellForKey == null)
+                // skip deleted rows
+                return null;
+            return BM25Utils.DocTF.createFromDocument(pk, cellForKey, analyzer, queryTerms);
+        }).filter(Objects::nonNull).iterator();
         return BM25Utils.computeScores(CloseableIterator.wrap(it),
                                        queryTerms,
                                        docStats,
@@ -352,8 +367,15 @@ public class TrieMemtableIndex implements MemtableIndex
         {
             // KeyRangeIterator.getMaxKeys is not accurate enough, we have to count them
             long keys = 0;
-            for (var it = termIterators.get(i); it.hasNext(); it.next())
+            for (var it = termIterators.get(i); it.hasNext(); )
+            {
+                PrimaryKey pk = it.next();
+                Cell<?> cellForKey = getCellForKey(pk);
+                if (cellForKey == null)
+                    // skip deleted rows
+                    continue;
                 keys++;
+            }
             documentFrequencies.put(queryTerms.get(i), keys);
         }
         long docCount = 0;
