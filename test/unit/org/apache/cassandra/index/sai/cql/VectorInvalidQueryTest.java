@@ -242,6 +242,34 @@ public class VectorInvalidQueryTest extends SAITester
     }
 
     @Test
+    public void cannotHaveAggregationOnANNQuery()
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v vector<float, 1>, c int)");
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
+
+        execute("INSERT INTO %s (k, v, c) VALUES (1, [4], 1)");
+        execute("INSERT INTO %s (k, v, c) VALUES (2, [3], 10)");
+        execute("INSERT INTO %s (k, v, c) VALUES (3, [2], 100)");
+        execute("INSERT INTO %s (k, v, c) VALUES (4, [1], 1000)");
+
+        assertThatThrownBy(() -> execute("SELECT sum(c) FROM %s ORDER BY v ANN OF [0] LIMIT 4"))
+                .isInstanceOf(InvalidRequestException.class)
+                .hasMessage(SelectStatement.TOPK_AGGREGATION_ERROR);
+
+        assertThatThrownBy(() -> execute("SELECT sum(c) FROM %s WHERE k = 1 ORDER BY v ANN OF [0] LIMIT 4"))
+                .isInstanceOf(InvalidRequestException.class)
+                .hasMessage(SelectStatement.TOPK_AGGREGATION_ERROR);
+
+        assertThatThrownBy(() -> execute("SELECT * FROM %s GROUP BY k ORDER BY v ANN OF [0] LIMIT 4"))
+                .isInstanceOf(InvalidRequestException.class)
+                .hasMessage(SelectStatement.TOPK_AGGREGATION_ERROR);
+
+        assertThatThrownBy(() -> execute("SELECT count(*) FROM %s ORDER BY v ANN OF [0] LIMIT 4"))
+                .isInstanceOf(InvalidRequestException.class)
+                .hasMessage(SelectStatement.TOPK_AGGREGATION_ERROR);
+    }
+
+    @Test
     public void canOnlyExecuteWithCorrectConsistencyLevel()
     {
         createTable("CREATE TABLE %s (k int, c int, v vector<float, 1>, PRIMARY KEY(k, c))");
