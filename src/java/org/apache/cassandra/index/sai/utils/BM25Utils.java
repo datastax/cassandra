@@ -83,9 +83,10 @@ public class BM25Utils
                                              AbstractAnalyzer docAnalyzer,
                                              Collection<ByteBuffer> queryTerms)
         {
+            assert cell != null : "Cannot find a cell for pk " + pk;
+
             int count = 0;
             Map<ByteBuffer, Integer> frequencies = new HashMap<>();
-
             docAnalyzer.reset(cell.buffer());
             try
             {
