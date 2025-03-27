@@ -65,6 +65,22 @@ public class BM25Test extends SAITester
     }
 
     @Test
+    public void testDeletedRow()
+    {
+        // create un-analyzed index
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v text)");
+        // create analyzed index
+        analyzeIndex();
+        execute("INSERT INTO %s (k, v) VALUES (1, 'apple')");
+        execute("INSERT INTO %s (k, v) VALUES (2, 'apple juice')");
+        var result = execute("SELECT k FROM %s ORDER BY v BM25 OF 'apple' LIMIT 3");
+        assertThat(result).hasSize(2);
+        execute("DELETE FROM %s WHERE k=2");
+        result = execute("SELECT k FROM %s ORDER BY v BM25 OF 'apple' LIMIT 3");
+        assertThat(result).hasSize(1);
+    }
+
+    @Test
     public void testTwoIndexesAmbiguousPredicate() throws Throwable
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v text)");
