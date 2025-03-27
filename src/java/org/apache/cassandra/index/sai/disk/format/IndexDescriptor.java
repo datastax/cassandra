@@ -427,6 +427,10 @@ public class IndexDescriptor
             boolean isValid = true;
             for (IndexComponentType expected : expectedComponentsForVersion())
             {
+                // Compression components may not exist when compression is not used
+                if (onDiskFormat().compressionInfoComponentTypes().contains(expected))
+                    continue;
+
                 var component = components.get(expected);
                 if (component == null)
                 {
@@ -629,17 +633,28 @@ public class IndexDescriptor
                 return file;
             }
 
-            @Override
-            public File compressionMetaFile()
+            private CompressionMetadata compressionMetadata()
             {
-                return IndexFileUtils.addSuffix(file(), "CompressionInfo");
+                var compressionMetaFile = compressionMetadataFile();
+
+                return (compressionMetaFile != null && compressionMetaFile.exists())
+                       ? new CompressionMetadata(compressionMetaFile, file().length(), true)
+                       : null;
             }
 
-            public CompressionMetadata compressionMetadata()
+            private File compressionMetadataFile()
             {
-                var compressionMetaFile = compressionMetaFile();
-                return (compressionMetaFile.exists())
-                       ? new CompressionMetadata(compressionMetaFile, file().length(), true)
+                var comressionComponent = compressionMetadataComponent();
+                return comressionComponent != null
+                       ? descriptor.fileFor(comressionComponent.asCustomComponent())
+                       : null;
+            }
+
+            @Override
+            public IndexComponentImpl compressionMetadataComponent()
+            {
+                return component.compressionMetadata != null
+                       ? new IndexComponentImpl(component.compressionMetadata)
                        : null;
             }
 
@@ -702,6 +717,9 @@ public class IndexDescriptor
                 CompressionParams compression = context() != null
                                                 ? context().getValueCompression()
                                                 : CompressionParams.noCompression();
+                if (!component.isCompressed())
+                    compression = CompressionParams.noCompression();
+
                 return openOutput(append, compression);
             }
 
@@ -715,7 +733,8 @@ public class IndexDescriptor
                                  component,
                                  file);
 
-                return IndexFileUtils.instance.openOutput(file, byteOrder(), append, compressionMetaFile(), compression);
+                File compressionMetaFile = compressionMetadataFile();
+                return IndexFileUtils.instance.openOutput(file, byteOrder(), append, compressionMetaFile, compression);
             }
 
 

@@ -18,26 +18,50 @@ package org.apache.cassandra.index.sai.cql;
 
 import java.util.Set;
 
+import org.junit.Before;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SAITester;
+import org.apache.cassandra.index.sai.SAIUtil;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.io.compress.CompressionMetadata;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.File;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
 public class IndexCompressionTest extends SAITester
 {
+    @Before
+    public void setup()
+    {
+        if (!Version.latest().onOrAfter(Version.EC))
+            SAIUtil.setLatestVersion(Version.EC);
+    }
+
+    @Test
+    public void testCannotUseCompressionInOlderVersions()
+    {
+        SAIUtil.setLatestVersion(Version.EB);
+        createTable("CREATE TABLE %s (pk int, c text, val text, PRIMARY KEY(pk, c))");
+        var exception = assertThrows(InvalidRequestException.class,
+                                     () -> createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH options = { 'key_compression': '{\"class\": \"LZ4Compressor\"}' };"));
+        assertTrue(exception.getMessage().contains("Cannot create compressed storage-attached index"));
+        assertTrue(exception.getMessage().contains("ec"));
+        assertTrue(exception.getMessage().contains("eb"));
+    }
+
     @Test
     public void testKeyCompression()
     {
@@ -103,6 +127,8 @@ public class IndexCompressionTest extends SAITester
         for (SSTableReader sstable : cfs.getLiveSSTables())
         {
             IndexDescriptor descriptor = IndexDescriptor.load(sstable, Set.of(context));
+            assertTrue(descriptor.perIndexComponents(context).get(IndexComponentType.TERMS_DATA_COMPRESSION_INFO).file().exists());
+            assertTrue(descriptor.perIndexComponents(context).get(IndexComponentType.POSTING_LISTS_COMPRESSION_INFO).file().exists());
             assertCompressed(descriptor.perIndexComponents(context).get(IndexComponentType.TERMS_DATA));
             assertCompressed(descriptor.perIndexComponents(context).get(IndexComponentType.POSTING_LISTS));
         }
@@ -131,6 +157,8 @@ public class IndexCompressionTest extends SAITester
         for (SSTableReader sstable : cfs.getLiveSSTables())
         {
             IndexDescriptor descriptor = IndexDescriptor.load(sstable, Set.of(context));
+            assertTrue(descriptor.perIndexComponents(context).get(IndexComponentType.KD_TREE_COMPRESSION_INFO).file().exists());
+            assertTrue(descriptor.perIndexComponents(context).get(IndexComponentType.KD_TREE_POSTING_LISTS_COMPRESSION_INFO).file().exists());
             assertCompressed(descriptor.perIndexComponents(context).get(IndexComponentType.KD_TREE));
             assertCompressed(descriptor.perIndexComponents(context).get(IndexComponentType.KD_TREE_POSTING_LISTS));
         }
@@ -139,7 +167,8 @@ public class IndexCompressionTest extends SAITester
 
     private void assertCompressed(IndexComponent component)
     {
-        File compressionMetaFile = component.compressionMetaFile();
+        assertNotNull(component.compressionMetadataComponent());
+        File compressionMetaFile = component.compressionMetadataComponent().file();
         assertTrue(compressionMetaFile.exists());
         try (CompressionMetadata metadata = new CompressionMetadata(compressionMetaFile, component.file().length(), true))
         {

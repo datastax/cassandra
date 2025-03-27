@@ -83,6 +83,7 @@ public class IndexFileUtils
     public IndexOutputWriter openOutput(File file, ByteOrder order, boolean append, @Nullable File compressionMetaFile, @Nullable CompressionParams compression) throws IOException
     {
         assert writerOption.finishOnClose() : "IndexOutputWriter relies on close() to sync with disk.";
+        assert compression == null || !compression.isEnabled() || compressionMetaFile != null : "compressionMetaFile must be provided if compression is enabled";
         return (compression != null && compression.isEnabled())
             ? openCompressedOutput(file, order, compressionMetaFile, compression)
             : openChecksummedOutput(file, order, append);
