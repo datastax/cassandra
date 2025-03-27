@@ -57,11 +57,51 @@ public class BM25Test extends SAITester
         assertInvalidMessage("BM25 ordering on column v requires an analyzed index",
                              "SELECT k FROM %s WHERE v : 'apple' ORDER BY v BM25 OF 'apple' LIMIT 3");
 
-        // create analyzed index
-        analyzeIndex();
+        createAnalyzedIndex();
         // BM25 query should work now
         var result = execute("SELECT k FROM %s WHERE v : 'apple' ORDER BY v BM25 OF 'apple' LIMIT 3");
         assertRows(result, row(1));
+    }
+
+    @Test
+    public void testDeletedRow() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v text)");
+        createAnalyzedIndex();
+        execute("INSERT INTO %s (k, v) VALUES (1, 'apple')");
+        execute("INSERT INTO %s (k, v) VALUES (2, 'apple juice')");
+        var result = execute("SELECT k FROM %s ORDER BY v BM25 OF 'apple' LIMIT 3");
+        assertThat(result).hasSize(2);
+        execute("DELETE FROM %s WHERE k=2");
+        String select = "SELECT k FROM %s ORDER BY v BM25 OF 'apple' LIMIT 3";
+        beforeAndAfterFlush(() -> assertRows(execute(select), row(1)));
+    }
+
+    @Test
+    public void testDeletedColumn() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v text)");
+        createAnalyzedIndex();
+        execute("INSERT INTO %s (k, v) VALUES (1, 'apple')");
+        execute("INSERT INTO %s (k, v) VALUES (2, 'apple juice')");
+        String select = "SELECT k FROM %s ORDER BY v BM25 OF 'apple' LIMIT 3";
+        assertRows(execute(select), row(1), row(2));
+        execute("DELETE v FROM %s WHERE k = 2");
+        beforeAndAfterFlush(() -> assertRows(execute(select), row(1)));
+    }
+
+    @Test
+    public void testDeletedRowWithPredicate() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v text, n int)");
+        createIndex("CREATE CUSTOM INDEX ON %s(n) USING 'org.apache.cassandra.index.sai.StorageAttachedIndex'");
+        createAnalyzedIndex();
+        execute("INSERT INTO %s (k, v, n) VALUES (1, 'apple', 0)");
+        execute("INSERT INTO %s (k, v, n) VALUES (2, 'apple juice', 0)");
+        String select = "SELECT k FROM %s WHERE n = 0 ORDER BY v BM25 OF 'apple' LIMIT 3";
+        assertRows(execute(select), row(1), row(2));
+        execute("DELETE FROM %s WHERE k=2");
+        beforeAndAfterFlush(() -> assertRows(execute(select), row(1)));
     }
 
     @Test
@@ -69,8 +109,8 @@ public class BM25Test extends SAITester
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v text)");
 
-        // Create analyzed and un-analyzed indexes
-        analyzeIndex();
+        createAnalyzedIndex();
+        // Create  un-analyzed indexes
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'org.apache.cassandra.index.sai.StorageAttachedIndex'");
 
         execute("INSERT INTO %s (k, v) VALUES (1, 'apple')");
@@ -368,10 +408,10 @@ public class BM25Test extends SAITester
     private void createSimpleTable()
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v text)");
-        analyzeIndex();
+        createAnalyzedIndex();
     }
 
-    private String analyzeIndex()
+    private String createAnalyzedIndex()
     {
         return createIndex("CREATE CUSTOM INDEX ON %s(v) " +
                            "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
@@ -387,7 +427,7 @@ public class BM25Test extends SAITester
     public void testWithPredicate() throws Throwable
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, p int, v text)");
-        analyzeIndex();
+        createAnalyzedIndex();
         execute("CREATE CUSTOM INDEX ON %s(p) USING 'StorageAttachedIndex'");
 
         // Insert documents with varying frequencies of the term "apple"
@@ -412,7 +452,7 @@ public class BM25Test extends SAITester
     public void testWidePartition() throws Throwable
     {
         createTable("CREATE TABLE %s (k1 int, k2 int, v text, PRIMARY KEY (k1, k2))");
-        analyzeIndex();
+        createAnalyzedIndex();
 
         // Insert documents with varying frequencies of the term "apple"
         execute("INSERT INTO %s (k1, k2, v) VALUES (0, 1, 'apple')");
@@ -434,7 +474,7 @@ public class BM25Test extends SAITester
     public void testWidePartitionWithPkPredicate() throws Throwable
     {
         createTable("CREATE TABLE %s (k1 int, k2 int, v text, PRIMARY KEY (k1, k2))");
-        analyzeIndex();
+        createAnalyzedIndex();
 
         // Insert documents with varying frequencies of the term "apple"
         execute("INSERT INTO %s (k1, k2, v) VALUES (0, 1, 'apple')");
@@ -458,7 +498,7 @@ public class BM25Test extends SAITester
     public void testWidePartitionWithPredicate() throws Throwable
     {
         createTable("CREATE TABLE %s (k1 int, k2 int, p int, v text, PRIMARY KEY (k1, k2))");
-        analyzeIndex();
+        createAnalyzedIndex();
         execute("CREATE CUSTOM INDEX ON %s(p) USING 'StorageAttachedIndex'");
 
         // Insert documents with varying frequencies of the term "apple"
@@ -519,7 +559,7 @@ public class BM25Test extends SAITester
     public void testBM25RaceConditionConcurrentQueriesInInvertedIndexSearcher() throws Throwable
     {
         createTable("CREATE TABLE %s (pk int, v text, PRIMARY KEY (pk))");
-        analyzeIndex();
+        createAnalyzedIndex();
 
         // Create 3 docs that have the same BM25 score and will be our top docs
         execute("INSERT INTO %s (pk, v) VALUES (1, 'apple apple apple')");
@@ -552,7 +592,7 @@ public class BM25Test extends SAITester
     public void testWildcardSelection()
     {
         createTable("CREATE TABLE %s (k int, c int, v text, PRIMARY KEY (k, c))");
-        analyzeIndex();
+        createAnalyzedIndex();
         execute("INSERT INTO %s (k, c, v) VALUES (1, 1, 'apple')");
 
         var result = execute("SELECT * FROM %s ORDER BY v BM25 OF 'apple' LIMIT 3");
