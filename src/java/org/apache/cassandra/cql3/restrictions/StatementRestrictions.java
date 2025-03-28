@@ -676,7 +676,7 @@ public class StatementRestrictions
                         {
                             if (isBoundedANN)
                                 throw invalidRequest(StatementRestrictions.VECTOR_INDEX_PRESENT_NOT_SUPPORT_GEO_DISTANCE_MESSAGE);
-                            else if (isIndexBasedOrdering)
+                            else
                                 throw invalidRequest(StatementRestrictions.VECTOR_INDEXES_UNSUPPORTED_OP_MESSAGE, vc);
                         }
                         else
