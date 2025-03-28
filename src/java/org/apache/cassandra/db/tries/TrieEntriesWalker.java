@@ -40,10 +40,10 @@ public abstract class TrieEntriesWalker<T, V> extends TriePathReconstructor impl
      */
     static class WithConsumer<T> extends TrieEntriesWalker<T, Void>
     {
-        private final BiConsumer<ByteComparable, T> consumer;
+        private final BiConsumer<ByteComparable.Preencoded, T> consumer;
         private final ByteComparable.Version byteComparableVersion;
 
-        public WithConsumer(BiConsumer<ByteComparable, T> consumer, ByteComparable.Version byteComparableVersion)
+        public WithConsumer(BiConsumer<ByteComparable.Preencoded, T> consumer, ByteComparable.Version byteComparableVersion)
         {
             this.consumer = consumer;
             this.byteComparableVersion = byteComparableVersion;

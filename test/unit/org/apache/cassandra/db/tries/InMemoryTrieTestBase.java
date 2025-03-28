@@ -656,15 +656,15 @@ public abstract class InMemoryTrieTestBase
         return list;
     }
 
-    static void assertMapEquals(Iterator<Map.Entry<ByteComparable, ByteBuffer>> it1,
-                                Iterator<Map.Entry<ByteComparable, ByteBuffer>> it2)
+    static <B extends ByteComparable, C extends ByteComparable>
+    void assertMapEquals(Iterator<Map.Entry<B, ByteBuffer>> it1, Iterator<Map.Entry<C, ByteBuffer>> it2)
     {
         List<ByteComparable> failedAt = new ArrayList<>();
         StringBuilder b = new StringBuilder();
         while (it1.hasNext() && it2.hasNext())
         {
-            Map.Entry<ByteComparable, ByteBuffer> en1 = it1.next();
-            Map.Entry<ByteComparable, ByteBuffer> en2 = it2.next();
+            Map.Entry<? extends ByteComparable, ByteBuffer> en1 = it1.next();
+            Map.Entry<? extends ByteComparable, ByteBuffer> en2 = it2.next();
             b.append(String.format("TreeSet %s:%s\n", asString(en2.getKey()), ByteBufferUtil.bytesToHex(en2.getValue())));
             b.append(String.format("Trie    %s:%s\n", asString(en1.getKey()), ByteBufferUtil.bytesToHex(en1.getValue())));
             if (ByteComparable.compare(en1.getKey(), en2.getKey(), byteComparableVersion) != 0 || ByteBufferUtil.compareUnsigned(en1.getValue(), en2.getValue()) != 0)
@@ -672,13 +672,13 @@ public abstract class InMemoryTrieTestBase
         }
         while (it1.hasNext())
         {
-            Map.Entry<ByteComparable, ByteBuffer> en1 = it1.next();
+            Map.Entry<? extends ByteComparable, ByteBuffer> en1 = it1.next();
             b.append(String.format("Trie    %s:%s\n", asString(en1.getKey()), ByteBufferUtil.bytesToHex(en1.getValue())));
             failedAt.add(en1.getKey());
         }
         while (it2.hasNext())
         {
-            Map.Entry<ByteComparable, ByteBuffer> en2 = it2.next();
+            Map.Entry<? extends ByteComparable, ByteBuffer> en2 = it2.next();
             b.append(String.format("TreeSet %s:%s\n", asString(en2.getKey()), ByteBufferUtil.bytesToHex(en2.getValue())));
             failedAt.add(en2.getKey());
         }
