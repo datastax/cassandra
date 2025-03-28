@@ -31,7 +31,7 @@ import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
-import com.google.common.collect.Iterators;
+import com.google.common.collect.Streams;
 import com.google.common.util.concurrent.Runnables;
 
 import org.apache.cassandra.cql3.Operator;
@@ -323,14 +323,10 @@ public class TrieMemtableIndex implements MemtableIndex
         // Compute BM25 scores
         var docStats = computeDocumentFrequencies(queryContext, queryTerms);
         var analyzer = indexContext.getAnalyzerFactory().create();
-        var it = Iterators.filter(Iterators.transform(intersectedIterator, pk ->
-        {
-            Cell<?> cellForKey = getCellForKey(pk);
-            if (cellForKey == null)
-                // skip deleted rows
-                return null;
-            return BM25Utils.DocTF.createFromDocument(pk, cellForKey, analyzer, queryTerms);
-        }), Objects::nonNull);
+        var it = Streams.stream(intersectedIterator)
+                 .map(pk -> BM25Utils.DocTF.createFromDocument(pk, getCellForKey(pk), analyzer, queryTerms))
+                 .filter(Objects::nonNull)
+                 .iterator();
 
         return List.of(BM25Utils.computeScores(CloseableIterator.wrap(it),
                                                queryTerms,
@@ -396,13 +392,10 @@ public class TrieMemtableIndex implements MemtableIndex
         var analyzer = indexContext.getAnalyzerFactory().create();
         var queryTerms = orderer.getQueryTerms();
         var docStats = computeDocumentFrequencies(queryContext, queryTerms);
-        var it = keys.stream().map(pk -> {
-            Cell<?> cellForKey = getCellForKey(pk);
-            if (cellForKey == null)
-                // skip deleted rows
-                return null;
-            return BM25Utils.DocTF.createFromDocument(pk, cellForKey, analyzer, queryTerms);
-        }).filter(Objects::nonNull).iterator();
+        var it = keys.stream()
+                     .map(pk -> BM25Utils.DocTF.createFromDocument(pk, getCellForKey(pk), analyzer, queryTerms))
+                     .filter(Objects::nonNull)
+                     .iterator();
         return BM25Utils.computeScores(CloseableIterator.wrap(it),
                                        queryTerms,
                                        docStats,

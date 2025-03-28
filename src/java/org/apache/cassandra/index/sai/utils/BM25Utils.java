@@ -27,6 +27,8 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
+import javax.annotation.Nullable;
+
 import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.index.sai.IndexContext;
@@ -78,12 +80,14 @@ public class BM25Utils
             return frequencies.getOrDefault(term, 0);
         }
 
+        @Nullable
         public static DocTF createFromDocument(PrimaryKey pk,
-                                             Cell<?> cell,
-                                             AbstractAnalyzer docAnalyzer,
-                                             Collection<ByteBuffer> queryTerms)
+                                               Cell<?> cell,
+                                               AbstractAnalyzer docAnalyzer,
+                                               Collection<ByteBuffer> queryTerms)
         {
-            assert cell != null : "Cannot find a cell for pk " + pk;
+            if (cell == null)
+                return null;
 
             int count = 0;
             Map<ByteBuffer, Integer> frequencies = new HashMap<>();
@@ -102,6 +106,10 @@ public class BM25Utils
             {
                 docAnalyzer.end();
             }
+
+            // Every query term must be present in the document
+            if (queryTerms.size() > frequencies.size())
+                return null;
 
             return new DocTF(pk, count, frequencies);
         }
