@@ -38,6 +38,7 @@ import java.util.stream.StreamSupport;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+import org.junit.Assume;
 import org.junit.Before;
 import org.junit.Ignore;
 import org.junit.Rule;
@@ -569,6 +570,10 @@ public abstract class CQLSSTableWriterTest
     @SuppressWarnings("unchecked")
     public void testWritesWithUdts() throws Exception
     {
+        Assume.assumeTrue("Skip test when using DaemonInitialization with Murmur3Partitioner",
+                          !DatabaseDescriptor.isDaemonInitialized()
+                          || !(DatabaseDescriptor.getPartitioner() instanceof Murmur3Partitioner));
+
         final String schema = "CREATE TABLE " + qualifiedTable + " ("
                               + "  k int,"
                               + "  v1 list<frozen<tuple2>>,"
@@ -639,6 +644,10 @@ public abstract class CQLSSTableWriterTest
     @SuppressWarnings("unchecked")
     public void testWritesWithDependentUdts() throws Exception
     {
+        Assume.assumeTrue("Skip test when using DaemonInitialization with Murmur3Partitioner",
+                          !DatabaseDescriptor.isDaemonInitialized()
+                          || !(DatabaseDescriptor.getPartitioner() instanceof Murmur3Partitioner));
+
         final String schema = "CREATE TABLE " + qualifiedTable + " ("
                               + "  k int,"
                               + "  v1 frozen<nested_tuple>,"
@@ -699,6 +708,10 @@ public abstract class CQLSSTableWriterTest
     @Test
     public void testUnsetValues() throws Exception
     {
+        Assume.assumeTrue("Skip test when using DaemonInitialization with Murmur3Partitioner",
+                          !DatabaseDescriptor.isDaemonInitialized()
+                          || !(DatabaseDescriptor.getPartitioner() instanceof Murmur3Partitioner));
+
         final String schema = "CREATE TABLE " + qualifiedTable + " ("
                               + "  k int,"
                               + "  c1 int,"
@@ -1238,6 +1251,10 @@ public abstract class CQLSSTableWriterTest
     @Test
     public void testWriteWithSorted() throws Exception
     {
+        Assume.assumeTrue("Skip test when using DaemonInitialization with Murmur3Partitioner",
+                          !DatabaseDescriptor.isDaemonInitialized()
+                          || !(DatabaseDescriptor.getPartitioner() instanceof Murmur3Partitioner));
+
         String schema = "CREATE TABLE " + qualifiedTable + " ("
                         + "  k int PRIMARY KEY,"
                         + "  v blob )";
@@ -1269,6 +1286,10 @@ public abstract class CQLSSTableWriterTest
     @Test
     public void testWriteWithSortedAndMaxSize() throws Exception
     {
+        Assume.assumeTrue("Skip test when using DaemonInitialization with Murmur3Partitioner",
+                          !DatabaseDescriptor.isDaemonInitialized()
+                          || !(DatabaseDescriptor.getPartitioner() instanceof Murmur3Partitioner));
+
         String schema = "CREATE TABLE " + qualifiedTable + " ("
                         + "  k int PRIMARY KEY,"
                         + "  v blob )";
@@ -1359,6 +1380,9 @@ public abstract class CQLSSTableWriterTest
     @Test
     public void testWriteWithSAI() throws Exception
     {
+        Assume.assumeTrue("Skip test when using DaemonInitialization without Murmur3Partitioner",
+                          !DatabaseDescriptor.isDaemonInitialized()
+                          || DatabaseDescriptor.getPartitioner() instanceof Murmur3Partitioner);
         writeWithSaiInternal();
         writeWithSaiInternal();
     }
@@ -1410,6 +1434,10 @@ public abstract class CQLSSTableWriterTest
     @Test
     public void testSkipBuildingIndexesWithSAI() throws Exception
     {
+        Assume.assumeTrue("Skip test when using DaemonInitialization without Murmur3Partitioner",
+                          !DatabaseDescriptor.isDaemonInitialized()
+                          || DatabaseDescriptor.getPartitioner() instanceof Murmur3Partitioner);
+
         String schema = "CREATE TABLE " + qualifiedTable + " ("
                         + "  k int PRIMARY KEY,"
                         + "  v1 text,"
