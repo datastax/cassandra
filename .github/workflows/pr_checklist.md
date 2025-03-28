@@ -8,3 +8,4 @@
 - [ ] Each commit has a meaningful description
 - [ ] Each commit is not very long and contains related changes
 - [ ] Renames, moves and reformatting are in distinct commits
+- [ ] All new files should contain the DataStax copyright header instead of the Apache License one
