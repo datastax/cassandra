@@ -34,7 +34,8 @@ public class SASIIndexQueryPlan extends SingletonIndexQueryPlan
     @Nullable
     public static SASIIndexQueryPlan create(SASIIndex index, RowFilter rowFilter)
     {
-        for (RowFilter.Expression e : rowFilter.expressions())
+        // SASI doesn't support disjunctions, so we only consider the top-level AND expressions for index selection.
+        for (RowFilter.Expression e : rowFilter.withoutDisjunctions().expressions())
         {
             if (index.supportsExpression(e.column(), e.operator()))
                 return new SASIIndexQueryPlan(index, index.getPostIndexQueryFilter(rowFilter));
