@@ -109,7 +109,7 @@ public interface ByteComparable
         default ByteSource.Duplicatable asComparableBytes(Version version)
         {
             Preconditions.checkState(version == encodingVersion(),
-                                     "Preprocessed byte-source at version %s queried at version %s",
+                                     "Preencoded byte-source at version %s queried at version %s",
                                      encodingVersion(),
                                      version);
             return getPreencodedBytes();
@@ -126,15 +126,6 @@ public interface ByteComparable
         {
             return asComparableBytes(version).remainingBytesToArray();
         }
-    }
-
-    static int compare(Preencoded a, Preencoded b)
-    {
-        Preconditions.checkArgument(a.encodingVersion() == b.encodingVersion(),
-                                    "Cannot compare preencoded byte-comparables of different versions %s vs %s",
-                                    a.encodingVersion(),
-                                    b.encodingVersion());
-        return ByteSource.compare(a.getPreencodedBytes(), b.getPreencodedBytes());
     }
 
     /**
@@ -211,6 +202,21 @@ public interface ByteComparable
     static int compare(ByteComparable bytes1, ByteComparable bytes2, Version version)
     {
         return ByteSource.compare(bytes1.asComparableBytes(version), bytes2.asComparableBytes(version));
+    }
+
+    /**
+     * Compare two preencoded byte-comparable values, using their encoding versions.
+     *
+     * @return the result of the lexicographic unsigned byte comparison of the byte-comparable representations of the
+     *         two arguments
+     */
+    static int compare(Preencoded a, Preencoded b)
+    {
+        Preconditions.checkArgument(a.encodingVersion() == b.encodingVersion(),
+                                    "Cannot compare preencoded byte-comparables of different versions %s vs %s",
+                                    a.encodingVersion(),
+                                    b.encodingVersion());
+        return ByteSource.compare(a.getPreencodedBytes(), b.getPreencodedBytes());
     }
 
     /**
