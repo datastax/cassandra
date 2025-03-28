@@ -128,7 +128,7 @@ public class InMemoryTrieUnionBench
     public int iterateEntries()
     {
         int sum = 0;
-        for (Map.Entry<ByteComparable, Byte> en : trie.entrySet())
+        for (Map.Entry<ByteComparable. Preencoded, Byte> en : trie.entrySet())
             sum += en.getValue();
         return sum;
     }

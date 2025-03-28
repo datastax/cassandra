@@ -711,11 +711,11 @@ public class TrieMemtable extends AbstractShardedMemtable
 
         private DecoratedKey firstPartitionKey(Direction direction)
         {
-            Iterator<Map.Entry<ByteComparable, PartitionData>> iter = data.filteredEntryIterator(direction, PartitionData.class);
+            Iterator<Map.Entry<ByteComparable.Preencoded, PartitionData>> iter = data.filteredEntryIterator(direction, PartitionData.class);
             if (!iter.hasNext())
                 return null;
 
-            Map.Entry<ByteComparable, PartitionData> entry = iter.next();
+            Map.Entry<ByteComparable.Preencoded, PartitionData> entry = iter.next();
             return getPartitionKeyFromPath(metadata.get(), entry.getKey());
         }
 
