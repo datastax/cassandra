@@ -157,14 +157,14 @@ public class MemtableIndexWriter implements PerIndexWriter
                 var docLengths = new Int2IntHashMap(Integer.MIN_VALUE);
                 Arrays.stream(((TrieMemtableIndex) memtableIndex).getRangeIndexes())
                       .map(TrieMemoryIndex.class::cast)
-                      .forEach(trieMemoryIndex -> 
+                      .forEach(trieMemoryIndex ->
                           trieMemoryIndex.getDocLengths().forEach((pk, length) -> {
                               int rowId = rowMapping.get(pk);
                               if (rowId >= 0)
                                   docLengths.put(rowId, (int) length);
                           })
                       );
-                
+
                 indexMetas = writer.writeAll(metadataBuilder.intercept(terms), docLengths);
                 numRows = writer.getPostingsCount();
             }

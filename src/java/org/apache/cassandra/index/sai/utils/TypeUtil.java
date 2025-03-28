@@ -29,6 +29,7 @@ import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
 import com.googlecode.concurrenttrees.radix.ConcurrentRadixTree;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.AsciiType;
@@ -45,6 +46,7 @@ import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.ComplexColumnData;
 import org.apache.cassandra.index.sai.IndexContext;
+import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.schema.ColumnMetadata;
@@ -125,24 +127,6 @@ public class TypeUtil
     public static ByteBuffer max(ByteBuffer a, ByteBuffer b, AbstractType<?> type, Version version)
     {
         return a == null ?  b : (b == null || compare(b, a, type, version) < 0) ? a : b;
-    }
-
-    /**
-     * Returns the lesser of two {@code ByteComparable} values, based on the result of {@link
-     * ByteComparable#compare(ByteComparable, ByteComparable, ByteComparable.Version)} comparision.
-     */
-    public static ByteComparable min(ByteComparable a, ByteComparable b)
-    {
-        return a == null ?  b : (b == null || ByteComparable.compare(b, a, BYTE_COMPARABLE_VERSION) > 0) ? a : b;
-    }
-
-    /**
-     * Returns the greater of two {@code ByteComparable} values, based on the result of {@link
-     * ByteComparable#compare(ByteComparable, ByteComparable, ByteComparable.Version)} comparision.
-     */
-    public static ByteComparable max(ByteComparable a, ByteComparable b)
-    {
-        return a == null ?  b : (b == null || ByteComparable.compare(b, a, BYTE_COMPARABLE_VERSION) < 0) ? a : b;
     }
 
     /**
@@ -677,5 +661,10 @@ public class TypeUtil
     {
         var peekableValue = ByteSource.peekable(ByteSource.preencoded(value));
         return DecimalType.instance.fromComparableBytes(peekableValue, BYTE_COMPARABLE_VERSION);
+    }
+
+    public static ByteComparable.Version byteComparableVersionForTermsData()
+    {
+        return Version.latest().byteComparableVersionFor(IndexComponentType.TERMS_DATA, DatabaseDescriptor.getSelectedSSTableFormat().getLatestVersion());
     }
 }

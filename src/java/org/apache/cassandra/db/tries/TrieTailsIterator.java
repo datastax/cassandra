@@ -101,7 +101,7 @@ public abstract class TrieTailsIterator<T, V> extends TriePathReconstructor impl
      * {@code tail} is the branch of the trie rooted at the selected content node (reachable by following
      * {@code path}). The tail trie will have the selected content at its root.
      */
-    static class AsEntries<T> extends TrieTailsIterator<T, Map.Entry<ByteComparable, Trie<T>>>
+    static class AsEntries<T> extends TrieTailsIterator<T, Map.Entry<ByteComparable.Preencoded, Trie<T>>>
     {
         public AsEntries(Trie.Cursor<T> cursor, Class<? extends T> clazz)
         {
@@ -109,9 +109,9 @@ public abstract class TrieTailsIterator<T, V> extends TriePathReconstructor impl
         }
 
         @Override
-        protected Map.Entry<ByteComparable, Trie<T>> mapContent(T value, Trie<T> tailTrie, byte[] bytes, int byteLength)
+        protected Map.Entry<ByteComparable.Preencoded, Trie<T>> mapContent(T value, Trie<T> tailTrie, byte[] bytes, int byteLength)
         {
-            ByteComparable key = toByteComparable(byteComparableVersion(), bytes, byteLength);
+            ByteComparable.Preencoded key = toByteComparable(byteComparableVersion(), bytes, byteLength);
             return new AbstractMap.SimpleImmutableEntry<>(key, tailTrie);
         }
     }
