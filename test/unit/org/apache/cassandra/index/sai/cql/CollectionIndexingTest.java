@@ -304,6 +304,24 @@ public class CollectionIndexingTest extends SAITester
         });
     }
 
+    @Test
+    public void testUpdateMapToNullValue() throws Throwable
+    {
+        createTable("CREATE TABLE %s(id int PRIMARY KEY, text_map map<text, text>)");
+        createIndex("CREATE CUSTOM INDEX ON %s(values(text_map)) USING 'StorageAttachedIndex'");
+        waitForTableIndexesQueryable();
+        execute("INSERT INTO %s(id, text_map) values (1, {'k1':'v1'})");
+        execute("INSERT INTO %s(id, text_map) values (2, {'k1':'v2'})");
+        assertRows(execute("SELECT id FROM %s WHERE text_map CONTAINS 'v1'"), row(1));
+        assertRows(execute("SELECT id FROM %s WHERE text_map NOT CONTAINS 'v1'"), row(2));
+        // Overwrite with null
+        execute("INSERT INTO %s(id, text_map) values (1, null)");
+        beforeAndAfterFlush(() -> {
+            assertRows(execute("SELECT id FROM %s WHERE text_map CONTAINS 'v1'"));
+            assertRows(execute("SELECT id FROM %s WHERE text_map NOT CONTAINS 'v1'"), row(1), row(2));
+        });
+    }
+
     private void createPopulatedMap()
     {
         createTable("CREATE TABLE %s (pk int primary key, value map<int, text>)");

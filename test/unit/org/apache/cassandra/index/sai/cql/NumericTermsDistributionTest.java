@@ -107,6 +107,15 @@ public class NumericTermsDistributionTest extends SAITester
         assertSSTableEstimateCount(sai, Operator.LTE, "0", 3);
         assertSSTableEstimateCount(sai, Operator.GTE, "0", 4);
         assertSSTableEstimateCount(sai, Operator.EQ, "5", 0);
+
+        compact();
+
+        assertSSTableEstimateCount(sai, Operator.EQ, "0", 1);
+        assertSSTableEstimateCount(sai, Operator.LT, "0", 2, 1, 0);
+        assertSSTableEstimateCount(sai, Operator.GT, "0", 3, 1, 0);
+        assertSSTableEstimateCount(sai, Operator.LTE, "0", 3);
+        assertSSTableEstimateCount(sai, Operator.GTE, "0", 4);
+        assertSSTableEstimateCount(sai, Operator.EQ, "5", 0);
     }
 
     @Test
@@ -145,6 +154,14 @@ public class NumericTermsDistributionTest extends SAITester
         assertSSTableEstimateCount(sai, Operator.LTE, b, 3);
         assertSSTableEstimateCount(sai, Operator.GT, b, 3);
         assertSSTableEstimateCount(sai, Operator.GTE, b, 3);
+
+        compact();
+
+        assertSSTableEstimateCount(sai, Operator.EQ, b, 3);
+        assertSSTableEstimateCount(sai, Operator.LT, b, 3);
+        assertSSTableEstimateCount(sai, Operator.LTE, b, 3);
+        assertSSTableEstimateCount(sai, Operator.GT, b, 3);
+        assertSSTableEstimateCount(sai, Operator.GTE, b, 3);
     }
 
     @Test
@@ -164,25 +181,39 @@ public class NumericTermsDistributionTest extends SAITester
 
         final int COUNT = (testType == CQL3Type.Native.TINYINT) ? 127 : 10000;
         for (int i = 0; i < COUNT; i++)
-            execute("INSERT INTO %s (pk, a) VALUES (1, "  + i + ')');
+            execute("INSERT INTO %s (pk, a) VALUES (" + i + ',' + i + ')');
 
         var sai = getIndex();
 
         final String MID_POINT = "" + COUNT / 2;
         assertInMemoryEstimateCount(sai, Operator.EQ, MID_POINT, 1);
-        assertInMemoryEstimateCount(sai, Operator.LT, MID_POINT, COUNT / 2, 0, 2);
-        assertInMemoryEstimateCount(sai, Operator.GT, MID_POINT, COUNT / 2, 0, 2);
-        assertInMemoryEstimateCount(sai, Operator.LTE, MID_POINT, COUNT / 2, 1, 2);
-        assertInMemoryEstimateCount(sai, Operator.GTE, MID_POINT, COUNT / 2, 1, 2);
+        // Because we extrapolate, the error is higher on non-tinyint types. Note that a previous implementation
+        // of this test relied on the fact overwriting a primary key in the memtables didn't remove the old value
+        // from the index. I've updated the test to account for more realistic uncertainty and also added a compact
+        // then estimate step since that exercises a different build path in the index.
+        var uncertainty = (testType == CQL3Type.Native.TINYINT) ? 1 : 52;
+        assertInMemoryEstimateCount(sai, Operator.LT, MID_POINT, COUNT / 2, 0, uncertainty);
+        assertInMemoryEstimateCount(sai, Operator.GT, MID_POINT, COUNT / 2, 0, uncertainty);
+        assertInMemoryEstimateCount(sai, Operator.LTE, MID_POINT, COUNT / 2, 1, uncertainty);
+        assertInMemoryEstimateCount(sai, Operator.GTE, MID_POINT, COUNT / 2, 1, uncertainty);
         assertInMemoryEstimateCount(sai, Operator.EQ, "-1", 0);
 
         flush();
 
         assertSSTableEstimateCount(sai, Operator.EQ, MID_POINT, 1);
-        assertSSTableEstimateCount(sai, Operator.LT, MID_POINT, COUNT / 2, 0, 2);
-        assertSSTableEstimateCount(sai, Operator.GT, MID_POINT, COUNT / 2, 0, 2);
-        assertSSTableEstimateCount(sai, Operator.LTE, MID_POINT, COUNT / 2, 1, 2);
-        assertSSTableEstimateCount(sai, Operator.GTE, MID_POINT, COUNT / 2, 1, 2);
+        assertSSTableEstimateCount(sai, Operator.LT, MID_POINT, COUNT / 2, 0, uncertainty);
+        assertSSTableEstimateCount(sai, Operator.GT, MID_POINT, COUNT / 2, 0, uncertainty);
+        assertSSTableEstimateCount(sai, Operator.LTE, MID_POINT, COUNT / 2, 1, uncertainty);
+        assertSSTableEstimateCount(sai, Operator.GTE, MID_POINT, COUNT / 2, 1, uncertainty);
+        assertSSTableEstimateCount(sai, Operator.EQ, "-1", 0);
+
+        compact();
+
+        assertSSTableEstimateCount(sai, Operator.EQ, MID_POINT, 1);
+        assertSSTableEstimateCount(sai, Operator.LT, MID_POINT, COUNT / 2, 0, uncertainty);
+        assertSSTableEstimateCount(sai, Operator.GT, MID_POINT, COUNT / 2, 0, uncertainty);
+        assertSSTableEstimateCount(sai, Operator.LTE, MID_POINT, COUNT / 2, 1, uncertainty);
+        assertSSTableEstimateCount(sai, Operator.GTE, MID_POINT, COUNT / 2, 1, uncertainty);
         assertSSTableEstimateCount(sai, Operator.EQ, "-1", 0);
     }
 
