@@ -480,17 +480,17 @@ public class TrieMemtableIndex implements MemtableIndex
      * @return iterator of indexed term to primary keys mapping in sorted by indexed term and primary key.
      */
     @Override
-    public Iterator<Pair<ByteComparable, List<PkWithFrequency>>> iterator(DecoratedKey min, DecoratedKey max)
+    public Iterator<Pair<ByteComparable.Preencoded, List<PkWithFrequency>>> iterator(DecoratedKey min, DecoratedKey max)
     {
         int minSubrange = min == null ? 0 : boundaries.getShardForKey(min);
         int maxSubrange = max == null ? rangeIndexes.length - 1 : boundaries.getShardForKey(max);
 
-        List<Iterator<Pair<ByteComparable, List<PkWithFrequency>>>> rangeIterators = new ArrayList<>(maxSubrange - minSubrange + 1);
+        List<Iterator<Pair<ByteComparable.Preencoded, List<PkWithFrequency>>>> rangeIterators = new ArrayList<>(maxSubrange - minSubrange + 1);
         for (int i = minSubrange; i <= maxSubrange; i++)
             rangeIterators.add(rangeIndexes[i].iterator());
 
         return MergeIterator.get(rangeIterators,
-                                 (o1, o2) -> ByteComparable.compare(o1.left, o2.left, TypeUtil.BYTE_COMPARABLE_VERSION),
+                                 (o1, o2) -> ByteComparable.compare(o1.left, o2.left),
                                  new PrimaryKeysMergeReducer(rangeIterators.size()));
     }
 
@@ -505,12 +505,12 @@ public class TrieMemtableIndex implements MemtableIndex
      * appears at most once per shard, and each key will only be found in a given shard, so there are no values to aggregate;
      * we simply combine and sort the primary keys from each shard that contains the term.
      */
-    private static class PrimaryKeysMergeReducer extends Reducer<Pair<ByteComparable, List<PkWithFrequency>>, Pair<ByteComparable, List<PkWithFrequency>>>
+    private static class PrimaryKeysMergeReducer extends Reducer<Pair<ByteComparable.Preencoded, List<PkWithFrequency>>, Pair<ByteComparable.Preencoded, List<PkWithFrequency>>>
     {
-        private final Pair<ByteComparable, List<PkWithFrequency>>[] rangeIndexEntriesToMerge;
+        private final Pair<ByteComparable.Preencoded, List<PkWithFrequency>>[] rangeIndexEntriesToMerge;
         private final Comparator<PrimaryKey> comparator;
 
-        private ByteComparable term;
+        private ByteComparable.Preencoded term;
 
         @SuppressWarnings("unchecked")
             // The size represents the number of range indexes that have been selected for the merger
@@ -523,7 +523,7 @@ public class TrieMemtableIndex implements MemtableIndex
         @Override
         // Receive the term entry for a range index. This should only be called once for each
         // range index before reduction.
-        public void reduce(int index, Pair<ByteComparable, List<PkWithFrequency>> termPair)
+        public void reduce(int index, Pair<ByteComparable.Preencoded, List<PkWithFrequency>> termPair)
         {
             Preconditions.checkArgument(rangeIndexEntriesToMerge[index] == null, "Terms should be unique in the memory index");
 
@@ -534,7 +534,7 @@ public class TrieMemtableIndex implements MemtableIndex
 
         @Override
         // Return a merger of the term keys for the term.
-        public Pair<ByteComparable, List<PkWithFrequency>> getReduced()
+        public Pair<ByteComparable.Preencoded, List<PkWithFrequency>> getReduced()
         {
             Preconditions.checkArgument(term != null, "The term must exist in the memory index");
 
