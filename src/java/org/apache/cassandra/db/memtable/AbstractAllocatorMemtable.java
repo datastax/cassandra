@@ -245,12 +245,12 @@ public abstract class AbstractAllocatorMemtable extends AbstractMemtableWithComm
 
     public void markExtraOnHeapUsed(long additionalSpace, OpOrder.Group opGroup)
     {
-        getAllocator().onHeap().allocate(additionalSpace, opGroup);
+        getAllocator().onHeap().adjust(additionalSpace, opGroup);
     }
 
     public void markExtraOffHeapUsed(long additionalSpace, OpOrder.Group opGroup)
     {
-        getAllocator().offHeap().allocate(additionalSpace, opGroup);
+        getAllocator().offHeap().adjust(additionalSpace, opGroup);
     }
 
     @Override
