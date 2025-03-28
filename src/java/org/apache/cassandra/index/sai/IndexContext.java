@@ -749,7 +749,8 @@ public class IndexContext
         if (op == Operator.ORDER_BY_ASC || op == Operator.ORDER_BY_DESC)
             return !isCollection()
                    && column.isRegular()
-                   &&  !(column.type instanceof InetAddressType  // Possible, but need to add decoding logic based on
+                   && !isAnalyzed
+                   && !(column.type instanceof InetAddressType  // Possible, but need to add decoding logic based on
                                                                  // SAI's TypeUtil.encode method.
                          || column.type instanceof DecimalType   // Currently truncates to 24 bytes
                          || column.type instanceof IntegerType); // Currently truncates to 20 bytes
