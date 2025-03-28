@@ -1529,6 +1529,7 @@
             <jvmarg value="-Dcassandra.ring_delay_ms=1000"/>
             <jvmarg value="-Dcassandra.tolerate_sstable_size=true"/>
             <jvmarg value="-Dcassandra.sai.latest.version=aa"/>
+            <jvmarg value="-Dcassandra.trie_index_format_version=bb"/>
             <jvmarg value="-Dcassandra.skip_sync=true" />
 
             <jvmarg value="-Dlogback.configurationFile=file://${test.logback.configurationFile}"/>

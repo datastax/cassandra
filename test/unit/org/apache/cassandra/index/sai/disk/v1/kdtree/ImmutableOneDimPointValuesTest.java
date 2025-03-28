@@ -35,7 +35,6 @@ import org.apache.cassandra.index.sai.disk.oldlucene.MutablePointsReaderUtils;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
-import org.apache.cassandra.utils.bytecomparable.ByteSource;
 
 import static org.junit.Assert.assertEquals;
 
@@ -113,12 +112,12 @@ public class ImmutableOneDimPointValuesTest
         final ByteBuffer minTerm = Int32Type.instance.decompose(from);
         final ByteBuffer maxTerm = Int32Type.instance.decompose(to);
 
-        final AbstractGuavaIterator<Pair<ByteComparable, List<RowMapping.RowIdWithFrequency>>> iterator = new AbstractGuavaIterator<>()
+        final AbstractGuavaIterator<Pair<ByteComparable.Preencoded, List<RowMapping.RowIdWithFrequency>>> iterator = new AbstractGuavaIterator<>()
         {
             private int currentTerm = from;
 
             @Override
-            protected Pair<ByteComparable, List<RowMapping.RowIdWithFrequency>> computeNext()
+            protected Pair<ByteComparable.Preencoded, List<RowMapping.RowIdWithFrequency>> computeNext()
             {
                 if (currentTerm <= to)
                 {
@@ -129,7 +128,7 @@ public class ImmutableOneDimPointValuesTest
                     new RowMapping.RowIdWithFrequency(0, 1),
                     new RowMapping.RowIdWithFrequency(1, 1),
                     new RowMapping.RowIdWithFrequency(2, 1));
-                return Pair.create(v -> ByteSource.preencoded(term), postings);
+                return Pair.create(ByteComparable.preencoded(TypeUtil.BYTE_COMPARABLE_VERSION, term), postings);
             }
         };
 
