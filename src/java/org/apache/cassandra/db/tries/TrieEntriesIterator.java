@@ -86,7 +86,7 @@ public abstract class TrieEntriesIterator<T, V> extends TriePathReconstructor im
     /**
      * Iterator representing the content of the trie a sequence of (path, content) pairs.
      */
-    static class AsEntries<T> extends TrieEntriesIterator<T, Map.Entry<ByteComparable, T>>
+    static class AsEntries<T> extends TrieEntriesIterator<T, Map.Entry<ByteComparable.Preencoded, T>>
     {
         public AsEntries(Trie.Cursor<T> cursor)
         {
@@ -94,7 +94,7 @@ public abstract class TrieEntriesIterator<T, V> extends TriePathReconstructor im
         }
 
         @Override
-        protected Map.Entry<ByteComparable, T> mapContent(T content, byte[] bytes, int byteLength)
+        protected Map.Entry<ByteComparable.Preencoded, T> mapContent(T content, byte[] bytes, int byteLength)
         {
             return toEntry(byteComparableVersion(), content, bytes, byteLength);
         }
@@ -103,7 +103,7 @@ public abstract class TrieEntriesIterator<T, V> extends TriePathReconstructor im
     /**
      * Iterator representing the content of the trie a sequence of (path, content) pairs.
      */
-    static class AsEntriesFilteredByType<T, U extends T> extends TrieEntriesIterator<T, Map.Entry<ByteComparable, U>>
+    static class AsEntriesFilteredByType<T, U extends T> extends TrieEntriesIterator<T, Map.Entry<ByteComparable.Preencoded, U>>
     {
         public AsEntriesFilteredByType(Trie.Cursor<T> cursor, Class<U> clazz)
         {
@@ -112,13 +112,13 @@ public abstract class TrieEntriesIterator<T, V> extends TriePathReconstructor im
 
         @Override
         @SuppressWarnings("unchecked")  // checked by the predicate
-        protected Map.Entry<ByteComparable, U> mapContent(T content, byte[] bytes, int byteLength)
+        protected Map.Entry<ByteComparable.Preencoded, U> mapContent(T content, byte[] bytes, int byteLength)
         {
             return toEntry(byteComparableVersion(), (U) content, bytes, byteLength);
         }
     }
 
-    static <T> java.util.Map.Entry<ByteComparable, T> toEntry(ByteComparable.Version version, T content, byte[] bytes, int byteLength)
+    static <T> java.util.Map.Entry<ByteComparable.Preencoded, T> toEntry(ByteComparable.Version version, T content, byte[] bytes, int byteLength)
     {
         return new AbstractMap.SimpleImmutableEntry<>(toByteComparable(version, bytes, byteLength), content);
     }

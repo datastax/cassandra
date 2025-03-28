@@ -45,7 +45,7 @@ public class RowMapping
     public static final RowMapping DUMMY = new RowMapping()
     {
         @Override
-        public Iterator<Pair<ByteComparable, List<RowIdWithFrequency>>> merge(MemtableIndex index) { return Collections.emptyIterator(); }
+        public Iterator<Pair<ByteComparable.Preencoded, List<RowIdWithFrequency>>> merge(MemtableIndex index) { return Collections.emptyIterator(); }
 
         @Override
         public void complete() {}
@@ -99,7 +99,7 @@ public class RowMapping
             this.frequency = frequency;
         }
     }
-    
+
     /**
      * Merge IndexMemtable(index term to PrimaryKeys mappings) with row mapping of a sstable
      * (PrimaryKey to RowId mappings).
@@ -108,7 +108,7 @@ public class RowMapping
      *
      * @return iterator of index term to postings mapping exists in the sstable
      */
-    public Iterator<Pair<ByteComparable, List<RowIdWithFrequency>>> merge(MemtableIndex index)
+    public Iterator<Pair<ByteComparable.Preencoded, List<RowIdWithFrequency>>> merge(MemtableIndex index)
     {
         assert complete : "RowMapping is not built.";
 
@@ -116,7 +116,7 @@ public class RowMapping
         return new AbstractGuavaIterator<>()
         {
             @Override
-            protected Pair<ByteComparable, List<RowIdWithFrequency>> computeNext()
+            protected Pair<ByteComparable.Preencoded, List<RowIdWithFrequency>> computeNext()
             {
                 while (it.hasNext())
                 {
