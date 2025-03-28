@@ -33,6 +33,7 @@ import javax.annotation.concurrent.NotThreadSafe;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.TermsIterator;
+import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.MutableOneDimPointValues;
@@ -57,6 +58,7 @@ public class SegmentMetadataBuilder
     private final long segmentRowIdOffset;
 
     private final List<Closeable> interceptors = new ArrayList<>();
+    private final ByteComparable.Version byteComparableVersion;
 
     private boolean built = false;
 
@@ -79,10 +81,11 @@ public class SegmentMetadataBuilder
     {
         IndexContext context = Objects.requireNonNull(components.context());
         this.segmentRowIdOffset = segmentRowIdOffset;
+        this.byteComparableVersion = components.byteComparableVersionFor(IndexComponentType.TERMS_DATA);
 
         int histogramSize = context.getIntOption(HISTOGRAM_SIZE_OPTION, 128);
         int mostFrequentTermsCount = context.getIntOption(MFT_COUNT_OPTION, 128);
-        this.termsDistributionBuilder = new TermsDistribution.Builder(context.getValidator(), histogramSize, mostFrequentTermsCount);
+        this.termsDistributionBuilder = new TermsDistribution.Builder(context.getValidator(), byteComparableVersion, histogramSize, mostFrequentTermsCount);
     }
 
     public void setKeyRange(@Nonnull PrimaryKey minKey, @Nonnull PrimaryKey maxKey)
@@ -347,7 +350,7 @@ public class SegmentMetadataBuilder
                 if (!Arrays.equals(term, lastTerm))
                 {
                     if (lastTerm != null)
-                        builder.add(ByteComparable.preencoded(TypeUtil.BYTE_COMPARABLE_VERSION, lastTerm), count);
+                        builder.add(ByteComparable.preencoded(builder.byteComparableVersion, lastTerm), count);
 
 
                     count = 0;
@@ -363,7 +366,7 @@ public class SegmentMetadataBuilder
         {
             if (lastTerm != null)
             {
-                builder.add(ByteComparable.preencoded(TypeUtil.BYTE_COMPARABLE_VERSION, lastTerm), count);
+                builder.add(ByteComparable.preencoded(builder.byteComparableVersion, lastTerm), count);
             }
         }
 
