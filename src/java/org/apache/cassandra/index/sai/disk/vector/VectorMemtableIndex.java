@@ -174,6 +174,12 @@ public class VectorMemtableIndex implements MemtableIndex
         }
     }
 
+    @Override
+    public void update(DecoratedKey key, Clustering clustering, Iterator<ByteBuffer> oldValues, Iterator<ByteBuffer> newValues, Memtable memtable, OpOrder.Group opGroup)
+    {
+        throw new UnsupportedOperationException("Vector index does not support multi-value updates");
+    }
+
     private void updateKeyBounds(PrimaryKey primaryKey) {
         if (minimumKey == null)
             minimumKey = primaryKey;

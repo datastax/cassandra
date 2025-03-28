@@ -29,23 +29,22 @@ import java.math.BigDecimal;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashSet;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
+import java.util.Set;
 import java.util.SortedSet;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.function.LongConsumer;
 import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.collect.Iterators;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.github.jbellis.jvector.util.Accountable;
 import io.github.jbellis.jvector.util.RamUsageEstimator;
 import io.netty.util.concurrent.FastThreadLocal;
 import org.apache.cassandra.db.Clustering;
@@ -61,7 +60,6 @@ import org.apache.cassandra.db.tries.TrieSpaceExhaustedException;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
-import org.apache.cassandra.index.sai.analyzer.NoOpAnalyzer;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.disk.v6.TermsDistribution;
@@ -87,8 +85,10 @@ public class TrieMemoryIndex extends MemoryIndex
     private static final int MAX_RECURSIVE_KEY_LENGTH = 128;
 
     private final InMemoryTrie<PrimaryKeys> data;
-    private final PrimaryKeysReducer primaryKeysReducer;
-    private final Map<PkWithTerm, Integer> termFrequencies;
+    private final LongAdder primaryKeysHeapAllocations;
+    private final PrimaryKeysAccumulator primaryKeysAccumulator;
+    private final PrimaryKeysRemover primaryKeysRemover;
+    private final boolean analyzerTransformsValue;
     private final Map<PrimaryKey, Integer> docLengths = new HashMap<>();
 
     private final Memtable memtable;
@@ -115,10 +115,12 @@ public class TrieMemoryIndex extends MemoryIndex
     {
         super(indexContext);
         this.keyBounds = keyBounds;
+        this.primaryKeysHeapAllocations = new LongAdder();
+        this.primaryKeysAccumulator = new PrimaryKeysAccumulator(primaryKeysHeapAllocations);
+        this.primaryKeysRemover = new PrimaryKeysRemover(primaryKeysHeapAllocations);
+        this.analyzerTransformsValue = indexContext.getAnalyzerFactory().create().transformValue();
         this.data = InMemoryTrie.longLived(TypeUtil.BYTE_COMPARABLE_VERSION, TrieMemtable.BUFFER_TYPE, indexContext.columnFamilyStore().readOrdering());
-        this.primaryKeysReducer = new PrimaryKeysReducer();
         this.memtable = memtable;
-        termFrequencies = new ConcurrentHashMap<>();
     }
 
     public synchronized Map<PrimaryKey, Integer> getDocLengths()
@@ -126,78 +128,110 @@ public class TrieMemoryIndex extends MemoryIndex
         return docLengths;
     }
 
-    private static class PkWithTerm implements Accountable
+    public synchronized void add(DecoratedKey key,
+                                 Clustering clustering,
+                                 ByteBuffer value,
+                                 LongConsumer onHeapAllocationsTracker,
+                                 LongConsumer offHeapAllocationsTracker)
     {
-        private final PrimaryKey pk;
-        private final ByteComparable term;
+        final PrimaryKey primaryKey = indexContext.keyFactory().create(key, clustering);
+        applyTransformer(primaryKey, value, onHeapAllocationsTracker, offHeapAllocationsTracker, primaryKeysAccumulator);
+    }
 
-        private PkWithTerm(PrimaryKey pk, ByteComparable term)
+    public synchronized void update(DecoratedKey key,
+                                    Clustering clustering,
+                                    ByteBuffer oldValue,
+                                    ByteBuffer newValue,
+                                    LongConsumer onHeapAllocationsTracker,
+                                    LongConsumer offHeapAllocationsTracker)
+    {
+        final PrimaryKey primaryKey = indexContext.keyFactory().create(key, clustering);
+        try
         {
-            this.pk = pk;
-            this.term = term;
+            if (analyzerTransformsValue)
+            {
+                // Because an update can add and remove the same term, we collect the set of the seen PrimaryKeys
+                // objects touched by the new values and pass it to the remover to prevent removing the PrimaryKey from
+                // the PrimaryKeys object if it was updated during the add part of this update.
+                var seenPrimaryKeys = new HashSet<PrimaryKeys>();
+                primaryKeysAccumulator.setSeenPrimaryKeys(seenPrimaryKeys);
+                primaryKeysRemover.setSeenPrimaryKeys(seenPrimaryKeys);
+            }
+
+            // Add before removing to prevent a period where the value is not available in the index
+            if (newValue != null && newValue.hasRemaining())
+                applyTransformer(primaryKey, newValue, onHeapAllocationsTracker, offHeapAllocationsTracker, primaryKeysAccumulator);
+            if (oldValue != null && oldValue.hasRemaining())
+                applyTransformer(primaryKey, oldValue, onHeapAllocationsTracker, offHeapAllocationsTracker, primaryKeysRemover);
         }
-
-        @Override
-        public long ramBytesUsed()
+        finally
         {
-            return RamUsageEstimator.NUM_BYTES_OBJECT_HEADER + 
-                   2L * RamUsageEstimator.NUM_BYTES_OBJECT_REF + 
-                   pk.ramBytesUsed() +
-                   ByteComparable.length(term, TypeUtil.BYTE_COMPARABLE_VERSION);
-        }
-
-        @Override
-        public int hashCode()
-        {
-            return Objects.hash(pk, ByteComparable.length(term, TypeUtil.BYTE_COMPARABLE_VERSION));
-        }
-
-        @Override
-        public boolean equals(Object o)
-        {
-            if (o == null || getClass() != o.getClass()) return false;
-            PkWithTerm that = (PkWithTerm) o;
-            return Objects.equals(pk, that.pk)
-                   && ByteComparable.compare(term, that.term, TypeUtil.BYTE_COMPARABLE_VERSION) == 0;
+            // Return the accumulator and remover to their default state.
+            primaryKeysAccumulator.setSeenPrimaryKeys(null);
+            primaryKeysRemover.setSeenPrimaryKeys(null);
         }
     }
 
-    @Override
-    public synchronized void add(DecoratedKey key, Clustering clustering, ByteBuffer value, LongConsumer onHeapAllocationsTracker, LongConsumer offHeapAllocationsTracker)
+    public synchronized void update(DecoratedKey key,
+                                    Clustering clustering,
+                                    Iterator<ByteBuffer> oldValues,
+                                    Iterator<ByteBuffer> newValues,
+                                    LongConsumer onHeapAllocationsTracker,
+                                    LongConsumer offHeapAllocationsTracker)
+    {
+        final PrimaryKey primaryKey = indexContext.keyFactory().create(key, clustering);
+        try
+        {
+            // Because an update can add and remove the same term, we collect the set of the seen PrimaryKeys
+            // objects touched by the new values and pass it to the remover to prevent removing the PrimaryKey from
+            // the PrimaryKeys object if it was updated during the add part of this update.
+            var seenPrimaryKeys = new HashSet<PrimaryKeys>();
+            primaryKeysAccumulator.setSeenPrimaryKeys(seenPrimaryKeys);
+            primaryKeysRemover.setSeenPrimaryKeys(seenPrimaryKeys);
+
+            // Add before removing to prevent a period where the values are not available in the index
+            while (newValues != null && newValues.hasNext())
+            {
+                ByteBuffer newValue = newValues.next();
+                if (newValue != null && newValue.hasRemaining())
+                    applyTransformer(primaryKey, newValue, onHeapAllocationsTracker, offHeapAllocationsTracker, primaryKeysAccumulator);
+            }
+
+            while (oldValues != null && oldValues.hasNext())
+            {
+                ByteBuffer oldValue = oldValues.next();
+                if (oldValue != null && oldValue.hasRemaining())
+                    applyTransformer(primaryKey, oldValue, onHeapAllocationsTracker, offHeapAllocationsTracker, primaryKeysRemover);
+            }
+        }
+        finally
+        {
+            // Return the accumulator and remover to their default state.
+            primaryKeysAccumulator.setSeenPrimaryKeys(null);
+            primaryKeysRemover.setSeenPrimaryKeys(null);
+        }
+    }
+
+    private void applyTransformer(PrimaryKey primaryKey,
+                                  ByteBuffer value,
+                                  LongConsumer onHeapAllocationsTracker,
+                                  LongConsumer offHeapAllocationsTracker,
+                                  InMemoryTrie.UpsertTransformer<PrimaryKeys, PrimaryKey> transformer)
     {
         AbstractAnalyzer analyzer = indexContext.getAnalyzerFactory().create();
         try
         {
             value = TypeUtil.asIndexBytes(value, indexContext.getValidator());
             analyzer.reset(value);
-            final PrimaryKey primaryKey = indexContext.keyFactory().create(key, clustering);
             final long initialSizeOnHeap = data.usedSizeOnHeap();
             final long initialSizeOffHeap = data.usedSizeOffHeap();
-            final long reducerHeapSize = primaryKeysReducer.heapAllocations();
-
-            if (docLengths.containsKey(primaryKey) && !(analyzer instanceof NoOpAnalyzer))
-            {
-                AtomicLong heapReclaimed = new AtomicLong();
-                // we're overwriting an existing cell, clear out the old term counts
-                for (Map.Entry<ByteComparable, PrimaryKeys> entry : data.entrySet())
-                {
-                    var termInTrie = entry.getKey();
-                    entry.getValue().forEach(pkInTrie -> {
-                        if (pkInTrie.equals(primaryKey))
-                        {
-                            var t = new PkWithTerm(pkInTrie, termInTrie);
-                            termFrequencies.remove(t);
-                            heapReclaimed.addAndGet(RamUsageEstimator.HASHTABLE_RAM_BYTES_PER_ENTRY + t.ramBytesUsed() + Integer.BYTES);
-                        }
-                    });
-                }
-            }
+            final long initialPrimaryKeysHeapAllocations = primaryKeysHeapAllocations.longValue();
 
             int tokenCount = 0;
             while (analyzer.hasNext())
             {
                 final ByteBuffer term = analyzer.next();
-                if (!indexContext.validateMaxTermSize(key, term))
+                if (!indexContext.validateMaxTermSize(primaryKey.partitionKey(), term))
                     continue;
 
                 tokenCount++;
@@ -209,25 +243,7 @@ public class TrieMemoryIndex extends MemoryIndex
 
                 try
                 {
-                    data.putSingleton(encodedTerm, primaryKey, (existing, update) -> {
-                        // First do the normal primary keys reduction
-                        PrimaryKeys result = primaryKeysReducer.apply(existing, update);
-                        if (analyzer instanceof NoOpAnalyzer)
-                            return result;
-
-                        // Then update term frequency
-                        var pkbc = new PkWithTerm(update, encodedTerm);
-                        termFrequencies.compute(pkbc, (k, oldValue) -> {
-                            if (oldValue == null) {
-                                // New key added, track heap allocation 
-                                onHeapAllocationsTracker.accept(RamUsageEstimator.HASHTABLE_RAM_BYTES_PER_ENTRY + k.ramBytesUsed() + Integer.BYTES);
-                                return 1;
-                            }
-                            return oldValue + 1;
-                        });
-
-                        return result;
-                    }, term.limit() <= MAX_RECURSIVE_KEY_LENGTH);
+                    data.putSingleton(encodedTerm, primaryKey, transformer, term.limit() <= MAX_RECURSIVE_KEY_LENGTH);
                 }
                 catch (TrieSpaceExhaustedException e)
                 {
@@ -235,16 +251,19 @@ public class TrieMemoryIndex extends MemoryIndex
                 }
             }
 
-            docLengths.put(primaryKey, tokenCount);
-            // heap used for term frequencies and doc lengths
-            long heapUsed = RamUsageEstimator.HASHTABLE_RAM_BYTES_PER_ENTRY
-                            + primaryKey.ramBytesUsed()
-                            + Integer.BYTES;
-            onHeapAllocationsTracker.accept(heapUsed);
+            Object prev = docLengths.put(primaryKey, tokenCount);
+            if (prev != null)
+            {
+                // heap used for doc lengths
+                long heapUsed = RamUsageEstimator.HASHTABLE_RAM_BYTES_PER_ENTRY
+                                + primaryKey.ramBytesUsed() // TODO do we count these bytes?
+                                + Integer.BYTES;
+                onHeapAllocationsTracker.accept(heapUsed);
+            }
 
             // memory used by the trie
             onHeapAllocationsTracker.accept((data.usedSizeOnHeap() - initialSizeOnHeap) +
-                                            (primaryKeysReducer.heapAllocations() - reducerHeapSize));
+                                            (primaryKeysHeapAllocations.longValue() - initialPrimaryKeysHeapAllocations));
             offHeapAllocationsTracker.accept(data.usedSizeOffHeap() - initialSizeOffHeap);
         }
         finally
@@ -290,15 +309,16 @@ public class TrieMemoryIndex extends MemoryIndex
             {
                 Map.Entry<ByteComparable, PrimaryKeys> entry = iterator.next();
                 var pairs = new ArrayList<PkWithFrequency>(entry.getValue().size());
-                for (PrimaryKey pk : entry.getValue().keys())
-                {
-                    var frequencyRaw = termFrequencies.get(new PkWithTerm(pk, entry.getKey()));
-                    int frequency = frequencyRaw == null ? 1 : frequencyRaw;
-                    pairs.add(new PkWithFrequency(pk, frequency));
-                }
+                Iterators.addAll(pairs, entry.getValue().iterator());
                 return Pair.create(entry.getKey(), pairs);
             }
         };
+    }
+
+    @VisibleForTesting
+    long estimatedTrieValuesMemoryUsed()
+    {
+        return primaryKeysHeapAllocations.longValue();
     }
 
     @Override
@@ -326,6 +346,97 @@ public class TrieMemoryIndex extends MemoryIndex
             return KeyRangeIterator.empty();
         }
         return new FilteringKeyRangeIterator(new SortedSetKeyRangeIterator(primaryKeys.keys()), keyRange);
+    }
+
+    /**
+     * Accumulator that adds a primary key to the primary keys set.
+     */
+    static class PrimaryKeysAccumulator implements InMemoryTrie.UpsertTransformer<PrimaryKeys, PrimaryKey>
+    {
+        private final LongAdder heapAllocations;
+        private HashSet<PrimaryKeys> seenPrimaryKeys;
+
+        PrimaryKeysAccumulator(LongAdder heapAllocations)
+        {
+            this.heapAllocations = heapAllocations;
+        }
+
+        /**
+         * Set the PrimaryKeys set to check for each PrimaryKeys object updated by this transformer.
+         * Warning: This method is not thread-safe and should only be called from within the synchronized block
+         * of the TrieMemoryIndex class.
+         * @param seenPrimaryKeys the set of PrimaryKeys objects updated so far
+         */
+        private void setSeenPrimaryKeys(HashSet<PrimaryKeys> seenPrimaryKeys)
+        {
+            this.seenPrimaryKeys = seenPrimaryKeys;
+        }
+
+        @Override
+        public PrimaryKeys apply(PrimaryKeys existing, PrimaryKey neww)
+        {
+            if (existing == null)
+            {
+                existing = new PrimaryKeys();
+                heapAllocations.add(PrimaryKeys.unsharedHeapSize());
+            }
+
+            // If we are tracking PrimaryKeys via the seenPrimaryKeys set, then we need to reset the
+            // counter on the first time seeing each PrimaryKeys object since an update means that the
+            // frequency should be reset.
+            boolean shouldResetFrequency = false;
+            if (seenPrimaryKeys != null)
+                shouldResetFrequency = seenPrimaryKeys.add(existing);
+
+            long bytesAdded = shouldResetFrequency ? existing.addAndResetFrequency(neww)
+                                                   : existing.addAndIncrementFrequency(neww);
+            heapAllocations.add(bytesAdded);
+            return existing;
+        }
+    }
+
+    /**
+     * Transformer that removes a primary key from the primary keys set, if present.
+     */
+    static class PrimaryKeysRemover implements InMemoryTrie.UpsertTransformer<PrimaryKeys, PrimaryKey>
+    {
+        private final LongAdder heapAllocations;
+        private Set<PrimaryKeys> seenPrimaryKeys;
+
+        PrimaryKeysRemover(LongAdder heapAllocations)
+        {
+            this.heapAllocations = heapAllocations;
+        }
+
+        /**
+         * Set the set of seenPrimaryKeys.
+         * Warning: This method is not thread-safe and should only be called from within the synchronized block
+         * of the TrieMemoryIndex class.
+         * @param seenPrimaryKeys
+         */
+        private void setSeenPrimaryKeys(Set<PrimaryKeys> seenPrimaryKeys)
+        {
+            this.seenPrimaryKeys = seenPrimaryKeys;
+        }
+
+        @Override
+        public PrimaryKeys apply(PrimaryKeys existing, PrimaryKey neww)
+        {
+            if (existing == null)
+                return null;
+
+            // This PrimaryKeys object was already seen during the add part of this update,
+            // so we skip removing the PrimaryKey from the PrimaryKeys class.
+            if (seenPrimaryKeys != null && seenPrimaryKeys.contains(existing))
+                return existing;
+
+            heapAllocations.add(existing.remove(neww));
+            if (!existing.isEmpty())
+                return existing;
+
+            heapAllocations.add(-PrimaryKeys.unsharedHeapSize());
+            return null;
+        }
     }
 
     /**
@@ -733,7 +844,7 @@ public class TrieMemoryIndex extends MemoryIndex
                 existing = new PrimaryKeys();
                 heapAllocations.add(existing.unsharedHeapSize());
             }
-            heapAllocations.add(existing.add(neww));
+            heapAllocations.add(existing.addAndIncrementFrequency(neww));
             return existing;
         }
 
@@ -759,6 +870,10 @@ public class TrieMemoryIndex extends MemoryIndex
     {
         assert term != null;
 
+        // Note that an update to a term could make these inaccurate, but they err in the correct direction.
+        // An alternative solution could use the trie to find the min/max term, but the trie has ByteComparable
+        // objects, not the ByteBuffer, and we would need to implement a custom decoder to undo the encodeForTrie
+        // mapping.
         minTerm = TypeUtil.min(term, minTerm, indexContext.getValidator(), Version.latest());
         maxTerm = TypeUtil.max(term, maxTerm, indexContext.getValidator(), Version.latest());
     }
