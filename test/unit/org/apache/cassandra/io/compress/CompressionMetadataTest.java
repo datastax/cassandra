@@ -26,12 +26,14 @@ import java.util.function.Consumer;
 
 import org.junit.Test;
 
+import org.apache.cassandra.distributed.shared.WithProperties;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.SliceDescriptor;
 import org.apache.cassandra.schema.CompressionParams;
 
 import static java.util.Arrays.asList;
+import static org.apache.cassandra.config.CassandraRelevantProperties.TEST_DEBUG_REF_COUNT;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 
@@ -56,32 +58,38 @@ public class CompressionMetadataTest
     @Test
     public void testMemoryIsFreed()
     {
-        CompressionMetadata.ChunkOffsetMemory memory = new CompressionMetadata.ChunkOffsetMemory(10);
-        CompressionMetadata cm = newCompressionMetadata(memory);
+        try (WithProperties properties = new WithProperties().set(TEST_DEBUG_REF_COUNT, false))
+        {
+            CompressionMetadata.ChunkOffsetMemory memory = new CompressionMetadata.ChunkOffsetMemory(10);
+            CompressionMetadata cm = newCompressionMetadata(memory);
 
-        cm.close();
-        assertThat(cm.isCleanedUp()).isTrue();
-        assertThatExceptionOfType(IllegalStateException.class).isThrownBy(memory.memory::free);
+            cm.close();
+            assertThat(cm.isCleanedUp()).isTrue();
+            assertThatExceptionOfType(IllegalStateException.class).isThrownBy(memory.memory::free);
+        }
     }
 
     @Test
     public void testMemoryIsShared()
     {
-        CompressionMetadata.ChunkOffsetMemory memory = new CompressionMetadata.ChunkOffsetMemory(10);
-        CompressionMetadata cm = newCompressionMetadata(memory);
+        try (WithProperties properties = new WithProperties().set(TEST_DEBUG_REF_COUNT, false))
+        {
+            CompressionMetadata.ChunkOffsetMemory memory = new CompressionMetadata.ChunkOffsetMemory(10);
+            CompressionMetadata cm = newCompressionMetadata(memory);
 
-        CompressionMetadata copy = cm.sharedCopy();
-        assertThat(copy).isNotSameAs(cm);
+            CompressionMetadata copy = cm.sharedCopy();
+            assertThat(copy).isNotSameAs(cm);
 
-        cm.close();
-        assertThat(cm.isCleanedUp()).isFalse();
-        assertThat(copy.isCleanedUp()).isFalse();
-        assertThat(memory.size()).isEqualTo(10); // expected that no expection is thrown since memory should not be released yet
+            cm.close();
+            assertThat(cm.isCleanedUp()).isFalse();
+            assertThat(copy.isCleanedUp()).isFalse();
+            assertThat(memory.size()).isEqualTo(10); // expected that no expection is thrown since memory should not be released yet
 
-        copy.close();
-        assertThat(cm.isCleanedUp()).isTrue();
-        assertThat(copy.isCleanedUp()).isTrue();
-        assertThatExceptionOfType(IllegalStateException.class).isThrownBy(memory.memory::free);
+            copy.close();
+            assertThat(cm.isCleanedUp()).isTrue();
+            assertThat(copy.isCleanedUp()).isTrue();
+            assertThatExceptionOfType(IllegalStateException.class).isThrownBy(memory.memory::free);
+        }
     }
 
     private File generateMetaDataFile(long dataLength, long... offsets) throws IOException
