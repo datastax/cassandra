@@ -416,7 +416,12 @@ public class BM25Test extends SAITester
 
     private String createAnalyzedIndex()
     {
-        return createIndex("CREATE CUSTOM INDEX ON %s(v) " +
+        return createAnalyzedIndex("v");
+    }
+
+    private String createAnalyzedIndex(String column)
+    {
+        return createIndex("CREATE CUSTOM INDEX ON %s(" + column + ") " +
                            "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
                            "WITH OPTIONS = {" +
                            "'index_analyzer': '{" +
@@ -628,4 +633,63 @@ public class BM25Test extends SAITester
                 .isInstanceOf(InvalidRequestException.class)
                 .hasMessage(SelectStatement.TOPK_AGGREGATION_ERROR);
     }
+
+    @Test
+    public void testBM25andFilterz() throws Throwable
+    {
+        createTable("CREATE TABLE %s (id int PRIMARY KEY, category text, score int, title text, body text)");
+        createAnalyzedIndex("body");
+        createIndex("CREATE CUSTOM INDEX ON %s (score) USING 'StorageAttachedIndex'");
+        insertArticle();
+        beforeAndAfterFlush(
+                () -> {
+                    // 10 docs have score 3 and 3 of those have "health"
+                    var result = execute("SELECT * FROM %s WHERE score = 3 ORDER BY body BM25 OF ? LIMIT 10",
+                                         "health");
+                    assertThat(result).hasSize(3);
+
+                    // 4 docs have score 2 and one of those has "discussed"
+                    result = execute("SELECT * FROM %s WHERE score = 2 ORDER BY body BM25 OF ? LIMIT 10",
+                                         "discussed");
+                    assertThat(result).hasSize(1);
+                });
+    }
+
+    private void insertArticle()
+    {
+        Object[][] dataset = {
+        { 1, "Climate", 5, "Climate change is a pressing issue. Climate patterns are shifting globally. Scientists study climate data daily." },
+        { 2, "Technology", 3, "Technology is advancing. New technology in AI and robotics is groundbreaking." },
+        { 3, "Economy", 4, "The economy is recovering. Economy experts are optimistic. However, the global economy still faces risks." },
+        { 4, "Health", 3, "Health is wealth. Health policies need to be improved to ensure better public health outcomes." },
+        { 5, "Education", 2, "Education is the foundation of success. Online education is booming." },
+        { 6, "Climate", 4, "Climate and health are closely linked. Climate affects air quality and health outcomes." },
+        { 7, "Education", 3, "Technology and education go hand in hand. EdTech is revolutionizing education through technology." },
+        { 8, "Economy", 3, "The global economy is influenced by technology. Fintech is a key part of the economy today." },
+        { 9, "Health", 3, "Education and health programs must be prioritized. Health education is vital in schools." },
+        { 10, "Mixed", 3, "Technology, economy, and education are pillars of development." },
+        { 11, "Climate", 5, "Climate climate climate. It's everywhere. Climate drives political and economic decisions." },
+        { 12, "Health", 2, "Health concerns rise with climate issues. Health organizations are sounding the alarm." },
+        { 13, "Economy", 3, "The economy is fluctuating. Uncertainty looms over the economy." },
+        { 14, "Health", 3, "Cutting-edge technology is transforming healthcare. Healthtech merges health and technology." },
+        { 15, "Education", 2, "Education reforms are underway. Education experts suggest holistic changes." },
+        { 16, "Climate", 4, "Climate affects the economy and health. Climate events cost billions annually." },
+        { 17, "Technology", 3, "Technology is the backbone of the modern economy. Without technology, economic growth stagnates." },
+        { 18, "Health", 2, "Health is discussed less than economy or climate, but health matters deeply." },
+        { 19, "Climate", 5, "Climate change, climate policies, climate research—climate is the buzzword of our time." },
+        { 20, "Mixed", 3, "Investments in education and technology will shape the future of the global economy." }
+        };
+
+        for (Object[] article : dataset)
+        {
+            execute(
+            "INSERT INTO %s (id, category, score, body) VALUES (?, ?, ?, ?)",
+            article[0],
+            article[1],
+            article[2],
+            article[3]
+            );
+        }
+    }
+
 }
