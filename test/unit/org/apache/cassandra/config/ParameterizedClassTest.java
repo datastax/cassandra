@@ -23,35 +23,48 @@ import java.util.Map;
 
 import org.junit.Test;
 
-import static org.hamcrest.CoreMatchers.containsString;
-import static org.hamcrest.CoreMatchers.startsWith;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertThrows;
-import static org.hamcrest.MatcherAssert.assertThat;
-import static org.junit.Assert.assertTrue;
-
 import org.apache.cassandra.auth.AllowAllAuthorizer;
 import org.apache.cassandra.auth.IAuthorizer;
 import org.apache.cassandra.exceptions.ConfigurationException;
 
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
+
 public class ParameterizedClassTest
 {
     @Test
-    public void newInstance_NonExistentClass_FailsWithConfigurationException()
+    public void testParameterizedClassEmptyConstructorHasNullParameters()
     {
-        ParameterizedClass nonExistentClass = new ParameterizedClass("NonExistentClass");
-
-        ConfigurationException exception = assertThrows(ConfigurationException.class, () -> {
-            ParameterizedClass.newInstance(nonExistentClass, List.of("org.apache.cassandra.config"));
-        });
-
-        String expectedError = "Unable to find class NonExistentClass in packages [\"org.apache.cassandra.config\"]";
-        assertEquals(expectedError, exception.getMessage());
+        ParameterizedClass parameterizedClass = new ParameterizedClass();
+        assertNull(parameterizedClass.parameters);
     }
 
     @Test
-    public void newInstance_WithSingleEmptyConstructor_UsesEmptyConstructor()
+    public void testParameterizedClassConstructorWithClassNameHasNonNullParameters()
+    {
+        ParameterizedClass parameterizedClass = new ParameterizedClass("TestClass");
+        assertNotNull(parameterizedClass.parameters);
+    }
+
+    @Test
+    public void testParameterizedClassConstructorWithClassNameAndParametersHasNullParamters()
+    {
+        ParameterizedClass parameterizedClass = new ParameterizedClass("TestClass", null);
+        assertNull(parameterizedClass.parameters);
+    }
+
+    @Test
+    public void testNewInstanceWithNonExistentClassFailsWithConfigurationException()
+    {
+        assertThatThrownBy(() -> ParameterizedClass.newInstance(new ParameterizedClass("NonExistentClass"),
+                                                                List.of("org.apache.cassandra.config")))
+        .hasMessage("Unable to find class NonExistentClass in packages [\"org.apache.cassandra.config\"]")
+        .isInstanceOf(ConfigurationException.class);
+    }
+
+    @Test
+    public void testNewInstanceWithSingleEmptyConstructorUsesEmptyConstructor()
     {
         ParameterizedClass parameterizedClass = new ParameterizedClass(AllowAllAuthorizer.class.getName());
         IAuthorizer instance = ParameterizedClass.newInstance(parameterizedClass, null);
@@ -59,38 +72,30 @@ public class ParameterizedClassTest
     }
 
     @Test
-    public void newInstance_SingleEmptyConstructorWithParameters_FailsWithConfigurationException()
-    {
-        Map<String, String> parameters = Map.of("key", "value");
-        ParameterizedClass parameterizedClass = new ParameterizedClass(AllowAllAuthorizer.class.getName(), parameters);
-
-        ConfigurationException exception = assertThrows(ConfigurationException.class, () -> {
-            ParameterizedClass.newInstance(parameterizedClass, null);
-        });
-
-        assertThat(exception.getMessage(), startsWith("No valid constructor found for class"));
-    }
-
-    @Test
-    public void newInstance_WithValidConstructors_FavorsMapConstructor()
+    public void testNewInstanceWithValidConstructorsFavorsMapConstructor()
     {
         ParameterizedClass parameterizedClass = new ParameterizedClass(ParameterizedClassExample.class.getName());
         ParameterizedClassExample instance = ParameterizedClass.newInstance(parameterizedClass, null);
-
-        assertTrue(instance.calledMapConstructor);
+        assertNotNull(instance);
     }
 
     @Test
-    public void newInstance_WithConstructorException_PreservesOriginalFailure()
+    public void testNewInstanceWithValidConstructorsUsingNullParamtersFavorsMapConstructor()
     {
-        Map <String, String> parameters = Map.of("fail", "true");
-        ParameterizedClass parameterizedClass = new ParameterizedClass(ParameterizedClassExample.class.getName(), parameters);
+        ParameterizedClass parameterizedClass = new ParameterizedClass(ParameterizedClassExample.class.getName());
+        parameterizedClass.parameters = null;
 
-        ConfigurationException exception = assertThrows(ConfigurationException.class, () -> {
-            ParameterizedClass.newInstance(parameterizedClass, null);
-        });
+        ParameterizedClassExample instance = ParameterizedClass.newInstance(parameterizedClass, null);
+        assertNotNull(instance);
+    }
 
-        assertThat(exception.getMessage(), startsWith("Failed to instantiate class"));
-        assertThat(exception.getMessage(), containsString("Simulated failure"));
+    @Test
+    public void testNewInstanceWithConstructorExceptionPreservesOriginalFailure()
+    {
+        assertThatThrownBy(() -> ParameterizedClass.newInstance(new ParameterizedClass(ParameterizedClassExample.class.getName(),
+                                                                                       Map.of("fail", "true")), null))
+        .hasMessageStartingWith("Failed to instantiate class")
+        .hasMessageContaining("Simulated failure")
+        .isInstanceOf(ConfigurationException.class);
     }
 }

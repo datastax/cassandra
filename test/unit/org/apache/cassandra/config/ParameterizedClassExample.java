@@ -24,8 +24,6 @@ import org.junit.Assert;
 
 public class ParameterizedClassExample
 {
-    boolean calledMapConstructor = false;
-
     public ParameterizedClassExample()
     {
         Assert.fail("This constructor should not be called");
@@ -33,10 +31,8 @@ public class ParameterizedClassExample
 
     public ParameterizedClassExample(Map<String, String> parameters)
     {
-        calledMapConstructor = true;
-
         if (parameters == null)
-            return;
+            throw new IllegalArgumentException("Parameters must not be null");
 
         boolean simulateFailure = Boolean.parseBoolean(parameters.getOrDefault("fail", "false"));
         if (simulateFailure)
