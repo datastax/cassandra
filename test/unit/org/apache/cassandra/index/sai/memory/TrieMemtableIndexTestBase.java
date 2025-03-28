@@ -330,10 +330,10 @@ public abstract class TrieMemtableIndexTestBase extends SAITester
         assertFalse(result.hasNext());
     }
 
-    private void assertNextEntryInIterator(Iterator<Pair<ByteComparable, List<MemoryIndex.PkWithFrequency>>> iter, int term, int... primaryKeys)
+    private void assertNextEntryInIterator(Iterator<Pair<ByteComparable.Preencoded, List<MemoryIndex.PkWithFrequency>>> iter, int term, int... primaryKeys)
     {
         assertTrue(iter.hasNext());
-        Pair<ByteComparable, List<MemoryIndex.PkWithFrequency>> entry = iter.next();
+        Pair<ByteComparable.Preencoded, List<MemoryIndex.PkWithFrequency>> entry = iter.next();
         assertEquals(term, termFromComparable(entry.left));
         for (int i = 0; i < primaryKeys.length; i++)
         {

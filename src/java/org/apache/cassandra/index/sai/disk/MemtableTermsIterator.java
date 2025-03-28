@@ -34,16 +34,16 @@ public class MemtableTermsIterator implements TermsIterator
 {
     private final ByteBuffer minTerm;
     private final ByteBuffer maxTerm;
-    private final Iterator<Pair<ByteComparable, List<RowMapping.RowIdWithFrequency>>> iterator;
+    private final Iterator<Pair<ByteComparable.Preencoded, List<RowMapping.RowIdWithFrequency>>> iterator;
 
-    private Pair<ByteComparable, List<RowMapping.RowIdWithFrequency>> current;
+    private Pair<ByteComparable.Preencoded, List<RowMapping.RowIdWithFrequency>> current;
 
     private int maxSSTableRowId = -1;
     private int minSSTableRowId = Integer.MAX_VALUE;
 
     public MemtableTermsIterator(ByteBuffer minTerm,
                                  ByteBuffer maxTerm,
-                                 Iterator<Pair<ByteComparable, List<RowMapping.RowIdWithFrequency>>> iterator)
+                                 Iterator<Pair<ByteComparable.Preencoded, List<RowMapping.RowIdWithFrequency>>> iterator)
     {
         Preconditions.checkArgument(iterator != null);
         this.minTerm = minTerm;

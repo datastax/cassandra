@@ -71,7 +71,6 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.Clock;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
-import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.utils.memory.Cloner;
 import org.apache.cassandra.utils.memory.EnsureOnHeap;
@@ -424,7 +423,7 @@ public class TrieMemtableStage1 extends AbstractAllocatorMemtable
         return new MemtablePartition(metadata, ensureOnHeap, key, data);
     }
 
-    private static MemtablePartition getPartitionFromTrieEntry(TableMetadata metadata, EnsureOnHeap ensureOnHeap, Map.Entry<ByteComparable, BTreePartitionData> en)
+    private static MemtablePartition getPartitionFromTrieEntry(TableMetadata metadata, EnsureOnHeap ensureOnHeap, Map.Entry<? extends ByteComparable, BTreePartitionData> en)
     {
         DecoratedKey key = BufferDecoratedKey.fromByteComparable(en.getKey(),
                                                                  BYTE_COMPARABLE_VERSION,
@@ -443,11 +442,10 @@ public class TrieMemtableStage1 extends AbstractAllocatorMemtable
         long keySize = 0;
         int keyCount = 0;
 
-        for (Iterator<Map.Entry<ByteComparable, BTreePartitionData>> it = toFlush.entryIterator(); it.hasNext(); )
+        for (Iterator<Map.Entry<ByteComparable.Preencoded, BTreePartitionData>> it = toFlush.entryIterator(); it.hasNext(); )
         {
-            Map.Entry<ByteComparable, BTreePartitionData> en = it.next();
-            ByteComparable byteComparable = v -> ByteSource.peekable(en.getKey().asComparableBytes(BYTE_COMPARABLE_VERSION));
-            byte[] keyBytes = DecoratedKey.keyFromByteComparable(byteComparable, BYTE_COMPARABLE_VERSION, metadata().partitioner);
+            Map.Entry<ByteComparable.Preencoded, BTreePartitionData> en = it.next();
+            byte[] keyBytes = DecoratedKey.keyFromByteComparable(en.getKey(), BYTE_COMPARABLE_VERSION, metadata().partitioner);
             keySize += keyBytes.length;
             keyCount++;
         }
@@ -649,11 +647,11 @@ public class TrieMemtableStage1 extends AbstractAllocatorMemtable
 
         private DecoratedKey firstPartitionKey(Direction direction)
         {
-            Iterator<Map.Entry<ByteComparable, BTreePartitionData>> iter = data.entryIterator(direction);
+            Iterator<Map.Entry<ByteComparable.Preencoded, BTreePartitionData>> iter = data.entryIterator(direction);
             if (!iter.hasNext())
                 return null;
 
-            Map.Entry<ByteComparable, BTreePartitionData> entry = iter.next();
+            Map.Entry<ByteComparable.Preencoded, BTreePartitionData> entry = iter.next();
             return getPartitionKeyFromPath(metadata.get(), entry.getKey());
         }
 
@@ -673,7 +671,7 @@ public class TrieMemtableStage1 extends AbstractAllocatorMemtable
         private final TableMetadata metadata;
         private final EnsureOnHeap ensureOnHeap;
         private final Trie<BTreePartitionData> source;
-        private final Iterator<Map.Entry<ByteComparable, BTreePartitionData>> iter;
+        private final Iterator<Map.Entry<ByteComparable.Preencoded, BTreePartitionData>> iter;
         private final ColumnFilter columnFilter;
         private final DataRange dataRange;
 

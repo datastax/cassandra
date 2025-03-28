@@ -87,7 +87,7 @@ public abstract class MemoryIndex
     /**
      * Iterate all Term->PrimaryKeys mappings in sorted order
      */
-    public abstract Iterator<Pair<ByteComparable, List<PkWithFrequency>>> iterator();
+    public abstract Iterator<Pair<ByteComparable.Preencoded, List<PkWithFrequency>>> iterator();
 
     public static class PkWithFrequency
     {
