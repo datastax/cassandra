@@ -1020,4 +1020,21 @@ public interface ByteSource
 
         return preencoded(ByteSourceInverse.readBytes(src));
     }
+
+    static int compare(ByteSource s1, ByteSource s2)
+    {
+        if (s1 == null || s2 == null)
+            return Boolean.compare(s1 != null, s2 != null);
+
+        while (true)
+        {
+            int b1 = s1.next();
+            int b2 = s2.next();
+            int cmp = Integer.compare(b1, b2);
+            if (cmp != 0)
+                return cmp;
+            if (b1 == END_OF_STREAM)
+                return 0;
+        }
+    }
 }

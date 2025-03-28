@@ -24,6 +24,7 @@ import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.TermsIterator;
 import org.apache.cassandra.index.sai.disk.oldlucene.MutablePointValues;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
 import org.apache.lucene.util.bkd.BKDWriter;
 
@@ -55,7 +56,7 @@ public class ImmutableOneDimPointValues extends MutableOneDimPointValues
     {
         while (termEnum.hasNext())
         {
-            ByteSourceInverse.readBytesMustFit(termEnum.next().asComparableBytes(TypeUtil.BYTE_COMPARABLE_VERSION),
+            ByteSourceInverse.readBytesMustFit(((ByteComparable.Preencoded) termEnum.next()).getPreencodedBytes(),
                                                scratch);
 
             try (final PostingList postings = termEnum.postings())
