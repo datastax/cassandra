@@ -38,6 +38,7 @@ import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.Dispatcher;
 import org.apache.cassandra.transport.messages.ResultMessage;
 
+import static org.apache.cassandra.cql3.restrictions.StatementRestrictions.NON_CLUSTER_ORDERING_REQUIRES_INDEX_MESSAGE;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
@@ -56,6 +57,27 @@ public class GenericOrderByInvalidQueryTest extends SAITester
         createTable("CREATE TABLE %s (pk int primary key, val varint)");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
         executeOrderByAndAssertInvalidRequestException("varint");
+    }
+
+    @Test
+    public void cannotOrderWithAnalyzedIndex()
+    {
+        createTable("CREATE TABLE %s (pk int primary key, val text)");
+        createIndex("CREATE CUSTOM INDEX test_v1_idx ON %s(val) USING 'StorageAttachedIndex'" +
+                    " WITH OPTIONS = {'index_analyzer': '{\"tokenizer\" : { \"name\" : \"whitespace\", \"args\" : {} }}'}");
+
+        execute("INSERT INTO %s (pk, val) VALUES (1, 'ciao amico')");
+        execute("INSERT INTO %s (pk, val) VALUES (2, 'ciao amico')");
+        assertRows(execute("SELECT * FROM %s"), row(1, "ciao amico"), row(2, "ciao amico"));
+
+        // Verify ORDER BY fails with analyzed index
+        assertThatThrownBy(() -> execute("SELECT * FROM %s ORDER BY val LIMIT 10"))
+        .isInstanceOf(InvalidRequestException.class)
+        .hasMessage(String.format(NON_CLUSTER_ORDERING_REQUIRES_INDEX_MESSAGE, "val"));
+
+        // Verify ORDER BY works with non-analyzed index
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        assertRows(execute("SELECT * FROM %s ORDER BY val LIMIT 10"), row(1, "ciao amico"), row(2, "ciao amico"));
     }
 
     @Test
@@ -78,10 +100,10 @@ public class GenericOrderByInvalidQueryTest extends SAITester
     {
         createTable("CREATE TABLE %s (pk int, val text, PRIMARY KEY(pk))");
 
-        assertInvalidMessage(String.format(StatementRestrictions.NON_CLUSTER_ORDERING_REQUIRES_INDEX_MESSAGE, "val"),
+        assertInvalidMessage(String.format(NON_CLUSTER_ORDERING_REQUIRES_INDEX_MESSAGE, "val"),
                              "SELECT * FROM %s ORDER BY val ASC LIMIT 1");
         // Also confirm filtering does not make it work.
-        assertInvalidMessage(String.format(StatementRestrictions.NON_CLUSTER_ORDERING_REQUIRES_INDEX_MESSAGE, "val"),
+        assertInvalidMessage(String.format(NON_CLUSTER_ORDERING_REQUIRES_INDEX_MESSAGE, "val"),
                              "SELECT * FROM %s ORDER BY val LIMIT 5 ALLOW FILTERING");
     }
 
@@ -110,7 +132,7 @@ public class GenericOrderByInvalidQueryTest extends SAITester
     public void testInvalidColumnName()
     {
         String table = createTable(KEYSPACE, "CREATE TABLE %s (k int, c int, v int, primary key (k, c))");
-        assertInvalidMessage(String.format("Undefined column name bad_col in table %s", KEYSPACE + "." + table),
+        assertInvalidMessage(String.format("Undefined column name bad_col in table %s", KEYSPACE + '.' + table),
                              "SELECT k from %s ORDER BY bad_col LIMIT 1");
     }
 
