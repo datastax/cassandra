@@ -30,6 +30,7 @@ import com.carrotsearch.hppc.IntArrayList;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.memory.RowMapping;
+import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
@@ -63,7 +64,7 @@ public class InvertedIndexBuilder
 
             // This logic feels a bit fragile, but it mimics the way we call unescape in the TrieMemoryIndex
             // before writing to the on disk format.
-            var encoded = version.onDiskFormat().encodeForTrie(term, UTF8Type.instance);
+            var encoded = version.onDiskFormat().encodeForTrie(term, UTF8Type.instance).preencode(TypeUtil.BYTE_COMPARABLE_VERSION);
             termsEnum.add(new TermsEnum(term, encoded, postingsList));
         }
         return termsEnum;
@@ -76,10 +77,10 @@ public class InvertedIndexBuilder
     {
         // Store the original term to ensure that searching by it is successful
         final ByteBuffer originalTermBytes;
-        final ByteComparable byteComparableBytes;
+        final ByteComparable.Preencoded byteComparableBytes;
         final IntArrayList postings;
 
-        TermsEnum(ByteBuffer originalTermBytes, ByteComparable byteComparableBytes, IntArrayList postings)
+        TermsEnum(ByteBuffer originalTermBytes, ByteComparable.Preencoded byteComparableBytes, IntArrayList postings)
         {
             this.originalTermBytes = originalTermBytes;
             this.byteComparableBytes = byteComparableBytes;
@@ -90,7 +91,7 @@ public class InvertedIndexBuilder
     /**
      * Adds default frequency of 1 to postings
      */
-    static Pair<ByteComparable, List<RowMapping.RowIdWithFrequency>> toTermWithFrequency(TermsEnum te)
+    static Pair<ByteComparable.Preencoded, List<RowMapping.RowIdWithFrequency>> toTermWithFrequency(TermsEnum te)
     {
         return Pair.create(te.byteComparableBytes, Arrays.stream(te.postings.toArray()).boxed()
                                                          .map(p -> new RowMapping.RowIdWithFrequency(p, 1))

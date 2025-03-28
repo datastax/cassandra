@@ -117,12 +117,12 @@ public class InMemoryTrieReadBench
     @Benchmark
     public int consumeEntries()
     {
-        class Counter implements BiConsumer<ByteComparable, Byte>
+        class Counter implements BiConsumer<ByteComparable.Preencoded, Byte>
         {
             int sum = 0;
 
             @Override
-            public void accept(ByteComparable byteComparable, Byte aByte)
+            public void accept(ByteComparable.Preencoded byteComparable, Byte aByte)
             {
                 sum += aByte;
             }
@@ -169,7 +169,7 @@ public class InMemoryTrieReadBench
     public int iterateEntries()
     {
         int sum = 0;
-        for (Map.Entry<ByteComparable, Byte> en : trie.entrySet(direction))
+        for (Map.Entry<ByteComparable.Preencoded, Byte> en : trie.entrySet(direction))
             sum += en.getValue();
         return sum;
     }
