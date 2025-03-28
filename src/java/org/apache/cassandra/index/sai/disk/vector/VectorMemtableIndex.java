@@ -432,7 +432,7 @@ public class VectorMemtableIndex implements MemtableIndex
     }
 
     @Override
-    public Iterator<Pair<ByteComparable, List<MemoryIndex.PkWithFrequency>>> iterator(DecoratedKey min, DecoratedKey max)
+    public Iterator<Pair<ByteComparable.Preencoded, List<MemoryIndex.PkWithFrequency>>> iterator(DecoratedKey min, DecoratedKey max)
     {
         // This method is only used when merging an in-memory index with a RowMapping. This is done a different
         // way with the graph using the writeData method below.

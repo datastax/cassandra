@@ -102,7 +102,7 @@ public class InMemoryTrieThreadedTest
                         int count = 0;
                         try (OpOrder.Group group = readOrder.start())
                         {
-                            for (Map.Entry<ByteComparable, String> en : trie.entrySet())
+                            for (Map.Entry<? extends ByteComparable, String> en : trie.entrySet())
                             {
                                 String v = value(en.getKey());
                                 Assert.assertEquals(en.getKey().byteComparableAsString(byteComparableVersion), v, en.getValue());
@@ -385,7 +385,7 @@ public class InMemoryTrieThreadedTest
                             int min = writeProgress.get();
                             try (OpOrder.Group group = readOrder.start())
                             {
-                                Iterable<Map.Entry<ByteComparable, Content>> entries = trie.entrySet();
+                                Iterable<Map.Entry<ByteComparable.Preencoded, Content>> entries = trie.entrySet();
                                 checkEntries("", min, true, checkAtomicity, false, PER_MUTATION, entries);
                             }
                         }
@@ -415,7 +415,7 @@ public class InMemoryTrieThreadedTest
                         {
                             ByteComparable key = srcLocal[r.nextInt(srcLocal.length)];
                             int min = writeProgress.get() / (pkeys.length * PER_MUTATION) * PER_MUTATION;
-                            Iterable<Map.Entry<ByteComparable, Content>> entries;
+                            Iterable<Map.Entry<ByteComparable.Preencoded, Content>> entries;
 
                             try (OpOrder.Group group = readOrder.start())
                             {
@@ -558,7 +558,7 @@ public class InMemoryTrieThreadedTest
                              boolean checkAtomicity,
                              boolean checkConsecutiveIds,
                              int PER_MUTATION,
-                             Iterable<Map.Entry<ByteComparable, Content>> entries)
+                             Iterable<Map.Entry<ByteComparable.Preencoded, Content>> entries)
     {
         long sum = 0;
         int count = 0;

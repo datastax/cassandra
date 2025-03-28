@@ -441,6 +441,7 @@ public class TermsDistribution
     public static class Builder
     {
         final AbstractType<?> termType;
+        final ByteComparable.Version byteComparableVersion;
         final int histogramSize;
         final int mostFrequentTermsTableSize;
 
@@ -454,10 +455,12 @@ public class TermsDistribution
         long cumulativeRowCount;
 
         public Builder(AbstractType<?> termType,
+                       ByteComparable.Version byteComparableVersion,
                        int histogramSize,
                        int mostFrequentTermsTableSize)
         {
             this.termType = termType;
+            this.byteComparableVersion = byteComparableVersion;
             this.histogramSize = histogramSize;
             this.mostFrequentTermsTableSize = mostFrequentTermsTableSize;
 
@@ -501,13 +504,12 @@ public class TermsDistribution
 
             shrink();
 
-            var bcVersion = TypeUtil.BYTE_COMPARABLE_VERSION;
-            var mft = new TreeMap<ByteComparable, Long>((b1, b2) -> ByteComparable.compare(b1, b2, bcVersion));
+            var mft = new TreeMap<ByteComparable, Long>((b1, b2) -> ByteComparable.compare(b1, b2, byteComparableVersion));
             for (Point point : mostFrequentTerms) {
                 mft.put(point.term, point.rowCount);
             }
 
-            return new TermsDistribution(termType, buckets, mft, Version.latest(), bcVersion);
+            return new TermsDistribution(termType, buckets, mft, Version.latest(), byteComparableVersion);
         }
 
         /**
