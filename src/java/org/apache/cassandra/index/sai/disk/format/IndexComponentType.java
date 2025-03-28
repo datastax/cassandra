@@ -133,7 +133,7 @@ public enum IndexComponentType
         this(representation, null);
     }
 
-    IndexComponentType(String representation, IndexComponentType compressionMetadata)
+    IndexComponentType(String representation, @Nullable IndexComponentType compressionMetadata)
     {
         this.representation = representation;
         this.compressionMetadata = compressionMetadata;
