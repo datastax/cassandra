@@ -25,6 +25,7 @@ import java.nio.ByteBuffer;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -267,7 +268,10 @@ public class InvertedIndexSearcher extends IndexSearcher
             documentFrequencies.put(term, matches);
         }
         var analyzer = indexContext.getAnalyzerFactory().create();
-        var it = keys.stream().map(pk -> DocTF.createFromDocument(pk, readColumn(sstable, pk), analyzer, queryTerms)).iterator();
+        var it = keys.stream()
+                     .map(pk -> DocTF.createFromDocument(pk, readColumn(sstable, pk), analyzer, queryTerms))
+                     .filter(Objects::nonNull)
+                     .iterator();
         return bm25Internal(CloseableIterator.wrap(it), queryTerms, documentFrequencies);
     }
 
