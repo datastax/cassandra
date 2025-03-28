@@ -32,6 +32,7 @@ import static org.junit.Assert.assertEquals;
 @Ignore
 public abstract class TrieMemtableIndexTest extends TrieMemtableIndexTestBase
 {
+
     @BeforeClass
     public static void setUpClass()
     {

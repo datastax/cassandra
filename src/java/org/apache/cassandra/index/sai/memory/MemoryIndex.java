@@ -52,6 +52,28 @@ public abstract class MemoryIndex
                              LongConsumer onHeapAllocationsTracker,
                              LongConsumer offHeapAllocationsTracker);
 
+    /**
+     * Update the index value for the given key and clustering by removing the old value and adding the new value.
+     * This is meant to be used when the indexed column is any type other than a non-frozen collection.
+     */
+    public abstract void update(DecoratedKey key,
+                                Clustering clustering,
+                                ByteBuffer oldValue,
+                                ByteBuffer newValue,
+                                LongConsumer onHeapAllocationsTracker,
+                                LongConsumer offHeapAllocationsTracker);
+
+    /**
+     * Update the index value for the given key and clustering by removing the old values and adding the new values.
+     * This is meant to be used when the indexed column is a non-frozen collection.
+     */
+    public abstract void update(DecoratedKey key,
+                                Clustering clustering,
+                                Iterator<ByteBuffer> oldValues,
+                                Iterator<ByteBuffer> newValues,
+                                LongConsumer onHeapAllocationsTracker,
+                                LongConsumer offHeapAllocationsTracker);
+
     public abstract CloseableIterator<PrimaryKeyWithSortKey> orderBy(Orderer orderer, Expression slice);
 
     public abstract KeyRangeIterator search(Expression expression, AbstractBounds<PartitionPosition> keyRange);
