@@ -94,7 +94,13 @@ public class TrieMemtableIndex implements MemtableIndex
 
     public TrieMemtableIndex(IndexContext indexContext, Memtable memtable)
     {
-        this.boundaries = indexContext.columnFamilyStore().localRangeSplits(AbstractShardedMemtable.getDefaultShardCount());
+        this(indexContext, memtable, AbstractShardedMemtable.getDefaultShardCount());
+    }
+
+    @VisibleForTesting
+    public TrieMemtableIndex(IndexContext indexContext, Memtable memtable, int shardCount)
+    {
+        this.boundaries = indexContext.columnFamilyStore().localRangeSplits(shardCount);
         this.rangeIndexes = new MemoryIndex[boundaries.shardCount()];
         this.indexContext = indexContext;
         this.validator = indexContext.getValidator();
@@ -205,6 +211,54 @@ public class TrieMemtableIndex implements MemtableIndex
     }
 
     @Override
+    public void update(DecoratedKey key, Clustering clustering, ByteBuffer oldValue, ByteBuffer newValue, Memtable memtable, OpOrder.Group opGroup)
+    {
+        int oldRemaining = oldValue == null ? 0 : oldValue.remaining();
+        int newRemaining = newValue == null ? 0 : newValue.remaining();
+        if (oldRemaining == 0 && newRemaining == 0)
+            return;
+
+        if (oldRemaining == newRemaining && validator.compare(oldValue, newValue) == 0)
+            return;
+
+        // The terms inserted into the index could still be the same in the case of certain analyzer configs.
+        // We don't know yet though, and instead of eagerly determining it, we leave it to the index to handle it.
+        rangeIndexes[boundaries.getShardForKey(key)].update(key,
+                                                            clustering,
+                                                            oldValue,
+                                                            newValue,
+                                                            allocatedBytes -> {
+                                                                memtable.markExtraOnHeapUsed(allocatedBytes, opGroup);
+                                                                estimatedOnHeapMemoryUsed.add(allocatedBytes);
+                                                                },
+                                                            allocatedBytes -> {
+                                                                memtable.markExtraOffHeapUsed(allocatedBytes, opGroup);
+                                                                estimatedOffHeapMemoryUsed.add(allocatedBytes);
+                                                            });
+        writeCount.increment();
+    }
+
+    @Override
+    public void update(DecoratedKey key, Clustering clustering, Iterator<ByteBuffer> oldValues, Iterator<ByteBuffer> newValues, Memtable memtable, OpOrder.Group opGroup)
+    {
+        // We defer on comparing old and new values here. Instead, we rely on the index to do the comparison and then
+        // have custom logic in the aggregator to ensure that we properly add/keep new values and remove old values
+        // that are not present in the new values.
+        rangeIndexes[boundaries.getShardForKey(key)].update(key,
+                                                            clustering,
+                                                            oldValues,
+                                                            newValues,
+                                                            allocatedBytes -> {
+                                                                memtable.markExtraOnHeapUsed(allocatedBytes, opGroup);
+                                                                estimatedOnHeapMemoryUsed.add(allocatedBytes);
+                                                            },
+                                                            allocatedBytes -> {
+                                                                memtable.markExtraOffHeapUsed(allocatedBytes, opGroup);
+                                                                estimatedOffHeapMemoryUsed.add(allocatedBytes);
+                                                            });
+        writeCount.increment();
+    }
+
     public KeyRangeIterator search(QueryContext queryContext, Expression expression, AbstractBounds<PartitionPosition> keyRange, int limit)
     {
         int startShard = boundaries.getShardForToken(keyRange.left.getToken());

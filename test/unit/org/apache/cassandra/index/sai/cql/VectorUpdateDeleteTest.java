@@ -922,7 +922,6 @@ public class VectorUpdateDeleteTest extends VectorTester.VersionedWithChecksums
         flush();
 
         assertRows(execute("SELECT PK FROM %s WHERE str_val = 'A' ORDER BY val ann of [1.0, 2.0, 3.0] LIMIT 1"));
-        getCurrentColumnFamilyStore().getLiveSSTables();
     }
 
     @Test
