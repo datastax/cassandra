@@ -25,10 +25,8 @@ import com.carrotsearch.randomizedtesting.annotations.Timeout;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.metrics.CASClientRequestMetrics;
 import org.apache.cassandra.service.paxos.PaxosUtils;
-import org.apache.tools.ant.types.Assertions;
 
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 
