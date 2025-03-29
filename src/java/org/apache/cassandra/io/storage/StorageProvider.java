@@ -333,7 +333,10 @@ public interface StorageProvider
             {
                 builder = builder.adviseRandom();
             }
-            return builder.mmapped(true);
+
+            return builder.mmapped(true)
+                          .withChunkCache(ChunkCache.instance);
+
         }
 
         @Override

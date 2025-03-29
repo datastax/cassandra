@@ -173,7 +173,6 @@ public abstract class SegmentBuilder
                                                                     rowCount,
                                                                     indexWriterConfig))
             {
-
                 MutableOneDimPointValues values = kdTreeRamBuffer.asPointValues();
                 var metadataMap = writer.writeAll(metadataBuilder.intercept(values));
                 metadataBuilder.setComponentsMetadata(metadataMap);
