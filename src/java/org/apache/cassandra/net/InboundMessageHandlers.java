@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.net;
 
+import java.lang.reflect.InvocationTargetException;
 import java.util.Collection;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
@@ -30,6 +31,9 @@ import io.netty.channel.Channel;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.metrics.InternodeInboundMetrics;
 import org.apache.cassandra.net.Message.Header;
+import org.apache.cassandra.utils.FBUtilities;
+
+import static org.apache.cassandra.config.CassandraRelevantProperties.CUSTOM_INTERNODE_INBOUND_METRICS_PROVIDER_PROPERTY;
 
 /**
  * An aggregation of {@link InboundMessageHandler}s for all connections from a peer.
@@ -128,7 +132,25 @@ public final class InboundMessageHandlers
         largeCallbacks  = makeMessageCallbacks(peer, largeCounters,  globalMetricCallbacks, messageConsumer);
         legacyCallbacks = makeMessageCallbacks(peer, legacyCounters, globalMetricCallbacks, messageConsumer);
 
-        metrics = new InternodeInboundMetrics(peer, this);
+        if (CUSTOM_INTERNODE_INBOUND_METRICS_PROVIDER_PROPERTY.isPresent())
+        {
+            Class<InternodeInboundMetrics> klass = FBUtilities.classForName(CUSTOM_INTERNODE_INBOUND_METRICS_PROVIDER_PROPERTY.getString(), "Internode Inbound Metrics Provider");
+            InternodeInboundMetrics ibInstance;
+            try
+            {
+                ibInstance = klass.getDeclaredConstructor(InetAddressAndPort.class, InboundMessageHandlers.class).newInstance(peer, this);
+            }
+            catch (NoSuchMethodException | InstantiationException | IllegalAccessException |
+                   InvocationTargetException e)
+            {
+                throw new RuntimeException(e);
+            }
+            metrics = ibInstance;
+        }
+        else
+        {
+            metrics = new InternodeInboundMetrics(peer, this);
+        }
     }
 
     InboundMessageHandler createHandler(FrameDecoder frameDecoder, ConnectionType type, Channel channel, int version)
