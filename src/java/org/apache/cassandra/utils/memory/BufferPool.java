@@ -228,9 +228,18 @@ public class BufferPool
     private ByteBuffer allocate(int size, BufferType bufferType)
     {
         updateOverflowMemoryUsage(size);
-        return bufferType == BufferType.ON_HEAP
-               ? ByteBuffer.allocate(size)
-               : ByteBuffer.allocateDirect(size);
+        if (bufferType == BufferType.ON_HEAP)
+        {
+            return ByteBuffer.allocate(size);
+        }
+        else
+        {
+            if (size > NORMAL_CHUNK_SIZE)
+                metrics.markOversizedOverflow();
+            else
+                metrics.markNormalOverflow();
+            return ByteBuffer.allocateDirect(size);
+        }
     }
 
     public void put(ByteBuffer buffer)
