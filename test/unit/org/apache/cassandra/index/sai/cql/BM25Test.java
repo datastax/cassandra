@@ -668,7 +668,30 @@ public class BM25Test extends SAITester
     }
 
     @Test
-    public void testComplexOrderingCollections() throws Throwable
+    public void reproErrors() throws Throwable
+    {
+        createTable("CREATE TABLE %s (id int PRIMARY KEY, category text, score int, " +
+                    "title text, body text, bodyset set<text>, " +
+                    "map_category map<int, text>, map_body map<text, text>)");
+        createAnalyzedIndex("body", true);
+        createAnalyzedIndex("bodyset", true);
+        createAnalyzedIndex("map_body", true);
+
+        // Repro error message CNDB-13514
+        assertThatThrownBy(() -> execute("SELECT * FROM %s ORDER BY bodyset BM25 OF ? LIMIT 10",
+                                         "climate"))
+        .isInstanceOf(InvalidRequestException.class)
+        .hasMessage("BM25 ordering on column bodyset requires an analyzed index");
+
+        // Repro CNDB-13515
+        assertThatThrownBy(() -> execute("SELECT * FROM %s WHERE map_body CONTAINS KEY 'Climate' ORDER BY body BM25 OF ? LIMIT 10",
+                                         "climate"));
+        assertThatThrownBy(() -> execute("SELECT * FROM %s WHERE map_body CONTAINS KEY 'HEALTH' ORDER BY body BM25 OF ? LIMIT 10 ALLOW FILTERING",
+                                         "climate"));
+    }
+
+    @Test
+    public void testCollections() throws Throwable
     {
         createTable("CREATE TABLE %s (id int PRIMARY KEY, category text, score int, " +
                     "title text, body text, bodyset set<text>, " +
@@ -680,12 +703,6 @@ public class BM25Test extends SAITester
         createIndex("CREATE CUSTOM INDEX ON %s (category) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s (map_category) USING 'StorageAttachedIndex'");
         insertCollectionData();
-
-        // Repro CNDB-13515
-        assertThatThrownBy(() -> executeQuery(Arrays.asList(11, 19, 1, 16, 6, 18, 12), "SELECT * FROM %s WHERE map_body CONTAINS KEY 'Climate' ORDER BY body BM25 OF ? LIMIT 10",
-                                              "climate"));
-        assertThatThrownBy(() -> executeQuery(Arrays.asList(4, 18, 12, 9, 14), "SELECT * FROM %s WHERE map_body CONTAINS KEY 'HEALTH' ORDER BY body BM25 OF ? LIMIT 10 ALLOW FILTERING",
-                                              "climate"));
 
         beforeAndAfterFlush(
         () -> {
