@@ -184,14 +184,7 @@ public class BM25Test extends SAITester
 
         // Create mix of analyzed, unanalyzed, and non-text indexes
         createIndex("CREATE CUSTOM INDEX ON %s(v1) USING 'org.apache.cassandra.index.sai.StorageAttachedIndex'");
-        createIndex("CREATE CUSTOM INDEX ON %s(v2) " +
-                    "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
-                    "WITH OPTIONS = {" +
-                    "'index_analyzer': '{" +
-                    "\"tokenizer\" : {\"name\" : \"standard\"}, " +
-                    "\"filters\" : [{\"name\" : \"porterstem\"}]" +
-                    "}'" +
-                    '}');
+        createAnalyzedIndex("v2");
         createIndex("CREATE CUSTOM INDEX ON %s(v3) USING 'org.apache.cassandra.index.sai.StorageAttachedIndex'");
 
         execute("INSERT INTO %s (k, v1, v2, v3) VALUES (1, 'apple', 'orange juice', 5)");
