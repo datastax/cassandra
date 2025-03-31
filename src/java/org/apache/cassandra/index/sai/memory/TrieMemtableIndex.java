@@ -324,7 +324,7 @@ public class TrieMemtableIndex implements MemtableIndex
         var docStats = computeDocumentFrequencies(queryContext, queryTerms);
         var analyzer = indexContext.getAnalyzerFactory().create();
         var it = Streams.stream(intersectedIterator)
-                 .map(pk -> BM25Utils.DocTF.createFromDocument(pk, getCellForKey(pk), analyzer, queryTerms))
+                 .map(pk -> BM25Utils.EagerDocTF.createFromDocument(pk, getCellForKey(pk), analyzer, queryTerms))
                  .filter(Objects::nonNull)
                  .iterator();
 
@@ -393,7 +393,7 @@ public class TrieMemtableIndex implements MemtableIndex
         var queryTerms = orderer.getQueryTerms();
         var docStats = computeDocumentFrequencies(queryContext, queryTerms);
         var it = keys.stream()
-                     .map(pk -> BM25Utils.DocTF.createFromDocument(pk, getCellForKey(pk), analyzer, queryTerms))
+                     .map(pk -> BM25Utils.EagerDocTF.createFromDocument(pk, getCellForKey(pk), analyzer, queryTerms))
                      .filter(Objects::nonNull)
                      .iterator();
         return BM25Utils.computeScores(CloseableIterator.wrap(it),
