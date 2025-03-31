@@ -178,6 +178,8 @@ public class KeyspaceMetrics
     public final Histogram repairedDataTrackingOverreadRows;
     public final Timer repairedDataTrackingOverreadTime;
 
+    public final LatencyMetrics viewSSTableIntervalTree;
+
     public final MetricNameFactory factory;
     private Keyspace keyspace;
 
@@ -276,6 +278,8 @@ public class KeyspaceMetrics
 
         repairedDataTrackingOverreadRows = createKeyspaceHistogram("RepairedDataTrackingOverreadRows", false);
         repairedDataTrackingOverreadTime = createKeyspaceTimer("RepairedDataTrackingOverreadTime");
+
+        viewSSTableIntervalTree = createLatencyMetrics("ViewSSTableIntervalTree");
     }
 
     /**
