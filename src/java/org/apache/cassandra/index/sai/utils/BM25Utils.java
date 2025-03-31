@@ -21,20 +21,21 @@ package org.apache.cassandra.index.sai.utils;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
 import javax.annotation.Nullable;
 
+import io.github.jbellis.jvector.graph.NodeQueue;
+import io.github.jbellis.jvector.util.BoundedLongHeap;
 import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
 import org.apache.cassandra.io.sstable.SSTableId;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.CloseableIterator;
 
 public class BM25Utils
@@ -60,15 +61,28 @@ public class BM25Utils
     }
 
     /**
-     * Term frequencies within a single document.  All instances of a term are counted.
+     * Term frequencies within a single document.  All instances of a term are counted. Allows us to optimize for
+     * the sstable use case, which is able to skip some reads from disk as well as some memory allocations.
      */
-    public static class DocTF
+    public interface DocTF
+    {
+        int getTermFrequency(ByteBuffer term);
+        int termCount();
+        PrimaryKeyWithSortKey primaryKey(IndexContext context, Memtable source, float score);
+        PrimaryKeyWithSortKey primaryKey(IndexContext context, SSTableId<?> source, float score);
+    }
+
+    /**
+     * Term frequencies within a single document.  All instances of a term are counted. It is eager in that the
+     * PrimaryKey is already created.
+     */
+    public static class EagerDocTF implements DocTF
     {
         private final PrimaryKey pk;
         private final Map<ByteBuffer, Integer> frequencies;
         private final int termCount;
 
-        public DocTF(PrimaryKey pk, int termCount, Map<ByteBuffer, Integer> frequencies)
+        public EagerDocTF(PrimaryKey pk, int termCount, Map<ByteBuffer, Integer> frequencies)
         {
             this.pk = pk;
             this.frequencies = frequencies;
@@ -78,6 +92,21 @@ public class BM25Utils
         public int getTermFrequency(ByteBuffer term)
         {
             return frequencies.getOrDefault(term, 0);
+        }
+
+        public int termCount()
+        {
+            return termCount;
+        }
+
+        public PrimaryKeyWithSortKey primaryKey(IndexContext context, Memtable source, float score)
+        {
+            return new PrimaryKeyWithScore(context, source, pk, score);
+        }
+
+        public PrimaryKeyWithSortKey primaryKey(IndexContext context, SSTableId<?> source, float score)
+        {
+            return new PrimaryKeyWithScore(context, source, pk, score);
         }
 
         @Nullable
@@ -111,7 +140,7 @@ public class BM25Utils
             if (queryTerms.size() > frequencies.size())
                 return null;
 
-            return new DocTF(pk, count, frequencies);
+            return new EagerDocTF(pk, count, frequencies);
         }
     }
 
@@ -121,6 +150,8 @@ public class BM25Utils
                                                                          IndexContext indexContext,
                                                                          Object source)
     {
+        assert source instanceof Memtable || source instanceof SSTableId : "Invalid source " + source.getClass();
+
         // data structures for document stats and frequencies
         ArrayList<DocTF> documents = new ArrayList<>();
         double totalTermCount = 0;
@@ -130,18 +161,20 @@ public class BM25Utils
         {
             var tf = docIterator.next();
             documents.add(tf);
-            totalTermCount += tf.termCount;
+            totalTermCount += tf.termCount();
         }
+
         if (documents.isEmpty())
             return CloseableIterator.emptyIterator();
 
         // Calculate average document length
         double avgDocLength = totalTermCount / documents.size();
 
-        // Calculate BM25 scores
-        var scoredDocs = new ArrayList<PrimaryKeyWithScore>(documents.size());
-        for (var doc : documents)
+        // Calculate BM25 scores. Uses a nodequeue that avoids additional allocations and has heap time complexity
+        var nodeQueue = new NodeQueue(new BoundedLongHeap(documents.size()), NodeQueue.Order.MAX_HEAP);
+        for (int i = 0; i < documents.size(); i++)
         {
+            var doc = documents.get(i);
             double score = 0.0;
             for (var queryTerm : queryTerms)
             {
@@ -150,45 +183,55 @@ public class BM25Utils
                 // we shouldn't have more hits for a term than we counted total documents
                 assert df <= docStats.docCount : String.format("df=%d, totalDocs=%d", df, docStats.docCount);
 
-                double normalizedTf = tf / (tf + K1 * (1 - B + B * doc.termCount / avgDocLength));
+                double normalizedTf = tf / (tf + K1 * (1 - B + B * doc.termCount() / avgDocLength));
                 double idf = Math.log(1 + (docStats.docCount - df + 0.5) / (df + 0.5));
                 double deltaScore = normalizedTf * idf;
                 assert deltaScore >= 0 : String.format("BM25 score for tf=%d, df=%d, tc=%d, totalDocs=%d is %f",
-                                                       tf, df, doc.termCount, docStats.docCount, deltaScore);
+                                                       tf, df, doc.termCount(), docStats.docCount, deltaScore);
                 score += deltaScore;
             }
-            if (source instanceof Memtable)
-                scoredDocs.add(new PrimaryKeyWithScore(indexContext, (Memtable) source, doc.pk, (float) score));
-            else if (source instanceof SSTableId)
-                scoredDocs.add(new PrimaryKeyWithScore(indexContext, (SSTableId) source, doc.pk, (float) score));
-            else
-                throw new IllegalArgumentException("Invalid source " + source.getClass());
+            nodeQueue.push(i, (float) score);
         }
 
-        // sort by score (PKWS implements Comparator correctly for us)
-        Collections.sort(scoredDocs);
+        return new NodeQueueDocTFIterator(nodeQueue, documents, indexContext, source, docIterator);
+    }
 
-        return new CloseableIterator<>()
+    private static class NodeQueueDocTFIterator extends AbstractIterator<PrimaryKeyWithSortKey>
+    {
+        private final NodeQueue nodeQueue;
+        private final List<DocTF> documents;
+        private final IndexContext indexContext;
+        private final Object source;
+        private final CloseableIterator<DocTF> docIterator;
+
+        NodeQueueDocTFIterator(NodeQueue nodeQueue, List<DocTF> documents, IndexContext indexContext, Object source, CloseableIterator<DocTF> docIterator)
         {
-            private final Iterator<PrimaryKeyWithScore> iterator = scoredDocs.iterator();
+            this.nodeQueue = nodeQueue;
+            this.documents = documents;
+            this.indexContext = indexContext;
+            this.source = source;
+            this.docIterator = docIterator;
+        }
 
-            @Override
-            public boolean hasNext()
-            {
-                return iterator.hasNext();
-            }
+        @Override
+        protected PrimaryKeyWithSortKey computeNext()
+        {
+            if (nodeQueue.size() == 0)
+                return endOfData();
 
-            @Override
-            public PrimaryKeyWithSortKey next()
-            {
-                return iterator.next();
-            }
+            var score = nodeQueue.topScore();
+            var node = nodeQueue.pop();
+            var doc = documents.get(node);
+            if (source instanceof Memtable)
+                return doc.primaryKey(indexContext, (Memtable) source, score);
+            else
+                return doc.primaryKey(indexContext, (SSTableId<?>) source, score);
+        }
 
-            @Override
-            public void close()
-            {
-                FileUtils.closeQuietly(docIterator);
-            }
-        };
+        @Override
+        public void close()
+        {
+            FileUtils.closeQuietly(docIterator);
+        }
     }
 }
