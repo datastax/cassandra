@@ -130,15 +130,15 @@ public class BM25Test extends SAITester
         // be rejected
         beforeAndAfterFlush(() -> {
             // Single predicate
-            assertInvalidMessage(String.format(EQ_AMBIGUOUS_ERROR, "v", getIndex(0), getIndex(1)),
+            assertInvalidMessage(String.format(EQ_AMBIGUOUS_ERROR, 'v', getIndex(0), getIndex(1)),
                                  "SELECT k FROM %s WHERE v = 'apple'");
 
             // AND
-            assertInvalidMessage(String.format(EQ_AMBIGUOUS_ERROR, "v", getIndex(0), getIndex(1)),
+            assertInvalidMessage(String.format(EQ_AMBIGUOUS_ERROR, 'v', getIndex(0), getIndex(1)),
                                  "SELECT k FROM %s WHERE v = 'apple' AND v : 'juice'");
 
             // OR
-            assertInvalidMessage(String.format(EQ_AMBIGUOUS_ERROR, "v", getIndex(0), getIndex(1)),
+            assertInvalidMessage(String.format(EQ_AMBIGUOUS_ERROR, 'v', getIndex(0), getIndex(1)),
                                  "SELECT k FROM %s WHERE v = 'apple' OR v : 'juice'");
         });
     }
@@ -191,7 +191,7 @@ public class BM25Test extends SAITester
                     "\"tokenizer\" : {\"name\" : \"standard\"}, " +
                     "\"filters\" : [{\"name\" : \"porterstem\"}]" +
                     "}'" +
-                    "}");
+                    '}');
         createIndex("CREATE CUSTOM INDEX ON %s(v3) USING 'org.apache.cassandra.index.sai.StorageAttachedIndex'");
 
         execute("INSERT INTO %s (k, v1, v2, v3) VALUES (1, 'apple', 'orange juice', 5)");
@@ -269,10 +269,8 @@ public class BM25Test extends SAITester
         execute("INSERT INTO %s (k, v) VALUES (1, 'apple')");
 
         beforeAndAfterFlush(() ->
-                            {
-                                assertInvalidMessage("BM25 query must contain at least one term (perhaps your analyzer is discarding tokens you didn't expect)",
-                                                     "SELECT k FROM %s ORDER BY v BM25 OF '+' LIMIT 1");
-                            });
+                            assertInvalidMessage("BM25 query must contain at least one term (perhaps your analyzer is discarding tokens you didn't expect)",
+                                                 "SELECT k FROM %s ORDER BY v BM25 OF '+' LIMIT 1"));
     }
 
     @Test
@@ -668,7 +666,7 @@ public class BM25Test extends SAITester
     }
 
     @Test
-    public void reproErrors() throws Throwable
+    public void testErrorMessages()
     {
         createTable("CREATE TABLE %s (id int PRIMARY KEY, category text, score int, " +
                     "title text, body text, bodyset set<text>, " +
@@ -677,17 +675,13 @@ public class BM25Test extends SAITester
         createAnalyzedIndex("bodyset", true);
         createAnalyzedIndex("map_body", true);
 
-        // Repro error message CNDB-13514
-        assertThatThrownBy(() -> execute("SELECT * FROM %s ORDER BY bodyset BM25 OF ? LIMIT 10",
-                                         "climate"))
-        .isInstanceOf(InvalidRequestException.class)
-        .hasMessage("BM25 ordering on column bodyset requires an analyzed index");
+        // Improve message issue CNDB-13514
+        assertInvalidMessage("BM25 ordering on column bodyset requires an analyzed index",
+                             "SELECT * FROM %s ORDER BY bodyset BM25 OF ? LIMIT 10");
 
-        // Repro CNDB-13515
-        assertThatThrownBy(() -> execute("SELECT * FROM %s WHERE map_body CONTAINS KEY 'Climate' ORDER BY body BM25 OF ? LIMIT 10",
-                                         "climate"));
-        assertThatThrownBy(() -> execute("SELECT * FROM %s WHERE map_body CONTAINS KEY 'HEALTH' ORDER BY body BM25 OF ? LIMIT 10 ALLOW FILTERING",
-                                         "climate"));
+        // Discussion of message incosistency CNDB-13526
+        assertInvalidMessage("Ordering on non-clustering column requires each restricted column to be indexed except for fully-specified partition keys",
+                             "SELECT * FROM %s WHERE map_body CONTAINS KEY 'Climate' ORDER BY body BM25 OF ? LIMIT 10");
     }
 
     @Test
@@ -702,6 +696,7 @@ public class BM25Test extends SAITester
         createIndex("CREATE CUSTOM INDEX ON %s (score) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s (category) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s (map_category) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s (KEYS(map_body)) USING 'StorageAttachedIndex'");
         insertCollectionData();
 
         beforeAndAfterFlush(
@@ -729,6 +724,8 @@ public class BM25Test extends SAITester
             executeQuery(Arrays.asList(11, 19, 1, 16, 6, 18, 12), "SELECT * FROM %s WHERE map_body CONTAINS 'Climate' ORDER BY body BM25 OF ? LIMIT 10",
                          "climate");
             executeQuery(Arrays.asList(11, 19, 16, 6, 18, 12), "SELECT * FROM %s WHERE map_body CONTAINS 'health' ORDER BY body BM25 OF ? LIMIT 10",
+                         "climate");
+            executeQuery(Arrays.asList(11, 19, 16, 6, 18, 12), "SELECT * FROM %s WHERE map_body CONTAINS KEY 'Health' ORDER BY body BM25 OF ? LIMIT 10",
                          "climate");
         });
     }
