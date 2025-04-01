@@ -283,7 +283,7 @@ public abstract class RepairMessage
             return ErrorHandling.RETRY;
         // Repair in mixed mode isn't fully supported, but also not activally blocked... so in the common case all participants
         // will be on the same version as this instance, so can avoid the lookup from gossip
-        CassandraVersion remoteVersion = Nodes.peers().getOpt(from).map(INodeInfo::getReleaseVersion).orElse(null);
+        CassandraVersion remoteVersion = Nodes.localOrPeerInfoOpt(from).map(INodeInfo::getReleaseVersion).orElse(null);
         if (remoteVersion == null)
         {
             if (VERB_TIMEOUT_VERSIONS.containsKey(verb))
