@@ -24,9 +24,12 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.ArrayDeque;
 import java.util.Collections;
+import java.util.List;
+import java.util.Map;
 import java.util.Queue;
 import java.util.Set;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicLongFieldUpdater;
 import java.util.concurrent.atomic.LongAdder;
@@ -120,6 +123,21 @@ import static org.apache.cassandra.utils.memory.MemoryUtil.isExactlyDirect;
  */
 public class BufferPool
 {
+    private static Map<Integer, AtomicInteger> allAllocs = new ConcurrentHashMap<>();
+    private static Map<Integer, AtomicInteger> overflowAllocs = new ConcurrentHashMap<>();
+    private static Map<Integer, AtomicInteger> allPuts = new ConcurrentHashMap<>();
+    private static Map<Integer, AtomicInteger> partialPuts = new ConcurrentHashMap<>();
+    private static Map<Integer, AtomicInteger> partialPoolPuts = new ConcurrentHashMap<>();
+    private static Map<Integer, AtomicInteger> partialOverflowPuts = new ConcurrentHashMap<>();
+    private static Map<Integer, AtomicInteger> overflowPuts = new ConcurrentHashMap<>();
+    private static AtomicInteger iteration = new AtomicInteger();
+    private static ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+
+    static
+    {
+        scheduler.scheduleAtFixedRate(BufferPool::dumpStats, 1, 1, TimeUnit.SECONDS);
+    }
+
     /** The size of a page aligned buffer, 128KiB */
     public static final int NORMAL_CHUNK_SIZE = 128 << 10;
     public static final int NORMAL_ALLOCATION_UNIT = NORMAL_CHUNK_SIZE / 64;
@@ -178,6 +196,34 @@ public class BufferPool
 
     private final ReferenceQueue<Object> localPoolRefQueue = new ReferenceQueue<>();
     private final InfiniteLoopExecutor localPoolCleaner;
+
+    private static void dumpStats()
+    {
+        StringBuilder sb = new StringBuilder();
+        sb.append("BufferPool dump stats:\n");
+        sb.append("iteration ").append(iteration.incrementAndGet()).append('\n');
+        sb.append("time ").append(System.currentTimeMillis()).append('\n');
+        appendMap("all allocs", allAllocs, sb);
+        appendMap("overflow allocs", overflowAllocs, sb);
+        sb.append('\n');
+        appendMap("all puts", allPuts, sb);
+        appendMap("overflow puts", overflowPuts, sb);
+        sb.append('\n');
+        appendMap("partial puts", partialPuts, sb);
+        appendMap("partial pool puts", partialPoolPuts, sb);
+        appendMap("partial overflow puts", partialOverflowPuts, sb);
+        logger.info("-------------- BUFFER POOL STATS --------------\n" + sb);
+    }
+
+    private static void appendMap(String description, Map<Integer, AtomicInteger> map, StringBuilder sb)
+    {
+        sb.append(description).append('\n');
+        map.entrySet()
+                 .stream()
+                 .forEach(e -> {
+                     sb.append(e.getKey()).append(" ").append(e.getValue().get()).append('\n');
+                 });
+    }
 
     public BufferPool(String name, long memoryUsageThreshold, boolean recyclePartially)
     {
@@ -238,7 +284,13 @@ public class BufferPool
                 metrics.markOversizedOverflow();
             else
                 metrics.markNormalOverflow();
-            return ByteBuffer.allocateDirect(size);
+            ByteBuffer ret = ByteBuffer.allocateDirect(size);
+            if (isChunkCache())
+            {
+                overflowAllocs.computeIfAbsent(ret.capacity(), k -> new AtomicInteger(0))
+                              .incrementAndGet();
+            }
+            return ret;
         }
     }
 
@@ -808,10 +860,18 @@ public class BufferPool
             Chunk chunk = Chunk.getParentChunk(buffer);
             int size = buffer.capacity();
 
+            if (isChunkCache())
+            {
+                allPuts.computeIfAbsent(size, k -> new AtomicInteger(0)).incrementAndGet();
+            }
             if (chunk == null)
             {
                 FileUtils.clean(buffer);
                 updateOverflowMemoryUsage(-size);
+                if (isChunkCache())
+                {
+                    overflowPuts.computeIfAbsent(size, k -> new AtomicInteger(0)).incrementAndGet();
+                }
             }
             else
             {
@@ -877,12 +937,33 @@ public class BufferPool
 
             if (chunk == null)
             {
+                if (isChunkCache())
+                {
+                    allPuts.computeIfAbsent(size, k -> new AtomicInteger(0))
+                           .incrementAndGet();
+                    overflowPuts.computeIfAbsent(size, k -> new AtomicInteger(0))
+                                .incrementAndGet();
+                    partialOverflowPuts.computeIfAbsent(size, k -> new AtomicInteger(0))
+                               .incrementAndGet();
+                    partialPuts.computeIfAbsent(size, k -> new AtomicInteger(0))
+                               .incrementAndGet();
+                }
                 updateOverflowMemoryUsage(-size);
                 return;
             }
 
             chunk.freeUnusedPortion(buffer);
             // Calculate the actual freed bytes which may be different from `size` when pooling is involved
+            if (isChunkCache())
+            {
+                int freed = originalCapacity - buffer.capacity();
+                allPuts.computeIfAbsent(freed, k -> new AtomicInteger(0))
+                       .incrementAndGet();
+                partialPoolPuts.computeIfAbsent(freed, k -> new AtomicInteger(0))
+                           .incrementAndGet();
+                partialPuts.computeIfAbsent(freed, k -> new AtomicInteger(0))
+                           .incrementAndGet();
+            }
             memoryInUse.add(buffer.capacity() - originalCapacity);
         }
 
@@ -897,6 +978,16 @@ public class BufferPool
         }
 
         private ByteBuffer get(int size, boolean sizeIsLowerBound)
+        {
+            ByteBuffer ret = doGet(size, sizeIsLowerBound);
+            if (isChunkCache())
+            {
+                allAllocs.computeIfAbsent(ret.capacity(), k -> new AtomicInteger(0)).incrementAndGet();
+            }
+            return ret;
+        }
+
+        private ByteBuffer doGet(int size, boolean sizeIsLowerBound)
         {
             ByteBuffer ret = tryGet(size, sizeIsLowerBound);
             if (ret != null)
@@ -1059,6 +1150,11 @@ public class BufferPool
                 tinyPool.recycleWhenFree = recycleWhenFree;
             return this;
         }
+    }
+
+    private boolean isChunkCache()
+    {
+        return name.equals("chunk-cache");
     }
 
     private static final class LocalPoolRef extends PhantomReference<LocalPool>

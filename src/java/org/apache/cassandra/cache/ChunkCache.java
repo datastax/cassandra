@@ -97,7 +97,7 @@ public class ChunkCache
                                               ? new ChunkCache(BufferPools.forChunkCache(), DatabaseDescriptor.getFileCacheSizeInMB(), ChunkCacheMetrics::create)
                                               : null;
 
-    private final BufferPool bufferPool;
+    public final BufferPool bufferPool;
 
     // Relies on the implementation detail that keys are interned strings and can be compared by reference.
     // Because compute optimistically updates the set without acquiring a lock, we must use a set that is
