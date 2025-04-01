@@ -43,6 +43,7 @@ import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.transport.messages.*;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.utils.MonotonicClock;
+import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.utils.ReflectionUtils;
 import org.apache.cassandra.utils.UUIDGen;
 
@@ -52,6 +53,16 @@ import org.apache.cassandra.utils.UUIDGen;
 public abstract class Message
 {
     protected static final Logger logger = LoggerFactory.getLogger(Message.class);
+    private static final NoSpamLogger noSpam = NoSpamLogger.getLogger(logger, 1, TimeUnit.MINUTES);
+
+
+    /**
+     * The timestamp in millis when the request was orignially received by upstream components. This is used to timeout
+     * requests with respect to their end-to-end lifecycle (as opposed to when the request message was deseiriled) and
+     * is respected in NTR queue timeouts as well as verb timeouts. The contract is, such requests should be endoded
+     * as a java long in the big-endian format.
+     */
+    protected static final String CNDB_START_TIME = "CNDB_START_TIME";
 
     public interface Codec<M extends Message> extends CBCodec<M> {}
 
@@ -231,6 +242,24 @@ public abstract class Message
          */
         protected long elapsedTimeSinceCreation(TimeUnit timeUnit)
         {
+            Map<String, ByteBuffer> customPayload = getCustomPayload();
+            if (customPayload != null && customPayload.containsKey(CNDB_START_TIME))
+            {
+                ByteBuffer startTime = customPayload.get(CNDB_START_TIME);
+                try
+                {
+                    long startTimeMillis = timeUnit.convert(startTime.getLong(), TimeUnit.MILLISECONDS);
+                    // TODO: Remove logline
+                    noSpam.info("Start time: {}", startTimeMillis);
+                    return timeUnit.convert(System.currentTimeMillis() - startTime.getLong(), TimeUnit.MILLISECONDS);
+                }
+                catch (Exception e)
+                {
+                    noSpam.warn("Failed to extract start time from custom payload, falling back to creationTimeNanos", e);
+                }
+            }
+
+            // fallback to the time elapsed since the request message was deserialized
             return timeUnit.convert(MonotonicClock.approxTime.now() - creationTimeNanos, TimeUnit.NANOSECONDS);
         }
 
