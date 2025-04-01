@@ -680,7 +680,7 @@ public class BM25Test extends SAITester
     @Test
     public void testCollections() throws Throwable
     {
-        createTable("CREATE TABLE %s (id int PRIMARY KEY, category text, score int, " +
+        createTable("CREATE TABLE %s (id int PRIMARY KEY, category text, score int, tie int," +
                     "title text, body text, bodyset set<text>, " +
                     "map_category map<int, text>, map_body map<text, text>)");
         createAnalyzedIndex("body", true);
@@ -688,62 +688,64 @@ public class BM25Test extends SAITester
         createAnalyzedIndex("map_body", true);
         createIndex("CREATE CUSTOM INDEX ON %s (score) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s (category) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s (tie) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s (map_category) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s (KEYS(map_body)) USING 'StorageAttachedIndex'");
         insertCollectionData();
 
         beforeAndAfterFlush(
         () -> {
-            executeQuery(Arrays.asList(11, 19, 1, 16, 6, 18, 12), "SELECT * FROM %s ORDER BY body BM25 OF ? LIMIT 10",
+            executeQuery(Arrays.asList(11, 1, 16, 18), "SELECT * FROM %s WHERE tie = 1 ORDER BY body BM25 OF ? LIMIT 10",
                          "climate");
-            executeQuery(Arrays.asList(11, 19, 1), "SELECT * FROM %s WHERE score = 5 ORDER BY body BM25 OF ? LIMIT 10",
+            executeQuery(Arrays.asList(11, 1), "SELECT * FROM %s WHERE score = 5 AND tie = 1 ORDER BY body BM25 OF ? LIMIT 10",
                          "climate");
             executeQuery(Arrays.asList(6, 16), "SELECT * FROM %s WHERE score > 3 ORDER BY body BM25 OF ? LIMIT 10",
                          "health");
-            executeQuery(Arrays.asList(4, 18, 12, 9, 14), "SELECT * FROM %s WHERE category = 'Health' " +
+            executeQuery(Arrays.asList(4, 18, 14), "SELECT * FROM %s WHERE category = 'Health' AND tie = 1 " +
                                                           "ORDER BY body BM25 OF ? LIMIT 10",
                          "Health");
-            executeQuery(Arrays.asList(4, 18, 12, 9, 14), "SELECT * FROM %s WHERE score <= 3 AND category = 'Health' " +
+            executeQuery(Arrays.asList(4, 18, 14), "SELECT * FROM %s WHERE score <= 3 AND tie = 1 AND category = 'Health' " +
                                                           "ORDER BY body BM25 OF ? LIMIT 10",
                          "health");
-            executeQuery(Arrays.asList(11, 19, 1, 16, 6, 18, 12), "SELECT * FROM %s WHERE bodyset CONTAINS 'climate' ORDER BY body BM25 OF ? LIMIT 10",
+            executeQuery(Arrays.asList(11, 1, 16, 18), "SELECT * FROM %s WHERE bodyset CONTAINS 'climate' AND tie <= 1 ORDER BY body BM25 OF ? LIMIT 10",
                          "climate");
-            executeQuery(Arrays.asList(16, 6, 18, 12), "SELECT * FROM %s WHERE bodyset CONTAINS 'health' ORDER BY body BM25 OF ? LIMIT 10",
+            executeQuery(Arrays.asList(6, 12), "SELECT * FROM %s WHERE bodyset CONTAINS 'health' AND tie > 1 ORDER BY body BM25 OF ? LIMIT 10",
                          "climate");
-            executeQuery(Arrays.asList(11, 19, 1, 16, 6, 18, 12), "SELECT * FROM %s WHERE map_category CONTAINS 'Climate' ORDER BY body BM25 OF ? LIMIT 10",
+            executeQuery(Arrays.asList(11, 1, 16, 18), "SELECT * FROM %s WHERE map_category CONTAINS 'Climate' AND tie <= 1 ORDER BY body BM25 OF ? LIMIT 10",
                          "climate");
-            executeQuery(Arrays.asList(19, 16, 6, 18, 12), "SELECT * FROM %s WHERE map_category CONTAINS 'Health' ORDER BY body BM25 OF ? LIMIT 10",
+            executeQuery(Arrays.asList(19, 6, 12), "SELECT * FROM %s WHERE map_category CONTAINS 'Health' AND tie > 1 ORDER BY body BM25 OF ? LIMIT 10",
                          "climate");
-            executeQuery(Arrays.asList(11, 19, 1, 16, 6, 18, 12), "SELECT * FROM %s WHERE map_body CONTAINS 'Climate' ORDER BY body BM25 OF ? LIMIT 10",
+            executeQuery(Arrays.asList(11, 1, 16, 18), "SELECT * FROM %s WHERE map_body CONTAINS 'Climate' AND tie <= 1 ORDER BY body BM25 OF ? LIMIT 10",
                          "climate");
-            executeQuery(Arrays.asList(11, 19, 16, 6, 18, 12), "SELECT * FROM %s WHERE map_body CONTAINS 'health' ORDER BY body BM25 OF ? LIMIT 10",
+            executeQuery(Arrays.asList(11, 16, 18), "SELECT * FROM %s WHERE map_body CONTAINS 'health' AND tie < 2 ORDER BY body BM25 OF ? LIMIT 10",
                          "climate");
-            executeQuery(Arrays.asList(11, 19, 16, 6, 18, 12), "SELECT * FROM %s WHERE map_body CONTAINS KEY 'Health' ORDER BY body BM25 OF ? LIMIT 10",
+            executeQuery(Arrays.asList(19, 6, 12), "SELECT * FROM %s WHERE map_body CONTAINS KEY 'Health' AND tie >= 2 ORDER BY body BM25 OF ? LIMIT 10",
                          "climate");
         });
     }
 
-    private final static Object[][] DATASET = {
-    { 1, "Climate", 5, "Climate change is a pressing issue. Climate patterns are shifting globally. Scientists study climate data daily." },
-    { 2, "Technology", 3, "Technology is advancing. New technology in AI and robotics is groundbreaking." },
-    { 3, "Economy", 4, "The economy is recovering. Economy experts are optimistic. However, the global economy still faces risks." },
-    { 4, "Health", 3, "Health is wealth. Health policies need to be improved to ensure better public health outcomes." },
-    { 5, "Education", 2, "Education is the foundation of success. Online education is booming." },
-    { 6, "Climate", 4, "Climate and health are closely linked. Climate affects air quality and health outcomes." },
-    { 7, "Education", 3, "Technology and education go hand in hand. EdTech is revolutionizing education through technology." },
-    { 8, "Economy", 3, "The global economy is influenced by technology. Fintech is a key part of the economy today." },
-    { 9, "Health", 3, "Education and health programs must be prioritized. Health education is vital in schools." },
-    { 10, "Mixed", 3, "Technology, economy, and education are pillars of development." },
-    { 11, "Climate", 5, "Climate climate climate. It's everywhere. Climate drives political and economic decisions." },
-    { 12, "Health", 2, "Health concerns rise with climate issues. Health organizations are sounding the alarm." },
-    { 13, "Economy", 3, "The economy is fluctuating. Uncertainty looms over the economy." },
-    { 14, "Health", 3, "Cutting-edge technology is transforming healthcare. Healthtech merges health and technology." },
-    { 15, "Education", 2, "Education reforms are underway. Education experts suggest holistic changes." },
-    { 16, "Climate", 4, "Climate affects the economy and health. Climate events cost billions annually." },
-    { 17, "Technology", 3, "Technology is the backbone of the modern economy. Without technology, economic growth stagnates." },
-    { 18, "Health", 2, "Health is discussed less than economy or climate, but health matters deeply." },
-    { 19, "Climate", 5, "Climate change, climate policies, climate research—climate is the buzzword of our time." },
-    { 20, "Mixed", 3, "Investments in education and technology will shape the future of the global economy." }
+    private final static Object[][] DATASET =
+    {
+    { 1, "Climate", 5, "Climate change is a pressing issue. Climate patterns are shifting globally. Scientists study climate data daily.", 1 },
+    { 2, "Technology", 3, "Technology is advancing. New technology in AI and robotics is groundbreaking.", 1 },
+    { 3, "Economy", 4, "The economy is recovering. Economy experts are optimistic. However, the global economy still faces risks.", 1 },
+    { 4, "Health", 3, "Health is wealth. Health policies need to be improved to ensure better public health outcomes.", 1 },
+    { 5, "Education", 2, "Education is the foundation of success. Online education is booming.", 4 },
+    { 6, "Climate", 4, "Climate and health are closely linked. Climate affects air quality and health outcomes.", 2 },
+    { 7, "Education", 3, "Technology and education go hand in hand. EdTech is revolutionizing education through technology.", 3 },
+    { 8, "Economy", 3, "The global economy is influenced by technology. Fintech is a key part of the economy today.", 2 },
+    { 9, "Health", 3, "Education and health programs must be prioritized. Health education is vital in schools.", 2 },
+    { 10, "Mixed", 3, "Technology, economy, and education are pillars of development.", 2 },
+    { 11, "Climate", 5, "Climate climate climate. It's everywhere. Climate drives political and economic decisions.", 1 },
+    { 12, "Health", 2, "Health concerns rise with climate issues. Health organizations are sounding the alarm.", 2 },
+    { 13, "Economy", 3, "The economy is fluctuating. Uncertainty looms over the economy.", 1 },
+    { 14, "Health", 3, "Cutting-edge technology is transforming healthcare. Healthtech merges health and technology.", 1 },
+    { 15, "Education", 2, "Education reforms are underway. Education experts suggest holistic changes.", 1 },
+    { 16, "Climate", 4, "Climate affects the economy and health. Climate events cost billions annually.", 1 },
+    { 17, "Technology", 3, "Technology is the backbone of the modern economy. Without technology, economic growth stagnates.", 2 },
+    { 18, "Health", 2, "Health is discussed less than economy or climate, but health matters deeply.", 1 },
+    { 19, "Climate", 5, "Climate change, climate policies, climate research—climate is the buzzword of our time.", 2 },
+    { 20, "Mixed", 3, "Investments in education and technology will shape the future of the global economy.", 1 }
     };
 
     private void insertPrimitiveData()
@@ -781,12 +783,13 @@ public class BM25Test extends SAITester
             }
 
             execute(
-            "INSERT INTO %s (id, category, score, body, bodyset, map_category, map_body) " +
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO %s (id, category, score, body, tie, bodyset, map_category, map_body) " +
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             DATASET[row][0],
             DATASET[row][1],
             DATASET[row][2],
             DATASET[row][3],
+            DATASET[row][4],
             set,
             map,
             map_text
