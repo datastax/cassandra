@@ -76,11 +76,11 @@ public class EncryptedSequentialWriter extends SequentialWriter
                                      SequentialWriterOption option,
                                      ICompressor encryptor)
     {
-        super(file, SequentialWriterOption.newBuilder()
+        super(file, true, SequentialWriterOption.newBuilder()
                             .bufferSize(maxBytesInPage(encryptor))
                             .bufferType(BufferType.preferredForCompression())
                             .finishOnClose(option.finishOnClose())
-                            .build());
+                            .build(), true);
         assert Integer.bitCount(CHUNK_SIZE) == 1
                 : "Chunk size of EncryptedSequentialWriter must be a power of two, was " + CHUNK_SIZE;
 
