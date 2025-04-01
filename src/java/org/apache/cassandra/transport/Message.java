@@ -243,6 +243,12 @@ public abstract class Message
         protected long elapsedTimeSinceCreation(TimeUnit timeUnit)
         {
             Map<String, ByteBuffer> customPayload = getCustomPayload();
+            if (customPayload == null)
+                noSpam.warn("Custom payload is null, falling back to creationTimeNanos");
+            else if (customPayload.containsKey(CNDB_START_TIME))
+                noSpam.info("CNDB_START_TIME is present in custom payload");
+            else
+                noSpam.warn("Custom payload does not contain CNDB_START_TIME, falling back to creationTimeNanos");
             if (customPayload != null && customPayload.containsKey(CNDB_START_TIME))
             {
                 ByteBuffer startTime = customPayload.get(CNDB_START_TIME);
@@ -250,7 +256,7 @@ public abstract class Message
                 {
                     long startTimeMillis = timeUnit.convert(startTime.getLong(), TimeUnit.MILLISECONDS);
                     // TODO: Remove logline
-                    noSpam.info("Start time: {}", startTimeMillis);
+                    noSpam.info("CNDB_START_TIME time: {}", startTimeMillis);
                     return timeUnit.convert(System.currentTimeMillis() - startTime.getLong(), TimeUnit.MILLISECONDS);
                 }
                 catch (Exception e)
