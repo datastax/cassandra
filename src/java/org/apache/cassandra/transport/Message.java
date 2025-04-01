@@ -249,6 +249,12 @@ public abstract class Message
                 noSpam.info("CNDB_START_TIME is present in custom payload");
             else
                 noSpam.warn("Custom payload does not contain CNDB_START_TIME, falling back to creationTimeNanos");
+            if (customPayload != null)
+                for (Map.Entry<String, ByteBuffer> entry : customPayload.entrySet()) {
+                    String key = entry.getKey();
+                    ByteBuffer value = entry.getValue();
+                    logger.info("Custom payload key: {}, value: {}", key, value);
+                }
             if (customPayload != null && customPayload.containsKey(CNDB_START_TIME))
             {
                 ByteBuffer startTime = customPayload.get(CNDB_START_TIME);
