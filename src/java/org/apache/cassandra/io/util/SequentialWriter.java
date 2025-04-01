@@ -106,17 +106,21 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
     }
 
     // TODO: we should specify as a parameter if we permit an existing file or not
-    private static FileChannel openChannel(File file)
+    private static FileChannel openChannel(File file, boolean readable)
     {
         try
         {
             if (file.exists())
             {
-                return FileChannel.open(file.toPath(), StandardOpenOption.WRITE);
+                StandardOpenOption[] options = readable ? new StandardOpenOption[] {StandardOpenOption.WRITE, StandardOpenOption.READ}
+                                                        : new StandardOpenOption[] {StandardOpenOption.WRITE};
+                return FileChannel.open(file.toPath(), options);
             }
             else
             {
-                FileChannel channel = FileChannel.open(file.toPath(), StandardOpenOption.WRITE, StandardOpenOption.CREATE_NEW);
+                StandardOpenOption[] options = readable ? new StandardOpenOption[] {StandardOpenOption.WRITE, StandardOpenOption.READ, StandardOpenOption.CREATE_NEW}
+                                                        : new StandardOpenOption[] {StandardOpenOption.WRITE, StandardOpenOption.CREATE_NEW};
+                FileChannel channel = FileChannel.open(file.toPath(), options);
                 try
                 {
                     SyncUtil.trySyncDir(file.parent());
@@ -164,7 +168,12 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
      */
     public SequentialWriter(File file, SequentialWriterOption option, boolean strictFlushing)
     {
-        super(openChannel(file), option.allocateBuffer());
+        this(file, false, option, strictFlushing);
+    }
+
+    public SequentialWriter(File file, boolean readable, SequentialWriterOption option, boolean strictFlushing)
+    {
+        super(openChannel(file, readable), option.allocateBuffer());
         this.strictFlushing = strictFlushing;
         this.fchannel = (FileChannel)channel;
 
