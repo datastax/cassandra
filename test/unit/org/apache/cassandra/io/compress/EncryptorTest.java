@@ -23,6 +23,10 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.crypto.EncryptionKeyBackup;
+import org.apache.cassandra.crypto.IKeyProvider;
+import org.apache.cassandra.crypto.IKeyProviderFactory;
+import org.apache.cassandra.crypto.LocalFileSystemKeyProviderFactory;
 
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
@@ -221,8 +225,7 @@ public class EncryptorTest
         Map<String, String> options = Maps.newHashMap();
         options.put("cipher_algorithm", "AES/CBC/PKCS5Padding");
         options.put("secret_key_strength", "128");
-        //TODO
-        //options.put("secret_key_provider_factory_class", LocalFileSystemKeyProviderFactory.class.getName());
+        options.put("secret_key_provider_factory_class", LocalFileSystemKeyProviderFactory.class.getName());
         options.put("secret_key_file", secretKeyFilePath);
 
         Encryptor cc1 = Encryptor.create(options);

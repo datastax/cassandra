@@ -11,9 +11,8 @@ import java.util.Map;
 
 import com.google.common.collect.ImmutableMap;
 
-import org.apache.cassandra.io.compress.IKeyProvider;
-import org.apache.cassandra.io.compress.IKeyProviderFactory;
-import org.apache.cassandra.io.compress.OptionMap;
+import org.apache.cassandra.crypto.IKeyProvider;
+import org.apache.cassandra.crypto.IKeyProviderFactory;
 
 public class EncryptionConfig
 {
