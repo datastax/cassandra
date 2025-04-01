@@ -230,6 +230,11 @@ public class CompressedSequentialWriter extends SequentialWriter
         return metadataWriter.open(overrideLength, chunkOffset);
     }
 
+    public void updateFileHandle(FileHandle.Builder fhBuilder)
+    {
+        fhBuilder.withCompressionMetadata(metadataWriter.open(lastFlushOffset, chunkOffset));
+    }
+
     @Override
     public DataPosition mark()
     {

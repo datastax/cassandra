@@ -21,10 +21,10 @@ import javax.crypto.spec.IvParameterSpec;
 
 import org.apache.commons.math3.random.ISAACRandom;
 
-import org.apache.cassandra.io.compress.IKeyProvider;
-import org.apache.cassandra.io.compress.IMultiKeyProvider;
-import org.apache.cassandra.io.compress.KeyAccessException;
-import org.apache.cassandra.io.compress.KeyGenerationException;
+import org.apache.cassandra.crypto.IKeyProvider;
+import org.apache.cassandra.crypto.IMultiKeyProvider;
+import org.apache.cassandra.crypto.KeyAccessException;
+import org.apache.cassandra.crypto.KeyGenerationException;
 
 /**
  * Encrypts blocks of data. Reuses the same Cipher instance and avoids needless initialization.

@@ -198,9 +198,9 @@ public class BigTableWriter extends SortedTableWriter
         IndexSummary indexSummary = iwriter.summary.build(metadata().partitioner, boundary);
         long indexFileLength = descriptor.fileFor(Component.PRIMARY_INDEX).length();
         int indexBufferSize = optimizationStrategy.bufferSize(indexFileLength / indexSummary.size());
+        iwriter.indexFile.updateFileHandle(iwriter.builder);
         FileHandle ifile = iwriter.builder.bufferSize(indexBufferSize).withLength(boundary.indexLength).complete();
-        if (compression)
-            dbuilder.withCompressionMetadata(((CompressedSequentialWriter) dataFile).open(boundary.dataLength));
+        dataFile.updateFileHandle(dbuilder);
         int dataBufferSize = optimizationStrategy.bufferSize(stats.estimatedPartitionSize.percentile(DatabaseDescriptor.getDiskOptimizationEstimatePercentile()));
         FileHandle dfile = dbuilder.bufferSize(dataBufferSize).withLength(boundary.dataLength).complete();
         invalidateCacheAtPreviousBoundary(dfile, boundary.dataLength);
@@ -242,9 +242,9 @@ public class BigTableWriter extends SortedTableWriter
         long indexFileLength = descriptor.fileFor(Component.PRIMARY_INDEX).length();
         int dataBufferSize = optimizationStrategy.bufferSize(stats.estimatedPartitionSize.percentile(DatabaseDescriptor.getDiskOptimizationEstimatePercentile()));
         int indexBufferSize = optimizationStrategy.bufferSize(indexFileLength / indexSummary.size());
+        iwriter.indexFile.updateFileHandle(iwriter.builder);
         FileHandle ifile = iwriter.builder.bufferSize(indexBufferSize).complete();
-        if (compression)
-            dbuilder.withCompressionMetadata(((CompressedSequentialWriter) dataFile).open(0));
+        dataFile.updateFileHandle(dbuilder);
         FileHandle dfile = dbuilder.bufferSize(dataBufferSize).complete();
         invalidateCacheAtPreviousBoundary(dfile, Long.MAX_VALUE);
         SSTableReader sstable = SSTableReader.internalOpen(descriptor,

@@ -24,6 +24,9 @@ import com.google.common.collect.Sets;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.crypto.EncryptionKeyBackup;
+import org.apache.cassandra.crypto.KeyAccessException;
+import org.apache.cassandra.crypto.KeyGenerationException;
 import org.apache.cassandra.service.StorageService;
 
 /**
