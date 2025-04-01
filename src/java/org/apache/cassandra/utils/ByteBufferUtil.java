@@ -26,6 +26,7 @@ package org.apache.cassandra.utils;
 import java.io.*;
 import java.net.InetAddress;
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
@@ -533,6 +534,21 @@ public class ByteBufferUtil
     public static long toLong(ByteBuffer bytes)
     {
         return bytes.getLong(bytes.position());
+    }
+
+    public static long getLongFromBuffer(byte[] bytes) {
+        if (bytes == null || bytes.length < Long.BYTES) {
+            throw new IllegalArgumentException("Input must contain at least " + Long.BYTES + " bytes");
+        }
+
+        ByteBuffer buffer = ByteBuffer.wrap(bytes);
+        buffer.order(ByteOrder.BIG_ENDIAN);
+
+        if (buffer.remaining() < Long.BYTES) {
+            throw new IllegalStateException("Insufficient bytes remaining in buffer");
+        }
+
+        return buffer.getLong();
     }
 
     public static float toFloat(ByteBuffer bytes)

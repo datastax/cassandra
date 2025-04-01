@@ -42,6 +42,7 @@ import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.transport.messages.*;
 import org.apache.cassandra.service.QueryState;
+import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.MonotonicClock;
 import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.utils.ReflectionUtils;
@@ -249,25 +250,32 @@ public abstract class Message
                 noSpam.info("CNDB_START_TIME is present in custom payload");
             else
                 noSpam.warn("Custom payload does not contain CNDB_START_TIME, falling back to creationTimeNanos");
-            if (customPayload != null)
-                for (Map.Entry<String, ByteBuffer> entry : customPayload.entrySet()) {
-                    String key = entry.getKey();
-                    ByteBuffer value = entry.getValue();
-                    logger.info("Custom payload key: {}, value: {}", key, value);
-                }
             if (customPayload != null && customPayload.containsKey(CNDB_START_TIME))
             {
                 ByteBuffer startTime = customPayload.get(CNDB_START_TIME);
                 try
                 {
-                    long startTimeMillis = timeUnit.convert(startTime.getLong(), TimeUnit.MILLISECONDS);
+                    long startTimeMillis = ByteBufferUtil.toLong(startTime);
                     // TODO: Remove logline
-                    noSpam.info("CNDB_START_TIME time: {}", startTimeMillis);
-                    return timeUnit.convert(System.currentTimeMillis() - startTime.getLong(), TimeUnit.MILLISECONDS);
+                    noSpam.info("CNDB_START_TIME time using ByteBufferUtil.toLong: {}, buffers: {}", startTimeMillis, startTime);
+                    //return timeUnit.convert(System.currentTimeMillis() - startTime.getLong(), TimeUnit.MILLISECONDS);
                 }
                 catch (Exception e)
                 {
-                    noSpam.warn("Failed to extract start time from custom payload, falling back to creationTimeNanos", e);
+                    noSpam.warn("Failed to extract start time from custom payload using ByteBufferUtil.toLong, falling back to creationTimeNanos, buffers: {}", startTime, e);
+                }
+
+                // try another method
+                try
+                {
+                    long startTimeMillis = ByteBufferUtil.getLongFromBuffer(startTime.array());
+                    // TODO: Remove logline
+                    noSpam.info("CNDB_START_TIME time using ByteBufferUtil.getLongFromBuffer: {}, buffers: {}", startTimeMillis, startTime);
+                    //return timeUnit.convert(System.currentTimeMillis() - startTime.getLong(), TimeUnit.MILLISECONDS);
+                }
+                catch (Exception e)
+                {
+                    noSpam.warn("Failed to extract start time from custom payload using ByteBufferUtil.getLongFromBuffer, falling back to creationTimeNanos, buffers: {}", startTime, e);
                 }
             }
 
