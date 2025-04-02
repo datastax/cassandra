@@ -27,6 +27,7 @@ import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.util.FileUtils;
 
@@ -47,12 +48,8 @@ public class KeyRangeIntersectionIterator extends KeyRangeIterator
 
     static
     {
-        logger.info(String.format("Storage attached index intersection clause limit is %d", INTERSECTION_CLAUSE_LIMIT));
-    }
-
-    public static boolean shouldDefer(int numberOfExpressions)
-    {
-        return (INTERSECTION_CLAUSE_LIMIT <= 0) || (numberOfExpressions <= INTERSECTION_CLAUSE_LIMIT);
+        logger.info(String.format("Storage attached index intersection clause limit is %d",
+                                  CassandraRelevantProperties.SAI_INTERSECTION_CLAUSE_LIMIT.getInt()));
     }
 
     public final List<KeyRangeIterator> ranges;

@@ -37,6 +37,8 @@ import org.apache.cassandra.cache.RowCacheKey;
 import org.apache.cassandra.cache.RowCacheSentinel;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.cql3.CqlBuilder;
+import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.db.filter.ClusteringIndexFilter;
 import org.apache.cassandra.db.filter.ClusteringIndexNamesFilter;
 import org.apache.cassandra.db.filter.ClusteringIndexSliceFilter;
@@ -1257,16 +1259,43 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
     }
 
     @Override
-    protected void appendCQLWhereClause(StringBuilder sb)
+    protected void appendCQLWhereClause(CqlBuilder builder)
     {
-        sb.append(" WHERE ").append(partitionKey().toCQLString(metadata()));
+        builder.append(" WHERE ");
 
-        String filterString = clusteringIndexFilter().toCQLString(metadata(), rowFilter());
+        List<ColumnMetadata> pkColumns = metadata().partitionKeyColumns();
+        if (pkColumns.size() == 1)
+        {
+            builder.append(pkColumns.get(0).name.toCQLString()).append(" = ");
+            builder.append(pkColumns.get(0).type.toCQLString(partitionKey().getKey()));
+        }
+        else
+        {
+            // Multi-column partition key
+            CompositeType ct = (CompositeType) metadata().partitionKeyType;
+            ByteBuffer[] values = ct.split(partitionKey().getKey());
+            for (int i = 0; i < pkColumns.size(); i++)
+            {
+                if (i > 0)
+                    builder.append(" AND ");
+                builder.append(pkColumns.get(i).name.toCQLString())
+                       .append(" = ")
+                       .append(pkColumns.get(i).type.toCQLString(values[i]));
+            }
+        }
+
+        // We put the row filter first because the clustering index filter can end by "ORDER BY"
+        if (!rowFilter().isEmpty())
+            builder.append(" AND ").append(rowFilter().toCQLString());
+
+        // Pass RowFilter.none() to avoid the clustering filter trying to modify our row filter
+        String filterString = clusteringIndexFilter().toCQLString(metadata(), RowFilter.none());
         if (!filterString.isEmpty())
         {
-            if (!clusteringIndexFilter().selectsAllPartition() || !rowFilter().isEmpty())
-                sb.append(" AND ");
-            sb.append(filterString);
+            // Only add AND if the filter string contains actual conditions (not just ORDER BY)
+            if (!filterString.trim().startsWith("ORDER BY"))
+                builder.append(" AND ");
+            builder.append(filterString);
         }
     }
 

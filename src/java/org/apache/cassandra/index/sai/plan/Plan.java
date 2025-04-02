@@ -31,6 +31,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.cache.ChunkCache;
+import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.disk.format.Version;
@@ -353,6 +354,10 @@ abstract public class Plan
         leaves.sort(Comparator.comparingDouble(Plan::selectivity).reversed());
         for (Leaf leaf : leaves)
         {
+            // We won't try to skip leaves with a preferred index
+            if (leaf.usesIncludedIndex())
+                continue;
+
             Plan candidate = bestPlanSoFar.removeRestriction(leaf.id);
             if (logger.isTraceEnabled())
                 logger.trace("Candidate query plan:\n{}", candidate.toStringRecursive());
@@ -625,6 +630,7 @@ abstract public class Plan
             return cost().costPerKey();
         }
 
+        protected abstract boolean usesIncludedIndex();
     }
 
     /**
@@ -667,6 +673,12 @@ abstract public class Plan
         protected KeysIterationCost estimateCost()
         {
             return new KeysIterationCost(0, 0.0, 0.0);
+        }
+
+        @Override
+        protected boolean usesIncludedIndex()
+        {
+            return false;
         }
 
         @Nullable
@@ -719,6 +731,12 @@ abstract public class Plan
             return new KeysIterationCost(access.expectedAccessCount(factory.tableMetrics.rows),
                                          Double.POSITIVE_INFINITY,
                                          Double.POSITIVE_INFINITY);
+        }
+
+        @Override
+        protected boolean usesIncludedIndex()
+        {
+            return false;
         }
 
         @Nullable
@@ -828,6 +846,12 @@ abstract public class Plan
             return factory.tableMetrics.rows > 0
                    ? ((double) matchingKeysCount / factory.tableMetrics.rows)
                    : 0.0;
+        }
+
+        @Override
+        protected boolean usesIncludedIndex()
+        {
+            return factory.hints.includes(getIndexName());
         }
 
         private double estimateCostPerSkip(double step)
@@ -997,7 +1021,6 @@ abstract public class Plan
             return 1.0 - inverseSelectivity;
         }
 
-
         @Override
         protected ControlFlow forEachSubplan(Function<Plan, ControlFlow> function)
         {
@@ -1069,6 +1092,12 @@ abstract public class Plan
                 FileUtils.closeQuietly(builder.ranges());
                 throw t;
             }
+        }
+
+        @Override
+        protected boolean usesIncludedIndex()
+        {
+            return subplansSupplier.get().stream().anyMatch(KeysIteration::usesIncludedIndex);
         }
     }
 
@@ -1208,6 +1237,12 @@ abstract public class Plan
             }
         }
 
+        @Override
+        protected boolean usesIncludedIndex()
+        {
+            return subplansSupplier.get().stream().anyMatch(KeysIteration::usesIncludedIndex);
+        }
+
         /**
          * Limits the number of intersected subplans
          */
@@ -1215,7 +1250,31 @@ abstract public class Plan
         {
             if (subplansSupplier.orig.size() <= clauseLimit)
                 return this;
-            List<Plan.KeysIteration> newSubplans = new ArrayList<>(subplansSupplier.orig.subList(0, clauseLimit));
+
+            if (factory.hints.included.isEmpty())
+                return withNewSubplans(new ArrayList<>(subplansSupplier.orig.subList(0, clauseLimit)));
+
+            List<Plan.KeysIteration> newSubplans = new ArrayList<>(clauseLimit);
+            List<Plan.KeysIteration> optionalNewSubplans = new ArrayList<>(clauseLimit);
+            for (KeysIteration keysIteration : subplansSupplier.orig)
+            {
+                if (keysIteration.usesIncludedIndex())
+                    newSubplans.add(keysIteration);
+                else
+                    optionalNewSubplans.add(keysIteration);
+            }
+            for (KeysIteration keysIteration : optionalNewSubplans)
+            {
+                if (newSubplans.size() >= clauseLimit)
+                    break;
+                newSubplans.add(keysIteration);
+            }
+
+            return withNewSubplans(newSubplans);
+        }
+
+        private Plan withNewSubplans(List<Plan.KeysIteration> newSubplans)
+        {
             return factory.intersection(newSubplans, id).withAccess(access);
         }
     }
@@ -1324,6 +1383,12 @@ abstract public class Plan
                    ? this
                    : new KeysSort(factory, id, source, access, ordering);
         }
+
+        @Override
+        protected boolean usesIncludedIndex()
+        {
+            return source.usesIncludedIndex();
+        }
     }
 
     /**
@@ -1354,10 +1419,21 @@ abstract public class Plan
         }
 
         @Override
+        protected boolean usesIncludedIndex()
+        {
+            return factory.hints.includes(getIndexName());
+        }
+
+        @Override
         protected Iterator<? extends PrimaryKey> execute(Executor executor)
         {
             int softLimit = max(1, round((float) access.expectedAccessCount(factory.tableMetrics.rows)));
             return executor.getTopKRows((Expression) null, softLimit);
+        }
+
+        public String getIndexName()
+        {
+            return ordering.getIndexName();
         }
     }
 
@@ -1439,7 +1515,6 @@ abstract public class Plan
             return ordering.context;
         }
     }
-
 
     abstract public static class RowsIteration extends Plan
     {
@@ -1703,6 +1778,8 @@ abstract public class Plan
 
         public final CostEstimator costEstimator;
 
+        public final IndexHints hints;
+
         /** A plan returning no keys */
         public final KeysIteration nothing;
 
@@ -1717,12 +1794,16 @@ abstract public class Plan
 
         /**
          * Creates a factory that produces Plan nodes.
+         *
          * @param tableMetrics allows the planner to adapt the cost estimates to the actual amount of data stored in the table
+         * @param costEstimator a cost estimator
+         * @param hints the user-provided index hints, the plan should try to respect them
          */
-        public Factory(TableMetrics tableMetrics, CostEstimator costEstimator)
+        public Factory(TableMetrics tableMetrics, CostEstimator costEstimator, IndexHints hints)
         {
             this.tableMetrics = tableMetrics;
             this.costEstimator = costEstimator;
+            this.hints = hints;
             this.nothing = new Nothing(-1, this);
             this.defaultAccess = Access.sequential(tableMetrics.rows);
             this.everything = new Everything(-1, this, defaultAccess);

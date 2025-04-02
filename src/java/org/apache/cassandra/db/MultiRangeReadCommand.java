@@ -27,6 +27,7 @@ import java.util.stream.Collectors;
 import com.google.common.annotations.VisibleForTesting;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.cql3.CqlBuilder;
 import org.apache.cassandra.db.filter.ClusteringIndexFilter;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.filter.DataLimits;
@@ -366,17 +367,17 @@ public class MultiRangeReadCommand extends ReadCommand
     }
 
     @Override
-    protected void appendCQLWhereClause(StringBuilder sb)
+    protected void appendCQLWhereClause(CqlBuilder builder)
     {
         if (ranges().size() == 1 && ranges().get(0).isUnrestricted(metadata()) && rowFilter().isEmpty())
             return;
 
-        sb.append(" WHERE ");
+        builder.append(" WHERE ");
         // We put the row filter first because the data range can end by "ORDER BY"
         if (!rowFilter().isEmpty())
         {
-            sb.append(rowFilter());
-            sb.append(" AND ");
+            builder.append(rowFilter().toCQLString());
+            builder.append(" AND ");
         }
 
         boolean isFirst = true;
@@ -386,9 +387,9 @@ public class MultiRangeReadCommand extends ReadCommand
             if (!dataRange.isUnrestricted(metadata()))
             {
                 if (!isFirst)
-                    sb.append(" AND ");
+                    builder.append(" AND ");
                 isFirst = false;
-                sb.append(dataRange.toCQLString(metadata(), rowFilter()));
+                builder.append(dataRange.toCQLString(metadata(), rowFilter()));
             }
         }
     }
