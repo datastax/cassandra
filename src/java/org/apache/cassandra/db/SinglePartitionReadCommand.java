@@ -31,6 +31,7 @@ import org.apache.cassandra.cache.RowCacheKey;
 import org.apache.cassandra.cache.RowCacheSentinel;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.cql3.CqlBuilder;
 import org.apache.cassandra.db.filter.*;
 import org.apache.cassandra.db.lifecycle.*;
 import org.apache.cassandra.db.memtable.Memtable;
@@ -1145,20 +1146,21 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
         return Verb.READ_REQ;
     }
 
-    protected void appendCQLWhereClause(StringBuilder sb)
+    @Override
+    protected void appendCQLWhereClause(CqlBuilder builder)
     {
-        sb.append(" WHERE ");
+        builder.append(" WHERE ");
 
-        sb.append(ColumnMetadata.toCQLString(metadata().partitionKeyColumns())).append(" = ");
-        DataRange.appendKeyString(sb, metadata().partitionKeyType, partitionKey().getKey());
+        builder.append(ColumnMetadata.toCQLString(metadata().partitionKeyColumns())).append(" = ");
+        DataRange.appendKeyString(builder, metadata().partitionKeyType, partitionKey().getKey());
 
         // We put the row filter first because the clustering index filter can end by "ORDER BY"
         if (!rowFilter().isEmpty())
-            sb.append(" AND ").append(rowFilter());
+            builder.append(" AND ").append(rowFilter());
 
         String filterString = clusteringIndexFilter().toCQLString(metadata());
         if (!filterString.isEmpty())
-            sb.append(" AND ").append(filterString);
+            builder.append(" AND ").append(filterString);
     }
 
     protected void serializeSelection(DataOutputPlus out, int version) throws IOException

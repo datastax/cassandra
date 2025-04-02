@@ -79,18 +79,15 @@ public class RowFilter
     private static final Logger logger = LoggerFactory.getLogger(RowFilter.class);
 
     public static final Serializer serializer = new Serializer();
-    public static final RowFilter NONE = new RowFilter(FilterElement.NONE);
+    public static final RowFilter NONE = new RowFilter(FilterElement.NONE, IndexHints.NONE);
 
-    private final FilterElement root;
+    public final FilterElement root;
+    public final IndexHints indexHints;
 
-    protected RowFilter(FilterElement root)
+    protected RowFilter(FilterElement root, IndexHints indexHints)
     {
         this.root = root;
-    }
-
-    public FilterElement root()
-    {
-        return root;
+        this.indexHints = indexHints;
     }
 
     /**
@@ -156,7 +153,7 @@ public class RowFilter
         FilterElement partitionLevelOperation = root.partitionLevelTree();
         FilterElement rowLevelOperation = root.rowLevelTree();
 
-        final boolean filterNonStaticColumns = rowLevelOperation.size() > 0;
+        final boolean filterNonStaticColumns = !rowLevelOperation.isEmpty();
 
         return new Transformation<>()
         {
@@ -297,7 +294,7 @@ public class RowFilter
         if (root.size() == 1)
             return RowFilter.NONE;
 
-        return new RowFilter(root.filter(e -> !e.equals(expression)));
+        return new RowFilter(root.filter(e -> !e.equals(expression)), indexHints);
     }
 
     public RowFilter withoutExpressions()
@@ -310,12 +307,12 @@ public class RowFilter
      */
     public RowFilter withoutDisjunctions()
     {
-        return new RowFilter(root.withoutDisjunctions());
+        return new RowFilter(root.withoutDisjunctions(), indexHints);
     }
 
     public RowFilter restrict(Predicate<Expression> filter)
     {
-        return new RowFilter(root.filter(filter));
+        return new RowFilter(root.filter(filter), indexHints);
     }
 
     public boolean isEmpty()
@@ -331,12 +328,12 @@ public class RowFilter
 
     public static Builder builder()
     {
-        return new Builder(null);
+        return new Builder(null, IndexHints.NONE);
     }
 
-    public static Builder builder(IndexRegistry indexRegistry)
+    public static Builder builder(IndexRegistry indexRegistry, IndexHints indexHints)
     {
-        return new Builder(indexRegistry);
+        return new Builder(indexRegistry, indexHints);
     }
 
     public static class Builder
@@ -344,15 +341,17 @@ public class RowFilter
         private FilterElement.Builder current = new FilterElement.Builder(false);
 
         private final IndexRegistry indexRegistry;
+        private final IndexHints indexHints;
 
-        public Builder(IndexRegistry indexRegistry)
+        public Builder(IndexRegistry indexRegistry, IndexHints indexHints)
         {
             this.indexRegistry = indexRegistry;
+            this.indexHints = indexHints;
         }
 
         public RowFilter build()
         {
-            return new RowFilter(current.build());
+            return new RowFilter(current.build(), indexHints);
         }
 
         public RowFilter buildFromRestrictions(StatementRestrictions restrictions,
@@ -366,7 +365,7 @@ public class RowFilter
             if (Guardrails.queryFilters.enabled(queryState))
                 Guardrails.queryFilters.guard(root.numFilteredValues(), "Select query", false, queryState);
 
-            return new RowFilter(root);
+            return new RowFilter(root, indexHints);
         }
 
         private FilterElement doBuild(StatementRestrictions restrictions,
@@ -378,7 +377,7 @@ public class RowFilter
             this.current = element;
 
             for (Restrictions restrictionSet : restrictions.filterRestrictions().getRestrictions())
-                restrictionSet.addToRowFilter(this, indexRegistry, options, annOptions);
+                restrictionSet.addToRowFilter(this, indexRegistry, options, annOptions, indexHints);
 
             for (ExternalRestriction expression : restrictions.filterRestrictions().getExternalExpressions())
                 addAllAsConjunction(b -> expression.addToRowFilter(b, table, options));
@@ -423,7 +422,7 @@ public class RowFilter
             {
                 // If we're in disjunction mode, we must not pass the current builder to addToRowFilter.
                 // We create a new conjunction sub-builder instead and add all expressions there.
-                var builder = new Builder(indexRegistry);
+                var builder = new Builder(indexRegistry, indexHints);
                 addToRowFilterDelegate.accept(builder);
 
                 if (builder.current.expressions.size() == 1 && builder.current.children.isEmpty())
@@ -493,7 +492,7 @@ public class RowFilter
         @Nullable
         private Index.Analyzer analyzer(ColumnMetadata def, Operator op, ByteBuffer value)
         {
-            return indexRegistry == null ? null : indexRegistry.getAnalyzerFor(def, op, value).orElse(null);
+            return indexRegistry == null ? null : indexRegistry.getAnalyzerFor(def, op, value, indexHints).orElse(null);
         }
 
         public void addGeoDistanceExpression(ColumnMetadata def, ByteBuffer point, Operator op, ByteBuffer distance)
@@ -773,12 +772,12 @@ public class RowFilter
                     serialize(child, out, version);
             }
 
-            public FilterElement deserialize(DataInputPlus in, int version, TableMetadata metadata) throws IOException
+            public FilterElement deserialize(DataInputPlus in, int version, TableMetadata metadata, IndexHints indexHints) throws IOException
             {
                 int size = (int)in.readUnsignedVInt();
                 List<Expression> expressions = new ArrayList<>(size);
                 for (int i = 0; i < size; i++)
-                    expressions.add(Expression.serializer.deserialize(in, version, metadata));
+                    expressions.add(Expression.serializer.deserialize(in, version, metadata, indexHints));
 
                 if (version < MessagingService.VERSION_DS_10)
                     return new FilterElement(false, expressions, Collections.emptyList());
@@ -787,7 +786,7 @@ public class RowFilter
                 size = (int)in.readUnsignedVInt();
                 List<FilterElement> children = new ArrayList<>(size);
                 for (int i  = 0; i < size; i++)
-                    children.add(deserialize(in, version, metadata));
+                    children.add(deserialize(in, version, metadata, indexHints));
                 return new FilterElement(isDisjunction, expressions, children);
             }
 
@@ -920,6 +919,16 @@ public class RowFilter
         }
 
         /**
+         * Checks the operator of this {@code IndexExpression} is any of the variations of {@code [NOT] CONTAINS [KEY]}.
+         *
+         * @return {@code true} if this operator is any kind of contains operator, {@code false} otherwise.
+         */
+        public boolean isAnyContains()
+        {
+            return operator.isAnyContains();
+        }
+
+        /**
          * If this expression is used to query an index, the value to use as
          * partition key for that index query.
          */
@@ -1044,7 +1053,7 @@ public class RowFilter
                 }
             }
 
-            public Expression deserialize(DataInputPlus in, int version, TableMetadata metadata) throws IOException
+            public Expression deserialize(DataInputPlus in, int version, TableMetadata metadata, IndexHints indexHints) throws IOException
             {
                 Kind kind = Kind.fromVal(in.readByte());
 
@@ -1074,7 +1083,7 @@ public class RowFilter
                     case SIMPLE:
                         ByteBuffer value = ByteBufferUtil.readWithShortLength(in);
                         ANNOptions annOptions = operator == Operator.ANN ? ANNOptions.serializer.deserialize(in, version) : null;
-                        Index.Analyzer analyzer = indexRegistry.getAnalyzerFor(column, operator, value).orElse(null);
+                        Index.Analyzer analyzer = indexRegistry.getAnalyzerFor(column, operator, value, indexHints).orElse(null);
                         return new SimpleExpression(column, operator, value, analyzer, annOptions);
                     case MAP_COMPARISON:
                         ByteBuffer key = ByteBufferUtil.readWithShortLength(in);
@@ -1764,7 +1773,7 @@ public class RowFilter
             }
         }
 
-        protected static abstract class Deserializer
+        public static abstract class Deserializer
         {
             protected abstract UserExpression deserialize(DataInputPlus in,
                                                           int version,
@@ -1817,20 +1826,23 @@ public class RowFilter
         public void serialize(RowFilter filter, DataOutputPlus out, int version) throws IOException
         {
             out.writeBoolean(false); // Old "is for thrift" boolean
+            IndexHints.serializer.serialize(filter.indexHints, out, version); // hints first because the expressions might need them
             FilterElement.serializer.serialize(filter.root, out, version);
         }
 
         public RowFilter deserialize(DataInputPlus in, int version, TableMetadata metadata) throws IOException
         {
             in.readBoolean(); // Unused
-            FilterElement operation = FilterElement.serializer.deserialize(in, version, metadata);
-            return new RowFilter(operation);
+            IndexHints indexHints = IndexHints.serializer.deserialize(in, version, metadata);
+            FilterElement operation = FilterElement.serializer.deserialize(in, version, metadata, indexHints);
+            return new RowFilter(operation, indexHints);
         }
 
         public long serializedSize(RowFilter filter, int version)
         {
             return 1 // unused boolean
-                   + FilterElement.serializer.serializedSize(filter.root, version);
+                   + FilterElement.serializer.serializedSize(filter.root, version)
+                   + IndexHints.serializer.serializedSize(filter.indexHints, version);
         }
     }
 }

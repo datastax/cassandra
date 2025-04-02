@@ -580,7 +580,7 @@ public enum Operator
      *
      * @return {@code true} if this operator is any kind of contains operator, {@code false} otherwise.
      */
-    public boolean isContains()
+    public boolean isAnyContains()
     {
         return this == CONTAINS || this == CONTAINS_KEY || this == NOT_CONTAINS || this == NOT_CONTAINS_KEY;
     }

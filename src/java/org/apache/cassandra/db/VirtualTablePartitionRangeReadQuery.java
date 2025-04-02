@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.db;
 
+import org.apache.cassandra.cql3.CqlBuilder;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.filter.RowFilter;
@@ -94,20 +95,20 @@ public class VirtualTablePartitionRangeReadQuery extends VirtualTableReadQuery i
     }
 
     @Override
-    protected void appendCQLWhereClause(StringBuilder sb)
+    protected void appendCQLWhereClause(CqlBuilder builder)
     {
         if (dataRange.isUnrestricted() && rowFilter().isEmpty())
             return;
 
-        sb.append(" WHERE ");
+        builder.append(" WHERE ");
         // We put the row filter first because the data range can end by "ORDER BY"
         if (!rowFilter().isEmpty())
         {
-            sb.append(rowFilter());
+            builder.append(rowFilter());
             if (!dataRange.isUnrestricted())
-                sb.append(" AND ");
+                builder.append(" AND ");
         }
         if (!dataRange.isUnrestricted())
-            sb.append(dataRange.toCQLString(metadata()));
+            builder.append(dataRange.toCQLString(metadata()));
     }
 }

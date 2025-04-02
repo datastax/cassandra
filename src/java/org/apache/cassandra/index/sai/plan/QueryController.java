@@ -23,6 +23,8 @@ import java.util.*;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import javax.annotation.Nullable;
+
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ArrayListMultimap;
@@ -51,6 +53,7 @@ import org.apache.cassandra.db.filter.ClusteringIndexFilter;
 import org.apache.cassandra.db.filter.ClusteringIndexNamesFilter;
 import org.apache.cassandra.db.filter.ClusteringIndexSliceFilter;
 import org.apache.cassandra.db.filter.DataLimits;
+import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.marshal.AbstractType;
@@ -71,7 +74,6 @@ import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
 import org.apache.cassandra.index.sai.disk.v1.Segment;
 import org.apache.cassandra.index.sai.disk.vector.VectorCompression;
 import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
-import org.apache.cassandra.index.sai.iterators.KeyRangeIntersectionIterator;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.iterators.KeyRangeTermIterator;
 import org.apache.cassandra.index.sai.memory.MemtableIndex;
@@ -187,7 +189,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
                                                  avgCellsPerRow(),
                                                  avgRowSizeInBytes(),
                                                  cfs.getLiveSSTables().size());
-        this.planFactory = new Plan.Factory(tableMetrics, this);
+        this.planFactory = new Plan.Factory(tableMetrics, this, command.rowFilter().indexHints);
     }
 
     public PrimaryKey.Factory primaryKeyFactory()
@@ -214,7 +216,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     {
         // NOTE: we cannot remove the order by filter expression here yet because it is used in the FilterTree class
         // to filter out shadowed rows.
-        return this.command.rowFilter().root();
+        return this.command.rowFilter().root;
     }
 
     /**
@@ -390,12 +392,13 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         // The limit here is higher than the final limit, so that the optimizer has a bit more freedom
         // in which predicates it leaves in the plan and the probability of accidentally removing a good branch
         // here is even lower.
-        Plan plan = rowsIteration.limitIntersectedClauses(KeyRangeIntersectionIterator.INTERSECTION_CLAUSE_LIMIT * 3);
+        int intersectionClauseLimit = CassandraRelevantProperties.SAI_INTERSECTION_CLAUSE_LIMIT.getInt();
+        Plan plan = rowsIteration.limitIntersectedClauses(intersectionClauseLimit * 3);
 
         if (QUERY_OPT_LEVEL > 0)
             plan = plan.optimize();
 
-        plan = plan.limitIntersectedClauses(KeyRangeIntersectionIterator.INTERSECTION_CLAUSE_LIMIT);
+        plan = plan.limitIntersectedClauses(intersectionClauseLimit);
 
         if (plan.contains(node -> node instanceof Plan.AnnIndexScan))
             queryContext.setFilterSortOrder(QueryContext.FilterSortOrder.SCAN_THEN_FILTER);
@@ -553,7 +556,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     void buildPlanForExpressions(Plan.Builder builder, Collection<Expression> expressions)
     {
         Operation.OperationType op = builder.type;
-        assert !expressions.isEmpty() : "expressions should not be empty for " + op + " in " + command.rowFilter().root();
+        assert !expressions.isEmpty() : "expressions should not be empty for " + op + " in " + command.rowFilter().root;
 
         assert !expressions.stream().anyMatch(e -> e.operation == Expression.Op.ORDER_BY);
 
@@ -564,11 +567,17 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
             return;
         }
 
+        IndexHints hints = command.rowFilter().indexHints;
+
         for (Expression expression : expressions)
         {
             if (expression.context.isIndexed())
             {
-                if ( expression.getOp() == Expression.Op.NOT_EQ)
+                // Skip the expressions using indexes that are excluded by the user-provided hints
+                if (hints.excludes(expression.context.getIndexName()))
+                    continue;
+
+                if (expression.getOp() == Expression.Op.NOT_EQ)
                     builder.add(buildInequalityPlan(expression));
                 else
                 {
@@ -798,9 +807,11 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
                command.clusteringIndexFilter(key.partitionKey()).selects(key.clustering());
     }
 
+    @Nullable
     private StorageAttachedIndex getBestIndexFor(RowFilter.Expression expression)
     {
-        return cfs.indexManager.getBestIndexFor(expression, StorageAttachedIndex.class).orElse(null);
+        return cfs.indexManager.getBestIndexFor(expression, command.rowFilter().indexHints, StorageAttachedIndex.class)
+                               .orElse(null);
     }
 
     // Note: This method assumes that the selects method has already been called for the
