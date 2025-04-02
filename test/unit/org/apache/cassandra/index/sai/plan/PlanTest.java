@@ -34,6 +34,7 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.cql3.Operator;
+import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
@@ -85,7 +86,7 @@ public class PlanTest
     private final Plan.TableMetrics table1M = new Plan.TableMetrics(1_000_000, 7, 128, 3);
     private final Plan.TableMetrics table10M = new Plan.TableMetrics(10_000_000, 7, 128, 8);
 
-    private final Plan.Factory factory = new Plan.Factory(table1M, new CostEstimator(table1M));
+    private final Plan.Factory factory = new Plan.Factory(table1M, new CostEstimator(table1M), IndexHints.NONE);
 
 
     static {
@@ -389,7 +390,7 @@ public class PlanTest
     public void annScanOfEmptyTable()
     {
         Plan.TableMetrics emptyTable = new Plan.TableMetrics(0, 0, 0, 0);
-        Plan.Factory factory = new Plan.Factory(emptyTable, new CostEstimator(table1M));
+        Plan.Factory factory = new Plan.Factory(emptyTable, new CostEstimator(table1M), IndexHints.NONE);
         Plan.KeysIteration plan = factory.sort(factory.everything, ordering);
         assertEquals(0.0, plan.expectedKeys(), 0.01);
         assertEquals(1.0, plan.selectivity(), 0.01);
@@ -847,7 +848,7 @@ public class PlanTest
 
     private void testIntersectionsUnderLimit(Plan.TableMetrics metrics, List<Double> selectivities, List<Integer> expectedIndexScanCount)
     {
-        Plan.Factory factory = new Plan.Factory(metrics, new CostEstimator(metrics));
+        Plan.Factory factory = new Plan.Factory(metrics, new CostEstimator(metrics), IndexHints.NONE);
         List<Plan.KeysIteration> indexScans = new ArrayList<>(selectivities.size());
         RowFilter.Builder rowFilterBuilder = RowFilter.builder(true);
         RowFilter.Expression[] predicates = new RowFilter.Expression[] { pred1, pred2, pred3, pred4 };
@@ -974,7 +975,7 @@ public class PlanTest
                                                List<Double> selectivities,
                                                List<Integer> expectedIndexScanCount)
     {
-        Plan.Factory factory = new Plan.Factory(metrics, new CostEstimator(metrics));
+        Plan.Factory factory = new Plan.Factory(metrics, new CostEstimator(metrics), IndexHints.NONE);
         List<Plan.KeysIteration> indexScans = new ArrayList<>(selectivities.size());
         RowFilter.Builder rowFilterBuilder = RowFilter.builder(true);
         for (int i = 0; i < selectivities.size(); i++)
@@ -1006,10 +1007,10 @@ public class PlanTest
         Plan.CostEstimator est2 = Mockito.mock(Plan.CostEstimator.class);
         Mockito.when(est2.estimateAnnSearchCost(Mockito.any(), Mockito.anyInt(), Mockito.anyLong())).thenReturn(100.0);
 
-        Plan.Factory factory1 = new Plan.Factory(table1M, est1);
+        Plan.Factory factory1 = new Plan.Factory(table1M, est1, IndexHints.NONE);
         Plan scan1 = factory1.sort(factory1.everything, ordering);
 
-        Plan.Factory factory2 = new Plan.Factory(table1M, est2);
+        Plan.Factory factory2 = new Plan.Factory(table1M, est2, IndexHints.NONE);
         Plan scan2 = factory2.sort(factory2.everything, ordering);
 
         assertTrue(scan2.fullCost() > scan1.fullCost());

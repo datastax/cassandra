@@ -575,6 +575,16 @@ public enum Operator
         return this == LT || this == LTE || this == GT || this == GTE;
     }
 
+    /**
+     * Checks if this operator is any of the variations of contains ({@code [NOT] CONTAINS [KEY]}).
+     *
+     * @return {@code true} if this operator is any kind of contains operator, {@code false} otherwise.
+     */
+    public boolean isAnyContains()
+    {
+        return this == CONTAINS || this == CONTAINS_KEY || this == NOT_CONTAINS || this == NOT_CONTAINS_KEY;
+    }
+
     @Override
     public String toString()
     {
