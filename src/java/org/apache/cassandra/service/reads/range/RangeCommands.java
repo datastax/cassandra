@@ -73,10 +73,7 @@ public class RangeCommands
         Tracing.trace("Computing ranges to query");
 
         Keyspace keyspace = Keyspace.open(command.metadata().keyspace);
-        ReplicaPlanIterator replicaPlans = new ReplicaPlanIterator(command.dataRange().keyRange(),
-                                                                   command.indexQueryPlan(),
-                                                                   keyspace,
-                                                                   consistencyLevel);
+        AbstractReplicaPlanIterator replicaPlans = ReplicaPlanIteratorProvider.instance.getReplicaPlanIterator(command, keyspace, consistencyLevel);
         if (command.isTopK())
             return new ScanAllRangesCommandIterator(keyspace, replicaPlans, command, replicaPlans.size(), queryStartNanoTime, readTracker);
 
