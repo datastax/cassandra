@@ -19,8 +19,9 @@ package org.apache.cassandra.cql3;
 
 import java.util.Iterator;
 import java.util.Map;
-import java.util.Map.Entry;
+import java.util.Set;
 import java.util.TreeMap;
+import java.util.TreeSet;
 import java.util.function.Consumer;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -60,6 +61,11 @@ public final class CqlBuilder
     public CqlBuilder(int capacity)
     {
         builder = new StringBuilder(capacity);
+    }
+
+    public CqlBuilder append(Object o)
+    {
+        return append(String.valueOf(o));
     }
 
     public CqlBuilder append(String str)
@@ -170,27 +176,44 @@ public final class CqlBuilder
 
     public CqlBuilder append(Map<String, String> map, boolean quoteValue)
     {
+        return append(new TreeMap<>(map).entrySet(), e -> {
+            appendWithSingleQuotes(e.getKey());
+            builder.append(": ");
+            appendCollectionValue(e.getValue(), quoteValue);
+        });
+    }
+
+    public CqlBuilder append(Set<String> set, boolean quoteValue)
+    {
+        return append(new TreeSet<>(set),
+                      value -> appendCollectionValue(value, quoteValue));
+    }
+
+    private <T> CqlBuilder append(Iterable<T> iterable, Consumer<T> appender)
+    {
         indentIfNeeded();
 
         builder.append('{');
 
-        Iterator<Entry<String, String>> iter = new TreeMap<>(map).entrySet()
-                                                                 .iterator();
-        while(iter.hasNext())
+        Iterator<T> iterator = iterable.iterator();
+        while (iterator.hasNext())
         {
-            Entry<String, String> e = iter.next();
-            appendWithSingleQuotes(e.getKey());
-            builder.append(": ");
-            if (quoteValue)
-                appendWithSingleQuotes(e.getValue());
-            else
-                builder.append(e.getValue());
+            appender.accept(iterator.next());
 
-            if (iter.hasNext())
+            if (iterator.hasNext())
                 builder.append(", ");
         }
+
         builder.append('}');
         return this;
+    }
+
+    private void appendCollectionValue(String value, boolean quote)
+    {
+        if (quote)
+            appendWithSingleQuotes(value);
+        else
+            builder.append(value);
     }
 
     public <T> CqlBuilder appendWithSeparators(Iterable<T> iterable, Appender<T> appender, String separator)
@@ -242,7 +265,12 @@ public final class CqlBuilder
 
     /**
      * Builds a `WITH option1 = ... AND option2 = ... AND option3 = ... clause
+<<<<<<< HEAD
      * @param builder a receiver to receive a builder allowing to add each option
+=======
+     *
+     * @param builder a consumer to receive a builder for the options to append
+>>>>>>> 4714c43331 (CNDB-13129: Add index hints)
      */
     public CqlBuilder appendOptions(Consumer<OptionsBuilder> builder)
     {
@@ -262,12 +290,24 @@ public final class CqlBuilder
 
         public OptionsBuilder append(String name, Map<String, String> options)
         {
-            if (options.isEmpty())
-                return this;
+            return options.isEmpty() ? this : append(name, () -> builder.append(options, false));
+        }
 
+        public OptionsBuilder append(String name, Set<String> options)
+        {
+            return options.isEmpty() ? this : append(name, () -> builder.append(options, false));
+        }
+
+        public OptionsBuilder append(String name, String options)
+        {
+            return options.isEmpty() ? this : append(name, () -> builder.append(options));
+        }
+
+        private OptionsBuilder append(String name, Runnable appender)
+        {
             builder.append((empty ? " WITH " : " AND ") + name + " = ");
             empty = false;
-            builder.append(options);
+            appender.run();
             return this;
         }
     }
