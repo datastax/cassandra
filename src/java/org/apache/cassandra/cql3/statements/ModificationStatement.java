@@ -45,7 +45,6 @@ import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.ColumnSpecification;
 import org.apache.cassandra.cql3.Operation;
 import org.apache.cassandra.cql3.Operations;
-import org.apache.cassandra.cql3.Ordering;
 import org.apache.cassandra.cql3.QualifiedName;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.QueryProcessor;
@@ -54,6 +53,7 @@ import org.apache.cassandra.cql3.UpdateParameters;
 import org.apache.cassandra.cql3.Validation;
 import org.apache.cassandra.cql3.VariableSpecifications;
 import org.apache.cassandra.cql3.WhereClause;
+import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.index.IndexRegistry;
 import org.apache.cassandra.index.sai.analyzer.AnalyzerEqOperatorSupport;
 import org.apache.cassandra.schema.ColumnMetadata;
@@ -338,7 +338,7 @@ public abstract class ModificationStatement implements CQLStatement.SingleKeyspa
 
         // Warn but otherwise accept conditions on analyzed columns. The analyzers won't be used (see CNDB-11658).
         IndexRegistry indexRegistry = IndexRegistry.obtain(metadata);
-        Set<ColumnMetadata> analyzedColumns = conditions.getAnalyzedColumns(indexRegistry);
+        Set<ColumnMetadata> analyzedColumns = conditions.getAnalyzedColumns(indexRegistry, IndexHints.NONE);
         if (!analyzedColumns.isEmpty())
         {
             StringJoiner joiner = new StringJoiner(", ");
@@ -1109,19 +1109,31 @@ public abstract class ModificationStatement implements CQLStatement.SingleKeyspa
          * @param conditions the conditions
          * @return the restrictions
          */
+        /**
+         * @deprecated Use the version with ClientState parameter instead
+         */
+        @Deprecated(since = "5.0")
+        protected StatementRestrictions newRestrictions(TableMetadata metadata,
+                                                        VariableSpecifications boundNames,
+                                                        Operations operations,
+                                                        WhereClause where,
+                                                        Conditions conditions)
+        {
+            throw new UnsupportedOperationException("This method is deprecated. Use the version with ClientState parameter.");
+        }
+
         protected StatementRestrictions newRestrictions(ClientState state,
                                                         TableMetadata metadata,
                                                         VariableSpecifications boundNames,
                                                         Operations operations,
                                                         WhereClause where,
-                                                        Conditions conditions,
-                                                        List<Ordering> orderings)
+                                                        Conditions conditions)
         {
             if (where.containsCustomExpressions())
                 throw new InvalidRequestException(CUSTOM_EXPRESSIONS_NOT_ALLOWED);
 
             boolean applyOnlyToStaticColumns = appliesOnlyToStaticColumns(operations, conditions);
-            return StatementRestrictions.create(state, type, metadata, where, boundNames, orderings, applyOnlyToStaticColumns, false, false);
+            return StatementRestrictions.create(state, type, metadata, where, boundNames, Collections.emptyList(), IndexHints.NONE, applyOnlyToStaticColumns, false, false);
         }
 
         public List<Pair<ColumnIdentifier, ColumnCondition.Raw>> getConditions()

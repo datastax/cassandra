@@ -32,6 +32,7 @@ import org.apache.cassandra.cql3.functions.types.utils.Bytes;
 import org.apache.cassandra.cql3.statements.PropertyDefinitions;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.exceptions.SyntaxException;
 import org.apache.cassandra.schema.CachingParams;
 import org.apache.cassandra.schema.CompactionParams;
 import org.apache.cassandra.schema.CompressionParams;
@@ -106,7 +107,7 @@ public final class TableAttributes extends PropertyDefinitions
 
     public TableId getId() throws ConfigurationException
     {
-        String id = getString(ID);
+        String id = getSimple(ID);
         try
         {
             return id != null ? TableId.fromString(id) : null;
@@ -246,7 +247,7 @@ public final class TableAttributes extends PropertyDefinitions
 
     private String getString(Option option)
     {
-        String value = getString(option.toString());
+        String value = getSimple(option.toString());
         if (value == null)
             throw new IllegalStateException(format("Option '%s' is absent", option));
         return value;
@@ -267,11 +268,19 @@ public final class TableAttributes extends PropertyDefinitions
 
     private int getInt(Option option)
     {
-        return parseInt(option.toString(), getString(option));
+        return toInt(option.toString(), getString(option), null);
     }
 
     private double getDouble(Option option)
     {
-        return parseDouble(option.toString(), getString(option));
+        String value = getString(option);
+        try
+        {
+            return Double.parseDouble(value);
+        }
+        catch (NumberFormatException e)
+        {
+            throw new SyntaxException(String.format("Invalid double value %s for '%s'", value, option));
+        }
     }
 }

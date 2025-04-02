@@ -111,11 +111,14 @@ public class SingletonIndexGroup implements Index.Group
     {
         Preconditions.checkNotNull(delegate);
 
+        if (rowFilter.indexHints.excludes(delegate))
+            return null;
+
         // Indexes using a singleton group don't support disjunctions,
         // so we only consider the top-level AND expressions for index selection.
         for (RowFilter.Expression e : rowFilter.withoutDisjunctions().expressions())
         {
-            if (delegate.supportsExpression(e.column(), e.operator()))
+            if (delegate.supportsExpression(e))
                 return new SingletonIndexQueryPlan(delegate, delegate.getPostIndexQueryFilter(rowFilter));
         }
 
