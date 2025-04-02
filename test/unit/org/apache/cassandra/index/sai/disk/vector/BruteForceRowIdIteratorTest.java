@@ -20,18 +20,19 @@ package org.apache.cassandra.index.sai.disk.vector;
 
 import java.util.NoSuchElementException;
 
-import com.google.common.collect.ImmutableList;
 import org.junit.Test;
 
 import io.github.jbellis.jvector.graph.GraphIndex;
+import io.github.jbellis.jvector.graph.NodeQueue;
 import io.github.jbellis.jvector.graph.NodesIterator;
 import io.github.jbellis.jvector.graph.similarity.ScoreFunction;
 import io.github.jbellis.jvector.util.Bits;
+import io.github.jbellis.jvector.util.BoundedLongHeap;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import io.github.jbellis.jvector.vector.VectorizationProvider;
 import io.github.jbellis.jvector.vector.types.VectorFloat;
 import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
-import org.apache.cassandra.utils.SortingIterator;
+import org.apache.cassandra.index.sai.utils.SegmentRowIdOrdinalPairs;
 
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertThrows;
@@ -45,14 +46,14 @@ public class BruteForceRowIdIteratorTest
     public void testBruteForceRowIdIteratorForEmptyPQAndTopKEqualsLimit()
     {
         var queryVector = vts.createFloatVector(new float[] { 1f, 0f });
-        var pq = SortingIterator.create(BruteForceRowIdIterator.RowWithApproximateScore::compare, ImmutableList.of());
+        var heap = new NodeQueue(new BoundedLongHeap(10), NodeQueue.Order.MAX_HEAP);
         var topK = 10;
         var limit = 10;
 
         // Should work for an empty pq
         var view = new TestView();
         CloseableReranker reranker = new CloseableReranker(VectorSimilarityFunction.COSINE, queryVector, view);
-        var iter = new BruteForceRowIdIterator(pq, reranker, limit, topK);
+        var iter = new BruteForceRowIdIterator(heap, new SegmentRowIdOrdinalPairs(10), reranker, limit, topK);
         assertFalse(iter.hasNext());
         assertThrows(NoSuchElementException.class, iter::next);
         assertFalse(view.isClosed);
