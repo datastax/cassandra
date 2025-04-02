@@ -33,6 +33,7 @@ import org.apache.cassandra.cql3.statements.SelectOptions;
 import org.apache.cassandra.cql3.statements.StatementType;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.ANNOptions;
+import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.DecimalType;
@@ -102,6 +103,11 @@ public class StatementRestrictions
     public final TableMetadata table;
 
     /**
+     * The index hints, needed to validate {@code ALLOW FILTERING}.
+     */
+    protected final IndexHints indexHints;
+
+    /**
      * Restrictions on partitioning columns
      */
     protected final PartitionKeyRestrictions partitionKeyRestrictions;
@@ -154,12 +160,13 @@ public class StatementRestrictions
      */
     public static StatementRestrictions empty(TableMetadata table)
     {
-        return new StatementRestrictions(table, false);
+        return new StatementRestrictions(table, IndexHints.NONE, false);
     }
 
-    private StatementRestrictions(TableMetadata table, boolean allowFiltering)
+    private StatementRestrictions(TableMetadata table, IndexHints indexHints, boolean allowFiltering)
     {
         this.table = table;
+        this.indexHints = indexHints;
         this.partitionKeyRestrictions = PartitionKeySingleRestrictionSet.builder(table.partitionKeyAsClusteringComparator())
                                                                         .build(IndexRegistry.obtain(table));
         this.clusteringColumnsRestrictions = ClusteringColumnRestrictions.builder(table, allowFiltering).build();
@@ -183,6 +190,7 @@ public class StatementRestrictions
                                                                   .build();
 
         return new StatementRestrictions(table,
+                                         indexHints,
                                          partitionKeyRestrictions,
                                          clusteringColumnsRestrictions,
                                          nonPrimaryKeyRestrictions,
@@ -209,6 +217,7 @@ public class StatementRestrictions
             newIndexRestrictions.add(restriction);
 
         return new StatementRestrictions(table,
+                                         indexHints,
                                          partitionKeyRestrictions,
                                          clusteringColumnsRestrictions,
                                          nonPrimaryKeyRestrictions,
@@ -222,6 +231,7 @@ public class StatementRestrictions
     }
 
     private StatementRestrictions(TableMetadata table,
+                                  IndexHints indexHints,
                                   PartitionKeyRestrictions partitionKeyRestrictions,
                                   ClusteringColumnRestrictions clusteringColumnsRestrictions,
                                   RestrictionSet nonPrimaryKeyRestrictions,
@@ -234,6 +244,7 @@ public class StatementRestrictions
                                   List<StatementRestrictions> children)
     {
         this.table = table;
+        this.indexHints = indexHints;
         this.partitionKeyRestrictions = partitionKeyRestrictions;
         this.clusteringColumnsRestrictions = clusteringColumnsRestrictions;
         this.nonPrimaryKeyRestrictions = nonPrimaryKeyRestrictions;
@@ -251,6 +262,7 @@ public class StatementRestrictions
                                                WhereClause whereClause,
                                                VariableSpecifications boundNames,
                                                List<Ordering> orderings,
+                                               IndexHints indexHints,
                                                boolean selectsOnlyStaticColumns,
                                                boolean allowFiltering,
                                                boolean forView)
@@ -260,6 +272,7 @@ public class StatementRestrictions
                            whereClause,
                            boundNames,
                            orderings,
+                           indexHints,
                            selectsOnlyStaticColumns,
                            type.allowUseOfSecondaryIndices(),
                            allowFiltering,
@@ -271,6 +284,7 @@ public class StatementRestrictions
                                                WhereClause whereClause,
                                                VariableSpecifications boundNames,
                                                List<Ordering> orderings,
+                                               IndexHints indexHints,
                                                boolean selectsOnlyStaticColumns,
                                                boolean allowUseOfSecondaryIndices,
                                                boolean allowFiltering,
@@ -281,6 +295,7 @@ public class StatementRestrictions
                            whereClause,
                            boundNames,
                            orderings,
+                           indexHints,
                            selectsOnlyStaticColumns,
                            allowUseOfSecondaryIndices,
                            allowFiltering,
@@ -303,6 +318,7 @@ public class StatementRestrictions
         private final VariableSpecifications boundNames;
 
         private final List<Ordering> orderings;
+        private final IndexHints indexHints;
         private final boolean selectsOnlyStaticColumns;
         private final boolean allowUseOfSecondaryIndices;
         private final boolean allowFiltering;
@@ -313,6 +329,7 @@ public class StatementRestrictions
                        WhereClause whereClause,
                        VariableSpecifications boundNames,
                        List<Ordering> orderings,
+                       IndexHints indexHints,
                        boolean selectsOnlyStaticColumns,
                        boolean allowUseOfSecondaryIndices,
                        boolean allowFiltering,
@@ -323,6 +340,7 @@ public class StatementRestrictions
             this.whereClause = whereClause;
             this.boundNames = boundNames;
             this.orderings = orderings;
+            this.indexHints = indexHints;
             this.selectsOnlyStaticColumns = selectsOnlyStaticColumns;
             this.allowUseOfSecondaryIndices = allowUseOfSecondaryIndices;
             this.allowFiltering = allowFiltering;
@@ -339,7 +357,7 @@ public class StatementRestrictions
                 indexRegistry = IndexRegistry.obtain(table);
 
             WhereClause.AndElement root = whereClause.root().conjunctiveForm();
-            return doBuild(root, indexRegistry, 0);
+            return doBuild(root, indexRegistry, indexHints, 0);
         }
 
         /**
@@ -347,16 +365,21 @@ public class StatementRestrictions
          * based on the columns they are applied to.
          *
          * @param element root of the tree
+         * @param indexRegistry the index registry for the queried table
+         * @param indexHints the query index hints
          * @param nestingLevel recursion depth needed to reject the restrictions that
          *                     are not allowed to be nested (e.g. partition key restrictions)
          */
-        StatementRestrictions doBuild(WhereClause.ExpressionElement element, IndexRegistry indexRegistry, int nestingLevel)
+        StatementRestrictions doBuild(WhereClause.ExpressionElement element,
+                                      IndexRegistry indexRegistry,
+                                      IndexHints indexHints,
+                                      int nestingLevel)
         {
             assert element instanceof WhereClause.AndElement || nestingLevel > 0:
                     "Root of the WHERE clause expression tree must be a conjunction";
 
             PartitionKeySingleRestrictionSet.Builder partitionKeyRestrictionSet = PartitionKeySingleRestrictionSet.builder(table.partitionKeyAsClusteringComparator());
-            ClusteringColumnRestrictions.Builder clusteringColumnsRestrictionSet = ClusteringColumnRestrictions.builder(table, allowFiltering, indexRegistry);
+            ClusteringColumnRestrictions.Builder clusteringColumnsRestrictionSet = ClusteringColumnRestrictions.builder(table, allowFiltering, indexRegistry, indexHints);
             RestrictionSet.Builder nonPrimaryKeyRestrictionSet = RestrictionSet.builder();
             ImmutableSet.Builder<ColumnMetadata> notNullColumnsBuilder = ImmutableSet.builder();
 
@@ -390,15 +413,15 @@ public class StatementRestrictions
                     if (!forView)
                         throw invalidRequest("Unsupported restriction: %s", relation);
 
-                    notNullColumnsBuilder.addAll(relation.toRestriction(table, boundNames).getColumnDefs());
+                    notNullColumnsBuilder.addAll(relation.toRestriction(table, boundNames, this.indexHints).getColumnDefs());
                 }
                 else
                 {
-                    Restriction restriction = relation.toRestriction(table, boundNames);
+                    Restriction restriction = relation.toRestriction(table, boundNames, this.indexHints);
 
-                    if (relation.isLIKE() && (!type.allowUseOfSecondaryIndices() || !restriction.hasSupportingIndex(indexRegistry)))
+                    if (relation.isLIKE() && (!type.allowUseOfSecondaryIndices() || !restriction.hasSupportingIndex(indexRegistry, indexHints)))
                     {
-                        if (getColumnsWithUnsupportedIndexRestrictions(table, ImmutableList.of(restriction)).isEmpty())
+                        if (getColumnsWithUnsupportedIndexRestrictions(table, this.indexHints, ImmutableList.of(restriction)).isEmpty())
                         {
                             throw invalidRequest(RESTRICTION_REQUIRES_INDEX_MESSAGE, relation.operator(), relation.toString());
                         }
@@ -413,9 +436,9 @@ public class StatementRestrictions
                         {
                             throw invalidRequest("Invalid query. %s does not support use of secondary indices, but %s restriction requires a secondary index.", type.name(), relation.toString());
                         }
-                        if (!restriction.hasSupportingIndex(indexRegistry))
+                        if (!restriction.hasSupportingIndex(indexRegistry, indexHints))
                         {
-                            if (getColumnsWithUnsupportedIndexRestrictions(table, ImmutableList.of(restriction)).isEmpty())
+                            if (getColumnsWithUnsupportedIndexRestrictions(table, this.indexHints, ImmutableList.of(restriction)).isEmpty())
                             {
                                 throw invalidRequest(RESTRICTION_REQUIRES_INDEX_MESSAGE, relation.operator(), relation.toString());
                             }
@@ -477,11 +500,11 @@ public class StatementRestrictions
                     filterRestrictionsBuilder.add(customExpression);
                 }
 
-                hasQueryableClusteringColumnIndex = clusteringColumnsRestrictions.hasSupportingIndex(indexRegistry);
+                hasQueryableClusteringColumnIndex = clusteringColumnsRestrictions.hasSupportingIndex(indexRegistry, this.indexHints);
                 hasQueryableIndex = element.containsCustomExpressions()
                                     || hasQueryableClusteringColumnIndex
-                                    || partitionKeyRestrictions.hasSupportingIndex(indexRegistry)
-                                    || nonPrimaryKeyRestrictions.hasSupportingIndex(indexRegistry);
+                                    || partitionKeyRestrictions.hasSupportingIndex(indexRegistry, this.indexHints)
+                                    || nonPrimaryKeyRestrictions.hasSupportingIndex(indexRegistry, this.indexHints);
             }
 
             // At this point, the select statement if fully constructed, but we still have a few things to validate
@@ -544,7 +567,7 @@ public class StatementRestrictions
                 // but both
                 //   UPDATE t SET s = 3 WHERE k = 0 AND v = 1
                 //   DELETE v FROM t WHERE k = 0 AND v = 1
-                // sounds like you don't really understand what your are doing.
+                // sounds like you don't really understand what you are doing.
                 if (type.isDelete() || type.isUpdate())
                     throw invalidRequest("Invalid restrictions on clustering columns since the %s statement modifies only static columns",
                                          type);
@@ -627,7 +650,7 @@ public class StatementRestrictions
                     if (vectorColumn.isPresent())
                     {
                         var vc = vectorColumn.get();
-                        var hasIndex = indexRegistry.listIndexes().stream().anyMatch(i -> i.dependsOn(vc));
+                        var hasIndex = indexRegistry.listIndexes(indexHints).stream().anyMatch(i -> i.dependsOn(vc));
                         var isBoundedANN = nonPrimaryKeyRestrictions.restrictions().stream().anyMatch(SingleRestriction::isBoundedAnn);
                         if (hasIndex)
                             if (isBoundedANN)
@@ -641,7 +664,7 @@ public class StatementRestrictions
                     }
 
                     if (!allowFiltering)
-                        throwRequiresAllowFilteringError(table, columnRestrictions);
+                        throwRequiresAllowFilteringError(table, this.indexHints, columnRestrictions);
                 }
 
                 filterRestrictionsBuilder.add(nonPrimaryKeyRestrictions);
@@ -654,9 +677,10 @@ public class StatementRestrictions
             ImmutableList.Builder<StatementRestrictions> children = ImmutableList.builder();
 
             for (WhereClause.ContainerElement container : element.operations())
-                children.add(doBuild(container, indexRegistry, nestingLevel + 1));
+                children.add(doBuild(container, indexRegistry, indexHints, nestingLevel + 1));
 
             return new StatementRestrictions(table,
+                                             this.indexHints,
                                              partitionKeyRestrictions,
                                              clusteringColumnsRestrictions,
                                              nonPrimaryKeyRestrictions,
@@ -696,9 +720,10 @@ public class StatementRestrictions
                     throw new InvalidRequestException("SAI based ORDER BY on non-vector column is not supported");
 
                 SingleRestriction restriction = ordering.expression.toRestriction();
+
                 ColumnMetadata column = restriction.getFirstColumn();
 
-                if (!restriction.hasSupportingIndex(indexRegistry))
+                if (!restriction.hasSupportingIndex(indexRegistry, indexHints))
                 {
                     var type = column.type.asCQL3Type().getType();
                     // This is a slight hack, but once we support a way to order these types, we can remove it.
@@ -793,12 +818,12 @@ public class StatementRestrictions
         if (hasIndxBasedOrdering())
             throw invalidRequest(StatementRestrictions.NON_CLUSTER_ORDERING_REQUIRES_ALL_RESTRICTED_NON_PARTITION_KEY_COLUMNS_INDEXED_MESSAGE);
 
-        throwRequiresAllowFilteringError(table, allColumnRestrictions(clusteringColumnsRestrictions, nonPrimaryKeyRestrictions));
+        throwRequiresAllowFilteringError(table, indexHints, allColumnRestrictions(clusteringColumnsRestrictions, nonPrimaryKeyRestrictions));
     }
 
-    private static void throwRequiresAllowFilteringError(TableMetadata table, Iterable<Restriction> columnRestrictions)
+    private static void throwRequiresAllowFilteringError(TableMetadata table, IndexHints indexHints, Iterable<Restriction> columnRestrictions)
     {
-        Set<ColumnMetadata> unsupported = getColumnsWithUnsupportedIndexRestrictions(table, columnRestrictions);
+        Set<ColumnMetadata> unsupported = getColumnsWithUnsupportedIndexRestrictions(table, indexHints, columnRestrictions);
         if (unsupported.isEmpty())
         {
             throw invalidRequest(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE);
@@ -1004,7 +1029,7 @@ public class StatementRestrictions
         return table.clusteringColumns().size() != clusteringColumnsRestrictions.size();
     }
 
-    public RowFilter getRowFilter(IndexRegistry indexManager, QueryOptions options, QueryState queryState, SelectOptions selectOptions)
+    public RowFilter getRowFilter(IndexRegistry indexRegistry, QueryOptions options, QueryState queryState, SelectOptions selectOptions)
     {
         boolean hasAnnOptions = selectOptions.hasANNOptions();
 
@@ -1013,11 +1038,14 @@ public class StatementRestrictions
             if (hasAnnOptions)
                 throw new InvalidRequestException(ANN_OPTIONS_WITHOUT_ORDER_BY_ANN);
 
+            indexHints.validate((Index.QueryPlan) null);
+
             return RowFilter.NONE;
         }
 
         ANNOptions annOptions = selectOptions.parseANNOptions();
-        RowFilter rowFilter = RowFilter.builder(indexManager)
+
+        RowFilter rowFilter = RowFilter.builder(indexRegistry, indexHints)
                                        .buildFromRestrictions(this, table, options, queryState, annOptions);
 
         if (hasAnnOptions && !rowFilter.hasANN())
@@ -1159,7 +1187,7 @@ public class StatementRestrictions
     {
         IndexRegistry registry = IndexRegistry.obtain(table);
         for (Restriction restriction : clusteringColumnsRestrictions.restrictions())
-            if (!restriction.hasSupportingIndex(registry))
+            if (!restriction.hasSupportingIndex(registry, indexHints))
                 return true;
         return false;
     }
@@ -1225,7 +1253,7 @@ public class StatementRestrictions
         IndexRegistry indexRegistry = IndexRegistry.obtain(table);
         boolean hasClusteringColumnRestrictions = !clusteringColumnsRestrictions.isEmpty();
         boolean hasMultipleContains = nonPrimaryKeyRestrictions.hasMultipleContains();
-        if (filterRestrictions.needFiltering(indexRegistry, hasClusteringColumnRestrictions, hasMultipleContains))
+        if (filterRestrictions.needFiltering(indexRegistry, indexHints, hasClusteringColumnRestrictions, hasMultipleContains))
             return true;
 
         for (StatementRestrictions child : children)
@@ -1245,7 +1273,7 @@ public class StatementRestrictions
         IndexRegistry indexRegistry = IndexRegistry.obtain(table);
 
         for (Index.Group group : indexRegistry.listIndexGroups())
-            if (filterRestrictions.indexBeingUsed(group) && !group.supportsDisjunction())
+            if (filterRestrictions.indexBeingUsed(group, indexHints) && !group.supportsDisjunction())
                 return true;
 
         for (StatementRestrictions child : children)
@@ -1260,7 +1288,7 @@ public class StatementRestrictions
         return Iterables.concat(clusteringColumnsRestrictions.restrictions(), nonPrimaryKeyRestrictions.restrictions());
     }
 
-    private static Set<ColumnMetadata> getColumnsWithUnsupportedIndexRestrictions(TableMetadata table, Iterable<Restriction> restrictions)
+    private static Set<ColumnMetadata> getColumnsWithUnsupportedIndexRestrictions(TableMetadata table, IndexHints indexHints, Iterable<Restriction> restrictions)
     {
         IndexRegistry indexRegistry = IndexRegistry.obtain(table);
         if (indexRegistry.listIndexes().isEmpty())
@@ -1270,9 +1298,9 @@ public class StatementRestrictions
 
         for (Restriction restriction : restrictions)
         {
-            if (!restriction.hasSupportingIndex(indexRegistry))
+            if (!restriction.hasSupportingIndex(indexRegistry, indexHints))
             {
-                for (Index index : indexRegistry.listIndexes())
+                for (Index index : indexRegistry.listIndexes(indexHints))
                 {
                     // If a column restriction has an index which was not picked up by hasSupportingIndex, it means it's an unsupported restriction
                     for (ColumnMetadata column : restriction.getColumnDefs())
