@@ -49,6 +49,7 @@ import org.apache.cassandra.db.filter.ClusteringIndexFilter;
 import org.apache.cassandra.db.filter.ClusteringIndexNamesFilter;
 import org.apache.cassandra.db.filter.ClusteringIndexSliceFilter;
 import org.apache.cassandra.db.filter.DataLimits;
+import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.marshal.AbstractType;
@@ -61,6 +62,7 @@ import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Bounds;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SSTableIndex;
@@ -79,6 +81,7 @@ import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.RowWithSourceTable;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
+import org.apache.cassandra.index.sai.utils.TreeFormatter;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.index.sai.view.View;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
@@ -181,7 +184,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
                                                  avgCellsPerRow(),
                                                  avgRowSizeInBytes(),
                                                  cfs.getLiveSSTables().size());
-        this.planFactory = new Plan.Factory(tableMetrics, this);
+        this.planFactory = new Plan.Factory(tableMetrics, this, command.rowFilter().indexHints());
     }
 
     public PrimaryKey.Factory primaryKeyFactory()
@@ -555,11 +558,17 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
             return;
         }
 
+        IndexHints hints = command.rowFilter().indexHints();
+
         for (Expression expression : expressions)
         {
             if (expression.context.isIndexed())
             {
-                if ( expression.getOp() == Expression.Op.NOT_EQ)
+                // Skip the expressions using indexes that are excluded by the user-provided hints
+                if (hints.excludes(expression.context.getIndexName()))
+                    continue;
+
+                if (expression.getOp() == Expression.Op.NOT_EQ)
                     builder.add(buildInequalityPlan(expression));
                 else
                 {
@@ -789,7 +798,8 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
 
     private StorageAttachedIndex getBestIndexFor(RowFilter.Expression expression)
     {
-        return cfs.indexManager.getBestIndexFor(expression, StorageAttachedIndex.class).orElse(null);
+        return cfs.indexManager.getBestIndexFor(expression, command.rowFilter().indexHints(), StorageAttachedIndex.class)
+                               .orElse(null);
     }
 
     // Note: This method assumes that the selects method has already been called for the
