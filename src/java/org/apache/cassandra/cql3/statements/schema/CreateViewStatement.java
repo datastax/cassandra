@@ -35,6 +35,7 @@ import org.apache.cassandra.cql3.selection.RawSelector;
 import org.apache.cassandra.cql3.selection.Selectable;
 import org.apache.cassandra.cql3.statements.RawKeyspaceAwareStatement;
 import org.apache.cassandra.cql3.statements.StatementType;
+import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.ReversedType;
 import org.apache.cassandra.db.view.View;
@@ -282,6 +283,7 @@ public final class CreateViewStatement extends AlterSchemaStatement
                                                                           whereClause,
                                                                           VariableSpecifications.empty(),
                                                                           Collections.emptyList(),
+                                                                          IndexHints.NONE,
                                                                           false,
                                                                           false,
                                                                           true,

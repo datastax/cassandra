@@ -28,6 +28,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Random;
@@ -57,6 +58,7 @@ import com.datastax.driver.core.Session;
 import com.datastax.driver.core.exceptions.ReadFailureException;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.ColumnIdentifier;
+import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget;
 import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -976,33 +978,50 @@ public class SAITester extends CQLTester
 
     protected PlanSelectionAssertion assertThatPlanFor(String query, Object[]... expectedRows)
     {
-        // First execute the query and check the number of rows returned
+        return assertThatPlanFor(query, rs -> assertRowsIgnoringOrder(rs, expectedRows));
+    }
+
+    protected PlanSelectionAssertion assertThatPlanFor(String query, int numExpectedRows)
+    {
+        return assertThatPlanFor(query, rs -> Assertions.assertThat(rs.size()).isEqualTo(numExpectedRows));
+    }
+
+    private PlanSelectionAssertion assertThatPlanFor(String query, Consumer<UntypedResultSet> resultSetConsumer)
+    {
+        // First execute the query capturing warnings and check the query results
+        disablePreparedReuseForTest();
         ClientWarn.instance.captureWarnings();
-        assertRowsIgnoringOrder(execute(query), expectedRows);
+        resultSetConsumer.accept(execute(query));
         List<String> warnings = ClientWarn.instance.getWarnings();
         ClientWarn.instance.resetWarnings();
 
+        // Then get the indexes used by the plan
+        Set<String> plannedIndexes = plannedIndexes(query);
+        return new PlanSelectionAssertion(plannedIndexes, warnings);
+    }
+
+    private Set<String> plannedIndexes(String query)
+    {
         ReadCommand command = parseReadCommand(query);
         Index.QueryPlan queryPlan = command.indexQueryPlan();
         if (queryPlan == null)
-            return new PlanSelectionAssertion(null, warnings);
+            return Collections.emptySet();
 
         StorageAttachedIndexQueryPlan saiQueryPlan = (StorageAttachedIndexQueryPlan) queryPlan;
         Assertions.assertThat(saiQueryPlan).isNotNull();
         StorageAttachedIndexSearcher searcher = saiQueryPlan.searcherFor(command);
-        Set<String> selectedIndexes = searcher.plannedIndexes();
-        return new PlanSelectionAssertion(selectedIndexes, warnings);
+        return searcher.plannedIndexes();
     }
 
     protected static class PlanSelectionAssertion
     {
-        private final List<String> warnings;
         private final Set<String> selectedIndexes;
+        private final List<String> warnings;
 
-        public PlanSelectionAssertion(@Nullable Set<String> selectedIndexes, @Nullable List<String> warnings)
+        public PlanSelectionAssertion(Set<String> selectedIndexes, @Nullable List<String> warnings)
         {
-            this.warnings = warnings;
             this.selectedIndexes = selectedIndexes;
+            this.warnings = warnings;
         }
 
         public PlanSelectionAssertion uses(String... indexes)
@@ -1011,6 +1030,41 @@ public class SAITester extends CQLTester
                       .isNotNull()
                       .as("Expected to select only %s, but got: %s", indexes, selectedIndexes)
                       .isEqualTo(Set.of(indexes));
+            return this;
+        }
+
+        public PlanSelectionAssertion usesNone()
+        {
+            Assertions.assertThat(selectedIndexes).isEmpty();
+            return this;
+        }
+
+        public PlanSelectionAssertion usesAnyOf(String index1, String index2, String... otherIndexes)
+        {
+            Set<String> expectedIndexes = new HashSet<>(otherIndexes.length + 1);
+            expectedIndexes.add(index1);
+            expectedIndexes.add(index2);
+            expectedIndexes.addAll(Arrays.asList(otherIndexes));
+
+            Assertions.assertThat(selectedIndexes)
+                      .isNotNull()
+                      .as("Expected to select any of %s, but got: %s", expectedIndexes, selectedIndexes)
+                      .containsAnyElementsOf(expectedIndexes);
+            return this;
+        }
+
+        public PlanSelectionAssertion usesAtLeast(String... indexes)
+        {
+            Assertions.assertThat(selectedIndexes)
+                      .isNotNull()
+                      .as("Expected to select at least %s, but got: %s", indexes, selectedIndexes)
+                      .containsAll(Set.of(indexes));
+            return this;
+        }
+
+        public PlanSelectionAssertion uses(int numIndexes)
+        {
+            Assertions.assertThat(selectedIndexes).hasSize(numIndexes);
             return this;
         }
 

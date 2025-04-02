@@ -69,6 +69,7 @@ public class CommitLogDescriptor
     // Stargazer 1.0 messaging
     static final int VERSION_DS_10 = MessagingService.VERSION_DS_10;
     static final int VERSION_DS_11 = MessagingService.VERSION_DS_11;
+    static final int VERSION_DS_12 = MessagingService.VERSION_DS_12;
 
     /**
      * Increment this number if there is a changes in the commit log disc layout or MessagingVersion changes.
@@ -228,6 +229,8 @@ public class CommitLogDescriptor
                 return MessagingService.VERSION_DS_10;
             case VERSION_DS_11:
                 return MessagingService.VERSION_DS_11;
+            case VERSION_DS_12:
+                return MessagingService.VERSION_DS_12;
             default:
                 throw new IllegalStateException("Unknown commitlog version " + commitLogVersion);
         }
@@ -255,6 +258,8 @@ public class CommitLogDescriptor
                 return VERSION_DS_10;
             case MessagingService.VERSION_DS_11:
                 return VERSION_DS_11;
+            case MessagingService.VERSION_DS_12:
+                return VERSION_DS_12;
             default:
                 throw new IllegalStateException("Unknown messaging version " + messagingVersion);
         }

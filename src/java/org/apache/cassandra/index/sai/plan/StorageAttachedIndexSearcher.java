@@ -36,7 +36,6 @@ import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -120,10 +119,21 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
     {
         try
         {
-            Plan plan = controller.buildPlan().optimize();
+            Plan plan = controller.buildPlan();
             Set<String> indexes = new HashSet<>();
-            plan.nodesOfType(Plan.IndexScan.class)
-                .forEach(s -> indexes.add(s.getIndexName()));
+            plan.forEach(node -> {
+                if (node instanceof Plan.IndexScan)
+                {
+                    Plan.IndexScan indexScan = (Plan.IndexScan) node;
+                    indexes.add(indexScan.getIndexName());
+                }
+                if (node instanceof Plan.ScoredIndexScan)
+                {
+                    Plan.ScoredIndexScan indexScan = (Plan.ScoredIndexScan) node;
+                    indexes.add(indexScan.getIndexName());
+                }
+                return Plan.ControlFlow.Continue;
+            });
             return indexes;
         }
         finally
@@ -188,7 +198,6 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             }
         }
     }
-
 
     /**
      * Converts expressions into filter tree (which is currently just a single AND).

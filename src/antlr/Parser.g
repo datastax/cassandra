@@ -1414,6 +1414,11 @@ indexName returns [QualifiedName name]
     : (ksName[name] '.')? idxName[name]
     ;
 
+indexNames returns [Set<QualifiedName> names]
+    @init { $names = new HashSet<QualifiedName>(); }
+    : '{' ( t1=indexName { names.add(t1); } ( ',' tn=indexName { names.add(tn); } )* )? '}'
+    ;
+
 columnFamilyName returns [QualifiedName name]
     @init { $name = new QualifiedName(); }
     : (ksName[name] '.')? cfName[name]
@@ -1686,6 +1691,7 @@ properties[PropertyDefinitions props]
 property[PropertyDefinitions props]
     : k=noncol_ident '=' simple=propertyValue { try { $props.addProperty(k.toString(), simple); } catch (SyntaxException e) { addRecognitionError(e.getMessage()); } }
     | k=noncol_ident '=' map=fullMapLiteral { try { $props.addProperty(k.toString(), convertPropertyMap(map)); } catch (SyntaxException e) { addRecognitionError(e.getMessage()); } }
+    | k=noncol_ident '=' names=indexNames { try { $props.addProperty(k.toString(), names); } catch (SyntaxException e) { addRecognitionError(e.getMessage()); } }
     ;
 
 propertyValue returns [String str]

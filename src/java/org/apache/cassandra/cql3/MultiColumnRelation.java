@@ -23,6 +23,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.stream.Collectors;
 
+import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.cql3.Term.MultiColumnRaw;
@@ -159,7 +160,7 @@ public class MultiColumnRelation extends Relation
     }
 
     @Override
-    protected Restriction newEQRestriction(TableMetadata table, VariableSpecifications boundNames)
+    protected Restriction newEQRestriction(TableMetadata table, VariableSpecifications boundNames, IndexHints indexHints)
     {
         List<ColumnMetadata> receivers = receivers(table);
         Term term = toTerm(receivers, getValue(), table.keyspace, boundNames);
