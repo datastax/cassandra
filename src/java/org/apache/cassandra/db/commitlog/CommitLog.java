@@ -93,7 +93,6 @@ public class CommitLog implements CommitLogMBean
 
     public final CommitLogArchiver archiver;
     public final CommitLogMetrics metrics;
-    public static InvalidMutationRelocator invalidMutationRelocator = new InvalidMutationRelocator();
     final AbstractCommitLogService executor;
     private Set<String> segmentsWithInvalidMutations;
     private Set<String> segmentsWithFailedMutations;
@@ -246,11 +245,8 @@ public class CommitLog implements CommitLogMBean
             // Move all segments with invalid (and no failed) mutations to a different sub-directory and delete the segment from the commit log directory of the host.
             for (File f : files)
             {
-                if (segmentsWithInvalidAndNoFailedMutations.contains(f.name()))
-                    invalidMutationRelocator.moveSegmentsWithInvalidMutationsToHostSubDirectory(f.toPath());
-
                 boolean hasFailedMutations = segmentsWithFailedMutations.contains(f.name());
-                segmentManager.handleReplayedSegment(f, hasFailedMutations);
+                segmentManager.handleReplayedSegment(f, segmentsWithInvalidAndNoFailedMutations.contains(f.name()), hasFailedMutations);
             }
         }
 
@@ -300,6 +296,11 @@ public class CommitLog implements CommitLogMBean
     public void recover(String path) throws IOException
     {
         recoverPath(path, false);
+    }
+
+    public void setCommitLogSegmentHandler(CommitLogSegmentHandler handler)
+    {
+        AbstractCommitLogSegmentManager.commitLogSegmentHandler = handler;
     }
 
     /**
@@ -646,14 +647,6 @@ public class CommitLog implements CommitLogMBean
     public AbstractCommitLogSegmentManager getSegmentManager()
     {
         return segmentManager;
-    }
-
-    public static class InvalidMutationRelocator
-    {
-        protected void moveSegmentsWithInvalidMutationsToHostSubDirectory(Path segmentWithInvalidAndNoFailedMutations)
-        {
-            // no-op
-        }
     }
 
     public static final class Configuration
