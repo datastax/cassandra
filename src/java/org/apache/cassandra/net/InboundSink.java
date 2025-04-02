@@ -22,6 +22,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
 import java.util.function.Predicate;
 
+import org.apache.cassandra.index.IndexBuildInProgressException;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
 import org.slf4j.LoggerFactory;
 
@@ -105,12 +106,20 @@ public class InboundSink implements InboundMessageHandlers.MessageConsumer
             if (t instanceof AbortedOperationException)
                 return;
 
-            if (t instanceof TombstoneOverwhelmingException || t instanceof IndexNotAvailableException)
+            if (t instanceof TombstoneOverwhelmingException || 
+                t instanceof IndexNotAvailableException || 
+                t instanceof IndexBuildInProgressException)
+            {
                 noSpamLogger.error(t.getMessage());
+            }
             else if (t instanceof RuntimeException)
+            {
                 throw (RuntimeException) t;
+            }
             else
+            {
                 throw new RuntimeException(t);
+            }
         }
     }
 
