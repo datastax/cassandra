@@ -28,6 +28,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Random;
@@ -44,6 +45,7 @@ import javax.management.ObjectName;
 
 import com.google.common.base.Predicates;
 import com.google.common.collect.Sets;
+import org.assertj.core.api.Assertions;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
@@ -58,11 +60,13 @@ import com.datastax.driver.core.exceptions.ReadFailureException;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.ColumnIdentifier;
+import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget;
 import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.lifecycle.View;
@@ -75,6 +79,8 @@ import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.SegmentBuilder;
 import org.apache.cassandra.index.sai.plan.QueryController;
+import org.apache.cassandra.index.sai.plan.StorageAttachedIndexQueryPlan;
+import org.apache.cassandra.index.sai.plan.StorageAttachedIndexSearcher;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.ResourceLeakDetector;
 import org.apache.cassandra.inject.ActionBuilder;
@@ -91,6 +97,7 @@ import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.MockSchema;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableId;
+import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.service.snapshot.TableSnapshot;
 import org.apache.cassandra.utils.FBUtilities;
@@ -976,6 +983,110 @@ public class SAITester extends CQLTester
             {
                 throw Throwables.unchecked(e);
             }
+        }
+    }
+    protected PlanSelectionAssertion assertThatPlanFor(String query, Object[]... expectedRows)
+    {
+        return assertThatPlanFor(query, rs -> assertRowsIgnoringOrder(rs, expectedRows));
+    }
+
+    protected PlanSelectionAssertion assertThatPlanFor(String query, int numExpectedRows)
+    {
+        return assertThatPlanFor(query, rs -> Assertions.assertThat(rs.size()).isEqualTo(numExpectedRows));
+    }
+
+    private PlanSelectionAssertion assertThatPlanFor(String query, Consumer<UntypedResultSet> resultSetConsumer)
+    {
+        // First execute the query capturing warnings and check the query results
+        disablePreparedReuseForTest();
+        ClientWarn.instance.captureWarnings();
+        resultSetConsumer.accept(execute(query));
+        List<String> warnings = ClientWarn.instance.getWarnings();
+        ClientWarn.instance.resetWarnings();
+
+        // Then get the indexes used by the plan
+        Set<String> plannedIndexes = plannedIndexes(query);
+        return new PlanSelectionAssertion(plannedIndexes, warnings);
+    }
+
+    private Set<String> plannedIndexes(String query)
+    {
+        ReadCommand command = parseReadCommand(query);
+        Index.QueryPlan queryPlan = command.indexQueryPlan();
+        if (queryPlan == null)
+            return Collections.emptySet();
+
+        StorageAttachedIndexQueryPlan saiQueryPlan = (StorageAttachedIndexQueryPlan) queryPlan;
+        Assertions.assertThat(saiQueryPlan).isNotNull();
+        StorageAttachedIndexSearcher searcher = (StorageAttachedIndexSearcher) saiQueryPlan.searcherFor(command);
+        return searcher.plannedIndexes();
+    }
+
+    protected static class PlanSelectionAssertion
+    {
+        private final Set<String> selectedIndexes;
+        private final List<String> warnings;
+
+        public PlanSelectionAssertion(Set<String> selectedIndexes, @Nullable List<String> warnings)
+        {
+            this.selectedIndexes = selectedIndexes;
+            this.warnings = warnings;
+        }
+
+        public PlanSelectionAssertion uses(String... indexes)
+        {
+            Assertions.assertThat(selectedIndexes)
+                      .isNotNull()
+                      .as("Expected to select only %s, but got: %s", indexes, selectedIndexes)
+                      .isEqualTo(Set.of(indexes));
+            return this;
+        }
+
+        public PlanSelectionAssertion usesNone()
+        {
+            Assertions.assertThat(selectedIndexes).isEmpty();
+            return this;
+        }
+
+        public PlanSelectionAssertion usesAnyOf(String index1, String index2, String... otherIndexes)
+        {
+            Set<String> expectedIndexes = new HashSet<>(otherIndexes.length + 1);
+            expectedIndexes.add(index1);
+            expectedIndexes.add(index2);
+            expectedIndexes.addAll(Arrays.asList(otherIndexes));
+
+            Assertions.assertThat(selectedIndexes)
+                      .isNotNull()
+                      .as("Expected to select any of %s, but got: %s", expectedIndexes, selectedIndexes)
+                      .containsAnyElementsOf(expectedIndexes);
+            return this;
+        }
+
+        public PlanSelectionAssertion usesAtLeast(String... indexes)
+        {
+            Assertions.assertThat(selectedIndexes)
+                      .isNotNull()
+                      .as("Expected to select at least %s, but got: %s", indexes, selectedIndexes)
+                      .containsAll(Set.of(indexes));
+            return this;
+        }
+
+        public PlanSelectionAssertion uses(int numIndexes)
+        {
+            Assertions.assertThat(selectedIndexes).hasSize(numIndexes);
+            return this;
+        }
+
+        public void doesntWarn()
+        {
+            Assert.assertNull(warnings);
+        }
+
+        public void warns(String expectedWarning)
+        {
+            Assert.assertNotNull(warnings);
+            Assert.assertEquals(1, warnings.size());
+            Assert.assertEquals(expectedWarning, warnings.get(0));
         }
     }
 }
