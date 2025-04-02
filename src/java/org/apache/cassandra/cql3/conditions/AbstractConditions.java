@@ -21,6 +21,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 
+import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.index.IndexRegistry;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.cql3.functions.Function;
@@ -42,7 +43,7 @@ abstract class AbstractConditions implements Conditions
     }
 
     @Override
-    public Set<ColumnMetadata> getAnalyzedColumns(IndexRegistry indexRegistry)
+    public Set<ColumnMetadata> getAnalyzedColumns(IndexRegistry indexRegistry, IndexHints indexHints)
     {
         return Collections.emptySet();
     }

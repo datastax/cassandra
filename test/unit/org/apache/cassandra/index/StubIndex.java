@@ -223,7 +223,7 @@ public class StubIndex implements Index
         return (iter, command) -> iter;
     }
 
-    protected class Searcher implements Index.Searcher
+    public class Searcher implements Index.Searcher
     {
         private final ReadCommand command;
 

@@ -17,11 +17,14 @@
  */
 package org.apache.cassandra.db;
 
+import javax.annotation.Nullable;
+
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.exceptions.RequestExecutionException;
+import org.apache.cassandra.index.Index;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.pager.QueryPager;
@@ -134,8 +137,8 @@ public interface ReadQuery
     /**
      * Starts a new read operation.
      * <p>
-     * This must be called before {@link #executeInternal} and passed to it to protect the read.
-     * The returned object <b>must</b> be closed on all path and it is thus strongly advised to
+     * This must be called before {@link #executeInternal(ReadExecutionController)} and passed to it to protect the read.
+     * The returned object <b>must</b> be closed on all paths, and it is thus strongly advised to
      * use it in a try-with-ressource construction.
      *
      * @return a newly started execution controller for this {@code ReadQuery}.
@@ -270,5 +273,16 @@ public interface ReadQuery
     default boolean isTopK()
     {
         return false;
+    }
+
+    /**
+     * Index query plan chosen for this query. Can be null.
+     *
+     * @return index query plan chosen for this query
+     */
+    @Nullable
+    default Index.QueryPlan indexQueryPlan()
+    {
+        return null;
     }
 }
