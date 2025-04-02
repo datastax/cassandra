@@ -16,6 +16,8 @@
 package org.apache.cassandra.db.filter;
 
 import java.io.IOException;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -129,9 +131,11 @@ public class ANNOptions
         return rerankK;
     }
 
-    public String toCQLString()
+    public Map<String, String> toMap()
     {
-        return String.format("{'%s': %d}", RERANK_K_OPTION_NAME, rerankK);
+        return this == NONE
+               ? Collections.emptyMap()
+               : Collections.singletonMap(RERANK_K_OPTION_NAME, String.valueOf(rerankK));
     }
 
     @Override
