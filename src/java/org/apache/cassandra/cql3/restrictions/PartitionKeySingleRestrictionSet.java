@@ -25,6 +25,7 @@ import org.apache.cassandra.cql3.statements.Bound;
 import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.MultiClusteringBuilder;
 import org.apache.cassandra.db.filter.ANNOptions;
+import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.guardrails.Guardrails;
 import org.apache.cassandra.index.IndexRegistry;
@@ -126,13 +127,14 @@ final class PartitionKeySingleRestrictionSet extends RestrictionSetWrapper imple
     public void addToRowFilter(RowFilter.Builder filter,
                                IndexRegistry indexRegistry,
                                QueryOptions options,
-                               ANNOptions annOptions)
+                               ANNOptions annOptions,
+                               IndexHints indexHints)
     {
         List<SingleRestriction> restrictions = restrictions();
         for (int i = 0; i < restrictions.size(); i++)
         {
             SingleRestriction r = restrictions.get(i);
-            r.addToRowFilter(filter, indexRegistry, options, annOptions);
+            r.addToRowFilter(filter, indexRegistry, options, annOptions, indexHints);
         }
     }
 

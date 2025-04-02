@@ -23,13 +23,16 @@ import java.util.concurrent.TimeUnit;
 
 import com.google.common.annotations.VisibleForTesting;
 
+import org.apache.cassandra.cql3.CqlBuilder;
+import org.apache.cassandra.db.memtable.Memtable;
+import org.apache.cassandra.net.Verb;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.filter.ClusteringIndexFilter;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.lifecycle.View;
-import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.partitions.CachedPartition;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
@@ -49,8 +52,6 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.metrics.TableMetrics;
-import org.apache.cassandra.net.Verb;
-import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.StorageProxy;
 import org.apache.cassandra.tracing.Tracing;
@@ -471,11 +472,24 @@ public class PartitionRangeReadCommand extends ReadCommand implements PartitionR
         return Verb.RANGE_REQ;
     }
 
-    protected void appendCQLWhereClause(StringBuilder sb)
+    @Override
+    protected void appendCQLWhereClause(CqlBuilder builder)
     {
-        String filterString = dataRange().toCQLString(metadata(), rowFilter());
-        if (!filterString.isEmpty())
-            sb.append(" WHERE ").append(filterString);
+        if (dataRange.isUnrestricted(metadata()) && rowFilter().isEmpty())
+            return;
+
+        builder.append(" WHERE ");
+        // Put data range (token) conditions first, then row filter
+        if (!dataRange.isUnrestricted(metadata()))
+        {
+            builder.append(dataRange.toCQLString(metadata(), RowFilter.none()));
+            if (!rowFilter().isEmpty())
+                builder.append(" AND ");
+        }
+        if (!rowFilter().isEmpty())
+        {
+            builder.append(rowFilter().toCQLString());
+        }
     }
 
     @Override

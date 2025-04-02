@@ -31,6 +31,7 @@ import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.cql3.statements.CQL3CasRequest;
 import org.apache.cassandra.db.Clustering;
+import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.index.IndexRegistry;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.commons.lang3.builder.ToStringBuilder;
@@ -87,13 +88,13 @@ public final class ColumnConditions extends AbstractConditions implements Iterab
     }
 
     @Override
-    public Set<ColumnMetadata> getAnalyzedColumns(IndexRegistry indexRegistry)
+    public Set<ColumnMetadata> getAnalyzedColumns(IndexRegistry indexRegistry, IndexHints indexHints)
     {
         Set<ColumnMetadata> analyzedColumns = new HashSet<>();
 
         for (ColumnCondition condition : this)
         {
-            if (indexRegistry.getAnalyzerFor(condition.column, condition.operator, null).isPresent())
+            if (indexRegistry.getAnalyzerFor(condition.column, condition.operator, null, indexHints).isPresent())
             {
                 analyzedColumns.add(condition.column);
             }

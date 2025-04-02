@@ -23,6 +23,7 @@ import java.lang.reflect.InvocationTargetException;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeSet;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
@@ -280,6 +281,18 @@ public final class IndexMetadata
         IndexMetadata other = (IndexMetadata) obj;
 
         return Objects.equal(id, other.id) && Objects.equal(name, other.name) && equalsWithoutName(other);
+    }
+
+    /**
+     * @param metadata the index metadata to join
+     * @return a comma-separated list of alphabetically sorted unqualified index names
+     */
+    public static String joinNames(Iterable<IndexMetadata> metadata)
+    {
+        TreeSet<String> sortedNames = new TreeSet<>();
+        for (IndexMetadata indexMetadata : metadata)
+            sortedNames.add(indexMetadata.name);
+        return String.join(",", sortedNames);
     }
 
     @Override

@@ -62,6 +62,7 @@ import static org.apache.cassandra.net.MessagingService.VERSION_DSE_68;
 import static org.apache.cassandra.utils.MonotonicClock.Global.approxTime;
 import static org.apache.cassandra.net.MessagingService.VERSION_DS_10;
 import static org.apache.cassandra.net.MessagingService.VERSION_DS_11;
+import static org.apache.cassandra.net.MessagingService.VERSION_DS_12;
 import static org.apache.cassandra.net.MessagingService.VERSION_DS_20;
 
 public class Mutation implements IMutation, Supplier<Mutation>
@@ -340,6 +341,7 @@ public class Mutation implements IMutation, Supplier<Mutation>
     private int serializedSize50;
     private int serializedSizeDS10;
     private int serializedSizeDS11;
+    private int serializedSizeDS12;
     private int serializedSizeDS20;
     private int serializedSizeDSE68;
 
@@ -363,6 +365,10 @@ public class Mutation implements IMutation, Supplier<Mutation>
                 if (serializedSizeDS11 == 0)
                     serializedSizeDS11 = (int) serializer.serializedSize(this, VERSION_DS_11);
                 return serializedSizeDS11;
+            case VERSION_DS_12:
+                if (serializedSizeDS12 == 0)
+                    serializedSizeDS12 = (int) serializer.serializedSize(this, VERSION_DS_12);
+                return serializedSizeDS12;
             case VERSION_DS_20:
                 if (serializedSizeDS20 == 0)
                     serializedSizeDS20 = (int) serializer.serializedSize(this, VERSION_DS_20);
@@ -370,6 +376,7 @@ public class Mutation implements IMutation, Supplier<Mutation>
             case VERSION_DSE_68:
                 if (serializedSizeDSE68 == 0)
                     serializedSizeDSE68 = (int) serializer.serializedSize(this, VERSION_DSE_68);
+                return serializedSizeDSE68;
             default:
                 throw new IllegalStateException("Unknown serialization version: " + version);
         }
