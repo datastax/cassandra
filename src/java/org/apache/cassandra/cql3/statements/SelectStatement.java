@@ -42,6 +42,7 @@ import org.apache.cassandra.cql3.restrictions.Restrictions;
 import org.apache.cassandra.cql3.selection.SortedRowsBuilder;
 import org.apache.cassandra.db.marshal.FloatType;
 import org.apache.cassandra.guardrails.Guardrails;
+import org.apache.cassandra.index.Index;
 import org.apache.cassandra.sensors.SensorsCustomParams;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.Schema;
@@ -407,9 +408,10 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
 
         DataLimits dataLimits = getDataLimits(queryState, userLimit, perPartitionLimit, userOffset);
 
+        IndexRegistry indexRegistry = IndexRegistry.obtain(table);
         ReadQuery query = isPartitionRangeQuery
-                        ? getRangeCommand(options, columnFilter, dataLimits, nowInSec, queryState)
-                        : getSliceCommands(queryState, options, columnFilter, dataLimits, nowInSec);
+                        ? getRangeCommand(options, columnFilter, dataLimits, nowInSec, queryState, indexRegistry)
+                        : getSliceCommands(queryState, options, columnFilter, dataLimits, nowInSec, indexRegistry);
 
         // Handle additional validation for topK queries
         if (query.isTopK())
@@ -437,7 +439,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             checkFalse(aggregationSpec != null, TOPK_AGGREGATION_ERROR);
         }
 
-        selectOptions.validate(queryState, table.keyspace, userLimit);
+        selectOptions.validate(queryState, indexRegistry, table, userLimit);
 
         // If there's a secondary index that the command can use, have it validate the request parameters.
         query.maybeValidateIndexes();
@@ -707,7 +709,12 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         return restrictions;
     }
 
-    private ReadQuery getSliceCommands(QueryState queryState, QueryOptions options, ColumnFilter columnFilter, DataLimits limit, int nowInSec)
+    private ReadQuery getSliceCommands(QueryState queryState,
+                                       QueryOptions options,
+                                       ColumnFilter columnFilter,
+                                       DataLimits limit,
+                                       int nowInSec,
+                                       IndexRegistry indexRegistry)
     {
         Collection<ByteBuffer> keys = restrictions.getPartitionKeys(options, queryState);
         if (keys.isEmpty())
@@ -719,7 +726,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         if (filter == null || filter.isEmpty(table.comparator))
             return ReadQuery.empty(table);
 
-        RowFilter rowFilter = getRowFilter(options, queryState);
+        RowFilter rowFilter = getRowFilter(options, queryState, indexRegistry);
 
         List<DecoratedKey> decoratedKeys = new ArrayList<>(keys.size());
         for (ByteBuffer key : keys)
@@ -764,25 +771,32 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         QueryOptions options = QueryOptions.forInternalCalls(Collections.emptyList());
         ColumnFilter columnFilter = selection.newSelectors(options).getColumnFilter();
         ClusteringIndexFilter filter = makeClusteringIndexFilter(options, columnFilter, state);
-        RowFilter rowFilter = getRowFilter(options, state);
+        RowFilter rowFilter = getRowFilter(options, state, IndexRegistry.EMPTY);
         return SinglePartitionReadCommand.create(table, nowInSec, columnFilter, rowFilter, DataLimits.NONE, key, filter);
     }
 
     /**
      * The {@code RowFilter} for this SELECT, assuming an internal call (no bound values in particular).
      */
-    public RowFilter rowFilterForInternalCalls()
+    public RowFilter rowFilterForInternalCalls(IndexRegistry indexRegistry)
     {
-        return getRowFilter(QueryOptions.forInternalCalls(Collections.emptyList()), QueryState.forInternalCalls());
+        return getRowFilter(QueryOptions.forInternalCalls(Collections.emptyList()),
+                            QueryState.forInternalCalls(),
+                            indexRegistry);
     }
 
-    private ReadQuery getRangeCommand(QueryOptions options, ColumnFilter columnFilter, DataLimits limit, int nowInSec, QueryState queryState)
+    private ReadQuery getRangeCommand(QueryOptions options,
+                                      ColumnFilter columnFilter,
+                                      DataLimits limit,
+                                      int nowInSec,
+                                      QueryState queryState,
+                                      IndexRegistry indexRegistry)
     {
         ClusteringIndexFilter clusteringIndexFilter = makeClusteringIndexFilter(options, columnFilter, queryState);
         if (clusteringIndexFilter == null)
             return ReadQuery.empty(table);
 
-        RowFilter rowFilter = getRowFilter(options, queryState);
+        RowFilter rowFilter = getRowFilter(options, queryState, indexRegistry);
 
         // The LIMIT provided by the user is the number of CQL row he wants returned.
         // We want to have getRangeSlice to count the number of columns, not the number of keys.
@@ -1006,9 +1020,8 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
     /**
      * May be used by custom QueryHandler implementations
      */
-    public RowFilter getRowFilter(QueryOptions options, QueryState state) throws InvalidRequestException
+    public RowFilter getRowFilter(QueryOptions options, QueryState state, IndexRegistry indexRegistry) throws InvalidRequestException
     {
-        IndexRegistry indexRegistry = IndexRegistry.obtain(table);
         return restrictions.getRowFilter(indexRegistry, options, state, selectOptions);
     }
 
@@ -1207,8 +1220,13 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             // on indexed columns to allow pushing ORDER BY into the index; see StatementRestrictions::addOrderingRestrictions.
             // Therefore, we don't want to convert an ANN Ordering column into a +score column until after that.
             List<Ordering> orderings = getOrderings(table);
+
+            // Besides actual restrictions (where clauses), prepareRestrictions will include the user-provided index hints,
+            // which are needed to determine what indexes to use for the query and to validate whether filtering is needed.
+            IndexHints indexHints = options.parseIndexHints(table, IndexRegistry.obtain(table));
+
             StatementRestrictions restrictions = prepareRestrictions(
-                    table, bindVariables, orderings, containsOnlyStaticColumns, forView);
+                    table, bindVariables, orderings, indexHints, containsOnlyStaticColumns, forView);
 
             // If we order post-query, the sorted column needs to be in the ResultSet for sorting,
             // even if we don't ultimately ship them to the client (CASSANDRA-4911).
@@ -1370,6 +1388,8 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
          *
          * @param metadata the column family meta data
          * @param boundNames the variable specifications
+         * @param orderings the orderings
+         * @param indexHints the index hints
          * @param selectsOnlyStaticColumns {@code true} if the query select only static columns, {@code false} otherwise.
          * @return the restrictions
          * @throws InvalidRequestException if a problem occurs while building the restrictions
@@ -1377,6 +1397,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         private StatementRestrictions prepareRestrictions(TableMetadata metadata,
                                                           VariableSpecifications boundNames,
                                                           List<Ordering> orderings,
+                                                          IndexHints indexHints,
                                                           boolean selectsOnlyStaticColumns,
                                                           boolean forView) throws InvalidRequestException
         {
@@ -1385,6 +1406,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                                                 whereClause,
                                                 boundNames,
                                                 orderings,
+                                                indexHints,
                                                 selectsOnlyStaticColumns,
                                                 parameters.allowFiltering,
                                                 forView);
