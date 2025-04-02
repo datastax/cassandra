@@ -18,6 +18,7 @@
 package org.apache.cassandra.db;
 
 import org.apache.cassandra.cql3.ColumnIdentifier;
+import org.apache.cassandra.cql3.CqlBuilder;
 import org.apache.cassandra.cql3.statements.SelectOptions;
 import org.apache.cassandra.db.filter.ANNOptions;
 import org.apache.cassandra.db.filter.ColumnFilter;
@@ -102,26 +103,23 @@ abstract class AbstractReadQuery extends MonitorableImpl implements ReadQuery
      */
     public String toCQLString()
     {
-        StringBuilder sb = new StringBuilder().append("SELECT ")
-                                              .append(columnFilter().toCQLString())
-                                              .append(" FROM ")
-                                              .append(ColumnIdentifier.maybeQuote(metadata().keyspace))
-                                              .append('.')
-                                              .append(ColumnIdentifier.maybeQuote(metadata().name));
-        appendCQLWhereClause(sb);
+        CqlBuilder builder = new CqlBuilder().append("SELECT ")
+                                             .append(columnFilter().toCQLString())
+                                             .append(" FROM ")
+                                             .append(ColumnIdentifier.maybeQuote(metadata().keyspace))
+                                             .append('.')
+                                             .append(ColumnIdentifier.maybeQuote(metadata().name));
+        appendCQLWhereClause(builder);
 
         if (limits() != DataLimits.NONE)
-            sb.append(' ').append(limits());
+            builder.append(' ').append(limits());
 
         ANNOptions annOptions = rowFilter().annOptions();
         if (annOptions != ANNOptions.NONE)
-            sb.append(" WITH ").append(SelectOptions.ANN_OPTIONS).append(" = ").append(annOptions.toCQLString());
+            builder.append(" WITH ").append(SelectOptions.ANN_OPTIONS).append(" = ").append(annOptions.toCQLString());
 
-        // ALLOW FILTERING might not be strictly necessary
-        sb.append(" ALLOW FILTERING");
-
-        return sb.toString();
+        return builder.toString();
     }
 
-    protected abstract void appendCQLWhereClause(StringBuilder sb);
+    protected abstract void appendCQLWhereClause(CqlBuilder builder);
 }

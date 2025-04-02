@@ -49,7 +49,7 @@ public class AnalyzerEqOperatorSupport
                                                            OPTION, Arrays.toString(Value.values()));
 
     public static final String EQ_RESTRICTION_ON_ANALYZED_WARNING =
-    String.format("Column [%%s] is restricted by '=' and has an analyzed index [%%s] able to process those restrictions. " +
+    String.format("Column [%%s] is restricted by '=' and has analyzed indexes [%%s] able to process those restrictions. " +
                   "Analyzed indexes might process '=' restrictions in a way that is inconsistent with non-indexed queries. " +
                   "While '=' is still supported on analyzed indexes for backwards compatibility, " +
                   "it is recommended to use the ':' operator instead to prevent the ambiguity. " +
@@ -59,9 +59,10 @@ public class AnalyzerEqOperatorSupport
                   OPTION, Value.UNSUPPORTED.toString().toLowerCase());
 
     public static final String EQ_AMBIGUOUS_ERROR =
-    String.format("Column [%%s] equality predicate is ambiguous.  It has both an analyzed index [%%s] configured with '%s':'%s', " +
-                  "and an un-analyzed index [%%s].  " +
-                  "To avoid ambiguity, drop the analyzed index and recreate it with option '%s':'%s'.",
+    String.format("Column [%%s] equality predicate is ambiguous.  It has both analyzed indexes [%%s] configured with '%s':'%s', " +
+                  "and an un-analyzed indexes [%%s].  " +
+                  "To avoid ambiguity, drop the analyzed indexes and recreate them with option '%s':'%s', " +
+                  "or use index hints to disambiguate, as in SELECT ... WITH included_indexes={%%s}.",
                   OPTION, Value.MATCH.toString().toLowerCase(), OPTION, Value.UNSUPPORTED.toString().toLowerCase());
 
 

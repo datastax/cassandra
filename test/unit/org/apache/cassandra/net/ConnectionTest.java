@@ -74,6 +74,7 @@ import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.apache.cassandra.net.MessagingService.VERSION_40;
 import static org.apache.cassandra.net.MessagingService.VERSION_DS_10;
 import static org.apache.cassandra.net.MessagingService.VERSION_DS_11;
+import static org.apache.cassandra.net.MessagingService.VERSION_DS_12;
 import static org.apache.cassandra.net.MessagingService.minimum_version;
 import static org.apache.cassandra.net.NoPayload.noPayload;
 import static org.apache.cassandra.net.MessagingService.current_version;
@@ -199,6 +200,7 @@ public class ConnectionTest
     static final AcceptVersions legacy = new AcceptVersions(VERSION_40, VERSION_40);
     static final AcceptVersions ds10 = new AcceptVersions(minimum_version, VERSION_DS_10);
     static final AcceptVersions ds11 = new AcceptVersions(minimum_version, VERSION_DS_11);
+    static final AcceptVersions ds12 = new AcceptVersions(minimum_version, VERSION_DS_12);
     static final AcceptVersions current = new AcceptVersions(current_version, current_version);
 
     static final List<Function<Settings, Settings>> MESSAGGING_VERSIONS = ImmutableList.of(
@@ -209,6 +211,14 @@ public class ConnectionTest
                             .inbound(inbound -> inbound.withAcceptMessaging(ds10)),
         settings -> settings.outbound(outbound -> outbound.withAcceptVersions(ds10))
                             .inbound(inbound -> inbound.withAcceptMessaging(ds11)),
+        settings -> settings.outbound(outbound -> outbound.withAcceptVersions(ds12))
+                            .inbound(inbound -> inbound.withAcceptMessaging(ds11)),
+        settings -> settings.outbound(outbound -> outbound.withAcceptVersions(ds11))
+                            .inbound(inbound -> inbound.withAcceptMessaging(ds12)),
+        settings -> settings.outbound(outbound -> outbound.withAcceptVersions(ds12))
+                            .inbound(inbound -> inbound.withAcceptMessaging(ds10)),
+        settings -> settings.outbound(outbound -> outbound.withAcceptVersions(ds10))
+                            .inbound(inbound -> inbound.withAcceptMessaging(ds12)),
         // This setting ensures that we cover the current case for the power set where no versions are overridden.
         settings -> settings.outbound(outbound -> outbound.withAcceptVersions(current))
                             .inbound(inbound -> inbound.withAcceptMessaging(current))
