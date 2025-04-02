@@ -600,7 +600,7 @@ public enum CassandraRelevantProperties
      * The current messaging version. This is used when we add new messaging versions without adopting them immediately,
      * or to force the node to use a specific version for testing purposes.
      */
-    DS_CURRENT_MESSAGING_VERSION("ds.current_messaging_version", Integer.toString(MessagingService.VERSION_DS_11)),
+    DS_CURRENT_MESSAGING_VERSION("ds.current_messaging_version", Integer.toString(MessagingService.VERSION_DS_12)),
 
     /**
      * Which compression algorithm to use for SSTable compression when not specified explicitly in the sstable options.
