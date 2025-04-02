@@ -22,18 +22,18 @@ import java.lang.invoke.MethodHandles;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.function.Consumer;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.MoreObjects;
-import com.google.common.util.concurrent.Runnables;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.github.jbellis.jvector.graph.NodeQueue;
 import io.github.jbellis.jvector.quantization.CompressedVectors;
 import io.github.jbellis.jvector.quantization.ProductQuantization;
 import io.github.jbellis.jvector.util.BitSet;
 import io.github.jbellis.jvector.util.Bits;
+import io.github.jbellis.jvector.util.BoundedLongHeap;
 import io.github.jbellis.jvector.util.SparseBits;
 import io.github.jbellis.jvector.vector.VectorizationProvider;
 import io.github.jbellis.jvector.vector.types.VectorFloat;
@@ -54,13 +54,14 @@ import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
 import org.apache.cassandra.index.sai.disk.vector.BruteForceRowIdIterator;
 import org.apache.cassandra.index.sai.disk.vector.CassandraDiskAnn;
 import org.apache.cassandra.index.sai.disk.vector.CloseableReranker;
+import org.apache.cassandra.index.sai.disk.vector.NodeQueueRowIdIterator;
 import org.apache.cassandra.index.sai.disk.vector.VectorCompression;
 import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.plan.Orderer;
 import org.apache.cassandra.index.sai.plan.Plan.CostCoefficients;
-import org.apache.cassandra.index.sai.utils.IntIntPairArray;
+import org.apache.cassandra.index.sai.utils.SegmentRowIdOrdinalPairs;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
@@ -72,7 +73,6 @@ import org.apache.cassandra.metrics.PairedSlidingWindowReservoir;
 import org.apache.cassandra.metrics.QuickSlidingWindowReservoir;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.CloseableIterator;
-import org.apache.cassandra.utils.SortingIterator;
 
 import static java.lang.Math.ceil;
 import static java.lang.Math.min;
@@ -230,7 +230,7 @@ public class V2VectorIndexSearcher extends IndexSearcher
             if (initialCostEstimate.shouldUseBruteForce())
             {
                 var maxSize = endSegmentRowId - startSegmentRowId + 1;
-                var segmentOrdinalPairs = new IntIntPairArray(maxSize);
+                var segmentOrdinalPairs = new SegmentRowIdOrdinalPairs(maxSize);
                 try (var ordinalsView = graph.getOrdinalsView())
                 {
                     ordinalsView.forEachOrdinalInRange(startSegmentRowId, endSegmentRowId, segmentOrdinalPairs::add);
@@ -270,7 +270,7 @@ public class V2VectorIndexSearcher extends IndexSearcher
         }
     }
 
-    private CloseableIterator<RowIdWithScore> orderByBruteForce(VectorFloat<?> queryVector, IntIntPairArray segmentOrdinalPairs, int limit, int rerankK) throws IOException
+    private CloseableIterator<RowIdWithScore> orderByBruteForce(VectorFloat<?> queryVector, SegmentRowIdOrdinalPairs segmentOrdinalPairs, int limit, int rerankK) throws IOException
     {
         // If we use compressed vectors, we still have to order rerankK results using full resolution similarity
         // scores, so only use the compressed vectors when there are enough vectors to make it worthwhile.
@@ -289,21 +289,24 @@ public class V2VectorIndexSearcher extends IndexSearcher
      */
     private CloseableIterator<RowIdWithScore> orderByBruteForce(CompressedVectors cv,
                                                                 VectorFloat<?> queryVector,
-                                                                IntIntPairArray segmentOrdinalPairs,
+                                                                SegmentRowIdOrdinalPairs segmentOrdinalPairs,
                                                                 int limit,
                                                                 int rerankK) throws IOException
     {
-        var approximateScores = new SortingIterator.Builder<BruteForceRowIdIterator.RowWithApproximateScore>(segmentOrdinalPairs.size());
+        // Use the jvector NodeQueue to avoid unnecessary object allocations since this part of the code operates on
+        // many rows.
+        var approximateScores = new NodeQueue(new BoundedLongHeap(segmentOrdinalPairs.size()), NodeQueue.Order.MAX_HEAP);
         var similarityFunction = indexContext.getIndexWriterConfig().getSimilarityFunction();
         var scoreFunction = cv.precomputedScoreFunctionFor(queryVector, similarityFunction);
 
-        segmentOrdinalPairs.forEachIntPair((segmentRowId, ordinal) -> {
-            var score = scoreFunction.similarityTo(ordinal);
-            approximateScores.add(new BruteForceRowIdIterator.RowWithApproximateScore(segmentRowId, ordinal, score));
+        // Store the index of the (rowId, ordinal) pair from the segmentOrdinalPairs in the NodeQueue so that we can
+        // retrieve both values with O(1) lookup when we need to resolve the full resolution score in the
+        // BruteForceRowIdIterator.
+        segmentOrdinalPairs.forEachIndexOrdinalPair((i, ordinal) -> {
+            approximateScores.push(i, scoreFunction.similarityTo(ordinal));
         });
-        var approximateScoresQueue = approximateScores.build(BruteForceRowIdIterator.RowWithApproximateScore::compare);
         var reranker = new CloseableReranker(similarityFunction, queryVector, graph.getView());
-        return new BruteForceRowIdIterator(approximateScoresQueue, reranker, limit, rerankK);
+        return new BruteForceRowIdIterator(approximateScores, segmentOrdinalPairs, reranker, limit, rerankK);
     }
 
     /**
@@ -311,11 +314,19 @@ public class V2VectorIndexSearcher extends IndexSearcher
      * vectors, read all vectors and put them into a priority queue to rank them lazily. It is assumed that the whole
      * PQ will often not be needed.
      */
-    private CloseableIterator<RowIdWithScore> orderByBruteForce(VectorFloat<?> queryVector, IntIntPairArray segmentOrdinalPairs) throws IOException
+    private CloseableIterator<RowIdWithScore> orderByBruteForce(VectorFloat<?> queryVector, SegmentRowIdOrdinalPairs segmentOrdinalPairs) throws IOException
     {
-        var scoredRowIds = new SortingIterator.Builder<RowIdWithScore>(segmentOrdinalPairs.size());
-        addScoredRowIdsToCollector(queryVector, segmentOrdinalPairs, 0, scoredRowIds::add);
-        return scoredRowIds.closeable(RowIdWithScore::compare, Runnables.doNothing());
+        var scoredRowIds = new NodeQueue(new BoundedLongHeap(segmentOrdinalPairs.size()), NodeQueue.Order.MAX_HEAP);
+        try (var vectorsView = graph.getView())
+        {
+            var similarityFunction = indexContext.getIndexWriterConfig().getSimilarityFunction();
+            var esf = vectorsView.rerankerFor(queryVector, similarityFunction);
+            // Because the scores are exact, we only store the rowid, score pair.
+            segmentOrdinalPairs.forEachSegmentRowIdOrdinalPair((segmentRowId, ordinal) -> {
+                scoredRowIds.push(segmentRowId, esf.similarityTo(ordinal));
+            });
+            return new NodeQueueRowIdIterator(scoredRowIds);
+        }
     }
 
     /**
@@ -324,29 +335,21 @@ public class V2VectorIndexSearcher extends IndexSearcher
      * NOTE: because the threshold is not used for ordering, the result is returned in PK order, not score order.
      */
     private CloseableIterator<RowIdWithScore> filterByBruteForce(VectorFloat<?> queryVector,
-                                                                 IntIntPairArray segmentOrdinalPairs,
+                                                                 SegmentRowIdOrdinalPairs segmentOrdinalPairs,
                                                                  float threshold) throws IOException
     {
         var results = new ArrayList<RowIdWithScore>(segmentOrdinalPairs.size());
-        addScoredRowIdsToCollector(queryVector, segmentOrdinalPairs, threshold, results::add);
-        return CloseableIterator.wrap(results.iterator());
-    }
-
-    private void addScoredRowIdsToCollector(VectorFloat<?> queryVector,
-                                            IntIntPairArray segmentOrdinalPairs,
-                                            float threshold,
-                                            Consumer<RowIdWithScore> collector) throws IOException
-    {
-        var similarityFunction = indexContext.getIndexWriterConfig().getSimilarityFunction();
         try (var vectorsView = graph.getView())
         {
+            var similarityFunction = indexContext.getIndexWriterConfig().getSimilarityFunction();
             var esf = vectorsView.rerankerFor(queryVector, similarityFunction);
-            segmentOrdinalPairs.forEachIntPair((segmentRowId, ordinal) -> {
+            segmentOrdinalPairs.forEachSegmentRowIdOrdinalPair((segmentRowId, ordinal) -> {
                 var score = esf.similarityTo(ordinal);
                 if (score >= threshold)
-                    collector.accept(new RowIdWithScore(segmentRowId, score));
+                    results.add(new RowIdWithScore(segmentRowId, score));
             });
         }
+        return CloseableIterator.wrap(results.iterator());
     }
 
     private long getMaxSSTableRowId(PrimaryKeyMap primaryKeyMap, PartitionPosition right)
@@ -489,7 +492,7 @@ public class V2VectorIndexSearcher extends IndexSearcher
         }
         // Create bits from the mapping
         var bits = bitSetForSearch();
-        segmentOrdinalPairs.forEachRightInt(bits::set);
+        segmentOrdinalPairs.forEachOrdinal(bits::set);
         // else ask the index to perform a search limited to the bits we created
         var queryVector = vts.createFloatVector(orderer.getVectorTerm());
         var results = graph.search(queryVector, limit, rerankK, 0, bits, context, cost::updateStatistics);
@@ -504,9 +507,9 @@ public class V2VectorIndexSearcher extends IndexSearcher
      * @return a mapping of segment row id to ordinal
      * @throws IOException
      */
-    private IntIntPairArray flatmapPrimaryKeysToBitsAndRows(List<PrimaryKey> keysInRange) throws IOException
+    private SegmentRowIdOrdinalPairs flatmapPrimaryKeysToBitsAndRows(List<PrimaryKey> keysInRange) throws IOException
     {
-        var segmentOrdinalPairs = new IntIntPairArray(keysInRange.size());
+        var segmentOrdinalPairs = new SegmentRowIdOrdinalPairs(keysInRange.size());
         int lastSegmentRowId = -1;
         try (var primaryKeyMap = primaryKeyMapFactory.newPerSSTablePrimaryKeyMap();
              var ordinalsView = graph.getOrdinalsView())
