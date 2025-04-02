@@ -27,6 +27,7 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -41,6 +42,7 @@ import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
 import java.util.function.BiPredicate;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
 
@@ -66,6 +68,7 @@ import sun.nio.ch.DirectBuffer;
 import static com.google.common.collect.ImmutableList.of;
 import static org.apache.cassandra.utils.ExecutorUtils.*;
 import static org.apache.cassandra.utils.FBUtilities.prettyPrintMemory;
+import static org.apache.cassandra.utils.memory.MemoryUtil.free;
 import static org.apache.cassandra.utils.memory.MemoryUtil.isExactlyDirect;
 
 /**
@@ -1763,9 +1766,9 @@ public class BufferPool
         }
         logger.info("Detailed chunks info:");
         logger.info("Total allocated memory in pool: {}/{}", totalPool, memoryAllocated.get());
-        logger.info("Allocated overflow memory: {}", overflowMemoryUsage.longValue());
+        logger.info("Currently allocated overflow memory: {}", overflowMemoryUsage.longValue());
         logger.info("Max allocation threshold: {}", memoryUsageThreshold);
-        logger.info("Total allocated memory: {} / {}", totalPool + overflowMemoryUsage.longValue(), ((double) totalPool + overflowMemoryUsage.longValue()) / memoryUsageThreshold);
+        logger.info("Total currently allocated memory: {} / {}", totalPool + overflowMemoryUsage.longValue(), ((double) totalPool + overflowMemoryUsage.longValue()) / memoryUsageThreshold);
         logger.info("Chunk usage:");
         logger.info("Number of macro chunks: {}", globalPool.macroChunks.size());
         for(Chunk macroChunk: globalPool.macroChunks)
@@ -1797,13 +1800,20 @@ public class BufferPool
         List <Chunk> partiallyFreedChunks = new ArrayList<>(new HashSet<>(globalPool.partiallyFreedChunks));
         logger.info("Unique partially freed chunks: {}", partiallyFreedChunks.size());
         partiallyFreedChunks.sort(Comparator.comparing(Chunk::freeSlotCount).reversed());
+        Map<Integer, AtomicInteger> freeMap = new HashMap<>();
         int totalFree = 0;
         for (Chunk chunk: partiallyFreedChunks)
         {
             //logger.info("{}", String.format("%64s", Long.toBinaryString(chunk.freeSlots)).replace(' ', '0'));
             totalFree += chunk.free();
+            freeMap.computeIfAbsent(chunk.freeSlotCount(), k -> new AtomicInteger(0)).incrementAndGet();
         }
         logger.info("Total free space in partially freed chunks: {}", totalFree);
+        logger.info("Free space map: {}", freeMap.entrySet()
+                                                 .stream()
+                                                 .sorted(Map.Entry.comparingByKey(Comparator.reverseOrder()))
+                                                 .map(e -> e.getKey() + " -> " + e.getValue().get())
+                                                 .collect(Collectors.joining("\n")));
 
         StringBuilder sb = new StringBuilder();
         int freeInMostlyFreeChunks = 0;
