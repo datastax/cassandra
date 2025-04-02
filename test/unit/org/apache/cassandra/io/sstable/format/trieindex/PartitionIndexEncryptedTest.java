@@ -91,17 +91,17 @@ public class PartitionIndexEncryptedTest extends PartitionIndexTest
     {
         return Arrays.asList(new Object[][]{
                 new Object[] {Config.DiskAccessMode.standard, false, compressionParamsNormal, ByteComparable.Version.LEGACY},
-                //new Object[] {Config.DiskAccessMode.standard, false, compressionParamsNormal, ByteComparable.Version.OSS41},
-                //new Object[] {Config.DiskAccessMode.standard, false, compressionParamsNormal, ByteComparable.Version.OSS50},
-                //// fromFile and out-of-place have independent implementations, one run suffices to test both
-                //new Object[] {Config.DiskAccessMode.standard, true, compressionParamsOutOfPlace, ByteComparable.Version.LEGACY},
-                //new Object[] {Config.DiskAccessMode.standard, true, compressionParamsOutOfPlace, ByteComparable.Version.OSS41},
-                //new Object[] {Config.DiskAccessMode.standard, true, compressionParamsOutOfPlace, ByteComparable.Version.OSS50},
-                //new Object[] {Config.DiskAccessMode.mmap, false, compressionParamsBlowfish, ByteComparable.Version.LEGACY},
-                //new Object[] {Config.DiskAccessMode.mmap, false, compressionParamsBlowfish, ByteComparable.Version.OSS41},
-                //new Object[] {Config.DiskAccessMode.mmap, false, compressionParamsBlowfish, ByteComparable.Version.OSS50},
-                //new Object[] {Config.DiskAccessMode.mmap, true, compressionParamsDes, ByteComparable.Version.LEGACY},
-                //new Object[] {Config.DiskAccessMode.mmap, true, compressionParamsDes, ByteComparable.Version.OSS41},
+                new Object[] {Config.DiskAccessMode.standard, false, compressionParamsNormal, ByteComparable.Version.OSS41},
+                new Object[] {Config.DiskAccessMode.standard, false, compressionParamsNormal, ByteComparable.Version.OSS50},
+                // fromFile and out-of-place have independent implementations, one run suffices to test both
+                new Object[] {Config.DiskAccessMode.standard, true, compressionParamsOutOfPlace, ByteComparable.Version.LEGACY},
+                new Object[] {Config.DiskAccessMode.standard, true, compressionParamsOutOfPlace, ByteComparable.Version.OSS41},
+                new Object[] {Config.DiskAccessMode.standard, true, compressionParamsOutOfPlace, ByteComparable.Version.OSS50},
+                new Object[] {Config.DiskAccessMode.mmap, false, compressionParamsBlowfish, ByteComparable.Version.LEGACY},
+                new Object[] {Config.DiskAccessMode.mmap, false, compressionParamsBlowfish, ByteComparable.Version.OSS41},
+                new Object[] {Config.DiskAccessMode.mmap, false, compressionParamsBlowfish, ByteComparable.Version.OSS50},
+                new Object[] {Config.DiskAccessMode.mmap, true, compressionParamsDes, ByteComparable.Version.LEGACY},
+                new Object[] {Config.DiskAccessMode.mmap, true, compressionParamsDes, ByteComparable.Version.OSS41},
                 new Object[] {Config.DiskAccessMode.mmap, true, compressionParamsDes, ByteComparable.Version.OSS50},
         });
     }

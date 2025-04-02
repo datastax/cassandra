@@ -145,6 +145,9 @@ public class EncryptedSequentialWriter extends SequentialWriter
             lastFlushOffset += encrypted.capacity();
             lastContent = current();
             assert fchannel.position() == lastFlushOffset : "fchannel.position=" + fchannel.position() + " lastFlushOffset=" + lastFlushOffset;
+
+            if (runPostFlush != null)
+                runPostFlush.run();
         }
         catch (IOException e)
         {
