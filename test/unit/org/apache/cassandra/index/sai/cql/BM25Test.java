@@ -176,15 +176,15 @@ public class BM25Test extends SAITester
         // be rejected
         beforeAndAfterFlush(() -> {
             // Single predicate
-            assertInvalidMessage(String.format(EQ_AMBIGUOUS_ERROR, 'v', getIndex(0), getIndex(1)),
+            assertInvalidMessage(String.format(EQ_AMBIGUOUS_ERROR, 'v', getIndex(0), getIndex(1), getIndex(0)),
                                  "SELECT k FROM %s WHERE v = 'apple'");
 
             // AND
-            assertInvalidMessage(String.format(EQ_AMBIGUOUS_ERROR, 'v', getIndex(0), getIndex(1)),
+            assertInvalidMessage(String.format(EQ_AMBIGUOUS_ERROR, 'v', getIndex(0), getIndex(1), getIndex(0)),
                                  "SELECT k FROM %s WHERE v = 'apple' AND v : 'juice'");
 
             // OR
-            assertInvalidMessage(String.format(EQ_AMBIGUOUS_ERROR, 'v', getIndex(0), getIndex(1)),
+            assertInvalidMessage(String.format(EQ_AMBIGUOUS_ERROR, 'v', getIndex(0), getIndex(1), getIndex(0)),
                                  "SELECT k FROM %s WHERE v = 'apple' OR v : 'juice'");
         });
     }

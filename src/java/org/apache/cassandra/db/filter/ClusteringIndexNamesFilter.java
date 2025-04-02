@@ -172,26 +172,39 @@ public class ClusteringIndexNamesFilter extends AbstractClusteringIndexFilter
         boolean isSingleClustering = clusterings.size() == 1;
 
         StringBuilder sb = new StringBuilder();
-        sb.append(isSingleColumn ? "" : '(')
-          .append(ColumnMetadata.toCQLString(metadata.clusteringColumns()))
-          .append(isSingleColumn ? "" : ')');
+        
+        if (isSingleColumn && isSingleClustering)
+        {
+            // Single column, single value - no parentheses
+            sb.append(metadata.clusteringColumns().get(0).name.toCQLString())
+              .append(" = ")
+              .append(metadata.clusteringColumns().get(0).type.toCQLString(clusterings.iterator().next().bufferAt(0)));
+        }
+        else
+        {
+            // Multiple columns or multiple values - use parentheses
+            sb.append('(')
+              .append(ColumnMetadata.toCQLString(metadata.clusteringColumns()))
+              .append(')');
 
-        sb.append(isSingleClustering ? " = " : " IN (");
-        int i = 0;
+            sb.append(isSingleClustering ? " = " : " IN (");
+            int i = 0;
+            for (Clustering<?> clustering : clusterings)
+            {
+                sb.append(i++ == 0 ? "" : ", ")
+                  .append('(')
+                  .append(clustering.toCQLString(metadata))
+                  .append(')');
+            }
+            sb.append(isSingleClustering ? "" : ")");
+        }
+
+        // Remove clustering columns from row filter to avoid duplication
         for (Clustering<?> clustering : clusterings)
         {
-            sb.append(i++ == 0 ? "" : ", ")
-              .append(isSingleColumn ? "" : '(')
-              .append(clustering.toCQLString(metadata))
-              .append(isSingleColumn ? "" : ')');
-
             for (int j = 0; j < clustering.size(); j++)
                 rowFilter = rowFilter.without(metadata.clusteringColumns().get(j), Operator.EQ, clustering.bufferAt(j));
         }
-        sb.append(isSingleClustering ? "" : ")");
-
-        if (!rowFilter.isEmpty())
-            sb.append(" AND ").append(rowFilter.toCQLString());
 
         appendOrderByToCQLString(metadata, sb);
         return sb.toString();
