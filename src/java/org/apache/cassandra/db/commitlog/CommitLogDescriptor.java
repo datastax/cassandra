@@ -70,6 +70,7 @@ public class CommitLogDescriptor
     // Stargazer 1.0 messaging
     static final int VERSION_DS_10 = MessagingService.VERSION_DS_10;
     static final int VERSION_DS_11 = MessagingService.VERSION_DS_11;
+    static final int VERSION_DS_12 = MessagingService.VERSION_DS_12;
     static final int VERSION_DS_20 = MessagingService.VERSION_DS_20;
     // For compatibility with CNDB
     public static final int VERSION_DSE_68 = 680;
@@ -244,6 +245,8 @@ public class CommitLogDescriptor
                 return MessagingService.Version.VERSION_DS_10.value;
             case VERSION_DS_11:
                 return MessagingService.Version.VERSION_DS_11.value;
+            case VERSION_DS_12:
+                return MessagingService.VERSION_DS_12;
             case VERSION_DS_20:
                 return MessagingService.Version.VERSION_DS_20.value;
             case VERSION_DSE_68:
@@ -276,6 +279,8 @@ public class CommitLogDescriptor
                 return VERSION_DS_10;
             case MessagingService.VERSION_DS_11:
                 return VERSION_DS_11;
+            case MessagingService.VERSION_DS_12:
+                return VERSION_DS_12;
             case MessagingService.VERSION_DS_20:
                 return VERSION_DS_20;
             default:
