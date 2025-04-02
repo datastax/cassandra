@@ -699,6 +699,12 @@ public class StorageAttachedIndex implements Index
     }
 
     @Override
+    public boolean isAnalyzed()
+    {
+        return indexContext.isAnalyzed();
+    }
+
+    @Override
     public Optional<Analyzer> getAnalyzer(ByteBuffer queriedValue)
     {
         if (!indexContext.isAnalyzed())
@@ -752,7 +758,7 @@ public class StorageAttachedIndex implements Index
     @Override
     public void validate(ReadCommand command) throws InvalidRequestException
     {
-        QueryPlan indexQueryPlan = command.indexQueryPlan();
+        var indexQueryPlan = command.indexQueryPlan();
         if (indexQueryPlan == null || !indexQueryPlan.isTopK())
             return;
 
@@ -767,7 +773,12 @@ public class StorageAttachedIndex implements Index
     @Override
     public long getEstimatedResultRows()
     {
-        throw new UnsupportedOperationException("Use StorageAttachedIndexQueryPlan#getEstimatedResultRows() instead.");
+        // This is temporary (until proper QueryPlan is integrated into Cassandra)
+        // and allows us to prioritize storage-attached indexes if any in the query since they
+        // are going to be more efficient, to query and intersect, than built-in indexes.
+        // See CNDB-14764 for details.
+        // Please remember to update StorageAttachedIndexQueryPlan#getEstimatedResultRows() when changing this.
+        return Long.MIN_VALUE;
     }
 
     @Override

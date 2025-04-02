@@ -147,11 +147,11 @@ public class Orderer
     @Nullable
     public static Orderer from(SecondaryIndexManager indexManager, RowFilter filter)
     {
-        var expressions = filter.root().expressions().stream().filter(Orderer::isFilterExpressionOrderer).collect(Collectors.toList());
+        var expressions = filter.root.expressions().stream().filter(Orderer::isFilterExpressionOrderer).collect(Collectors.toList());
         if (expressions.isEmpty())
             return null;
         var orderExpression = expressions.get(0);
-        var index = indexManager.getBestIndexFor(orderExpression, StorageAttachedIndex.class)
+        var index = indexManager.getBestIndexFor(orderExpression, filter.indexHints, StorageAttachedIndex.class)
                                 .orElseThrow(() -> new IllegalStateException("No index found for order by clause"));
 
         return new Orderer(index.getIndexContext(), orderExpression.operator(), orderExpression.getIndexValue(), filter.annOptions());

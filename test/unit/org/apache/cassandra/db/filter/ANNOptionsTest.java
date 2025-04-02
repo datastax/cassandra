@@ -29,6 +29,8 @@ import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
+import org.apache.cassandra.cql3.statements.PropertyDefinitions;
+import org.apache.cassandra.cql3.statements.SelectOptions;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.ReadCommand;
@@ -128,7 +130,7 @@ public class ANNOptionsTest extends CQLTester
                                   baseQuery + " WITH ann_options = {'rerank_k': 0} AND unknown_options = {}");
 
         // duplicated SELECT options
-        assertInvalidThrowMessage("Multiple definitions for property 'ann_options'",
+        assertInvalidThrowMessage(String.format(PropertyDefinitions.MULTIPLE_DEFINITIONS_ERROR, SelectOptions.ANN_OPTIONS),
                                   SyntaxException.class,
                                   baseQuery + " WITH ann_options = {'rerank_k': 0} AND ann_options = {'rerank_k': 0}");
 
@@ -274,7 +276,8 @@ public class ANNOptionsTest extends CQLTester
 
             // ...with a version that doesn't support ANN options
             out = new DataOutputBuffer();
-            if (expectedOptions != ANNOptions.NONE) {
+            if (expectedOptions != ANNOptions.NONE)
+            {
                 try
                 {
                     ReadCommand.serializer.serialize(command, out, MessagingService.VERSION_DS_10);
@@ -285,7 +288,9 @@ public class ANNOptionsTest extends CQLTester
                     Assertions.assertThat(e)
                               .hasMessageContaining("Unable to serialize ANN options with messaging version: " + MessagingService.VERSION_DS_10);
                 }
-            } else {
+            }
+            else
+            {
                 ReadCommand.serializer.serialize(command, out, MessagingService.VERSION_DS_10);
                 Assertions.assertThat(ReadCommand.serializer.serializedSize(command, MessagingService.VERSION_DS_10))
                           .isEqualTo(out.buffer().remaining());

@@ -74,6 +74,7 @@ import static java.util.concurrent.TimeUnit.NANOSECONDS;
 import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
 import static org.apache.cassandra.net.MessagingService.VERSION_DS_10;
 import static org.apache.cassandra.net.MessagingService.VERSION_DS_11;
+import static org.apache.cassandra.net.MessagingService.VERSION_DS_12;
 import static org.apache.cassandra.net.MessagingService.VERSION_DS_20;
 import static org.apache.cassandra.net.MessagingService.VERSION_40;
 import static org.apache.cassandra.net.MessagingService.VERSION_50;
@@ -487,6 +488,7 @@ public class CounterMutation implements IMutation
     private int serializedSize50;
     private int serializedSizeDS10;
     private int serializedSizeDS11;
+    private int serializedSizeDS12;
     private int serializedSizeDS20;
     private int serializedSizeDSE68;
 
@@ -510,6 +512,10 @@ public class CounterMutation implements IMutation
                 if (serializedSizeDS11 == 0)
                     serializedSizeDS11 = (int) serializer.serializedSize(this, VERSION_DS_11);
                 return serializedSizeDS11;
+            case VERSION_DS_12:
+                if (serializedSizeDS12 == 0)
+                    serializedSizeDS12 = (int) serializer.serializedSize(this, VERSION_DS_12);
+                return serializedSizeDS12;
             case VERSION_DS_20:
                 if (serializedSizeDS20 == 0)
                     serializedSizeDS20 = (int) serializer.serializedSize(this, VERSION_DS_20);

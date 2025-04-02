@@ -1093,4 +1093,7 @@ class TestCqlshCompletion(CqlshCompletionCase):
         self.trycompletions('SELECT * FROM system.peers ORDER BY vectorcol ANN ', immediate='OF [ ')
         self.trycompletions('SELECT * FROM system.peers ORDER BY vectorcol ANN OF [ 1.2, ', choices=['<float>'])
         self.trycompletions('SELECT * FROM system.peers ORDER BY vectorcol ANN OF [ 1.0, 2.0] LIMIT 100 ', choices=[';', 'ALLOW', 'OFFSET', 'WITH'])
-        self.trycompletions('SELECT * FROM system.peers ORDER BY vectorcol ANN OF [ 1.0, 2.0] LIMIT 100 WITH ', immediate='ann_options = { ')
+        self.trycompletions('SELECT * FROM system.peers ORDER BY vectorcol ANN OF [ 1.0, 2.0] LIMIT 100 WITH ', choices=['ann_options', 'included_indexes', 'excluded_indexes'])
+        self.trycompletions('SELECT * FROM system.peers ORDER BY vectorcol ANN OF [ 1.0, 2.0] LIMIT 100 WITH a', immediate='nn_options = { ',)
+        self.trycompletions('SELECT * FROM system.peers ORDER BY vectorcol ANN OF [ 1.0, 2.0] LIMIT 100 WITH i', immediate='ncluded_indexes = { ',)
+        self.trycompletions('SELECT * FROM system.peers ORDER BY vectorcol ANN OF [ 1.0, 2.0] LIMIT 100 WITH e', immediate='xcluded_indexes = { ',)

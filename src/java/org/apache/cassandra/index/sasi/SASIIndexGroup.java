@@ -33,6 +33,9 @@ public class SASIIndexGroup extends SingletonIndexGroup
     @Override
     public Index.QueryPlan queryPlanFor(RowFilter rowFilter)
     {
+        if (rowFilter.indexHints.excludes(getIndex()))
+            return null;
+        
         return SASIIndexQueryPlan.create((SASIIndex) getIndex(), rowFilter);
     }
 }

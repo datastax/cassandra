@@ -742,7 +742,7 @@ syntax_rules += r'''
                           ( "PER" "PARTITION" "LIMIT" perPartitionLimit=<wholenumber> )?
                           ( "LIMIT" limit=<wholenumber> ( "OFFSET" offset=<wholenumber> )? )?
                           ( "ALLOW" "FILTERING" )?
-                          ( "WITH" "ann_options" "=" <mapLiteral> )?
+                          ( "WITH" <options> )?
                     ;
 <whereClause> ::= <relation> ( "AND" <relation> )*
                 ;
@@ -779,6 +779,14 @@ syntax_rules += r'''
 <groupByFunctionArgument> ::= [groupcol]=<cident>
                             | <term>
                             ;
+<identifiers> ::= "{" <identifier> ( "," <identifier> )* "}" 
+                  ;
+<options> ::= <option> ( "AND" <option> )*
+                  ;
+<option> ::= "ann_options" "=" <mapLiteral> 
+           | "included_indexes" "=" <identifiers> 
+           | "excluded_indexes" "=" <identifiers> 
+           ;
 '''
 
 

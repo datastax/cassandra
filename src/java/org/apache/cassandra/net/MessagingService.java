@@ -226,6 +226,7 @@ public class MessagingService extends MessagingServiceMBeanImpl implements Messa
         VERSION_50(MessagingService.VERSION_50, true),
         VERSION_DS_10(MessagingService.VERSION_DS_10, false), // DS Converged Cassandra 4.0
         VERSION_DS_11(MessagingService.VERSION_DS_11, false),
+        VERSION_DS_12(MessagingService.VERSION_DS_12, false), // adds index hints (CNDB-13129)
         VERSION_DS_20(MessagingService.VERSION_DS_20, true), // DS Converged Cassandra 5.0
         VERSION_DSE_68(MessagingService.VERSION_DSE_68, false), // DSE 6.8
         ;
@@ -271,6 +272,7 @@ public class MessagingService extends MessagingServiceMBeanImpl implements Messa
     // Current DataStax version while we have serialization differences.
     // If differences get merged upstream then we can revert to OS versioning.
     public static final int VERSION_DS_11 = 101; // adds ann_options (CNDB-12456)
+    public static final int VERSION_DS_12 = 102; // adds index hints (CNDB-13129)
     public static final int VERSION_DS_20 = 110; // DS Converged Cassandra 5.0
     public static final int minimum_version = VERSION_40;
     public static final int maximum_version = VERSION_DS_20;
