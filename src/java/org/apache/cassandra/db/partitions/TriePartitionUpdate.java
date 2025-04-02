@@ -25,6 +25,7 @@ import java.util.List;
 import java.util.Set;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.collect.Iterators;
 import com.google.common.primitives.Ints;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -80,6 +81,21 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
         super(key, columns, stats, rowCountIncludingStatic, trie, metadata, canHaveShadowedData);
         this.dataSize = dataSize;
     }
+
+    @Override
+    public boolean equals(Object obj)
+    {
+        if (!(obj instanceof TriePartitionUpdate))
+            return false;
+
+        TriePartitionUpdate that = (TriePartitionUpdate) obj;
+        return partitionKey.equals(that.partitionKey)
+               && metadata().id.equals(that.metadata().id)
+               && deletionInfo().equals(that.deletionInfo())
+               && staticRow().equals(that.staticRow())
+               && Iterators.elementsEqual(rowIterator(), that.rowIterator());
+    }
+
 
     private static InMemoryTrie<Object> newTrie(DeletionInfo deletion)
     {
