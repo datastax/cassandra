@@ -87,6 +87,7 @@ import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.filter.ClusteringIndexSliceFilter;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.filter.DataLimits;
+import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.lifecycle.View;
@@ -635,14 +636,14 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
                 @Override
                 public void onFailure(Throwable t)
                 {
-                    logger.warn("Failed to incrementally build indexes {}", getIndexNames(groupedIndexes));
+                    logger.warn("Failed to incrementally build indexes {}", groupedIndexes.stream().map(i -> i.getIndexMetadata().name).collect(Collectors.toList()));
                     build.setException(t);
                 }
 
                 @Override
                 public void onSuccess(Object o)
                 {
-                    logger.info("Incremental index build of {} completed", getIndexNames(groupedIndexes));
+                    logger.info("Incremental index build of {} completed", groupedIndexes.stream().map(i -> i.getIndexMetadata().name).collect(Collectors.toList()));
                     build.set(o);
                 }
             }, ImmediateExecutor.INSTANCE);
@@ -691,7 +692,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
 
         logger.info("Submitting index {} of {} for data in {}",
                     isFullRebuild ? "recovery" : "build",
-                    commaSeparated(indexes),
+                    Index.joinNames(indexes),
                     sstables.stream().map(SSTableReader::toString).collect(Collectors.joining(",")));
 
         // Group all building tasks
@@ -726,7 +727,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
                                public void onSuccess(Object o)
                                {
                                    groupedIndexes.forEach(i -> markIndexBuilt(i, isFullRebuild));
-                                   logger.info("Index build of {} completed", getIndexNames(groupedIndexes));
+                                   logger.info("Index build of {} completed", Index.joinNames(groupedIndexes));
                                    builtIndexes.addAll(groupedIndexes);
                                    build.set(o);
                                }
@@ -793,14 +794,6 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
                 throw e;
             }
         }
-    }
-
-    private String getIndexNames(Set<Index> indexes)
-    {
-        List<String> indexNames = indexes.stream()
-                                         .map(i -> i.getIndexMetadata().name)
-                                         .collect(Collectors.toList());
-        return StringUtils.join(indexNames, ',');
     }
 
     /**
@@ -927,9 +920,9 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
     {
         JVMStabilityInspector.inspectThrowable(indexBuildFailure);
         if (indexBuildFailure != null)
-            logger.warn("Index build of {} failed. Please run full index rebuild to fix it.", getIndexNames(indexes), indexBuildFailure);
+            logger.warn("Index build of {} failed. Please run full index rebuild to fix it.", Index.joinNames(indexes), indexBuildFailure);
         else
-            logger.warn("Index build of {} failed. Please run full index rebuild to fix it.", getIndexNames(indexes));
+            logger.warn("Index build of {} failed. Please run full index rebuild to fix it.", Index.joinNames(indexes));
         indexes.forEach(i -> this.markIndexFailed(i, isInitialBuild));
     }
 
@@ -950,6 +943,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         IndexStatusManager.instance.propagateLocalIndexStatus(keyspace.getName(), indexName, Index.Status.DROPPED);
     }
 
+    @Override
     public Index getIndexByName(String indexName)
     {
         return indexes.get(indexName);
@@ -1266,7 +1260,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
     /**
      * Called at query time to choose which (if any) of the registered index implementations to use for a given query.
      * <p>
-     * This is a two step processes, firstly compiling the set of searchable indexes then choosing the one which reduces
+     * This is a two-step processes, firstly compiling the set of searchable indexes then choosing the one which reduces
      * the search space the most.
      * <p>
      * In the first phase, if the command's RowFilter contains any custom index expressions, the indexes that they
@@ -1275,6 +1269,15 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
      * <p>
      * The filtered set then sorted by selectivity, as reported by the Index implementations' getEstimatedResultRows
      * method.
+     * Once we have the filtered set of indexes, one is selected as the best one according to the following rules:
+     * <ol>
+     *     <li>An index included by the query's index hints is better than an index not included by the hints.</li>
+     *     <li>If it's a contains restriction, then a non-analyzed index is better. See CNDB-13925 for details.</li>
+     *     <li>An index more selective according to {@link Index#getEstimatedResultRows()} is better. This is done
+     *     accordingly to the {@link Index.QueryPlan#getEstimatedResultRows()} method. Please note that some index
+     *     implementations (SASI and SAI) will always return -1 for that method to prioritize themselves. Third party
+     *     implementations can also return similar fixed values. See CNDB-14764 for details.</li>
+     * </ol>
      * <p>
      * Implementation specific validation of the target expression, either custom or standard, by the selected
      * index should be performed in the searcherFor method to ensure that we pick the right index regardless of
@@ -1323,12 +1326,26 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
             return null;
         }
 
+        // Prepare a plan comparator based first on the user-provided hints, which will prefer the plan closest to
+        // satisfying the index hints, then on rules about peference of non-analyzed indexes over analyzed indexes for
+        // CONTAINS operators as described by CNDB-13925, and finally on the index-provided selectivity, which will
+        // prefer the most selective index.
+        // Selectivity is determined by the Index#getEstimatedResultRows() method. Please note that some index
+        // implementations (SASI and SAI) will always return -1 for that method to prioritize themselves. Third party
+        // implementations can also return similar fixed values. See CNDB-14764 for details.
+        // We let pass plans that don't satisfy the index hints so we can provide a better error message later,
+        // at the validation at the end of this method. That validation will be done over the plan that is closest to
+        // satisfying the index hints, so the error message will only complain about the missing parts.
+        Comparator<Index.QueryPlan> planComparator = rowFilter.indexHints.comparator()
+                                                              .thenComparing((Index.QueryPlan plan) -> !hasAnalyzerOnContains(plan, rowFilter))
+                                                              .thenComparing(Comparator.<Index.QueryPlan>naturalOrder().reversed());
+
         // find the best plan
         Index.QueryPlan selected = queryPlans.size() == 1
                                    ? Iterables.getOnlyElement(queryPlans)
                                    : queryPlans.stream()
-                                               .min(Comparator.naturalOrder())
-                                               .orElseThrow(() -> new AssertionError("Could not select most selective index"));
+                                               .max(planComparator)
+                                               .orElseThrow(() -> new AssertionError("Could not select an index plan."));
 
         // pay for an additional threadlocal get() rather than build the strings unnecessarily
         if (Tracing.isTracing())
@@ -1345,6 +1362,22 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         return selected;
     }
 
+    private static boolean hasAnalyzerOnContains(Index.QueryPlan plan, RowFilter rowFilter)
+    {
+        for (RowFilter.Expression expression : rowFilter.expressions())
+        {
+            if (expression.isAnyContains())
+            {
+                for (Index index : plan.getIndexes())
+                {
+                    if (index.supportsExpression(expression) && index.isAnalyzed())
+                        return true;
+                }
+            }
+        }
+        return false;
+    }
+
     private static String commaSeparated(Collection<Index> indexes)
     {
         StringJoiner joiner = new StringJoiner(",");
@@ -1357,18 +1390,21 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
 
     public Optional<Index> getBestIndexFor(ColumnMetadata column, Operator operator)
     {
-        return Index.getBestIndexFor(indexes.values(), column, operator);
+        return IndexHints.NONE.getBestIndexFor(indexes.values(), i -> i.supportsExpression(column, operator), operator.isAnyContains());
     }
 
-    public <T extends Index> Optional<T> getBestIndexFor(RowFilter.Expression expression, Class<T> indexType)
+    @Override
+    public Optional<Index> getBestIndexFor(ColumnMetadata column, Operator operator, IndexHints hints)
     {
-        // Filter indexes by type first, then use the standard getBestIndexFor logic
-        List<T> typedIndexes = indexes.values().stream()
-                .filter(indexType::isInstance)
-                .map(indexType::cast)
-                .collect(Collectors.toList());
-        
-        return Index.getBestIndexFor(typedIndexes, expression.column(), expression.operator());
+        return hints.getBestIndexFor(indexes.values(), i -> i.supportsExpression(column, operator), operator.isAnyContains());
+    }
+
+    public <T extends Index> Optional<T> getBestIndexFor(RowFilter.Expression expression, IndexHints hints, Class<T> indexType)
+    {
+        return hints.getBestIndexFor(indexes.values(),
+                                     i -> i.supportsExpression(expression) && indexType.isInstance(i),
+                                     expression.isAnyContains())
+                         .map(indexType::cast);
     }
 
     /**

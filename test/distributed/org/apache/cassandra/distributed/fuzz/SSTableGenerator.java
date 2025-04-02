@@ -48,6 +48,7 @@ import org.apache.cassandra.cql3.statements.DeleteStatement;
 import org.apache.cassandra.cql3.statements.StatementType;
 import org.apache.cassandra.db.ClusteringBound;
 import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DeletionTime;
@@ -313,6 +314,7 @@ public class SSTableGenerator
                                                                           builder.build(),
                                                                           new VariableSpecifications(variableNames),
                                                                           Collections.emptyList(),
+                                                                          IndexHints.NONE,
                                                                           false,
                                                                           false,
                                                                           false,

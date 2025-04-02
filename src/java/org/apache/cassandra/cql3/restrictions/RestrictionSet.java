@@ -36,6 +36,7 @@ import com.google.common.collect.Multimap;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.cql3.restrictions.SingleColumnRestriction.ContainsRestriction;
+import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.db.filter.ANNOptions;
@@ -64,7 +65,11 @@ public abstract class RestrictionSet implements Restrictions
         }
 
         @Override
-        public void addToRowFilter(RowFilter.Builder rowFilter, IndexRegistry indexRegistry, QueryOptions options, ANNOptions annOptions)
+        public void addToRowFilter(RowFilter.Builder rowFilter,
+                                   IndexRegistry indexRegistry,
+                                   QueryOptions options,
+                                   ANNOptions annOptions,
+                                   IndexHints indexHints)
         {
             // nothing to do here, since there are no restrictions
         }
@@ -105,13 +110,13 @@ public abstract class RestrictionSet implements Restrictions
         }
 
         @Override
-        public boolean hasSupportingIndex(IndexRegistry indexRegistry)
+        public boolean hasSupportingIndex(IndexRegistry indexRegistry, IndexHints indexHints)
         {
             return false;
         }
 
         @Override
-        public boolean needsFiltering(Index.Group indexGroup)
+        public boolean needsFiltering(Index.Group indexGroup, IndexHints indexHints)
         {
             return false;
         }
@@ -236,10 +241,11 @@ public abstract class RestrictionSet implements Restrictions
         public void addToRowFilter(RowFilter.Builder rowFilter,
                                    IndexRegistry indexRegistry,
                                    QueryOptions options,
-                                   ANNOptions annOptions) throws InvalidRequestException
+                                   ANNOptions annOptions,
+                                   IndexHints indexHints) throws InvalidRequestException
         {
             for (SingleRestriction restriction : restrictionsMap.values())
-                rowFilter.addAllAsConjunction(b -> restriction.addToRowFilter(b, indexRegistry, options, annOptions));
+                rowFilter.addAllAsConjunction(b -> restriction.addToRowFilter(b, indexRegistry, options, annOptions, indexHints));
         }
 
         @Override
@@ -280,19 +286,19 @@ public abstract class RestrictionSet implements Restrictions
         }
 
         @Override
-        public boolean hasSupportingIndex(IndexRegistry indexRegistry)
+        public boolean hasSupportingIndex(IndexRegistry indexRegistry, IndexHints indexHints)
         {
             for (SingleRestriction restriction : restrictionsMap.values())
-                if (restriction.hasSupportingIndex(indexRegistry))
+                if (restriction.hasSupportingIndex(indexRegistry, indexHints))
                     return true;
             return false;
         }
 
         @Override
-        public boolean needsFiltering(Index.Group indexGroup)
+        public boolean needsFiltering(Index.Group indexGroup, IndexHints indexHints)
         {
             for (SingleRestriction restriction : restrictionsMap.values())
-                if (restriction.needsFiltering(indexGroup))
+                if (restriction.needsFiltering(indexGroup, indexHints))
                     return true;
 
             return false;

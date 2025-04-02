@@ -18,7 +18,12 @@
 package org.apache.cassandra.db;
 
 import java.io.IOException;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiFunction;
 import java.util.function.LongPredicate;
@@ -37,6 +42,9 @@ import org.slf4j.LoggerFactory;
 
 import io.netty.util.concurrent.FastThreadLocal;
 import org.apache.cassandra.config.*;
+import org.apache.cassandra.cql3.ColumnIdentifier;
+import org.apache.cassandra.cql3.CqlBuilder;
+import org.apache.cassandra.cql3.statements.SelectOptions;
 import org.apache.cassandra.db.filter.*;
 import org.apache.cassandra.db.transform.BasePartitions;
 import org.apache.cassandra.db.transform.BaseRows;
@@ -52,6 +60,7 @@ import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.filter.ClusteringIndexFilter;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.filter.DataLimits;
+import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.filter.TombstoneOverwhelmingException;
 import org.apache.cassandra.db.partitions.PartitionIterator;
@@ -283,6 +292,7 @@ public abstract class ReadCommand extends AbstractReadQuery
      *
      * @return index query plan chosen for this query
      */
+    @Override
     @Nullable
     public Index.QueryPlan indexQueryPlan()
     {
@@ -970,7 +980,7 @@ public abstract class ReadCommand extends AbstractReadQuery
 
     public abstract Verb verb();
 
-    protected abstract void appendCQLWhereClause(StringBuilder sb);
+    protected abstract void appendCQLWhereClause(CqlBuilder builder);
 
     // Skip purgeable tombstones. We do this because it's safe to do (post-merge of the memtable and sstable at least), it
     // can save us some bandwith, and avoid making us throw a TombstoneOverwhelmingException for purgeable tombstones (which
@@ -1000,6 +1010,36 @@ public abstract class ReadCommand extends AbstractReadQuery
      * Return the queried token(s) for logging
      */
     public abstract String loggableTokens();
+
+    @Override
+    public String toCQLString()
+    {
+        CqlBuilder builder = new CqlBuilder();
+        builder.append("SELECT ").append(columnFilter().toCQLString());
+        builder.append(" FROM ").append(ColumnIdentifier.maybeQuote(metadata().keyspace)).append('.').append(ColumnIdentifier.maybeQuote(metadata().name));
+        appendCQLWhereClause(builder);
+
+        if (limits() != DataLimits.NONE)
+            builder.append(' ').append(limits());
+
+        builder.appendOptions(b -> {
+
+            IndexHints indexHints = rowFilter().indexHints;
+            Set<String> included = new HashSet<>();
+            for (IndexMetadata i : indexHints.included)
+                included.add(i.name);
+            Set<String> excluded = new HashSet<>();
+            for (IndexMetadata i : indexHints.excluded)
+                excluded.add(i.name);
+
+            b.append(SelectOptions.INCLUDED_INDEXES, included)
+             .append(SelectOptions.EXCLUDED_INDEXES, excluded)
+             .append(SelectOptions.ANN_OPTIONS, rowFilter().annOptions().toCQLString());
+        });
+
+        builder.append(" ALLOW FILTERING");
+        return builder.toString();
+    }
 
     // Monitorable interface
     public String name()
