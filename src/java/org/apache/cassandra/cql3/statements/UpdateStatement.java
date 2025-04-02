@@ -45,6 +45,7 @@ import org.apache.cassandra.cql3.conditions.Conditions;
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.Slice;
+import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.sensors.SensorsCustomParams;
 import org.apache.cassandra.schema.ColumnMetadata;
@@ -224,6 +225,7 @@ public class UpdateStatement extends ModificationStatement
                                                                               whereClause.build(),
                                                                               bindVariables,
                                                                               Collections.emptyList(),
+                                                                              IndexHints.NONE,
                                                                               applyOnlyToStaticColumns,
                                                                               false,
                                                                               false);
@@ -296,6 +298,7 @@ public class UpdateStatement extends ModificationStatement
                                                                               whereClause.build(),
                                                                               bindVariables,
                                                                               Collections.emptyList(),
+                                                                              IndexHints.NONE,
                                                                               applyOnlyToStaticColumns,
                                                                               false,
                                                                               false);
@@ -364,8 +367,7 @@ public class UpdateStatement extends ModificationStatement
                                                                  bindVariables,
                                                                  operations,
                                                                  whereClause,
-                                                                 conditions,
-                                                                 Collections.emptyList());
+                                                                 conditions);
 
             return new UpdateStatement(rawCQLStatement,
                                        type,

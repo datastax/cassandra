@@ -31,6 +31,7 @@ import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.commons.lang3.StringUtils;
 
 /**
  * {@code SELECT} query options for ANN search.
@@ -40,7 +41,20 @@ public class ANNOptions
     public static final String RERANK_K_OPTION_NAME = "rerank_k";
     public static final String USE_PRUNING_OPTION_NAME = "use_pruning";
 
-    public static final ANNOptions NONE = new ANNOptions(null, null);
+    public static final ANNOptions NONE = new ANNOptions(null, null)
+    {
+        @Override
+        public String toCQLString()
+        {
+            return StringUtils.EMPTY;
+        }
+
+        @Override
+        public void validate(ClientState state, String keyspace, int limit)
+        {
+            // no validation needed for NONE
+        }
+    };
 
     public static final Serializer serializer = new Serializer();
 
@@ -75,9 +89,6 @@ public class ANNOptions
      */
     public void validate(ClientState state, String keyspace, int limit)
     {
-        if (rerankK == null && usePruning == null)
-            return;
-
         if (rerankK != null)
         {
             if (rerankK > 0 && rerankK < limit)
@@ -165,7 +176,7 @@ public class ANNOptions
                 sb.append(", ");
             sb.append(String.format("'%s': %b", USE_PRUNING_OPTION_NAME, usePruning));
         }
-        sb.append("}");
+        sb.append('}');
         return sb.toString();
     }
 

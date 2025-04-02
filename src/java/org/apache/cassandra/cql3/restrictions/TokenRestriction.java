@@ -23,6 +23,7 @@ import java.util.*;
 import com.google.common.base.Joiner;
 
 import org.apache.cassandra.db.filter.ANNOptions;
+import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
@@ -119,21 +120,21 @@ public abstract class TokenRestriction implements PartitionKeyRestrictions
     }
 
     @Override
-    public boolean hasSupportingIndex(IndexRegistry indexRegistry)
+    public boolean hasSupportingIndex(IndexRegistry indexRegistry, IndexHints indexHints)
     {
         return false;
     }
 
     @Override
-    public void addToRowFilter(RowFilter.Builder filter, IndexRegistry indexRegistry, QueryOptions options, ANNOptions annOptions)
+    public boolean needsFiltering(Index.Group indexGroup, IndexHints indexHints)
+    {
+        return false;
+    }
+
+    @Override
+    public void addToRowFilter(RowFilter.Builder filter, IndexRegistry indexRegistry, QueryOptions options, ANNOptions annOptions, IndexHints indexHints)
     {
         throw new UnsupportedOperationException("Index expression cannot be created for token restriction");
-    }
-
-    @Override
-    public boolean needsFiltering(Index.Group indexGroup)
-    {
-        return false;
     }
 
     @Override

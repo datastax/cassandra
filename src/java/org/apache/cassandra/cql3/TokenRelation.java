@@ -25,6 +25,7 @@ import java.util.stream.Collectors;
 
 import com.google.common.base.Joiner;
 
+import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.cql3.Term.Raw;
@@ -76,7 +77,7 @@ public final class TokenRelation extends Relation
     }
 
     @Override
-    protected Restriction newEQRestriction(TableMetadata table, VariableSpecifications boundNames)
+    protected Restriction newEQRestriction(TableMetadata table, VariableSpecifications boundNames, IndexHints indexHints)
     {
         List<ColumnMetadata> columnDefs = getColumnDefinitions(table);
         Term term = toTerm(toReceivers(table, columnDefs), value, table.keyspace, boundNames);

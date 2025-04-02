@@ -20,9 +20,15 @@
  */
 package org.apache.cassandra.cql3.statements;
 
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.function.BiConsumer;
+
 import org.junit.Test;
 
+import org.apache.cassandra.cql3.QualifiedName;
 import org.apache.cassandra.exceptions.SyntaxException;
+import org.assertj.core.api.Assertions;
 
 import static org.junit.Assert.assertEquals;
 
@@ -80,5 +86,34 @@ public class PropertyDefinitionsTest
     public void testInvalidNegativeBooleanParsing()
     {
         parseBoolean("cdc", "fals");
+    }
+
+    @Test
+    public void testAddProperty()
+    {
+        // string overload
+        testAddProperty("v1", "v2", (pd, v) -> pd.addProperty("k", v));
+
+        // map overload
+        testAddProperty(new HashMap<String, String>(){{put("k1", "v1");}},
+                        new HashMap<String, String>(){{put("k2", "v2");}},
+                        (pd, v) -> pd.addProperty("k", v));
+
+        // set of QualifiedName overload
+        testAddProperty(Collections.singleton(new QualifiedName("keyspace", "v1")),
+                        Collections.singleton(new QualifiedName("keyspace", "v2")),
+                        (pd, v) -> pd.addProperty("k", v));
+    }
+
+    private <V> void testAddProperty(V oldValue, V newValue, BiConsumer<PropertyDefinitions, V> adder)
+    {
+        String key = "k";
+        PropertyDefinitions pd = new PropertyDefinitions();
+        adder.accept(pd, oldValue);
+        Assertions.assertThat(pd.getProperty(key)).isEqualTo(oldValue);
+        Assertions.assertThatThrownBy(() -> adder.accept(pd, newValue))
+                  .isInstanceOf(SyntaxException.class)
+                  .hasMessageContaining(String.format(PropertyDefinitions.MULTIPLE_DEFINITIONS_ERROR, key));
+        Assertions.assertThat(pd.getProperty(key)).isEqualTo(oldValue);
     }
 }

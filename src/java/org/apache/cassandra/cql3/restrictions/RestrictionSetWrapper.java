@@ -21,6 +21,7 @@ import java.util.List;
 import java.util.Set;
 
 import org.apache.cassandra.db.filter.ANNOptions;
+import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.cql3.QueryOptions;
@@ -48,9 +49,10 @@ class RestrictionSetWrapper implements Restrictions
     public void addToRowFilter(RowFilter.Builder rowFilter,
                                IndexRegistry indexRegistry,
                                QueryOptions options,
-                               ANNOptions annOptions)
+                               ANNOptions annOptions,
+                               IndexHints indexHints)
     {
-        restrictions.addToRowFilter(rowFilter, indexRegistry, options, annOptions);
+        restrictions.addToRowFilter(rowFilter, indexRegistry, options, annOptions, indexHints);
     }
 
     @Override
@@ -81,15 +83,15 @@ class RestrictionSetWrapper implements Restrictions
     }
 
     @Override
-    public boolean hasSupportingIndex(IndexRegistry indexRegistry)
+    public boolean hasSupportingIndex(IndexRegistry indexRegistry, IndexHints indexHints)
     {
-        return restrictions.hasSupportingIndex(indexRegistry);
+        return restrictions.hasSupportingIndex(indexRegistry, indexHints);
     }
 
     @Override
-    public boolean needsFiltering(Index.Group indexGroup)
+    public boolean needsFiltering(Index.Group indexGroup, IndexHints indexHints)
     {
-        return restrictions.needsFiltering(indexGroup);
+        return restrictions.needsFiltering(indexGroup, indexHints);
     }
 
     @Override
