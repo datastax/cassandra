@@ -237,6 +237,8 @@ public abstract class Message
         /**
          * Returns the time elapsed since this request was created. Note that this is the total lifetime of the request
          * in the system, so we expect increasing returned values across multiple calls to elapsedTimeSinceCreation.
+         * The elaspse time is calculated using the start time from the custom payload if it exists, otherwise it falls
+         * back to the time the request was created in the NTR stage (that is, when it was deserialized).
          *
          * @param timeUnit the time unit in which to return the elapsed time
          * @return the time elapsed since this request was created
@@ -244,38 +246,18 @@ public abstract class Message
         protected long elapsedTimeSinceCreation(TimeUnit timeUnit)
         {
             Map<String, ByteBuffer> customPayload = getCustomPayload();
-            if (customPayload == null)
-                noSpam.warn("Custom payload is null, falling back to creationTimeNanos");
-            else if (customPayload.containsKey(CNDB_START_TIME))
-                noSpam.info("CNDB_START_TIME is present in custom payload");
-            else
-                noSpam.warn("Custom payload does not contain CNDB_START_TIME, falling back to creationTimeNanos");
             if (customPayload != null && customPayload.containsKey(CNDB_START_TIME))
             {
                 ByteBuffer startTime = customPayload.get(CNDB_START_TIME);
                 try
                 {
                     long startTimeMillis = ByteBufferUtil.toLong(startTime);
-                    // TODO: Remove logline
-                    noSpam.info("CNDB_START_TIME time using ByteBufferUtil.toLong: {}, buffers: {}", startTimeMillis, startTime);
-                    //return timeUnit.convert(System.currentTimeMillis() - startTime.getLong(), TimeUnit.MILLISECONDS);
+                    long startTimeNanos = TimeUnit.MILLISECONDS.toNanos(startTimeMillis);
+                    return timeUnit.convert(MonotonicClock.approxTime.now() - startTimeNanos, TimeUnit.NANOSECONDS);
                 }
                 catch (Exception e)
                 {
                     noSpam.warn("Failed to extract start time from custom payload using ByteBufferUtil.toLong, falling back to creationTimeNanos, buffers: {}", startTime, e);
-                }
-
-                // try another method
-                try
-                {
-                    long startTimeMillis = ByteBufferUtil.getLongFromBuffer(startTime.array());
-                    // TODO: Remove logline
-                    noSpam.info("CNDB_START_TIME time using ByteBufferUtil.getLongFromBuffer: {}, buffers: {}", startTimeMillis, startTime);
-                    //return timeUnit.convert(System.currentTimeMillis() - startTime.getLong(), TimeUnit.MILLISECONDS);
-                }
-                catch (Exception e)
-                {
-                    noSpam.warn("Failed to extract start time from custom payload using ByteBufferUtil.getLongFromBuffer, falling back to creationTimeNanos, buffers: {}", startTime, e);
                 }
             }
 
