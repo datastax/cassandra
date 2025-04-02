@@ -109,6 +109,16 @@ public class DisableBinaryTest extends TestBaseImpl
         finally
         {
             executor.shutdown();
+            try
+            {
+                boolean shutdown = executor.awaitTermination(10, TimeUnit.SECONDS);
+                if (!shutdown)
+                    throw new AssertionError("Executor did not terminate");
+            }
+            catch (InterruptedException e)
+            {
+                throw new RuntimeException(e);
+            }
         }
     }
 
