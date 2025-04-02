@@ -109,6 +109,8 @@ import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.ReadCommand;
+import org.apache.cassandra.db.ReadQuery;
+import org.apache.cassandra.db.SinglePartitionReadCommand;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.BooleanType;
 import org.apache.cassandra.db.marshal.ByteType;
@@ -1549,7 +1551,18 @@ public abstract class CQLTester
     protected ReadCommand parseReadCommand(String query)
     {
         SelectStatement select = (SelectStatement) parseStatement(query);
-        return  (ReadCommand) select.getQuery(QueryState.forInternalCalls(), QueryOptions.DEFAULT, FBUtilities.nowInSeconds());
+        ReadQuery readQuery = select.getQuery(QueryState.forInternalCalls(), QueryOptions.DEFAULT, FBUtilities.nowInSeconds());
+        Assertions.assertThat(readQuery).isInstanceOf(ReadCommand.class);
+        return  (ReadCommand) readQuery;
+    }
+
+    protected List<SinglePartitionReadCommand> parseReadCommandGroup(String query)
+    {
+        SelectStatement select = (SelectStatement) parseStatement(query);
+        ReadQuery readQuery = select.getQuery(QueryState.forInternalCalls(), QueryOptions.DEFAULT, FBUtilities.nowInSeconds());
+        Assertions.assertThat(readQuery).isInstanceOf(SinglePartitionReadCommand.Group.class);
+        SinglePartitionReadCommand.Group commands = (SinglePartitionReadCommand.Group) readQuery;
+        return commands.queries;
     }
 
     protected ResultMessage.Prepared prepare(String query) throws Throwable

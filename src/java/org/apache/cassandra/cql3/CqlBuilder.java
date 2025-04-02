@@ -20,7 +20,9 @@ package org.apache.cassandra.cql3;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.Set;
 import java.util.TreeMap;
+import java.util.TreeSet;
 import java.util.function.Consumer;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -60,6 +62,11 @@ public final class CqlBuilder
     public CqlBuilder(int capacity)
     {
         builder = new StringBuilder(capacity);
+    }
+
+    public CqlBuilder append(Object o)
+    {
+        return append(String.valueOf(o));
     }
 
     public CqlBuilder append(String str)
@@ -193,6 +200,33 @@ public final class CqlBuilder
         return this;
     }
 
+    public CqlBuilder append(Set<String> set)
+    {
+        return append(set, true);
+    }
+
+    public CqlBuilder append(Set<String> set, boolean quoteValue)
+    {
+        indentIfNeeded();
+
+        builder.append('{');
+
+        Iterator<String> iter = new TreeSet<>(set).iterator();
+        while(iter.hasNext())
+        {
+            String value = iter.next();
+            if (quoteValue)
+                appendWithSingleQuotes(value);
+            else
+                builder.append(value);
+
+            if (iter.hasNext())
+                builder.append(", ");
+        }
+        builder.append('}');
+        return this;
+    }
+
     public <T> CqlBuilder appendWithSeparators(Iterable<T> iterable, Appender<T> appender, String separator)
     {
         return appendWithSeparators(iterable.iterator(), appender, separator);
@@ -262,12 +296,24 @@ public final class CqlBuilder
 
         public OptionsBuilder append(String name, Map<String, String> options)
         {
-            if (options.isEmpty())
-                return this;
+            return options.isEmpty() ? this : append(name, () -> builder.append(options, false));
+        }
 
+        public OptionsBuilder append(String name, Set<String> options)
+        {
+            return options.isEmpty() ? this : append(name, () -> builder.append(options, false));
+        }
+
+        public OptionsBuilder append(String name, String options)
+        {
+            return options.isEmpty() ? this : append(name, () -> builder.append(options));
+        }
+
+        private OptionsBuilder append(String name, Runnable appender)
+        {
             builder.append((empty ? " WITH " : " AND ") + name + " = ");
             empty = false;
-            builder.append(options);
+            appender.run();
             return this;
         }
     }

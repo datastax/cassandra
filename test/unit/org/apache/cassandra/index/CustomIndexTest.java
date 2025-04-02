@@ -1458,7 +1458,7 @@ public class CustomIndexTest extends CQLTester
      * {@link StubIndex} implementation that uses the same {@link Index.Group} for all its instances.
      * That group keeps count of the calls and passes them to its members.
      */
-    public static final class IndexWithSharedGroup extends StubIndex
+    public static class IndexWithSharedGroup extends StubIndex
     {
         public IndexWithSharedGroup(ColumnFamilyStore baseCfs, IndexMetadata metadata)
         {
@@ -1617,7 +1617,16 @@ public class CustomIndexTest extends CQLTester
             @Override
             public QueryPlan queryPlanFor(RowFilter rowFilter)
             {
-                throw new UnsupportedOperationException();
+                for (RowFilter.Expression e : rowFilter.withoutDisjunctions().expressions())
+                {
+                    for (Index index : indexes.values())
+                    {
+                        if (index.supportsExpression(e.column(), e.operator()))
+                            return new SingletonIndexQueryPlan(index, index.getPostIndexQueryFilter(rowFilter));
+                    }
+                }
+
+                return null;
             }
 
             @Override

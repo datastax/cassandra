@@ -884,6 +884,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         propagateLocalIndexStatus(keyspace.getName(), indexName, Index.Status.DROPPED);
     }
 
+    @Override
     public Index getIndexByName(String indexName)
     {
         return indexes.get(indexName);
