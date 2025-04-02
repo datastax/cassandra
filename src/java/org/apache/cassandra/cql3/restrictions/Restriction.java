@@ -20,6 +20,7 @@ package org.apache.cassandra.cql3.restrictions;
 import java.util.List;
 
 import org.apache.cassandra.db.filter.ANNOptions;
+import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.cql3.QueryOptions;
@@ -36,7 +37,7 @@ public interface Restriction
      * Check if the restriction is on a partition key
      * @return <code>true</code> if the restriction is on a partition key, <code>false</code>
      */
-    public default boolean isOnToken()
+    default boolean isOnToken()
     {
         return false;
     }
@@ -45,19 +46,19 @@ public interface Restriction
      * Returns the definition of the first column.
      * @return the definition of the first column.
      */
-    public ColumnMetadata getFirstColumn();
+    ColumnMetadata getFirstColumn();
 
     /**
      * Returns the definition of the last column.
      * @return the definition of the last column.
      */
-    public ColumnMetadata getLastColumn();
+    ColumnMetadata getLastColumn();
 
     /**
      * Returns the column definitions in position order.
      * @return the column definitions in position order.
      */
-    public List<ColumnMetadata> getColumnDefs();
+    List<ColumnMetadata> getColumnDefs();
 
     /**
      * Adds all functions (native and user-defined) used by any component of the restriction
@@ -70,17 +71,21 @@ public interface Restriction
      * Check if the restriction is on indexed columns.
      *
      * @param indexRegistry the index registry
+     * @param indexHints the user-provided index hints, which might exclude some indexes or explicitly expect some
+     * indexes requested by the user
      * @return <code>true</code> if the restriction is on indexed columns, <code>false</code>
      */
-    boolean hasSupportingIndex(IndexRegistry indexRegistry);
+    boolean hasSupportingIndex(IndexRegistry indexRegistry, IndexHints indexHints);
 
     /**
      * Returns whether this restriction would need filtering if the specified index group were used.
      *
      * @param indexGroup an index group
+     * @param indexHints the user-provided index hints, which might exclude some indexes or explicitly expect some
+     * indexes requested by the user
      * @return {@code true} if this would need filtering if {@code indexGroup} were used, {@code false} otherwise
      */
-    boolean needsFiltering(Index.Group indexGroup);
+    boolean needsFiltering(Index.Group indexGroup, IndexHints indexHints);
 
     /**
      * Adds to the specified row filter the expressions corresponding to this <code>Restriction</code>.
@@ -89,9 +94,11 @@ public interface Restriction
      * @param indexRegistry the index registry
      * @param options the query options
      * @param annOptions the query ANN options
+     * @param indexHints the index hints
      */
-    public void addToRowFilter(RowFilter.Builder filter,
-                               IndexRegistry indexRegistry,
-                               QueryOptions options,
-                               ANNOptions annOptions);
+    void addToRowFilter(RowFilter.Builder filter,
+                        IndexRegistry indexRegistry,
+                        QueryOptions options,
+                        ANNOptions annOptions,
+                        IndexHints indexHints);
 }

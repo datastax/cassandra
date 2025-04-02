@@ -23,6 +23,7 @@ import java.util.Collections;
 import java.util.List;
 
 import org.apache.cassandra.cql3.QualifiedName;
+import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.IndexRegistry;
 import org.apache.cassandra.schema.TableMetadata;
@@ -110,11 +111,16 @@ public final class IndexRestrictions
      * Returns whether these restrictions would need filtering if the specified index registry were used.
      *
      * @param indexRegistry an index registry
+     * @param indexHints the user-provided index hints, which might exclude some indexes or explicitly expect some
+     * indexes requested by the user
      * @param hasClusteringColumnRestrictions {@code true} if there are restricted clustering columns
      * @param hasMultipleContains {@code true} if there are multiple "contains" restrictions
      * @return {@code true} if this would need filtering if {@code indexRegistry} were used, {@code false} otherwise
      */
-    public boolean needFiltering(IndexRegistry indexRegistry, boolean hasClusteringColumnRestrictions, boolean hasMultipleContains)
+    public boolean needFiltering(IndexRegistry indexRegistry,
+                                 IndexHints indexHints,
+                                 boolean hasClusteringColumnRestrictions,
+                                 boolean hasMultipleContains)
     {
         // We need filtering if any clustering columns have restrictions that are not supported
         // by their indexes.
@@ -122,7 +128,7 @@ public final class IndexRestrictions
             return hasClusteringColumnRestrictions;
 
         for (Index.Group group : indexRegistry.listIndexGroups())
-            if (!needFiltering(group, hasMultipleContains))
+            if (!needFiltering(group, indexHints, hasMultipleContains))
                 return false;
 
         return true;
@@ -132,16 +138,17 @@ public final class IndexRestrictions
      * Returns whether these restrictions would need filtering if the specified index group were used.
      *
      * @param indexGroup an index group
+     * @param indexHints the user-provided index hints, which might exclude some indexes
      * @param hasMultipleContains {@code true} if there are multiple "contains" restrictions
      * @return {@code true} if this would need filtering if {@code indexGroup} were used, {@code false} otherwise
      */
-    private boolean needFiltering(Index.Group indexGroup, boolean hasMultipleContains)
+    private boolean needFiltering(Index.Group indexGroup, IndexHints indexHints, boolean hasMultipleContains)
     {
         if (hasMultipleContains && !indexGroup.supportsMultipleContains())
             return true;
 
         for (Restrictions restrictions : regularRestrictions)
-            if (restrictions.needsFiltering(indexGroup))
+            if (restrictions.needsFiltering(indexGroup, indexHints))
                 return true;
 
         for (ExternalRestriction restriction : externalRestrictions)
@@ -151,53 +158,10 @@ public final class IndexRestrictions
         return false;
     }
 
-    /**
-     * Returns whether these restrictions would need filtering if the specified index registry were used.
-     *
-     * @param indexRegistry an index registry
-     * @return {@code true} if this would need filtering if {@code indexRegistry} were used, {@code false} otherwise
-     */
-    public boolean needsFiltering(IndexRegistry indexRegistry)
-    {
-        if (isEmpty())
-            return false;
-
-        for (Index.Group group : indexRegistry.listIndexGroups())
-        {
-            if (!needsFiltering(group))
-                return false;
-        }
-
-        return true;
-    }
-
-    /**
-     * Returns whether these restrictions would need filtering if the specified index group were used.
-     *
-     * @param indexGroup an index group
-     * @return {@code true} if this would need filtering if {@code indexGroup} were used, {@code false} otherwise
-     */
-    private boolean needsFiltering(Index.Group indexGroup)
+    public boolean indexBeingUsed(Index.Group indexGroup, IndexHints indexHints)
     {
         for (Restrictions restrictions : regularRestrictions)
-        {
-            if (restrictions.needsFiltering(indexGroup))
-                return true;
-        }
-
-        for (ExternalRestriction restriction : externalRestrictions)
-        {
-            if (restriction.needsFiltering(indexGroup))
-                return true;
-        }
-
-        return false;
-    }
-
-    public boolean indexBeingUsed(Index.Group indexGroup)
-    {
-        for (Restrictions restrictions : regularRestrictions)
-            if (!restrictions.needsFiltering(indexGroup))
+            if (!restrictions.needsFiltering(indexGroup, indexHints))
                 return true;
 
         for (ExternalRestriction restriction : externalRestrictions)

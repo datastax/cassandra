@@ -40,6 +40,7 @@ import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.cql3.statements.Bound;
 import org.apache.cassandra.db.MultiClusteringBuilder;
 import org.apache.cassandra.db.filter.ANNOptions;
+import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.marshal.ByteBufferAccessor;
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -126,27 +127,27 @@ public abstract class MultiColumnRestriction implements SingleRestriction
     }
 
     @Override
-    public final boolean hasSupportingIndex(IndexRegistry indexRegistry)
+    public final boolean hasSupportingIndex(IndexRegistry indexRegistry, IndexHints indexHints)
     {
-        for (Index index : indexRegistry.listIndexes())
+        for (Index index : indexRegistry.listNotExcludedIndexes(indexHints))
             if (isSupportingIndex(index))
                 return true;
         return false;
     }
 
     @Override
-    public boolean needsFiltering(Index.Group indexGroup)
+    public boolean needsFiltering(Index.Group indexGroup, IndexHints indexHints)
     {
         for (ColumnMetadata column : columnDefs)
-            if (!isSupportedBy(indexGroup, column))
+            if (!isSupportedBy(indexGroup, indexHints, column))
                 return true;
 
         return false;
     }
 
-    private boolean isSupportedBy(Index.Group indexGroup, ColumnMetadata column)
+    private boolean isSupportedBy(Index.Group indexGroup, IndexHints indexHints, ColumnMetadata column)
     {
-        for (Index index : indexGroup.getIndexes())
+        for (Index index : indexGroup.getNotExcludedIndexes(indexHints))
             if (isSupportedBy(index, column))
                 return true;
 
@@ -242,7 +243,8 @@ public abstract class MultiColumnRestriction implements SingleRestriction
         public final void addToRowFilter(RowFilter.Builder filter,
                                          IndexRegistry indexRegistry,
                                          QueryOptions options,
-                                         ANNOptions annOptions)
+                                         ANNOptions annOptions,
+                                         IndexHints indexHints)
         {
             Tuples.Value t = ((Tuples.Value) term.bind(options));
             List<ByteBuffer> values = t.getElements();
@@ -308,7 +310,8 @@ public abstract class MultiColumnRestriction implements SingleRestriction
         public final void addToRowFilter(RowFilter.Builder filter,
                                          IndexRegistry indexRegistry,
                                          QueryOptions options,
-                                         ANNOptions annOptions)
+                                         ANNOptions annOptions,
+                                         IndexHints indexHints)
         {
             // If the relation is of the type (c) IN ((x),(y),(z)) then it is equivalent to
             // c IN (x, y, z) and we can perform filtering
@@ -575,7 +578,8 @@ public abstract class MultiColumnRestriction implements SingleRestriction
         public final void addToRowFilter(RowFilter.Builder filter,
                                          IndexRegistry indexRegistry,
                                          QueryOptions options,
-                                         ANNOptions annOptions)
+                                         ANNOptions annOptions,
+                                         IndexHints indexHints)
         {
             throw invalidRequest("Multi-column slice restrictions cannot be used for filtering.");
         }
@@ -667,7 +671,11 @@ public abstract class MultiColumnRestriction implements SingleRestriction
         }
 
         @Override
-        public final void addToRowFilter(RowFilter.Builder filter, IndexRegistry indexRegistry, QueryOptions options, ANNOptions annOptions)
+        public final void addToRowFilter(RowFilter.Builder filter,
+                                         IndexRegistry indexRegistry,
+                                         QueryOptions options,
+                                         ANNOptions annOptions,
+                                         IndexHints indexHints)
         {
             throw new UnsupportedOperationException("Secondary indexes do not support IS NOT NULL restrictions");
         }
