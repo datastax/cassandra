@@ -23,6 +23,7 @@ package org.apache.cassandra.index;
 import java.nio.ByteBuffer;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.Callable;
@@ -34,6 +35,7 @@ import javax.annotation.Nullable;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.*;
+import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.db.marshal.AbstractType;
@@ -95,7 +97,19 @@ public interface IndexRegistry
         }
 
         @Override
+        public Index getIndexByName(String indexName)
+        {
+            return null;
+        }
+
+        @Override
         public Optional<Index> getBestIndexFor(ColumnMetadata column, Operator operator)
+        {
+            return Optional.empty();
+        }
+
+        @Override
+        public Optional<Index> getBestIndexFor(ColumnMetadata column, Operator operator, IndexHints hints)
         {
             return Optional.empty();
         }
@@ -281,6 +295,12 @@ public interface IndexRegistry
         }
 
         @Override
+        public Index getIndexByName(String indexName)
+        {
+            return index;
+        }
+
+        @Override
         public Collection<Index> listIndexes()
         {
             return Collections.singletonList(index);
@@ -299,6 +319,12 @@ public interface IndexRegistry
         }
 
         @Override
+        public Optional<Index> getBestIndexFor(ColumnMetadata column, Operator operator, IndexHints hints)
+        {
+            return Optional.empty();
+        }
+
+        @Override
         public void validate(PartitionUpdate update, ClientState state)
         {
         }
@@ -306,14 +332,27 @@ public interface IndexRegistry
 
     default void registerIndex(Index index)
     {
-        registerIndex(index, new Index.Group.Key(index), () -> new SingletonIndexGroup());
+        registerIndex(index, new Index.Group.Key(index), SingletonIndexGroup::new);
     }
     void registerIndex(Index index, Index.Group.Key groupKey, Supplier<Index.Group> groupSupplier);
     void unregisterIndex(Index index, Index.Group.Key groupKey);
     Collection<Index.Group> listIndexGroups();
 
     Index getIndex(IndexMetadata indexMetadata);
+    @Nullable
+    Index getIndexByName(String indexName);
     Collection<Index> listIndexes();
+
+    /**
+     * Lists the indexes in this registry, minus the ones excluded by the specified {@link IndexHints}.
+     *
+     * @param hints the index hints with the indexes to exclude.
+     * @return the indexes in this registry that are not excluded by the hints.
+     */
+    default Collection<Index> listNotExcludedIndexes(IndexHints hints)
+    {
+        return hints.notExcluded(listIndexes());
+    }
 
     default Optional<Index.Analyzer> getAnalyzerFor(ColumnMetadata column, Operator operator, ByteBuffer value)
     {
@@ -329,6 +368,11 @@ public interface IndexRegistry
         return Optional.empty();
     }
 
+    default Optional<Index.Analyzer> getAnalyzerFor(ColumnMetadata column, Operator operator, ByteBuffer value, IndexHints hints)
+    {
+        return getBestIndexFor(column, operator, hints).flatMap(i -> i.getAnalyzer(value));
+    }
+
     Optional<Index> getBestIndexFor(ColumnMetadata column, Operator operator);
 
     default Optional<Index> getBestIndexFor(RowFilter.Expression expression)
@@ -336,6 +380,12 @@ public interface IndexRegistry
         return getBestIndexFor(expression.column(), expression.operator());
     }
 
+    Optional<Index> getBestIndexFor(ColumnMetadata column, Operator operator, IndexHints hints);
+
+    default Optional<Index> getBestIndexFor(RowFilter.Expression expression, IndexHints hints)
+    {
+        return getBestIndexFor(expression.column(), expression.operator(), hints);
+    }
     /**
      * Called at write time to ensure that values present in the update
      * are valid according to the rules of all registered indexes which
@@ -372,44 +422,46 @@ public interface IndexRegistry
     class EqBehaviorIndexes
     {
         public EqBehavior behavior;
-        public final Index eqIndex;
-        public final Index matchIndex;
+        public final Collection<Index> eqIndexes;
+        public final Collection<Index> matchIndexes;
 
-        private EqBehaviorIndexes(Index eqIndex, Index matchIndex, EqBehavior behavior)
+        private EqBehaviorIndexes(Collection<Index> eqIndexes, Collection<Index> matchIndexes, EqBehavior behavior)
         {
-            this.eqIndex = eqIndex;
-            this.matchIndex = matchIndex;
+            this.eqIndexes = eqIndexes;
+            this.matchIndexes = matchIndexes;
             this.behavior = behavior;
         }
 
-        public static EqBehaviorIndexes eq(Index eqIndex)
+        public static EqBehaviorIndexes eq(Collection<Index> eqIndexes)
         {
-            return new EqBehaviorIndexes(eqIndex, null, EqBehavior.EQ);
+            return new EqBehaviorIndexes(eqIndexes, null, EqBehavior.EQ);
         }
 
-        public static EqBehaviorIndexes match(Index eqAndMatchIndex)
+        public static EqBehaviorIndexes match(Collection<Index> eqAndMatchIndexes)
         {
-            return new EqBehaviorIndexes(eqAndMatchIndex, eqAndMatchIndex, EqBehavior.MATCH);
+            return new EqBehaviorIndexes(eqAndMatchIndexes, eqAndMatchIndexes, EqBehavior.MATCH);
         }
 
-        public static EqBehaviorIndexes ambiguous(Index firstEqIndex, Index secondEqIndex)
+        public static EqBehaviorIndexes ambiguous(Collection<Index> firstEqIndexes, Collection<Index> secondEqIndexes)
         {
-            return new EqBehaviorIndexes(firstEqIndex, secondEqIndex, EqBehavior.AMBIGUOUS);
+            return new EqBehaviorIndexes(firstEqIndexes, secondEqIndexes, EqBehavior.AMBIGUOUS);
         }
     }
 
     /**
      * @return
-     * - AMBIGUOUS if an index supports EQ and a different one supports both EQ and ANALYZER_MATCHES
-     * - MATCHES if an index supports both EQ and ANALYZER_MATCHES
+     * - AMBIGUOUS if an index that is not excluded by the hints supports EQ and a different one, also not excluded by
+     *   the hints, supports both EQ and ANALYZER_MATCHES. If one of the indexes is included by the hints, the behavior
+     *   is not AMBIGUOUS.
+     * - MATCHES if it's not AMBIGUOUS and an index supports both EQ and ANALYZER_MATCHES
      * - otherwise EQ
      */
-    default EqBehaviorIndexes getEqBehavior(ColumnMetadata cm)
+    default EqBehaviorIndexes getEqBehavior(ColumnMetadata cm, IndexHints hints)
     {
-        Index eqOnlyIndex = null;
-        Index bothIndex = null;
+        Set<Index> eqOnlyIndexes = new HashSet<>();
+        Set<Index> eqAndMatchIndexes = new HashSet<>();
 
-        for (Index index : listIndexes())
+        for (Index index : listNotExcludedIndexes(hints))
         {
             boolean supportsEq = index.supportsExpression(cm, Operator.EQ);
             boolean supportsMatches = index.supportsExpression(cm, Operator.ANALYZER_MATCHES);
@@ -417,21 +469,32 @@ public interface IndexRegistry
             // which uses regular equality by convention.
             boolean hasIndexMetadata = index.getIndexMetadata() != null;
 
+            // Categorize indexes based on their capabilities
             if (supportsEq && supportsMatches && hasIndexMetadata)
-                bothIndex = index;
+                eqAndMatchIndexes.add(index);
             else if (supportsEq)
-                eqOnlyIndex = index;
+                eqOnlyIndexes.add(index);
         }
 
-        // If we have one index supporting only EQ and another supporting both, return AMBIGUOUS
-        if (eqOnlyIndex != null && bothIndex != null)
-            return EqBehaviorIndexes.ambiguous(eqOnlyIndex, bothIndex);
+        // we should consider the user-provided index hints, which can be used to disambiguate EQ queries
+        boolean prefersEq = hints.includesAnyOf(eqOnlyIndexes);
+        boolean prefersMatch = hints.includesAnyOf(eqAndMatchIndexes);
 
-        // If we have an index supporting both EQ and MATCHES, return MATCHES
-        if (bothIndex != null)
-            return EqBehaviorIndexes.match(bothIndex);
+        // If we have indexes supporting only EQ and indexes supporting both, return AMBIGUOUS,
+        // unless the index hints prefer one index over the other.
+        if (!eqOnlyIndexes.isEmpty() && !eqAndMatchIndexes.isEmpty())
+        {
+            if (prefersMatch == prefersEq)
+                return EqBehaviorIndexes.ambiguous(eqOnlyIndexes, eqAndMatchIndexes);
+
+            return prefersMatch ? EqBehaviorIndexes.match(eqAndMatchIndexes) : EqBehaviorIndexes.eq(eqOnlyIndexes);
+        }
+
+        // If we have indexes supporting both EQ and MATCHES, return MATCHES
+        if (!eqAndMatchIndexes.isEmpty())
+            return EqBehaviorIndexes.match(eqAndMatchIndexes);
 
         // Otherwise return EQ
-        return EqBehaviorIndexes.eq(eqOnlyIndex == null ? bothIndex : eqOnlyIndex);
+        return EqBehaviorIndexes.eq(eqOnlyIndexes);
     }
 }
