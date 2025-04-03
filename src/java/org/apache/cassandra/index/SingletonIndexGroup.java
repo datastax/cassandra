@@ -49,9 +49,6 @@ import org.apache.cassandra.schema.TableMetadata;
  */
 public class SingletonIndexGroup implements Index.Group
 {
-    public static final String MULTIPLE_INDEXES_ERROR_MESSAGE = "This index implementation only supports one index per query.";
-    public static final String INDEX_WITHOUT_EXPRESSION_ERROR_MESSAGE = "The query doesn't have any expression supported by the index ";
-
     private volatile Index delegate;
     private final Set<Index> indexes = Sets.newConcurrentHashSet();
 
@@ -119,13 +116,8 @@ public class SingletonIndexGroup implements Index.Group
         if (hints.excluded.contains(delegate))
             return null;
 
-        if (!hints.included.isEmpty())
-        {
-            if (!hints.included.contains(delegate))
-                return null;
-            if (hints.included.size() > 1)
-                throw new InvalidRequestException(MULTIPLE_INDEXES_ERROR_MESSAGE);
-        }
+//        if (!hints.preferred.contains(delegate))
+//            return null;
 
         // Indexes using a singleton group don't support disjunctions,
         // so we only consider the top-level AND expressions for index selection.
@@ -134,9 +126,6 @@ public class SingletonIndexGroup implements Index.Group
             if (delegate.supportsExpression(e.column(), e.operator()))
                 return new SingletonIndexQueryPlan(delegate, delegate.getPostIndexQueryFilter(rowFilter));
         }
-
-        if (hints.included.contains(delegate))
-            throw new InvalidRequestException(INDEX_WITHOUT_EXPRESSION_ERROR_MESSAGE + delegate.getIndexMetadata().name);
 
         return null;
     }

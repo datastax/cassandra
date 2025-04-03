@@ -33,7 +33,6 @@ import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.SyntaxException;
 import org.apache.cassandra.index.CustomIndexTest;
 import org.apache.cassandra.index.Index;
-import org.apache.cassandra.index.SingletonIndexGroup;
 import org.apache.cassandra.index.TargetParser;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataOutputBuffer;
@@ -46,7 +45,6 @@ import org.assertj.core.api.Assertions;
 import static org.apache.cassandra.db.filter.IndexHints.CONFLICTING_INDEXES_ERROR;
 import static org.apache.cassandra.db.filter.IndexHints.MISSING_INDEX_ERROR;
 import static org.apache.cassandra.db.filter.IndexHints.WRONG_KEYSPACE_ERROR;
-import static org.apache.cassandra.index.SingletonIndexGroup.MULTIPLE_INDEXES_ERROR_MESSAGE;
 
 /**
  * Tests for {@link IndexHints}, independent of the specific underlying index implementation.
@@ -71,23 +69,23 @@ public class IndexHintsTest extends CQLTester
 
         // valid queries without index hints
         execute("SELECT * FROM %s WHERE a = 1 ALLOW FILTERING");
-        execute("SELECT * FROM %s WHERE a = 1 ALLOW FILTERING WITH included_indexes = {}");
+        execute("SELECT * FROM %s WHERE a = 1 ALLOW FILTERING WITH preferred_indexes = {}");
         execute("SELECT * FROM %s WHERE a = 1 ALLOW FILTERING WITH excluded_indexes = {}");
-        execute("SELECT * FROM %s WHERE a = 1 ALLOW FILTERING WITH included_indexes = {} AND excluded_indexes = {}");
+        execute("SELECT * FROM %s WHERE a = 1 ALLOW FILTERING WITH preferred_indexes = {} AND excluded_indexes = {}");
 
         // index hints with unparseable properties
-        assertInvalidThrowMessage("Invalid value for property 'included_indexes'. It should be a set of identifiers.",
+        assertInvalidThrowMessage("Invalid value for property 'preferred_indexes'. It should be a set of identifiers.",
                                   SyntaxException.class,
-                                  "SELECT * FROM %s WHERE a = 1 ALLOW FILTERING WITH included_indexes = {'a': 'b'}");
+                                  "SELECT * FROM %s WHERE a = 1 ALLOW FILTERING WITH preferred_indexes = {'a': 'b'}");
 
         // invalid queries with unknown index (no index has been created yet)
         String missingIndexError = String.format(MISSING_INDEX_ERROR, currentTable(), "idx1");
         assertInvalidThrowMessage(missingIndexError,
                                   InvalidRequestException.class,
-                                  "SELECT * FROM %s WHERE a = 1 ALLOW FILTERING WITH included_indexes = {idx1}");
+                                  "SELECT * FROM %s WHERE a = 1 ALLOW FILTERING WITH preferred_indexes = {idx1}");
         assertInvalidThrowMessage(missingIndexError,
                                   InvalidRequestException.class,
-                                  "SELECT * FROM %s WHERE a = 1 ALLOW FILTERING WITH included_indexes = {idx1, idx2}");
+                                  "SELECT * FROM %s WHERE a = 1 ALLOW FILTERING WITH preferred_indexes = {idx1, idx2}");
         assertInvalidThrowMessage(missingIndexError,
                                   InvalidRequestException.class,
                                   "SELECT * FROM %s WHERE a = 1 ALLOW FILTERING WITH excluded_indexes = {idx1}");
@@ -96,93 +94,93 @@ public class IndexHintsTest extends CQLTester
                                   "SELECT * FROM %s WHERE a = 1 ALLOW FILTERING WITH excluded_indexes = {idx1, idx2}");
         assertInvalidThrowMessage(missingIndexError,
                                   InvalidRequestException.class,
-                                  "SELECT * FROM %s WHERE a = 1 ALLOW FILTERING WITH included_indexes = {idx1} AND excluded_indexes = {idx2}");
+                                  "SELECT * FROM %s WHERE a = 1 ALLOW FILTERING WITH preferred_indexes = {idx1} AND excluded_indexes = {idx2}");
 
         // create a single index and test queries with it
         createIndex(String.format("CREATE CUSTOM INDEX idx1 ON %%s(a) USING '%s'", GroupedIndex.class.getName()));
-        execute("SELECT * FROM %s WHERE a = 1 WITH included_indexes = {}");
-        execute("SELECT * FROM %s WHERE a = 1 WITH included_indexes = {idx1}");
+        execute("SELECT * FROM %s WHERE a = 1 WITH preferred_indexes = {}");
+        execute("SELECT * FROM %s WHERE a = 1 WITH preferred_indexes = {idx1}");
         missingIndexError = String.format(MISSING_INDEX_ERROR, currentTable(), "idx2");
         assertInvalidThrowMessage(missingIndexError,
                                   InvalidRequestException.class,
-                                  "SELECT * FROM %s WHERE a = 1 WITH included_indexes = {idx2}");
+                                  "SELECT * FROM %s WHERE a = 1 WITH preferred_indexes = {idx2}");
         execute("SELECT * FROM %s WHERE a = 1 WITH excluded_indexes = {}");
         execute("SELECT * FROM %s WHERE a = 1 WITH excluded_indexes = {idx1}");
         assertInvalidThrowMessage(missingIndexError,
                                   InvalidRequestException.class,
                                   "SELECT * FROM %s WHERE a = 1 WITH excluded_indexes = {idx2}");
-        execute("SELECT * FROM %s WHERE a = 1 WITH included_indexes = {} AND excluded_indexes = {}");
+        execute("SELECT * FROM %s WHERE a = 1 WITH preferred_indexes = {} AND excluded_indexes = {}");
         assertInvalidThrowMessage(missingIndexError,
                                   InvalidRequestException.class,
-                                  "SELECT * FROM %s WHERE a = 1 WITH included_indexes = {idx1} AND excluded_indexes = {idx2}");
+                                  "SELECT * FROM %s WHERE a = 1 WITH preferred_indexes = {idx1} AND excluded_indexes = {idx2}");
         assertInvalidThrowMessage(missingIndexError,
                                   InvalidRequestException.class,
-                                  "SELECT * FROM %s WHERE a = 1 WITH included_indexes = {idx2} AND excluded_indexes = {idx1}");
+                                  "SELECT * FROM %s WHERE a = 1 WITH preferred_indexes = {idx2} AND excluded_indexes = {idx1}");
         assertInvalidThrowMessage(CONFLICTING_INDEXES_ERROR + "idx1",
                                   InvalidRequestException.class,
-                                  "SELECT * FROM %s WHERE a = 1 WITH included_indexes = {idx1} AND excluded_indexes = {idx1}");
+                                  "SELECT * FROM %s WHERE a = 1 WITH preferred_indexes = {idx1} AND excluded_indexes = {idx1}");
 
         // create a second index and test queries with both indexes
         createIndex(String.format("CREATE CUSTOM INDEX idx2 ON %%s(b) USING '%s'", GroupedIndex.class.getName()));
-        execute("SELECT * FROM %s WHERE a = 1 WITH included_indexes = {}");
-        execute("SELECT * FROM %s WHERE a = 1 WITH included_indexes = {idx1}");
-        execute("SELECT * FROM %s WHERE a = 1 WITH included_indexes = {idx2}");
-        execute("SELECT * FROM %s WHERE a = 1 WITH included_indexes = {idx1, idx2}");
+        execute("SELECT * FROM %s WHERE a = 1 WITH preferred_indexes = {}");
+        execute("SELECT * FROM %s WHERE a = 1 WITH preferred_indexes = {idx1}");
+        execute("SELECT * FROM %s WHERE a = 1 WITH preferred_indexes = {idx2}");
+        execute("SELECT * FROM %s WHERE a = 1 WITH preferred_indexes = {idx1, idx2}");
         execute("SELECT * FROM %s WHERE a = 1 WITH excluded_indexes = {}");
         execute("SELECT * FROM %s WHERE a = 1 WITH excluded_indexes = {idx1}");
         execute("SELECT * FROM %s WHERE a = 1 WITH excluded_indexes = {idx2}");
         execute("SELECT * FROM %s WHERE a = 1 WITH excluded_indexes = {idx1, idx2}");
-        execute("SELECT * FROM %s WHERE a = 1 WITH included_indexes = {} AND excluded_indexes = {}");
-        execute("SELECT * FROM %s WHERE a = 1 WITH included_indexes = {idx1} AND excluded_indexes = {idx2}");
-        execute("SELECT * FROM %s WHERE a = 1 WITH included_indexes = {idx2} AND excluded_indexes = {idx1}");
+        execute("SELECT * FROM %s WHERE a = 1 WITH preferred_indexes = {} AND excluded_indexes = {}");
+        execute("SELECT * FROM %s WHERE a = 1 WITH preferred_indexes = {idx1} AND excluded_indexes = {idx2}");
+        execute("SELECT * FROM %s WHERE a = 1 WITH preferred_indexes = {idx2} AND excluded_indexes = {idx1}");
         assertInvalidThrowMessage(CONFLICTING_INDEXES_ERROR + "idx1",
                                   InvalidRequestException.class,
-                                  "SELECT * FROM %s WHERE a = 1 WITH included_indexes = {idx1} AND excluded_indexes = {idx1}");
+                                  "SELECT * FROM %s WHERE a = 1 WITH preferred_indexes = {idx1} AND excluded_indexes = {idx1}");
         assertInvalidThrowMessage(CONFLICTING_INDEXES_ERROR + "idx2",
                                   InvalidRequestException.class,
-                                  "SELECT * FROM %s WHERE a = 1 WITH included_indexes = {idx2} AND excluded_indexes = {idx2}");
+                                  "SELECT * FROM %s WHERE a = 1 WITH preferred_indexes = {idx2} AND excluded_indexes = {idx2}");
         assertInvalidThrowMessage(CONFLICTING_INDEXES_ERROR + "idx1",
                                   InvalidRequestException.class,
-                                  "SELECT * FROM %s WHERE a = 1 WITH included_indexes = {idx1, idx2} AND excluded_indexes = {idx1}");
+                                  "SELECT * FROM %s WHERE a = 1 WITH preferred_indexes = {idx1, idx2} AND excluded_indexes = {idx1}");
         assertInvalidThrowMessage(CONFLICTING_INDEXES_ERROR + "idx1",
                                   InvalidRequestException.class,
-                                  "SELECT * FROM %s WHERE a = 1 WITH included_indexes = {idx1} AND excluded_indexes = {idx1, idx2}");
+                                  "SELECT * FROM %s WHERE a = 1 WITH preferred_indexes = {idx1} AND excluded_indexes = {idx1, idx2}");
         assertInvalidThrowMessage(CONFLICTING_INDEXES_ERROR + "idx1, idx2",
                                   InvalidRequestException.class,
-                                  "SELECT * FROM %s WHERE a = 1 WITH included_indexes = {idx1, idx2} AND excluded_indexes = {idx1, idx2}");
+                                  "SELECT * FROM %s WHERE a = 1 WITH preferred_indexes = {idx1, idx2} AND excluded_indexes = {idx1, idx2}");
 
         // invalid queries referencing other keyspaces
         String wrongKeyspaceError = String.format(WRONG_KEYSPACE_ERROR, "ks1.idx1");
         assertInvalidThrowMessage(wrongKeyspaceError,
                                   InvalidRequestException.class,
-                                  "SELECT * FROM %s WHERE a = 1 ALLOW FILTERING WITH included_indexes = {ks1.idx1}");
+                                  "SELECT * FROM %s WHERE a = 1 ALLOW FILTERING WITH preferred_indexes = {ks1.idx1}");
         assertInvalidThrowMessage(wrongKeyspaceError,
                                   InvalidRequestException.class,
                                   "SELECT * FROM %s WHERE a = 1 ALLOW FILTERING WITH excluded_indexes = {ks1.idx1}");
 
         // valid queries with explicit keyspace
         String keyspace = keyspace();
-        execute("SELECT * FROM %s WHERE a = 1 WITH included_indexes = {" + keyspace + ".idx1}");
-        execute("SELECT * FROM %s WHERE a = 1 WITH included_indexes = {" + keyspace + ".idx1, idx2}");
-        execute("SELECT * FROM %s WHERE a = 1 WITH included_indexes = {" + keyspace + ".idx1, " + keyspace + ".idx2}");
+        execute("SELECT * FROM %s WHERE a = 1 WITH preferred_indexes = {" + keyspace + ".idx1}");
+        execute("SELECT * FROM %s WHERE a = 1 WITH preferred_indexes = {" + keyspace + ".idx1, idx2}");
+        execute("SELECT * FROM %s WHERE a = 1 WITH preferred_indexes = {" + keyspace + ".idx1, " + keyspace + ".idx2}");
         execute("SELECT * FROM %s WHERE a = 1 WITH excluded_indexes = {" + keyspace + ".idx1}");
         execute("SELECT * FROM %s WHERE a = 1 WITH excluded_indexes = {" + keyspace + ".idx1, idx2}");
-        execute("SELECT * FROM %s WHERE a = 1 WITH included_indexes = {" + keyspace + ".idx1} AND excluded_indexes = {idx2}");
-        execute("SELECT * FROM %s WHERE a = 1 WITH included_indexes = {" + keyspace + ".idx1} AND excluded_indexes = {" + keyspace + ".idx2}");
-        execute("SELECT * FROM %s WHERE a = 1 WITH excluded_indexes = {" + keyspace + ".idx1} AND included_indexes = {idx2}");
-        execute("SELECT * FROM %s WHERE a = 1 WITH excluded_indexes = {" + keyspace + ".idx1} AND included_indexes = {" + keyspace + ".idx2}");
+        execute("SELECT * FROM %s WHERE a = 1 WITH preferred_indexes = {" + keyspace + ".idx1} AND excluded_indexes = {idx2}");
+        execute("SELECT * FROM %s WHERE a = 1 WITH preferred_indexes = {" + keyspace + ".idx1} AND excluded_indexes = {" + keyspace + ".idx2}");
+        execute("SELECT * FROM %s WHERE a = 1 WITH excluded_indexes = {" + keyspace + ".idx1} AND preferred_indexes = {idx2}");
+        execute("SELECT * FROM %s WHERE a = 1 WITH excluded_indexes = {" + keyspace + ".idx1} AND preferred_indexes = {" + keyspace + ".idx2}");
 
         // valid queries with quoted names
-        execute("SELECT * FROM %s WHERE a = 1 WITH included_indexes = {\"idx1\"}");
+        execute("SELECT * FROM %s WHERE a = 1 WITH preferred_indexes = {\"idx1\"}");
         execute("SELECT * FROM %s WHERE a = 1 WITH excluded_indexes = {\"idx1\", idx2}");
         execute("SELECT * FROM %s WHERE a = 1 WITH excluded_indexes = {\"idx1\", \"idx2\"}");
         execute("SELECT * FROM %s WHERE a = 1 WITH excluded_indexes = {\"idx1\"}");
         execute("SELECT * FROM %s WHERE a = 1 WITH excluded_indexes = {\"idx1\", idx2}");
         execute("SELECT * FROM %s WHERE a = 1 WITH excluded_indexes = {\"idx1\", \"idx2\"}");
-        execute("SELECT * FROM %s WHERE a = 1 WITH included_indexes = {\"idx1\"} AND excluded_indexes = {idx2}");
-        execute("SELECT * FROM %s WHERE a = 1 WITH included_indexes = {\"idx1\"} AND excluded_indexes = {\"idx2\"}");
-        execute("SELECT * FROM %s WHERE a = 1 WITH excluded_indexes = {\"idx1\"} AND included_indexes = {idx2}");
-        execute("SELECT * FROM %s WHERE a = 1 WITH excluded_indexes = {\"idx1\"} AND included_indexes = {\"idx2\"}");
+        execute("SELECT * FROM %s WHERE a = 1 WITH preferred_indexes = {\"idx1\"} AND excluded_indexes = {idx2}");
+        execute("SELECT * FROM %s WHERE a = 1 WITH preferred_indexes = {\"idx1\"} AND excluded_indexes = {\"idx2\"}");
+        execute("SELECT * FROM %s WHERE a = 1 WITH excluded_indexes = {\"idx1\"} AND preferred_indexes = {idx2}");
+        execute("SELECT * FROM %s WHERE a = 1 WITH excluded_indexes = {\"idx1\"} AND preferred_indexes = {\"idx2\"}");
     }
 
     /**
@@ -199,21 +197,21 @@ public class IndexHintsTest extends CQLTester
         String formattedQuery = formatQuery("SELECT * FROM %%s WHERE a = 0");
         ReadCommand command = parseReadCommand(formattedQuery);
         Assertions.assertThat(command.toCQLString())
-                  .doesNotContain("included_indexes")
+                  .doesNotContain("preferred_indexes")
                   .doesNotContain("excluded_indexes");
 
         // with empty hints
-        formattedQuery = formatQuery("SELECT * FROM %%s WHERE a = 0 AND b = 0 WITH included_indexes = {} AND excluded_indexes = {}");
+        formattedQuery = formatQuery("SELECT * FROM %%s WHERE a = 0 AND b = 0 WITH preferred_indexes = {} AND excluded_indexes = {}");
         command = parseReadCommand(formattedQuery);
         Assertions.assertThat(command.toCQLString())
-                  .doesNotContain("included_indexes")
+                  .doesNotContain("preferred_indexes")
                   .doesNotContain("excluded_indexes");
 
-        // with included indexes only
-        formattedQuery = formatQuery("SELECT * FROM %%s WHERE a = 0 AND b = 0 WITH included_indexes = {idx1, idx2}");
+        // with preferred indexes only
+        formattedQuery = formatQuery("SELECT * FROM %%s WHERE a = 0 AND b = 0 WITH preferred_indexes = {idx1, idx2}");
         command = parseReadCommand(formattedQuery);
         Assertions.assertThat(command.toCQLString())
-                  .contains(" WITH included_indexes = {idx1, idx2}")
+                  .contains(" WITH preferred_indexes = {idx1, idx2}")
                   .doesNotContain("excluded_indexes");
 
         // with excluded indexes only
@@ -221,13 +219,13 @@ public class IndexHintsTest extends CQLTester
         command = parseReadCommand(formattedQuery);
         Assertions.assertThat(command.toCQLString())
                   .contains(" WITH excluded_indexes = {idx1, idx2}")
-                  .doesNotContain("included_indexes");
+                  .doesNotContain("preferred_indexes");
 
-        // with both included and excluded indexes
-        formattedQuery = formatQuery("SELECT * FROM %%s WHERE a = 0 AND b = 0 WITH included_indexes = {idx1} AND excluded_indexes = {idx2}");
+        // with both preferred and excluded indexes
+        formattedQuery = formatQuery("SELECT * FROM %%s WHERE a = 0 AND b = 0 WITH preferred_indexes = {idx1} AND excluded_indexes = {idx2}");
         command = parseReadCommand(formattedQuery);
         Assertions.assertThat(command.toCQLString())
-                  .contains(" WITH included_indexes = {idx1} AND excluded_indexes = {idx2}");
+                  .contains(" WITH preferred_indexes = {idx1} AND excluded_indexes = {idx2}");
     }
 
     /**
@@ -245,15 +243,15 @@ public class IndexHintsTest extends CQLTester
 
         // unespecified hints should be mapped to NONE
         testTransport("SELECT * FROM %s WHERE a = 1", IndexHints.NONE);
-        testTransport("SELECT * FROM %s WHERE a = 1 WITH included_indexes = {}", IndexHints.NONE);
+        testTransport("SELECT * FROM %s WHERE a = 1 WITH preferred_indexes = {}", IndexHints.NONE);
         testTransport("SELECT * FROM %s WHERE a = 1 WITH excluded_indexes = {}", IndexHints.NONE);
 
         // hints with a single index
-        testTransport("SELECT * FROM %s WHERE a = 1 WITH included_indexes = {idx1}", IndexHints.create(indexes(idx1), indexes()));
+        testTransport("SELECT * FROM %s WHERE a = 1 WITH preferred_indexes = {idx1}", IndexHints.create(indexes(idx1), indexes()));
         testTransport("SELECT * FROM %s WHERE a = 1 WITH excluded_indexes = {idx1}", IndexHints.create(indexes(), indexes(idx1)));
 
         // hints with multiple indexes
-        testTransport("SELECT * FROM %s WHERE a = 1 WITH included_indexes = {idx1, idx2}", IndexHints.create(indexes(idx1, idx2), indexes()));
+        testTransport("SELECT * FROM %s WHERE a = 1 WITH preferred_indexes = {idx1, idx2}", IndexHints.create(indexes(idx1, idx2), indexes()));
         testTransport("SELECT * FROM %s WHERE a = 1 WITH excluded_indexes = {idx1, idx2}", IndexHints.create(indexes(), indexes(idx1, idx2)));
     }
 
@@ -323,70 +321,57 @@ public class IndexHintsTest extends CQLTester
         Index idx2 = getCurrentColumnFamilyStore().indexManager.getIndexByName("idx2");
 
         // without any hints
-        assertAcceptsHints("SELECT * FROM %s ALLOW FILTERING");
-        assertAcceptsHints("SELECT * FROM %s WHERE v1=0 ALLOW FILTERING", idx1);
-        assertAcceptsHints("SELECT * FROM %s WHERE v1=0 ALLOW FILTERING", idx1);
-        assertAcceptsHints("SELECT * FROM %s WHERE v2=0 ALLOW FILTERING", idx2);
-        assertAcceptsHints("SELECT * FROM %s WHERE v3=0 ALLOW FILTERING");
-        assertAcceptsHints("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING", idx1);
-        assertAcceptsHints("SELECT * FROM %s WHERE v1=0 AND v3=0 ALLOW FILTERING", idx1);
-        assertAcceptsHints("SELECT * FROM %s WHERE v2=0 AND v3=0 ALLOW FILTERING", idx2);
+        assertSelectsAny("SELECT * FROM %s ALLOW FILTERING");
+        assertSelectsAny("SELECT * FROM %s WHERE v1=0 ALLOW FILTERING", idx1);
+        assertSelectsAny("SELECT * FROM %s WHERE v1=0 ALLOW FILTERING", idx1);
+        assertSelectsAny("SELECT * FROM %s WHERE v2=0 ALLOW FILTERING", idx2);
+        assertSelectsAny("SELECT * FROM %s WHERE v3=0 ALLOW FILTERING");
+        assertSelectsAny("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING", idx1, idx2);
+        assertSelectsAny("SELECT * FROM %s WHERE v1=0 AND v3=0 ALLOW FILTERING", idx1);
+        assertSelectsAny("SELECT * FROM %s WHERE v2=0 AND v3=0 ALLOW FILTERING", idx2);
 
-        // with a single restriction and included indexes
-        assertAcceptsHints("SELECT * FROM %s WHERE v1=0 ALLOW FILTERING WITH included_indexes = {idx1}", idx1);
-        assertRejectsHints("SELECT * FROM %s WHERE v1=0 ALLOW FILTERING WITH included_indexes = {idx2}",
-                           SingletonIndexGroup.INDEX_WITHOUT_EXPRESSION_ERROR_MESSAGE + "idx2");
-        assertRejectsHints("SELECT * FROM %s WHERE v2=0 ALLOW FILTERING WITH included_indexes = {idx1}",
-                           SingletonIndexGroup.INDEX_WITHOUT_EXPRESSION_ERROR_MESSAGE + "idx1");
-        assertAcceptsHints("SELECT * FROM %s WHERE v2=0 ALLOW FILTERING WITH included_indexes = {idx2}", idx2);
-        assertRejectsHints("SELECT * FROM %s WHERE v3=0 ALLOW FILTERING WITH included_indexes = {idx1}",
-                           SingletonIndexGroup.INDEX_WITHOUT_EXPRESSION_ERROR_MESSAGE + "idx1");
-        assertRejectsHints("SELECT * FROM %s WHERE v3=0 ALLOW FILTERING WITH included_indexes = {idx2}",
-                           SingletonIndexGroup.INDEX_WITHOUT_EXPRESSION_ERROR_MESSAGE + "idx2");
+        // with a single restriction and preferred indexes
+        assertSelectsAny("SELECT * FROM %s WHERE v1=0 ALLOW FILTERING WITH preferred_indexes = {idx1}", idx1);
+        assertSelectsAny("SELECT * FROM %s WHERE v1=0 ALLOW FILTERING WITH preferred_indexes = {idx2}", idx1);
+        assertSelectsAny("SELECT * FROM %s WHERE v2=0 ALLOW FILTERING WITH preferred_indexes = {idx1}", idx2);
+        assertSelectsAny("SELECT * FROM %s WHERE v2=0 ALLOW FILTERING WITH preferred_indexes = {idx2}", idx2);
+        assertSelectsAny("SELECT * FROM %s WHERE v3=0 ALLOW FILTERING WITH preferred_indexes = {idx1}");
+        assertSelectsAny("SELECT * FROM %s WHERE v3=0 ALLOW FILTERING WITH preferred_indexes = {idx2}");
 
         // with a single restriction and excluded indexes
-        assertAcceptsHints("SELECT * FROM %s WHERE v1=0 ALLOW FILTERING WITH excluded_indexes = {idx1}");
-        assertAcceptsHints("SELECT * FROM %s WHERE v1=0 ALLOW FILTERING WITH excluded_indexes = {idx2}", idx1);
-        assertAcceptsHints("SELECT * FROM %s WHERE v2=0 ALLOW FILTERING WITH excluded_indexes = {idx1}", idx2);
-        assertAcceptsHints("SELECT * FROM %s WHERE v2=0 ALLOW FILTERING WITH excluded_indexes = {idx2}");
-        assertAcceptsHints("SELECT * FROM %s WHERE v3=0 ALLOW FILTERING WITH excluded_indexes = {idx1}");
-        assertAcceptsHints("SELECT * FROM %s WHERE v3=0 ALLOW FILTERING WITH excluded_indexes = {idx2}");
+        assertSelectsAny("SELECT * FROM %s WHERE v1=0 ALLOW FILTERING WITH excluded_indexes = {idx1}");
+        assertSelectsAny("SELECT * FROM %s WHERE v1=0 ALLOW FILTERING WITH excluded_indexes = {idx2}", idx1);
+        assertSelectsAny("SELECT * FROM %s WHERE v2=0 ALLOW FILTERING WITH excluded_indexes = {idx1}", idx2);
+        assertSelectsAny("SELECT * FROM %s WHERE v2=0 ALLOW FILTERING WITH excluded_indexes = {idx2}");
+        assertSelectsAny("SELECT * FROM %s WHERE v3=0 ALLOW FILTERING WITH excluded_indexes = {idx1}");
+        assertSelectsAny("SELECT * FROM %s WHERE v3=0 ALLOW FILTERING WITH excluded_indexes = {idx2}");
 
-        // with restrictions in two columns (v1 and v2) and included indexes
-        assertAcceptsHints("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING WITH included_indexes = {idx1}", idx1);
-        assertAcceptsHints("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING WITH included_indexes = {idx2}", idx2);
-        assertRejectsHints("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING WITH included_indexes = {idx1, idx2}",
-                           SingletonIndexGroup.MULTIPLE_INDEXES_ERROR_MESSAGE);
+        // with restrictions in two columns (v1 and v2) and preferred indexes
+        assertSelectsAny("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING WITH preferred_indexes = {idx1}", idx1);
+        assertSelectsAny("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING WITH preferred_indexes = {idx2}", idx2);
+        assertSelectsAny("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING WITH preferred_indexes = {idx1, idx2}", idx1, idx2);
 
         // with restrictions in two columns (v1 and v2) and excluded indexes
-        assertAcceptsHints("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING WITH excluded_indexes = {idx1}", idx2);
-        assertAcceptsHints("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING WITH excluded_indexes = {idx2}", idx1);
-        assertAcceptsHints("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING WITH excluded_indexes = {idx1, idx2}");
+        assertSelectsAny("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING WITH excluded_indexes = {idx1}", idx2);
+        assertSelectsAny("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING WITH excluded_indexes = {idx2}", idx1);
+        assertSelectsAny("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING WITH excluded_indexes = {idx1, idx2}");
 
-        // with restrictions in two columns (v1 and v3) and included indexes
-        assertAcceptsHints("SELECT * FROM %s WHERE v1=0 AND v3=0 ALLOW FILTERING WITH included_indexes = {idx1}", idx1);
-        assertRejectsHints("SELECT * FROM %s WHERE v1=0 AND v3=0 ALLOW FILTERING WITH included_indexes = {idx2}",
-                           SingletonIndexGroup.INDEX_WITHOUT_EXPRESSION_ERROR_MESSAGE + "idx2");
-        assertRejectsHints("SELECT * FROM %s WHERE v1=0 AND v3=0 ALLOW FILTERING WITH included_indexes = {idx1, idx2}",
-                           SingletonIndexGroup.MULTIPLE_INDEXES_ERROR_MESSAGE);
+        // with restrictions in two columns (v1 and v3) and preferred indexes
+        assertSelectsAny("SELECT * FROM %s WHERE v1=0 AND v3=0 ALLOW FILTERING WITH preferred_indexes = {idx1}", idx1);
+        assertSelectsAny("SELECT * FROM %s WHERE v1=0 AND v3=0 ALLOW FILTERING WITH preferred_indexes = {idx2}", idx1);
+        assertSelectsAny("SELECT * FROM %s WHERE v1=0 AND v3=0 ALLOW FILTERING WITH preferred_indexes = {idx1, idx2}", idx1);
 
         // with restrictions in two columns (v1 and v3) and excluded indexes
-        assertAcceptsHints("SELECT * FROM %s WHERE v1=0 AND v3=0 ALLOW FILTERING WITH excluded_indexes = {idx1}");
-        assertAcceptsHints("SELECT * FROM %s WHERE v1=0 AND v3=0 ALLOW FILTERING WITH excluded_indexes = {idx2}", idx1);
-        assertAcceptsHints("SELECT * FROM %s WHERE v1=0 AND v3=0 ALLOW FILTERING WITH excluded_indexes = {idx1, idx2}");
+        assertSelectsAny("SELECT * FROM %s WHERE v1=0 AND v3=0 ALLOW FILTERING WITH excluded_indexes = {idx1}");
+        assertSelectsAny("SELECT * FROM %s WHERE v1=0 AND v3=0 ALLOW FILTERING WITH excluded_indexes = {idx2}", idx1);
+        assertSelectsAny("SELECT * FROM %s WHERE v1=0 AND v3=0 ALLOW FILTERING WITH excluded_indexes = {idx1, idx2}");
 
         // without restrictions
-        assertAcceptsHints("SELECT * FROM %s WITH included_indexes = {idx1}"); // TODO: should be rejected
-        assertAcceptsHints("SELECT * FROM %s WITH excluded_indexes = {idx1}");
+        assertSelectsAny("SELECT * FROM %s WITH preferred_indexes = {idx1}");
+        assertSelectsAny("SELECT * FROM %s WITH excluded_indexes = {idx1}");
     }
 
-    private void assertRejectsHints(String query, String message)
-    {
-        Assertions.assertThatThrownBy(() -> execute(query))
-                  .hasMessageContaining(message);
-    }
-
-    private void assertAcceptsHints(String query, Index... indexes)
+    private void assertSelectsAny(String query, Index... indexes)
     {
         Index.QueryPlan plan = parseReadCommand(query).indexQueryPlan();
         if (indexes.length == 0)
@@ -396,7 +381,10 @@ public class IndexHintsTest extends CQLTester
         else
         {
             Assertions.assertThat(plan).isNotNull();
-            Assertions.assertThat(plan.getIndexes()).hasSize(indexes.length).contains(indexes);
+            Set<Index> selectedIndexes = plan.getIndexes();
+            Assertions.assertThat(selectedIndexes).hasSize(1);
+            Set<Index> expectedIndexes = indexes(indexes);
+            Assertions.assertThat(expectedIndexes).contains(selectedIndexes.iterator().next());
         }
     }
 

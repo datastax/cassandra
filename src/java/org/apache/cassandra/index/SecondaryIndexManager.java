@@ -1238,12 +1238,19 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
             return null;
         }
 
+        // Prepare a plan comparator based first on the user-provided hints, preferring the one using the most preferred
+        // indexes, and then on the index-provided selectivity, preferring the most selective index.
+        Set<Index> preferredIndexes = rowFilter.indexHints().preferred;
+        Comparator<Index.QueryPlan> hintsComparator = Comparator.comparing(plan -> Sets.intersection(preferredIndexes, plan.getIndexes()).size());
+        Comparator<Index.QueryPlan> selectivityComparator = Comparator.<Index.QueryPlan>naturalOrder().reversed();
+        Comparator<Index.QueryPlan> planComparator = hintsComparator.thenComparing(selectivityComparator);
+
         // find the best plan
         Index.QueryPlan selected = queryPlans.size() == 1
                                    ? Iterables.getOnlyElement(queryPlans)
                                    : queryPlans.stream()
-                                               .min(Comparator.naturalOrder())
-                                               .orElseThrow(() -> new AssertionError("Could not select most selective index"));
+                                               .max(planComparator)
+                                               .orElseThrow(() -> new AssertionError("Could not select the most adequate index plan"));
 
         // pay for an additional threadlocal get() rather than build the strings unnecessarily
         if (Tracing.isTracing())
