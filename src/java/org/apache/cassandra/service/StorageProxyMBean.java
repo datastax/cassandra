@@ -103,7 +103,4 @@ public interface StorageProxyMBean
     boolean getCheckForDuplicateRowsDuringCompaction();
     void enableCheckForDuplicateRowsDuringCompaction();
     void disableCheckForDuplicateRowsDuringCompaction();
-
-    int getMaxPaxosBackoffMillis();
-    void setMaxPaxosBackoffMillis(int maxPaxosBackoffMillis);
 }
