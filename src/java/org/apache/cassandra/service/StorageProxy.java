@@ -44,7 +44,6 @@ import javax.annotation.Nullable;
 import com.google.common.base.Preconditions;
 import com.google.common.cache.CacheLoader;
 import com.google.common.collect.Iterables;
-import com.google.common.util.concurrent.Uninterruptibles;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -143,6 +142,7 @@ import org.apache.cassandra.service.paxos.Paxos;
 import org.apache.cassandra.service.paxos.PaxosState;
 import org.apache.cassandra.service.paxos.v1.PrepareCallback;
 import org.apache.cassandra.service.paxos.v1.ProposeCallback;
+import org.apache.cassandra.service.paxos.PaxosUtils;
 import org.apache.cassandra.service.reads.AbstractReadExecutor;
 import org.apache.cassandra.service.reads.ReadCallback;
 import org.apache.cassandra.service.reads.range.RangeCommands;
@@ -394,8 +394,6 @@ public class StorageProxy implements StorageProxyMBean
     private volatile long logBlockingReadRepairAttemptsUntilNanos = Long.MIN_VALUE;
     private static volatile QueryInfoTracker queryInfoTracker = QueryInfoTracker.NOOP;
 
-    private static volatile Integer maxPaxosBackoffMillis = CassandraRelevantProperties.LWT_MAX_BACKOFF_MS.getInt();
-
     private StorageProxy()
     {
     }
@@ -404,6 +402,7 @@ public class StorageProxy implements StorageProxyMBean
     {
         MBeanWrapper.instance.registerMBean(instance, MBEAN_NAME);
         HintsService.instance.registerMBean();
+        PaxosUtils.instance.registerMBean();
 
         standardWritePerformer = (mutation, targets, responseHandler, localDataCenter, requestTime) ->
         {
@@ -781,9 +780,7 @@ public class StorageProxy implements StorageProxyMBean
 
                 Tracing.trace("Paxos proposal not accepted (pre-empted by a higher ballot)");
                 contentions++;
-                int sleepInMillis = ThreadLocalRandom.current().nextInt(maxPaxosBackoffMillis);
-                Uninterruptibles.sleepUninterruptibly(sleepInMillis, TimeUnit.MILLISECONDS);
-                casMetrics.contentionBackoffLatency.addNano(sleepInMillis * 1000);
+                PaxosUtils.applyPaxosContentionBackoff(casMetrics);
                 // continue to retry
             }
         }
@@ -850,9 +847,7 @@ public class StorageProxy implements StorageProxyMBean
                     Tracing.trace("Some replicas have already promised a higher ballot than ours; aborting");
                     contentions++;
                     // sleep a random amount to give the other proposer a chance to finish
-                    int sleepInMillis = ThreadLocalRandom.current().nextInt(maxPaxosBackoffMillis);
-                    Uninterruptibles.sleepUninterruptibly(sleepInMillis, MILLISECONDS);
-                    casMetrics.contentionBackoffLatency.addNano(sleepInMillis * 1000);
+                    PaxosUtils.applyPaxosContentionBackoff(casMetrics);
                     continue;
                 }
 
@@ -891,9 +886,7 @@ public class StorageProxy implements StorageProxyMBean
                         Tracing.trace("Some replicas have already promised a higher ballot than ours; aborting");
                         // sleep a random amount to give the other proposer a chance to finish
                         contentions++;
-                        int sleepInMillis = ThreadLocalRandom.current().nextInt(maxPaxosBackoffMillis);
-                        Uninterruptibles.sleepUninterruptibly(sleepInMillis, MILLISECONDS);
-                        casMetrics.contentionBackoffLatency.addNano(sleepInMillis * 1000);
+                        PaxosUtils.applyPaxosContentionBackoff(casMetrics);
                     }
                     continue;
                 }
@@ -3619,15 +3612,4 @@ public class StorageProxy implements StorageProxyMBean
         DatabaseDescriptor.setClientRequestSizeMetricsEnabled(enabled);
     }
 
-    @Override
-    public int getMaxPaxosBackoffMillis()
-    {
-        return maxPaxosBackoffMillis;
-    }
-
-    @Override
-    public void setMaxPaxosBackoffMillis(int maxPaxosBackoffMillis)
-    {
-        StorageProxy.maxPaxosBackoffMillis = maxPaxosBackoffMillis;
-    }
 }

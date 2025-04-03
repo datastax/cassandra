@@ -149,6 +149,4 @@ public interface StorageProxyMBean
 
     boolean getClientRequestSizeMetricsEnabled();
     void setClientRequestSizeMetricsEnabled(boolean enabled);
-    int getMaxPaxosBackoffMillis();
-    void setMaxPaxosBackoffMillis(int maxPaxosBackoffMillis);
 }
