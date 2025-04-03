@@ -98,7 +98,7 @@ public class IndexHintsDistributedTest extends TestBaseImpl
         cluster.schemaChange(withKeyspace("CREATE CUSTOM INDEX idx ON %s.t(v) USING 'StorageAttachedIndex'"));
         SAIUtil.waitForIndexQueryable(cluster, KEYSPACE);
 
-        String select = withKeyspace("SELECT * FROM %s.t WHERE v = 0 WITH included_indexes = {idx}");
+        String select = withKeyspace("SELECT * FROM %s.t WHERE v = 0 WITH preferred_indexes = {idx}");
 
         for (int i = 1; i <= cluster.size(); i++)
         {
