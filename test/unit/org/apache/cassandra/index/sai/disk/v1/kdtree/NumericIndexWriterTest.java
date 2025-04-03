@@ -47,7 +47,6 @@ import org.apache.cassandra.utils.AbstractGuavaIterator;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
-import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
 import org.apache.lucene.index.PointValues;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.Counter;
@@ -194,13 +193,13 @@ public class NumericIndexWriterTest extends SaiRandomizedTest
         final ByteBuffer minTerm = Int32Type.instance.decompose(startTermInclusive);
         final ByteBuffer maxTerm = Int32Type.instance.decompose(endTermExclusive);
 
-        final AbstractGuavaIterator<Pair<ByteComparable.Preencoded, List<RowMapping.RowIdWithFrequency>>> iterator = new AbstractGuavaIterator<>()
+        final AbstractGuavaIterator<Pair<ByteComparable, List<RowMapping.RowIdWithFrequency>>> iterator = new AbstractGuavaIterator<>()
         {
             private int currentTerm = startTermInclusive;
             private int currentRowId = 0;
 
             @Override
-            protected Pair<ByteComparable.Preencoded, List<RowMapping.RowIdWithFrequency>> computeNext()
+            protected Pair<ByteComparable, List<RowMapping.RowIdWithFrequency>> computeNext()
             {
                 if (currentTerm >= endTermExclusive)
                 {
@@ -210,9 +209,7 @@ public class NumericIndexWriterTest extends SaiRandomizedTest
                 final List<RowMapping.RowIdWithFrequency> postings = new ArrayList<>();
                 postings.add(new RowMapping.RowIdWithFrequency(currentRowId++, 1));
                 final ByteSource encoded = Int32Type.instance.asComparableBytes(term, TypeUtil.BYTE_COMPARABLE_VERSION);
-                byte[] bytes = new byte[4];
-                encoded.nextBytes(bytes);
-                return Pair.create(ByteComparable.preencoded(TypeUtil.BYTE_COMPARABLE_VERSION, bytes), postings);
+                return Pair.create(v -> encoded, postings);
             }
         };
 
