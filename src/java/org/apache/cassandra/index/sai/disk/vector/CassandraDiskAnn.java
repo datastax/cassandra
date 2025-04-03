@@ -29,8 +29,7 @@ import org.slf4j.LoggerFactory;
 
 import io.github.jbellis.jvector.graph.GraphIndex;
 import io.github.jbellis.jvector.graph.GraphSearcher;
-import io.github.jbellis.jvector.graph.disk.CachingGraphIndex;
-import io.github.jbellis.jvector.graph.disk.FeatureId;
+import io.github.jbellis.jvector.graph.disk.feature.FeatureId;
 import io.github.jbellis.jvector.graph.disk.OnDiskGraphIndex;
 import io.github.jbellis.jvector.graph.similarity.SearchScoreProvider;
 import io.github.jbellis.jvector.quantization.BQVectors;
@@ -57,7 +56,6 @@ import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.CloseableIterator;
 
-import static java.lang.Math.min;
 
 public class CassandraDiskAnn
 {
@@ -94,7 +92,7 @@ public class CassandraDiskAnn
         graphHandle = indexFiles.termsData();
         var rawGraph = OnDiskGraphIndex.load(graphHandle::createReader, termsMetadata.offset);
         features = rawGraph.getFeatureSet();
-        graph = V3OnDiskFormat.ENABLE_EDGES_CACHE ? cachingGraphFor(rawGraph) : rawGraph;
+        graph = rawGraph;
 
         long pqSegmentOffset = this.componentMetadatas.get(IndexComponentType.PQ).offset;
         try (var pqFile = indexFiles.pq();
@@ -173,27 +171,6 @@ public class CassandraDiskAnn
         assert compression.type == VectorCompression.CompressionType.PRODUCT_QUANTIZATION;
         assert pq != null;
         return pq;
-    }
-
-    private GraphIndex cachingGraphFor(OnDiskGraphIndex rawGraph)
-    {
-        // cache edges around the entry point
-        // we can easily hold 1% of the edges in memory for typical index sizes, but
-        // there is a lot of redundancy in the nodes we observe in practice around the entry point
-        // (only 10%-20% are unique), so use 5% as our target.
-        //
-        // 32**3 = 32k, which would be 4MB if all the nodes are unique, so 3 levels deep is a safe upper bound
-        int distance = min(logBaseX(0.05d * rawGraph.size(), rawGraph.maxDegree()), 3);
-        var result = new CachingGraphIndex(rawGraph, distance);
-        logger.debug("Cached {}@{} to distance {} in {}B",
-                     this, graphHandle.path(), distance, result.ramBytesUsed());
-        return result;
-    }
-
-    private static int logBaseX(double val, double base) {
-        if (base <= 1.0d || val <= 1.0d)
-            return 0;
-        return (int)Math.floor(Math.log(val) / Math.log(base));
     }
 
     public long ramBytesUsed()
