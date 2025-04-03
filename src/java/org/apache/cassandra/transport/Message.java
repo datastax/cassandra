@@ -246,6 +246,13 @@ public abstract class Message
         protected long elapsedTimeSinceCreation(TimeUnit timeUnit)
         {
             Map<String, ByteBuffer> customPayload = getCustomPayload();
+            if (customPayload == null)
+                noSpam.warn("Custom payload is null, falling back to creationTimeNanos.");
+            else if (!customPayload.containsKey(REQUEST_CREATE_NANOS))
+                noSpam.warn("Custom payload does not contain REQUEST_CREATE_NANOS, falling back to creationTimeNanos.");
+            else
+                noSpam.debug("Custom payload contains REQUEST_CREATE_NANOS, using it to calculate elapsed time. REQUEST_CREATE_NANOS={}",
+                             ByteBufferUtil.toLong(customPayload.get(REQUEST_CREATE_NANOS)));
             if (customPayload != null && customPayload.containsKey(REQUEST_CREATE_NANOS))
             {
                 ByteBuffer requestCreateNanosBuffer = customPayload.get(REQUEST_CREATE_NANOS);
