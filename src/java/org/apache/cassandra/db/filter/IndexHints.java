@@ -37,12 +37,13 @@ import static java.lang.String.format;
 
 /**
  * User-provided directives about what indexes should be used by a {@code SELECT} query. It consists of a set of indexes
- * that should be used and a set of indexes that should not be used. Other than that, indexes that are applicable to the
- * query and that are not mentioned on these two sets might or might not be used depending on the index query planner.
+ * that should be preferred and a set of indexes that should not be used. Other than that, indexes that are applicable
+ * to the query and that are not mentioned on these two sets might or might not be used depending on the index query
+ * planner.
  */
 public class IndexHints
 {
-    static final String CONFLICTING_INDEXES_ERROR = "Indexes cannot be both included and excluded: ";
+    static final String CONFLICTING_INDEXES_ERROR = "Indexes cannot be both preferred and excluded: ";
     static final String WRONG_KEYSPACE_ERROR = "Index %s is not in the same keyspace as the queried table.";
     static final String MISSING_INDEX_ERROR = "Table %s doesn't have an index named %s";
 
@@ -51,38 +52,38 @@ public class IndexHints
     public static final Serializer serializer = new Serializer();
 
     /**
-     * The indexes to use in the query, sorted by name.
+     * The indexes to prefer when executing a query.
      */
-    public final Set<Index> included;
+    public final Set<Index> preferred;
 
     /**
-     * The indexes not to use in the query, sorted by name.
+     * The indexes not to use when executing the query.
      */
     public final Set<Index> excluded;
 
-    private IndexHints(Set<Index> included, Set<Index> excluded)
+    private IndexHints(Set<Index> preferred, Set<Index> excluded)
     {
-        this.included = included;
+        this.preferred = preferred;
         this.excluded = excluded;
     }
 
-    public static IndexHints create(Set<Index> included, Set<Index> excluded)
+    public static IndexHints create(Set<Index> preferred, Set<Index> excluded)
     {
-        assert included != null && excluded != null;
+        assert preferred != null && excluded != null;
 
-        if (included.isEmpty() && excluded.isEmpty())
+        if (preferred.isEmpty() && excluded.isEmpty())
             return NONE;
 
-        return new IndexHints(included, excluded);
+        return new IndexHints(preferred, excluded);
     }
 
     public void validate(String keyspace)
     {
-        if (included.isEmpty() && excluded.isEmpty())
+        if (preferred.isEmpty() && excluded.isEmpty())
             return;
 
-        // Ensure that no index is both included and excluded
-        Set<Index> conflictingIndexes = Sets.intersection(included, excluded);
+        // Ensure that no index is both preferred and excluded
+        Set<Index> conflictingIndexes = Sets.intersection(preferred, excluded);
         if (!conflictingIndexes.isEmpty())
         {
             // collect the names of the conflicting indexes in order to provide a consistent error message
@@ -108,7 +109,7 @@ public class IndexHints
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
         IndexHints that = (IndexHints) o;
-        return Objects.equals(included, that.included) &&
+        return Objects.equals(preferred, that.preferred) &&
                Objects.equals(excluded, that.excluded);
     }
 
@@ -118,19 +119,19 @@ public class IndexHints
      * All the mentioned indexes should exist in the index registry of the queried table,
      * or an {@link InvalidRequestException} will be thrown.
      *
-     * @param included the names of the indexes to include in the query
-     * @param excluded the names of the indexes to exclude in the query
+     * @param preferred the names of the indexes to prefer when executing the query
+     * @param excluded the names of the indexes to exclude when executing the query
      * @param table the queried table
      * @param indexRegistry the index registry of the queried table
      * @return the index hints represented by the specified sets of CQL names
      * @throws InvalidRequestException if any of the specified indexes do not exist in the specified index registry
      */
-    public static IndexHints fromCQLNames(Set<QualifiedName> included,
+    public static IndexHints fromCQLNames(Set<QualifiedName> preferred,
                                           Set<QualifiedName> excluded,
                                           TableMetadata table,
                                           IndexRegistry indexRegistry)
     {
-        return IndexHints.create(fetchIndexes(included, table, indexRegistry),
+        return IndexHints.create(fetchIndexes(preferred, table, indexRegistry),
                                  fetchIndexes(excluded, table, indexRegistry));
     }
 
@@ -177,14 +178,14 @@ public class IndexHints
      */
     public static class Serializer
     {
-        /** Bit flags mask to check if there are included indexes. */
-        private static final short INCLUDED_MASK = 1;
+        /** Bit flags mask to check if there are preferred indexes. */
+        private static final short PREFERRED_MASK = 1;
 
         /** Bit flags mask to check if there are excluded indexes. */
         private static final short EXCLUDED_MASK = 2;
 
         /** Bit flags mask to check if there are any unknown hints. It's the negation of all the known flags. */
-        private static final short UNKNOWN_HINTS_MASK = ~(INCLUDED_MASK | EXCLUDED_MASK);
+        private static final short UNKNOWN_HINTS_MASK = ~(PREFERRED_MASK | EXCLUDED_MASK);
 
         private static final IndexSetSerializer indexSetSerializer = new IndexSetSerializer();
 
@@ -201,7 +202,7 @@ public class IndexHints
             short flags = flags(hints);
             out.writeShort(flags);
 
-            indexSetSerializer.serialize(hints.included, out, version);
+            indexSetSerializer.serialize(hints.preferred, out, version);
             indexSetSerializer.serialize(hints.excluded, out, version);
         }
 
@@ -219,11 +220,11 @@ public class IndexHints
                 throw new IOException("Found unsupported index hints, likely due to the index hints containing " +
                                       "new types of hint that are not supported by this node.");
 
-            // read included and excluded indexes
-            Set<Index> included = hasIncluded(flags) ? indexSetSerializer.deserialize(in, version, table) : Collections.emptySet();
+            // read preferred and excluded indexes
+            Set<Index> preferred = hasPreferred(flags) ? indexSetSerializer.deserialize(in, version, table) : Collections.emptySet();
             Set<Index> excluded = hasExcluded(flags) ? indexSetSerializer.deserialize(in, version, table) : Collections.emptySet();
 
-            return IndexHints.create(included, excluded);
+            return IndexHints.create(preferred, excluded);
         }
 
         public long serializedSize(IndexHints hints, int version)
@@ -235,8 +236,8 @@ public class IndexHints
             // size of flags
             long size = TypeSizes.SHORT_SIZE;
 
-            // size of included and excluded indexes
-            size += indexSetSerializer.serializedSize(hints.included, version);
+            // size of preferred and excluded indexes
+            size += indexSetSerializer.serializedSize(hints.preferred, version);
             size += indexSetSerializer.serializedSize(hints.excluded, version);
 
             return size;
@@ -249,8 +250,8 @@ public class IndexHints
             if (hints == NONE)
                 return flags;
 
-            if (!hints.included.isEmpty())
-                flags |= INCLUDED_MASK;
+            if (!hints.preferred.isEmpty())
+                flags |= PREFERRED_MASK;
 
             if (!hints.excluded.isEmpty())
                 flags |= EXCLUDED_MASK;
@@ -258,9 +259,9 @@ public class IndexHints
             return flags;
         }
 
-        private static boolean hasIncluded(int flags)
+        private static boolean hasPreferred(int flags)
         {
-            return (flags & INCLUDED_MASK) == INCLUDED_MASK;
+            return (flags & PREFERRED_MASK) == PREFERRED_MASK;
         }
 
         private static boolean hasExcluded(int flags)

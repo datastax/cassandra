@@ -785,10 +785,10 @@ public abstract class ReadCommand extends AbstractReadQuery
         builder.appendOptions(b -> {
 
             IndexHints hints = rowFilter().indexHints();
-            Set<String> included = hints.included.stream().map(i -> i.getIndexMetadata().name).collect(Collectors.toSet());
+            Set<String> included = hints.preferred.stream().map(i -> i.getIndexMetadata().name).collect(Collectors.toSet());
             Set<String> excluded = hints.excluded.stream().map(i -> i.getIndexMetadata().name).collect(Collectors.toSet());
 
-            b.append(SelectOptions.INCLUDED_INDEXES, included)
+            b.append(SelectOptions.PREFERRED_INDEXES, included)
              .append(SelectOptions.EXCLUDED_INDEXES, excluded)
              .append(SelectOptions.ANN_OPTIONS, rowFilter().annOptions().toMap());
         });
