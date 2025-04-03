@@ -82,7 +82,7 @@ public class NativeTransportTimeoutTest extends CQLTester
     }
 
     @Test
-    public void testNativeTransportLoadSheddingWithCndbStartTime() throws Throwable
+    public void testNativeTransportLoadSheddingWithRequestCreateNanos() throws Throwable
     {
         long nativeTransportTimeoutNanos = 10_000_000_000L;
         DatabaseDescriptor.setNativeTransportTimeout(nativeTransportTimeoutNanos, TimeUnit.NANOSECONDS);
@@ -90,10 +90,9 @@ public class NativeTransportTimeoutTest extends CQLTester
         createTable("CREATE TABLE %s (pk int PRIMARY KEY, v text)");
         Statement statement = new SimpleStatement("SELECT * FROM " + KEYSPACE + '.' + currentTable());
 
-        // rewind the start time by the native transport timeout to ensure the timeout is exceeded
-        long mockedStartTimeNanos = MonotonicClock.approxTime.now() - nativeTransportTimeoutNanos;
-        long mockedStartTimeMillis = TimeUnit.MILLISECONDS.convert(mockedStartTimeNanos, TimeUnit.NANOSECONDS);
-        statement.setOutgoingPayload(Collections.singletonMap("CNDB_START_TIME", ByteBufferUtil.bytes(mockedStartTimeMillis)));
+        // rewind the request time by the native transport timeout to ensure the timeout is exceeded
+        long mockedRequestCreateNanos = MonotonicClock.approxTime.now() - nativeTransportTimeoutNanos - approxTimeErrorCorrection();
+        statement.setOutgoingPayload(Collections.singletonMap("REQUEST_CREATE_NANOS", ByteBufferUtil.bytes(mockedRequestCreateNanos)));
 
         doTestLoadShedding(false, statement, false);
     }
@@ -114,14 +113,14 @@ public class NativeTransportTimeoutTest extends CQLTester
                        condition = "flagged(Thread.currentThread()) && callerEquals(\"Message$Request.execute\", true)",
                        action = "clear(Thread.currentThread()); " +
                                 "return 10000000;") })
-    public void testNativeTransportLoadSheddingWithMalformedCndbStartTime() throws Throwable
+    public void testNativeTransportLoadSheddingWithMalformedRequestCreateNanos() throws Throwable
     {
         createTable("CREATE TABLE %s (pk int PRIMARY KEY, v text)");
         Statement statement = new SimpleStatement("SELECT * FROM " + KEYSPACE + '.' + currentTable());
 
-        // malformed start time, should fall back to NTR timeouts using message creation time
-        String malformedStartTime = "string";
-        statement.setOutgoingPayload(Collections.singletonMap("CNDB_START_TIME", ByteBufferUtil.bytes(malformedStartTime)));
+        // malformed request time, should fall back to NTR timeouts using message creation time
+        String malformedRequestCreateNanos = "string";
+        statement.setOutgoingPayload(Collections.singletonMap("REQUEST_CREATE_NANOS", ByteBufferUtil.bytes(malformedRequestCreateNanos)));
 
         doTestLoadShedding(false, statement);
     }
@@ -182,7 +181,7 @@ public class NativeTransportTimeoutTest extends CQLTester
                        condition = "flagged(Thread.currentThread())",
                        action = "clear(Thread.currentThread()); " +
                                 "return org.apache.cassandra.transport.NativeTransportTimeoutTest.CUSTOM_PAYLOAD;") })
-    public void testAsyncStageLoadSheddingWithCndbStartTime() throws Throwable
+    public void testAsyncStageLoadSheddingWithRequestCreateNanos() throws Throwable
     {
         CassandraRelevantProperties.NATIVE_TRANSPORT_ASYNC_READ_WRITE_ENABLED.setBoolean(true);
         long nativeTransportTimeoutNanos = 10_000_000_000L;
@@ -194,12 +193,11 @@ public class NativeTransportTimeoutTest extends CQLTester
 
             Statement statement = new SimpleStatement("SELECT * FROM " + KEYSPACE + '.' + currentTable());
 
-            // rewind the start time by the native transport timeout to ensure the timeout is exceeded
+            // rewind the request time by the native transport timeout to ensure the timeout is exceeded
             // note that we cannot set the payload in the statement directly, because that would cause the sync stage, which
             // precedes the async stage, to timeout
-            long mockedStartTimeNanos = MonotonicClock.approxTime.now() - nativeTransportTimeoutNanos;
-            long mockedStartTimeMillis = TimeUnit.MILLISECONDS.convert(mockedStartTimeNanos, TimeUnit.NANOSECONDS);
-            CUSTOM_PAYLOAD = Collections.singletonMap("CNDB_START_TIME", ByteBufferUtil.bytes(mockedStartTimeMillis));
+            long mockedRequestCreateNanos = MonotonicClock.approxTime.now() - nativeTransportTimeoutNanos - approxTimeErrorCorrection();
+            CUSTOM_PAYLOAD = Collections.singletonMap("REQUEST_CREATE_NANOS", ByteBufferUtil.bytes(mockedRequestCreateNanos));
 
             doTestLoadShedding(true, statement, false);
 
@@ -265,12 +263,17 @@ public class NativeTransportTimeoutTest extends CQLTester
             // callsite. Therefore, to ensure an OverloadedException by exceeding the timeout, we need to sleep for 10
             // milliseconds plus 2x the error of approxTime (creation timestamp error + error when getting current time).
             WAIT_BARRIER.acquire();
-            Thread.sleep(10 + TimeUnit.MILLISECONDS.convert(approxTime.error(), TimeUnit.NANOSECONDS) * 2);
+            Thread.sleep(10 + approxTimeErrorCorrection());
             EXECUTE_BARRIER.release();
         }
 
         Assertions.assertThatThrownBy(rsf::get).hasCauseInstanceOf(OverloadedException.class);
         Assert.assertEquals(initialTimedOut + 1, timedOutMeter.getCount());
         Assert.assertTrue(queueTimer.getSnapshot().get999thPercentile() > TimeUnit.NANOSECONDS.convert(10, TimeUnit.MILLISECONDS));
+    }
+
+    long approxTimeErrorCorrection()
+    {
+        return TimeUnit.MILLISECONDS.convert(approxTime.error(), TimeUnit.NANOSECONDS) * 2;
     }
 }

@@ -63,7 +63,7 @@ public abstract class Message
      * is respected in NTR queue timeouts as well as verb timeouts. The contract is, such requests should be endoded
      * as a java long in the big-endian format.
      */
-    protected static final String CNDB_START_TIME = "CNDB_START_TIME";
+    protected static final String REQUEST_CREATE_NANOS = "REQUEST_CREATE_NANOS";
 
     public interface Codec<M extends Message> extends CBCodec<M> {}
 
@@ -237,7 +237,7 @@ public abstract class Message
         /**
          * Returns the time elapsed since this request was created. Note that this is the total lifetime of the request
          * in the system, so we expect increasing returned values across multiple calls to elapsedTimeSinceCreation.
-         * The elaspse time is calculated using the start time from the custom payload if it exists, otherwise it falls
+         * The elaspse time is calculated using the request time from the custom payload if it exists, otherwise it falls
          * back to the time the request was created in the NTR stage (that is, when it was deserialized).
          *
          * @param timeUnit the time unit in which to return the elapsed time
@@ -246,18 +246,17 @@ public abstract class Message
         protected long elapsedTimeSinceCreation(TimeUnit timeUnit)
         {
             Map<String, ByteBuffer> customPayload = getCustomPayload();
-            if (customPayload != null && customPayload.containsKey(CNDB_START_TIME))
+            if (customPayload != null && customPayload.containsKey(REQUEST_CREATE_NANOS))
             {
-                ByteBuffer startTime = customPayload.get(CNDB_START_TIME);
+                ByteBuffer requestCreateNanosBuffer = customPayload.get(REQUEST_CREATE_NANOS);
                 try
                 {
-                    long startTimeMillis = ByteBufferUtil.toLong(startTime);
-                    long startTimeNanos = TimeUnit.MILLISECONDS.toNanos(startTimeMillis);
-                    return timeUnit.convert(MonotonicClock.approxTime.now() - startTimeNanos, TimeUnit.NANOSECONDS);
+                    long requestCreateNanos = ByteBufferUtil.toLong(requestCreateNanosBuffer);
+                    return timeUnit.convert(MonotonicClock.approxTime.now() - requestCreateNanos, TimeUnit.NANOSECONDS);
                 }
                 catch (Exception e)
                 {
-                    noSpam.warn("Failed to extract start time from custom payload using ByteBufferUtil.toLong, falling back to creationTimeNanos, buffers: {}", startTime, e);
+                    noSpam.warn("Failed to extract request time from custom payload, falling back to creationTimeNanos.", e);
                 }
             }
 
