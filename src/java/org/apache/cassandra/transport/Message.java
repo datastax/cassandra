@@ -250,16 +250,17 @@ public abstract class Message
                 noSpam.warn("Custom payload is null, falling back to creationTimeNanos.");
             else if (!customPayload.containsKey(REQUEST_CREATE_NANOS))
                 noSpam.warn("Custom payload does not contain REQUEST_CREATE_NANOS, falling back to creationTimeNanos.");
-            else
-                noSpam.debug("Custom payload contains REQUEST_CREATE_NANOS, using it to calculate elapsed time. REQUEST_CREATE_NANOS={}",
-                             ByteBufferUtil.toLong(customPayload.get(REQUEST_CREATE_NANOS)));
+
             if (customPayload != null && customPayload.containsKey(REQUEST_CREATE_NANOS))
             {
                 ByteBuffer requestCreateNanosBuffer = customPayload.get(REQUEST_CREATE_NANOS);
                 try
                 {
                     long requestCreateNanos = ByteBufferUtil.toLong(requestCreateNanosBuffer);
-                    return timeUnit.convert(MonotonicClock.approxTime.now() - requestCreateNanos, TimeUnit.NANOSECONDS);
+                    long now = MonotonicClock.approxTime.now();
+                    noSpam.debug("REQUEST_CREATE_NANOS={}, creationTimeNanos={}, approxTime={}, difference={}",
+                                 requestCreateNanos, creationTimeNanos, now, now - requestCreateNanos);
+                    return timeUnit.convert(now - requestCreateNanos, TimeUnit.NANOSECONDS);
                 }
                 catch (Exception e)
                 {
