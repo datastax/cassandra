@@ -82,11 +82,11 @@ public class TrieMemoryIndexTest
             index.add(makeKey(table, Integer.toString(row)), Clustering.EMPTY, Int32Type.instance.decompose(row / 10), allocatedBytes -> {}, allocatesBytes -> {});
         }
 
-        Iterator<Pair<ByteComparable.Preencoded, PrimaryKeys>> iterator = index.iterator();
+        Iterator<Pair<ByteComparable, PrimaryKeys>> iterator = index.iterator();
         int valueCount = 0;
         while(iterator.hasNext())
         {
-            Pair<ByteComparable.Preencoded, PrimaryKeys> pair = iterator.next();
+            Pair<ByteComparable, PrimaryKeys> pair = iterator.next();
             int value = ByteSourceInverse.getSignedInt(pair.left.asComparableBytes(TypeUtil.BYTE_COMPARABLE_VERSION));
             int idCount = 0;
             Iterator<PrimaryKey> primaryKeyIterator = pair.right.iterator();
@@ -113,11 +113,11 @@ public class TrieMemoryIndexTest
             index.add(makeKey(table, Integer.toString(row)), Clustering.EMPTY, UTF8Type.instance.decompose(Integer.toString(row / 10)), allocatedBytes -> {}, allocatesBytes -> {});
         }
 
-        Iterator<Pair<ByteComparable.Preencoded, PrimaryKeys>> iterator = index.iterator();
+        Iterator<Pair<ByteComparable, PrimaryKeys>> iterator = index.iterator();
         int valueCount = 0;
         while(iterator.hasNext())
         {
-            Pair<ByteComparable.Preencoded, PrimaryKeys> pair = iterator.next();
+            Pair<ByteComparable, PrimaryKeys> pair = iterator.next();
             String value = new String(ByteSourceInverse.readBytes(pair.left.asPeekableBytes(TypeUtil.BYTE_COMPARABLE_VERSION)), StandardCharsets.UTF_8);
             int idCount = 0;
             Iterator<PrimaryKey> primaryKeyIterator = pair.right.iterator();
@@ -149,11 +149,11 @@ public class TrieMemoryIndexTest
             index.add(key, Clustering.EMPTY, decompose.apply(i), allocatedBytes -> {}, allocatesBytes -> {});
         }
 
-        final Iterator<Pair<ByteComparable.Preencoded, PrimaryKeys>> iterator = index.iterator();
+        final Iterator<Pair<ByteComparable, PrimaryKeys>> iterator = index.iterator();
         int i = 0;
         while (iterator.hasNext())
         {
-            Pair<ByteComparable.Preencoded, PrimaryKeys> pair = iterator.next();
+            Pair<ByteComparable, PrimaryKeys> pair = iterator.next();
             assertEquals(1, pair.right.size());
 
             final int rowId = i;

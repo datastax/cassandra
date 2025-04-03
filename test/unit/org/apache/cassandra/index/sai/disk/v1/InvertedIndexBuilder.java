@@ -28,7 +28,6 @@ import java.util.stream.Stream;
 import com.carrotsearch.hppc.IntArrayList;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.index.sai.disk.format.Version;
-import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
@@ -62,7 +61,7 @@ public class InvertedIndexBuilder
 
             // This logic feels a bit fragile, but it mimics the way we call unescape in the TrieMemoryIndex
             // before writing to the on disk format.
-            var encoded = version.onDiskFormat().encodeForTrie(term, UTF8Type.instance).preencode(TypeUtil.BYTE_COMPARABLE_VERSION);
+            var encoded = version.onDiskFormat().encodeForTrie(term, UTF8Type.instance);
             termsEnum.add(new TermsEnum(term, encoded, postingsList));
         }
         return termsEnum;
@@ -75,17 +74,17 @@ public class InvertedIndexBuilder
     {
         // Store the original term to ensure that searching by it is successful
         final ByteBuffer originalTermBytes;
-        final ByteComparable.Preencoded byteComparableBytes;
+        final ByteComparable byteComparableBytes;
         final IntArrayList postings;
 
-        TermsEnum(ByteBuffer originalTermBytes, ByteComparable.Preencoded byteComparableBytes, IntArrayList postings)
+        TermsEnum(ByteBuffer originalTermBytes, ByteComparable byteComparableBytes, IntArrayList postings)
         {
             this.originalTermBytes = originalTermBytes;
             this.byteComparableBytes = byteComparableBytes;
             this.postings = postings;
         }
 
-        public Pair<ByteComparable.Preencoded, IntArrayList> toPair()
+        public Pair<ByteComparable, IntArrayList> toPair()
         {
             return Pair.create(byteComparableBytes, postings);
         }

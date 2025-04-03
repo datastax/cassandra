@@ -225,11 +225,11 @@ public abstract class TrieMemtableIndexTestBase extends SAITester
             DecoratedKey minimum = temp1.compareTo(temp2) <= 0 ? temp1 : temp2;
             DecoratedKey maximum = temp1.compareTo(temp2) <= 0 ? temp2 : temp1;
 
-            Iterator<Pair<ByteComparable.Preencoded, Iterator<PrimaryKey>>> iterator = memtableIndex.iterator(minimum, maximum);
+            Iterator<Pair<ByteComparable, Iterator<PrimaryKey>>> iterator = memtableIndex.iterator(minimum, maximum);
 
             while (iterator.hasNext())
             {
-                Pair<ByteComparable.Preencoded, Iterator<PrimaryKey>> termPair = iterator.next();
+                Pair<ByteComparable, Iterator<PrimaryKey>> termPair = iterator.next();
                 int term = termFromComparable(termPair.left);
                 // The iterator will return keys outside the range of min/max, so we need to filter here to
                 // get the correct keys

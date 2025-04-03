@@ -44,7 +44,6 @@ import org.apache.cassandra.utils.AbstractGuavaIterator;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
-import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
 import org.apache.lucene.index.PointValues;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.Counter;
@@ -191,13 +190,13 @@ public class NumericIndexWriterTest extends SaiRandomizedTest
         final ByteBuffer minTerm = Int32Type.instance.decompose(startTermInclusive);
         final ByteBuffer maxTerm = Int32Type.instance.decompose(endTermExclusive);
 
-        final AbstractGuavaIterator<Pair<ByteComparable.Preencoded, IntArrayList>> iterator = new AbstractGuavaIterator<Pair<ByteComparable.Preencoded, IntArrayList>>()
+        final AbstractGuavaIterator<Pair<ByteComparable, IntArrayList>> iterator = new AbstractGuavaIterator<Pair<ByteComparable, IntArrayList>>()
         {
             private int currentTerm = startTermInclusive;
             private int currentRowId = 0;
 
             @Override
-            protected Pair<ByteComparable.Preencoded, IntArrayList> computeNext()
+            protected Pair<ByteComparable, IntArrayList> computeNext()
             {
                 if (currentTerm >= endTermExclusive)
                 {
@@ -207,9 +206,7 @@ public class NumericIndexWriterTest extends SaiRandomizedTest
                 final IntArrayList postings = new IntArrayList();
                 postings.add(currentRowId++);
                 final ByteSource encoded = Int32Type.instance.asComparableBytes(term, TypeUtil.BYTE_COMPARABLE_VERSION);
-                byte[] bytes = new byte[4];
-                encoded.nextBytes(bytes);
-                return Pair.create(ByteComparable.preencoded(TypeUtil.BYTE_COMPARABLE_VERSION, bytes), postings);
+                return Pair.create(v -> encoded, postings);
             }
         };
 

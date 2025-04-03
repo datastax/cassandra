@@ -44,7 +44,7 @@ public class RowMapping
     public static final RowMapping DUMMY = new RowMapping()
     {
         @Override
-        public Iterator<Pair<ByteComparable.Preencoded, IntArrayList>> merge(MemtableIndex index) { return Collections.emptyIterator(); }
+        public Iterator<Pair<ByteComparable, IntArrayList>> merge(MemtableIndex index) { return Collections.emptyIterator(); }
 
         @Override
         public void complete() {}
@@ -97,19 +97,19 @@ public class RowMapping
      *
      * @return iterator of index term to postings mapping exists in the sstable
      */
-    public Iterator<Pair<ByteComparable.Preencoded, IntArrayList>> merge(MemtableIndex index)
+    public Iterator<Pair<ByteComparable, IntArrayList>> merge(MemtableIndex index)
     {
         assert complete : "RowMapping is not built.";
 
-        Iterator<Pair<ByteComparable.Preencoded, Iterator<PrimaryKey>>> iterator = index.iterator(minKey.partitionKey(), maxKey.partitionKey());
-        return new AbstractGuavaIterator<Pair<ByteComparable.Preencoded, IntArrayList>>()
+        Iterator<Pair<ByteComparable, Iterator<PrimaryKey>>> iterator = index.iterator(minKey.partitionKey(), maxKey.partitionKey());
+        return new AbstractGuavaIterator<Pair<ByteComparable, IntArrayList>>()
         {
             @Override
-            protected Pair<ByteComparable.Preencoded, IntArrayList> computeNext()
+            protected Pair<ByteComparable, IntArrayList> computeNext()
             {
                 while (iterator.hasNext())
                 {
-                    Pair<ByteComparable.Preencoded, Iterator<PrimaryKey>> pair = iterator.next();
+                    Pair<ByteComparable, Iterator<PrimaryKey>> pair = iterator.next();
 
                     IntArrayList postings = null;
                     Iterator<PrimaryKey> primaryKeys = pair.right;

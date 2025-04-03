@@ -108,7 +108,7 @@ public class TrieMemoryIndex extends MemoryIndex
     {
         super(indexContext);
         this.keyBounds = keyBounds;
-        this.data = InMemoryTrie.longLived(TypeUtil.byteComparableVersionForTermsData(), TrieMemtable.BUFFER_TYPE, indexContext.columnFamilyStore().readOrdering());
+        this.data = InMemoryTrie.longLived(TypeUtil.BYTE_COMPARABLE_VERSION, TrieMemtable.BUFFER_TYPE, indexContext.columnFamilyStore().readOrdering());
         this.primaryKeysReducer = new PrimaryKeysReducer();
         this.memtable = memtable;
     }
@@ -161,10 +161,10 @@ public class TrieMemoryIndex extends MemoryIndex
     }
 
     @Override
-    public Iterator<Pair<ByteComparable.Preencoded, PrimaryKeys>> iterator()
+    public Iterator<Pair<ByteComparable, PrimaryKeys>> iterator()
     {
-        Iterator<Map.Entry<ByteComparable.Preencoded, PrimaryKeys>> iterator = data.entrySet().iterator();
-        return new Iterator<Pair<ByteComparable.Preencoded, PrimaryKeys>>()
+        Iterator<Map.Entry<ByteComparable, PrimaryKeys>> iterator = data.entrySet().iterator();
+        return new Iterator<Pair<ByteComparable, PrimaryKeys>>()
         {
             @Override
             public boolean hasNext()
@@ -173,9 +173,9 @@ public class TrieMemoryIndex extends MemoryIndex
             }
 
             @Override
-            public Pair<ByteComparable.Preencoded, PrimaryKeys> next()
+            public Pair<ByteComparable, PrimaryKeys> next()
             {
-                Map.Entry<ByteComparable.Preencoded, PrimaryKeys> entry = iterator.next();
+                Map.Entry<ByteComparable, PrimaryKeys> entry = iterator.next();
                 return Pair.create(entry.getKey(), entry.getValue());
             }
         };
@@ -236,8 +236,7 @@ public class TrieMemoryIndex extends MemoryIndex
                 // Before version DB, we encoded composite types using a non order-preserving function. In order to
                 // perform a range query on a map, we use the bounds to get all entries for a given map key and then
                 // only keep the map entries that satisfy the expression.
-                assert entry.getKey().encodingVersion() == TypeUtil.BYTE_COMPARABLE_VERSION || Version.latest() == Version.AA;
-                byte[] key = ByteSourceInverse.readBytes(entry.getKey().getPreencodedBytes());
+                byte[] key = ByteSourceInverse.readBytes(entry.getKey().asComparableBytes(TypeUtil.BYTE_COMPARABLE_VERSION));
                 if (expression.isSatisfiedBy(ByteBuffer.wrap(key)))
                     mergingIteratorBuilder.add(entry.getValue());
             });
@@ -665,11 +664,11 @@ public class TrieMemoryIndex extends MemoryIndex
 
     private class AllTermsIterator extends AbstractIterator<PrimaryKeyWithSortKey>
     {
-        private final Iterator<Map.Entry<ByteComparable.Preencoded, PrimaryKeys>> iterator;
+        private final Iterator<Map.Entry<ByteComparable, PrimaryKeys>> iterator;
         private Iterator<PrimaryKey> primaryKeysIterator = CloseableIterator.emptyIterator();
-        private ByteComparable.Preencoded byteComparableTerm = null;
+        private ByteComparable byteComparableTerm = null;
 
-        public AllTermsIterator(Iterator<Map.Entry<ByteComparable.Preencoded, PrimaryKeys>> iterator)
+        public AllTermsIterator(Iterator<Map.Entry<ByteComparable, PrimaryKeys>> iterator)
         {
             this.iterator = iterator;
         }

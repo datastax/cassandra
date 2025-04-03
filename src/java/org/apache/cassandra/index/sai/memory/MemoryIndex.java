@@ -64,5 +64,5 @@ public abstract class MemoryIndex
     /**
      * Iterate all Term->PrimaryKeys mappings in sorted order
      */
-    public abstract Iterator<Pair<ByteComparable.Preencoded, PrimaryKeys>> iterator();
+    public abstract Iterator<Pair<ByteComparable, PrimaryKeys>> iterator();
 }
