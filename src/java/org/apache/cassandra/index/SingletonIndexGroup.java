@@ -31,9 +31,11 @@ import com.google.common.collect.Sets;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.WriteContext;
+import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.db.memtable.Memtable;
+import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.transactions.IndexTransaction;
 import org.apache.cassandra.io.sstable.Component;
@@ -47,6 +49,9 @@ import org.apache.cassandra.schema.TableMetadata;
  */
 public class SingletonIndexGroup implements Index.Group
 {
+    public static final String MULTIPLE_INDEXES_ERROR_MESSAGE = "This index implementation only supports one index per query.";
+    public static final String INDEX_WITHOUT_EXPRESSION_ERROR_MESSAGE = "The query doesn't have any expression supported by the index ";
+
     private volatile Index delegate;
     private final Set<Index> indexes = Sets.newConcurrentHashSet();
 
@@ -109,6 +114,19 @@ public class SingletonIndexGroup implements Index.Group
     {
         Preconditions.checkNotNull(delegate);
 
+        IndexHints hints = rowFilter.indexHints();
+
+        if (hints.excluded.contains(delegate))
+            return null;
+
+        if (!hints.included.isEmpty())
+        {
+            if (!hints.included.contains(delegate))
+                return null;
+            if (hints.included.size() > 1)
+                throw new InvalidRequestException(MULTIPLE_INDEXES_ERROR_MESSAGE);
+        }
+
         // Indexes using a singleton group don't support disjunctions,
         // so we only consider the top-level AND expressions for index selection.
         for (RowFilter.Expression e : rowFilter.withoutDisjunctions().expressions())
@@ -116,6 +134,9 @@ public class SingletonIndexGroup implements Index.Group
             if (delegate.supportsExpression(e.column(), e.operator()))
                 return new SingletonIndexQueryPlan(delegate, delegate.getPostIndexQueryFilter(rowFilter));
         }
+
+        if (hints.included.contains(delegate))
+            throw new InvalidRequestException(INDEX_WITHOUT_EXPRESSION_ERROR_MESSAGE + delegate.getIndexMetadata().name);
 
         return null;
     }
