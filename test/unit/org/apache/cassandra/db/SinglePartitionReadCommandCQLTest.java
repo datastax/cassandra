@@ -18,16 +18,20 @@
 
 package org.apache.cassandra.db;
 
+import java.util.List;
+
 import org.junit.Test;
 
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.UntypedResultSet;
+import org.assertj.core.api.Assertions;
+
 import static org.junit.Assert.assertTrue;
 
 public class SinglePartitionReadCommandCQLTest extends CQLTester
 {
     @Test
-    public void partitionLevelDeletionTest() throws Throwable
+    public void partitionLevelDeletionTest()
     {
         createTable("CREATE TABLE %s (bucket_id TEXT,name TEXT,data TEXT,PRIMARY KEY (bucket_id, name))");
         execute("insert into %s (bucket_id, name, data) values ('8772618c9009cf8f5a5e0c18', 'test', 'hello')");
@@ -37,5 +41,34 @@ public class SinglePartitionReadCommandCQLTest extends CQLTester
         flush();
         UntypedResultSet res = execute("select * from %s where bucket_id = '8772618c9009cf8f5a5e0c18' and name = 'test'");
         assertTrue(res.isEmpty());
+    }
+
+    @Test
+    public void testToCQLString()
+    {
+        createTable("CREATE TABLE %s (k int, c int, v int, PRIMARY KEY (k, c))");
+
+        testToCQLString("SELECT * FROM %s WHERE k = 0", "SELECT * FROM %s WHERE k = 0");
+
+        testToCQLString("SELECT * FROM %s WHERE k = 0 AND c = 0", "SELECT * FROM %s WHERE k = 0 AND (c) = (0)");
+        testToCQLString("SELECT * FROM %s WHERE k = 0 AND (c) = (0)", "SELECT * FROM %s WHERE k = 0 AND (c) = (0)");
+        testToCQLString("SELECT * FROM %s WHERE k = 0 AND c > 0", "SELECT * FROM %s WHERE k = 0 AND c > 0");
+        testToCQLString("SELECT * FROM %s WHERE k = 0 AND c < 0", "SELECT * FROM %s WHERE k = 0 AND c < 0");
+        testToCQLString("SELECT * FROM %s WHERE k = 0 AND c >= 0", "SELECT * FROM %s WHERE k = 0 AND c >= 0");
+        testToCQLString("SELECT * FROM %s WHERE k = 0 AND c <= 0", "SELECT * FROM %s WHERE k = 0 AND c <= 0");
+
+        testToCQLString("SELECT * FROM %s WHERE k = 0 AND v = 1 ALLOW FILTERING", "SELECT * FROM %s WHERE k = 0 AND v = 1");
+        testToCQLString("SELECT * FROM %s WHERE k = 0 AND c = 0 AND v = 1 ALLOW FILTERING", "SELECT * FROM %s WHERE k = 0 AND v = 1 AND (c) = (0)");
+        testToCQLString("SELECT * FROM %s WHERE k = 0 AND c > 0 AND v = 1 ALLOW FILTERING", "SELECT * FROM %s WHERE k = 0 AND v = 1 AND c > 0");
+        testToCQLString("SELECT * FROM %s WHERE k = 0 AND c < 0 AND v = 1 ALLOW FILTERING", "SELECT * FROM %s WHERE k = 0 AND v = 1 AND c < 0");
+        testToCQLString("SELECT * FROM %s WHERE k = 0 AND c >= 0 AND v = 1 ALLOW FILTERING", "SELECT * FROM %s WHERE k = 0 AND v = 1 AND c >= 0");
+        testToCQLString("SELECT * FROM %s WHERE k = 0 AND c <= 0 AND v = 1 ALLOW FILTERING", "SELECT * FROM %s WHERE k = 0 AND v = 1 AND c <= 0");
+    }
+
+    private void testToCQLString(String query, String expected)
+    {
+        List<SinglePartitionReadCommand> commands = parseReadCommandGroup(query);
+        Assertions.assertThat(commands.get(0).toCQLString())
+                  .isEqualTo(formatQuery(expected));
     }
 }

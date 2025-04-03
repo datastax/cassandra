@@ -95,6 +95,12 @@ public interface IndexRegistry
         }
 
         @Override
+        public Index getIndexByName(String indexName)
+        {
+            return null;
+        }
+
+        @Override
         public Optional<Index> getBestIndexFor(RowFilter.Expression expression)
         {
             return Optional.empty();
@@ -272,6 +278,12 @@ public interface IndexRegistry
             return index;
         }
 
+        @Override
+        public Index getIndexByName(String indexName)
+        {
+            return index;
+        }
+
         public Collection<Index> listIndexes()
         {
             return Collections.singletonList(index);
@@ -302,6 +314,7 @@ public interface IndexRegistry
     Collection<Index.Group> listIndexGroups();
 
     Index getIndex(IndexMetadata indexMetadata);
+    Index getIndexByName(String indexName);
     Collection<Index> listIndexes();
 
     default Optional<Index.Analyzer> getIndexAnalyzerFor(ColumnMetadata column, Operator operator)

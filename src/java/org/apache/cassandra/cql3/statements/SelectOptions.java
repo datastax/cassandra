@@ -19,9 +19,15 @@ import java.util.Collections;
 import java.util.Map;
 import java.util.Set;
 
+import com.google.common.collect.ImmutableSet;
+
+import org.apache.cassandra.cql3.QualifiedName;
 import org.apache.cassandra.db.filter.ANNOptions;
+import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.RequestValidationException;
+import org.apache.cassandra.index.IndexRegistry;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.QueryState;
 
 /**
@@ -31,20 +37,24 @@ public class SelectOptions extends PropertyDefinitions
 {
     public static final SelectOptions EMPTY = new SelectOptions();
     public static final String ANN_OPTIONS = "ann_options";
+    public static final String PREFERRED_INDEXES = "preferred_indexes";
+    public static final String EXCLUDED_INDEXES = "excluded_indexes";
 
-    private static final Set<String> keywords = Collections.singleton(ANN_OPTIONS);
+    private static final Set<String> keywords = ImmutableSet.of(ANN_OPTIONS, PREFERRED_INDEXES, EXCLUDED_INDEXES);
 
     /**
      * Validates all the {@code SELECT} options.
      *
      * @param state the query state
+     * @param indexRegistry the index registry for the queried table
      * @param limit the {@code SELECT} query user-provided limit
      * @throws InvalidRequestException if any of the options are invalid
      */
-    public void validate(QueryState state, String keyspace, int limit) throws RequestValidationException
+    public void validate(QueryState state, IndexRegistry indexRegistry, TableMetadata table, int limit) throws RequestValidationException
     {
         validate(keywords, Collections.emptySet());
-        parseANNOptions().validate(state, keyspace, limit);
+        parseANNOptions().validate(state, table.keyspace, limit);
+        parseIndexHints(table, indexRegistry).validate(table.keyspace);
     }
 
     /**
@@ -68,5 +78,12 @@ public class SelectOptions extends PropertyDefinitions
     public boolean hasANNOptions()
     {
         return properties.containsKey(ANN_OPTIONS);
+    }
+
+    public IndexHints parseIndexHints(TableMetadata table, IndexRegistry indexRegistry) throws RequestValidationException
+    {
+        Set<QualifiedName> preferred = getQualifiedNames(PREFERRED_INDEXES);
+        Set<QualifiedName> excluded = getQualifiedNames(EXCLUDED_INDEXES);
+        return IndexHints.fromCQLNames(preferred, excluded, table, indexRegistry);
     }
 }

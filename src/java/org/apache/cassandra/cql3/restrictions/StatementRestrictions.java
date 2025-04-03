@@ -33,6 +33,7 @@ import org.apache.cassandra.cql3.statements.SelectOptions;
 import org.apache.cassandra.cql3.statements.StatementType;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.ANNOptions;
+import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.DecimalType;
@@ -995,7 +996,7 @@ public class StatementRestrictions
         return table.clusteringColumns().size() != clusteringColumnsRestrictions.size();
     }
 
-    public RowFilter getRowFilter(IndexRegistry indexManager, QueryOptions options, QueryState queryState, SelectOptions selectOptions)
+    public RowFilter getRowFilter(IndexRegistry indexRegistry, QueryOptions options, QueryState queryState, SelectOptions selectOptions)
     {
         boolean hasAnnOptions = selectOptions.hasANNOptions();
 
@@ -1008,7 +1009,9 @@ public class StatementRestrictions
         }
 
         ANNOptions annOptions = selectOptions.parseANNOptions();
-        RowFilter rowFilter = RowFilter.builder(indexManager)
+        IndexHints indexHints = selectOptions.parseIndexHints(table, indexRegistry);
+
+        RowFilter rowFilter = RowFilter.builder(indexRegistry, indexHints)
                                        .buildFromRestrictions(this, table, options, queryState, annOptions);
 
         if (hasAnnOptions && !rowFilter.hasANN())
