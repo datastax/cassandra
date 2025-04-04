@@ -32,8 +32,10 @@ import java.util.function.Function;
 import com.google.common.base.Predicates;
 import com.google.common.collect.Iterables;
 import com.google.common.primitives.Bytes;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Hex;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
@@ -52,6 +54,12 @@ import static org.junit.Assert.assertNotNull;
 
 public class PrefixTailTrieTest
 {
+    @BeforeClass
+    public static void enableVerification()
+    {
+        CassandraRelevantProperties.TRIE_DEBUG.setBoolean(true);
+    }
+
     private static final int COUNT_TAIL = 5000;
     private static final int COUNT_HEAD = 25;
     public static final Comparator<ByteComparable> BYTE_COMPARABLE_COMPARATOR = (a, b) -> ByteComparable.compare(a, b, byteComparableVersion);
