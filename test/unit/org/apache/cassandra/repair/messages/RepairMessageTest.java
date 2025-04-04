@@ -18,12 +18,15 @@
 
 package org.apache.cassandra.repair.messages;
 
+import java.util.UUID;
+
 import org.junit.Before;
 import org.junit.Test;
 
 import org.apache.cassandra.concurrent.ScheduledExecutorPlus;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.exceptions.RequestFailureReason;
+import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.gms.IGossiper;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.metrics.RepairMetrics;
@@ -31,10 +34,8 @@ import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessageDelivery;
 import org.apache.cassandra.net.RequestCallback;
 import org.apache.cassandra.net.Verb;
-import org.apache.cassandra.nodes.Nodes;
 import org.apache.cassandra.repair.SharedContext;
 import org.apache.cassandra.utils.Backoff;
-import org.apache.cassandra.utils.CassandraVersion;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.TimeUUID;
 import org.assertj.core.api.Assertions;
@@ -64,7 +65,8 @@ public class RepairMessageTest
     {
         DatabaseDescriptor.clientInitialization();
         ADDRESS = FBUtilities.getBroadcastAddressAndPort();
-        Nodes.peers().update(ADDRESS, peerInfo -> peerInfo.setReleaseVersion(new CassandraVersion("5.0")));
+        // this will initialize Nodes.local() with RELEASE_VERSION
+        Gossiper.instance.initializeNodeUnsafe(ADDRESS, UUID.randomUUID(), 1);
         RepairMetrics.init();
     }
 
