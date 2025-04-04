@@ -30,10 +30,12 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Multiset;
 import org.junit.Assert;
+import org.junit.BeforeClass;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
@@ -45,6 +47,12 @@ import static org.junit.Assert.assertEquals;
 @RunWith(Parameterized.class)
 public abstract class InMemoryTrieTestBase
 {
+    @BeforeClass
+    public static void enableVerification()
+    {
+        CassandraRelevantProperties.TRIE_DEBUG.setBoolean(true);
+    }
+
     // Set this to true (in combination with smaller count) to dump the tries while debugging a problem.
     // Do not commit the code with VERBOSE = true.
     private static final boolean VERBOSE = false;

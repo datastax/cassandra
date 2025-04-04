@@ -25,14 +25,22 @@ import java.util.Random;
 import java.util.SortedMap;
 import java.util.TreeMap;
 
+import org.junit.BeforeClass;
 import org.junit.Test;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 import static org.apache.cassandra.db.tries.InMemoryTrieTestBase.*;
 
 public class MergeTrieTest
 {
+    @BeforeClass
+    public static void enableVerification()
+    {
+        CassandraRelevantProperties.TRIE_DEBUG.setBoolean(true);
+    }
+
     private static final int COUNT = 15000;
     Random rand = new Random();
 

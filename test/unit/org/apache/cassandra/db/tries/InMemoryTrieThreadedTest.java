@@ -41,6 +41,8 @@ import static org.apache.cassandra.db.tries.InMemoryTrieTestBase.generateKeys;
 
 public class InMemoryTrieThreadedTest
 {
+    // Note: This should not be run by default with verification to have the higher concurrency of faster writes and reads.
+
     private static final int COUNT = 30000;
     private static final int OTHERS = COUNT / 10;
     private static final int PROGRESS_UPDATE = COUNT / 15;
