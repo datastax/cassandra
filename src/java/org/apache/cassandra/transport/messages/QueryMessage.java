@@ -23,6 +23,9 @@ import java.util.concurrent.TimeUnit;
 
 import com.google.common.collect.ImmutableMap;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import io.netty.buffer.ByteBuf;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -42,12 +45,16 @@ import org.apache.cassandra.transport.Message;
 import org.apache.cassandra.transport.ProtocolException;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.JVMStabilityInspector;
+import org.apache.cassandra.utils.NoSpamLogger;
 
 /**
  * A CQL query
  */
 public class QueryMessage extends Message.Request
 {
+    protected static final Logger logger = LoggerFactory.getLogger(QueryMessage.class);
+    private static final NoSpamLogger noSpam = NoSpamLogger.getLogger(logger, 1, TimeUnit.MINUTES);
+
     public static final Message.Codec<QueryMessage> codec = new Message.Codec<QueryMessage>()
     {
         public QueryMessage decode(ByteBuf body, ProtocolVersion version)
@@ -127,6 +134,8 @@ public class QueryMessage extends Message.Request
                                                        // and any time spent in the queue for the async stage
                                                        long elapsedTime = elapsedTimeSinceCreation(TimeUnit.NANOSECONDS);
                                                        ClientMetrics.instance.recordAsyncQueueTime(elapsedTime, TimeUnit.NANOSECONDS);
+                                                       noSpam.debug("QueryMessage Async stage elapsedTime={}, getNativeTransportTimeout={} nanos, shouldTimeOut={}", elapsedTime,
+                                                                    DatabaseDescriptor.getNativeTransportTimeout(TimeUnit.NANOSECONDS), elapsedTime > DatabaseDescriptor.getNativeTransportTimeout(TimeUnit.NANOSECONDS));
                                                        if (elapsedTime > DatabaseDescriptor.getNativeTransportTimeout(TimeUnit.NANOSECONDS))
                                                        {
                                                            ClientMetrics.instance.markTimedOutBeforeAsyncProcessing();

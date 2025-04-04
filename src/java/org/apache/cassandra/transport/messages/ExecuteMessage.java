@@ -172,6 +172,8 @@ public class ExecuteMessage extends Message.Request
                                                        // and any time spent in the queue for the async stage
                                                        long elapsedTime = elapsedTimeSinceCreation(TimeUnit.NANOSECONDS);
                                                        ClientMetrics.instance.recordAsyncQueueTime(elapsedTime, TimeUnit.NANOSECONDS);
+                                                       nospam.debug("ExecuteMessage Async stage elapsedTime={}, getNativeTransportTimeout={} nanos, shouldTimeOut={}", elapsedTime,
+                                                                    DatabaseDescriptor.getNativeTransportTimeout(TimeUnit.NANOSECONDS), elapsedTime > DatabaseDescriptor.getNativeTransportTimeout(TimeUnit.NANOSECONDS));
                                                        if (elapsedTime > DatabaseDescriptor.getNativeTransportTimeout(TimeUnit.NANOSECONDS))
                                                        {
                                                            ClientMetrics.instance.markTimedOutBeforeAsyncProcessing();

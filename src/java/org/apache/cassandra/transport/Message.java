@@ -285,6 +285,8 @@ public abstract class Message
             // at the time of the check, this is approximately the time spent in the NTR stage's queue
             long elapsedTimeSinceCreation = elapsedTimeSinceCreation(TimeUnit.NANOSECONDS);
             ClientMetrics.instance.recordQueueTime(elapsedTimeSinceCreation, TimeUnit.NANOSECONDS);
+            noSpam.debug("Message Sync stage elapsedTime={}, getNativeTransportTimeout={} nanos, shouldTimeOut={}", elapsedTimeSinceCreation,
+                         DatabaseDescriptor.getNativeTransportTimeout(TimeUnit.NANOSECONDS), elapsedTimeSinceCreation > DatabaseDescriptor.getNativeTransportTimeout(TimeUnit.NANOSECONDS));
             if (elapsedTimeSinceCreation > DatabaseDescriptor.getNativeTransportTimeout(TimeUnit.NANOSECONDS))
             {
                 ClientMetrics.instance.markTimedOutBeforeProcessing();
