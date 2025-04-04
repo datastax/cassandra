@@ -251,8 +251,10 @@ public abstract class Message
                 ByteBuffer requestCreateNanosBuffer = customPayload.get(REQUEST_CREATE_NANOS);
                 try
                 {
-                    long requestCreateNanos = ByteBufferUtil.toLong(requestCreateNanosBuffer);
-                    return timeUnit.convert(MonotonicClock.approxTime.now() - requestCreateNanos, TimeUnit.NANOSECONDS);
+                    long requestCreationEpochNanos = ByteBufferUtil.toLong(requestCreateNanosBuffer);
+                    long requestCreationEpochMillis = TimeUnit.NANOSECONDS.toMillis(requestCreationEpochNanos);
+                    long requestCreationNanoTime = MonotonicClock.approxTime.translate().fromMillisSinceEpoch(requestCreationEpochMillis);
+                    return timeUnit.convert(MonotonicClock.approxTime.now() - requestCreationNanoTime, TimeUnit.NANOSECONDS);
                 }
                 catch (Exception e)
                 {

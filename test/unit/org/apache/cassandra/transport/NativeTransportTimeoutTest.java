@@ -19,6 +19,7 @@
 package org.apache.cassandra.transport;
 
 import java.nio.ByteBuffer;
+import java.time.Instant;
 import java.util.Collections;
 import java.util.Map;
 import java.util.concurrent.Semaphore;
@@ -42,7 +43,6 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.metrics.ClientMetrics;
 import org.apache.cassandra.utils.ByteBufferUtil;
-import org.apache.cassandra.utils.MonotonicClock;
 import org.assertj.core.api.Assertions;
 import org.jboss.byteman.contrib.bmunit.BMRule;
 import org.jboss.byteman.contrib.bmunit.BMRules;
@@ -91,8 +91,8 @@ public class NativeTransportTimeoutTest extends CQLTester
         Statement statement = new SimpleStatement("SELECT * FROM " + KEYSPACE + '.' + currentTable());
 
         // rewind the request time by the native transport timeout to ensure the timeout is exceeded
-        long mockedRequestCreateNanos = MonotonicClock.approxTime.now() - nativeTransportTimeoutNanos - approxTimeErrorCorrection();
-        statement.setOutgoingPayload(Collections.singletonMap("REQUEST_CREATE_NANOS", ByteBufferUtil.bytes(mockedRequestCreateNanos)));
+        long mockedRequestCreateEpochNanos = getEpochNanos() - nativeTransportTimeoutNanos - approxTimeErrorCorrection();
+        statement.setOutgoingPayload(Collections.singletonMap("REQUEST_CREATE_NANOS", ByteBufferUtil.bytes(mockedRequestCreateEpochNanos)));
 
         doTestLoadShedding(false, statement, false);
     }
@@ -196,8 +196,8 @@ public class NativeTransportTimeoutTest extends CQLTester
             // rewind the request time by the native transport timeout to ensure the timeout is exceeded
             // note that we cannot set the payload in the statement directly, because that would cause the sync stage, which
             // precedes the async stage, to timeout
-            long mockedRequestCreateNanos = MonotonicClock.approxTime.now() - nativeTransportTimeoutNanos - approxTimeErrorCorrection();
-            CUSTOM_PAYLOAD = Collections.singletonMap("REQUEST_CREATE_NANOS", ByteBufferUtil.bytes(mockedRequestCreateNanos));
+            long mockedRequestCreateEpochNanos = getEpochNanos() - nativeTransportTimeoutNanos - approxTimeErrorCorrection();
+            CUSTOM_PAYLOAD = Collections.singletonMap("REQUEST_CREATE_NANOS", ByteBufferUtil.bytes(mockedRequestCreateEpochNanos));
 
             doTestLoadShedding(true, statement, false);
 
@@ -272,8 +272,13 @@ public class NativeTransportTimeoutTest extends CQLTester
         Assert.assertTrue(queueTimer.getSnapshot().get999thPercentile() > TimeUnit.NANOSECONDS.convert(10, TimeUnit.MILLISECONDS));
     }
 
-    long approxTimeErrorCorrection()
+    private long approxTimeErrorCorrection()
     {
         return TimeUnit.MILLISECONDS.convert(approxTime.error(), TimeUnit.NANOSECONDS) * 2;
+    }
+
+    private long getEpochNanos() {
+        Instant instant = Instant.now();
+        return instant.getEpochSecond() * 1_000_000_000L + instant.getNano();
     }
 }
