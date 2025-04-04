@@ -42,7 +42,6 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.metrics.ClientMetrics;
 import org.apache.cassandra.utils.ByteBufferUtil;
-import org.apache.cassandra.utils.MonotonicClock;
 import org.assertj.core.api.Assertions;
 import org.jboss.byteman.contrib.bmunit.BMRule;
 import org.jboss.byteman.contrib.bmunit.BMRules;
@@ -91,7 +90,7 @@ public class NativeTransportTimeoutTest extends CQLTester
         Statement statement = new SimpleStatement("SELECT * FROM " + KEYSPACE + '.' + currentTable());
 
         // rewind the request time by the native transport timeout to ensure the timeout is exceeded
-        long mockedRequestCreateNanos = MonotonicClock.approxTime.now() - nativeTransportTimeoutNanos - approxTimeErrorCorrection();
+        long mockedRequestCreateNanos = System.currentTimeMillis() * 1000_000 - nativeTransportTimeoutNanos - approxTimeErrorCorrection();
         statement.setOutgoingPayload(Collections.singletonMap("REQUEST_CREATE_NANOS", ByteBufferUtil.bytes(mockedRequestCreateNanos)));
 
         doTestLoadShedding(false, statement, false);
@@ -196,7 +195,7 @@ public class NativeTransportTimeoutTest extends CQLTester
             // rewind the request time by the native transport timeout to ensure the timeout is exceeded
             // note that we cannot set the payload in the statement directly, because that would cause the sync stage, which
             // precedes the async stage, to timeout
-            long mockedRequestCreateNanos = MonotonicClock.approxTime.now() - nativeTransportTimeoutNanos - approxTimeErrorCorrection();
+            long mockedRequestCreateNanos = System.currentTimeMillis() * 1000_000 - nativeTransportTimeoutNanos;
             CUSTOM_PAYLOAD = Collections.singletonMap("REQUEST_CREATE_NANOS", ByteBufferUtil.bytes(mockedRequestCreateNanos));
 
             doTestLoadShedding(true, statement, false);

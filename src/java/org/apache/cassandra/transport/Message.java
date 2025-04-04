@@ -44,9 +44,12 @@ import org.apache.cassandra.transport.messages.*;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.MonotonicClock;
+import org.apache.cassandra.utils.MonotonicClockTranslation;
 import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.utils.ReflectionUtils;
 import org.apache.cassandra.utils.UUIDGen;
+
+import static org.apache.cassandra.utils.MonotonicClock.approxTime;
 
 /**
  * A message from the CQL binary protocol.
@@ -256,11 +259,14 @@ public abstract class Message
                 ByteBuffer requestCreateNanosBuffer = customPayload.get(REQUEST_CREATE_NANOS);
                 try
                 {
-                    long requestCreateNanos = ByteBufferUtil.toLong(requestCreateNanosBuffer);
-                    long now = MonotonicClock.approxTime.now();
-                    noSpam.debug("REQUEST_CREATE_NANOS={}, creationTimeNanos={}, approxTime={}, difference={}",
-                                 requestCreateNanos, creationTimeNanos, now, now - requestCreateNanos);
-                    return timeUnit.convert(now - requestCreateNanos, TimeUnit.NANOSECONDS);
+                    long requestCreationEpochNanos = ByteBufferUtil.toLong(requestCreateNanosBuffer);
+                    long requestCreationEpochMillis = TimeUnit.NANOSECONDS.toMillis(requestCreationEpochNanos);
+                    long now = approxTime.now();
+
+                    long requestCreationNanoTime = approxTime.translate().fromMillisSinceEpoch(requestCreationEpochMillis);
+                    noSpam.debug("requestCreationEpochNanos={}, requestCreationEpochMillis={}, requestCreationNanoTime{}, creationTimeNanos={}, approxTime={}, difference={}",
+                                 requestCreationEpochNanos, requestCreationEpochMillis, requestCreationNanoTime, creationTimeNanos, now, now - requestCreationEpochNanos);
+                    return timeUnit.convert(now - requestCreationNanoTime, TimeUnit.NANOSECONDS);
                 }
                 catch (Exception e)
                 {
