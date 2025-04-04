@@ -30,9 +30,11 @@ import java.util.SortedMap;
 import java.util.TreeMap;
 
 import org.junit.Assert;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 import com.googlecode.concurrenttrees.common.Iterables;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 import static org.apache.cassandra.db.tries.InMemoryTrieTestBase.asString;
@@ -45,6 +47,12 @@ import static org.junit.Assert.assertEquals;
 
 public class SlicedTrieTest
 {
+    @BeforeClass
+    public static void enableVerification()
+    {
+        CassandraRelevantProperties.TRIE_DEBUG.setBoolean(true);
+    }
+
     public static final ByteComparable[] BOUNDARIES = toByteComparable(new String[]{
     "test1",
     "test11",
