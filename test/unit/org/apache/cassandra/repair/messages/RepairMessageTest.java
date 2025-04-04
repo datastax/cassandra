@@ -18,12 +18,15 @@
 
 package org.apache.cassandra.repair.messages;
 
+import java.util.UUID;
+
 import org.junit.Before;
 import org.junit.Test;
 
 import org.apache.cassandra.concurrent.ScheduledExecutorPlus;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.exceptions.RequestFailureReason;
+import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.gms.IGossiper;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.metrics.RepairMetrics;
@@ -64,7 +67,8 @@ public class RepairMessageTest
     {
         DatabaseDescriptor.clientInitialization();
         ADDRESS = FBUtilities.getBroadcastAddressAndPort();
-        Nodes.peers().update(ADDRESS, peerInfo -> peerInfo.setReleaseVersion(new CassandraVersion("5.0")));
+        // this will initialize Nodes.local() with RELEASE_VERSION
+        Gossiper.instance.initializeNodeUnsafe(ADDRESS, UUID.randomUUID(), 1);
         RepairMetrics.init();
     }
 
