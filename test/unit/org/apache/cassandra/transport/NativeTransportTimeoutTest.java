@@ -82,6 +82,14 @@ public class NativeTransportTimeoutTest extends CQLTester
     }
 
     @Test
+    @BMRule(name = "Delay Message execution on NTR stage",
+    targetClass = "org.apache.cassandra.transport.Message$Request",
+    targetMethod = "execute",
+    targetLocation = "AT ENTRY",
+    condition = "$this.getCustomPayload() != null",
+    action = "org.apache.cassandra.transport.NativeTransportTimeoutTest.WAIT_BARRIER.release(); " +
+             "org.apache.cassandra.transport.NativeTransportTimeoutTest.EXECUTE_BARRIER.acquire(); " +
+             "flag(Thread.currentThread());")
     public void testNativeTransportLoadSheddingWithRequestCreateNanos() throws Throwable
     {
         long nativeTransportTimeoutNanos = 10_000_000_000L;
@@ -91,10 +99,10 @@ public class NativeTransportTimeoutTest extends CQLTester
         Statement statement = new SimpleStatement("SELECT * FROM " + KEYSPACE + '.' + currentTable());
 
         // rewind the request time by the native transport timeout to ensure the timeout is exceeded
-        long mockedRequestCreateEpochNanos = getEpochNanos() - nativeTransportTimeoutNanos - approxTimeErrorCorrection();
+        long mockedRequestCreateEpochNanos = getEpochNanos() - nativeTransportTimeoutNanos;
         statement.setOutgoingPayload(Collections.singletonMap("REQUEST_CREATE_NANOS", ByteBufferUtil.bytes(mockedRequestCreateEpochNanos)));
 
-        doTestLoadShedding(false, statement, false);
+        doTestLoadShedding(false, statement);
     }
 
     @Test
@@ -168,12 +176,14 @@ public class NativeTransportTimeoutTest extends CQLTester
 
 
     @Test
-    @BMRules(rules = { @BMRule(name = "Flag current thread on elapsedTimeSinceCreationCheck from async stage to enable the second rule",
+    @BMRules(rules = { @BMRule(name = "Delay elapsedTimeSinceCreationCheck from async stage",
                        targetClass = "org.apache.cassandra.transport.Message$Request",
                        targetMethod = "elapsedTimeSinceCreation",
                        targetLocation = "AT ENTRY",
                        condition = "$this.getCustomPayload() != null && !callerEquals(\"Message$Request.execute\", true)",
-                       action = "flag(Thread.currentThread());"),
+                       action = "org.apache.cassandra.transport.NativeTransportTimeoutTest.WAIT_BARRIER.release(); " +
+                                "org.apache.cassandra.transport.NativeTransportTimeoutTest.EXECUTE_BARRIER.acquire(); " +
+                                "flag(Thread.currentThread());"),
                        @BMRule(name = "Mock native transport timeout from async stage",
                        targetClass = "org.apache.cassandra.transport.Message",
                        targetMethod = "getCustomPayload",
@@ -196,18 +206,18 @@ public class NativeTransportTimeoutTest extends CQLTester
             // rewind the request time by the native transport timeout to ensure the timeout is exceeded
             // note that we cannot set the payload in the statement directly, because that would cause the sync stage, which
             // precedes the async stage, to timeout
-            long mockedRequestCreateEpochNanos = getEpochNanos() - nativeTransportTimeoutNanos - approxTimeErrorCorrection();
+            long mockedRequestCreateEpochNanos = getEpochNanos() - nativeTransportTimeoutNanos;
             CUSTOM_PAYLOAD = Collections.singletonMap("REQUEST_CREATE_NANOS", ByteBufferUtil.bytes(mockedRequestCreateEpochNanos));
 
-            doTestLoadShedding(true, statement, false);
+            doTestLoadShedding(true, statement);
 
             Statement insert1 = new SimpleStatement("INSERT INTO " + KEYSPACE + '.' + currentTable() + " (pk, v) VALUES (1, 'foo')");
             Statement insert2 = new SimpleStatement("INSERT INTO " + KEYSPACE + '.' + currentTable() + " (pk, v) VALUES (2, 'bar')");
             statement = new BatchStatement().add(insert1).add(insert2);
-            doTestLoadShedding(true, statement, false);
+            doTestLoadShedding(true, statement);
 
             PreparedStatement ps = sessionNet().prepare("SELECT * FROM " + KEYSPACE + '.' + currentTable());
-            doTestLoadShedding(true, ps.bind(), false);
+            doTestLoadShedding(true, ps.bind());
         }
         finally
         {
@@ -217,17 +227,8 @@ public class NativeTransportTimeoutTest extends CQLTester
 
     private void doTestLoadShedding(boolean useAsyncStages, Statement statement) throws InterruptedException
     {
-        doTestLoadShedding(useAsyncStages, statement, true);
-    }
-
-    private void doTestLoadShedding(boolean useAsyncStages, Statement statement, boolean injectDelay) throws InterruptedException
-    {
-        // if we're injecting a delay, we need to synchronize the execution of the statement with the test
-        if (injectDelay)
-        {
-            EXECUTE_BARRIER = new Semaphore(0);
-            WAIT_BARRIER = new Semaphore(0);
-        }
+        EXECUTE_BARRIER = new Semaphore(0);
+        WAIT_BARRIER = new Semaphore(0);
 
         Meter timedOutMeter;
         Timer queueTimer;
@@ -255,26 +256,18 @@ public class NativeTransportTimeoutTest extends CQLTester
 
         ResultSetFuture rsf = session.executeAsync(statement);
 
-        if (injectDelay)
-        {
-            // once WAIT_BARRIER is acquired, the Stage we want an OverloadedException from is executing the statement,
-            // but it hasn't yet retrieved the elapsed time. It will not proceed until the EXECUTE_BARRIER is released.
-            // The Byteman rules in the tests will override the native transport timeout to 10 milliseconds from that
-            // callsite. Therefore, to ensure an OverloadedException by exceeding the timeout, we need to sleep for 10
-            // milliseconds plus 2x the error of approxTime (creation timestamp error + error when getting current time).
-            WAIT_BARRIER.acquire();
-            Thread.sleep(10 + approxTimeErrorCorrection());
-            EXECUTE_BARRIER.release();
-        }
+        // once WAIT_BARRIER is acquired, the Stage we want an OverloadedException from is executing the statement,
+        // but it hasn't yet retrieved the elapsed time. It will not proceed until the EXECUTE_BARRIER is released.
+        // The Byteman rules in the tests will override the native transport timeout to 10 milliseconds from that
+        // callsite. Therefore, to ensure an OverloadedException by exceeding the timeout, we need to sleep for 10
+        // milliseconds plus 2x the error of approxTime (creation timestamp error + error when getting current time).
+        WAIT_BARRIER.acquire();
+        Thread.sleep(10 + TimeUnit.MILLISECONDS.convert(approxTime.error(), TimeUnit.NANOSECONDS) * 2);
+        EXECUTE_BARRIER.release();
 
         Assertions.assertThatThrownBy(rsf::get).hasCauseInstanceOf(OverloadedException.class);
         Assert.assertEquals(initialTimedOut + 1, timedOutMeter.getCount());
         Assert.assertTrue(queueTimer.getSnapshot().get999thPercentile() > TimeUnit.NANOSECONDS.convert(10, TimeUnit.MILLISECONDS));
-    }
-
-    private long approxTimeErrorCorrection()
-    {
-        return TimeUnit.MILLISECONDS.convert(approxTime.error(), TimeUnit.NANOSECONDS) * 2;
     }
 
     private long getEpochNanos() {
