@@ -69,7 +69,7 @@ public class ChunkCache
 {
     private final static Logger logger = LoggerFactory.getLogger(ChunkCache.class);
 
-    public static final int RESERVED_POOL_SPACE_IN_MB = 32;
+    public static final int RESERVED_POOL_SPACE_IN_MB = Integer.getInteger("cassandra.chunkcache_reserved_pool_space_mb", 32);
     private static final int INITIAL_CAPACITY = Integer.getInteger("cassandra.chunkcache_initialcapacity", 16);
     private static final boolean ASYNC_CLEANUP = Boolean.parseBoolean(System.getProperty("cassandra.chunkcache.async_cleanup", "true"));
     private static final int CLEANER_THREADS = Integer.getInteger("dse.chunk.cache.cleaner.threads",1);
@@ -97,7 +97,7 @@ public class ChunkCache
                                               ? new ChunkCache(BufferPools.forChunkCache(), DatabaseDescriptor.getFileCacheSizeInMB(), ChunkCacheMetrics::create)
                                               : null;
 
-    private final BufferPool bufferPool;
+    public final BufferPool bufferPool;
 
     // Relies on the implementation detail that keys are interned strings and can be compared by reference.
     // Because compute optimistically updates the set without acquiring a lock, we must use a set that is

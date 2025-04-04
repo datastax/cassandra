@@ -47,4 +47,14 @@ public interface BufferPoolMetrics
      * used to register alias for 3.0/3.11 compatibility
      */
     void register3xAlias();
+
+    /*
+     * overflow allocation of a buffer that is larger than NORMAL_CHUNK_SIZE
+     */
+    void markOversizedOverflow();
+
+    /*
+     * overflow allocation of a buffer that is smaller than or equal to NORMAL_CHUNK_SIZE
+     */
+    void markNormalOverflow();
 }

@@ -19,6 +19,7 @@
 package org.apache.cassandra.metrics;
 
 import com.codahale.metrics.Meter;
+import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Tags;
 import org.apache.cassandra.utils.memory.BufferPool;
@@ -31,6 +32,8 @@ public class MicrometerBufferPoolMetrics extends MicrometerMetrics implements Bu
     public static final String USED_SIZE_BYTES = METRICS_PREFIX + "_used_size_bytes";
     public static final String OVERFLOW_SIZE_BYTES = METRICS_PREFIX + "_overflow_size_bytes";
     public static final String OVERFLOW_ALLOCATIONS = METRICS_PREFIX + "_overflow_allocations";
+    public static final String OVERFLOW_OVERSIZED_ALLOCATIONS = METRICS_PREFIX + "_overflow_oversized_allocations";
+    public static final String OVERFLOW_NORMAL_ALLOCATIONS = METRICS_PREFIX + "_overflow_normal_allocations";
     public static final String POOL_ALLOCATIONS = METRICS_PREFIX + "_pool_allocations";
     public static final String NAME_TAG = "pool_name";
 
@@ -42,6 +45,9 @@ public class MicrometerBufferPoolMetrics extends MicrometerMetrics implements Bu
 
     /** Total number of misses */
     private final Meter misses;
+
+    private Counter overflowNormalAllocations;
+    private Counter overflowOversizedAllocations;
 
     public MicrometerBufferPoolMetrics(String scope, BufferPool bufferPool)
     {
@@ -63,6 +69,8 @@ public class MicrometerBufferPoolMetrics extends MicrometerMetrics implements Bu
         gauge(OVERFLOW_SIZE_BYTES, bufferPool, BufferPool::overflowMemoryInBytes);
         gauge(OVERFLOW_ALLOCATIONS, misses, Meter::getMeanRate);
         gauge(POOL_ALLOCATIONS, hits, Meter::getMeanRate);
+        this.overflowNormalAllocations = counter(OVERFLOW_NORMAL_ALLOCATIONS);
+        this.overflowOversizedAllocations = counter(OVERFLOW_OVERSIZED_ALLOCATIONS);
     }
 
     @Override
@@ -110,5 +118,19 @@ public class MicrometerBufferPoolMetrics extends MicrometerMetrics implements Bu
     public void register3xAlias()
     {
         // Not implemented
+    }
+
+    @Override
+    public void markOversizedOverflow()
+    {
+        if (overflowOversizedAllocations != null)
+            overflowOversizedAllocations.increment();
+    }
+
+    @Override
+    public void markNormalOverflow()
+    {
+        if (overflowNormalAllocations != null)
+            overflowNormalAllocations.increment();
     }
 }

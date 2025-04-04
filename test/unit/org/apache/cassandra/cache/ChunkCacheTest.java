@@ -29,6 +29,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.ThreadLocalRandom;
 
 import com.google.common.base.Throwables;
 import org.junit.BeforeClass;
@@ -37,6 +38,7 @@ import org.junit.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.util.ChannelProxy;
@@ -65,12 +67,15 @@ import static org.mockito.Mockito.when;
 public class ChunkCacheTest
 {
     private static final Logger logger = LoggerFactory.getLogger(ChunkCacheTest.class);
+    private static final long FILE_SIZE_MB = 1024;
 
     @BeforeClass
     public static void setupDD()
     {
         DatabaseDescriptor.daemonInitialization();
         DatabaseDescriptor.enableChunkCache(512);
+        DatabaseDescriptor.setDiskAccessMode(Config.DiskAccessMode.standard);
+//        DatabaseDescriptor.enableChunkCache(4096);
     }
 
     @Test
@@ -108,6 +113,83 @@ public class ChunkCacheTest
         assertEquals(ChunkCache.instance.size(), 0);
         ChunkCache.instance.invalidateFile("/tmp/does/not/exist/in/cache/or/on/file/system");
     }
+
+    @Test
+    public void testSizeNotEnforced() throws Exception
+    {
+        File file4k = createFile("4k");
+        File file64k = createFile("64k");
+
+        //int bufSize = 128 * 1024;
+        byte[] b4k = new byte[4096];
+        byte[] b64k = new byte[65536];
+
+        long total4k = 0;
+        long total64k = 0;
+
+        int NUM_ITERATIONS = 1_000_000;
+        //int NUM_ITERATIONS = 10;
+        try (FileHandle.Builder builder4k = new FileHandle.Builder(file4k).withChunkCache(ChunkCache.instance).bufferSize(4096);
+             FileHandle handle4k = builder4k.complete();
+             RandomAccessReader reader4k = handle4k.createReader();
+             FileHandle.Builder builder64k = new FileHandle.Builder(file64k).withChunkCache(ChunkCache.instance).bufferSize(65536);
+             FileHandle handle64k = builder64k.complete();
+             RandomAccessReader reader64k = handle64k.createReader())
+        {
+            for (int i = 0; i < NUM_ITERATIONS; i++)
+            {
+                if (ThreadLocalRandom.current().nextBoolean())
+                {
+                    // read 4k
+                    long offset = randomOffset() & ~4095;
+                    reader4k.seek(offset);
+                    int read = reader4k.read(b4k);
+                    total4k += read;
+                }
+                else
+                {
+                    // read 64k
+                    long offset = randomOffset() & ~65535;
+                    reader64k.seek(offset);
+                    int read = reader64k.read(b64k);
+                    total64k += read;
+                }
+                if (i % 1000 == 0)
+                {
+                    logger.info("Reads 64k: {} bytes", total64k);
+                    logger.info("Reads 4k: {} bytes", total4k);
+                    logger.info("CC capacity={}, buffer pool allocated={}, buffer pool used size={}; overflow={}", ChunkCache.instance.capacity(), ChunkCache.instance.bufferPool.sizeInBytes(), ChunkCache.instance.bufferPool.usedSizeInBytes(), ChunkCache.instance.bufferPool.overflowMemoryInBytes());
+                    ChunkCache.instance.bufferPool.dumpStats();
+                }
+                if (ChunkCache.instance.bufferPool.overflowMemoryInBytes() > 80 * 1024 * 1024)
+                    break;
+            }
+
+            ChunkCache.instance.bufferPool.dumpDetailedChunkInfo();
+        }
+    }
+
+    private long randomOffset()
+    {
+        return (Math.abs(ThreadLocalRandom.current().nextLong()) % (FILE_SIZE_MB * 1024 * 1024));
+    }
+
+    private File createFile(String fileName) throws IOException
+    {
+        File file = FileUtils.createTempFile(fileName, null);
+        file.deleteOnExit();
+
+        byte[] bytes = new byte[1 * 1024 * 1024]; // 1MB of crap
+        try (SequentialWriter writer = new SequentialWriter(file))
+        {
+            // 1 GB of crap
+            for (int i = 0; i < FILE_SIZE_MB; i++)
+                writer.write(bytes);
+            writer.flush();
+        }
+        return file;
+    }
+
 
     @Test
     public void testRandomAccessReadersWithUpdatedFileAndMultipleChunksAndCacheInvalidation() throws IOException

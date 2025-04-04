@@ -109,4 +109,16 @@ class CodahaleBufferPoolMetrics implements BufferPoolMetrics
         Metrics.registerMBean(misses, legacyFactory.createMetricName("Misses").getMBeanName());
         Metrics.registerMBean(size, legacyFactory.createMetricName("Size").getMBeanName());
     }
+
+    @Override
+    public void markOversizedOverflow()
+    {
+        // Not implemented
+    }
+
+    @Override
+    public void markNormalOverflow()
+    {
+        // Not implemented
+    }
 }
