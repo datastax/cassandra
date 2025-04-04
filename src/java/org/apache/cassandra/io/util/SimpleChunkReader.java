@@ -20,6 +20,7 @@ package org.apache.cassandra.io.util;
 
 import java.nio.ByteBuffer;
 
+import org.apache.cassandra.io.FSReadError;
 import org.apache.cassandra.io.compress.BufferType;
 
 class SimpleChunkReader extends AbstractReaderFileProxy implements ChunkReader
@@ -44,8 +45,12 @@ class SimpleChunkReader extends AbstractReaderFileProxy implements ChunkReader
     @Override
     public void readChunk(long position, ByteBuffer buffer)
     {
+        long readPosition = position - startOffset;
+        if (readPosition < 0)
+            throw new IllegalArgumentException("Trying to read from a negative read position: " + readPosition + " startOffset " + startOffset + " position " + position);
+
         buffer.clear();
-        channel.read(buffer, position - startOffset);
+        channel.read(buffer, readPosition);
         buffer.flip();
     }
 
