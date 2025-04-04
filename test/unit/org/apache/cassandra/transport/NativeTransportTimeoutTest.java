@@ -19,7 +19,9 @@
 package org.apache.cassandra.transport;
 
 import java.nio.ByteBuffer;
+import java.time.Instant;
 import java.util.Collections;
+import java.util.Map;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 
@@ -37,8 +39,10 @@ import com.datastax.driver.core.SimpleStatement;
 import com.datastax.driver.core.Statement;
 import com.datastax.driver.core.exceptions.OverloadedException;
 import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.metrics.ClientMetrics;
+import org.apache.cassandra.utils.ByteBufferUtil;
 import org.assertj.core.api.Assertions;
 import org.jboss.byteman.contrib.bmunit.BMRule;
 import org.jboss.byteman.contrib.bmunit.BMRules;
@@ -51,6 +55,8 @@ public class NativeTransportTimeoutTest extends CQLTester
 {
     static Semaphore EXECUTE_BARRIER;
     static Semaphore WAIT_BARRIER;
+
+    static Map<String, ByteBuffer> CUSTOM_PAYLOAD;
 
     @Test
     @BMRules(rules = { @BMRule(name = "Delay Message execution on NTR stage",
@@ -65,7 +71,7 @@ public class NativeTransportTimeoutTest extends CQLTester
                        targetClass = "org.apache.cassandra.config.DatabaseDescriptor",
                        targetMethod = "getNativeTransportTimeout",
                        targetLocation = "AT ENTRY",
-                       condition = "flagged(Thread.currentThread()) && callerEquals(\"Message$Request.execute\", true)",
+                       condition = "flagged(Thread.currentThread()) && callerEquals(\"Message$Request.execute\", true, 2)",
                        action = "clear(Thread.currentThread()); " +
                                 "return 10000000;") })
     public void testNativeTransportLoadShedding() throws Throwable
@@ -76,11 +82,62 @@ public class NativeTransportTimeoutTest extends CQLTester
     }
 
     @Test
+    @BMRule(name = "Delay Message execution on NTR stage",
+    targetClass = "org.apache.cassandra.transport.Message$Request",
+    targetMethod = "execute",
+    targetLocation = "AT ENTRY",
+    condition = "$this.getCustomPayload() != null",
+    action = "org.apache.cassandra.transport.NativeTransportTimeoutTest.WAIT_BARRIER.release(); " +
+             "org.apache.cassandra.transport.NativeTransportTimeoutTest.EXECUTE_BARRIER.acquire(); ")
+    public void testNativeTransportLoadSheddingWithRequestCreateNanos() throws Throwable
+    {
+        long nativeTransportTimeoutNanos = 10_000_000_000L;
+        DatabaseDescriptor.setNativeTransportTimeout(nativeTransportTimeoutNanos, TimeUnit.NANOSECONDS);
+
+        createTable("CREATE TABLE %s (pk int PRIMARY KEY, v text)");
+        Statement statement = new SimpleStatement("SELECT * FROM " + KEYSPACE + '.' + currentTable());
+
+        // rewind the request time by the native transport timeout to ensure the timeout is exceeded
+        long mockedRequestCreateEpochNanos = getEpochNanos() - nativeTransportTimeoutNanos;
+        statement.setOutgoingPayload(Collections.singletonMap("REQUEST_CREATE_NANOS", ByteBufferUtil.bytes(mockedRequestCreateEpochNanos)));
+
+        doTestLoadShedding(false, statement);
+    }
+
+    @Test
+    @BMRules(rules = { @BMRule(name = "Delay Message execution on NTR stage",
+                       targetClass = "org.apache.cassandra.transport.Message$Request",
+                       targetMethod = "execute",
+                       targetLocation = "AT ENTRY",
+                       condition = "$this.getCustomPayload() != null",
+                       action = "org.apache.cassandra.transport.NativeTransportTimeoutTest.WAIT_BARRIER.release(); " +
+                                "org.apache.cassandra.transport.NativeTransportTimeoutTest.EXECUTE_BARRIER.acquire(); " +
+                                "flag(Thread.currentThread());"),
+                       @BMRule(name = "Mock NTR timeout from Request.execute",
+                       targetClass = "org.apache.cassandra.config.DatabaseDescriptor",
+                       targetMethod = "getNativeTransportTimeout",
+                       targetLocation = "AT ENTRY",
+                       condition = "flagged(Thread.currentThread()) && callerEquals(\"Message$Request.execute\", true, 2)",
+                       action = "clear(Thread.currentThread()); " +
+                                "return 10000000;") })
+    public void testNativeTransportLoadSheddingWithMalformedRequestCreateNanos() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int PRIMARY KEY, v text)");
+        Statement statement = new SimpleStatement("SELECT * FROM " + KEYSPACE + '.' + currentTable());
+
+        // malformed request time, should fall back to NTR timeouts using message creation time
+        String malformedRequestCreateNanos = "string";
+        statement.setOutgoingPayload(Collections.singletonMap("REQUEST_CREATE_NANOS", ByteBufferUtil.bytes(malformedRequestCreateNanos)));
+
+        doTestLoadShedding(false, statement);
+    }
+
+    @Test
     @BMRules(rules = { @BMRule(name = "Delay elapsedTimeSinceCreationCheck from async stage",
                        targetClass = "org.apache.cassandra.transport.Message$Request",
                        targetMethod = "elapsedTimeSinceCreation",
                        targetLocation = "AT ENTRY",
-                       condition = "$this.getCustomPayload() != null && !callerEquals(\"Message$Request.execute\", true)",
+                       condition = "$this.getCustomPayload() != null && !callerEquals(\"Message$Request.execute\", true, 2)",
                        action = "org.apache.cassandra.transport.NativeTransportTimeoutTest.WAIT_BARRIER.release(); " +
                                 "org.apache.cassandra.transport.NativeTransportTimeoutTest.EXECUTE_BARRIER.acquire(); " +
                                 "flag(Thread.currentThread());"),
@@ -88,7 +145,7 @@ public class NativeTransportTimeoutTest extends CQLTester
                        targetClass = "org.apache.cassandra.config.DatabaseDescriptor",
                        targetMethod = "getNativeTransportTimeout",
                        targetLocation = "AT ENTRY",
-                       condition = "flagged(Thread.currentThread()) && callerMatches(\".*maybeExecuteAsync.*\", true)",
+                       condition = "flagged(Thread.currentThread()) && callerMatches(\".*maybeExecuteAsync.*\", true, 2)",
                        action = "clear(Thread.currentThread()); " +
                                 "return 10000000;") })
     public void testAsyncStageLoadShedding() throws Throwable
@@ -116,6 +173,57 @@ public class NativeTransportTimeoutTest extends CQLTester
         }
     }
 
+
+    @Test
+    @BMRules(rules = { @BMRule(name = "Delay maybeExpire from async stage",
+                       targetClass = "org.apache.cassandra.transport.Message$Request",
+                       targetMethod = "maybeExpire",
+                       targetLocation = "AT ENTRY",
+                       condition = "$this.getCustomPayload() != null && !callerEquals(\"Message$Request.execute\", true, 2)",
+                       action = "org.apache.cassandra.transport.NativeTransportTimeoutTest.WAIT_BARRIER.release(); " +
+                                "org.apache.cassandra.transport.NativeTransportTimeoutTest.EXECUTE_BARRIER.acquire(); " +
+                                "flag(Thread.currentThread());"),
+                       @BMRule(name = "Mock native transport timeout from async stage",
+                       targetClass = "org.apache.cassandra.transport.Message",
+                       targetMethod = "getCustomPayload",
+                       targetLocation = "AT ENTRY",
+                       condition = "flagged(Thread.currentThread())",
+                       action = "clear(Thread.currentThread()); " +
+                                "return org.apache.cassandra.transport.NativeTransportTimeoutTest.CUSTOM_PAYLOAD;") })
+    public void testAsyncStageLoadSheddingWithRequestCreateNanos() throws Throwable
+    {
+        CassandraRelevantProperties.NATIVE_TRANSPORT_ASYNC_READ_WRITE_ENABLED.setBoolean(true);
+        long nativeTransportTimeoutNanos = 10_000_000_000L;
+        DatabaseDescriptor.setNativeTransportTimeout(nativeTransportTimeoutNanos, TimeUnit.NANOSECONDS);
+
+        try
+        {
+            createTable("CREATE TABLE %s (pk int PRIMARY KEY, v text)");
+
+            Statement statement = new SimpleStatement("SELECT * FROM " + KEYSPACE + '.' + currentTable());
+
+            // rewind the request time by the native transport timeout to ensure the timeout is exceeded
+            // note that we cannot set the payload in the statement directly, because that would cause the NTR stage to
+            // timeout before dispatching to the async stage
+            long mockedRequestCreateEpochNanos = getEpochNanos() - nativeTransportTimeoutNanos;
+            CUSTOM_PAYLOAD = Collections.singletonMap("REQUEST_CREATE_NANOS", ByteBufferUtil.bytes(mockedRequestCreateEpochNanos));
+
+            doTestLoadShedding(true, statement);
+
+            Statement insert1 = new SimpleStatement("INSERT INTO " + KEYSPACE + '.' + currentTable() + " (pk, v) VALUES (1, 'foo')");
+            Statement insert2 = new SimpleStatement("INSERT INTO " + KEYSPACE + '.' + currentTable() + " (pk, v) VALUES (2, 'bar')");
+            statement = new BatchStatement().add(insert1).add(insert2);
+            doTestLoadShedding(true, statement);
+
+            PreparedStatement ps = sessionNet().prepare("SELECT * FROM " + KEYSPACE + '.' + currentTable());
+            doTestLoadShedding(true, ps.bind());
+        }
+        finally
+        {
+            CassandraRelevantProperties.NATIVE_TRANSPORT_ASYNC_READ_WRITE_ENABLED.setBoolean(false);
+        }
+    }
+
     private void doTestLoadShedding(boolean useAsyncStages, Statement statement) throws InterruptedException
     {
         EXECUTE_BARRIER = new Semaphore(0);
@@ -127,7 +235,10 @@ public class NativeTransportTimeoutTest extends CQLTester
         Session session = sessionNet();
 
         // custom payload used to make detection of this statement easy early in byteman rules
-        statement.setOutgoingPayload(Collections.singletonMap("sentinel", ByteBuffer.wrap(new byte[0])));
+        if (statement.getOutgoingPayload() == null)
+        {
+            statement.setOutgoingPayload(Collections.singletonMap("sentinel", ByteBuffer.wrap(new byte[0])));
+        }
 
         if (useAsyncStages)
         {
@@ -156,5 +267,10 @@ public class NativeTransportTimeoutTest extends CQLTester
         Assertions.assertThatThrownBy(rsf::get).hasCauseInstanceOf(OverloadedException.class);
         Assert.assertEquals(initialTimedOut + 1, timedOutMeter.getCount());
         Assert.assertTrue(queueTimer.getSnapshot().get999thPercentile() > TimeUnit.NANOSECONDS.convert(10, TimeUnit.MILLISECONDS));
+    }
+
+    private long getEpochNanos() {
+        Instant instant = Instant.now();
+        return instant.getEpochSecond() * 1_000_000_000L + instant.getNano();
     }
 }

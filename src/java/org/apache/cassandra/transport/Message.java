@@ -26,6 +26,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.function.BiConsumer;
 
 import com.google.common.annotations.VisibleForTesting;
 
@@ -42,7 +43,9 @@ import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.transport.messages.*;
 import org.apache.cassandra.service.QueryState;
+import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.MonotonicClock;
+import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.utils.ReflectionUtils;
 import org.apache.cassandra.utils.UUIDGen;
 
@@ -52,6 +55,15 @@ import org.apache.cassandra.utils.UUIDGen;
 public abstract class Message
 {
     protected static final Logger logger = LoggerFactory.getLogger(Message.class);
+    private static final NoSpamLogger noSpam = NoSpamLogger.getLogger(logger, 1, TimeUnit.MINUTES);
+
+    /**
+     * The timestamp in millis when the request was orignially received by upstream components. This is used to timeout
+     * requests with respect to their end-to-end lifecycle (as opposed to when the request message was deseiriled) and
+     * is respected in NTR queue timeouts as well as verb timeouts. The contract is, such requests should be endoded
+     * as a java long in the big-endian format.
+     */
+    protected static final String REQUEST_CREATE_NANOS = "REQUEST_CREATE_NANOS";
 
     public interface Codec<M extends Message> extends CBCodec<M> {}
 
@@ -224,24 +236,84 @@ public abstract class Message
 
         /**
          * Returns the time elapsed since this request was created. Note that this is the total lifetime of the request
-         * in the system, so we expect increasing returned values across multiple calls to elapsedTimeSinceCreation.
+         * in the system (inclding the time spent in the NTR queue, basic query parsing/set up, and any time spent in
+         * the queue for the async stage), so we expect increasing returned values across multiple calls to
+         * elapsedTimeSinceCreation.
          *
          * @param timeUnit the time unit in which to return the elapsed time
          * @return the time elapsed since this request was created
          */
-        protected long elapsedTimeSinceCreation(TimeUnit timeUnit)
+        private long elapsedTimeSinceCreation(TimeUnit timeUnit)
         {
-            return timeUnit.convert(MonotonicClock.approxTime.now() - creationTimeNanos, TimeUnit.NANOSECONDS);
+            return elapsedTimeSince(creationTimeNanos, timeUnit);
+        }
+
+        private long elapsedTimeSince(long time, TimeUnit timeUnit)
+        {
+            return timeUnit.convert(MonotonicClock.approxTime.now() - time, TimeUnit.NANOSECONDS);
+        }
+
+        /**
+         * Returns the time when the request was created in upstream components. This is optinally recorded in the custom
+         * payload using the {@link Message#REQUEST_CREATE_NANOS} key.
+         *
+         * @return the time recorded in custom payload via {@link Message#REQUEST_CREATE_NANOS} or -1 if not present
+         */
+        private long customPayloadRequestTime()
+        {
+            Map<String, ByteBuffer> customPayload = getCustomPayload();
+            if (customPayload != null && customPayload.containsKey(REQUEST_CREATE_NANOS))
+            {
+                ByteBuffer requestCreateNanosBuffer = customPayload.get(REQUEST_CREATE_NANOS);
+                try
+                {
+                    long requestCreationEpochNanos = ByteBufferUtil.toLong(requestCreateNanosBuffer);
+                    long requestCreationEpochMillis = TimeUnit.NANOSECONDS.toMillis(requestCreationEpochNanos);
+                    return MonotonicClock.approxTime.translate().fromMillisSinceEpoch(requestCreationEpochMillis);
+                }
+                catch (Exception e)
+                {
+                    noSpam.warn("{} exists in custom payload, but its value cannot be extracted", REQUEST_CREATE_NANOS, e);
+                }
+            }
+
+            return -1;
+        }
+
+        /**
+         * Check if the request has expired. If it has, call the onExpired callback. It respects the
+         * {@link Message#REQUEST_CREATE_NANOS} key in the custom payload to determine the time when the request was and
+         * falls back to {@link Request#creationTimeNanos} if not present.
+         *
+         * @param queueTimeRecoder a callback to record the time spent in the NTR queue
+         * @param onExpired        a runnable to call if the request has expired, exceptions are propagated to the caller.
+         * @return true if the request has expired, false otherwise
+         */
+        protected boolean maybeExpire(BiConsumer<Long, TimeUnit> queueTimeRecoder, Runnable onExpired)
+        {
+            long customPayloadRequestTime = customPayloadRequestTime();
+            long elapsedTimeSinceCreation = elapsedTimeSinceCreation(TimeUnit.NANOSECONDS);
+
+            // always record the queue time, even if the request has custom payload request time
+            queueTimeRecoder.accept(elapsedTimeSinceCreation, TimeUnit.NANOSECONDS);
+
+            long elapsedTime = customPayloadRequestTime == -1
+                               ? elapsedTimeSinceCreation
+                               : elapsedTimeSince(customPayloadRequestTime, TimeUnit.NANOSECONDS);
+            if (elapsedTime > DatabaseDescriptor.getNativeTransportTimeout(TimeUnit.NANOSECONDS))
+            {
+                onExpired.run();
+                return true;
+            }
+
+            return false;
         }
 
         protected abstract CompletableFuture<Response> maybeExecuteAsync(QueryState queryState, long queryStartNanoTime, boolean traceRequest);
 
         public final CompletableFuture<Response> execute(QueryState queryState, long queryStartNanoTime)
         {
-            // at the time of the check, this is approximately the time spent in the NTR stage's queue
-            long elapsedTimeSinceCreation = elapsedTimeSinceCreation(TimeUnit.NANOSECONDS);
-            ClientMetrics.instance.recordQueueTime(elapsedTimeSinceCreation, TimeUnit.NANOSECONDS);
-            if (elapsedTimeSinceCreation > DatabaseDescriptor.getNativeTransportTimeout(TimeUnit.NANOSECONDS))
+            if (maybeExpire(ClientMetrics.instance::recordQueueTime, () -> {}))
             {
                 ClientMetrics.instance.markTimedOutBeforeProcessing();
                 return CompletableFuture.completedFuture(ErrorMessage.fromException(new OverloadedException("Query timed out before it could start")));

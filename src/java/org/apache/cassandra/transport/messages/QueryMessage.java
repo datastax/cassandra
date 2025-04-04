@@ -123,15 +123,10 @@ public class QueryMessage extends Message.Request
                                                {
                                                    try
                                                    {
-                                                       // at the time of the check, this includes the time spent in the NTR queue, basic query parsing/set up,
-                                                       // and any time spent in the queue for the async stage
-                                                       long elapsedTime = elapsedTimeSinceCreation(TimeUnit.NANOSECONDS);
-                                                       ClientMetrics.instance.recordAsyncQueueTime(elapsedTime, TimeUnit.NANOSECONDS);
-                                                       if (elapsedTime > DatabaseDescriptor.getNativeTransportTimeout(TimeUnit.NANOSECONDS))
-                                                       {
+                                                       maybeExpire(ClientMetrics.instance::recordAsyncQueueTime, () -> {
                                                            ClientMetrics.instance.markTimedOutBeforeAsyncProcessing();
                                                            throw new OverloadedException("Query timed out before it could start");
-                                                       }
+                                                       });
                                                    }
                                                    catch (Exception e)
                                                    {
