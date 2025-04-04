@@ -264,8 +264,8 @@ public abstract class Message
                     long now = approxTime.now();
 
                     long requestCreationNanoTime = approxTime.translate().fromMillisSinceEpoch(requestCreationEpochMillis);
-                    noSpam.debug("requestCreationEpochNanos={}, requestCreationEpochMillis={}, requestCreationNanoTime{}, creationTimeNanos={}, approxTime={}, difference={}",
-                                 requestCreationEpochNanos, requestCreationEpochMillis, requestCreationNanoTime, creationTimeNanos, now, now - requestCreationEpochNanos);
+                    noSpam.debug("requestCreationEpochNanos={}, requestCreationEpochMillis={}, requestCreationNanoTime={}, creationTimeNanos={}, approxTime={}, difference={}",
+                                 requestCreationEpochNanos, requestCreationEpochMillis, requestCreationNanoTime, creationTimeNanos, now, now - requestCreationNanoTime);
                     return timeUnit.convert(now - requestCreationNanoTime, TimeUnit.NANOSECONDS);
                 }
                 catch (Exception e)
