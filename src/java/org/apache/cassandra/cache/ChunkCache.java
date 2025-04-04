@@ -152,7 +152,7 @@ public class ChunkCache
             chunk = newChunk(file.chunkSize(), position);  // Note: we need `chunk` to be assigned before we call read to release on error
             chunk.read(file);
         }
-        catch (RuntimeException t)
+        catch (RuntimeException | Error t)
         {
             if (chunk != null)
                 chunk.release();
