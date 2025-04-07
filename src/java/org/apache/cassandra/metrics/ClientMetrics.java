@@ -53,10 +53,10 @@ public final class ClientMetrics
 
     public Meter timedOutBeforeProcessing;
     public Meter timedOutBeforeAsyncProcessing;
-    public Timer queueTime; // time between Message creation and execution on NTR
-    public Counter totalQueueTime; // total queue time (in nanoseconds) for use in histogram timer
-    public Timer asyncQueueTime; // time between Message creation and execution on an async stage. This includes the time recorded in queueTime metric.
-    public Counter totalAsyncQueueTime; // total async queue time (in nanoseconds) for use in histogram timer
+    public Timer elapsedTimeSinceCreation; // time between Message creation and execution on NTR
+    public Counter totalElapsedTimeSinceCreation; // total elapsed time (in nanoseconds) for use in histogram timer
+    public Timer asyncElapsedTimeSinceCreation; // time between Message creation and execution on an async stage. This includes the time recorded in elapsedTimeSinceCreation metric.
+    public Counter totalAsyncElapsedTimeSinceCreation; // total async elapsed time (in nanoseconds) for use in histogram timer
 
     private Meter protocolException;
     private Meter unknownException;
@@ -105,27 +105,29 @@ public final class ClientMetrics
     }
 
     /**
-     * Record time between Message creation and execution on NTR.
+     * Record time between Message creation and execution on NTR. See {@link Message.Request#creationTimeNanos} for
+     * details on how message creation time is calculated.
      * @param value time elapsed
      * @param unit time unit
      */
-    public void recordQueueTime(long value, TimeUnit unit)
+    public void recordElapsedTimeSinceCreation(long value, TimeUnit unit)
     {
-        queueTime.update(value, unit);
-        totalQueueTime.inc(TimeUnit.NANOSECONDS.convert(value, unit));
+        elapsedTimeSinceCreation.update(value, unit);
+        totalElapsedTimeSinceCreation.inc(TimeUnit.NANOSECONDS.convert(value, unit));
     }
 
     /**
      * Record time between Message creation and execution on an async stage, if present.
-     * Note that this includes the queue time previously recorded before execution on the NTR stage,
-     * so for a given request, asyncQueueTime >= queueTime.
+     * See {@link Message.Request#creationTimeNanos} for details on how message creation time is calculated.
+     * Note that this includes the elapsed time previously recorded before execution on the NTR stage,
+     * so for a given request, asyncElapsedTimeSinceCreation >= elapsedTimeSinceCreation.
      * @param value time elapsed
      * @param unit time unit
      */
-    public void recordAsyncQueueTime(long value, TimeUnit unit)
+    public void recordAsyncElapsedTimeSinceCreation(long value, TimeUnit unit)
     {
-        asyncQueueTime.update(value, unit);
-        totalAsyncQueueTime.inc(TimeUnit.NANOSECONDS.convert(value, unit));
+        asyncElapsedTimeSinceCreation.update(value, unit);
+        totalAsyncElapsedTimeSinceCreation.inc(TimeUnit.NANOSECONDS.convert(value, unit));
     }
 
     public void markProtocolException()
@@ -172,10 +174,10 @@ public final class ClientMetrics
 
         timedOutBeforeProcessing = registerMeter("TimedOutBeforeProcessing");
         timedOutBeforeAsyncProcessing = registerMeter("TimedOutBeforeAsyncProcessing");
-        queueTime = registerTimer("QueueTime");
-        totalQueueTime = registerCounter("TotalQueueTime");
-        asyncQueueTime = registerTimer("AsyncQueueTime");
-        totalAsyncQueueTime = registerCounter("TotalAsyncQueueTime");
+        elapsedTimeSinceCreation = registerTimer("ElapsedTimeSinceCreation");
+        totalElapsedTimeSinceCreation = registerCounter("TotalElapsedTimeSinceCreation");
+        asyncElapsedTimeSinceCreation = registerTimer("AsyncElapsedTimeSinceCreation");
+        totalAsyncElapsedTimeSinceCreation = registerCounter("TotalAsyncElapsedTimeSinceCreation");
 
         protocolException = registerMeter("ProtocolException");
         unknownException = registerMeter("UnknownException");

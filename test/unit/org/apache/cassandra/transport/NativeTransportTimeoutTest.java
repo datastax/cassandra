@@ -245,12 +245,12 @@ public class NativeTransportTimeoutTest extends CQLTester
         if (useAsyncStages)
         {
             timedOutMeter = ClientMetrics.instance.timedOutBeforeAsyncProcessing;
-            queueTimer = ClientMetrics.instance.asyncQueueTime;
+            queueTimer = ClientMetrics.instance.asyncElapsedTimeSinceCreation;
         }
         else
         {
             timedOutMeter = ClientMetrics.instance.timedOutBeforeProcessing;
-            queueTimer = ClientMetrics.instance.queueTime;
+            queueTimer = ClientMetrics.instance.elapsedTimeSinceCreation;
         }
 
         long initialTimedOut = timedOutMeter.getCount();

@@ -221,6 +221,12 @@ public abstract class Message
     public static abstract class Request extends Message
     {
         private boolean tracingRequested;
+
+        /**
+         * Creation time of the message. If {@link Message#REQUEST_CREATE_MILLIS} is set in custom payload,
+         * {@link Message.Decoder#decodeMessage(Channel, Envelope)}} will use the encoded value, otherwise it will use
+         * current time when message was decoded.
+         */
         private long creationTimeNanos;
 
         protected Request(Type type)
@@ -291,7 +297,7 @@ public abstract class Message
         public final CompletableFuture<Response> execute(QueryState queryState, long queryStartNanoTime)
         {
             long elapsedTimeSinceCreation = elapsedTimeSinceCreation(TimeUnit.NANOSECONDS);
-            ClientMetrics.instance.recordQueueTime(elapsedTimeSinceCreation, TimeUnit.NANOSECONDS);
+            ClientMetrics.instance.recordElapsedTimeSinceCreation(elapsedTimeSinceCreation, TimeUnit.NANOSECONDS);
             if (elapsedTimeSinceCreation > DatabaseDescriptor.getNativeTransportTimeout(TimeUnit.NANOSECONDS))
             {
                 ClientMetrics.instance.markTimedOutBeforeProcessing();

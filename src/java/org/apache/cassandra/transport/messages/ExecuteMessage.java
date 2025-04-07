@@ -169,7 +169,7 @@ public class ExecuteMessage extends Message.Request
                                                    try
                                                    {
                                                        long elapsedTime = elapsedTimeSinceCreation(TimeUnit.NANOSECONDS);
-                                                       ClientMetrics.instance.recordAsyncQueueTime(elapsedTime, TimeUnit.NANOSECONDS);
+                                                       ClientMetrics.instance.recordAsyncElapsedTimeSinceCreation(elapsedTime, TimeUnit.NANOSECONDS);
                                                        if (elapsedTime > DatabaseDescriptor.getNativeTransportTimeout(TimeUnit.NANOSECONDS))
                                                        {
                                                            ClientMetrics.instance.markTimedOutBeforeAsyncProcessing();
