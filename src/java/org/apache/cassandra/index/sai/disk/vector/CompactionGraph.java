@@ -317,8 +317,7 @@ public class CompactionGraph implements Closeable, Accountable
                     compressedVectors = new MutablePQVectors((ProductQuantization) compressor);
                     compactionFjp.submit(() -> {
                         IntStream.range(0, encodedVectorCount)
-                                 // FIXME parallel is disabled until 4.0.0 beta2 (encodeAndSet is not threadsafe before then)
-//                                 .parallel()
+                                 .parallel()
                                  .forEach(i -> {
                                      var v = vectorsByOrdinal.get(i);
                                      if (v == null)
