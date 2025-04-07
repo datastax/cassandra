@@ -58,12 +58,12 @@ public abstract class Message
     private static final NoSpamLogger noSpam = NoSpamLogger.getLogger(logger, 1, TimeUnit.MINUTES);
 
     /**
-     * The timestamp in millis when the request was orignially received by upstream components. This is used to timeout
-     * requests with respect to their end-to-end lifecycle (as opposed to when the request message was deseiriled) and
-     * is respected in NTR queue timeouts as well as verb timeouts. The contract is, such requests should be endoded
-     * as a java long in the big-endian format.
+     * An optional key in custom payload used to encode the timestamp in epoch millis when the request was originally
+     * created by upstream components. When present, this value will be used NTR queue timeouts instead of the timestamp
+     * when the request was deserialized and dispatched to the queue. The contract is for the value assoacited wite that
+     * key to be encoded as an 8-byte unsigned integer in the big-endian format.
      */
-    protected static final String REQUEST_CREATE_NANOS = "REQUEST_CREATE_NANOS";
+    protected static final String REQUEST_CREATE_MILLIS = "REQUEST_CREATE_MILLIS";
 
     public interface Codec<M extends Message> extends CBCodec<M> {}
 
@@ -255,25 +255,25 @@ public abstract class Message
 
         /**
          * Returns the time when the request was created in upstream components. This is optinally recorded in the custom
-         * payload using the {@link Message#REQUEST_CREATE_NANOS} key.
+         * payload using the {@link Message#REQUEST_CREATE_MILLIS} key.
          *
-         * @return the time recorded in custom payload via {@link Message#REQUEST_CREATE_NANOS} or -1 if not present
+         * @return the time recorded in custom payload via {@link Message#REQUEST_CREATE_MILLIS} or -1 if not present
          */
         private long customPayloadRequestTime()
         {
             Map<String, ByteBuffer> customPayload = getCustomPayload();
-            if (customPayload != null && customPayload.containsKey(REQUEST_CREATE_NANOS))
+            if (customPayload != null && customPayload.containsKey(REQUEST_CREATE_MILLIS))
             {
-                ByteBuffer requestCreateNanosBuffer = customPayload.get(REQUEST_CREATE_NANOS);
+                ByteBuffer requestCreateNanosBuffer = customPayload.get(REQUEST_CREATE_MILLIS);
                 try
                 {
-                    long requestCreationEpochNanos = ByteBufferUtil.toLong(requestCreateNanosBuffer);
-                    long requestCreationEpochMillis = TimeUnit.NANOSECONDS.toMillis(requestCreationEpochNanos);
+                    long requestCreationEpochMillis = ByteBufferUtil.toLong(requestCreateNanosBuffer);
+                    // translate wall clock time to monotonic clock time
                     return MonotonicClock.approxTime.translate().fromMillisSinceEpoch(requestCreationEpochMillis);
                 }
                 catch (Exception e)
                 {
-                    noSpam.warn("{} exists in custom payload, but its value cannot be extracted", REQUEST_CREATE_NANOS, e);
+                    noSpam.warn("{} exists in custom payload, but its value cannot be extracted", REQUEST_CREATE_MILLIS, e);
                 }
             }
 
@@ -282,7 +282,7 @@ public abstract class Message
 
         /**
          * Check if the request has expired. If it has, call the onExpired callback. It respects the
-         * {@link Message#REQUEST_CREATE_NANOS} key in the custom payload to determine the time when the request was and
+         * {@link Message#REQUEST_CREATE_MILLIS} key in the custom payload to determine the time when the request was and
          * falls back to {@link Request#creationTimeNanos} if not present.
          *
          * @param queueTimeRecoder a callback to record the time spent in the NTR queue
