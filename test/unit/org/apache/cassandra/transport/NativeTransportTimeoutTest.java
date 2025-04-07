@@ -55,8 +55,6 @@ public class NativeTransportTimeoutTest extends CQLTester
     static Semaphore EXECUTE_BARRIER;
     static Semaphore WAIT_BARRIER;
 
-    static Map<String, ByteBuffer> CUSTOM_PAYLOAD;
-
     @Test
     @BMRules(rules = { @BMRule(name = "Delay Message execution on NTR stage",
     targetClass = "org.apache.cassandra.transport.Message$Request",
@@ -70,7 +68,7 @@ public class NativeTransportTimeoutTest extends CQLTester
                        targetClass = "org.apache.cassandra.config.DatabaseDescriptor",
                        targetMethod = "getNativeTransportTimeout",
                        targetLocation = "AT ENTRY",
-                       condition = "flagged(Thread.currentThread()) && callerEquals(\"Message$Request.execute\", true, 2)",
+                       condition = "flagged(Thread.currentThread()) && callerEquals(\"Message$Request.execute\", true)",
                        action = "clear(Thread.currentThread()); " +
                                 "return 10000000;") })
     public void testNativeTransportLoadShedding() throws Throwable
@@ -88,7 +86,7 @@ public class NativeTransportTimeoutTest extends CQLTester
     condition = "$this.getCustomPayload() != null",
     action = "org.apache.cassandra.transport.NativeTransportTimeoutTest.WAIT_BARRIER.release(); " +
              "org.apache.cassandra.transport.NativeTransportTimeoutTest.EXECUTE_BARRIER.acquire(); ")
-    public void testNativeTransportLoadSheddingWithRequestCreateNanos() throws Throwable
+    public void testNativeTransportLoadSheddingWithRequestCreateMillis() throws Throwable
     {
         long nativeTransportTimeoutMillis = 10_000L;
         DatabaseDescriptor.setNativeTransportTimeout(nativeTransportTimeoutMillis, TimeUnit.MILLISECONDS);
@@ -144,7 +142,7 @@ public class NativeTransportTimeoutTest extends CQLTester
                        targetClass = "org.apache.cassandra.config.DatabaseDescriptor",
                        targetMethod = "getNativeTransportTimeout",
                        targetLocation = "AT ENTRY",
-                       condition = "flagged(Thread.currentThread()) && callerMatches(\".*maybeExecuteAsync.*\", true, 2)",
+                       condition = "flagged(Thread.currentThread()) && callerMatches(\".*maybeExecuteAsync.*\", true)",
                        action = "clear(Thread.currentThread()); " +
                                 "return 10000000;") })
     public void testAsyncStageLoadShedding() throws Throwable
@@ -174,27 +172,29 @@ public class NativeTransportTimeoutTest extends CQLTester
 
 
     @Test
-    @BMRules(rules = { @BMRule(name = "Delay maybeExpire from async stage",
+    @BMRules(rules = { @BMRule(name = "Delay elapsedTimeSinceCreationCheck from async stage",
     targetClass = "org.apache.cassandra.transport.Message$Request",
-    targetMethod = "maybeExpire",
+    targetMethod = "elapsedTimeSinceCreation",
     targetLocation = "AT ENTRY",
-    condition = "$this.getCustomPayload() != null && !callerEquals(\"Message$Request.execute\", true, 2)",
+    condition = "$this.getCustomPayload() != null && !callerEquals(\"Message$Request.execute\", true)",
     action = "org.apache.cassandra.transport.NativeTransportTimeoutTest.WAIT_BARRIER.release(); " +
              "org.apache.cassandra.transport.NativeTransportTimeoutTest.EXECUTE_BARRIER.acquire(); " +
              "flag(Thread.currentThread());"),
                        @BMRule(name = "Mock native transport timeout from async stage",
-                       targetClass = "org.apache.cassandra.transport.Message",
-                       targetMethod = "getCustomPayload",
+                       targetClass = "org.apache.cassandra.config.DatabaseDescriptor",
+                       targetMethod = "getNativeTransportTimeout",
                        targetLocation = "AT ENTRY",
-                       condition = "flagged(Thread.currentThread())",
+                       condition = "flagged(Thread.currentThread()) && callerMatches(\".*maybeExecuteAsync.*\", true)",
                        action = "clear(Thread.currentThread()); " +
-                                "return org.apache.cassandra.transport.NativeTransportTimeoutTest.CUSTOM_PAYLOAD;") })
-    public void testAsyncStageLoadSheddingWithRequestCreateNanos() throws Throwable
+                                "return 10000000000L;") })
+    public void testAsyncStageLoadSheddingWithRequestCreateMillis() throws Throwable
     {
         CassandraRelevantProperties.NATIVE_TRANSPORT_ASYNC_READ_WRITE_ENABLED.setBoolean(true);
         long nativeTransportTimeoutMillis = 10_000L;
-        DatabaseDescriptor.setNativeTransportTimeout(nativeTransportTimeoutMillis, TimeUnit.MILLISECONDS);
-
+        // Set to double the native transport timeout to ensure the NTR stage to doesn't time out before
+        // dispatching to the async stage. The byteman rule will override the timeout to nativeTransportTimeoutMillis for
+        // async stage verification.
+        DatabaseDescriptor.setNativeTransportTimeout(nativeTransportTimeoutMillis * 2, TimeUnit.MILLISECONDS);
         try
         {
             createTable("CREATE TABLE %s (pk int PRIMARY KEY, v text)");
@@ -205,16 +205,19 @@ public class NativeTransportTimeoutTest extends CQLTester
             // note that we cannot set the payload in the statement directly, because that would cause the NTR stage to
             // timeout before dispatching to the async stage
             long mockedRequestCreateEpochMillis = System.currentTimeMillis() - nativeTransportTimeoutMillis;
-            CUSTOM_PAYLOAD = Collections.singletonMap("REQUEST_CREATE_MILLIS", ByteBufferUtil.bytes(mockedRequestCreateEpochMillis));
+            Map<String, ByteBuffer> payload = Collections.singletonMap("REQUEST_CREATE_MILLIS", ByteBufferUtil.bytes(mockedRequestCreateEpochMillis));
+            statement.setOutgoingPayload(payload);
 
             doTestLoadShedding(true, statement);
 
             Statement insert1 = new SimpleStatement("INSERT INTO " + KEYSPACE + '.' + currentTable() + " (pk, v) VALUES (1, 'foo')");
             Statement insert2 = new SimpleStatement("INSERT INTO " + KEYSPACE + '.' + currentTable() + " (pk, v) VALUES (2, 'bar')");
             statement = new BatchStatement().add(insert1).add(insert2);
+            statement.setOutgoingPayload(payload);
             doTestLoadShedding(true, statement);
 
             PreparedStatement ps = sessionNet().prepare("SELECT * FROM " + KEYSPACE + '.' + currentTable());
+            ps.setOutgoingPayload(payload);
             doTestLoadShedding(true, ps.bind());
         }
         finally

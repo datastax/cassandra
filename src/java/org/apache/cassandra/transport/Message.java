@@ -26,7 +26,6 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
-import java.util.function.BiConsumer;
 
 import com.google.common.annotations.VisibleForTesting;
 
@@ -45,9 +44,12 @@ import org.apache.cassandra.transport.messages.*;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.MonotonicClock;
+import org.apache.cassandra.utils.MonotonicClockTranslation;
 import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.utils.ReflectionUtils;
 import org.apache.cassandra.utils.UUIDGen;
+
+import static org.apache.cassandra.utils.MonotonicClock.approxTime;
 
 /**
  * A message from the CQL binary protocol.
@@ -219,7 +221,7 @@ public abstract class Message
     public static abstract class Request extends Message
     {
         private boolean tracingRequested;
-        private final long creationTimeNanos = MonotonicClock.approxTime.now();
+        private long creationTimeNanos;
 
         protected Request(Type type)
         {
@@ -234,42 +236,46 @@ public abstract class Message
             return false;
         }
 
+        private void setCreationTimeNanos(long creationTimeNanos)
+        {
+            this.creationTimeNanos = creationTimeNanos;
+        }
+
         /**
          * Returns the time elapsed since this request was created. Note that this is the total lifetime of the request
-         * in the system (inclding the time spent in the NTR queue, basic query parsing/set up, and any time spent in
-         * the queue for the async stage), so we expect increasing returned values across multiple calls to
-         * elapsedTimeSinceCreation.
+         * in the system, so we expect increasing returned values across multiple calls to elapsedTimeSinceCreation.
          *
          * @param timeUnit the time unit in which to return the elapsed time
          * @return the time elapsed since this request was created
          */
-        private long elapsedTimeSinceCreation(TimeUnit timeUnit)
+        protected long elapsedTimeSinceCreation(TimeUnit timeUnit)
         {
-            return elapsedTimeSince(creationTimeNanos, timeUnit);
-        }
-
-        private long elapsedTimeSince(long time, TimeUnit timeUnit)
-        {
-            return timeUnit.convert(MonotonicClock.approxTime.now() - time, TimeUnit.NANOSECONDS);
+            return timeUnit.convert(MonotonicClock.approxTime.now() - creationTimeNanos, TimeUnit.NANOSECONDS);
         }
 
         /**
-         * Returns the time when the request was created in upstream components. This is optinally recorded in the custom
-         * payload using the {@link Message#REQUEST_CREATE_MILLIS} key.
+         * Returns the time that is optionally recorded in the custom payload using the {@link Message#REQUEST_CREATE_MILLIS}
+         * key or falls back to fallbackCreationTime if not present. The timeSnapshot is used to translate the wall clock
+         * time to monotonic clock time. The fallbackCreationTime is returned as is if {@link Message#REQUEST_CREATE_MILLIS}
+         * is not present.
          *
-         * @return the time recorded in custom payload via {@link Message#REQUEST_CREATE_MILLIS} or -1 if not present
+         * @param timeSnapshot the current time snapshot used for time translation
+         * @param fallbackCreationTime the fallback creation time
+         *
+         * @return the time recorded in the custom payload via {@link Message#REQUEST_CREATE_MILLIS} or fallbackCreationTime
+         * if not present
          */
-        private long customPayloadRequestTime()
+        private long calculateCreationTimeNanos(MonotonicClockTranslation timeSnapshot, long fallbackCreationTime)
         {
             Map<String, ByteBuffer> customPayload = getCustomPayload();
             if (customPayload != null && customPayload.containsKey(REQUEST_CREATE_MILLIS))
             {
-                ByteBuffer requestCreateNanosBuffer = customPayload.get(REQUEST_CREATE_MILLIS);
+                ByteBuffer requestCreateMillisBuffer = customPayload.get(REQUEST_CREATE_MILLIS);
                 try
                 {
-                    long requestCreationEpochMillis = ByteBufferUtil.toLong(requestCreateNanosBuffer);
+                    long requestCreationEpochMillis = ByteBufferUtil.toLong(requestCreateMillisBuffer);
                     // translate wall clock time to monotonic clock time
-                    return MonotonicClock.approxTime.translate().fromMillisSinceEpoch(requestCreationEpochMillis);
+                    return timeSnapshot.fromMillisSinceEpoch(requestCreationEpochMillis);
                 }
                 catch (Exception e)
                 {
@@ -277,43 +283,16 @@ public abstract class Message
                 }
             }
 
-            return -1;
-        }
-
-        /**
-         * Check if the request has expired. If it has, call the onExpired callback. It respects the
-         * {@link Message#REQUEST_CREATE_MILLIS} key in the custom payload to determine the time when the request was and
-         * falls back to {@link Request#creationTimeNanos} if not present.
-         *
-         * @param queueTimeRecoder a callback to record the time spent in the NTR queue
-         * @param onExpired        a runnable to call if the request has expired, exceptions are propagated to the caller.
-         * @return true if the request has expired, false otherwise
-         */
-        protected boolean maybeExpire(BiConsumer<Long, TimeUnit> queueTimeRecoder, Runnable onExpired)
-        {
-            long customPayloadRequestTime = customPayloadRequestTime();
-            long elapsedTimeSinceCreation = elapsedTimeSinceCreation(TimeUnit.NANOSECONDS);
-
-            // always record the queue time, even if the request has custom payload request time
-            queueTimeRecoder.accept(elapsedTimeSinceCreation, TimeUnit.NANOSECONDS);
-
-            long elapsedTime = customPayloadRequestTime == -1
-                               ? elapsedTimeSinceCreation
-                               : elapsedTimeSince(customPayloadRequestTime, TimeUnit.NANOSECONDS);
-            if (elapsedTime > DatabaseDescriptor.getNativeTransportTimeout(TimeUnit.NANOSECONDS))
-            {
-                onExpired.run();
-                return true;
-            }
-
-            return false;
+            return fallbackCreationTime;
         }
 
         protected abstract CompletableFuture<Response> maybeExecuteAsync(QueryState queryState, long queryStartNanoTime, boolean traceRequest);
 
         public final CompletableFuture<Response> execute(QueryState queryState, long queryStartNanoTime)
         {
-            if (maybeExpire(ClientMetrics.instance::recordQueueTime, () -> {}))
+            long elapsedTimeSinceCreation = elapsedTimeSinceCreation(TimeUnit.NANOSECONDS);
+            ClientMetrics.instance.recordQueueTime(elapsedTimeSinceCreation, TimeUnit.NANOSECONDS);
+            if (elapsedTimeSinceCreation > DatabaseDescriptor.getNativeTransportTimeout(TimeUnit.NANOSECONDS))
             {
                 ClientMetrics.instance.markTimedOutBeforeProcessing();
                 return CompletableFuture.completedFuture(ErrorMessage.fromException(new OverloadedException("Query timed out before it could start")));
@@ -502,6 +481,9 @@ public abstract class Message
             if (isCustomPayload && inbound.header.version.isSmallerThan(ProtocolVersion.V4))
                 throw new ProtocolException("Received frame with CUSTOM_PAYLOAD flag for native protocol version < 4");
 
+            long now = approxTime.now();
+            MonotonicClockTranslation timeSnapshot = approxTime.translate();
+
             Message message = inbound.header.type.codec.decode(inbound.body, inbound.header.version);
             message.setStreamId(inbound.header.streamId);
             message.setSource(inbound);
@@ -515,6 +497,8 @@ public abstract class Message
                 req.attach(connection);
                 if (isTracing)
                     req.setTracingRequested();
+                long creationTimeNanos = req.calculateCreationTimeNanos(timeSnapshot, now);
+                req.setCreationTimeNanos(creationTimeNanos);
             }
             else
             {

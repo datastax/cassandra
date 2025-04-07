@@ -168,10 +168,13 @@ public class ExecuteMessage extends Message.Request
                                                {
                                                    try
                                                    {
-                                                       maybeExpire(ClientMetrics.instance::recordAsyncQueueTime, () -> {
+                                                       long elapsedTime = elapsedTimeSinceCreation(TimeUnit.NANOSECONDS);
+                                                       ClientMetrics.instance.recordAsyncQueueTime(elapsedTime, TimeUnit.NANOSECONDS);
+                                                       if (elapsedTime > DatabaseDescriptor.getNativeTransportTimeout(TimeUnit.NANOSECONDS))
+                                                       {
                                                            ClientMetrics.instance.markTimedOutBeforeAsyncProcessing();
                                                            throw new OverloadedException("Query timed out before it could start");
-                                                       });
+                                                       }
                                                    }
                                                    catch (Exception e)
                                                    {
