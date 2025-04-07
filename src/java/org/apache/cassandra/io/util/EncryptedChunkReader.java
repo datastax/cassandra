@@ -214,6 +214,11 @@ public abstract class EncryptedChunkReader extends AbstractReaderFileProxy imple
             {
                 //TODO how to handle it?
             }
+
+            if (!encryptor.canDecompressInPlace())
+            {
+                BufferPools.forChunkCache().put(input);
+            }
         }
 
         @Override
