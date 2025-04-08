@@ -38,6 +38,7 @@ import java.util.stream.StreamSupport;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+import org.junit.Assume;
 import org.junit.Before;
 import org.junit.Ignore;
 import org.junit.Rule;
@@ -1359,6 +1360,10 @@ public abstract class CQLSSTableWriterTest
     @Test
     public void testWriteWithSAI() throws Exception
     {
+        Assume.assumeTrue("SAI only supports Murmur3Partitioner",
+                          !DatabaseDescriptor.isDaemonInitialized()
+                          || DatabaseDescriptor.getPartitioner() instanceof Murmur3Partitioner);
+
         writeWithSaiInternal();
         writeWithSaiInternal();
     }
