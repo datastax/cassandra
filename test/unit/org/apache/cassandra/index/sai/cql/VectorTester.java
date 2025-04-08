@@ -84,7 +84,8 @@ public class VectorTester extends SAITester
                                                  16,
                                                  100,
                                                  1.2f,
-                                                 1.4f);
+                                                 1.4f,
+                                                 false);
 
         for (float[] raw : rawVectors)
         {
