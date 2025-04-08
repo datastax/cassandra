@@ -239,6 +239,7 @@ public class BatchMessage extends Message.Request
                                                        ClientMetrics.instance.recordAsyncElapsedTimeSinceCreation(elapsedTime, TimeUnit.NANOSECONDS);
                                                        if (elapsedTime > DatabaseDescriptor.getNativeTransportTimeout(TimeUnit.NANOSECONDS))
                                                        {
+                                                           noSpam.debug("markTimedOutBeforeProcessing because {} > {}", elapsedTime, DatabaseDescriptor.getNativeTransportTimeout(TimeUnit.NANOSECONDS));
                                                            ClientMetrics.instance.markTimedOutBeforeAsyncProcessing();
                                                            throw new OverloadedException("Query timed out before it could start");
                                                        }

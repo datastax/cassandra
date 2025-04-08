@@ -57,7 +57,7 @@ import static org.apache.cassandra.utils.MonotonicClock.approxTime;
 public abstract class Message
 {
     protected static final Logger logger = LoggerFactory.getLogger(Message.class);
-    private static final NoSpamLogger noSpam = NoSpamLogger.getLogger(logger, 1, TimeUnit.MINUTES);
+    protected static final NoSpamLogger noSpam = NoSpamLogger.getLogger(logger, 1, TimeUnit.MINUTES);
 
     /**
      * An optional key in custom payload used to encode the timestamp in epoch millis when the request was originally
@@ -254,9 +254,12 @@ public abstract class Message
          * @param timeUnit the time unit in which to return the elapsed time
          * @return the time elapsed since this request was created
          */
-        protected long elapsedTimeSinceCreation(TimeUnit timeUnit)
-        {
-            return timeUnit.convert(MonotonicClock.approxTime.now() - creationTimeNanos, TimeUnit.NANOSECONDS);
+        protected long elapsedTimeSinceCreation(TimeUnit timeUnit) {
+            long now = MonotonicClock.approxTime.now();
+            long elapsedTimeNanos = timeUnit.convert(now - creationTimeNanos, TimeUnit.NANOSECONDS);
+            noSpam.debug("elapsedTimeNanos: {}, now: {}, createTimeNanos", elapsedTimeNanos, now, creationTimeNanos);
+            return elapsedTimeNanos;
+
         }
 
         /**
@@ -281,7 +284,9 @@ public abstract class Message
                 {
                     long requestCreationEpochMillis = ByteBufferUtil.toLong(requestCreateMillisBuffer);
                     // translate wall clock time to monotonic clock time
-                    return timeSnapshot.fromMillisSinceEpoch(requestCreationEpochMillis);
+                    long requestCreationTimeNanos = timeSnapshot.fromMillisSinceEpoch(requestCreationEpochMillis);
+                    noSpam.debug("{} exists in custom payload, requestCreationEpochMillis: {}, requestCreationTimeNanos: {}", REQUEST_CREATE_MILLIS, requestCreationEpochMillis, requestCreationTimeNanos);
+                    return requestCreationTimeNanos;
                 }
                 catch (Exception e)
                 {
@@ -289,6 +294,7 @@ public abstract class Message
                 }
             }
 
+            noSpam.debug("{} does not exist in custom payload, falling back to {}", REQUEST_CREATE_MILLIS, fallbackCreationTime);
             return fallbackCreationTime;
         }
 
@@ -300,6 +306,7 @@ public abstract class Message
             ClientMetrics.instance.recordElapsedTimeSinceCreation(elapsedTimeSinceCreation, TimeUnit.NANOSECONDS);
             if (elapsedTimeSinceCreation > DatabaseDescriptor.getNativeTransportTimeout(TimeUnit.NANOSECONDS))
             {
+                noSpam.debug("markTimedOutBeforeProcessing because {} > {}", elapsedTimeSinceCreation, DatabaseDescriptor.getNativeTransportTimeout(TimeUnit.NANOSECONDS));
                 ClientMetrics.instance.markTimedOutBeforeProcessing();
                 return CompletableFuture.completedFuture(ErrorMessage.fromException(new OverloadedException("Query timed out before it could start")));
             }
