@@ -257,7 +257,7 @@ public abstract class Message
         protected long elapsedTimeSinceCreation(TimeUnit timeUnit) {
             long now = MonotonicClock.approxTime.now();
             long elapsedTimeNanos = timeUnit.convert(now - creationTimeNanos, TimeUnit.NANOSECONDS);
-            noSpam.debug("elapsedTimeNanos: {}, now: {}, createTimeNanos", elapsedTimeNanos, now, creationTimeNanos);
+            noSpam.debug("elapsedTimeNanos: {}, now: {}, createTimeNanos: {}, Message: {}", elapsedTimeNanos, now, creationTimeNanos, this);
             return elapsedTimeNanos;
 
         }
@@ -306,7 +306,7 @@ public abstract class Message
             ClientMetrics.instance.recordElapsedTimeSinceCreation(elapsedTimeSinceCreation, TimeUnit.NANOSECONDS);
             if (elapsedTimeSinceCreation > DatabaseDescriptor.getNativeTransportTimeout(TimeUnit.NANOSECONDS))
             {
-                noSpam.debug("markTimedOutBeforeProcessing because {} > {}", elapsedTimeSinceCreation, DatabaseDescriptor.getNativeTransportTimeout(TimeUnit.NANOSECONDS));
+                noSpam.debug("markTimedOutBeforeProcessing because {} > {}, Message: {} ", elapsedTimeSinceCreation, DatabaseDescriptor.getNativeTransportTimeout(TimeUnit.NANOSECONDS), this);
                 ClientMetrics.instance.markTimedOutBeforeProcessing();
                 return CompletableFuture.completedFuture(ErrorMessage.fromException(new OverloadedException("Query timed out before it could start")));
             }
