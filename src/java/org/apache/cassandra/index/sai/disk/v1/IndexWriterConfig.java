@@ -24,7 +24,6 @@ import java.util.stream.Collectors;
 import com.google.common.annotations.VisibleForTesting;
 
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
-import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.disk.vector.VectorSourceModel;
@@ -45,6 +44,9 @@ public class IndexWriterConfig
 
     public static final String MAXIMUM_NODE_CONNECTIONS = "maximum_node_connections";
     public static final String CONSTRUCTION_BEAM_WIDTH = "construction_beam_width";
+    public static final String NEIGHBORHOOD_OVERFLOW = "neighborhood_overflow";
+    public static final String ALPHA = "alpha";
+    public static final String ENABLE_HIERARCHY = "enable_hierarchy";
     public static final String SIMILARITY_FUNCTION = "similarity_function";
     public static final String SOURCE_MODEL = "source_model";
     public static final String OPTIMIZE_FOR = "optimize_for"; // unused, retained for compatibility w/ old schemas
@@ -54,6 +56,7 @@ public class IndexWriterConfig
 
     public static final int DEFAULT_MAXIMUM_NODE_CONNECTIONS = 16;
     public static final int DEFAULT_CONSTRUCTION_BEAM_WIDTH = 100;
+    public static final boolean DEFAULT_ENABLE_HIERARCHY = false;
 
     public static final int MAX_TOP_K = SAI_VECTOR_SEARCH_MAX_TOP_K.getInt();
 
@@ -87,6 +90,10 @@ public class IndexWriterConfig
     private final VectorSimilarityFunction similarityFunction;
     private final VectorSourceModel sourceModel;
 
+    private final Float neighborhoodOverflow; // default varies for in memory/compaction build
+    private final Float alpha; // default varies for in memory/compaction build
+    private final boolean enableHierarchy; // defaults to false
+
     public IndexWriterConfig(String indexName,
                              int bkdPostingsSkip,
                              int bkdPostingsMinLeaves)
@@ -109,6 +116,21 @@ public class IndexWriterConfig
                              VectorSimilarityFunction similarityFunction,
                              VectorSourceModel sourceModel)
     {
+        this(indexName, bkdPostingsSkip, bkdPostingsMinLeaves, maximumNodeConnections, constructionBeamWidth,
+             similarityFunction, sourceModel, null, null, false);
+    }
+
+    public IndexWriterConfig(String indexName,
+                             int bkdPostingsSkip,
+                             int bkdPostingsMinLeaves,
+                             int maximumNodeConnections,
+                             int constructionBeamWidth,
+                             VectorSimilarityFunction similarityFunction,
+                             VectorSourceModel sourceModel,
+                             Float neighborhoodOverflow,
+                             Float alpha,
+                             boolean enableHierarchy)
+    {
         this.indexName = indexName;
         this.bkdPostingsSkip = bkdPostingsSkip;
         this.bkdPostingsMinLeaves = bkdPostingsMinLeaves;
@@ -116,6 +138,9 @@ public class IndexWriterConfig
         this.constructionBeamWidth = constructionBeamWidth;
         this.similarityFunction = similarityFunction;
         this.sourceModel = sourceModel;
+        this.neighborhoodOverflow = neighborhoodOverflow;
+        this.alpha = alpha;
+        this.enableHierarchy = enableHierarchy;
     }
 
     public String getIndexName()
@@ -164,6 +189,21 @@ public class IndexWriterConfig
         return sourceModel;
     }
 
+    public float getNeighborhoodOverflow(float defaultValue)
+    {
+        return neighborhoodOverflow == null ? defaultValue : neighborhoodOverflow;
+    }
+
+    public float getAlpha(float defaultValue)
+    {
+        return alpha == null ? defaultValue : alpha;
+    }
+
+    public boolean isHierarchyEnabled()
+    {
+        return enableHierarchy;
+    }
+
     public static IndexWriterConfig fromOptions(String indexName, AbstractType<?> type, Map<String, String> options)
     {
         int minLeaves = DEFAULT_POSTING_LIST_MIN_LEAVES;
@@ -172,6 +212,10 @@ public class IndexWriterConfig
         int queueSize = DEFAULT_CONSTRUCTION_BEAM_WIDTH;
         VectorSourceModel sourceModel = DEFAULT_SOURCE_MODEL;
         VectorSimilarityFunction similarityFunction = sourceModel.defaultSimilarityFunction; // don't leave null in case no options at all are given
+
+        Float neighborhoodOverflow = null;
+        Float alpha = null;
+        boolean enableHierarchy = DEFAULT_ENABLE_HIERARCHY;
 
         if (options.get(POSTING_LIST_LVL_MIN_LEAVES) != null || options.get(POSTING_LIST_LVL_SKIP_OPTION) != null)
         {
@@ -214,16 +258,16 @@ public class IndexWriterConfig
                  options.get(CONSTRUCTION_BEAM_WIDTH) != null ||
                  options.get(OPTIMIZE_FOR) != null ||
                  options.get(SIMILARITY_FUNCTION) != null ||
-                 options.get(SOURCE_MODEL) != null)
+                 options.get(SOURCE_MODEL) != null ||
+                 options.get(NEIGHBORHOOD_OVERFLOW) != null ||
+                 options.get(ALPHA) != null ||
+                 options.get(ENABLE_HIERARCHY) != null)
         {
             if (!type.isVector())
                 throw new InvalidRequestException(String.format("CQL type %s cannot have vector options", type.asCQL3Type()));
 
             if (options.containsKey(MAXIMUM_NODE_CONNECTIONS))
             {
-                if (!CassandraRelevantProperties.SAI_HNSW_ALLOW_CUSTOM_PARAMETERS.getBoolean())
-                    throw new InvalidRequestException(String.format("Maximum node connections cannot be set without enabling %s", CassandraRelevantProperties.SAI_HNSW_ALLOW_CUSTOM_PARAMETERS.name()));
-
                 try
                 {
                     maximumNodeConnections = Integer.parseInt(options.get(MAXIMUM_NODE_CONNECTIONS));
@@ -238,9 +282,6 @@ public class IndexWriterConfig
             }
             if (options.containsKey(CONSTRUCTION_BEAM_WIDTH))
             {
-                if (!CassandraRelevantProperties.SAI_HNSW_ALLOW_CUSTOM_PARAMETERS.getBoolean())
-                    throw new InvalidRequestException(String.format("Construction beam width cannot be set without enabling %s", CassandraRelevantProperties.SAI_HNSW_ALLOW_CUSTOM_PARAMETERS.name()));
-
                 try
                 {
                     queueSize = Integer.parseInt(options.get(CONSTRUCTION_BEAM_WIDTH));
@@ -286,9 +327,51 @@ public class IndexWriterConfig
             {
                 similarityFunction = sourceModel.defaultSimilarityFunction;
             }
+
+            if (options.containsKey(NEIGHBORHOOD_OVERFLOW))
+            {
+                try
+                {
+                    neighborhoodOverflow = Float.parseFloat(options.get(NEIGHBORHOOD_OVERFLOW));
+                    if (neighborhoodOverflow < 1.0f)
+                        throw new InvalidRequestException(String.format("Neighborhood overflow for index %s must be >= 1.0, was %s",
+                                                                      indexName, neighborhoodOverflow));
+                }
+                catch (NumberFormatException e)
+                {
+                    throw new InvalidRequestException(String.format("Neighborhood overflow %s is not a valid float for index %s",
+                                                                    options.get(NEIGHBORHOOD_OVERFLOW), indexName));
+                }
+            }
+
+            if (options.containsKey(ALPHA))
+            {
+                try
+                {
+                    alpha = Float.parseFloat(options.get(ALPHA));
+                    if (alpha <= 0)
+                        throw new InvalidRequestException(String.format("Alpha for index %s must be > 0, was %s", 
+                                                                      indexName, alpha));
+                }
+                catch (NumberFormatException e)
+                {
+                    throw new InvalidRequestException(String.format("Alpha %s is not a valid float for index %s",
+                                                                  options.get(ALPHA), indexName));
+                }
+            }
+
+            if (options.containsKey(ENABLE_HIERARCHY))
+            {
+                String value = options.get(ENABLE_HIERARCHY).toLowerCase();
+                if (!value.equals("true") && !value.equals("false"))
+                    throw new InvalidRequestException(String.format("Enable hierarchy must be 'true' or 'false' for index %s, was '%s'",
+                                                                  indexName, value));
+                enableHierarchy = Boolean.parseBoolean(value);
+            }
         }
 
-        return new IndexWriterConfig(indexName, skip, minLeaves, maximumNodeConnections, queueSize, similarityFunction, sourceModel);
+        return new IndexWriterConfig(indexName, skip, minLeaves, maximumNodeConnections, queueSize,
+                                   similarityFunction, sourceModel, neighborhoodOverflow, alpha, enableHierarchy);
     }
 
     public static IndexWriterConfig defaultConfig(String indexName)
@@ -311,12 +394,15 @@ public class IndexWriterConfig
     @Override
     public String toString()
     {
-        return String.format("IndexWriterConfig{%s=%d, %s=%d, %s=%d, %s=%d, %s=%s, %s=%s}",
+        return String.format("IndexWriterConfig{%s=%d, %s=%d, %s=%d, %s=%d, %s=%s, %s=%s, %s=%f, %s=%f, %s=%b}",
                              POSTING_LIST_LVL_SKIP_OPTION, bkdPostingsSkip,
                              POSTING_LIST_LVL_MIN_LEAVES, bkdPostingsMinLeaves,
                              MAXIMUM_NODE_CONNECTIONS, maximumNodeConnections,
                              CONSTRUCTION_BEAM_WIDTH, constructionBeamWidth,
                              SIMILARITY_FUNCTION, similarityFunction,
-                             SOURCE_MODEL, sourceModel);
+                             SOURCE_MODEL, sourceModel,
+                             NEIGHBORHOOD_OVERFLOW, neighborhoodOverflow,
+                             ALPHA, alpha,
+                             ENABLE_HIERARCHY, enableHierarchy);
     }
 }
