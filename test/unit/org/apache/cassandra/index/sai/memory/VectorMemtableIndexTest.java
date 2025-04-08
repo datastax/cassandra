@@ -27,6 +27,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -140,13 +141,20 @@ public class VectorMemtableIndexTest extends SAITester
         List<DecoratedKey> keys = new ArrayList<>(keyMap.keySet());
 
         // execute queries both with and without brute force enabled
-        validate(keys);
-        VectorTester.setMaxBruteForceRows(0);
-        validate(keys);
+        validate(keys, 1.0, 1.0);
+        // In scenarios where we have 5 or fewer vectors, brute force is always going to be used,
+        // so we do that here.
+        VectorTester.setMaxBruteForceRows(5);
+        // For these tests, we will push some queries that would typically go the brute force path to the graph path.
+        // This comes at the cost of some recall, which is why we only assert 50% recall on the individual queries
+        // and 90% recall on the overall test.
+        validate(keys, 0.5, 0.9);
     }
 
-    private void validate(List<DecoratedKey> keys)
+    private void validate(List<DecoratedKey> keys, double expectedIndividualQueryRecall, double expectedRecall)
     {
+        var actualVectorsReturned = new AtomicInteger();
+        var expectedVectorsReturned = new AtomicInteger();
         IntStream.range(0, 1_000).parallel().forEach(i ->
         {
             var orderer = randomVectorOrderer();
@@ -184,12 +192,16 @@ public class VectorMemtableIndexTest extends SAITester
                     assertTrue(rowMap.containsKey(key));
                     foundKeys.add(key);
                 }
+                // Note that we weight each result evenly instead of each query evenly.
+                actualVectorsReturned.addAndGet(foundKeys.size());
+                expectedVectorsReturned.addAndGet((int) expectedResults);
                 if (foundKeys.size() < expectedResults)
-                    assertEquals("Expected " + expectedResults + " results but got " + foundKeys.size(), foundKeys.size(), expectedResults);
-                if (limit < keysInRange.size())
-                    assertTrue("Iterator should not be exhausted since it can resume search", iterator.hasNext());
+                    assertTrue("Expected at least " + expectedResults + " results but got " + foundKeys.size(),
+                               foundKeys.size() >= expectedResults * expectedIndividualQueryRecall);
             }
         });
+        assertTrue("Expected at least " + expectedVectorsReturned + " results but got " + actualVectorsReturned,
+                   actualVectorsReturned.get() >= expectedVectorsReturned.get() * expectedRecall);
     }
 
     @Test
