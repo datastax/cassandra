@@ -26,7 +26,6 @@ import org.junit.Test;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import org.apache.cassandra.db.marshal.FloatType;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
-import org.apache.cassandra.index.sai.disk.vector.CompactionGraph;
 
 import static org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph.MIN_PQ_ROWS;
 import static org.junit.Assert.assertEquals;
@@ -76,7 +75,9 @@ public class VectorCompactionTest extends VectorTester.Versioned
             flush();
         }
 
-        CompactionGraph.PQ_TRAINING_SIZE = 2 * MIN_PQ_ROWS;
+//        TODO deterimine proper design for PQ training on vectors of dimension < 100.
+//        see https://github.com/riptano/cndb/issues/13630
+//        CompactionGraph.PQ_TRAINING_SIZE = 2 * MIN_PQ_ROWS;
         compact();
 
         // Confirm we can query the data with reasonable recall
