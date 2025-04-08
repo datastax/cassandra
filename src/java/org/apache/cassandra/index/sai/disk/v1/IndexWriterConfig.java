@@ -333,14 +333,14 @@ public class IndexWriterConfig
                 try
                 {
                     neighborhoodOverflow = Float.parseFloat(options.get(NEIGHBORHOOD_OVERFLOW));
-                    if (neighborhoodOverflow <= 0)
-                        throw new InvalidRequestException(String.format("Neighborhood overflow for index %s must be > 0, was %s", 
+                    if (neighborhoodOverflow < 1.0f)
+                        throw new InvalidRequestException(String.format("Neighborhood overflow for index %s must be >= 1.0, was %s",
                                                                       indexName, neighborhoodOverflow));
                 }
                 catch (NumberFormatException e)
                 {
                     throw new InvalidRequestException(String.format("Neighborhood overflow %s is not a valid float for index %s",
-                                                                  options.get(NEIGHBORHOOD_OVERFLOW), indexName));
+                                                                    options.get(NEIGHBORHOOD_OVERFLOW), indexName));
                 }
             }
 

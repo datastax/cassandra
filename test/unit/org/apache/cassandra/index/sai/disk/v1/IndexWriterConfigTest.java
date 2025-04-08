@@ -144,7 +144,7 @@ public class IndexWriterConfigTest
         options.put(IndexWriterConfig.NEIGHBORHOOD_OVERFLOW, "0");
         assertThatThrownBy(() -> IndexWriterConfig.fromOptions("test", VectorType.getInstance(FloatType.instance, 3), options))
         .isInstanceOf(InvalidRequestException.class)
-        .hasMessageContaining("Neighborhood overflow for index test must be > 0, was 0");
+        .hasMessageContaining("Neighborhood overflow for index test must be >= 1.0, was 0");
 
         // Provide a non-float overflow
         options.put(IndexWriterConfig.NEIGHBORHOOD_OVERFLOW, "abc");
