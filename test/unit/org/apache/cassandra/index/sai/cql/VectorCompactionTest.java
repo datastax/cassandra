@@ -77,7 +77,9 @@ public class VectorCompactionTest extends VectorTester.Versioned
             flush();
         }
 
-        CompactionGraph.PQ_TRAINING_SIZE = 2 * MIN_PQ_ROWS;
+//        TODO deterimine proper design for PQ training on vectors of dimension < 100.
+//        see https://github.com/riptano/cndb/issues/13630
+//        CompactionGraph.PQ_TRAINING_SIZE = 2 * MIN_PQ_ROWS;
         compact();
 
         // Confirm we can query the data with reasonable recall
