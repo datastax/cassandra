@@ -239,7 +239,7 @@ public class BatchMessage extends Message.Request
                                                        ClientMetrics.instance.recordAsyncElapsedTimeSinceCreation(elapsedTime, TimeUnit.NANOSECONDS);
                                                        if (elapsedTime > DatabaseDescriptor.getNativeTransportTimeout(TimeUnit.NANOSECONDS))
                                                        {
-                                                           noSpam.debug("markTimedOutBeforeAsyncProcessing because {} > {}, Message: {} ", elapsedTime, DatabaseDescriptor.getNativeTransportTimeout(TimeUnit.NANOSECONDS), this);
+                                                           logger.debug("markTimedOutBeforeAsyncProcessing because {} > {}, Message: {}, CustomPayload: {} ", elapsedTime, DatabaseDescriptor.getNativeTransportTimeout(TimeUnit.NANOSECONDS), this, getCustomPayload());
                                                            ClientMetrics.instance.markTimedOutBeforeAsyncProcessing();
                                                            throw new OverloadedException("Query timed out before it could start");
                                                        }

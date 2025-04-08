@@ -257,7 +257,7 @@ public abstract class Message
         protected long elapsedTimeSinceCreation(TimeUnit timeUnit) {
             long now = MonotonicClock.approxTime.now();
             long elapsedTimeNanos = timeUnit.convert(now - creationTimeNanos, TimeUnit.NANOSECONDS);
-            noSpam.debug("elapsedTimeNanos: {}, now: {}, createTimeNanos: {}, Message: {}", elapsedTimeNanos, now, creationTimeNanos, this);
+            logger.debug("elapsedTimeNanos: {}, now: {}, createTimeNanos: {}, Message: {}, CustomPayload: {}", elapsedTimeNanos, now, creationTimeNanos, this, this.getCustomPayload());
             return elapsedTimeNanos;
 
         }
@@ -285,16 +285,16 @@ public abstract class Message
                     long requestCreationEpochMillis = ByteBufferUtil.toLong(requestCreateMillisBuffer);
                     // translate wall clock time to monotonic clock time
                     long requestCreationTimeNanos = timeSnapshot.fromMillisSinceEpoch(requestCreationEpochMillis);
-                    noSpam.debug("{} exists in custom payload, requestCreationEpochMillis: {}, requestCreationTimeNanos: {}", REQUEST_CREATE_MILLIS, requestCreationEpochMillis, requestCreationTimeNanos);
+                    logger.debug("{} exists in custom payload, requestCreationEpochMillis: {}, requestCreationTimeNanos: {}", REQUEST_CREATE_MILLIS, requestCreationEpochMillis, requestCreationTimeNanos);
                     return requestCreationTimeNanos;
                 }
                 catch (Exception e)
                 {
-                    noSpam.warn("{} exists in custom payload, but its value cannot be extracted", REQUEST_CREATE_MILLIS, e);
+                    logger.warn("{} exists in custom payload, but its value cannot be extracted", REQUEST_CREATE_MILLIS, e);
                 }
             }
 
-            noSpam.debug("{} does not exist in custom payload, falling back to {}", REQUEST_CREATE_MILLIS, fallbackCreationTime);
+            logger.debug("{} does not exist in custom payload, falling back to {}", REQUEST_CREATE_MILLIS, fallbackCreationTime);
             return fallbackCreationTime;
         }
 
@@ -306,7 +306,7 @@ public abstract class Message
             ClientMetrics.instance.recordElapsedTimeSinceCreation(elapsedTimeSinceCreation, TimeUnit.NANOSECONDS);
             if (elapsedTimeSinceCreation > DatabaseDescriptor.getNativeTransportTimeout(TimeUnit.NANOSECONDS))
             {
-                noSpam.debug("markTimedOutBeforeProcessing because {} > {}, Message: {} ", elapsedTimeSinceCreation, DatabaseDescriptor.getNativeTransportTimeout(TimeUnit.NANOSECONDS), this);
+                logger.debug("markTimedOutBeforeProcessing because {} > {}, Message: {}, CustomPayload: {}", elapsedTimeSinceCreation, DatabaseDescriptor.getNativeTransportTimeout(TimeUnit.NANOSECONDS), this, getCustomPayload());
                 ClientMetrics.instance.markTimedOutBeforeProcessing();
                 return CompletableFuture.completedFuture(ErrorMessage.fromException(new OverloadedException("Query timed out before it could start")));
             }
