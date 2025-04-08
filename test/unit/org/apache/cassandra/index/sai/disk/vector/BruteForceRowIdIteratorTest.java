@@ -88,7 +88,7 @@ public class BruteForceRowIdIteratorTest
         }
 
         @Override
-        public NodesIterator getNeighborsIterator(int i)
+        public NodesIterator getNeighborsIterator(int i, int i1)
         {
             throw new UnsupportedOperationException();
         }
@@ -100,7 +100,7 @@ public class BruteForceRowIdIteratorTest
         }
 
         @Override
-        public int entryNode()
+        public GraphIndex.NodeAtLevel entryNode()
         {
             throw new UnsupportedOperationException();
         }

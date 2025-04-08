@@ -33,10 +33,9 @@ import org.junit.runners.Parameterized;
 
 import io.github.jbellis.jvector.graph.GraphSearcher;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
-import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.cql3.UntypedResultSet;
-import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
+import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
 import org.apache.cassandra.index.sai.disk.v1.SegmentBuilder;
 import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
 import org.apache.cassandra.index.sai.disk.vector.VectorSourceModel;
@@ -49,6 +48,7 @@ import org.apache.cassandra.inject.InvokePointBuilder;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 @RunWith(Parameterized.class)
 public class VectorTypeTest extends VectorTester.VersionedWithChecksums
@@ -324,18 +324,8 @@ public class VectorTypeTest extends VectorTester.VersionedWithChecksums
     public void changingOptionsTest()
     {
         createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
-        if (CassandraRelevantProperties.SAI_HNSW_ALLOW_CUSTOM_PARAMETERS.getBoolean())
-        {
-            createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = " +
-                        "{'maximum_node_connections' : 10, 'construction_beam_width' : 200, 'similarity_function' : 'euclidean' }");
-        }
-        else
-        {
-            assertThatThrownBy(() -> createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = " +
-                                                 "{'maximum_node_connections' : 10, 'construction_beam_width' : 200, 'similarity_function' : 'euclidean' }"))
-            .isInstanceOf(InvalidRequestException.class);
-            return;
-        }
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = " +
+                    "{'maximum_node_connections' : 10, 'construction_beam_width' : 200, 'similarity_function' : 'euclidean' }");
 
         execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', [1.0, 2.0, 3.0])");
         execute("INSERT INTO %s (pk, str_val, val) VALUES (1, 'B', [2.0, 3.0, 4.0])");
@@ -953,4 +943,58 @@ public class VectorTypeTest extends VectorTester.VersionedWithChecksums
             assertRows(execute("SELECT i FROM %s WHERE c >= 1 ORDER BY v ANN OF [1,1] LIMIT 1"), row(1));
         });
     }
+
+    @Test
+    public void newJVectorOptionsTest()
+    {
+        // This test ensures that we can set and retrieve new jvector parameters
+        // (neighborhood_overflow, alpha, enable_hierarchy), and that they are honored at index build time.
+
+        createTable("CREATE TABLE %s (pk int, txt text, vec vector<float, 4>, PRIMARY KEY(pk))");
+
+        // We'll specify a few options, including the existing ones (e.g. maximum_node_connections).
+        // Setting dimension=4 also triggers the default alpha=1.2 if not overridden,
+        // which you can compare to your own defaults in the IndexWriterConfig code.
+
+        // This should succeed.
+        createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex' "
+                    + "WITH OPTIONS = {"
+                    + "  'maximum_node_connections' : '20', "
+                    + "  'construction_beam_width'   : '300', "
+                    + "  'similarity_function'       : 'euclidean', "
+                    + "  'enable_hierarchy'          : 'true', "
+                    + "  'neighborhood_overflow'     : '1.5', "
+                    + "  'alpha'                     : '1.8' "
+                    + '}');
+
+        // Insert some data
+        execute("INSERT INTO %s (pk, txt, vec) VALUES (0, 'row0', [1.0, 2.0, 3.0, 4.0])");
+        execute("INSERT INTO %s (pk, txt, vec) VALUES (1, 'row1', [2.0, 2.5, 3.5, 4.5])");
+        execute("INSERT INTO %s (pk, txt, vec) VALUES (2, 'row2', [5.0, 1.0, 1.0, 1.0])");
+        // Run basic query
+        assertRows(execute("SELECT pk FROM %s ORDER BY vec ANN OF [2.0, 2.0, 3.0, 4.0] LIMIT 2"), row(1), row(0));
+        // Confirm that we can flush with custom options
+        flush();
+        // Run basic query
+        assertRows(execute("SELECT pk FROM %s ORDER BY vec ANN OF [2.0, 2.0, 3.0, 4.0] LIMIT 2"), row(1), row(0));
+        // Confirm that we can compact with custom options
+        compact();
+        // Run basic query
+        assertRows(execute("SELECT pk FROM %s ORDER BY vec ANN OF [2.0, 2.0, 3.0, 4.0] LIMIT 2"), row(1), row(0));
+
+        // Confirm that the config picks up our custom settings.
+        StorageAttachedIndex saiIndex =
+        (StorageAttachedIndex) getCurrentColumnFamilyStore().indexManager.listIndexes().iterator().next();
+
+        IndexWriterConfig config = saiIndex.getIndexContext().getIndexWriterConfig();
+        // Check the new fields
+        assertEquals(1.5f, config.getNeighborhoodOverflow(999f), 0.0001f);
+        assertEquals(1.8f,  config.getAlpha(999f),               0.0001f);
+        assertTrue(config.isHierarchyEnabled());
+        assertEquals(20,    config.getMaximumNodeConnections());
+        assertEquals(40,    config.getAnnMaxDegree());
+        assertEquals(300,   config.getConstructionBeamWidth());
+        assertEquals(VectorSimilarityFunction.EUCLIDEAN, config.getSimilarityFunction());
+    }
+
 }
