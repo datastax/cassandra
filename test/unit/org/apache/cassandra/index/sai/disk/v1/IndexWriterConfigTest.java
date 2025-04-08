@@ -23,7 +23,6 @@ import java.util.Map;
 
 import org.junit.Test;
 
-import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.marshal.FloatType;
 import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -47,8 +46,6 @@ public class IndexWriterConfigTest
     @Test
     public void maximumNodeConnectionsTest()
     {
-        CassandraRelevantProperties.SAI_HNSW_ALLOW_CUSTOM_PARAMETERS.setBoolean(true);
-
         Map<String, String> options = new HashMap<>();
         options.put(IndexWriterConfig.MAXIMUM_NODE_CONNECTIONS, "10");
         IndexWriterConfig config = IndexWriterConfig.fromOptions("test", VectorType.getInstance(FloatType.instance, 3), options);
@@ -73,8 +70,6 @@ public class IndexWriterConfigTest
     @Test
     public void queueSizeTest()
     {
-        CassandraRelevantProperties.SAI_HNSW_ALLOW_CUSTOM_PARAMETERS.setBoolean(true);
-
         Map<String, String> options = new HashMap<>();
         options.put(IndexWriterConfig.CONSTRUCTION_BEAM_WIDTH, "150");
         IndexWriterConfig config = IndexWriterConfig.fromOptions("test", VectorType.getInstance(FloatType.instance, 3), options);
@@ -99,9 +94,6 @@ public class IndexWriterConfigTest
     @Test
     public void similarityFunctionTest()
     {
-        // Similarity function may be changed even when allow_custom_parameters is false
-        CassandraRelevantProperties.SAI_HNSW_ALLOW_CUSTOM_PARAMETERS.setBoolean(false);
-
         Map<String, String> options = new HashMap<>();
         options.put(IndexWriterConfig.SIMILARITY_FUNCTION, "DOT_PRODUCT");
         IndexWriterConfig config = IndexWriterConfig.fromOptions("test", VectorType.getInstance(FloatType.instance, 3), options);
@@ -115,5 +107,65 @@ public class IndexWriterConfigTest
         assertThatThrownBy(() -> IndexWriterConfig.fromOptions("test", VectorType.getInstance(FloatType.instance, 3), options))
         .isInstanceOf(InvalidRequestException.class)
         .hasMessage("Similarity function BLAH was not recognized for index test. Valid values are: EUCLIDEAN, DOT_PRODUCT, COSINE");
+    }
+
+    @Test
+    public void alphaTest()
+    {
+        Map<String, String> options = new HashMap<>();
+        // Provide a valid alpha
+        options.put(IndexWriterConfig.ALPHA, "1.7");
+        IndexWriterConfig config = IndexWriterConfig.fromOptions("test", VectorType.getInstance(FloatType.instance, 3), options);
+        assertThat(config.getAlpha(999f)).isEqualTo(1.7f);
+
+        // Provide an invalid (negative) alpha
+        options.put(IndexWriterConfig.ALPHA, "-5");
+        assertThatThrownBy(() -> IndexWriterConfig.fromOptions("test", VectorType.getInstance(FloatType.instance, 3), options))
+        .isInstanceOf(InvalidRequestException.class)
+        .hasMessageContaining("Alpha for index test must be > 0, was -5");
+
+        // Provide a non-float alpha
+        options.put(IndexWriterConfig.ALPHA, "abc");
+        assertThatThrownBy(() -> IndexWriterConfig.fromOptions("test", VectorType.getInstance(FloatType.instance, 3), options))
+        .isInstanceOf(InvalidRequestException.class)
+        .hasMessageContaining("Alpha abc is not a valid float for index test");
+    }
+
+    @Test
+    public void neighborhoodOverflowTest()
+    {
+        Map<String, String> options = new HashMap<>();
+        // Provide a valid neighborhood_overflow
+        options.put(IndexWriterConfig.NEIGHBORHOOD_OVERFLOW, "2.3");
+        IndexWriterConfig config = IndexWriterConfig.fromOptions("test", VectorType.getInstance(FloatType.instance, 3), options);
+        assertThat(config.getNeighborhoodOverflow(999f)).isEqualTo(2.3f);
+
+        // Provide invalid (<=0) overflow
+        options.put(IndexWriterConfig.NEIGHBORHOOD_OVERFLOW, "0");
+        assertThatThrownBy(() -> IndexWriterConfig.fromOptions("test", VectorType.getInstance(FloatType.instance, 3), options))
+        .isInstanceOf(InvalidRequestException.class)
+        .hasMessageContaining("Neighborhood overflow for index test must be >= 1.0, was 0");
+
+        // Provide a non-float overflow
+        options.put(IndexWriterConfig.NEIGHBORHOOD_OVERFLOW, "abc");
+        assertThatThrownBy(() -> IndexWriterConfig.fromOptions("test", VectorType.getInstance(FloatType.instance, 3), options))
+        .isInstanceOf(InvalidRequestException.class)
+        .hasMessageContaining("Neighborhood overflow abc is not a valid float for index test");
+    }
+
+    @Test
+    public void enableHierarchyTest()
+    {
+        Map<String, String> options = new HashMap<>();
+        // Provide a valid enable_hierarchy
+        options.put(IndexWriterConfig.ENABLE_HIERARCHY, "true");
+        IndexWriterConfig config = IndexWriterConfig.fromOptions("test", VectorType.getInstance(FloatType.instance, 3), options);
+        assertThat(config.isHierarchyEnabled()).isTrue();
+
+        // Provide an invalid enable_hierarchy
+        options.put(IndexWriterConfig.ENABLE_HIERARCHY, "foo");
+        assertThatThrownBy(() -> IndexWriterConfig.fromOptions("test", VectorType.getInstance(FloatType.instance, 3), options))
+        .isInstanceOf(InvalidRequestException.class)
+        .hasMessageContaining("Enable hierarchy must be 'true' or 'false' for index test, was 'foo'");
     }
 }
