@@ -224,10 +224,10 @@ public abstract class Message
 
         /**
          * Creation time of the message. If {@link Message#REQUEST_CREATE_MILLIS} is set in custom payload,
-         * {@link Message.Decoder#decodeMessage(Channel, Envelope)}} will use the encoded value, otherwise it will use
-         * current time when message was decoded.
+         * {@link Message.Decoder#decodeMessage(Channel, Envelope)}} will override it with the encoded value, otherwise
+         * it will keep current time when message was constructed.
          */
-        private long creationTimeNanos;
+        private long creationTimeNanos = MonotonicClock.approxTime.now();
 
         protected Request(Type type)
         {
@@ -274,7 +274,7 @@ public abstract class Message
          * @return the time recorded in the custom payload via {@link Message#REQUEST_CREATE_MILLIS} or fallbackCreationTime
          * if not present
          */
-        private long calculateCreationTimeNanos(MonotonicClockTranslation timeSnapshot, long fallbackCreationTime)
+        private void maybeOverrideCreationTimeNanos(MonotonicClockTranslation timeSnapshot)
         {
             Map<String, ByteBuffer> customPayload = getCustomPayload();
             if (customPayload != null && customPayload.containsKey(REQUEST_CREATE_MILLIS))
@@ -286,16 +286,13 @@ public abstract class Message
                     // translate wall clock time to monotonic clock time
                     long requestCreationTimeNanos = timeSnapshot.fromMillisSinceEpoch(requestCreationEpochMillis);
                     logger.debug("{} exists in custom payload, requestCreationEpochMillis: {}, requestCreationTimeNanos: {}", REQUEST_CREATE_MILLIS, requestCreationEpochMillis, requestCreationTimeNanos);
-                    return requestCreationTimeNanos;
+                    creationTimeNanos = requestCreationTimeNanos;
                 }
                 catch (Exception e)
                 {
                     logger.warn("{} exists in custom payload, but its value cannot be extracted", REQUEST_CREATE_MILLIS, e);
                 }
             }
-
-            logger.debug("{} does not exist in custom payload, falling back to {}", REQUEST_CREATE_MILLIS, fallbackCreationTime);
-            return fallbackCreationTime;
         }
 
         protected abstract CompletableFuture<Response> maybeExecuteAsync(QueryState queryState, long queryStartNanoTime, boolean traceRequest);
@@ -494,7 +491,6 @@ public abstract class Message
             if (isCustomPayload && inbound.header.version.isSmallerThan(ProtocolVersion.V4))
                 throw new ProtocolException("Received frame with CUSTOM_PAYLOAD flag for native protocol version < 4");
 
-            long now = approxTime.now();
             MonotonicClockTranslation timeSnapshot = approxTime.translate();
 
             Message message = inbound.header.type.codec.decode(inbound.body, inbound.header.version);
@@ -510,8 +506,8 @@ public abstract class Message
                 req.attach(connection);
                 if (isTracing)
                     req.setTracingRequested();
-                long creationTimeNanos = req.calculateCreationTimeNanos(timeSnapshot, now);
-                req.setCreationTimeNanos(creationTimeNanos);
+                if (isCustomPayload)
+                    req.maybeOverrideCreationTimeNanos(timeSnapshot);
             }
             else
             {
