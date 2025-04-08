@@ -38,10 +38,10 @@ import org.slf4j.LoggerFactory;
 
 import io.github.jbellis.jvector.graph.GraphIndexBuilder;
 import io.github.jbellis.jvector.graph.ListRandomAccessVectorValues;
-import io.github.jbellis.jvector.graph.disk.Feature;
-import io.github.jbellis.jvector.graph.disk.FeatureId;
-import io.github.jbellis.jvector.graph.disk.FusedADC;
-import io.github.jbellis.jvector.graph.disk.InlineVectors;
+import io.github.jbellis.jvector.graph.disk.feature.Feature;
+import io.github.jbellis.jvector.graph.disk.feature.FeatureId;
+import io.github.jbellis.jvector.graph.disk.feature.FusedADC;
+import io.github.jbellis.jvector.graph.disk.feature.InlineVectors;
 import io.github.jbellis.jvector.graph.disk.OnDiskGraphIndex;
 import io.github.jbellis.jvector.graph.disk.OnDiskGraphIndexWriter;
 import io.github.jbellis.jvector.graph.disk.OrdinalMapper;
@@ -205,8 +205,9 @@ public class CompactionGraph implements Closeable, Accountable
                                         dimension,
                                         indexConfig.getAnnMaxDegree(),
                                         indexConfig.getConstructionBeamWidth(),
-                                        1.2f,
-                                        dimension > 3 ? 1.2f : 1.4f,
+                                        indexConfig.getNeighborhoodOverflow(1.2f),
+                                        indexConfig.getAlpha(dimension > 3 ? 1.2f : 1.4f),
+                                        indexConfig.isHierarchyEnabled(),
                                         compactionSimdPool, compactionFjp);
 
         termsFile = perIndexComponents.addOrGet(IndexComponentType.TERMS_DATA).file();
@@ -317,8 +318,7 @@ public class CompactionGraph implements Closeable, Accountable
                     compressedVectors = new MutablePQVectors((ProductQuantization) compressor);
                     compactionFjp.submit(() -> {
                         IntStream.range(0, encodedVectorCount)
-                                 // FIXME parallel is disabled until 4.0.0 beta2 (encodeAndSet is not threadsafe before then)
-//                                 .parallel()
+                                 .parallel()
                                  .forEach(i -> {
                                      var v = vectorsByOrdinal.get(i);
                                      if (v == null)
