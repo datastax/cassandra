@@ -13,7 +13,6 @@ commitlog_disk_access_mode: legacy
 # commitlog_compression:
 # - class_name: LZ4Compressor
 cdc_raw_directory: build/test/cassandra/cdc_raw
-cdc_enabled: false
 hints_directory: build/test/cassandra/hints
 metadata_directory: build/test/cassandra/metadata
 partitioner: org.apache.cassandra.dht.ByteOrderedPartitioner
