@@ -203,21 +203,26 @@ public abstract class EncryptedChunkReader extends AbstractReaderFileProxy imple
                 input = BufferPools.forChunkCache().get(CHUNK_SIZE, BufferType.preferredForCompression());
             }
 
-            input.position(0).limit(CHUNK_SIZE);
-            channel.read(input, position);
-
             try
             {
-                decrypt(input, 0, buffer, position);
-            }
-            catch (IOException e)
-            {
-                //TODO how to handle it?
-            }
+                input.position(0).limit(CHUNK_SIZE);
+                channel.read(input, position);
 
-            if (!encryptor.canDecompressInPlace())
+                try
+                {
+                    decrypt(input, 0, buffer, position);
+                }
+                catch (IOException e)
+                {
+                    //TODO how to handle it?
+                }
+            }
+            finally
             {
-                BufferPools.forChunkCache().put(input);
+                if (!encryptor.canDecompressInPlace())
+                {
+                    BufferPools.forChunkCache().put(input);
+                }
             }
         }
 
