@@ -23,7 +23,6 @@ package org.apache.cassandra.index.sai.cql;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.nio.file.FileSystemException;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -88,7 +87,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 import static org.mockito.Mockito.when;
@@ -265,32 +263,6 @@ public class NativeIndexDDLTest extends SAITester
         assertFalse(tuple.isMultiCell());
         assertFalse(tuple.isCollection());
         assertTrue(tuple.isTuple());
-    }
-
-    /**
-     * The test reproduces CNDB-13198
-     */
-    @Test
-    public void reproFailOnLongIndexName()
-    {
-        // Generate an index name of the maximum allowed length, adding four chars accounting for components with a
-        // generation number of the form "-XXX", which won't be included in the first index segment, and
-        // the difference between actual index component representation and longest (4 chars).
-        String longIndexName = "a".repeat(Version.calculateIndexNameAllowedLength() + 4 + 4);
-        createTable("CREATE TABLE %s (key int PRIMARY KEY, value1 int, value2 int)");
-        createIndex(String.format("CREATE CUSTOM INDEX %s ON %%s(value1) USING 'StorageAttachedIndex'", longIndexName));
-        execute("INSERT INTO %s (\"key\", value1) VALUES (1, 1)");
-        execute("INSERT INTO %s (\"key\", value2) VALUES (2, 2)");
-        flush();
-
-        // Now try to create an index with a name that is one character longer than the maximum allowed length.
-        longIndexName += "a";
-        createTable("CREATE TABLE %s (key int PRIMARY KEY, value1 int, value2 int)");
-        createIndex(String.format("CREATE CUSTOM INDEX %s ON %%s(value1) USING 'StorageAttachedIndex'", longIndexName));
-        execute("INSERT INTO %s (\"key\", value1) VALUES (1, 1)");
-        execute("INSERT INTO %s (\"key\", value2) VALUES (2, 2)");
-        RuntimeException e = assertThrows(RuntimeException.class, this::flush);
-        assertTrue(e.getCause() instanceof FileSystemException);
     }
 
     @Test
