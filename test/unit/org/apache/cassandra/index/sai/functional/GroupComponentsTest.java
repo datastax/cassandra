@@ -54,7 +54,7 @@ public class GroupComponentsTest extends SAITester
         SSTableReader sstable = Iterables.getOnlyElement(cfs.getLiveSSTables());
 
         Set<Component> components = group.activeComponents(sstable);
-        assertEquals(Version.latest().onDiskFormat().perSSTableComponentTypes().size() + 1, components.size());
+        assertEquals(Version.current().onDiskFormat().perSSTableComponentTypes().size() + 1, components.size());
 
         // index files are released but not removed
         cfs.invalidate(true, false);
@@ -80,7 +80,7 @@ public class GroupComponentsTest extends SAITester
 
         Set<Component> components = group.activeComponents(sstables.iterator().next());
 
-        assertEquals(Version.latest().onDiskFormat().perSSTableComponentTypes().size() + 1, components.size());
+        assertEquals(Version.current().onDiskFormat().perSSTableComponentTypes().size() + 1, components.size());
     }
 
     @Test
@@ -100,8 +100,8 @@ public class GroupComponentsTest extends SAITester
 
         Set<Component> components = group.activeComponents(sstables.iterator().next());
 
-        assertEquals(Version.latest().onDiskFormat().perSSTableComponentTypes().size() +
-                     Version.latest().onDiskFormat().perIndexComponentTypes(indexContext).size(),
+        assertEquals(Version.current().onDiskFormat().perSSTableComponentTypes().size() +
+                     Version.current().onDiskFormat().perIndexComponentTypes(indexContext).size(),
                      components.size());
     }
 }

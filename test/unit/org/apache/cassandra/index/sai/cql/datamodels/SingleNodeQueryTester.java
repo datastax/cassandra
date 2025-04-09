@@ -54,13 +54,13 @@ abstract class SingleNodeQueryTester extends SAITester
 
     protected DataModel.Executor executor;
 
-    private Version latest;
+    private Version current;
 
     @Before
     public void setup() throws Throwable
     {
-        latest = Version.latest();
-        SAIUtil.setLatestVersion(version);
+        current = Version.current();
+        SAIUtil.setCurrentVersion(version);
         requireNetwork();
 
         schemaChange(String.format("CREATE KEYSPACE IF NOT EXISTS %s WITH replication = {'class': 'SimpleStrategy', 'replication_factor': '1'}", DataModel.KEYSPACE));
@@ -73,7 +73,7 @@ abstract class SingleNodeQueryTester extends SAITester
     @After
     public void teardown() throws Throwable
     {
-        SAIUtil.setLatestVersion(latest);
+        SAIUtil.setCurrentVersion(current);
     }
 
     @Parameterized.Parameters(name = "{0}_{1}")
