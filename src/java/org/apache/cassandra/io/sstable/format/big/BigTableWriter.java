@@ -201,6 +201,8 @@ public class BigTableWriter extends SortedTableWriter
         iwriter.indexFile.updateFileHandle(iwriter.builder);
         FileHandle ifile = iwriter.builder.bufferSize(indexBufferSize).withLength(boundary.indexLength).complete();
         dataFile.updateFileHandle(dbuilder);
+        if (compression)
+            dbuilder.withCompressionMetadata(((CompressedSequentialWriter) dataFile).open(boundary.dataLength));
         int dataBufferSize = optimizationStrategy.bufferSize(stats.estimatedPartitionSize.percentile(DatabaseDescriptor.getDiskOptimizationEstimatePercentile()));
         FileHandle dfile = dbuilder.bufferSize(dataBufferSize).withLength(boundary.dataLength).complete();
         invalidateCacheAtPreviousBoundary(dfile, boundary.dataLength);

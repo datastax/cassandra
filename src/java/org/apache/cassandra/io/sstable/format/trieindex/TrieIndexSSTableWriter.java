@@ -200,6 +200,8 @@ public class TrieIndexSSTableWriter extends SortedTableWriter
             // With trie indices it is no longer necessary to limit the file size; just make sure indices and data
             // get updated length / compression metadata.
             dataFile.updateFileHandle(dbuilder);
+            if (compression)
+                dbuilder.withCompressionMetadata(((CompressedSequentialWriter) dataFile).open(dataLength));
             int dataBufferSize = optimizationStrategy.bufferSize(stats.estimatedPartitionSize.percentile(DatabaseDescriptor.getDiskOptimizationEstimatePercentile()));
             //TODO is withLength needed?
             FileHandle dfile = dbuilder.bufferSize(dataBufferSize).withLength(iwriter.rowIndexFile.getLastFlushOffset()).complete();
