@@ -19,6 +19,8 @@ package org.apache.cassandra.index.sai.metrics;
 
 import java.util.concurrent.TimeUnit;
 
+import io.github.jbellis.jvector.graph.SearchResult;
+
 /**
  * Listener that gets notified during storage-attached index query execution.
  */
@@ -112,5 +114,18 @@ public interface QueryEventListener
 
             }
         };
+    }
+
+    interface VectorIndexEventListener
+    {
+        void onGraphLoaded(long quantizationBytes, long ordinalsMapCachedBytes, long vectorsLoaded);
+
+        void onGraphClosed(long pqBytes, long ordinalsMapCachedBytes, long vectorsLoaded);
+
+        void onSearchResult(SearchResult result, long latencyNs, boolean isResume);
+
+        void onBruteForceNodesVisited(int visited);
+
+        void onBruteForceNodesReranked(int visited);
     }
 }
