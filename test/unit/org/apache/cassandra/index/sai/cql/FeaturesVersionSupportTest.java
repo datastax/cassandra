@@ -54,7 +54,7 @@ public class FeaturesVersionSupportTest extends VectorTester
     {
         super.setup();
         requireNetwork();
-        SAIUtil.setLatestVersion(version);
+        SAIUtil.setCurrentVersion(version);
     }
 
     /**
@@ -94,7 +94,7 @@ public class FeaturesVersionSupportTest extends VectorTester
 
         // vector index creation will be accepted on newer versions, even if there is still another index in the older version
         dropIndex("DROP INDEX %s." + idx);
-        SAIUtil.setLatestVersion(Version.EC);
+        SAIUtil.setCurrentVersion(Version.EC);
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
 
         // once the index has been created, we can query it
@@ -142,7 +142,7 @@ public class FeaturesVersionSupportTest extends VectorTester
 
         // vector index creation will be accepted on newer versions, even if there is still an index in the older version
         dropIndex("DROP INDEX %s." + idx);
-        SAIUtil.setLatestVersion(Version.EC);
+        SAIUtil.setCurrentVersion(Version.EC);
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
 
         // once the index has been created, we can query it

@@ -29,7 +29,6 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.NavigableMap;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.SortedMap;
@@ -78,7 +77,6 @@ import org.apache.cassandra.dht.LocalPartitioner;
 import org.apache.cassandra.dht.OrderPreservingPartitioner;
 import org.apache.cassandra.dht.RandomPartitioner;
 import org.apache.cassandra.exceptions.InvalidRequestException;
-import org.apache.cassandra.db.filter.ANNOptions;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.IndexBuildDecider;
 import org.apache.cassandra.index.IndexRegistry;
@@ -450,13 +448,13 @@ public class StorageAttachedIndex implements Index
             return CompletableFuture.completedFuture(null);
         }
 
-        if (indexContext.isVector() && Version.latest().compareTo(Version.CA) < 0)
+        if (indexContext.isVector() && Version.current().compareTo(Version.CA) < 0)
         {
             throw new IndexVersionTooOldException(String.format("The current configured on-disk format version %s " +
                                                                 "does not support vector indexes. The on-disk format " +
                                                                 "version can be set via the -D%s system property.",
-                                                                Version.latest(),
-                                                                CassandraRelevantProperties.SAI_LATEST_VERSION.name()));
+                                                                Version.current(),
+                                                                CassandraRelevantProperties.SAI_CURRENT_VERSION.name()));
         }
 
         // stop in-progress compaction tasks to prevent compacted sstables not being indexed.

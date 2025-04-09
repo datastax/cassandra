@@ -23,7 +23,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
@@ -32,7 +31,6 @@ import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
-import com.google.common.collect.Iterators;
 import com.google.common.collect.Streams;
 import com.google.common.util.concurrent.Runnables;
 
@@ -162,7 +160,7 @@ public class TrieMemtableIndex implements MemtableIndex
         return Arrays.stream(rangeIndexes)
                      .map(MemoryIndex::getMinTerm)
                      .filter(Objects::nonNull)
-                     .reduce((a, b) -> TypeUtil.min(a, b, validator, Version.latest()))
+                     .reduce((a, b) -> TypeUtil.min(a, b, validator, Version.current()))
                      .orElse(null);
     }
 
@@ -179,7 +177,7 @@ public class TrieMemtableIndex implements MemtableIndex
         return Arrays.stream(rangeIndexes)
                      .map(MemoryIndex::getMaxTerm)
                      .filter(Objects::nonNull)
-                     .reduce((a, b) -> TypeUtil.max(a, b, validator, Version.latest()))
+                     .reduce((a, b) -> TypeUtil.max(a, b, validator, Version.current()))
                      .orElse(null);
     }
 
@@ -465,7 +463,7 @@ public class TrieMemtableIndex implements MemtableIndex
 
     private ByteComparable encode(ByteBuffer input)
     {
-        return Version.latest().onDiskFormat().encodeForTrie(input, indexContext.getValidator());
+        return Version.current().onDiskFormat().encodeForTrie(input, indexContext.getValidator());
     }
 
     /**

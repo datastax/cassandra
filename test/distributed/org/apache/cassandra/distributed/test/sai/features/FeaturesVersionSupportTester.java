@@ -42,7 +42,7 @@ import static org.apache.cassandra.distributed.api.Feature.NETWORK;
 /**
  * Tests the availabilty of features in different versions of the SAI on-disk format in a multinode, multiversion cluster.
  * </p>
- * This is done with a 2-node cluster where the first node has the latest version of the SAI on-disk format and the
+ * This is done with a 2-node cluster where the first node has the newer version of the SAI on-disk format and the
  * second node has the older version being tested.
  */
 public abstract class FeaturesVersionSupportTester extends TestBaseImpl
@@ -210,8 +210,8 @@ public abstract class FeaturesVersionSupportTester extends TestBaseImpl
         public static void install(ClassLoader classLoader, int node, Version version)
         {
             new ByteBuddy().rebase(Version.class)
-                           .method(named("latestVersion"))
-                           .intercept(FixedValue.value(node == 1 ? Version.EC.toString() : version.toString()))
+                           .method(named("currentVersionProperty"))
+                           .intercept(FixedValue.value(node == 1 ? Version.LATEST.toString() : version.toString()))
                            .make()
                            .load(classLoader, ClassLoadingStrategy.Default.INJECTION);
         }

@@ -357,7 +357,7 @@ public enum CassandraRelevantProperties
     CUSTOM_SSTABLE_WATCHER("cassandra.custom_sstable_watcher"),
 
     /** The current/latest version of the SAI on-disk index format. */
-    SAI_LATEST_VERSION("cassandra.sai.latest.version", "dc"),
+    SAI_CURRENT_VERSION("cassandra.sai.latest.version", "dc"),
 
     /** Controls the maximum top-k limit for vector search */
     SAI_VECTOR_SEARCH_MAX_TOP_K("cassandra.sai.vector_search.max_top_k", "1000"),

@@ -342,8 +342,8 @@ public class SSTableIndexComponentsStateTest
             IndexContext idx2 = SAITester.createIndexContext("test_index2", UTF8Type.instance);
 
             createFakeDataFile(descriptor);
-            createFakePerSSTableComponents(descriptor, Version.latest(), 0);
-            createFakePerIndexComponents(descriptor, idx1, Version.latest(), 1);
+            createFakePerSSTableComponents(descriptor, Version.current(), 0);
+            createFakePerIndexComponents(descriptor, idx1, Version.current(), 1);
             createFakePerIndexComponents(descriptor, idx2, Version.DB, 0);
 
             IndexDescriptor indexDescriptor = loadDescriptor(descriptor, idx1, idx2);
@@ -353,10 +353,10 @@ public class SSTableIndexComponentsStateTest
 
             assertEquals(Set.of(idx1.getIndexName(), idx2.getIndexName()), state.includedIndexes());
 
-            assertEquals(Version.latest(), state.perSSTable().buildId.version());
+            assertEquals(Version.current(), state.perSSTable().buildId.version());
             assertEquals(0, state.perSSTable().buildId.generation());
 
-            assertEquals(Version.latest(), state.perIndex(idx1.getIndexName()).buildId.version());
+            assertEquals(Version.current(), state.perIndex(idx1.getIndexName()).buildId.version());
             assertEquals(1, state.perIndex(idx1.getIndexName()).buildId.generation());
 
             assertEquals(Version.DB, state.perIndex(idx2.getIndexName()).buildId.version());
