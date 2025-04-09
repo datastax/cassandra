@@ -62,7 +62,7 @@ public abstract class Message
     /**
      * An optional key in custom payload used to encode the timestamp in epoch millis when the request was originally
      * created by upstream components. When present, this value will be used NTR queue timeouts instead of the timestamp
-     * when the request was deserialized and dispatched to the queue. The contract is for the value assoacited wite that
+     * when the request was deserialized and dispatched to the queue. The contract is for the value associated with that
      * key to be encoded as an 8-byte unsigned integer in the big-endian format.
      */
     protected static final String REQUEST_CREATE_MILLIS = "REQUEST_CREATE_MILLIS";
@@ -224,10 +224,10 @@ public abstract class Message
 
         /**
          * Creation time of the message. If {@link Message#REQUEST_CREATE_MILLIS} is set in custom payload,
-         * {@link Message.Decoder#decodeMessage(Channel, Envelope)}} will use the encoded value, otherwise it will use
-         * current time when message was decoded.
+         * {@link Message.Decoder#decodeMessage(Channel, Envelope)} will override it using the encoded value,
+         * otherwise it will keep current time when message was constructed.
          */
-        private long creationTimeNanos;
+        private long creationTimeNanos = MonotonicClock.approxTime.now();
 
         protected Request(Type type)
         {
@@ -242,9 +242,10 @@ public abstract class Message
             return false;
         }
 
-        private void setCreationTimeNanos(long creationTimeNanos)
+        @VisibleForTesting
+        public long getCreationTimeNanos()
         {
-            this.creationTimeNanos = creationTimeNanos;
+            return creationTimeNanos;
         }
 
         /**
@@ -260,18 +261,13 @@ public abstract class Message
         }
 
         /**
-         * Returns the time that is optionally recorded in the custom payload using the {@link Message#REQUEST_CREATE_MILLIS}
-         * key or falls back to fallbackCreationTime if not present. The timeSnapshot is used to translate the wall clock
-         * time to monotonic clock time. The fallbackCreationTime is returned as is if {@link Message#REQUEST_CREATE_MILLIS}
-         * is not present.
+         * Overrides {@link Request#creationTimeNanos} by the time recorded in the custom payload using the {@link Message#REQUEST_CREATE_MILLIS}
+         * key present. The timeSnapshot is used to translate the wall clock time to monotonic clock time.
          *
          * @param timeSnapshot the current time snapshot used for time translation
-         * @param fallbackCreationTime the fallback creation time
-         *
-         * @return the time recorded in the custom payload via {@link Message#REQUEST_CREATE_MILLIS} or fallbackCreationTime
-         * if not present
          */
-        private long calculateCreationTimeNanos(MonotonicClockTranslation timeSnapshot, long fallbackCreationTime)
+        @VisibleForTesting
+        public void maybeOverrideCreationTimeNanos(MonotonicClockTranslation timeSnapshot)
         {
             Map<String, ByteBuffer> customPayload = getCustomPayload();
             if (customPayload != null && customPayload.containsKey(REQUEST_CREATE_MILLIS))
@@ -281,15 +277,13 @@ public abstract class Message
                 {
                     long requestCreationEpochMillis = ByteBufferUtil.toLong(requestCreateMillisBuffer);
                     // translate wall clock time to monotonic clock time
-                    return timeSnapshot.fromMillisSinceEpoch(requestCreationEpochMillis);
+                    creationTimeNanos = timeSnapshot.fromMillisSinceEpoch(requestCreationEpochMillis);
                 }
                 catch (Exception e)
                 {
                     noSpam.warn("{} exists in custom payload, but its value cannot be extracted", REQUEST_CREATE_MILLIS, e);
                 }
             }
-
-            return fallbackCreationTime;
         }
 
         protected abstract CompletableFuture<Response> maybeExecuteAsync(QueryState queryState, long queryStartNanoTime, boolean traceRequest);
@@ -503,8 +497,8 @@ public abstract class Message
                 req.attach(connection);
                 if (isTracing)
                     req.setTracingRequested();
-                long creationTimeNanos = req.calculateCreationTimeNanos(timeSnapshot, now);
-                req.setCreationTimeNanos(creationTimeNanos);
+                if (isCustomPayload)
+                    req.maybeOverrideCreationTimeNanos(timeSnapshot);
             }
             else
             {
