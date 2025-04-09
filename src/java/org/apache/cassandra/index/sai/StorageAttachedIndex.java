@@ -76,6 +76,7 @@ import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.IndexBuildDecider;
 import org.apache.cassandra.index.IndexRegistry;
+import org.apache.cassandra.index.FeatureNeedsIndexRebuildException;
 import org.apache.cassandra.index.SecondaryIndexBuilder;
 import org.apache.cassandra.index.SecondaryIndexManager;
 import org.apache.cassandra.index.TargetParser;
@@ -85,6 +86,7 @@ import org.apache.cassandra.index.sai.analyzer.LuceneAnalyzer;
 import org.apache.cassandra.index.sai.analyzer.NonTokenizingOptions;
 import org.apache.cassandra.index.sai.disk.StorageAttachedIndexWriter;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.index.sai.view.View;
@@ -447,7 +449,17 @@ public class StorageAttachedIndex implements Index
             return ImmediateFuture.success(null);
         }
 
-        // stop in-progress compaction tasks to prevent compacted sstable not being index.
+        if (indexContext.isVector() && Version.current().compareTo(Version.JVECTOR_EARLIEST) < 0)
+        {
+            throw new FeatureNeedsIndexRebuildException(String.format("The current configured on-disk format version %s does not support vector indexes. " +
+                                                                      "The minimum version that supports vectors is %s. " +
+                                                                      "The on-disk format version can be set via the -D%s system property.",
+                                                                      Version.current(),
+                                                                      Version.JVECTOR_EARLIEST,
+                                                                      CassandraRelevantProperties.SAI_CURRENT_VERSION.name()));
+        }
+
+        // stop in-progress compaction tasks to prevent compacted sstables not being indexed.
         logger.debug(indexContext.logMessage("Stopping active compactions to make sure all sstables are indexed after initial build."));
         CompactionManager.instance.interruptCompactionFor(Collections.singleton(baseCfs.metadata()),
                                                           OperationType.REWRITES_SSTABLES,

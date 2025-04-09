@@ -90,9 +90,9 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
                                       TableMetrics tableMetrics) throws IOException
     {
         // We always write at the latest version (through what that version is can be configured for specific cases)
-        var onDiskFormat = Version.latest().onDiskFormat();
+        var onDiskFormat = Version.current().onDiskFormat();
         this.indexDescriptor = indexDescriptor;
-        // Note: I think there is a silent assumption here. That is, the PK factory we use here must be for the latest
+        // Note: I think there is a silent assumption here. That is, the PK factory we use here must be for the current
         // format version, because that is what `IndexContext.keyFactory` always uses (see ctor)
         this.primaryKeyFactory = onDiskFormat.newPrimaryKeyFactory(tableMetadata.comparator);
         this.indices = indices;

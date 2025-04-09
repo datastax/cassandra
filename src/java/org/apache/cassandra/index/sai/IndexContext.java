@@ -181,7 +181,7 @@ public class IndexContext
         this.viewManager = new IndexViewManager(this);
         this.validator = TypeUtil.cellValueType(column, indexType);
         this.cfs = cfs;
-        this.primaryKeyFactory = Version.latest().onDiskFormat().newPrimaryKeyFactory(clusteringComparator);
+        this.primaryKeyFactory = Version.current().onDiskFormat().newPrimaryKeyFactory(clusteringComparator);
 
         String columnName = column.name.toString();
 
@@ -662,7 +662,7 @@ public class IndexContext
      */
     public int openPerIndexFiles()
     {
-        return viewManager.getView().size() * Version.latest().onDiskFormat().openFilesPerIndex(this);
+        return viewManager.getView().size() * Version.current().onDiskFormat().openFilesPerIndex(this);
     }
 
     public void prepareSSTablesForRebuild(Collection<SSTableReader> sstablesToRebuild)

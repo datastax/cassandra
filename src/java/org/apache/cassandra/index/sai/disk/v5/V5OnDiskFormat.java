@@ -34,7 +34,7 @@ public class V5OnDiskFormat extends V4OnDiskFormat
 
     public static boolean writeV5VectorPostings()
     {
-        return Version.latest().onOrAfter(Version.DC);
+        return Version.current().onOrAfter(Version.DC);
     }
 
     @Override
