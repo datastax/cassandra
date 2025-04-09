@@ -61,7 +61,7 @@ public class MultiVersionComposabilityTest extends SAITester
             // Flush before writing so we have a memtable to test as well.
             if (!compactFirst)
                 flush();
-            SAIUtil.setLatestVersion(version);
+            SAIUtil.setCurrentVersion(version);
             // Insert 100 random rows with mostly the same keys.
             for (int i = 0; i < 100; i++)
             {

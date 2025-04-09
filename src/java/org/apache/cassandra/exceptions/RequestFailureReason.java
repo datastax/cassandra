@@ -24,6 +24,7 @@ import java.util.Map;
 import org.apache.cassandra.db.filter.TombstoneOverwhelmingException;
 import org.apache.cassandra.index.IndexBuildInProgressException;
 import org.apache.cassandra.index.IndexNotAvailableException;
+import org.apache.cassandra.index.FeatureNeedsIndexRebuildException;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
@@ -47,7 +48,8 @@ public enum RequestFailureReason
     UNKNOWN_COLUMN           (500),
     UNKNOWN_TABLE            (501),
     REMOTE_STORAGE_FAILURE   (502),
-    INDEX_BUILD_IN_PROGRESS  (503);
+    INDEX_BUILD_IN_PROGRESS  (503),
+    FEATURE_NEEDS_INDEX_REBUILD(504); // The index uses an old version that doesn't support the requested feature
 
     public static final Serializer serializer = new Serializer();
 
@@ -85,6 +87,7 @@ public enum RequestFailureReason
         exceptionToReasonMap.put(UnknownColumnException.class, UNKNOWN_COLUMN);
         exceptionToReasonMap.put(UnknownTableException.class, UNKNOWN_TABLE);
         exceptionToReasonMap.put(IndexBuildInProgressException.class, INDEX_BUILD_IN_PROGRESS);
+        exceptionToReasonMap.put(FeatureNeedsIndexRebuildException.class, FEATURE_NEEDS_INDEX_REBUILD);
 
         if (exceptionToReasonMap.size() != reasons.length-5)
             throw new RuntimeException("A new RequestFailureReasons was probably added and you may need to update the exceptionToReasonMap");
