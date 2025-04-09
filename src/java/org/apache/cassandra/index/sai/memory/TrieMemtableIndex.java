@@ -162,7 +162,7 @@ public class TrieMemtableIndex implements MemtableIndex
         return Arrays.stream(rangeIndexes)
                      .map(MemoryIndex::getMinTerm)
                      .filter(Objects::nonNull)
-                     .reduce((a, b) -> TypeUtil.min(a, b, validator, Version.latest()))
+                     .reduce((a, b) -> TypeUtil.min(a, b, validator, Version.current()))
                      .orElse(null);
     }
 
@@ -179,7 +179,7 @@ public class TrieMemtableIndex implements MemtableIndex
         return Arrays.stream(rangeIndexes)
                      .map(MemoryIndex::getMaxTerm)
                      .filter(Objects::nonNull)
-                     .reduce((a, b) -> TypeUtil.max(a, b, validator, Version.latest()))
+                     .reduce((a, b) -> TypeUtil.max(a, b, validator, Version.current()))
                      .orElse(null);
     }
 
@@ -465,7 +465,7 @@ public class TrieMemtableIndex implements MemtableIndex
 
     private ByteComparable encode(ByteBuffer input)
     {
-        return Version.latest().onDiskFormat().encodeForTrie(input, indexContext.getValidator());
+        return Version.current().onDiskFormat().encodeForTrie(input, indexContext.getValidator());
     }
 
     /**

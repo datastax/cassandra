@@ -55,7 +55,7 @@ public class BM25Test extends SAITester
     @Before
     public void setup() throws Throwable
     {
-        SAIUtil.setLatestVersion(Version.EC);
+        SAIUtil.setCurrentVersion(Version.BM25_EARLIEST);
     }
 
     @Test
