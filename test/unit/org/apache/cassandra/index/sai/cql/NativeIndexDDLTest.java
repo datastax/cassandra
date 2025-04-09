@@ -990,13 +990,13 @@ public class NativeIndexDDLTest extends SAITester
         IndexContext numericIndexContext = getIndexContext(numericIndexName);
         IndexContext stringIndexContext = getIndexContext(stringIndexName);
 
-        for (IndexComponentType component : Version.latest().onDiskFormat().perSSTableComponentTypes())
+        for (IndexComponentType component : Version.current().onDiskFormat().perSSTableComponentTypes())
             verifyRebuildIndexComponent(numericIndexContext, stringIndexContext, component, null, corruptionType, true, true, rebuild);
 
-        for (IndexComponentType component : Version.latest().onDiskFormat().perIndexComponentTypes(numericIndexContext))
+        for (IndexComponentType component : Version.current().onDiskFormat().perIndexComponentTypes(numericIndexContext))
             verifyRebuildIndexComponent(numericIndexContext, stringIndexContext, component, numericIndexContext, corruptionType, false, true, rebuild);
 
-        for (IndexComponentType component : Version.latest().onDiskFormat().perIndexComponentTypes(stringIndexContext))
+        for (IndexComponentType component : Version.current().onDiskFormat().perIndexComponentTypes(stringIndexContext))
             verifyRebuildIndexComponent(numericIndexContext, stringIndexContext, component, stringIndexContext, corruptionType, true, false, rebuild);
     }
 
@@ -1104,10 +1104,10 @@ public class NativeIndexDDLTest extends SAITester
     @Test
     public void verifyCanRebuildAndReloadInPlaceToNewerVersion()
     {
-        Version current = Version.latest();
+        Version current = Version.current();
         try
         {
-            SAIUtil.setLatestVersion(Version.AA);
+            SAIUtil.setCurrentVersion(Version.AA);
 
             // prepare schema and data
             createTable(CREATE_TABLE_TEMPLATE);
@@ -1129,7 +1129,7 @@ public class NativeIndexDDLTest extends SAITester
 
             verifySAIVersionInUse(Version.AA, numericIndexContext, stringIndexContext);
 
-            SAIUtil.setLatestVersion(current);
+            SAIUtil.setCurrentVersion(current);
 
             rebuildIndexes(numericIndexName, stringIndexName);
             reloadSSTableIndexInPlace();
@@ -1145,7 +1145,7 @@ public class NativeIndexDDLTest extends SAITester
         finally
         {
             // If we haven't failed, we should already have done this, but if we did fail ...
-            SAIUtil.setLatestVersion(current);
+            SAIUtil.setCurrentVersion(current);
         }
     }
 
