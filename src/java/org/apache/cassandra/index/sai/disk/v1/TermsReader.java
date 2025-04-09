@@ -374,7 +374,7 @@ public class TermsReader implements Closeable
 
     private boolean readFrequencies()
     {
-        return indexContext.isAnalyzed() && version.onOrAfter(Version.EC);
+        return indexContext.isAnalyzed() && version.onOrAfter(Version.BM25_EARLIEST);
     }
 
     private class TermsScanner implements TermsIterator
