@@ -63,7 +63,7 @@ public class V5OnDiskOrdinalsMapTest extends VectorTester
     {
         super.setup();
         // this can be removed once LATEST is >= DC
-        SAIUtil.setLatestVersion(Version.DC);
+        SAIUtil.setCurrentVersion(Version.DC);
     }
 
     private static final VectorTypeSupport vts = VectorizationProvider.getInstance().getVectorTypeSupport();

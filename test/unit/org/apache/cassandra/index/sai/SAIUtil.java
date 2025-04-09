@@ -25,16 +25,16 @@ import org.apache.cassandra.utils.ReflectionUtils;
 
 public class SAIUtil
 {
-    public static void setLatestVersion(Version version)
+    public static void setCurrentVersion(Version version)
     {
-        Field latest = null;
+        Field current = null;
         try
         {
-            latest = Version.class.getDeclaredField("LATEST");
-            latest.setAccessible(true);
+            current = Version.class.getDeclaredField("CURRENT");
+            current.setAccessible(true);
             Field modifiersField = ReflectionUtils.getModifiersField();
             modifiersField.setAccessible(true);
-            latest.set(null, version);
+            current.set(null, version);
         }
         catch (Exception e)
         {

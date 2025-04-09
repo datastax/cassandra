@@ -202,7 +202,7 @@ public abstract class SegmentBuilder
 
         private boolean writeFrequencies()
         {
-            return !(analyzer instanceof NoOpAnalyzer) && Version.latest().onOrAfter(Version.EC);
+            return !(analyzer instanceof NoOpAnalyzer) && Version.current().onOrAfter(Version.BM25_EARLIEST);
         }
 
         public boolean isEmpty()
@@ -499,8 +499,8 @@ public abstract class SegmentBuilder
         // Update term boundaries for all terms in this row
         for (ByteBuffer term : terms)
         {
-            minTerm = TypeUtil.min(term, minTerm, termComparator, Version.latest());
-            maxTerm = TypeUtil.max(term, maxTerm, termComparator, Version.latest());
+            minTerm = TypeUtil.min(term, minTerm, termComparator, Version.current());
+            maxTerm = TypeUtil.max(term, maxTerm, termComparator, Version.current());
         }
 
         // segmentRowIdOffset should encode sstableRowId into Integer

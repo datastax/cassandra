@@ -942,7 +942,7 @@ public interface Index
          * Returns the set of sstable-attached components that this group will create for a newly flushed sstable.
          *
          * Note that the result of this method is only valid for newly flushed/written sstables as the components
-         * returned will assume a version of {@link Version#latest()} and a generation of 0. SSTables for which some
+         * returned will assume a version of {@link Version#current()} and a generation of 0. SSTables for which some
          * index have been rebuild may have index components that do not match what this method return in particular.
          */
         Set<Component> componentsForNewSSTable();

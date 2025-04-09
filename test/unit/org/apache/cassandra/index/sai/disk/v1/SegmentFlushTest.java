@@ -115,7 +115,7 @@ public class SegmentFlushTest
     @Before
     public void setVersion()
     {
-        SAIUtil.setLatestVersion(version);
+        SAIUtil.setCurrentVersion(version);
     }
 
     @After
