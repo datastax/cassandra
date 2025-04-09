@@ -1987,11 +1987,11 @@ abstract public class Plan
 
         /** Cost to begin processing PKs into index ordinals for estimateAnnSortCost */
         // DC introduced the one-to-many ordinal mapping optimization
-        public final static double ANN_SORT_OPEN_COST = Version.latest().onOrAfter(Version.DC) ? 370 : 4200;
+        public final static double ANN_SORT_OPEN_COST = Version.current().onOrAfter(Version.DC) ? 370 : 4200;
 
         /** Additional overhead needed to process each input key fed to the ANN index searcher */
         // DC introduced the one-to-many ordinal mapping optimization
-        public final static double ANN_SORT_KEY_COST = Version.latest().onOrAfter(Version.DC) ? 0.03 : 0.2;
+        public final static double ANN_SORT_KEY_COST = Version.current().onOrAfter(Version.DC) ? 0.03 : 0.2;
 
         /** Cost to get a scored key from DiskANN (~rerank cost). Affected by cache hit rate */
         public final static double ANN_SCORED_KEY_COST = 15;
