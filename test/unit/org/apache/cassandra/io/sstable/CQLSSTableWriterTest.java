@@ -1432,7 +1432,6 @@ public abstract class CQLSSTableWriterTest
                                                   .withIndexes(v1Index, v2Index)
                                                   // not building indexes here so no SAI components will be present
                                                   .withBuildIndexes(false)
-                                                  .withPartitioner(Murmur3Partitioner.instance)
                                                   .build();
 
         int rowCount = 30_000;
