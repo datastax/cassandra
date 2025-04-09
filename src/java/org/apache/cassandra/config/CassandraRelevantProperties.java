@@ -678,6 +678,8 @@ public enum CassandraRelevantProperties
 
     /** Class used to discover/load the proper SAI index components file for a given sstable. */
     SAI_ANN_USE_SYNTHETIC_SCORE("cassandra.sai.ann_use_synthetic_score", "false"),
+    /** The current version of the SAI on-disk index format. */
+    SAI_CURRENT_VERSION("cassandra.sai.latest.version", "dc"),
     SAI_CUSTOM_COMPONENTS_DISCOVERY_CLASS("cassandra.sai.custom_components_discovery_class"),
     SAI_ENABLE_EDGES_CACHE("cassandra.sai.enable_edges_cache", "false"),
     SAI_ENABLE_GENERAL_ORDER_BY("cassandra.sai.general_order_by", "true"),

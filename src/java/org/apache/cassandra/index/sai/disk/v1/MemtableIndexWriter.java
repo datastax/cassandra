@@ -212,7 +212,7 @@ public class MemtableIndexWriter implements PerIndexWriter
 
     private boolean writeFrequencies()
     {
-        return indexContext().isAnalyzed() && Version.latest().onOrAfter(Version.EC);
+        return indexContext().isAnalyzed() && Version.current().onOrAfter(Version.BM25_EARLIEST);
     }
 
     private void flushVectorIndex(DecoratedKey minKey, DecoratedKey maxKey, long startTime, Stopwatch stopwatch) throws IOException

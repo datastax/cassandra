@@ -79,7 +79,7 @@ public class IndexDescriptor
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
     private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(logger, 1, TimeUnit.MINUTES);
 
-    private static final ComponentsBuildId EMPTY_GROUP_MARKER = ComponentsBuildId.latest(-1);
+    private static final ComponentsBuildId EMPTY_GROUP_MARKER = ComponentsBuildId.current(-1);
 
     // TODO Because indexes can be added at any time to existing data, the Version of a column index
     // may not match the Version of the base sstable.  OnDiskFormat + IndexFeatureSet + IndexDescriptor

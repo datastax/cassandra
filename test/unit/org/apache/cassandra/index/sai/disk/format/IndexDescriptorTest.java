@@ -43,7 +43,7 @@ import org.apache.cassandra.io.util.PathUtils;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.mockito.Mockito;
 
-import static org.apache.cassandra.index.sai.SAIUtil.setLatestVersion;
+import static org.apache.cassandra.index.sai.SAIUtil.setCurrentVersion;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
@@ -59,7 +59,7 @@ public class IndexDescriptorTest
 {
     private TemporaryFolder temporaryFolder = new TemporaryFolder();
     private Descriptor descriptor;
-    private Version latest;
+    private Version current;
 
     @BeforeClass
     public static void initialise()
@@ -72,13 +72,13 @@ public class IndexDescriptorTest
     {
         temporaryFolder.create();
         descriptor = Descriptor.fromFilename(temporaryFolder.newFolder().getAbsolutePath() + "/ca-1-bti-Data.db");
-        latest = Version.latest();
+        current = Version.current();
     }
 
     @After
     public void teardown() throws Throwable
     {
-        setLatestVersion(latest);
+        setCurrentVersion(current);
         temporaryFolder.delete();
     }
 
@@ -99,7 +99,7 @@ public class IndexDescriptorTest
     @Test
     public void versionAAPerSSTableComponentIsParsedCorrectly() throws Throwable
     {
-        setLatestVersion(Version.AA);
+        setCurrentVersion(Version.AA);
 
         // As mentioned in the class javadoc, we rely on the no-TOC fallback path and that only kick in if there is a
         // data file. Otherwise, it assumes the SSTable simply does not exist at all.
@@ -115,7 +115,7 @@ public class IndexDescriptorTest
     @Test
     public void versionAAPerIndexComponentIsParsedCorrectly() throws Throwable
     {
-        setLatestVersion(Version.AA);
+        setCurrentVersion(Version.AA);
 
         IndexContext indexContext = SAITester.createIndexContext("test_index", UTF8Type.instance);
 
@@ -132,7 +132,7 @@ public class IndexDescriptorTest
     @Test
     public void versionBAPerSSTableComponentIsParsedCorrectly() throws Throwable
     {
-        setLatestVersion(Version.BA);
+        setCurrentVersion(Version.BA);
 
         createFakeDataFile(descriptor);
         createFakePerSSTableComponents(descriptor, Version.BA, 0);
@@ -146,7 +146,7 @@ public class IndexDescriptorTest
     @Test
     public void versionBAPerIndexComponentIsParsedCorrectly() throws Throwable
     {
-        setLatestVersion(Version.BA);
+        setCurrentVersion(Version.BA);
 
         IndexContext indexContext = SAITester.createIndexContext("test_index", UTF8Type.instance);
 
@@ -162,7 +162,7 @@ public class IndexDescriptorTest
     @Test
     public void allVersionAAPerSSTableComponentsAreLoaded() throws Throwable
     {
-        setLatestVersion(Version.AA);
+        setCurrentVersion(Version.AA);
 
         createFakeDataFile(descriptor);
         createFakePerSSTableComponents(descriptor, Version.AA, 0);
@@ -178,7 +178,7 @@ public class IndexDescriptorTest
     @Test
     public void allVersionAAPerIndexLiteralComponentsAreLoaded() throws Throwable
     {
-        setLatestVersion(Version.AA);
+        setCurrentVersion(Version.AA);
 
         IndexContext indexContext = SAITester.createIndexContext("test_index", UTF8Type.instance);
 
@@ -198,7 +198,7 @@ public class IndexDescriptorTest
     @Test
     public void allVersionAAPerIndexNumericComponentsAreLoaded() throws Throwable
     {
-        setLatestVersion(Version.AA);
+        setCurrentVersion(Version.AA);
 
         IndexContext indexContext = SAITester.createIndexContext("test_index", Int32Type.instance);
 
@@ -219,7 +219,7 @@ public class IndexDescriptorTest
     @Test
     public void componentsAreLoadedAfterUpgradeDespiteBrokenTOC() throws Throwable
     {
-        setLatestVersion(Version.AA);
+        setCurrentVersion(Version.AA);
 
         // Force old version of sstables to simulate upgrading from DSE
         Descriptor descriptor = Descriptor.fromFilename(temporaryFolder.newFolder().getAbsolutePath() + "/bb-2-bti-Data.db");
@@ -244,7 +244,7 @@ public class IndexDescriptorTest
     @Test
     public void testReload() throws Throwable
     {
-        setLatestVersion(latest);
+        setCurrentVersion(current);
 
         // We create the descriptor first, with no files, so it should initially be empty.
         IndexContext indexContext = SAITester.createIndexContext("test_index", Int32Type.instance);
@@ -255,8 +255,8 @@ public class IndexDescriptorTest
 
         // We then create the proper files and call reload
         createFakeDataFile(descriptor);
-        createFakePerSSTableComponents(descriptor, latest, 0);
-        createFakePerIndexComponents(descriptor, indexContext, latest, 0);
+        createFakePerSSTableComponents(descriptor, current, 0);
+        createFakePerIndexComponents(descriptor, indexContext, current, 0);
 
         SSTableReader sstable = Mockito.mock(SSTableReader.class);
         Mockito.when(sstable.getDescriptor()).thenReturn(descriptor);

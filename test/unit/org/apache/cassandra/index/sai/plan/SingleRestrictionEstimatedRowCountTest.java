@@ -106,7 +106,7 @@ public class SingleRestrictionEstimatedRowCountTest extends SAITester
     {
         for (Version version : versions)
         {
-            SAIUtil.setLatestVersion(version);
+            SAIUtil.setCurrentVersion(version);
             for (CQL3Type.Native type : types)
             {
                 createTable("CREATE TABLE %s (pk text PRIMARY KEY, age " + type + ')');
