@@ -61,19 +61,22 @@ public class Version implements Comparable<Version>
     public static final Version DC = new Version("dc", V5OnDiskFormat.instance, (c, i, g) -> stargazerFileNameFormat(c, i, g, "dc"));
     // histograms in index metadata
     public static final Version EB = new Version("eb", V6OnDiskFormat.instance, (c, i, g) -> stargazerFileNameFormat(c, i, g, "eb"));
-    // term frequencies index component
+    // term frequencies index component (support for BM25)
     public static final Version EC = new Version("ec", V7OnDiskFormat.instance, (c, i, g) -> stargazerFileNameFormat(c, i, g, "ec"));
 
     // These are in reverse-chronological order so that the latest version is first. Version matching tests
-    // are more likely to match the latest version so we want to test that one first.
+    // are more likely to match the latest version, so we want to test that one first.
     public static final List<Version> ALL = Lists.newArrayList(EC, EB, DC, DB, CA, BA, AA);
 
     public static final Version EARLIEST = AA;
     public static final Version VECTOR_EARLIEST = BA;
-    // The latest version can be configured to be an earlier version to support partial upgrades that don't
+    public static final Version JVECTOR_EARLIEST = CA;
+    public static final Version BM25_EARLIEST = EC;
+    public static final Version LATEST = EC;
+    // The current version can be configured to be an earlier version to support partial upgrades that don't
     // write newer versions of the on-disk formats. This is volatile rather than final so that tests may
     // use reflection to change it and safely publish across threads.
-    private static volatile Version LATEST = parse(CassandraRelevantProperties.SAI_LATEST_VERSION.getString());
+    public static volatile Version CURRENT = parse(currentVersionProperty());
 
     private static final Pattern GENERATION_PATTERN = Pattern.compile("\\d+");
 
@@ -88,6 +91,11 @@ public class Version implements Comparable<Version>
         this.fileNameFormatter = fileNameFormatter;
     }
 
+    private static String currentVersionProperty()
+    {
+        return CassandraRelevantProperties.SAI_CURRENT_VERSION.getString();
+    }
+
     public static Version parse(String input)
     {
         checkArgument(input != null);
@@ -99,9 +107,9 @@ public class Version implements Comparable<Version>
         throw new IllegalArgumentException("Unrecognized SAI version string " + input);
     }
 
-    public static Version latest()
+    public static Version current()
     {
-        return LATEST;
+        return CURRENT;
     }
 
     /**
@@ -125,7 +133,7 @@ public class Version implements Comparable<Version>
     private static int getAddedLengthFromDescriptorAndVersion()
     {
         // Prefixes and suffixes constructed by Version.stargazerFileNameFormat
-        int versionNameLength = latest().toString().length();
+        int versionNameLength = current().toString().length();
         // room for up to 999 generations
         int generationLength = 3 + SAI_SEPARATOR.length();
         int addedLength = SAI_DESCRIPTOR.length()
