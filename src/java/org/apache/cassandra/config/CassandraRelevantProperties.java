@@ -298,6 +298,9 @@ public enum CassandraRelevantProperties
     /** Watcher used when opening sstables to discover extra components, eg. archive component */
     CUSTOM_SSTABLE_WATCHER("cassandra.custom_sstable_watcher"),
 
+    /** The current version of the SAI on-disk index format. */
+    SAI_CURRENT_VERSION("cassandra.sai.latest.version", "dc"),
+
     /**
      * If provided, this custom factory class will be used to create stage executor for a couple of stages.
      * @see Stage for details
