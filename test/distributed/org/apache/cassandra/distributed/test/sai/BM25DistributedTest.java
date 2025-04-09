@@ -60,7 +60,7 @@ public class BM25DistributedTest extends TestBaseImpl
                         .start();
 
         cluster.schemaChange(withKeyspace(String.format(CREATE_KEYSPACE, RF)));
-        cluster.forEach(i -> i.runOnInstance(() -> org.apache.cassandra.index.sai.SAIUtil.setLatestVersion(Version.EC)));
+        cluster.forEach(i -> i.runOnInstance(() -> org.apache.cassandra.index.sai.SAIUtil.setCurrentVersion(Version.BM25_EARLIEST)));
     }
 
     @AfterClass

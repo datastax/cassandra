@@ -30,6 +30,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import com.google.common.base.MoreObjects;
+import org.apache.cassandra.index.sai.plan.QueryController;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -42,6 +43,7 @@ import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.index.FeatureNeedsIndexRebuildException;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SSTableContext;
@@ -187,7 +189,10 @@ public class InvertedIndexSearcher extends IndexSearcher
             return toMetaSortedIterator(iter, queryContext);
         }
         if (docLengthsMeta == null)
-            throw new InvalidRequestException(indexContext.getIndexName() + " does not support BM25 scoring until it is rebuilt");
+        {
+            throw new FeatureNeedsIndexRebuildException(String.format(QueryController.INDEX_VERSION_DOES_NOT_SUPPORT_BM25,
+                                                                      indexContext.getIndexName()));
+        }
 
         // find documents that match each term
         var queryTerms = orderer.getQueryTerms();
@@ -264,8 +269,12 @@ public class InvertedIndexSearcher extends IndexSearcher
     {
         if (!orderer.isBM25())
             return super.orderResultsBy(reader, queryContext, keys, orderer, limit);
+        
         if (docLengthsMeta == null)
-            throw new InvalidRequestException(indexContext.getIndexName() + " does not support BM25 scoring until it is rebuilt");
+        {
+            throw new InvalidRequestException(String.format(QueryController.INDEX_VERSION_DOES_NOT_SUPPORT_BM25,
+                                                            indexContext.getIndexName()));
+        }
 
         var queryTerms = orderer.getQueryTerms();
         // compute documentFrequencies from either histogram or an index search
