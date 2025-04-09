@@ -61,7 +61,7 @@ public class Version implements Comparable<Version>
     public static final Version DC = new Version("dc", V5OnDiskFormat.instance, (c, i, g) -> stargazerFileNameFormat(c, i, g, "dc"));
     // histograms in index metadata
     public static final Version EB = new Version("eb", V6OnDiskFormat.instance, (c, i, g) -> stargazerFileNameFormat(c, i, g, "eb"));
-    // term frequencies index component
+    // term frequencies index component (support for BM25)
     public static final Version EC = new Version("ec", V7OnDiskFormat.instance, (c, i, g) -> stargazerFileNameFormat(c, i, g, "ec"));
 
     // These are in reverse-chronological order so that the latest version is first. Version matching tests
@@ -73,7 +73,7 @@ public class Version implements Comparable<Version>
     // The latest version can be configured to be an earlier version to support partial upgrades that don't
     // write newer versions of the on-disk formats. This is volatile rather than final so that tests may
     // use reflection to change it and safely publish across threads.
-    private static volatile Version LATEST = parse(System.getProperty("cassandra.sai.latest.version", DC.version));
+    public static volatile Version LATEST = parse(latestVersion());
 
     private static final Pattern GENERATION_PATTERN = Pattern.compile("\\d+");
 
@@ -86,6 +86,11 @@ public class Version implements Comparable<Version>
         this.version = version;
         this.onDiskFormat = onDiskFormat;
         this.fileNameFormatter = fileNameFormatter;
+    }
+
+    private static String latestVersion()
+    {
+        return CassandraRelevantProperties.SAI_LATEST_VERSION.getString();
     }
 
     public static Version parse(String input)

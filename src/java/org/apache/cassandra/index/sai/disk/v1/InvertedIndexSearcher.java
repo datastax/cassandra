@@ -42,6 +42,7 @@ import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.index.IndexVersionTooOldException;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SSTableContext;
@@ -184,7 +185,7 @@ public class InvertedIndexSearcher extends IndexSearcher
             return toMetaSortedIterator(iter, queryContext);
         }
         if (docLengthsMeta == null)
-            throw new InvalidRequestException(indexContext.getIndexName() + " does not support BM25 scoring until it is rebuilt");
+            throw new IndexVersionTooOldException(indexContext.getIndexName() + " does not support BM25 scoring until it is rebuilt");
 
         // find documents that match each term
         var queryTerms = orderer.getQueryTerms();
