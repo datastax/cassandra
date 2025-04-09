@@ -118,7 +118,7 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
         Objects.requireNonNull(minTerm);
         Objects.requireNonNull(maxTerm);
 
-        this.version = Version.latest();
+        this.version = Version.current();
         this.segmentRowIdOffset = segmentRowIdOffset;
         this.minSSTableRowId = minSSTableRowId;
         this.maxSSTableRowId = maxSSTableRowId;
