@@ -35,6 +35,8 @@ import com.google.common.base.Preconditions;
 import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Multimap;
+import org.apache.cassandra.index.FeatureNeedsIndexRebuildException;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -102,6 +104,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
 {
     public static final String INDEX_MAY_HAVE_BEEN_DROPPED = "An index may have been dropped. " +
                                                              StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE;
+    public static final String INDEX_VERSION_DOES_NOT_SUPPORT_BM25 = "%s does not support BM25 scoring until it is rebuilt";
     private static final Logger logger = LoggerFactory.getLogger(QueryController.class);
 
     /**
@@ -591,6 +594,14 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     @Override
     public CloseableIterator<PrimaryKeyWithSortKey> getTopKRows(Expression predicate, int softLimit)
     {
+        // Only the disk format limits the features of the index, but we also fail for in memory indexes because they
+        // will fail when flushed.
+        if (orderer.isBM25() && !Version.current().onOrAfter(Version.BM25_EARLIEST))
+        {
+            throw new FeatureNeedsIndexRebuildException(String.format(INDEX_VERSION_DOES_NOT_SUPPORT_BM25,
+                                                                      orderer.context.getIndexName()));
+        }
+
         List<CloseableIterator<PrimaryKeyWithSortKey>> memtableResults = new ArrayList<>();
         try
         {

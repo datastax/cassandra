@@ -290,10 +290,10 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
         // The current components are "replaced" (by "other" components) if the build create different components than
         // the existing ones. This will happen in the following cases:
         // 1. if we use immutable components, that's the point of immutable components.
-        // 2. when we do not use immutable components, the rebuild components will always be for the latest version and
+        // 2. when we do not use immutable components, the rebuild components will always be for the current version and
         // for generation 0, so if the current components are not for that specific built, then we won't be rebuilding
         // the exact same components, and we're "replacing", not "overwriting" ()
-        //   a) the old components are from an older version: a new build will alawys be for `Version.latest()` and
+        //   a) the old components are from an older version: a new build will alawys be for `Version.current()` and
         //     so will create new files in that case (Note that "normally" we should not have non-0 generation in the
         //     first place if immutable components are not used, but we handle this case to better support "downgrades"
         //     where immutable components was enabled, but then disabled for some reason. If that happens, we still

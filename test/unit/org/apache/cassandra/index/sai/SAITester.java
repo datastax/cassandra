@@ -147,7 +147,7 @@ public class SAITester extends CQLTester
 
     public static final ClusteringComparator EMPTY_COMPARATOR = new ClusteringComparator();
 
-    public static final PrimaryKey.Factory TEST_FACTORY = Version.latest().onDiskFormat().newPrimaryKeyFactory(EMPTY_COMPARATOR);
+    public static final PrimaryKey.Factory TEST_FACTORY = Version.current().onDiskFormat().newPrimaryKeyFactory(EMPTY_COMPARATOR);
 
 
     static
@@ -593,21 +593,21 @@ public class SAITester extends CQLTester
     {
         Set<File> indexFiles = indexFiles();
 
-        for (IndexComponentType indexComponentType : Version.latest().onDiskFormat().perSSTableComponentTypes())
+        for (IndexComponentType indexComponentType : Version.current().onDiskFormat().perSSTableComponentTypes())
         {
-            Set<File> tableFiles = componentFiles(indexFiles, new Component(SSTableFormat.Components.Types.CUSTOM, Version.latest().fileNameFormatter().format(indexComponentType, (String)null, 0)));
+            Set<File> tableFiles = componentFiles(indexFiles, new Component(SSTableFormat.Components.Types.CUSTOM, Version.current().fileNameFormatter().format(indexComponentType, (String)null, 0)));
             assertEquals(tableFiles.toString(), perSSTableFiles, tableFiles.size());
         }
 
         if (literalIndexContext != null)
         {
-            for (IndexComponentType indexComponentType : Version.latest().onDiskFormat().perIndexComponentTypes(literalIndexContext))
+            for (IndexComponentType indexComponentType : Version.current().onDiskFormat().perIndexComponentTypes(literalIndexContext))
             {
                 Set<File> stringIndexFiles = componentFiles(indexFiles,
                                                             new Component(SSTableFormat.Components.Types.CUSTOM,
-                                                                          Version.latest().fileNameFormatter().format(indexComponentType,
-                                                                                                                      literalIndexContext,
-                                                                                                                      0)));
+                                                                          Version.current().fileNameFormatter().format(indexComponentType,
+                                                                                                                       literalIndexContext,
+                                                                                                                       0)));
                 if (isBuildCompletionMarker(indexComponentType))
                     assertEquals(literalCompletionMarkers, stringIndexFiles.size());
                 else
@@ -617,13 +617,13 @@ public class SAITester extends CQLTester
 
         if (numericIndexContext != null)
         {
-            for (IndexComponentType indexComponentType : Version.latest().onDiskFormat().perIndexComponentTypes(numericIndexContext))
+            for (IndexComponentType indexComponentType : Version.current().onDiskFormat().perIndexComponentTypes(numericIndexContext))
             {
                 Set<File> numericIndexFiles = componentFiles(indexFiles,
                                                              new Component(SSTableFormat.Components.Types.CUSTOM,
-                                                                           Version.latest().fileNameFormatter().format(indexComponentType,
-                                                                                                                       numericIndexContext,
-                                                                                                                       0)));
+                                                                           Version.current().fileNameFormatter().format(indexComponentType,
+                                                                                                                        numericIndexContext,
+                                                                                                                        0)));
                 if (isBuildCompletionMarker(indexComponentType))
                     assertEquals(numericCompletionMarkers, numericIndexFiles.size());
                 else
@@ -881,7 +881,7 @@ public class SAITester extends CQLTester
 
     protected Set<File> componentFiles(Collection<File> indexFiles, IndexComponentType indexComponentType, IndexContext indexContext)
     {
-        String componentName = Version.latest().fileNameFormatter().format(indexComponentType, indexContext, 0);
+        String componentName = Version.current().fileNameFormatter().format(indexComponentType, indexContext, 0);
         return indexFiles.stream().filter(c -> c.name().endsWith(componentName)).collect(Collectors.toSet());
     }
 

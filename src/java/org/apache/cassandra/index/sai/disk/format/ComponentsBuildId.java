@@ -31,7 +31,7 @@ import org.apache.cassandra.index.sai.IndexContext;
  */
 public class ComponentsBuildId implements Comparable<ComponentsBuildId>
 {
-    private static final ComponentsBuildId FOR_NEW_SSTABLE = ComponentsBuildId.latest(0);
+    private static final ComponentsBuildId FOR_NEW_SSTABLE = ComponentsBuildId.current(0);
 
     private final Version version;
     private final int generation;
@@ -47,9 +47,9 @@ public class ComponentsBuildId implements Comparable<ComponentsBuildId>
         return new ComponentsBuildId(version, generation);
     }
 
-    public static ComponentsBuildId latest(int generation)
+    public static ComponentsBuildId current(int generation)
     {
-        return of(Version.latest(), generation);
+        return of(Version.current(), generation);
     }
 
     public static ComponentsBuildId forNewSSTable()
@@ -59,7 +59,7 @@ public class ComponentsBuildId implements Comparable<ComponentsBuildId>
 
     public static ComponentsBuildId forNewBuild(@Nullable ComponentsBuildId previousBuild, Predicate<ComponentsBuildId> newBuildIsUsablePredicate)
     {
-        Version version = Version.latest();
+        Version version = Version.current();
         // If we're not using immutable components, we always use generation 0, and we're fine if that overrides existing files
         if (!version.useImmutableComponentFiles())
             return new ComponentsBuildId(version, 0);
