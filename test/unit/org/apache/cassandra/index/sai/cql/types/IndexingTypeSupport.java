@@ -36,7 +36,7 @@ public abstract class IndexingTypeSupport extends SAITester
     protected final DataSet<?> dataset;
 
     private final Version version;
-    private Version latest;
+    private Version current;
     private final boolean widePartitions;
     private final Scenario scenario;
     private Object[][] allRows;
@@ -81,8 +81,8 @@ public abstract class IndexingTypeSupport extends SAITester
     @Before
     public void setup()
     {
-        latest = Version.latest();
-        SAIUtil.setLatestVersion(version);
+        current = Version.current();
+        SAIUtil.setCurrentVersion(version);
 
         dataset.init();
 
@@ -96,7 +96,7 @@ public abstract class IndexingTypeSupport extends SAITester
     @After
     public void teardown()
     {
-        SAIUtil.setLatestVersion(latest);
+        SAIUtil.setCurrentVersion(current);
     }
 
     protected void runIndexQueryScenarios() throws Throwable
