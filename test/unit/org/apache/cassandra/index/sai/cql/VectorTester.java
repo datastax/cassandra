@@ -194,7 +194,7 @@ public class VectorTester extends SAITester
         public void setup() throws Throwable
         {
             super.setup();
-            SAIUtil.setLatestVersion(version);
+            SAIUtil.setCurrentVersion(version);
         }
     }
 
