@@ -35,15 +35,15 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class RequestMessageTest
 {
     @Test
-    public void testCreateTimeNanos()
+    public void testCreateTimeNanosInitialized()
     {
+        long now = MonotonicClock.approxTime.now();
         TestRequestMessage message = new TestRequestMessage();
-        assertThat(message.getCreationTimeNanos()).isGreaterThan(0L);
-        assertThat(message.getCreationTimeNanos()).isLessThanOrEqualTo(MonotonicClock.approxTime.now());
+        assertThat(message.getCreationTimeNanos()).isGreaterThanOrEqualTo(now);
     }
 
     @Test
-    public void testCreateTimeNanosOverride()
+    public void testMaybeOverrideCreationTimeNanos()
     {
         MonotonicClockTranslation timeSnapshot = MonotonicClock.approxTime.translate();
         long overrideEpochMillis = 1234567890L;
@@ -57,6 +57,17 @@ public class RequestMessageTest
         assertThat(message.getCreationTimeNanos()).isEqualTo(overrideTimeNanos);
     }
 
+    @Test
+    public void testMaybeOverrideCreationTimeNanosWithoutSideEffects()
+    {
+        Map<String, ByteBuffer> customPayload = Collections.singletonMap("REQUEST_CREATE_MILLIS", ByteBufferUtil.bytes("string"));
+        TestRequestMessage message = new TestRequestMessage();
+
+        long initialCreationTimeNanos = message.getCreationTimeNanos();
+        message.setCustomPayload(customPayload);
+        message.maybeOverrideCreationTimeNanos(MonotonicClock.approxTime.translate());
+        assertThat(message.getCreationTimeNanos()).isEqualTo(initialCreationTimeNanos);
+    }
 
     private static class TestRequestMessage extends Message.Request
     {
