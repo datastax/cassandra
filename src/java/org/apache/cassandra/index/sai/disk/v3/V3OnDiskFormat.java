@@ -23,7 +23,6 @@ import java.lang.invoke.MethodHandles;
 import java.util.EnumSet;
 import java.util.Set;
 
-import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -41,6 +40,7 @@ import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_ENABLE
 import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_ENABLE_JVECTOR_DELETES;
 import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_ENABLE_LTM_CONSTRUCTION;
 import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_ENABLE_RERANK_FLOOR;
+import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_JVECTOR_VERSION;
 import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_REDUCE_TOPK_ACROSS_SSTABLES;
 import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_WRITE_JVECTOR3_FORMAT;
 
@@ -57,7 +57,14 @@ public class V3OnDiskFormat extends V2OnDiskFormat
     public static volatile boolean WRITE_JVECTOR3_FORMAT = SAI_WRITE_JVECTOR3_FORMAT.getBoolean();
     public static final boolean ENABLE_LTM_CONSTRUCTION = SAI_ENABLE_LTM_CONSTRUCTION.getBoolean();
 
-    public static final int JVECTOR_2_VERSION = 2;
+    // These are built to be backwards and forwards compatible. Not final only for testing.
+    public static int JVECTOR_VERSION = SAI_JVECTOR_VERSION.getInt();
+    static
+    {
+        // JVector 3 is not compatible with the latest jvector changes, so we fail fast if the config is enabled.
+        assert JVECTOR_VERSION != 3 : "JVector version 3 is no longer suppoerted";
+        assert !WRITE_JVECTOR3_FORMAT : "JVector version 3 is no longer suppoerted";
+    }
 
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
@@ -116,11 +123,5 @@ public class V3OnDiskFormat extends V2OnDiskFormat
         if (validator.isVector())
             return VECTOR_COMPONENTS_V3;
         return super.perIndexComponentTypes(validator);
-    }
-
-    @VisibleForTesting
-    public static void enableJVector3Format()
-    {
-        WRITE_JVECTOR3_FORMAT = true;
     }
 }
