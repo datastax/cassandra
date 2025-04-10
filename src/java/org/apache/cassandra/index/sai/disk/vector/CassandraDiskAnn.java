@@ -193,7 +193,8 @@ public class CassandraDiskAnn
 
     public int size()
     {
-        return graph.size();
+        // The base layer of the graph has all nodes.
+        return graph.size(0);
     }
 
     /**
@@ -223,6 +224,8 @@ public class CassandraDiskAnn
         {
             var view = (GraphIndex.ScoringView) searcher.getView();
             SearchScoreProvider ssp;
+            // FusedADC can no longer be written due to jvector upgrade. However, it's possible these index files
+            // still exist, so we have to support them.
             if (features.contains(FeatureId.FUSED_ADC))
             {
                 var asf = view.approximateScoreFunctionFor(queryVector, similarityFunction);
