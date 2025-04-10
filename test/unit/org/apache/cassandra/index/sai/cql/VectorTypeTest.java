@@ -37,6 +37,7 @@ import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
 import org.apache.cassandra.index.sai.disk.v1.SegmentBuilder;
+import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
 import org.apache.cassandra.index.sai.disk.vector.VectorSourceModel;
 import org.apache.cassandra.index.sai.plan.QueryController;
@@ -913,8 +914,22 @@ public class VectorTypeTest extends VectorTester.VersionedWithChecksums
     }
 
     @Test
-    public void newJVectorOptionsTest()
+    public void newJVectorOptionsTestVersion2()
     {
+        newJVectorOptionsTest(2);
+    }
+    // We skip version 3 since it isn't supported anymore
+    @Test
+    public void newJVectorOptionsTestVersion4()
+    {
+        newJVectorOptionsTest(4);
+    }
+
+    public void newJVectorOptionsTest(int version)
+    {
+        // Configure the version to ensure we don't fail for settings that are unsupported on earlier versions of jvector
+        V3OnDiskFormat.JVECTOR_VERSION = version;
+
         // This test ensures that we can set and retrieve new jvector parameters
         // (neighborhood_overflow, alpha, enable_hierarchy), and that they are honored at index build time.
 
@@ -935,20 +950,20 @@ public class VectorTypeTest extends VectorTester.VersionedWithChecksums
                     + "  'alpha'                     : '1.8' "
                     + '}');
 
-        // Insert some data
-        execute("INSERT INTO %s (pk, txt, vec) VALUES (0, 'row0', [1.0, 2.0, 3.0, 4.0])");
-        execute("INSERT INTO %s (pk, txt, vec) VALUES (1, 'row1', [2.0, 2.5, 3.5, 4.5])");
-        execute("INSERT INTO %s (pk, txt, vec) VALUES (2, 'row2', [5.0, 1.0, 1.0, 1.0])");
-        // Run basic query
-        assertRows(execute("SELECT pk FROM %s ORDER BY vec ANN OF [2.0, 2.0, 3.0, 4.0] LIMIT 2"), row(1), row(0));
+        // Insert many rows
+        for (int i = 0; i < 2000; i++)
+            execute("INSERT INTO %s (pk, txt, vec) VALUES (?, ?, ?)", i, "row" + i, randomVectorBoxed(4));
+
+        // Run basic query to confirm we can, no need to validate results
+        execute("SELECT pk FROM %s ORDER BY vec ANN OF [2.0, 2.0, 3.0, 4.0] LIMIT 2");
         // Confirm that we can flush with custom options
         flush();
-        // Run basic query
-        assertRows(execute("SELECT pk FROM %s ORDER BY vec ANN OF [2.0, 2.0, 3.0, 4.0] LIMIT 2"), row(1), row(0));
+        // Run basic query to confirm we can, no need to validate results
+        execute("SELECT pk FROM %s ORDER BY vec ANN OF [2.0, 2.0, 3.0, 4.0] LIMIT 2");
         // Confirm that we can compact with custom options
         compact();
-        // Run basic query
-        assertRows(execute("SELECT pk FROM %s ORDER BY vec ANN OF [2.0, 2.0, 3.0, 4.0] LIMIT 2"), row(1), row(0));
+        // Run basic query to confirm we can, no need to validate results
+        execute("SELECT pk FROM %s ORDER BY vec ANN OF [2.0, 2.0, 3.0, 4.0] LIMIT 2");
 
         // Confirm that the config picks up our custom settings.
         StorageAttachedIndex saiIndex =
@@ -963,6 +978,33 @@ public class VectorTypeTest extends VectorTester.VersionedWithChecksums
         assertEquals(40,    config.getAnnMaxDegree());
         assertEquals(300,   config.getConstructionBeamWidth());
         assertEquals(VectorSimilarityFunction.EUCLIDEAN, config.getSimilarityFunction());
+    }
+
+    @Test
+    public void testMultiVersionJVectorCompatibility() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int, vec vector<float, 4>, PRIMARY KEY(pk))");
+        createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex'");
+
+        // Note that we do not test the multi-version path where compaction produces different sstables, which is
+        // the norm in CNDB. If we had a way to compact individual sstables, we could.
+        disableCompaction();
+
+        // Create index files for each valid version
+        for (int version = 2; version <= V3OnDiskFormat.JVECTOR_VERSION; version++)
+        {
+            // Version 3 is no longer supported, so there is mild risk that it isn't covered here, but we can't write
+            // it any more, so there isn't much we can do.
+            if (version == 3)
+                continue;
+            V3OnDiskFormat.JVECTOR_VERSION = version;
+            for (int i = 0; i < CassandraOnHeapGraph.MIN_PQ_ROWS; i++)
+                execute("INSERT INTO %s (pk, vec) VALUES (?, ?)", i, randomVectorBoxed(4));
+            flush();
+        }
+
+        // Run basic query to confirm we can, no need to validate results
+        execute("SELECT pk FROM %s ORDER BY vec ANN OF [2.0, 2.0, 3.0, 4.0] LIMIT 2");
     }
 
 }
