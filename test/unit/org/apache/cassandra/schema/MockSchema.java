@@ -336,7 +336,7 @@ public class MockSchema
     public static TableMetadata.Builder newTableMetadataBuilder(String ksname, String cfname)
     {
         return TableMetadata.builder(ksname, cfname)
-                            .partitioner(Murmur3Partitioner.instance)
+                            .partitioner(DatabaseDescriptor.getPartitioner())
                             .addPartitionKeyColumn("key", UTF8Type.instance)
                             .addClusteringColumn("col", UTF8Type.instance)
                             .addRegularColumn("value", UTF8Type.instance)
