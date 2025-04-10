@@ -32,6 +32,7 @@ import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import io.github.jbellis.jvector.vector.VectorizationProvider;
 import io.github.jbellis.jvector.vector.types.VectorFloat;
 import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
+import org.apache.cassandra.index.sai.metrics.ColumnQueryMetrics;
 import org.apache.cassandra.index.sai.utils.SegmentRowIdOrdinalPairs;
 
 import static org.junit.Assert.assertFalse;
@@ -53,7 +54,8 @@ public class BruteForceRowIdIteratorTest
         // Should work for an empty pq
         var view = new TestView();
         CloseableReranker reranker = new CloseableReranker(VectorSimilarityFunction.COSINE, queryVector, view);
-        var iter = new BruteForceRowIdIterator(heap, new SegmentRowIdOrdinalPairs(10), reranker, limit, topK);
+        var metrics = new ColumnQueryMetrics.VectorIndexMetrics("ks", "cf", "index");
+        var iter = new BruteForceRowIdIterator(heap, new SegmentRowIdOrdinalPairs(10), reranker, limit, topK, metrics);
         assertFalse(iter.hasNext());
         assertThrows(NoSuchElementException.class, iter::next);
         assertFalse(view.isClosed);

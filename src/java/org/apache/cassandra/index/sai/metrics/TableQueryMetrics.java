@@ -18,7 +18,6 @@
 package org.apache.cassandra.index.sai.metrics;
 
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.LongAdder;
 
 import com.codahale.metrics.Counter;
 import com.codahale.metrics.Histogram;
@@ -44,7 +43,6 @@ public class TableQueryMetrics extends AbstractMetrics
 
     private final Counter sortThenFilterQueriesCompleted;
     private final Counter filterThenSortQueriesCompleted;
-
 
     public TableQueryMetrics(TableMetadata table)
     {
@@ -112,7 +110,10 @@ public class TableQueryMetrics extends AbstractMetrics
         private final Histogram postingsSkips;
         private final Histogram postingsDecodes;
 
-        private final LongAdder annNodesVisited = new LongAdder();
+        /**
+         * Cumulative time spent searching ANN graph.
+         */
+        private final Timer annGraphSearchLatency;
 
         public PerQueryMetrics(TableMetadata table)
         {
@@ -135,6 +136,9 @@ public class TableQueryMetrics extends AbstractMetrics
             rowsFiltered = Metrics.histogram(createMetricName("RowsFiltered"), false);
 
             shadowedKeysScannedHistogram = Metrics.histogram(createMetricName("ShadowedKeysScannedHistogram"), false);
+
+            // Key vector metrics that translate to performance
+            annGraphSearchLatency = Metrics.timer(createMetricName("ANNGraphSearchLatency"));
         }
 
         private void recordStringIndexCacheMetrics(QueryContext events)
@@ -151,9 +155,9 @@ public class TableQueryMetrics extends AbstractMetrics
             kdTreePostingsDecodes.update(events.bkdPostingsDecodes());
         }
 
-        private void recordAnnIndexMetrics(QueryContext queryContext)
+        private void recordVectorIndexMetrics(QueryContext queryContext)
         {
-            annNodesVisited.add(queryContext.annNodesVisited());
+            annGraphSearchLatency.update(queryContext.annGraphSearchLatency(), TimeUnit.NANOSECONDS);
         }
 
         public void record(QueryContext queryContext)
@@ -209,8 +213,11 @@ public class TableQueryMetrics extends AbstractMetrics
                 recordStringIndexCacheMetrics(queryContext);
             if (queryContext.bkdSegmentsHit() > 0)
                 recordNumericIndexCacheMetrics(queryContext);
-            if (queryContext.annNodesVisited() > 0)
-                recordAnnIndexMetrics(queryContext);
+            // If ann brute forced the whole search, this is 0. We don't measure brute force latency. Maybe we should?
+            // At the very least, we collect brute force comparison metrics, which should give a reasonable indicator
+            // of work done.
+            if (queryContext.annGraphSearchLatency() > 0)
+                recordVectorIndexMetrics(queryContext);
 
             shadowedKeysScannedHistogram.update(queryContext.getShadowedPrimaryKeyCount());
 
