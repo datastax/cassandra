@@ -40,7 +40,6 @@ import io.github.jbellis.jvector.graph.GraphIndexBuilder;
 import io.github.jbellis.jvector.graph.ListRandomAccessVectorValues;
 import io.github.jbellis.jvector.graph.disk.feature.Feature;
 import io.github.jbellis.jvector.graph.disk.feature.FeatureId;
-import io.github.jbellis.jvector.graph.disk.feature.FusedADC;
 import io.github.jbellis.jvector.graph.disk.feature.InlineVectors;
 import io.github.jbellis.jvector.graph.disk.OnDiskGraphIndex;
 import io.github.jbellis.jvector.graph.disk.OnDiskGraphIndexWriter;
@@ -92,7 +91,7 @@ import org.apache.cassandra.service.StorageService;
 import static org.apache.cassandra.utils.Clock.Global.nanoTime;
 import static java.lang.Math.max;
 import static java.lang.Math.min;
-import static org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat.JVECTOR_2_VERSION;
+import static org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat.JVECTOR_VERSION;
 
 public class CompactionGraph implements Closeable, Accountable
 {
@@ -201,13 +200,17 @@ public class CompactionGraph implements Closeable, Accountable
         {
             throw new IllegalArgumentException("Unsupported compressor: " + compressor);
         }
+        if (indexConfig.isHierarchyEnabled() && V3OnDiskFormat.JVECTOR_VERSION < 4)
+            logger.warn("Hierarchical graphs configured but node configured with V3OnDiskFormat.JVECTOR_VERSION {}. " +
+                        "Skipping setting for {}", V3OnDiskFormat.JVECTOR_VERSION, indexConfig.getIndexName());
+
         builder = new GraphIndexBuilder(bsp,
                                         dimension,
                                         indexConfig.getAnnMaxDegree(),
                                         indexConfig.getConstructionBeamWidth(),
                                         indexConfig.getNeighborhoodOverflow(1.2f),
                                         indexConfig.getAlpha(dimension > 3 ? 1.2f : 1.4f),
-                                        indexConfig.isHierarchyEnabled(),
+                                        indexConfig.isHierarchyEnabled() && V3OnDiskFormat.JVECTOR_VERSION >= 4,
                                         compactionSimdPool, compactionFjp);
 
         termsFile = perIndexComponents.addOrGet(IndexComponentType.TERMS_DATA).file();
@@ -221,19 +224,10 @@ public class CompactionGraph implements Closeable, Accountable
 
     private OnDiskGraphIndexWriter.Builder createTermsWriterBuilder() throws IOException
     {
-        var indexConfig = context.getIndexWriterConfig();
-        var writerBuilder = new OnDiskGraphIndexWriter.Builder(builder.getGraph(), termsFile.toPath())
-                      .withStartOffset(termsOffset)
-                      .with(new InlineVectors(dimension));
-        if (V3OnDiskFormat.WRITE_JVECTOR3_FORMAT && compressor instanceof ProductQuantization)
-        {
-            writerBuilder = writerBuilder.with(new FusedADC(indexConfig.getAnnMaxDegree(), (ProductQuantization) compressor));
-        }
-        else
-        {
-            writerBuilder = writerBuilder.withVersion(JVECTOR_2_VERSION);
-        }
-        return writerBuilder;
+        return new OnDiskGraphIndexWriter.Builder(builder.getGraph(), termsFile.toPath())
+               .withStartOffset(termsOffset)
+               .with(new InlineVectors(dimension))
+               .withVersion(JVECTOR_VERSION);
     }
 
     @Override
@@ -402,7 +396,7 @@ public class CompactionGraph implements Closeable, Accountable
             // write PQ (time to do this is negligible, don't bother doing it async)
             long pqOffset = pqOutput.getFilePointer();
             CassandraOnHeapGraph.writePqHeader(pqOutput.asSequentialWriter(), unitVectors, VectorCompression.CompressionType.PRODUCT_QUANTIZATION);
-            compressedVectors.write(pqOutput.asSequentialWriter(), JVECTOR_2_VERSION); // VSTODO old version until we add APQ
+            compressedVectors.write(pqOutput.asSequentialWriter(), JVECTOR_VERSION); // VSTODO old version until we add APQ
             long pqLength = pqOutput.getFilePointer() - pqOffset;
 
             // write postings asynchronously while we run cleanup()
@@ -456,18 +450,9 @@ public class CompactionGraph implements Closeable, Accountable
 
             // write the graph edge lists and optionally fused adc features
             var start = nanoTime();
-            if (writer.getFeatureSet().contains(FeatureId.FUSED_ADC))
-            {
-                try (var view = builder.getGraph().getView())
-                {
-                    var supplier = Feature.singleStateFactory(FeatureId.FUSED_ADC, ordinal -> new FusedADC.State(view, (PQVectors) compressedVectors, ordinal));
-                    writer.write(supplier);
-                }
-            }
-            else
-            {
-                writer.write(Map.of());
-            }
+            // Required becuase jvector 3 wrote the fused adc map here. We no longer write jvector 3, but we still
+            // write out the empty map.
+            writer.write(Map.of());
             SAICodecUtils.writeFooter(writer.getOutput(), writer.checksum());
             logger.info("Writing graph took {}ms", (nanoTime() - start) / 1_000_000);
             long termsLength = writer.getOutput().position() - termsOffset;
