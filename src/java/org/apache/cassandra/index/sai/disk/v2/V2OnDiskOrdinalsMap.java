@@ -99,6 +99,12 @@ public class V2OnDiskOrdinalsMap implements OnDiskOrdinalsMap
     }
 
     @Override
+    public long cachedBytesUsed()
+    {
+        return 0;
+    }
+
+    @Override
     public RowIdsView getRowIdsView()
     {
         if (canFastMapRowIdsView) {
