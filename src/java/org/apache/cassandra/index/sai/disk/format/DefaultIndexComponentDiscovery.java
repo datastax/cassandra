@@ -18,16 +18,22 @@
 
 package org.apache.cassandra.index.sai.disk.format;
 
+import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 
 public class DefaultIndexComponentDiscovery extends IndexComponentDiscovery
 {
     @Override
-    public SSTableIndexComponentsState discoverComponents(SSTableReader sstable)
-    {
-        SSTableIndexComponentsState groups = tryDiscoverComponentsFromTOC(sstable.getDescriptor());
+    public SSTableIndexComponentsState discoverComponents(SSTableReader sstable) {
+        Descriptor descriptor = sstable.getDescriptor();
+
+        // Older versions might not have all components in the TOC, we should not trust it (fix for CNDB-13582):
+        if (descriptor.version.version.compareTo("ca") < 0)
+           return discoverComponentsFromDiskFallback(descriptor);
+
+        SSTableIndexComponentsState groups = tryDiscoverComponentsFromTOC(descriptor);
         return groups == null
-               ? discoverComponentsFromDiskFallback(sstable.getDescriptor())
+               ? discoverComponentsFromDiskFallback(descriptor)
                : groups;
     }
 }
