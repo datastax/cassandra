@@ -19,6 +19,9 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.concurrent.CompletableFuture;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.compress.CorruptBlockException;
 import org.apache.cassandra.io.compress.EncryptedSequentialWriter;
@@ -54,6 +57,8 @@ import static org.apache.cassandra.io.compress.EncryptedSequentialWriter.FOOTER_
  */
 public abstract class EncryptedChunkReader extends AbstractReaderFileProxy implements ChunkReader
 {
+    private static final Logger logger = LoggerFactory.getLogger(EncryptedChunkReader.class);
+
     final int maxBytesInPage;
 
     final CompressionParams compressionParams;
@@ -99,6 +104,7 @@ public abstract class EncryptedChunkReader extends AbstractReaderFileProxy imple
 
     protected ByteBuffer decrypt(ByteBuffer input, int start, ByteBuffer output, long position) throws IOException
     {
+        logger.debug("Decrypting encrypted buffer");
         assert output.capacity() == CHUNK_SIZE;
 
         if (shouldCheckCrc())

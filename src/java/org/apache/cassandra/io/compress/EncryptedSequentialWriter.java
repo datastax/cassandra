@@ -22,6 +22,9 @@ import java.nio.ByteBuffer;
 import java.nio.channels.Channels;
 import java.util.zip.CRC32;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.io.FSReadError;
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
@@ -57,6 +60,8 @@ import org.apache.cassandra.utils.PageAware;
  */
 public class EncryptedSequentialWriter extends SequentialWriter
 {
+    private static final Logger logger = LoggerFactory.getLogger(EncryptedSequentialWriter.class);
+
     public static final int FOOTER_LENGTH = 8; // CRC and encrypted length
     public static final int CHUNK_SIZE = PageAware.PAGE_SIZE;
     // Note: We could just as well permit other chunk sizes for encryption, but as is stands we can't specify them
@@ -123,6 +128,7 @@ public class EncryptedSequentialWriter extends SequentialWriter
     {
         try
         {
+            logger.debug("Flushing encrypted data");
             // compressing data with buffer re-use
             buffer.flip();
             encrypted.clear();
