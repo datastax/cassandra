@@ -52,11 +52,13 @@ public class BM25Utils
         private final Map<ByteBuffer, Long> frequencies;
         // total number of docs in the index
         private final long docCount;
+        private final long totalTermCount;
 
-        public DocStats(Map<ByteBuffer, Long> frequencies, long docCount)
+        public DocStats(Map<ByteBuffer, Long> frequencies, long docCount, long totalTermCount)
         {
             this.frequencies = frequencies;
             this.docCount = docCount;
+            this.totalTermCount = totalTermCount;
         }
     }
 
@@ -154,21 +156,19 @@ public class BM25Utils
 
         // data structures for document stats and frequencies
         ArrayList<DocTF> documents = new ArrayList<>();
-        double totalTermCount = 0;
 
         // Compute TF within each document
         while (docIterator.hasNext())
         {
             var tf = docIterator.next();
             documents.add(tf);
-            totalTermCount += tf.termCount();
         }
 
         if (documents.isEmpty())
             return CloseableIterator.emptyIterator();
 
         // Calculate average document length
-        double avgDocLength = totalTermCount / documents.size();
+        double avgDocLength = (double) docStats.totalTermCount / docStats.docCount;
 
         // Calculate BM25 scores.
         // Uses a NodeQueue that avoids allocating an object for each document.

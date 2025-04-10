@@ -379,7 +379,7 @@ public class BM25Test extends SAITester
                    row(4), // Highest frequency of both terms
                    row(2), // High frequency of 'crispy', one 'crust'
                    row(1)); // One mention of each term
-        // Rows 4 and 5 do not contain all terms
+        // Rows 3 and 5 do not contain all terms
     }
 
     @Test

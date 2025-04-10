@@ -256,7 +256,7 @@ public class InvertedIndexSearcher extends IndexSearcher
         // cap frequencies to total rows so that the IDF term doesn't turn negative
         var cappedFrequencies = documentFrequencies.entrySet().stream()
                                                     .collect(Collectors.toMap(Map.Entry::getKey, e -> Math.min(e.getValue(), totalRows)));
-        var docStats = new BM25Utils.DocStats(cappedFrequencies, totalRows);
+        BM25Utils.DocStats docStats = new BM25Utils.DocStats(cappedFrequencies, totalRows, metadata.termsDistribution.numPoints);
         return BM25Utils.computeScores(keyIterator,
                                        queryTerms,
                                        docStats,
