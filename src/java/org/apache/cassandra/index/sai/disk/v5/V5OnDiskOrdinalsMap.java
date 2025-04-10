@@ -354,4 +354,26 @@ public class V5OnDiskOrdinalsMap implements OnDiskOrdinalsMap
             // no-op
         }
     }
+
+    @Override
+    public long cachedBytesUsed()
+    {
+        if (structure != V5VectorPostingsWriter.Structure.ONE_TO_MANY) {
+            return 0;
+        }
+
+        long bytes = 0;
+        if (extraRowIds != null) {
+            bytes += extraRowIds.length * 4L;
+        }
+        if (extraOrdinals != null) {
+            bytes += extraOrdinals.length * 4L;
+        }
+        if (extraRowsByOrdinal != null) {
+            for (int[] rowIds : extraRowsByOrdinal.values()) {
+                bytes += rowIds.length * 4L;
+            }
+        }
+        return bytes;
+    }
 }
