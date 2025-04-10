@@ -20,6 +20,7 @@ package org.apache.cassandra.index.sai.disk.vector;
 
 import io.github.jbellis.jvector.graph.NodeQueue;
 import io.github.jbellis.jvector.util.BoundedLongHeap;
+import org.apache.cassandra.index.sai.metrics.ColumnQueryMetrics;
 import org.apache.cassandra.index.sai.utils.SegmentRowIdOrdinalPairs;
 import org.apache.cassandra.index.sai.utils.RowIdWithMeta;
 import org.apache.cassandra.index.sai.utils.RowIdWithScore;
@@ -62,6 +63,7 @@ public class BruteForceRowIdIterator extends AbstractIterator<RowIdWithScore>
     private final CloseableReranker reranker;
     private final int topK;
     private final int limit;
+    private final ColumnQueryMetrics.VectorIndexMetrics columnQueryMetrics;
     private int rerankedCount;
 
     /**
@@ -70,12 +72,14 @@ public class BruteForceRowIdIterator extends AbstractIterator<RowIdWithScore>
      * @param reranker A function that takes a graph ordinal and returns the exact similarity score
      * @param limit The query limit
      * @param topK The number of vectors to resolve and score before returning results
+     * @param columnQueryMetrics object to record metrics
      */
     public BruteForceRowIdIterator(NodeQueue approximateScoreQueue,
                                    SegmentRowIdOrdinalPairs segmentOrdinalPairs,
                                    CloseableReranker reranker,
                                    int limit,
-                                   int topK)
+                                   int topK,
+                                   ColumnQueryMetrics.VectorIndexMetrics columnQueryMetrics)
     {
         this.approximateScoreQueue = approximateScoreQueue;
         this.segmentOrdinalPairs = segmentOrdinalPairs;
@@ -84,6 +88,7 @@ public class BruteForceRowIdIterator extends AbstractIterator<RowIdWithScore>
         assert topK >= limit : "topK must be greater than or equal to limit. Found: " + topK + " < " + limit;
         this.limit = limit;
         this.topK = topK;
+        this.columnQueryMetrics = columnQueryMetrics;
         this.rerankedCount = topK; // placeholder to kick off computeNext
     }
 
@@ -91,14 +96,17 @@ public class BruteForceRowIdIterator extends AbstractIterator<RowIdWithScore>
     protected RowIdWithScore computeNext() {
         int consumed = rerankedCount - exactScoreQueue.size();
         if (consumed >= limit) {
+            int exactComparisons = 0;
             // Refill the exactScoreQueue until it reaches topK exact scores, or the approximate score queue is empty
             while (approximateScoreQueue.size() > 0 && exactScoreQueue.size() < topK) {
                 int segmentOrdinalIndex = approximateScoreQueue.pop();
                 int rowId = segmentOrdinalPairs.getSegmentRowId(segmentOrdinalIndex);
                 int ordinal = segmentOrdinalPairs.getOrdinal(segmentOrdinalIndex);
                 float score = reranker.similarityTo(ordinal);
+                exactComparisons++;
                 exactScoreQueue.push(rowId, score);
             }
+            columnQueryMetrics.onBruteForceNodesReranked(exactComparisons);
             rerankedCount = exactScoreQueue.size();
         }
         if (exactScoreQueue.size() == 0)
