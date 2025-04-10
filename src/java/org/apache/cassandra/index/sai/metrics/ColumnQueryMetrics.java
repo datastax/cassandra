@@ -18,9 +18,12 @@
 package org.apache.cassandra.index.sai.metrics;
 
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.LongAdder;
 
+import com.codahale.metrics.Counter;
 import com.codahale.metrics.Meter;
 import com.codahale.metrics.Timer;
+import io.github.jbellis.jvector.graph.SearchResult;
 
 import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
 
@@ -140,6 +143,104 @@ public abstract class ColumnQueryMetrics extends AbstractMetrics
         public void postingDecoded(long postingsDecoded)
         {
             postingDecodes.mark(postingsDecoded);
+        }
+    }
+
+    /**
+     * Example VectorIndexMetrics for tracking ANN/Vector index–related metrics.
+     * You will also need a corresponding QueryEventListener implementation
+     * (e.g. VectorIndexEventListener) that calls these methods.
+     */
+    public static class VectorIndexMetrics extends ColumnQueryMetrics implements QueryEventListener.VectorIndexEventListener
+    {
+        // Vector index meatrics
+        // Note that the counters will essentially give us a number of operations per second. We lose the notion
+        // of per query counts, but we can back into an average by dividing by the number of queries.
+        public final Counter annNodesVisited;
+        public final Counter annNodesReranked;
+        public final Counter annNodesExpanded;
+        public final Counter annNodesExpandedBaseLayer;
+        public final Counter annGraphSearches;
+        public final Counter annGraphResumes;
+        public final Timer   annGraphSearchLatency; // Note that this timer measures individual graph search latency
+
+        public final Counter bruteForceNodesVisited;
+        public final Counter bruteForceNodesReranked;
+
+        // While not query metrics, these are vector specific metrics for the column.
+        public final LongAdder quantizationMemoryBytes;
+        public final LongAdder ordinalsMapMemoryBytes;
+        public final LongAdder onDiskGraphsCount;
+        public final LongAdder onDiskGraphVectorsCount;
+
+        public VectorIndexMetrics(String keyspace, String table, String indexName)
+        {
+            super(keyspace, table, indexName);
+
+            // Initialize Counters and Timer for ANN search
+            annNodesVisited = Metrics.counter(createMetricName("ANNNodesVisited"));
+            annNodesReranked = Metrics.counter(createMetricName("ANNNodesReranked"));
+            annNodesExpanded = Metrics.counter(createMetricName("ANNNodesExpanded"));
+            annNodesExpandedBaseLayer = Metrics.counter(createMetricName("ANNNodesExpandedBaseLayer"));
+            annGraphSearches = Metrics.counter(createMetricName("ANNGraphSearches"));
+            annGraphResumes = Metrics.counter(createMetricName("ANNGraphResumes"));
+            annGraphSearchLatency = Metrics.timer(createMetricName("ANNGraphSearchLatency"));
+
+            // Initialize Counters for brute-force fallback (if applicable)
+            bruteForceNodesVisited = Metrics.counter(createMetricName("BruteForceNodesVisited"));
+            bruteForceNodesReranked = Metrics.counter(createMetricName("BruteForceNodesReranked"));
+
+            // Initialize Gauge for PQ bytes. Ignoring codahale metrics for now.
+            quantizationMemoryBytes = new LongAdder();
+            ordinalsMapMemoryBytes = new LongAdder();
+            onDiskGraphVectorsCount = new LongAdder();
+            onDiskGraphsCount = new LongAdder();
+        }
+
+        @Override
+        public void onGraphLoaded(long quantizationBytes, long ordinalsMapCachedBytes, long vectorsLoaded)
+        {
+            this.quantizationMemoryBytes.add(quantizationBytes);
+            this.ordinalsMapMemoryBytes.add(ordinalsMapCachedBytes);
+            this.onDiskGraphVectorsCount.add(vectorsLoaded);
+            this.onDiskGraphsCount.increment();
+        }
+
+        @Override
+        public void onGraphClosed(long quantizationBytes, long ordinalsMapCachedBytes, long vectorsLoaded)
+        {
+            this.quantizationMemoryBytes.add(-quantizationBytes);
+            this.ordinalsMapMemoryBytes.add(-ordinalsMapCachedBytes);
+            this.onDiskGraphVectorsCount.add(-vectorsLoaded);
+            this.onDiskGraphsCount.decrement();
+        }
+
+        @Override
+        public void onSearchResult(SearchResult result, long latencyNs, boolean isResume)
+        {
+            annNodesVisited.inc(result.getVisitedCount());
+            annNodesReranked.inc(result.getRerankedCount());
+            annNodesExpanded.inc(result.getExpandedCount());
+            annNodesExpandedBaseLayer.inc(result.getExpandedCountBaseLayer());
+            annGraphSearchLatency.update(latencyNs, TimeUnit.NANOSECONDS);
+            if (isResume)
+                annGraphResumes.inc();
+            else
+                annGraphSearches.inc();
+        }
+
+        // These are the approximate similarity comparisons
+        @Override
+        public void onBruteForceNodesVisited(int visited)
+        {
+            bruteForceNodesVisited.inc(visited);
+        }
+
+        // These are the exact similarity comparisons
+        @Override
+        public void onBruteForceNodesReranked(int visited)
+        {
+            bruteForceNodesReranked.inc(visited);
         }
     }
 }
