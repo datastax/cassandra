@@ -83,6 +83,7 @@ import org.apache.cassandra.index.sai.disk.v5.V5OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter.Structure;
 import org.apache.cassandra.index.sai.disk.vector.VectorCompression.CompressionType;
+import org.apache.cassandra.index.sai.metrics.ColumnQueryMetrics;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.io.util.SequentialWriter;
@@ -111,6 +112,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
 
     // We use the metable reference for easier tracing.
     private final String source;
+    private final ColumnQueryMetrics.VectorIndexMetrics columnQueryMetrics;
     private final ConcurrentVectorValues vectorValues;
     private final GraphIndexBuilder builder;
     private final VectorType.VectorSerializer serializer;
@@ -135,6 +137,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
         this.source = memtable == null
                       ? "null"
                       : memtable.getClass().getSimpleName() + '@' + Integer.toHexString(memtable.hashCode());
+        this.columnQueryMetrics = (ColumnQueryMetrics.VectorIndexMetrics) context.getColumnQueryMetrics();
         var indexConfig = context.getIndexWriterConfig();
         var termComparator = context.getValidator();
         serializer = (VectorType.VectorSerializer) termComparator.getSerializer();
@@ -328,17 +331,20 @@ public class CassandraOnHeapGraph<T> implements Accountable
         try
         {
             var ssf = SearchScoreProvider.exact(queryVector, similarityFunction, vectorValues);
+            long start = nanoTime();
             var result = searcher.search(ssf, limit, rerankK, threshold, 0.0f, bits);
+            long elapsed = nanoTime() - start;
             Tracing.trace("ANN search for {}/{} visited {} nodes, reranked {} to return {} results from {}",
                           limit, rerankK, result.getVisitedCount(), result.getRerankedCount(), result.getNodes().length, source);
-            context.addAnnNodesVisited(result.getVisitedCount());
+            columnQueryMetrics.onSearchResult(result, elapsed, false);
+            context.addAnnGraphSearchLatency(elapsed);
             if (threshold > 0)
             {
                 // Threshold based searches do not support resuming the search.
                 graphAccessManager.release();
                 return CloseableIterator.wrap(Arrays.stream(result.getNodes()).iterator());
             }
-            return new AutoResumingNodeScoreIterator(searcher, graphAccessManager, result, context::addAnnNodesVisited, limit, rerankK, true, source);
+            return new AutoResumingNodeScoreIterator(searcher, graphAccessManager, result, context, columnQueryMetrics, visited -> {}, limit, rerankK, true, source);
         }
         catch (Throwable t)
         {
