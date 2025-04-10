@@ -214,6 +214,32 @@ public class IndexDescriptorTest
         assertTrue(components.has(IndexComponentType.KD_TREE_POSTING_LISTS));
     }
 
+    // CNDB-13582
+    @Test
+    public void componentsAreLoadedAfterUpgradeDespiteBrokenTOC() throws Throwable
+    {
+        setLatestVersion(Version.AA);
+
+        // Force old version of sstables to simulate upgrading from DSE
+        Descriptor descriptor = Descriptor.fromFilename(temporaryFolder.newFolder().getAbsolutePath() + "/bb-2-bti-Data.db");
+
+        IndexContext indexContext = SAITester.createIndexContext("test_index", Int32Type.instance);
+
+        createFakeDataFile(descriptor);
+        createFakeTOCFile(descriptor);
+        createFakePerSSTableComponents(descriptor, Version.AA, 0);
+        createFakePerIndexComponents(descriptor, indexContext, Version.AA, 0);
+
+        IndexDescriptor indexDescriptor = loadDescriptor(descriptor, indexContext);
+
+        IndexComponents.ForRead components = indexDescriptor.perIndexComponents(indexContext);
+        assertTrue(components.has(IndexComponentType.COLUMN_COMPLETION_MARKER));
+        assertTrue(components.has(IndexComponentType.META));
+        assertTrue(components.has(IndexComponentType.KD_TREE));
+        assertTrue(components.has(IndexComponentType.KD_TREE_POSTING_LISTS));
+    }
+
+
     @Test
     public void testReload() throws Throwable
     {
@@ -254,6 +280,11 @@ public class IndexDescriptorTest
     static void createFakeDataFile(Descriptor descriptor) throws IOException
     {
         createFileOnDisk(descriptor, SSTableFormat.Components.DATA.name());
+    }
+
+    static void createFakeTOCFile(Descriptor descriptor) throws IOException
+    {
+        createFileOnDisk(descriptor, SSTableFormat.Components.TOC.name());
     }
 
     static void createFakePerSSTableComponents(Descriptor descriptor, Version version, int generation) throws IOException
