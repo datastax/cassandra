@@ -49,12 +49,15 @@ import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter.Structure;
 import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph.PQVersion;
+import org.apache.cassandra.index.sai.metrics.ColumnQueryMetrics;
 import org.apache.cassandra.index.sai.utils.RowIdWithScore;
 import org.apache.cassandra.io.sstable.SSTableId;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.CloseableIterator;
+
+import static org.apache.cassandra.utils.Clock.Global.nanoTime;
 
 
 public class CassandraDiskAnn
@@ -63,6 +66,7 @@ public class CassandraDiskAnn
 
     public static final int PQ_MAGIC = 0xB011A61C; // PQ_MAGIC, with a lot of liberties taken
     protected final PerIndexFiles indexFiles;
+    private final ColumnQueryMetrics.VectorIndexMetrics columnQueryMetrics;
     protected final SegmentMetadata.ComponentMetadataMap componentMetadatas;
 
     private final SSTableId<?> source;
@@ -85,6 +89,7 @@ public class CassandraDiskAnn
         this.source = sstableContext.sstable().getId();
         this.componentMetadatas = componentMetadatas;
         this.indexFiles = indexFiles;
+        this.columnQueryMetrics = (ColumnQueryMetrics.VectorIndexMetrics) context.getColumnQueryMetrics();
 
         similarityFunction = context.getIndexWriterConfig().getSimilarityFunction();
 
@@ -152,8 +157,16 @@ public class CassandraDiskAnn
 
         SegmentMetadata.ComponentMetadata postingListsMetadata = this.componentMetadatas.get(IndexComponentType.POSTING_LISTS);
         ordinalsMap = omFactory.create(indexFiles.postingLists(), postingListsMetadata.offset, postingListsMetadata.length);
+        if (ordinalsMap.getStructure() == Structure.ZERO_OR_ONE_TO_MANY)
+            logger.warn("Index {} has structure ZERO_OR_ONE_TO_MANY, which requires on reading the on disk row id" +
+                        " to ordinal mapping for each search. This will be slower.", source);
 
         searchers = ExplicitThreadLocal.withInitial(() -> new GraphSearcherAccessManager(new GraphSearcher(graph)));
+
+        // Record metrics for this graph
+        columnQueryMetrics.onGraphLoaded(compressedVectors == null ? 0 : compressedVectors.ramBytesUsed(),
+                                         ordinalsMap.cachedBytesUsed(),
+                                         graph.size(0));
     }
 
     public Structure getPostingsStructure()
@@ -231,11 +244,15 @@ public class CassandraDiskAnn
                 var rr = view.rerankerFor(queryVector, similarityFunction);
                 ssp = new SearchScoreProvider(asf, rr);
             }
+            long start = nanoTime();
             var result = searcher.search(ssp, limit, rerankK, threshold, context.getAnnRerankFloor(), ordinalsMap.ignoringDeleted(acceptBits));
+            long elapsed = nanoTime() - start;
             if (V3OnDiskFormat.ENABLE_RERANK_FLOOR)
                 context.updateAnnRerankFloor(result.getWorstApproximateScoreInTopK());
             Tracing.trace("DiskANN search for {}/{} visited {} nodes, reranked {} to return {} results from {}",
                           limit, rerankK, result.getVisitedCount(), result.getRerankedCount(), result.getNodes().length, source);
+            columnQueryMetrics.onSearchResult(result, elapsed, false);
+            context.addAnnGraphSearchLatency(elapsed);
             if (threshold > 0)
             {
                 // Threshold based searches are comprehensive and do not need to resume the search.
@@ -246,7 +263,7 @@ public class CassandraDiskAnn
             }
             else
             {
-                var nodeScores = new AutoResumingNodeScoreIterator(searcher, graphAccessManager, result, nodesVisitedConsumer, limit, rerankK, false, source.toString());
+                var nodeScores = new AutoResumingNodeScoreIterator(searcher, graphAccessManager, result, context, columnQueryMetrics, nodesVisitedConsumer, limit, rerankK, false, source.toString());
                 return new NodeScoreToRowIdWithScoreIterator(nodeScores, ordinalsMap.getRowIdsView());
             }
         }
@@ -271,6 +288,9 @@ public class CassandraDiskAnn
     public void close() throws IOException
     {
         FileUtils.close(ordinalsMap, searchers, graph, graphHandle);
+        columnQueryMetrics.onGraphClosed(compressedVectors == null ? 0 : compressedVectors.ramBytesUsed(),
+                                         ordinalsMap.cachedBytesUsed(),
+                                         graph.size(0));
     }
 
     public OrdinalsView getOrdinalsView()

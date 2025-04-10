@@ -58,6 +58,7 @@ import org.apache.cassandra.index.sai.disk.vector.NodeQueueRowIdIterator;
 import org.apache.cassandra.index.sai.disk.vector.VectorCompression;
 import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
+import org.apache.cassandra.index.sai.metrics.ColumnQueryMetrics;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.plan.Orderer;
 import org.apache.cassandra.index.sai.plan.Plan.CostCoefficients;
@@ -103,6 +104,7 @@ public class V2VectorIndexSearcher extends IndexSearcher
     private final PrimaryKey.Factory keyFactory;
     private final PairedSlidingWindowReservoir expectedActualNodesVisited = new PairedSlidingWindowReservoir(20);
     private final ThreadLocal<SparseBits> cachedBits;
+    private final ColumnQueryMetrics.VectorIndexMetrics columnQueryMetrics;
 
     protected V2VectorIndexSearcher(PrimaryKeyMap.Factory primaryKeyMapFactory,
                                     PerIndexFiles perIndexFiles,
@@ -113,7 +115,8 @@ public class V2VectorIndexSearcher extends IndexSearcher
         super(primaryKeyMapFactory, perIndexFiles, segmentMetadata, indexContext);
         this.graph = graph;
         this.keyFactory = PrimaryKey.factory(indexContext.comparator(), indexContext.indexFeatureSet());
-        cachedBits = ThreadLocal.withInitial(SparseBits::new);
+        this.cachedBits = ThreadLocal.withInitial(SparseBits::new);
+        this.columnQueryMetrics = (ColumnQueryMetrics.VectorIndexMetrics) indexContext.getColumnQueryMetrics();
     }
 
     @Override
@@ -194,10 +197,7 @@ public class V2VectorIndexSearcher extends IndexSearcher
             if (RangeUtil.coversFullRing(keyRange))
             {
                 var estimate = estimateCost(rerankK, graph.size());
-                return graph.search(queryVector, limit, rerankK, threshold, Bits.ALL, context, visited -> {
-                    estimate.updateStatistics(visited);
-                    context.addAnnNodesVisited(visited);
-                });
+                return graph.search(queryVector, limit, rerankK, threshold, Bits.ALL, context, estimate::updateStatistics);
             }
 
             PrimaryKey firstPrimaryKey = keyFactory.createTokenOnly(keyRange.left.getToken());
@@ -214,7 +214,7 @@ public class V2VectorIndexSearcher extends IndexSearcher
 
             // if the range covers the entire segment, skip directly to an index search
             if (minSSTableRowId <= metadata.minSSTableRowId && maxSSTableRowId >= metadata.maxSSTableRowId)
-                return graph.search(queryVector, limit, rerankK, threshold, Bits.ALL, context, context::addAnnNodesVisited);
+                return graph.search(queryVector, limit, rerankK, threshold, Bits.ALL, context, visited -> {});
 
             minSSTableRowId = Math.max(minSSTableRowId, metadata.minSSTableRowId);
             maxSSTableRowId = min(maxSSTableRowId, metadata.maxSSTableRowId);
@@ -263,10 +263,7 @@ public class V2VectorIndexSearcher extends IndexSearcher
             // the trouble to add it.
             var betterCostEstimate = estimateCost(rerankK, cardinality);
 
-            return graph.search(queryVector, limit, rerankK, threshold, bits, context, visited -> {
-                betterCostEstimate.updateStatistics(visited);
-                context.addAnnNodesVisited(visited);
-            });
+            return graph.search(queryVector, limit, rerankK, threshold, bits, context, betterCostEstimate::updateStatistics);
         }
     }
 
@@ -305,8 +302,9 @@ public class V2VectorIndexSearcher extends IndexSearcher
         segmentOrdinalPairs.forEachIndexOrdinalPair((i, ordinal) -> {
             approximateScores.push(i, scoreFunction.similarityTo(ordinal));
         });
+        columnQueryMetrics.onBruteForceNodesVisited(segmentOrdinalPairs.size());
         var reranker = new CloseableReranker(similarityFunction, queryVector, graph.getView());
-        return new BruteForceRowIdIterator(approximateScores, segmentOrdinalPairs, reranker, limit, rerankK);
+        return new BruteForceRowIdIterator(approximateScores, segmentOrdinalPairs, reranker, limit, rerankK, columnQueryMetrics);
     }
 
     /**
@@ -325,6 +323,7 @@ public class V2VectorIndexSearcher extends IndexSearcher
             segmentOrdinalPairs.forEachSegmentRowIdOrdinalPair((segmentRowId, ordinal) -> {
                 scoredRowIds.push(segmentRowId, esf.similarityTo(ordinal));
             });
+            columnQueryMetrics.onBruteForceNodesReranked(segmentOrdinalPairs.size());
             return new NodeQueueRowIdIterator(scoredRowIds);
         }
     }
@@ -348,6 +347,7 @@ public class V2VectorIndexSearcher extends IndexSearcher
                 if (score >= threshold)
                     results.add(new RowIdWithScore(segmentRowId, score));
             });
+            columnQueryMetrics.onBruteForceNodesReranked(segmentOrdinalPairs.size());
         }
         return CloseableIterator.wrap(results.iterator());
     }
