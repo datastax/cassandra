@@ -1219,8 +1219,13 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             // on indexed columns to allow pushing ORDER BY into the index; see StatementRestrictions::addOrderingRestrictions.
             // Therefore, we don't want to convert an ANN Ordering column into a +score column until after that.
             List<Ordering> orderings = getOrderings(table);
+
+            // Besides actual restrictions (where clauses), prepareRestrictions will include the user-provided index hints,
+            // which are needed to determine what indexes to use for the query and to validate whether filtering is needed.
+            IndexHints indexHints = options.parseIndexHints(table, IndexRegistry.obtain(table));
+
             StatementRestrictions restrictions = prepareRestrictions(
-                    table, bindVariables, orderings, containsOnlyStaticColumns, forView);
+                    table, bindVariables, orderings, indexHints, containsOnlyStaticColumns, forView);
 
             // If we order post-query, the sorted column needs to be in the ResultSet for sorting,
             // even if we don't ultimately ship them to the client (CASSANDRA-4911).
@@ -1382,6 +1387,8 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
          *
          * @param metadata the column family meta data
          * @param boundNames the variable specifications
+         * @param orderings the orderings
+         * @param indexHints the index hints
          * @param selectsOnlyStaticColumns {@code true} if the query select only static columns, {@code false} otherwise.
          * @return the restrictions
          * @throws InvalidRequestException if a problem occurs while building the restrictions
@@ -1389,6 +1396,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         private StatementRestrictions prepareRestrictions(TableMetadata metadata,
                                                           VariableSpecifications boundNames,
                                                           List<Ordering> orderings,
+                                                          IndexHints indexHints,
                                                           boolean selectsOnlyStaticColumns,
                                                           boolean forView) throws InvalidRequestException
         {
@@ -1397,6 +1405,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                                                 whereClause,
                                                 boundNames,
                                                 orderings,
+                                                indexHints,
                                                 selectsOnlyStaticColumns,
                                                 parameters.allowFiltering,
                                                 forView);

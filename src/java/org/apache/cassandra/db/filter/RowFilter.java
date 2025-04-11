@@ -387,7 +387,7 @@ public class RowFilter
             this.current = element;
 
             for (Restrictions restrictionSet : restrictions.filterRestrictions().getRestrictions())
-                restrictionSet.addToRowFilter(this, indexRegistry, options, annOptions);
+                restrictionSet.addToRowFilter(this, indexRegistry, options, annOptions, indexHints);
 
             for (ExternalRestriction expression : restrictions.filterRestrictions().getExternalExpressions())
                 addAllAsConjunction(b -> expression.addToRowFilter(b, table, options));

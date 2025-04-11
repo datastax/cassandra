@@ -89,6 +89,7 @@ import org.apache.cassandra.db.SinglePartitionReadCommand;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.WriteContext;
 import org.apache.cassandra.db.compaction.CompactionManager;
+import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.lifecycle.View;
@@ -1238,10 +1239,9 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
             return null;
         }
 
-        // Prepare a plan comparator based first on the user-provided hints, preferring the one using the most preferred
-        // indexes, and then on the index-provided selectivity, preferring the most selective index.
-        Set<Index> preferredIndexes = rowFilter.indexHints().preferred;
-        Comparator<Index.QueryPlan> hintsComparator = Comparator.comparing(plan -> Sets.intersection(preferredIndexes, plan.getIndexes()).size());
+        // Prepare a plan comparator based first on the user-provided hints, which will prefer the plan using the most
+        // preferred indexes, and then on the index-provided selectivity, which will prefer the most selective index.
+        Comparator<Index.QueryPlan> hintsComparator = rowFilter.indexHints().comparator();
         Comparator<Index.QueryPlan> selectivityComparator = Comparator.<Index.QueryPlan>naturalOrder().reversed();
         Comparator<Index.QueryPlan> planComparator = hintsComparator.thenComparing(selectivityComparator);
 
@@ -1269,13 +1269,20 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         return indexes.stream().map(i -> i.getIndexMetadata().name).collect(Collectors.joining(","));
     }
 
-
-    public Optional<Index> getBestIndexFor(RowFilter.Expression expression)
+    @Override
+    public Optional<Index> getBestIndexFor(RowFilter.Expression expression, IndexHints hints)
     {
-        return indexes.values().stream().filter((i) -> i.supportsExpression(expression.column(), expression.operator())).findFirst();
+        for (Index index : indexes.values())
+        {
+            if (!hints.excludes(index) && index.supportsExpression(expression.column(), expression.operator()))
+            {
+                return Optional.of(index);
+            }
+        }
+        return Optional.empty();
     }
 
-    public <T extends Index> Optional<T> getBestIndexFor(RowFilter.Expression expression, Class<T> indexType)
+    public <T extends Index> Optional<T> getBestIndexFor(RowFilter.Expression expression, Class<T> indexType) // TODO CNDB-13129: Use hints
     {
         return indexes.values()
                       .stream()

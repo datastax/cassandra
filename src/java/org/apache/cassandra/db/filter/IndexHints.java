@@ -16,7 +16,14 @@
 package org.apache.cassandra.db.filter;
 
 import java.io.IOException;
-import java.util.*;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashSet;
+import java.util.Objects;
+import java.util.Set;
+import java.util.SortedSet;
+import java.util.TreeSet;
 
 import com.google.common.collect.Sets;
 
@@ -54,20 +61,25 @@ public class IndexHints
     /**
      * The indexes to prefer when executing a query.
      */
-    public final Set<Index> preferred;
+    public final Set<IndexMetadata> preferred;
 
     /**
      * The indexes not to use when executing the query.
      */
-    public final Set<Index> excluded;
+    public final Set<IndexMetadata> excluded;
 
-    private IndexHints(Set<Index> preferred, Set<Index> excluded)
+    private IndexHints(Set<IndexMetadata> preferred, Set<IndexMetadata> excluded)
     {
         this.preferred = preferred;
         this.excluded = excluded;
     }
 
-    public static IndexHints create(Set<Index> preferred, Set<Index> excluded)
+    public boolean excludes(Index index)
+    {
+        return excluded.contains(index.getIndexMetadata());
+    }
+
+    public static IndexHints create(Set<IndexMetadata> preferred, Set<IndexMetadata> excluded)
     {
         assert preferred != null && excluded != null;
 
@@ -83,13 +95,13 @@ public class IndexHints
             return;
 
         // Ensure that no index is both preferred and excluded
-        Set<Index> conflictingIndexes = Sets.intersection(preferred, excluded);
+        Set<IndexMetadata> conflictingIndexes = Sets.intersection(preferred, excluded);
         if (!conflictingIndexes.isEmpty())
         {
             // collect the names of the conflicting indexes in order to provide a consistent error message
             SortedSet<String> names = new TreeSet<>();
-            for (Index i : conflictingIndexes)
-                names.add(i.getIndexMetadata().name);
+            for (IndexMetadata i : conflictingIndexes)
+                names.add(i.name);
 
             throw new InvalidRequestException(CONFLICTING_INDEXES_ERROR + String.join(", ", names));
         }
@@ -135,23 +147,23 @@ public class IndexHints
                                  fetchIndexes(excluded, table, indexRegistry));
     }
 
-    private static Set<Index> fetchIndexes(Set<QualifiedName> indexNames, TableMetadata table, IndexRegistry indexRegistry)
+    private static Set<IndexMetadata> fetchIndexes(Set<QualifiedName> indexNames, TableMetadata table, IndexRegistry indexRegistry)
     {
         if (indexNames == null || indexNames.isEmpty())
             return Collections.emptySet();
 
-        Set<Index> indexes = new HashSet<>(indexNames.size());
+        Set<IndexMetadata> indexes = new HashSet<>(indexNames.size());
 
         for (QualifiedName indexName : indexNames)
         {
-            Index index = fetchIndex(indexName, table, indexRegistry);
+            IndexMetadata index = fetchIndex(indexName, table, indexRegistry);
             indexes.add(index);
         }
 
         return indexes;
     }
 
-    private static Index fetchIndex(QualifiedName indexName, TableMetadata table, IndexRegistry indexRegistry)
+    private static IndexMetadata fetchIndex(QualifiedName indexName, TableMetadata table, IndexRegistry indexRegistry)
     {
         String name = indexName.getName();
         String keyspace = indexName.getKeyspace();
@@ -163,7 +175,20 @@ public class IndexHints
         if (index == null)
             throw new InvalidRequestException(format(MISSING_INDEX_ERROR, table.name, name));
 
-        return index;
+        return index.getIndexMetadata();
+    }
+
+    public Comparator<Index.QueryPlan> comparator()
+    {
+        return Comparator.comparing(plan -> Sets.intersection(preferred, metadatas(plan.getIndexes())).size());
+    }
+
+    private static Set<IndexMetadata> metadatas(Collection<Index> indexes)
+    {
+        Set<IndexMetadata> metadatas = new HashSet<>(indexes.size());
+        for (Index index : indexes)
+            metadatas.add(index.getIndexMetadata());
+        return metadatas;
     }
 
     /**
@@ -221,8 +246,8 @@ public class IndexHints
                                       "new types of hint that are not supported by this node.");
 
             // read preferred and excluded indexes
-            Set<Index> preferred = hasPreferred(flags) ? indexSetSerializer.deserialize(in, version, table) : Collections.emptySet();
-            Set<Index> excluded = hasExcluded(flags) ? indexSetSerializer.deserialize(in, version, table) : Collections.emptySet();
+            Set<IndexMetadata> preferred = hasPreferred(flags) ? indexSetSerializer.deserialize(in, version, table) : Collections.emptySet();
+            Set<IndexMetadata> excluded = hasExcluded(flags) ? indexSetSerializer.deserialize(in, version, table) : Collections.emptySet();
 
             return IndexHints.create(preferred, excluded);
         }
@@ -276,39 +301,38 @@ public class IndexHints
      */
     private static class IndexSetSerializer
     {
-        private void serialize(Set<Index> indexes, DataOutputPlus out, int version) throws IOException
+        private void serialize(Set<IndexMetadata> indexes, DataOutputPlus out, int version) throws IOException
         {
             if (indexes.isEmpty())
                 return;
 
             int n = indexes.size();
             out.writeShort(n);
-            for (Index index : indexes)
-                IndexMetadata.serializer.serialize(index.getIndexMetadata(), out, version);
+            for (IndexMetadata index : indexes)
+                IndexMetadata.serializer.serialize(index, out, version);
         }
 
-        private Set<Index> deserialize(DataInputPlus in, int version, TableMetadata table) throws IOException
+        private Set<IndexMetadata> deserialize(DataInputPlus in, int version, TableMetadata table) throws IOException
         {
             short n = in.readShort();
-            Set<Index> indexes = new HashSet<>(n);
+            Set<IndexMetadata> indexes = new HashSet<>(n);
             for (short i = 0; i < n; i++)
             {
                 IndexMetadata metadata = IndexMetadata.serializer.deserialize(in, version, table);
-                Index index = IndexRegistry.obtain(table).getIndex(metadata);
-                indexes.add(index);
+                indexes.add(metadata);
             }
             return indexes;
         }
 
-        private long serializedSize(Set<Index> indexes, int version)
+        private long serializedSize(Set<IndexMetadata> indexes, int version)
         {
             if (indexes.isEmpty())
                 return 0;
 
             long size = 0;
             size += TypeSizes.SHORT_SIZE; // number of indexes
-            for (Index index : indexes)
-                size += IndexMetadata.serializer.serializedSize(index.getIndexMetadata(), version);
+            for (IndexMetadata index : indexes)
+                size += IndexMetadata.serializer.serializedSize(index, version);
             return size;
         }
     }
