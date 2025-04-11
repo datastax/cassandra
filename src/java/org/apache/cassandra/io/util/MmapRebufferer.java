@@ -47,6 +47,13 @@ class MmapRebufferer extends AbstractReaderFileProxy implements Rebufferer, Rebu
     }
 
     @Override
+    public int chunkSize()
+    {
+        // We're not producing chunks
+        return -1;
+    }
+
+    @Override
     public void invalidateIfCached(long position)
     {
     }
