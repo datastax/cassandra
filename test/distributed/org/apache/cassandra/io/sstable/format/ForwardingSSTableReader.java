@@ -54,6 +54,7 @@ import org.apache.cassandra.io.util.ChannelProxy;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.RandomAccessReader;
+import org.apache.cassandra.io.util.ReadPattern;
 import org.apache.cassandra.metrics.RestorableMeter;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
@@ -568,21 +569,21 @@ public abstract class ForwardingSSTableReader extends SSTableReader
     }
 
     @Override
-    public RandomAccessReader openDataReader(RateLimiter limiter)
+    public RandomAccessReader openDataReader(RateLimiter limiter, ReadPattern accessPattern)
     {
-        return delegate.openDataReader(limiter);
+        return delegate.openDataReader(limiter, accessPattern);
     }
 
     @Override
-    public RandomAccessReader openDataReader()
+    public RandomAccessReader openDataReader(ReadPattern accessPattern)
     {
-        return delegate.openDataReader();
+        return delegate.openDataReader(accessPattern);
     }
 
     @Override
-    public RandomAccessReader openIndexReader()
+    public RandomAccessReader openIndexReader(ReadPattern accessPattern)
     {
-        return delegate.openIndexReader();
+        return delegate.openIndexReader(accessPattern);
     }
 
     @Override

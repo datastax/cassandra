@@ -84,6 +84,7 @@ import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileInputStreamPlus;
 import org.apache.cassandra.io.util.RandomAccessReader;
+import org.apache.cassandra.io.util.ReadPattern;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
@@ -833,7 +834,7 @@ public class TrieIndexSSTableReader extends SSTableReader
     }
 
     @Override
-    public RandomAccessReader openIndexReader()
+    public RandomAccessReader openIndexReader(ReadPattern accessPattern)
     {
         throw new UnsupportedOperationException("tries do not have primary index");
     }
@@ -841,7 +842,7 @@ public class TrieIndexSSTableReader extends SSTableReader
     @Override
     public RandomAccessReader openKeyComponentReader()
     {
-        return openDataReader();
+        return openDataReader(ReadPattern.RANDOM);
     }
 
     @Override
