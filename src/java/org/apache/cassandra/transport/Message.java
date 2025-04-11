@@ -42,9 +42,14 @@ import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.transport.messages.*;
 import org.apache.cassandra.service.QueryState;
+import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.MonotonicClock;
+import org.apache.cassandra.utils.MonotonicClockTranslation;
+import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.utils.ReflectionUtils;
 import org.apache.cassandra.utils.UUIDGen;
+
+import static org.apache.cassandra.utils.MonotonicClock.approxTime;
 
 /**
  * A message from the CQL binary protocol.
@@ -52,6 +57,15 @@ import org.apache.cassandra.utils.UUIDGen;
 public abstract class Message
 {
     protected static final Logger logger = LoggerFactory.getLogger(Message.class);
+    private static final NoSpamLogger noSpam = NoSpamLogger.getLogger(logger, 1, TimeUnit.MINUTES);
+
+    /**
+     * An optional key in custom payload used to encode the timestamp in epoch millis when the request was originally
+     * created by upstream components. When present, this value will be used NTR queue timeouts instead of the timestamp
+     * when the request was deserialized and dispatched to the queue. The contract is for the value associated with that
+     * key to be encoded as an 8-byte unsigned integer in the big-endian format.
+     */
+    protected static final String REQUEST_CREATE_MILLIS = "REQUEST_CREATE_MILLIS";
 
     public interface Codec<M extends Message> extends CBCodec<M> {}
 
@@ -207,7 +221,13 @@ public abstract class Message
     public static abstract class Request extends Message
     {
         private boolean tracingRequested;
-        private final long creationTimeNanos = MonotonicClock.approxTime.now();
+
+        /**
+         * Creation time of the message. If {@link Message#REQUEST_CREATE_MILLIS} is set in custom payload,
+         * {@link Message.Decoder#decodeMessage(Channel, Envelope)} will override it using the encoded value,
+         * otherwise it will keep current time when message was constructed.
+         */
+        private long creationTimeNanos = MonotonicClock.approxTime.now();
 
         protected Request(Type type)
         {
@@ -222,6 +242,12 @@ public abstract class Message
             return false;
         }
 
+        @VisibleForTesting
+        public long getCreationTimeNanos()
+        {
+            return creationTimeNanos;
+        }
+
         /**
          * Returns the time elapsed since this request was created. Note that this is the total lifetime of the request
          * in the system, so we expect increasing returned values across multiple calls to elapsedTimeSinceCreation.
@@ -234,13 +260,38 @@ public abstract class Message
             return timeUnit.convert(MonotonicClock.approxTime.now() - creationTimeNanos, TimeUnit.NANOSECONDS);
         }
 
+        /**
+         * Overrides {@link Request#creationTimeNanos} by the time recorded in the custom payload using the {@link Message#REQUEST_CREATE_MILLIS}
+         * key present. The timeSnapshot is used to translate the wall clock time to monotonic clock time.
+         *
+         * @param timeSnapshot the current time snapshot used for time translation
+         */
+        @VisibleForTesting
+        public void maybeOverrideCreationTimeNanos(MonotonicClockTranslation timeSnapshot)
+        {
+            Map<String, ByteBuffer> customPayload = getCustomPayload();
+            if (customPayload != null && customPayload.containsKey(REQUEST_CREATE_MILLIS))
+            {
+                ByteBuffer requestCreateMillisBuffer = customPayload.get(REQUEST_CREATE_MILLIS);
+                try
+                {
+                    long requestCreationEpochMillis = ByteBufferUtil.toLong(requestCreateMillisBuffer);
+                    // translate wall clock time to monotonic clock time
+                    creationTimeNanos = timeSnapshot.fromMillisSinceEpoch(requestCreationEpochMillis);
+                }
+                catch (Exception e)
+                {
+                    noSpam.warn("{} exists in custom payload, but its value cannot be extracted", REQUEST_CREATE_MILLIS, e);
+                }
+            }
+        }
+
         protected abstract CompletableFuture<Response> maybeExecuteAsync(QueryState queryState, long queryStartNanoTime, boolean traceRequest);
 
         public final CompletableFuture<Response> execute(QueryState queryState, long queryStartNanoTime)
         {
-            // at the time of the check, this is approximately the time spent in the NTR stage's queue
             long elapsedTimeSinceCreation = elapsedTimeSinceCreation(TimeUnit.NANOSECONDS);
-            ClientMetrics.instance.recordQueueTime(elapsedTimeSinceCreation, TimeUnit.NANOSECONDS);
+            ClientMetrics.instance.recordElapsedTimeSinceCreation(elapsedTimeSinceCreation, TimeUnit.NANOSECONDS);
             if (elapsedTimeSinceCreation > DatabaseDescriptor.getNativeTransportTimeout(TimeUnit.NANOSECONDS))
             {
                 ClientMetrics.instance.markTimedOutBeforeProcessing();
@@ -430,6 +481,9 @@ public abstract class Message
             if (isCustomPayload && inbound.header.version.isSmallerThan(ProtocolVersion.V4))
                 throw new ProtocolException("Received frame with CUSTOM_PAYLOAD flag for native protocol version < 4");
 
+            long now = approxTime.now();
+            MonotonicClockTranslation timeSnapshot = approxTime.translate();
+
             Message message = inbound.header.type.codec.decode(inbound.body, inbound.header.version);
             message.setStreamId(inbound.header.streamId);
             message.setSource(inbound);
@@ -443,6 +497,8 @@ public abstract class Message
                 req.attach(connection);
                 if (isTracing)
                     req.setTracingRequested();
+                if (isCustomPayload)
+                    req.maybeOverrideCreationTimeNanos(timeSnapshot);
             }
             else
             {
