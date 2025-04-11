@@ -21,7 +21,6 @@
 package org.apache.cassandra.index;
 
 import java.util.Collection;
-import java.util.HashSet;
 import java.util.Collections;
 import java.util.Optional;
 import java.util.Set;
@@ -35,6 +34,7 @@ import javax.annotation.Nullable;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.*;
+import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.db.marshal.AbstractType;
@@ -95,7 +95,13 @@ public interface IndexRegistry
         }
 
         @Override
-        public Optional<Index> getBestIndexFor(RowFilter.Expression expression)
+        public Index getIndexByName(String indexName)
+        {
+            return null;
+        }
+
+        @Override
+        public Optional<Index> getBestIndexFor(RowFilter.Expression expression, IndexHints hints)
         {
             return Optional.empty();
         }
@@ -112,9 +118,9 @@ public interface IndexRegistry
      * but enables query validation and preparation to succeed. Useful for tools which need to prepare
      * CQL statements without instantiating the whole ColumnFamilyStore infrastructure.
      */
-    public static final IndexRegistry NON_DAEMON = new IndexRegistry()
+    IndexRegistry NON_DAEMON = new IndexRegistry()
     {
-        Index index = new Index()
+        final Index index = new Index()
         {
             public Callable<?> getInitializationTask()
             {
@@ -201,7 +207,7 @@ public interface IndexRegistry
             }
         };
 
-        Index.Group group = new Index.Group()
+        final Index.Group group = new Index.Group()
         {
             @Override
             public Set<Index> getIndexes()
@@ -272,6 +278,12 @@ public interface IndexRegistry
             return index;
         }
 
+        @Override
+        public Index getIndexByName(String indexName)
+        {
+            return index;
+        }
+
         public Collection<Index> listIndexes()
         {
             return Collections.singletonList(index);
@@ -283,7 +295,8 @@ public interface IndexRegistry
             return Collections.singletonList(group);
         }
 
-        public Optional<Index> getBestIndexFor(RowFilter.Expression expression)
+        @Override
+        public Optional<Index> getBestIndexFor(RowFilter.Expression expression, IndexHints hints)
         {
             return Optional.empty();
         }
@@ -295,13 +308,14 @@ public interface IndexRegistry
 
     default void registerIndex(Index index)
     {
-        registerIndex(index, new Index.Group.Key(index), () -> new SingletonIndexGroup());
+        registerIndex(index, new Index.Group.Key(index), SingletonIndexGroup::new);
     }
     void registerIndex(Index index, Index.Group.Key groupKey, Supplier<Index.Group> groupSupplier);
     void unregisterIndex(Index index, Index.Group.Key groupKey);
     Collection<Index.Group> listIndexGroups();
 
     Index getIndex(IndexMetadata indexMetadata);
+    Index getIndexByName(String indexName);
     Collection<Index> listIndexes();
 
     default Optional<Index.Analyzer> getIndexAnalyzerFor(ColumnMetadata column, Operator operator)
@@ -330,7 +344,7 @@ public interface IndexRegistry
         return Optional.empty();
     }
 
-    Optional<Index> getBestIndexFor(RowFilter.Expression expression);
+    Optional<Index> getBestIndexFor(RowFilter.Expression expression, IndexHints hints);
 
     /**
      * Called at write time to ensure that values present in the update

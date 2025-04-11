@@ -28,6 +28,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.function.LongPredicate;
+import java.util.stream.Collectors;
 import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -37,11 +38,12 @@ import com.google.common.collect.Sets;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.cql3.CqlBuilder;
 import org.apache.cassandra.cql3.statements.SelectOptions;
-import org.apache.cassandra.db.filter.ANNOptions;
 import org.apache.cassandra.db.filter.ClusteringIndexFilter;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.filter.DataLimits;
+import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.filter.TombstoneOverwhelmingException;
 import org.apache.cassandra.db.partitions.PartitionIterator;
@@ -64,7 +66,6 @@ import org.apache.cassandra.guardrails.DefaultGuardrail;
 import org.apache.cassandra.guardrails.Guardrails;
 import org.apache.cassandra.guardrails.Threshold;
 import org.apache.cassandra.index.Index;
-import org.apache.cassandra.index.IndexRegistry;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.DataInputPlus;
@@ -74,7 +75,6 @@ import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessageFlag;
 import org.apache.cassandra.net.Verb;
-import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
@@ -736,7 +736,7 @@ public abstract class ReadCommand extends AbstractReadQuery
 
     public abstract Verb verb();
 
-    protected abstract void appendCQLWhereClause(StringBuilder sb);
+    protected abstract void appendCQLWhereClause(CqlBuilder builder);
 
     // Skip purgeable tombstones. We do this because it's safe to do (post-merge of the memtable and sstable at least), it
     // can save us some bandwith, and avoid making us throw a TombstoneOverwhelmingException for purgeable tombstones (which
@@ -771,21 +771,29 @@ public abstract class ReadCommand extends AbstractReadQuery
      * we query them all). So this shouldn't be relied too strongly, but this should be good enough for
      * debugging purpose which is what this is for.
      */
+    @Override
     public String toCQLString()
     {
-        StringBuilder sb = new StringBuilder();
-        sb.append("SELECT ").append(columnFilter().toCQLString());
-        sb.append(" FROM ").append(metadata().keyspace).append('.').append(metadata().name);
-        appendCQLWhereClause(sb);
+        CqlBuilder builder = new CqlBuilder();
+        builder.append("SELECT ").append(columnFilter().toCQLString());
+        builder.append(" FROM ").append(metadata().keyspace).append('.').append(metadata().name);
+        appendCQLWhereClause(builder);
 
         if (limits() != DataLimits.NONE)
-            sb.append(' ').append(limits());
+            builder.append(' ').append(limits());
 
-        ANNOptions annOptions = rowFilter().annOptions();
-        if (annOptions != ANNOptions.NONE)
-            sb.append(" WITH ").append(SelectOptions.ANN_OPTIONS).append(" = ").append(annOptions.toCQLString());
+        builder.appendOptions(b -> {
 
-        return sb.toString();
+            IndexHints hints = rowFilter().indexHints();
+            Set<String> included = hints.preferred.stream().map(i -> i.name).collect(Collectors.toSet());
+            Set<String> excluded = hints.excluded.stream().map(i -> i.name).collect(Collectors.toSet());
+
+            b.append(SelectOptions.PREFERRED_INDEXES, included)
+             .append(SelectOptions.EXCLUDED_INDEXES, excluded)
+             .append(SelectOptions.ANN_OPTIONS, rowFilter().annOptions().toMap());
+        });
+
+        return builder.toString();
     }
 
     // Monitorable interface

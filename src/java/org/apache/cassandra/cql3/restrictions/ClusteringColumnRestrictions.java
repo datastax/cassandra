@@ -19,6 +19,7 @@ package org.apache.cassandra.cql3.restrictions;
 
 import java.util.*;
 
+import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.guardrails.Guardrails;
 import org.apache.cassandra.db.filter.ANNOptions;
 import org.apache.cassandra.schema.ColumnMetadata;
@@ -126,7 +127,8 @@ final class ClusteringColumnRestrictions extends RestrictionSetWrapper
     public void addToRowFilter(RowFilter.Builder filter,
                                IndexRegistry indexRegistry,
                                QueryOptions options,
-                               ANNOptions annOptions) throws InvalidRequestException
+                               ANNOptions annOptions,
+                               IndexHints indexHints) throws InvalidRequestException
     {
         int position = 0;
 
@@ -135,9 +137,9 @@ final class ClusteringColumnRestrictions extends RestrictionSetWrapper
         {
             SingleRestriction restriction = restrictions.get(i);
             // We ignore all the clustering columns that can be handled by slices.
-            if (handleInFilter(restriction, position) || restriction.hasSupportingIndex(indexRegistry))
+            if (handleInFilter(restriction, position) || restriction.hasSupportingIndex(indexRegistry, indexHints))
             {
-                restriction.addToRowFilter(filter, indexRegistry, options, annOptions);
+                restriction.addToRowFilter(filter, indexRegistry, options, annOptions, indexHints);
                 continue;
             }
 
@@ -153,12 +155,12 @@ final class ClusteringColumnRestrictions extends RestrictionSetWrapper
 
     public static ClusteringColumnRestrictions.Builder builder(TableMetadata table, boolean allowFiltering)
     {
-        return new Builder(table, allowFiltering, null);
+        return new Builder(table, allowFiltering, null, IndexHints.NONE);
     }
 
-    public static ClusteringColumnRestrictions.Builder builder(TableMetadata table, boolean allowFiltering, IndexRegistry indexRegistry)
+    public static ClusteringColumnRestrictions.Builder builder(TableMetadata table, boolean allowFiltering, IndexRegistry indexRegistry, IndexHints hints)
     {
-        return new Builder(table, allowFiltering, indexRegistry);
+        return new Builder(table, allowFiltering, indexRegistry, hints);
     }
 
     public static class Builder
@@ -166,14 +168,16 @@ final class ClusteringColumnRestrictions extends RestrictionSetWrapper
         private final TableMetadata table;
         private final boolean allowFiltering;
         private final IndexRegistry indexRegistry;
+        private final IndexHints hints;
 
         private final RestrictionSet.Builder restrictions = RestrictionSet.builder();
 
-        private Builder(TableMetadata table, boolean allowFiltering, IndexRegistry indexRegistry)
+        private Builder(TableMetadata table, boolean allowFiltering, IndexRegistry indexRegistry, IndexHints hints)
         {
             this.table = table;
             this.allowFiltering = allowFiltering;
             this.indexRegistry = indexRegistry;
+            this.hints = hints;
         }
 
         public ClusteringColumnRestrictions.Builder addRestriction(Restriction restriction)
@@ -186,7 +190,7 @@ final class ClusteringColumnRestrictions extends RestrictionSetWrapper
             SingleRestriction newRestriction = (SingleRestriction) restriction;
             boolean isEmpty = restrictions.isEmpty();
 
-            if (!isEmpty && !allowFiltering && (indexRegistry == null || !newRestriction.hasSupportingIndex(indexRegistry)))
+            if (!isEmpty && !allowFiltering && (indexRegistry == null || !newRestriction.hasSupportingIndex(indexRegistry, hints)))
             {
                 SingleRestriction lastRestriction = restrictions.lastRestriction();
                 ColumnMetadata lastRestrictionStart = lastRestriction.getFirstColumn();

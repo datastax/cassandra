@@ -181,7 +181,7 @@ public class ANNOptionsTest extends CQLTester
         // with ANN options
         formattedQuery = formatQuery("SELECT * FROM %%s ORDER BY v ANN OF [1, 1] LIMIT 1 WITH ann_options = {'rerank_k': 2}");
         command = parseReadCommand(formattedQuery);
-        Assertions.assertThat(command.toCQLString()).contains("WITH ann_options = {'rerank_k': 2}");
+        Assertions.assertThat(command.toCQLString()).contains("WITH ann_options = {'rerank_k': '2'}");
     }
 
     /**
@@ -241,7 +241,8 @@ public class ANNOptionsTest extends CQLTester
 
             // ...with a version that doesn't support ANN options
             out = new DataOutputBuffer();
-            if (expectedOptions != ANNOptions.NONE) {
+            if (expectedOptions != ANNOptions.NONE)
+            {
                 try
                 {
                     ReadCommand.serializer.serialize(command, out, MessagingService.VERSION_DS_10);
@@ -252,7 +253,9 @@ public class ANNOptionsTest extends CQLTester
                     Assertions.assertThat(e)
                               .hasMessageContaining("Unable to serialize ANN options with messaging version: " + MessagingService.VERSION_DS_10);
                 }
-            } else {
+            }
+            else
+            {
                 ReadCommand.serializer.serialize(command, out, MessagingService.VERSION_DS_10);
                 Assertions.assertThat(ReadCommand.serializer.serializedSize(command, MessagingService.VERSION_DS_10))
                           .isEqualTo(out.buffer().remaining());

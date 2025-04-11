@@ -89,6 +89,7 @@ import org.apache.cassandra.db.SinglePartitionReadCommand;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.WriteContext;
 import org.apache.cassandra.db.compaction.CompactionManager;
+import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.lifecycle.View;
@@ -884,6 +885,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         propagateLocalIndexStatus(keyspace.getName(), indexName, Index.Status.DROPPED);
     }
 
+    @Override
     public Index getIndexByName(String indexName)
     {
         return indexes.get(indexName);
@@ -1237,12 +1239,18 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
             return null;
         }
 
+        // Prepare a plan comparator based first on the user-provided hints, which will prefer the plan using the most
+        // preferred indexes, and then on the index-provided selectivity, which will prefer the most selective index.
+        Comparator<Index.QueryPlan> hintsComparator = rowFilter.indexHints().comparator();
+        Comparator<Index.QueryPlan> selectivityComparator = Comparator.<Index.QueryPlan>naturalOrder().reversed();
+        Comparator<Index.QueryPlan> planComparator = hintsComparator.thenComparing(selectivityComparator);
+
         // find the best plan
         Index.QueryPlan selected = queryPlans.size() == 1
                                    ? Iterables.getOnlyElement(queryPlans)
                                    : queryPlans.stream()
-                                               .min(Comparator.naturalOrder())
-                                               .orElseThrow(() -> new AssertionError("Could not select most selective index"));
+                                               .max(planComparator)
+                                               .orElseThrow(() -> new AssertionError("Could not select the most adequate index plan"));
 
         // pay for an additional threadlocal get() rather than build the strings unnecessarily
         if (Tracing.isTracing())
@@ -1261,13 +1269,20 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         return indexes.stream().map(i -> i.getIndexMetadata().name).collect(Collectors.joining(","));
     }
 
-
-    public Optional<Index> getBestIndexFor(RowFilter.Expression expression)
+    @Override
+    public Optional<Index> getBestIndexFor(RowFilter.Expression expression, IndexHints hints)
     {
-        return indexes.values().stream().filter((i) -> i.supportsExpression(expression.column(), expression.operator())).findFirst();
+        for (Index index : indexes.values())
+        {
+            if (!hints.excludes(index) && index.supportsExpression(expression.column(), expression.operator()))
+            {
+                return Optional.of(index);
+            }
+        }
+        return Optional.empty();
     }
 
-    public <T extends Index> Optional<T> getBestIndexFor(RowFilter.Expression expression, Class<T> indexType)
+    public <T extends Index> Optional<T> getBestIndexFor(RowFilter.Expression expression, Class<T> indexType) // TODO CNDB-13129: Use hints
     {
         return indexes.values()
                       .stream()
