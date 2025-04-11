@@ -87,6 +87,7 @@ import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.utils.CloseableIterator;
@@ -123,6 +124,8 @@ public class IndexContext
             ImmutableSet.of(UTF8Type.instance, AsciiType.instance, BooleanType.instance, UUIDType.instance);
 
     public static final String ENABLE_SEGMENT_COMPACTION_OPTION_NAME = "enable_segment_compaction";
+    public static final String KEY_COMPRESSION_OPTION_NAME = "key_compression";
+    public static final String VALUE_COMPRESSION_OPTION_NAME = "value_compression";
 
     private final AbstractType<?> partitionKeyType;
     private final ClusteringComparator clusteringComparator;
@@ -145,6 +148,7 @@ public class IndexContext
     private final IndexMetrics indexMetrics;
     private final ColumnQueryMetrics columnQueryMetrics;
     private final IndexWriterConfig indexWriterConfig;
+    private final CompressionParams valueCompression;
     private final boolean isAnalyzed;
     private final boolean hasEuclideanSimilarityFunc;
     private final AbstractAnalyzer.AnalyzerFactory analyzerFactory;
@@ -197,6 +201,7 @@ public class IndexContext
                                       isLiteral() ? new ColumnQueryMetrics.TrieIndexMetrics(keyspace, table, getIndexName())
                                                   : new ColumnQueryMetrics.BKDIndexMetrics(keyspace, table, getIndexName());
 
+            this.valueCompression = StorageAttachedIndex.getCompressionOptionUnchecked(config.options, VALUE_COMPRESSION_OPTION_NAME);
         }
         else
         {
@@ -212,6 +217,7 @@ public class IndexContext
             // query path.
             this.indexMetrics = null;
             this.columnQueryMetrics = null;
+            this.valueCompression = CompressionParams.noCompression();
         }
 
         this.maxTermSize = isVector() ? MAX_VECTOR_TERM_SIZE
@@ -220,6 +226,11 @@ public class IndexContext
 
 
         logger.debug(logMessage("Initialized index context with index writer config: {}"), indexWriterConfig);
+    }
+
+    public IndexMetadata getConfig()
+    {
+        return config;
     }
 
     public AbstractType<?> keyValidator()
@@ -614,6 +625,11 @@ public class IndexContext
     public String getIndexName()
     {
         return this.config == null ? null : config.name;
+    }
+
+    public CompressionParams getValueCompression()
+    {
+        return valueCompression;
     }
 
     public int getIntOption(String name, int defaultValue)
