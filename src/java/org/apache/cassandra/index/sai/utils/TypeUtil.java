@@ -648,6 +648,6 @@ public class TypeUtil
 
     public static ByteComparable.Version byteComparableVersionForTermsData()
     {
-        return Version.latest().byteComparableVersionFor(IndexComponentType.TERMS_DATA, SSTableFormat.Type.current().info.getLatestVersion());
+        return Version.current().byteComparableVersionFor(IndexComponentType.TERMS_DATA, SSTableFormat.Type.current().info.getLatestVersion());
     }
 }
