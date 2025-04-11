@@ -302,16 +302,16 @@ public class TrieMemtableIndex implements MemtableIndex
      * @return iterator of indexed term to primary keys mapping in sorted by indexed term and primary key.
      */
     @Override
-    public Iterator<Pair<ByteComparable, Iterator<PrimaryKey>>> iterator(DecoratedKey min, DecoratedKey max)
+    public Iterator<Pair<ByteComparable.Preencoded, Iterator<PrimaryKey>>> iterator(DecoratedKey min, DecoratedKey max)
     {
         int minSubrange = min == null ? 0 : boundaries.getShardForKey(min);
         int maxSubrange = max == null ? rangeIndexes.length - 1 : boundaries.getShardForKey(max);
 
-        List<Iterator<Pair<ByteComparable, PrimaryKeys>>> rangeIterators = new ArrayList<>(maxSubrange - minSubrange + 1);
+        List<Iterator<Pair<ByteComparable.Preencoded, PrimaryKeys>>> rangeIterators = new ArrayList<>(maxSubrange - minSubrange + 1);
         for (int i = minSubrange; i <= maxSubrange; i++)
             rangeIterators.add(rangeIndexes[i].iterator());
 
-        return MergeIterator.get(rangeIterators, (o1, o2) -> ByteComparable.compare(o1.left, o2.left, TypeUtil.BYTE_COMPARABLE_VERSION),
+        return MergeIterator.get(rangeIterators, (o1, o2) -> ByteComparable.compare(o1.left, o2.left),
                                  new PrimaryKeysMergeReducer(rangeIterators.size()));
     }
 
@@ -319,12 +319,12 @@ public class TrieMemtableIndex implements MemtableIndex
     // min and max keys passed to the iterator method. It doesn't strictly do any reduction because the terms in each
     // range index are unique. It will receive at most one range index entry per selected range index before getReduced
     // is called.
-    private static class PrimaryKeysMergeReducer extends Reducer<Pair<ByteComparable, PrimaryKeys>, Pair<ByteComparable, Iterator<PrimaryKey>>>
+    private static class PrimaryKeysMergeReducer extends Reducer<Pair<ByteComparable.Preencoded, PrimaryKeys>, Pair<ByteComparable.Preencoded, Iterator<PrimaryKey>>>
     {
-        private final Pair<ByteComparable, PrimaryKeys>[] rangeIndexEntriesToMerge;
+        private final Pair<ByteComparable.Preencoded, PrimaryKeys>[] rangeIndexEntriesToMerge;
         private final Comparator<PrimaryKey> comparator;
 
-        private ByteComparable term;
+        private ByteComparable.Preencoded term;
 
         @SuppressWarnings("unchecked")
             // The size represents the number of range indexes that have been selected for the merger
@@ -337,7 +337,7 @@ public class TrieMemtableIndex implements MemtableIndex
         @Override
         // Receive the term entry for a range index. This should only be called once for each
         // range index before reduction.
-        public void reduce(int index, Pair<ByteComparable, PrimaryKeys> termPair)
+        public void reduce(int index, Pair<ByteComparable.Preencoded, PrimaryKeys> termPair)
         {
             Preconditions.checkArgument(rangeIndexEntriesToMerge[index] == null, "Terms should be unique in the memory index");
 
@@ -348,12 +348,12 @@ public class TrieMemtableIndex implements MemtableIndex
 
         @Override
         // Return a merger of the term keys for the term.
-        public Pair<ByteComparable, Iterator<PrimaryKey>> getReduced()
+        public Pair<ByteComparable.Preencoded, Iterator<PrimaryKey>> getReduced()
         {
             Preconditions.checkArgument(term != null, "The term must exist in the memory index");
 
             List<Iterator<PrimaryKey>> keyIterators = new ArrayList<>(rangeIndexEntriesToMerge.length);
-            for (Pair<ByteComparable, PrimaryKeys> p : rangeIndexEntriesToMerge)
+            for (Pair<ByteComparable.Preencoded, PrimaryKeys> p : rangeIndexEntriesToMerge)
                 if (p != null && p.right != null && !p.right.isEmpty())
                     keyIterators.add(p.right.iterator());
 
