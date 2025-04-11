@@ -60,7 +60,8 @@ public class QueryContext
 
     private final LongAdder queryTimeouts = new LongAdder();
 
-    private final LongAdder annNodesVisited = new LongAdder();
+    private final LongAdder annGraphSearchLatency = new LongAdder();
+
     private float annRerankFloor = 0.0f; // only called from single-threaded setup code
 
     private final LongAdder shadowedPrimaryKeyCount = new LongAdder();
@@ -138,9 +139,10 @@ public class QueryContext
     {
         queryTimeouts.add(val);
     }
-    public void addAnnNodesVisited(long val)
+
+    public void addAnnGraphSearchLatency(long val)
     {
-        annNodesVisited.add(val);
+        annGraphSearchLatency.add(val);
     }
 
     public void setFilterSortOrder(FilterSortOrder filterSortOrder)
@@ -201,9 +203,9 @@ public class QueryContext
     {
         return queryTimeouts.longValue();
     }
-    public long annNodesVisited()
+    public long annGraphSearchLatency()
     {
-        return annNodesVisited.longValue();
+        return annGraphSearchLatency.longValue();
     }
 
     public FilterSortOrder filterSortOrder()

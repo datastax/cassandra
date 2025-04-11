@@ -43,11 +43,11 @@ import io.github.jbellis.jvector.graph.GraphIndexBuilder;
 import io.github.jbellis.jvector.graph.GraphSearcher;
 import io.github.jbellis.jvector.graph.RandomAccessVectorValues;
 import io.github.jbellis.jvector.graph.SearchResult;
-import io.github.jbellis.jvector.graph.disk.Feature;
-import io.github.jbellis.jvector.graph.disk.FeatureId;
-import io.github.jbellis.jvector.graph.disk.InlineVectors;
 import io.github.jbellis.jvector.graph.disk.OnDiskGraphIndexWriter;
 import io.github.jbellis.jvector.graph.disk.OrdinalMapper;
+import io.github.jbellis.jvector.graph.disk.feature.Feature;
+import io.github.jbellis.jvector.graph.disk.feature.FeatureId;
+import io.github.jbellis.jvector.graph.disk.feature.InlineVectors;
 import io.github.jbellis.jvector.graph.similarity.SearchScoreProvider;
 import io.github.jbellis.jvector.quantization.BinaryQuantization;
 import io.github.jbellis.jvector.quantization.CompressedVectors;
@@ -83,6 +83,7 @@ import org.apache.cassandra.index.sai.disk.v5.V5OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter.Structure;
 import org.apache.cassandra.index.sai.disk.vector.VectorCompression.CompressionType;
+import org.apache.cassandra.index.sai.metrics.ColumnQueryMetrics;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.io.util.SequentialWriter;
@@ -92,7 +93,7 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.lucene.util.StringHelper;
 
-import static org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat.JVECTOR_2_VERSION;
+import static org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat.JVECTOR_VERSION;
 
 public class CassandraOnHeapGraph<T> implements Accountable
 {
@@ -110,6 +111,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
 
     // We use the metable reference for easier tracing.
     private final String source;
+    private final ColumnQueryMetrics.VectorIndexMetrics columnQueryMetrics;
     private final ConcurrentVectorValues vectorValues;
     private final GraphIndexBuilder builder;
     private final VectorType.VectorSerializer serializer;
@@ -134,6 +136,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
         this.source = memtable == null
                       ? "null"
                       : memtable.getClass().getSimpleName() + '@' + Integer.toHexString(memtable.hashCode());
+        this.columnQueryMetrics = (ColumnQueryMetrics.VectorIndexMetrics) context.getColumnQueryMetrics();
         var indexConfig = context.getIndexWriterConfig();
         var termComparator = context.getValidator();
         serializer = (VectorType.VectorSerializer) termComparator.getSerializer();
@@ -153,12 +156,18 @@ public class CassandraOnHeapGraph<T> implements Accountable
         vectorsByKey = forSearching ? new NonBlockingHashMap<>() : null;
         invalidVectorBehavior = forSearching ? InvalidVectorBehavior.FAIL : InvalidVectorBehavior.IGNORE;
 
+        // This is only a warning since it's not a fatal error to write without hierarchy
+        if (indexConfig.isHierarchyEnabled() && V3OnDiskFormat.JVECTOR_VERSION < 4)
+            logger.warn("Hierarchical graphs configured but node configured with V3OnDiskFormat.JVECTOR_VERSION {}. " +
+                        "Skipping setting for {}", V3OnDiskFormat.JVECTOR_VERSION, indexConfig.getIndexName());
+
         builder = new GraphIndexBuilder(vectorValues,
                                         similarityFunction,
                                         indexConfig.getAnnMaxDegree(),
                                         indexConfig.getConstructionBeamWidth(),
-                                        1.0f, // no overflow means add will be a bit slower but flush will be faster
-                                        dimension > 3 ? 1.2f : 2.0f);
+                                        indexConfig.getNeighborhoodOverflow(1.0f), // no overflow means add will be a bit slower but flush will be faster
+                                        indexConfig.getAlpha(dimension > 3 ? 1.2f : 2.0f),
+                                        indexConfig.isHierarchyEnabled() && V3OnDiskFormat.JVECTOR_VERSION >= 4);
         searchers = ThreadLocal.withInitial(() -> new GraphSearcherAccessManager(new GraphSearcher(builder.getGraph())));
     }
 
@@ -326,17 +335,20 @@ public class CassandraOnHeapGraph<T> implements Accountable
         try
         {
             var ssf = SearchScoreProvider.exact(queryVector, similarityFunction, vectorValues);
+            long start = System.nanoTime();
             var result = searcher.search(ssf, limit, rerankK, threshold, 0.0f, bits);
+            long elapsed = System.nanoTime() - start;
             Tracing.trace("ANN search for {}/{} visited {} nodes, reranked {} to return {} results from {}",
                           limit, rerankK, result.getVisitedCount(), result.getRerankedCount(), result.getNodes().length, source);
-            context.addAnnNodesVisited(result.getVisitedCount());
+            columnQueryMetrics.onSearchResult(result, elapsed, false);
+            context.addAnnGraphSearchLatency(elapsed);
             if (threshold > 0)
             {
                 // Threshold based searches do not support resuming the search.
                 graphAccessManager.release();
                 return CloseableIterator.wrap(Arrays.stream(result.getNodes()).iterator());
             }
-            return new AutoResumingNodeScoreIterator(searcher, graphAccessManager, result, context::addAnnNodesVisited, limit, rerankK, true, source);
+            return new AutoResumingNodeScoreIterator(searcher, graphAccessManager, result, context, columnQueryMetrics, visited -> {}, limit, rerankK, true, source);
         }
         catch (Throwable t)
         {
@@ -420,7 +432,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
         try (var pqOutput = perIndexComponents.addOrGet(IndexComponentType.PQ).openOutput(true);
              var postingsOutput = perIndexComponents.addOrGet(IndexComponentType.POSTING_LISTS).openOutput(true);
              var indexWriter = new OnDiskGraphIndexWriter.Builder(builder.getGraph(), indexFile.toPath())
-                               .withVersion(JVECTOR_2_VERSION) // always write old-version format since we're not using the new features
+                               .withVersion(JVECTOR_VERSION)
                                .withMapper(ordinalMapper)
                                .with(new InlineVectors(vectorValues.dimension()))
                                .withStartOffset(termsOffset)
@@ -559,14 +571,14 @@ public class CassandraOnHeapGraph<T> implements Accountable
             return writer.position();
 
         // save (outside the synchronized block, this is io-bound not CPU)
-        cv.write(writer, JVECTOR_2_VERSION);
+        cv.write(writer, JVECTOR_VERSION);
         return writer.position();
     }
 
     static void writePqHeader(DataOutput writer, boolean unitVectors, CompressionType type)
     throws IOException
     {
-        if (V3OnDiskFormat.WRITE_JVECTOR3_FORMAT)
+        if (V3OnDiskFormat.JVECTOR_VERSION >= 3)
         {
             // version and optional fields
             writer.writeInt(CassandraDiskAnn.PQ_MAGIC);
