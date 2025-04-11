@@ -61,6 +61,8 @@ public abstract class Version
 
     public abstract boolean hasMetadataChecksum();
 
+    public abstract boolean indicesAreEncrypted();
+
     /**
      * The old bloomfilter format serializes the data as BIG_ENDIAN long's, the new one uses the
      * same format as in memory (serializes as bytes).
