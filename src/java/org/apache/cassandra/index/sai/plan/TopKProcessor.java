@@ -42,6 +42,7 @@ import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.ReadCommand;
+import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.marshal.FloatType;
 import org.apache.cassandra.db.partitions.PartitionIterator;
@@ -355,7 +356,8 @@ public class TopKProcessor
             return null;
         }
 
-        Optional<Index> index = sim.getBestIndexFor(e);
+        IndexHints hints = command.rowFilter().indexHints();
+        Optional<Index> index = sim.getBestIndexFor(e, hints);
         return (StorageAttachedIndex) index.filter(i -> i instanceof StorageAttachedIndex).orElse(null);
     }
 }

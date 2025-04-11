@@ -31,6 +31,7 @@ import com.google.common.collect.RangeSet;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.cql3.statements.Bound;
+import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Token;
@@ -326,9 +327,9 @@ abstract class TokenFilter implements PartitionKeyRestrictions
     }
 
     @Override
-    public boolean hasSupportingIndex(IndexRegistry indexRegistry)
+    public boolean hasSupportingIndex(IndexRegistry indexRegistry, IndexHints indexHints)
     {
-        return restrictions.hasSupportingIndex(indexRegistry);
+        return restrictions.hasSupportingIndex(indexRegistry, indexHints);
     }
 
     @Override
@@ -338,9 +339,13 @@ abstract class TokenFilter implements PartitionKeyRestrictions
     }
 
     @Override
-    public void addToRowFilter(RowFilter.Builder filter, IndexRegistry indexRegistry, QueryOptions options, ANNOptions annOptions)
+    public void addToRowFilter(RowFilter.Builder filter,
+                               IndexRegistry indexRegistry,
+                               QueryOptions options,
+                               ANNOptions annOptions,
+                               IndexHints indexHints)
     {
-        restrictions.addToRowFilter(filter, indexRegistry, options, annOptions);
+        restrictions.addToRowFilter(filter, indexRegistry, options, annOptions, indexHints);
     }
 
     @Override

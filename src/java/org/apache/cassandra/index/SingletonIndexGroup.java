@@ -113,11 +113,8 @@ public class SingletonIndexGroup implements Index.Group
 
         IndexHints hints = rowFilter.indexHints();
 
-        if (hints.excluded.contains(delegate))
+        if (hints.excludes(delegate))
             return null;
-
-//        if (!hints.preferred.contains(delegate))
-//            return null;
 
         // Indexes using a singleton group don't support disjunctions,
         // so we only consider the top-level AND expressions for index selection.

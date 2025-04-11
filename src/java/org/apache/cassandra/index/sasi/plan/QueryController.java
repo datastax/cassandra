@@ -29,6 +29,7 @@ import org.apache.cassandra.db.PartitionRangeReadCommand;
 import org.apache.cassandra.db.ReadExecutionController;
 import org.apache.cassandra.db.SinglePartitionReadCommand;
 import org.apache.cassandra.db.filter.DataLimits;
+import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
@@ -91,7 +92,8 @@ public class QueryController
 
     public ColumnIndex getIndex(RowFilter.Expression expression)
     {
-        Optional<Index> index = cfs.indexManager.getBestIndexFor(expression);
+        IndexHints hints = command.rowFilter().indexHints();
+        Optional<Index> index = cfs.indexManager.getBestIndexFor(expression, hints);
         return index.isPresent() ? ((SASIIndex) index.get()).getIndex() : null;
     }
 
