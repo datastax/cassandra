@@ -175,7 +175,7 @@ public class TermsReaderTest extends SaiRandomizedTest
             var iter = termsEnum.stream()
                     .map(InvertedIndexBuilder::toTermWithFrequency)
                     .collect(Collectors.toList());
-            for (Pair<ByteComparable.Preencoded, List<RowMapping.RowIdWithFrequency>> pair : iter)
+            for (Pair<ByteComparable, List<RowMapping.RowIdWithFrequency>> pair : iter)
             {
                 final byte[] bytes = ByteSourceInverse.readBytes(pair.left.asComparableBytes(VERSION));
                 try (PostingList actualPostingList = reader.exactMatch(ByteComparable.preencoded(VERSION, bytes),
