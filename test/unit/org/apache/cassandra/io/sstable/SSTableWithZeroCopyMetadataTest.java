@@ -59,6 +59,7 @@ import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
 import org.apache.cassandra.io.sstable.format.ScrubPartitionIterator;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.RandomAccessReader;
+import org.apache.cassandra.io.util.ReadPattern;
 import org.apache.cassandra.locator.Replica;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.Schema;
@@ -234,7 +235,7 @@ public class SSTableWithZeroCopyMetadataTest
     private void checkSSTableReader(SSTableReader sstable) throws IOException
     {
         List<DecoratedKey> keys = new ArrayList<>();
-        try (RandomAccessReader dataReader = sstable.openDataReader())
+        try (RandomAccessReader dataReader = sstable.openDataReader(ReadPattern.RANDOM))
         {
             checkAllKeysIterator(sstable, dataReader, keys);
             checkSrubPartitionsIterator(sstable, dataReader, keys);

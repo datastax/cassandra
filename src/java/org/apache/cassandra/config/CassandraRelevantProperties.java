@@ -24,6 +24,7 @@ import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.compress.AdaptiveCompressor;
 import org.apache.cassandra.io.compress.LZ4Compressor;
+import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.sensors.SensorsFactory;
@@ -600,6 +601,29 @@ public enum CassandraRelevantProperties
      * with vnodes.
      */
     SKIP_OPTIMAL_STREAMING_CANDIDATES_CALCULATION("cassandra.skip_optimal_streaming_candidates_calculation", "false"),
+
+    /**
+     * For reads that use prefetching (sequential ones), how much data is prefetced in kilobytes. If the value set is <= 0, then
+     * prefetching is disabled. Also see {@link #READ_PREFETCHING_WINDOW}.
+     * <p>
+     * This is disabled by default because read prefectching is already provided by the OS when working with local disks.
+     * But this is meant for tiered storage extensions, where prefetching may not be provided by the underlying
+     * (custom) "filesystem".
+     */
+    READ_PREFETCHING_SIZE_KB("cassandra.read_prefetching_size_kb", "-1"),
+
+    /**
+     * The window (on the prefetching size) used to triggered prefetching. The prefetching algorithm ensures that at least
+     * {@link #READ_PREFETCHING_WINDOW} * {@link #READ_PREFETCHING_SIZE_KB} prefetching has been requested, and if that's
+     * not the case it requests up to {@link #READ_PREFETCHING_SIZE_KB}.
+     */
+    READ_PREFETCHING_WINDOW("cassandra.read_prefetching_window", "0.5"),
+
+    /**
+     * Number of threads used for read prefetching (when enabled). If unsed, a default based on the number of processors
+     * is used.
+     */
+    READ_PREFETCHING_THREADS("cassandra.read_prefetching_threads"),
 
     /**
      * Allows custom implementation of {@link OperationContext.Factory} to optionally create and configure custom
