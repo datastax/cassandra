@@ -39,7 +39,7 @@ public interface IMultiKeyProvider extends IKeyProvider
      * @param keyStrength key length in bits
      * @param output byte buffer to write header data to. Limit must be >= size returned by headerLength
      * @return key instance identified by header data to be used for encryption
-     * @throws com.datastax.bdp.cassandra.crypto.KeyAccessException when the key exists but could not be retrieved, e.g. from the disk or external storage
+     * @throws KeyAccessException when the key exists but could not be retrieved, e.g. from the disk or external storage
      * @throws KeyGenerationException when invalid cipherName was given, or keyStrength does not match the algorithm
      */
     SecretKey writeHeader(String cipherName, int keyStrength, ByteBuffer output) throws KeyAccessException, KeyGenerationException;
@@ -56,14 +56,14 @@ public interface IMultiKeyProvider extends IKeyProvider
      * @param keyStrength key length in bits
      * @param input byte buffer to write header data to. Limit must be >= size returned by headerLength
      * @return key instance identified by header data to be used for encryption
-     * @throws com.datastax.bdp.cassandra.crypto.KeyAccessException when the key exists but could not be retrieved, e.g. from the disk or external storage
+     * @throws KeyAccessException when the key exists but could not be retrieved, e.g. from the disk or external storage
      * @throws KeyGenerationException when invalid cipherName was given, or keyStrength does not match the algorithm
      */
     SecretKey readHeader(String cipherName, int keyStrength, ByteBuffer input) throws KeyAccessException, KeyGenerationException;
 
     /**
      * @return size of header data to be written.
-     * @throws com.datastax.bdp.cassandra.crypto.KeyAccessException when the key exists but could not be retrieved, e.g. from the disk or external storage
+     * @throws KeyAccessException when the key exists but could not be retrieved, e.g. from the disk or external storage
      * @throws KeyGenerationException when invalid cipherName was given, or keyStrength does not match the algorithm
      */
     int headerLength();

@@ -160,7 +160,7 @@ public class EncryptionConfig
 
             if (!className.contains("."))
             {
-                className = "com.datastax.bdp.cassandra.crypto." + className;
+                className = "org.apache.cassandra.crypto." + className;
             }
 
             return Class.forName(className);

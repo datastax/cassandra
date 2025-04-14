@@ -34,7 +34,7 @@ public class LocalFileSystemKeyProviderFactory implements IKeyProviderFactory
     private static final ConcurrentMap<Path, LocalFileSystemKeyProvider> keyProviders = Maps.newConcurrentMap();
 
     public static final String SECRET_KEY_FILE = "secret_key_file";
-    private static final String DEFAULT_SECRET_KEY_FILE = "/etc/dse/conf/data_encryption_keys";
+    private static final String DEFAULT_SECRET_KEY_FILE = "/etc/cassandra/conf/data_encryption_keys";
 
     @Override
     public IKeyProvider getKeyProvider(Map<String, String> options) throws IOException

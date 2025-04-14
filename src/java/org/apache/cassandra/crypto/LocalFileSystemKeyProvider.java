@@ -23,9 +23,7 @@ import java.nio.file.Path;
 import java.security.InvalidKeyException;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
-import java.util.Collections;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.ConcurrentMap;
 import javax.crypto.Cipher;
 import javax.crypto.KeyGenerator;
@@ -33,13 +31,11 @@ import javax.crypto.NoSuchPaddingException;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
 
-import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Maps;
 import org.apache.commons.codec.binary.Base64;
 
 import org.apache.cassandra.io.util.FileUtils;
 
-import static java.lang.String.format;
 import static java.nio.file.StandardOpenOption.APPEND;
 import static org.apache.cassandra.crypto.LocalSystemKey.KEY_DEFAULT_PERMISSIONS;
 
@@ -156,7 +152,6 @@ public class LocalFileSystemKeyProvider implements IKeyProvider
         }
     }
 
-
     private String getKeyType(String cipherName)
     {
         return cipherName.replaceAll("/.*", "");
@@ -165,24 +160,6 @@ public class LocalFileSystemKeyProvider implements IKeyProvider
     String getFileName()
     {
         return keyPath.toAbsolutePath().toString();
-    }
-
-    private void addKeyIfItDoesNotExist(String cipherName, int keyStrength, SecretKey secretKey) throws IOException
-    {
-        SecretKey previousKey = keys.putIfAbsent(getMapKey(cipherName, keyStrength), secretKey);
-
-        if (previousKey != null)
-        {
-            if (!secretKey.equals(previousKey))
-                throw new RuntimeException(format("Unable to store a local encryption key (%s) as there is an different local key with the same cipher '%s' and key strength %d", getFileName(), cipherName, keyStrength));
-
-            if (!Files.exists(keyPath))
-                throw new RuntimeException(format("Unable to store a local encryption key with cipher '%s' and key strength %d as the file '%s' doesn't exist", cipherName, keyStrength, getFileName()));
-
-            return;
-        }
-
-        appendKey(cipherName, keyStrength, secretKey);
     }
 
     @Override

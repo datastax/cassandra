@@ -29,6 +29,7 @@ import com.google.common.collect.ImmutableMap;
 
 import static java.util.Objects.requireNonNull;
 
+//TODO: to decide whether we need key backups
 /**
  * A backup of an encryption key used to encrypt/decrypt data. It's a generic
  * container so it can accommodate different types of keys and its metadata, allowing
@@ -120,24 +121,6 @@ public final class EncryptionKeyBackup implements Comparable<EncryptionKeyBackup
     public static Builder builder(Class<?> keyProviderClassName)
     {
         return new Builder(keyProviderClassName.getName());
-    }
-
-    /**
-     * Restores this encryption key backup No-op for already existing keys
-     */
-    public void restore()
-    {
-        try
-        {
-            //TODO
-            /*Class<?> restorerClass = Class.forName(keyRestorerClassName);
-            KeyRestorer keyRestorer = (KeyRestorer) restorerClass.newInstance();
-            keyRestorer.restoreKey(this);*/
-        }
-        catch (Throwable e)
-        {
-            throw new RuntimeException(String.format("Unable to restore encryption key %s - %d", cipher, strength), e);
-        }
     }
 
     /**
