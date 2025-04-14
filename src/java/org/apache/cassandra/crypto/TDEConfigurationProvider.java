@@ -19,7 +19,7 @@ import com.google.common.annotations.VisibleForTesting;
 
 public class TDEConfigurationProvider
 {
-    private static String systemKeyDirectoryProperty = System.getProperty("dse.system_key_directory", "/etc/cassandra/conf");
+    private static String systemKeyDirectoryProperty = System.getProperty("cassandra.system_key_directory", "/etc/cassandra/conf");
 
     public static TDEConfiguration getConfiguration()
     {

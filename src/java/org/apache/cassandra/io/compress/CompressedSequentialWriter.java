@@ -177,7 +177,6 @@ public class CompressedSequentialWriter extends SequentialWriter
         if (compressedLength >= maxCompressedLength)
         {
             toWrite = buffer;
-            //TODO: confirm that we do not have to change anything here
             if (uncompressedLength >= maxCompressedLength)
             {
                 compressedLength = uncompressedLength;
