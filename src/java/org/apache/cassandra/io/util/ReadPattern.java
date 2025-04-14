@@ -20,4 +20,5 @@ package org.apache.cassandra.io.util;
 
 public enum ReadPattern
 {
-    SEQUENTIAL, RANDOM}
+    SEQUENTIAL, RANDOM
+}

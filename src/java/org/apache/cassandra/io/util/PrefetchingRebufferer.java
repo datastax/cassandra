@@ -108,7 +108,7 @@ public class PrefetchingRebufferer implements Rebufferer
     /// The buffers that are being/have been prefetched (but have not yet be requested by [#rebuffer]).
     private final Deque<PrefetchedEntry> queue;
 
-    /// The number of buffers prefetched when prefect is triggered ().
+    /// The number of buffers prefetched when prefetch is triggered ().
     private final int prefetchSize;
 
     /// The minimum number of buffers that should be prefetched; as soon as we have less than this number of prefetched
@@ -150,7 +150,9 @@ public class PrefetchingRebufferer implements Rebufferer
 
         if (Integer.bitCount(chunkSize) != 1)
         {
-            NO_SPAM_LOGGER.debug("Prefecting is enabled for SEQUENTIAL reads on {} but the chunk size {} is not a power of two (should only true for zero-copied files); will not prefetch.", factory.channel().filePath(), chunkSize);
+            NO_SPAM_LOGGER.debug("Prefecting is enabled for SEQUENTIAL reads on {} but the chunk size {} is not a " +
+                                 "power of two (should only true for zero-copied files); will not prefetch.",
+                                 factory.channel().filePath(), chunkSize);
             return factory.instantiateRebufferer();
         }
 
@@ -170,7 +172,10 @@ public class PrefetchingRebufferer implements Rebufferer
             unusedRebufferers.add(lastReturnedRebufferer);
 
         if (position >= fileLength())
+        {
+            assert position == fileLength() : "Requested seek to " + position + " but file length is " + fileLength();
             return Rebufferer.EMPTY;
+        }
 
         long pageAlignedPos = position & alignmentMask;
 
@@ -202,15 +207,15 @@ public class PrefetchingRebufferer implements Rebufferer
         // 1. `entry == null`: this is either the first call to this rebufferer, or we've seeked forward since the
         //    last `rebuffer` and all the prefected entries where discared by the loop above.
         // 2. `entry.position > pageAlignedPos` (we have prefected entries, but they are "later" in the file). This
-        //    means the code has seeked backward since the last `rebuffer`. We don't want our prefetching queue to grow
+        //    means the code has jumped backward since the last `rebuffer`. We don't want our prefetching queue to grow
         //    unbounded if we get a series of backward seek, so we need to release those prefecth, at least if they
-        //    don't fall within the "current" prefetching window. But for now, we simply release all the prefect
+        //    don't fall within the "current" prefetching window. But for now, we simply release all prefetched entries
         //    because:
         //    - if this is used for a genuinely sequential process, like compaction/scrub, then we shouldn't seek
         //      backward at all, and if we do it's exceptional, to handle some problem/retry, and being optimal in those
         //      rare case is not a priority.
         //    - if this is used for actual user reads, then this rebuffer should sit on top of the chunk cache anyway,
-        //      and so those prefected entries will still be in the cache even if we remove them from our own queue, and
+        //      and so those prefetched entries will still be in the cache even if we remove them from our own queue, and
         //      we're not really losing anything (arguably the queue of this rebuffer is a tad superfluous when we sit
         //      on top of the chunk cache for that reason, but that queue exists mainly for when that's not the case).
         // In both cases, we ensure the prefecth queue is empty, then prefetch from the current position, and wait on
@@ -243,7 +248,7 @@ public class PrefetchingRebufferer implements Rebufferer
         return holder;
     }
 
-     /// Trigger prefetches the next N buffers unless they are already in the queue.
+     /// Trigger prefetches of the next N buffers unless they are already in the queue.
      ///
      /// This method does not block, it just submits prefetch to the executor and then return immediately.
      ///
@@ -277,7 +282,7 @@ public class PrefetchingRebufferer implements Rebufferer
                 ++createdRebuffers;
             }
             // We must have gotten a rebufferer: we know the queue is smaller than `prefetchSize`, so either we had
-            // created less than `prefetchSize` rebuffererer yet, and we just created one above, or some rebuffere must
+            // created less than `prefetchSize` rebuffererer yet, and we just created one above, or some rebufferer must
             // have been unused.
             assert rebufferer != null;
             PrefetchedEntry newEntry = new PrefetchedEntry(prefetchPosition, rebufferer);
@@ -391,7 +396,7 @@ public class PrefetchingRebufferer implements Rebufferer
         ReusedRebufferer forReuse()
         {
             assert !reused;
-            assert isReady() : "Should not have been called on incomplete prefetc";
+            assert isReady() : "Should not have been called on incomplete prefetch";
             reused = true;
             return rebufferer.prepareForReuse(null);
         }
@@ -414,7 +419,7 @@ public class PrefetchingRebufferer implements Rebufferer
                         metrics.unused.mark();
                     }
 
-                    // We shouldn't fail, but we're also explicitely not using the result of that prefetch, so no reason
+                    // We shouldn't fail, but we're also explicitly not using the result of that prefetch, so no reason
                     // to do more than warn.
                     if (error != null)
                         LOGGER.warn("Error during prefetching; but this prefetch is discarded", error);
@@ -448,7 +453,7 @@ public class PrefetchingRebufferer implements Rebufferer
         @Override
         public String toString()
         {
-            return String.format("Position: %d, Status: %s", position, future.isDone());
+            return String.format("Position: %d, Done: %s", position, future.isDone());
         }
     }
 
@@ -521,10 +526,10 @@ public class PrefetchingRebufferer implements Rebufferer
             if (prefetched.getCount() == 0)
                 return "No prefetching yet";
 
-            return String.format("Prefetched: [%s], Unused: [%s], Not ready: [%s] (%.2f), Non sequential request: [%s]",
+            return String.format("Prefetched: [%s], Unused: [%s] (%.2f), Not ready: [%s] (%.2f), Non sequential request: [%s]",
                                  prefetched.getCount(),
-                                 unused.getCount(),
-                                 notReady.getCount(), (double)notReady.getCount() / prefetched.getCount(),
+                                 unused.getCount(), (double) unused.getCount() / prefetched.getCount(),
+                                 notReady.getCount(), (double) notReady.getCount() / prefetched.getCount(),
                                  nonSequentialRequest.getCount());
         }
     }
