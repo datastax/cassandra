@@ -203,7 +203,7 @@ public class TrieIndexSSTableWriter extends SortedTableWriter
             if (compression)
                 dbuilder.withCompressionMetadata(((CompressedSequentialWriter) dataFile).open(dataLength));
             int dataBufferSize = optimizationStrategy.bufferSize(stats.estimatedPartitionSize.percentile(DatabaseDescriptor.getDiskOptimizationEstimatePercentile()));
-            //TODO is withLength needed?
+            //TODO is withLength needed - Check CI results
             FileHandle dfile = dbuilder.bufferSize(dataBufferSize).complete();
             invalidateCacheAtPreviousBoundary(dfile, dataLength);
             SSTableReader sstable = TrieIndexSSTableReader.internalOpen(descriptor,
@@ -434,7 +434,7 @@ public class TrieIndexSSTableWriter extends SortedTableWriter
             // truncate index file
             rowIndexFile.prepareToCommit();
             rowIndexFHBuilder.withLength(rowIndexFile.getLastFlushOffset());
-            //TODO before or after? +1 similar problem somewhere else
+            //TODO figure out whether the update should be done before or after the prepare to commit
             rowIndexFile.updateFileHandle(rowIndexFHBuilder);
 
             complete();
