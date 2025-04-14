@@ -29,7 +29,7 @@ import com.google.common.collect.ImmutableMap;
 
 import static java.util.Objects.requireNonNull;
 
-//TODO: to decide whether we need key backups
+//TODO: to decide whether we need key backups for now
 /**
  * A backup of an encryption key used to encrypt/decrypt data. It's a generic
  * container so it can accommodate different types of keys and its metadata, allowing

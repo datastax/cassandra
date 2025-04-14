@@ -177,7 +177,6 @@ public class CompressedSequentialWriter extends SequentialWriter
         if (compressedLength >= maxCompressedLength)
         {
             toWrite = buffer;
-            //TODO: confirm that we do not have to change anything here
             if (uncompressedLength >= maxCompressedLength)
             {
                 compressedLength = uncompressedLength;
@@ -222,7 +221,7 @@ public class CompressedSequentialWriter extends SequentialWriter
             runPostFlush.run();
     }
 
-    //TODO: to revisit
+    //TODO: without that method usage in BIG format writer the tests fail
     public CompressionMetadata open(long overrideLength)
     {
         if (overrideLength <= 0)
