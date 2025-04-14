@@ -205,29 +205,25 @@ public abstract class EncryptedChunkReader extends AbstractReaderFileProxy imple
             }
             else
             {
-                //TODO check whether chunk cache can be used
-                input = BufferPools.forChunkCache().get(CHUNK_SIZE, BufferType.preferredForCompression());
+                //TODO confirm whether we can use networking pool or use something else
+                input = BufferPools.forNetworking().get(CHUNK_SIZE, BufferType.preferredForCompression());
             }
 
             try
             {
                 input.position(0).limit(CHUNK_SIZE);
                 channel.read(input, position);
-
-                try
-                {
-                    decrypt(input, 0, buffer, position);
-                }
-                catch (IOException e)
-                {
-                    //TODO how to handle it?
-                }
+                decrypt(input, 0, buffer, position);
+            }
+            catch (IOException e)
+            {
+                throw new RuntimeException(e);
             }
             finally
             {
                 if (!encryptor.canDecompressInPlace())
                 {
-                    BufferPools.forChunkCache().put(input);
+                    BufferPools.forNetworking().put(input);
                 }
             }
         }
@@ -268,7 +264,7 @@ public abstract class EncryptedChunkReader extends AbstractReaderFileProxy imple
             }
             catch (IOException e)
             {
-                //TODO how to handle it?
+                throw new RuntimeException(e);
             }
         }
 
