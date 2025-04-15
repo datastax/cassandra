@@ -62,6 +62,7 @@ public class CreateTableStatementCompactionStrategiesTest extends CQLTester
     @Test
     public void dseCompactionStrategyShouldBeIgnoredWithWarning() throws Throwable
     {
+        decorateCQLWithTestNames = false;
         String tableName = createTableName();
 
         // should not throw
