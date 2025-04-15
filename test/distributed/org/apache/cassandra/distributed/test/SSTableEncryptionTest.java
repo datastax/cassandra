@@ -49,7 +49,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.ThrowableAssert.catchThrowable;
 import static org.junit.Assert.assertTrue;
 
-public class EncryptSSTableTest extends TestBaseImpl
+public class SSTableEncryptionTest extends TestBaseImpl
 {
     private static final String KEYSPACE_PREFIX = "ks";
     private static final String TABLE_PREFIX = "tbl";
