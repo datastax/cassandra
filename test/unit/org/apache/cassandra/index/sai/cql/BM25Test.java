@@ -24,6 +24,7 @@ import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import org.assertj.core.api.Assertions;
@@ -676,9 +677,19 @@ public class BM25Test extends SAITester
     }
 
     @Test
+    public void testWithLowercase() throws Throwable
+    {
+        createTable("CREATE TABLE %s (id int PRIMARY KEY, body text)");
+        createAnalyzedIndex("body", true);
+        execute("INSERT INTO %s (id, body) VALUES (?, ?)", 1, "Hi hi");
+        execute("INSERT INTO %s (id, body) VALUES (?, ?)", 2, "hi hi longer");
+        executeQuery(Arrays.asList(1, 2), "SELECT * FROM %s ORDER BY body BM25 OF 'hi' LIMIT 4");
+    }
+
+    @Test
     public void testCollections() throws Throwable
     {
-        createTable("CREATE TABLE %s (id int PRIMARY KEY, category text, score int, tie int," +
+        createTable("CREATE TABLE %s (id int PRIMARY KEY, category text, score int, " +
                     "title text, body text, bodyset set<text>, " +
                     "map_category map<int, text>, map_body map<text, text>)");
         createAnalyzedIndex("body", true);
@@ -686,39 +697,55 @@ public class BM25Test extends SAITester
         createAnalyzedIndex("map_body", true);
         createIndex("CREATE CUSTOM INDEX ON %s (score) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s (category) USING 'StorageAttachedIndex'");
-        createIndex("CREATE CUSTOM INDEX ON %s (tie) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s (map_category) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s (KEYS(map_body)) USING 'StorageAttachedIndex'");
         insertCollectionData();
+        analyzeDataset("climate");
+        analyzeDataset("health");
 
         beforeAndAfterFlush(
         () -> {
-            executeQuery(Arrays.asList(11, 1, 16, 18), "SELECT * FROM %s WHERE tie = 1 ORDER BY body BM25 OF ? LIMIT 10",
+            // ID 11: total words = 12, climate occurrences = 4
+            // ID 19: total words = 13, climate occurrences = 4
+            // ID 1: total words = 16, climate occurrences = 3
+            // ID 16: total words = 11, climate occurrences = 2
+            // ID 6: total words = 13, climate occurrences = 2
+            // ID 12: total words = 12, climate occurrences = 1
+            // ID 18: total words = 14, climate occurrences = 1
+            executeQuery(Arrays.asList(11, 19, 1, 16, 6, 12, 18), "SELECT * FROM %s  ORDER BY body BM25 OF ? LIMIT 10",
                          "climate");
-            executeQuery(Arrays.asList(11, 1), "SELECT * FROM %s WHERE score = 5 AND tie = 1 ORDER BY body BM25 OF ? LIMIT 10",
+            executeQuery(Arrays.asList(11, 19, 1), "SELECT * FROM %s WHERE score = 5 ORDER BY body BM25 OF ? LIMIT 10",
                          "climate");
+            executeQuery(Arrays.asList(11, 19, 1, 16, 6, 12, 18), "SELECT * FROM %s WHERE bodyset CONTAINS 'climate' ORDER BY body BM25 OF ? LIMIT 10",
+                         "climate");
+            executeQuery(Arrays.asList(16, 6, 12, 18), "SELECT * FROM %s WHERE bodyset CONTAINS 'health' ORDER BY body BM25 OF ? LIMIT 10",
+                         "climate");
+            executeQuery(Arrays.asList(11, 19, 1, 16, 6, 12, 18), "SELECT * FROM %s WHERE map_category CONTAINS 'Climate' ORDER BY body BM25 OF ? LIMIT 10",
+                         "climate");
+            executeQuery(Arrays.asList(19, 16, 6, 12, 18), "SELECT * FROM %s WHERE map_category CONTAINS 'Health' ORDER BY body BM25 OF ? LIMIT 10",
+                         "climate");
+            executeQuery(Arrays.asList(11, 19, 1, 16, 6, 12, 18), "SELECT * FROM %s WHERE map_body CONTAINS 'Climate' ORDER BY body BM25 OF ? LIMIT 10",
+                         "climate");
+            executeQuery(Arrays.asList(11, 19, 16, 6, 12, 18), "SELECT * FROM %s WHERE map_body CONTAINS 'health' ORDER BY body BM25 OF ? LIMIT 10",
+                         "climate");
+            executeQuery(Arrays.asList(11, 19, 16, 6, 12, 18), "SELECT * FROM %s WHERE map_body CONTAINS KEY 'Health' ORDER BY body BM25 OF ? LIMIT 10",
+                         "climate");
+
+            // ID 4: total words = 15, health occurrences = 3
+            // ID 12: total words = 12, health occurrences = 2
+            // ID 6: total words = 13, health occurrences = 2
+            // ID 9: total words = 13, health occurrences = 2
+            // ID 18: total words = 14, health occurrences = 2
+            // ID 14: total words = 11, health occurrences = 1
+            // ID 16: total words = 11, health occurrences = 1
             executeQuery(Arrays.asList(6, 16), "SELECT * FROM %s WHERE score > 3 ORDER BY body BM25 OF ? LIMIT 10",
                          "health");
-            executeQuery(Arrays.asList(4, 18, 14), "SELECT * FROM %s WHERE category = 'Health' AND tie = 1 " +
+            executeQuery(Arrays.asList(4, 12, 9, 18, 14), "SELECT * FROM %s WHERE category = 'Health' " +
                                                           "ORDER BY body BM25 OF ? LIMIT 10",
                          "Health");
-            executeQuery(Arrays.asList(4, 18, 14), "SELECT * FROM %s WHERE score <= 3 AND tie = 1 AND category = 'Health' " +
+            executeQuery(Arrays.asList(4, 12, 9, 18, 14), "SELECT * FROM %s WHERE score <= 3 AND category = 'Health' " +
                                                           "ORDER BY body BM25 OF ? LIMIT 10",
                          "health");
-            executeQuery(Arrays.asList(11, 1, 16, 18), "SELECT * FROM %s WHERE bodyset CONTAINS 'climate' AND tie <= 1 ORDER BY body BM25 OF ? LIMIT 10",
-                         "climate");
-            executeQuery(Arrays.asList(6, 12), "SELECT * FROM %s WHERE bodyset CONTAINS 'health' AND tie > 1 ORDER BY body BM25 OF ? LIMIT 10",
-                         "climate");
-            executeQuery(Arrays.asList(11, 1, 16, 18), "SELECT * FROM %s WHERE map_category CONTAINS 'Climate' AND tie <= 1 ORDER BY body BM25 OF ? LIMIT 10",
-                         "climate");
-            executeQuery(Arrays.asList(19, 6, 12), "SELECT * FROM %s WHERE map_category CONTAINS 'Health' AND tie > 1 ORDER BY body BM25 OF ? LIMIT 10",
-                         "climate");
-            executeQuery(Arrays.asList(11, 1, 16, 18), "SELECT * FROM %s WHERE map_body CONTAINS 'Climate' AND tie <= 1 ORDER BY body BM25 OF ? LIMIT 10",
-                         "climate");
-            executeQuery(Arrays.asList(11, 16, 18), "SELECT * FROM %s WHERE map_body CONTAINS 'health' AND tie < 2 ORDER BY body BM25 OF ? LIMIT 10",
-                         "climate");
-            executeQuery(Arrays.asList(19, 6, 12), "SELECT * FROM %s WHERE map_body CONTAINS KEY 'Health' AND tie >= 2 ORDER BY body BM25 OF ? LIMIT 10",
-                         "climate");
         });
     }
 
@@ -741,10 +768,29 @@ public class BM25Test extends SAITester
     { 15, "Education", 2, "Education reforms are underway. Education experts suggest holistic changes.", 1 },
     { 16, "Climate", 4, "Climate affects the economy and health. Climate events cost billions annually.", 1 },
     { 17, "Technology", 3, "Technology is the backbone of the modern economy. Without technology, economic growth stagnates.", 2 },
-    { 18, "Health", 2, "Health is discussed less than economy or climate, but health matters deeply.", 1 },
+    { 18, "Health", 2, "Health is discussed less than economy or climate or technology, but health matters deeply.", 1 },
     { 19, "Climate", 5, "Climate change, climate policies, climate research—climate is the buzzword of our time.", 2 },
     { 20, "Mixed", 3, "Investments in education and technology will shape the future of the global economy.", 1 }
     };
+    
+    private void analyzeDataset(String term)
+    {
+        final Pattern PATTERN = Pattern.compile("\\W+");
+        for (Object[] row : DATASET)
+        {
+            String body = (String) row[3];
+            String[] words = PATTERN.split(body.toLowerCase());
+
+            long totalWords = words.length;
+            long termCount = Arrays.stream(words)
+                                   .filter(word -> word.equals(term))
+                                   .count();
+
+            if (termCount > 0)
+                System.out.printf("            // ID %d: total words = %d, %s occurrences = %d%n",
+                                  (Integer) row[0], totalWords, term, termCount);
+        }
+    }
 
     private void insertPrimitiveData()
     {
@@ -781,13 +827,12 @@ public class BM25Test extends SAITester
             }
 
             execute(
-            "INSERT INTO %s (id, category, score, body, tie, bodyset, map_category, map_body) " +
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO %s (id, category, score, body, bodyset, map_category, map_body) " +
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
             DATASET[row][0],
             DATASET[row][1],
             DATASET[row][2],
             DATASET[row][3],
-            DATASET[row][4],
             set,
             map,
             map_text
