@@ -21,12 +21,17 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+import org.apache.cassandra.index.sai.SSTableIndex;
+import org.apache.cassandra.index.sai.memory.MemtableIndex;
+import org.apache.cassandra.index.sai.memory.TrieMemoryIndex;
+import org.apache.cassandra.index.sai.memory.TrieMemtableIndex;
 import org.assertj.core.api.Assertions;
 import org.junit.Before;
 import org.junit.Test;
@@ -814,6 +819,56 @@ public class BM25Test extends SAITester
                 "climate");
         executeQuery(Arrays.asList(11, 19, 1), "SELECT * FROM %s WHERE score = 5 ORDER BY body BM25 OF ? LIMIT 10",
                 "climate");
+    }
+
+    /**
+     * Asserts that memtable SAI index maintains expected row count, which is, then,
+     * used to store row count in SSTable SAI index and its segments. This is also
+     * asserted.
+     */
+    @Test
+    public void testIndexMetaForNumRows()
+    {
+        createTable("CREATE TABLE %s (id int PRIMARY KEY, category text, score int, title text, body text)");
+        String bodyIndexName = createAnalyzedIndex("body", true);
+        String scoreIndexName = createIndex("CREATE CUSTOM INDEX ON %s (score) USING 'StorageAttachedIndex'");
+        insertPrimitiveData();
+
+        assertNumRowsMemtable(scoreIndexName);
+        assertNumRowsMemtable(bodyIndexName);
+        flush();
+        assertNumRowsSSTable(scoreIndexName);
+        assertNumRowsSSTable(bodyIndexName);
+    }
+
+    private void assertNumRowsMemtable(String indexName)
+    {
+        int rowCount = 0;
+
+        for (var memtable : getCurrentColumnFamilyStore().getAllMemtables())
+        {
+            MemtableIndex memIndex = getIndexContext(indexName).getMemtableIndex(memtable);
+            assert memIndex instanceof TrieMemtableIndex;
+            rowCount = Arrays.stream(((TrieMemtableIndex) memIndex).getRangeIndexes())
+                             .map(index -> ((TrieMemoryIndex) index).getDocLengths().size())
+                             .mapToInt(Integer::intValue).sum();
+        }
+        assertEquals(DATASET.length, rowCount);
+    }
+
+    private void assertNumRowsSSTable(String indexName)
+    {
+        long indexRowCount = 0;
+        long segmentRowCount = 0;
+        for (SSTableIndex sstableIndex : getIndexContext(indexName).getView())
+        {
+            indexRowCount += sstableIndex.getRowCount();
+            segmentRowCount += sstableIndex.getSegments().stream()
+                                           .map(s -> Objects.requireNonNull(s.metadata).numRows)
+                                           .mapToLong(Long::longValue).sum();
+        }
+        assertEquals(indexRowCount, segmentRowCount);
+        assertEquals(DATASET.length, indexRowCount);
     }
 
     private final static Object[][] DATASET =

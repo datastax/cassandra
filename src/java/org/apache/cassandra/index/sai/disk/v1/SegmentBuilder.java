@@ -465,6 +465,7 @@ public abstract class SegmentBuilder
         metadataBuilder.setKeyRange(minKey, maxKey);
         metadataBuilder.setRowIdRange(minSSTableRowId, maxSSTableRowId);
         metadataBuilder.setTermRange(minTerm, maxTerm);
+        metadataBuilder.setNumRows(getRowCount());
 
         flushInternal(metadataBuilder);
         return metadataBuilder.build();

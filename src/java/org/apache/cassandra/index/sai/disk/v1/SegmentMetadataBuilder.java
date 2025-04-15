@@ -35,11 +35,9 @@ import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.TermsIterator;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
-import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.MutableOneDimPointValues;
 import org.apache.cassandra.index.sai.disk.v6.TermsDistribution;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
-import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.lucene.util.BytesRef;
@@ -88,6 +86,11 @@ public class SegmentMetadataBuilder
         this.termsDistributionBuilder = new TermsDistribution.Builder(context.getValidator(), byteComparableVersion, histogramSize, mostFrequentTermsCount);
     }
 
+    public void setNumRows(long numRows)
+    {
+        this.numRows = numRows;
+    }
+
     public void setKeyRange(@Nonnull PrimaryKey minKey, @Nonnull PrimaryKey maxKey)
     {
         assert minKey.compareTo(maxKey) <= 0: "minKey (" + minKey + ") must not be greater than (" + maxKey + ')';
@@ -131,7 +134,6 @@ public class SegmentMetadataBuilder
         if (built)
             throw new IllegalStateException("Segment metadata already built, no more additions allowed");
 
-        numRows += rowCount;
         termsDistributionBuilder.add(term, rowCount);
     }
 
@@ -362,7 +364,7 @@ public class SegmentMetadataBuilder
         }
 
         @Override
-        public void close() throws IOException
+        public void close()
         {
             if (lastTerm != null)
             {
@@ -373,5 +375,3 @@ public class SegmentMetadataBuilder
     }
 
 }
-
-

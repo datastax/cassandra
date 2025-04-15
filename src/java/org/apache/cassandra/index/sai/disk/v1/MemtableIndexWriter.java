@@ -146,6 +146,7 @@ public class MemtableIndexWriter implements PerIndexWriter
 
     private long flush(DecoratedKey minKey, DecoratedKey maxKey, AbstractType<?> termComparator, MemtableTermsIterator terms, int maxSegmentRowId) throws IOException
     {
+        long numCells;
         long numRows;
         SegmentMetadataBuilder metadataBuilder = new SegmentMetadataBuilder(0, perIndexComponents);
         SegmentMetadata.ComponentMetadataMap indexMetas;
@@ -166,7 +167,8 @@ public class MemtableIndexWriter implements PerIndexWriter
                       );
 
                 indexMetas = writer.writeAll(metadataBuilder.intercept(terms), docLengths);
-                numRows = writer.getPostingsCount();
+                numCells = writer.getPostingsCount();
+                numRows = docLengths.size();
             }
         }
         else
@@ -180,7 +182,8 @@ public class MemtableIndexWriter implements PerIndexWriter
             {
                 ImmutableOneDimPointValues values = ImmutableOneDimPointValues.fromTermEnum(terms, termComparator);
                 indexMetas = writer.writeAll(metadataBuilder.intercept(values));
-                numRows = writer.getPointCount();
+                numCells = writer.getPointCount();
+                numRows = numCells;
             }
         }
 
@@ -192,6 +195,7 @@ public class MemtableIndexWriter implements PerIndexWriter
             return 0;
         }
 
+        metadataBuilder.setNumRows(numRows);
         metadataBuilder.setKeyRange(pkFactory.createPartitionKeyOnly(minKey), pkFactory.createPartitionKeyOnly(maxKey));
         metadataBuilder.setRowIdRange(terms.getMinSSTableRowId(), terms.getMaxSSTableRowId());
         metadataBuilder.setTermRange(terms.getMinTerm(), terms.getMaxTerm());
@@ -203,7 +207,7 @@ public class MemtableIndexWriter implements PerIndexWriter
             SegmentMetadata.write(writer, Collections.singletonList(metadata));
         }
 
-        return numRows;
+        return numCells;
     }
 
     private boolean writeFrequencies()
