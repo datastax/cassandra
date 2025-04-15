@@ -358,6 +358,11 @@ public class CQLSSTableWriter implements Closeable
         return (UserType) JavaDriverUtils.driverType(userType);
     }
 
+    public TableMetadataRef getMetadata()
+    {
+        return writer.metadata;
+    }
+
     /**
      * Close this writer.
      * <p>
