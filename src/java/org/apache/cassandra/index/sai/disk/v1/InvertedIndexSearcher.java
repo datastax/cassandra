@@ -164,6 +164,9 @@ public class InvertedIndexSearcher extends IndexSearcher
         var slices = Slices.with(indexContext.comparator(), Slice.make(primaryKey.clustering()));
         try (var rowIterator = sstable.iterator(dk, slices, columnFilter, false, SSTableReadsListener.NOOP_LISTENER))
         {
+            // primaryKey might not belong to this sstable, thus the iterator will be empty
+            if (rowIterator.isEmpty())
+                return null;
             var unfiltered = rowIterator.next();
             assert unfiltered.isRow() : unfiltered;
             Row row = (Row) unfiltered;
