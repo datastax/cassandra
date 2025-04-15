@@ -66,9 +66,9 @@ import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.dht.ByteOrderedPartitioner;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.exceptions.InvalidRequestException;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.big.BigFormat;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.PathUtils;
@@ -1480,7 +1480,8 @@ public abstract class CQLSSTableWriterTest
         IndexContext idx1 = createIndexContext("idx1", UTF8Type.instance);
         IndexContext idx2 = createIndexContext("idx2", UTF8Type.instance);
         HashSet<IndexContext> indices = new HashSet<>(Arrays.asList(idx1, idx2));
-        indexDescriptor.reload(null, indices);
+        SSTableReader sstable = SSTableReader.openNoValidation(null, indexDescriptor.descriptor, writer.getMetadata());
+        indexDescriptor.reload(sstable, indices);
 
         assertTrue(indexDescriptor.perIndexComponents(idx1).isComplete());
         assertTrue(indexDescriptor.perIndexComponents(idx2).isComplete());
