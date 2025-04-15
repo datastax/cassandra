@@ -18,21 +18,22 @@
 
 package org.apache.cassandra.index.sai.disk.vector;
 
-import java.util.Comparator;
 import java.util.NoSuchElementException;
 
-import com.google.common.collect.ImmutableList;
 import org.junit.Test;
 
 import io.github.jbellis.jvector.graph.GraphIndex;
+import io.github.jbellis.jvector.graph.NodeQueue;
 import io.github.jbellis.jvector.graph.NodesIterator;
 import io.github.jbellis.jvector.graph.similarity.ScoreFunction;
 import io.github.jbellis.jvector.util.Bits;
+import io.github.jbellis.jvector.util.BoundedLongHeap;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import io.github.jbellis.jvector.vector.VectorizationProvider;
 import io.github.jbellis.jvector.vector.types.VectorFloat;
 import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
-import org.apache.cassandra.utils.SortingIterator;
+import org.apache.cassandra.index.sai.metrics.ColumnQueryMetrics;
+import org.apache.cassandra.index.sai.utils.SegmentRowIdOrdinalPairs;
 
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertThrows;
@@ -46,14 +47,15 @@ public class BruteForceRowIdIteratorTest
     public void testBruteForceRowIdIteratorForEmptyPQAndTopKEqualsLimit()
     {
         var queryVector = vts.createFloatVector(new float[] { 1f, 0f });
-        var pq = SortingIterator.create(BruteForceRowIdIterator.RowWithApproximateScore::compare, ImmutableList.of());
+        var heap = new NodeQueue(new BoundedLongHeap(10), NodeQueue.Order.MAX_HEAP);
         var topK = 10;
         var limit = 10;
 
         // Should work for an empty pq
         var view = new TestView();
         CloseableReranker reranker = new CloseableReranker(VectorSimilarityFunction.COSINE, queryVector, view);
-        var iter = new BruteForceRowIdIterator(pq, reranker, limit, topK);
+        var metrics = new ColumnQueryMetrics.VectorIndexMetrics("ks", "cf", "index");
+        var iter = new BruteForceRowIdIterator(heap, new SegmentRowIdOrdinalPairs(10), reranker, limit, topK, metrics);
         assertFalse(iter.hasNext());
         assertThrows(NoSuchElementException.class, iter::next);
         assertFalse(view.isClosed);
@@ -88,7 +90,7 @@ public class BruteForceRowIdIteratorTest
         }
 
         @Override
-        public NodesIterator getNeighborsIterator(int i)
+        public NodesIterator getNeighborsIterator(int i, int i1)
         {
             throw new UnsupportedOperationException();
         }
@@ -100,7 +102,7 @@ public class BruteForceRowIdIteratorTest
         }
 
         @Override
-        public int entryNode()
+        public GraphIndex.NodeAtLevel entryNode()
         {
             throw new UnsupportedOperationException();
         }

@@ -1,13 +1,11 @@
 /*
- * Licensed to the Apache Software Foundation (ASF) under one
- * or more contributor license agreements.  See the NOTICE file
- * distributed with this work for additional information
- * regarding copyright ownership.  The ASF licenses this file
- * to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance
- * with the License.  You may obtain a copy of the License at
+ * Copyright DataStax, Inc.
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -19,14 +17,23 @@
 package org.apache.cassandra.index.sai.cql;
 
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
+import org.assertj.core.api.Assertions;
 import org.junit.Before;
 import org.junit.Test;
 
 import org.apache.cassandra.cql3.UntypedResultSet;
+import org.apache.cassandra.cql3.statements.SelectStatement;
+import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.SAIUtil;
 import org.apache.cassandra.index.sai.disk.format.Version;
@@ -34,6 +41,7 @@ import org.apache.cassandra.index.sai.disk.v1.SegmentBuilder;
 import org.apache.cassandra.index.sai.plan.QueryController;
 
 import static org.apache.cassandra.index.sai.analyzer.AnalyzerEqOperatorSupport.EQ_AMBIGUOUS_ERROR;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.AssertionsForInterfaceTypes.assertThat;
 import static org.junit.Assert.assertEquals;
 
@@ -57,11 +65,51 @@ public class BM25Test extends SAITester
         assertInvalidMessage("BM25 ordering on column v requires an analyzed index",
                              "SELECT k FROM %s WHERE v : 'apple' ORDER BY v BM25 OF 'apple' LIMIT 3");
 
-        // create analyzed index
-        analyzeIndex();
+        createAnalyzedIndex();
         // BM25 query should work now
         var result = execute("SELECT k FROM %s WHERE v : 'apple' ORDER BY v BM25 OF 'apple' LIMIT 3");
         assertRows(result, row(1));
+    }
+
+    @Test
+    public void testDeletedRow() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v text)");
+        createAnalyzedIndex();
+        execute("INSERT INTO %s (k, v) VALUES (1, 'apple')");
+        execute("INSERT INTO %s (k, v) VALUES (2, 'apple juice')");
+        var result = execute("SELECT k FROM %s ORDER BY v BM25 OF 'apple' LIMIT 3");
+        assertThat(result).hasSize(2);
+        execute("DELETE FROM %s WHERE k=2");
+        String select = "SELECT k FROM %s ORDER BY v BM25 OF 'apple' LIMIT 3";
+        beforeAndAfterFlush(() -> assertRows(execute(select), row(1)));
+    }
+
+    @Test
+    public void testDeletedColumn() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v text)");
+        createAnalyzedIndex();
+        execute("INSERT INTO %s (k, v) VALUES (1, 'apple')");
+        execute("INSERT INTO %s (k, v) VALUES (2, 'apple juice')");
+        String select = "SELECT k FROM %s ORDER BY v BM25 OF 'apple' LIMIT 3";
+        assertRows(execute(select), row(1), row(2));
+        execute("DELETE v FROM %s WHERE k = 2");
+        beforeAndAfterFlush(() -> assertRows(execute(select), row(1)));
+    }
+
+    @Test
+    public void testDeletedRowWithPredicate() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v text, n int)");
+        createIndex("CREATE CUSTOM INDEX ON %s(n) USING 'org.apache.cassandra.index.sai.StorageAttachedIndex'");
+        createAnalyzedIndex();
+        execute("INSERT INTO %s (k, v, n) VALUES (1, 'apple', 0)");
+        execute("INSERT INTO %s (k, v, n) VALUES (2, 'apple juice', 0)");
+        String select = "SELECT k FROM %s WHERE n = 0 ORDER BY v BM25 OF 'apple' LIMIT 3";
+        assertRows(execute(select), row(1), row(2));
+        execute("DELETE FROM %s WHERE k=2");
+        beforeAndAfterFlush(() -> assertRows(execute(select), row(1)));
     }
 
     @Test
@@ -69,8 +117,8 @@ public class BM25Test extends SAITester
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v text)");
 
-        // Create analyzed and un-analyzed indexes
-        analyzeIndex();
+        createAnalyzedIndex();
+        // Create  un-analyzed indexes
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'org.apache.cassandra.index.sai.StorageAttachedIndex'");
 
         execute("INSERT INTO %s (k, v) VALUES (1, 'apple')");
@@ -81,15 +129,15 @@ public class BM25Test extends SAITester
         // be rejected
         beforeAndAfterFlush(() -> {
             // Single predicate
-            assertInvalidMessage(String.format(EQ_AMBIGUOUS_ERROR, "v", getIndex(0), getIndex(1)),
+            assertInvalidMessage(String.format(EQ_AMBIGUOUS_ERROR, 'v', getIndex(0), getIndex(1)),
                                  "SELECT k FROM %s WHERE v = 'apple'");
 
             // AND
-            assertInvalidMessage(String.format(EQ_AMBIGUOUS_ERROR, "v", getIndex(0), getIndex(1)),
+            assertInvalidMessage(String.format(EQ_AMBIGUOUS_ERROR, 'v', getIndex(0), getIndex(1)),
                                  "SELECT k FROM %s WHERE v = 'apple' AND v : 'juice'");
 
             // OR
-            assertInvalidMessage(String.format(EQ_AMBIGUOUS_ERROR, "v", getIndex(0), getIndex(1)),
+            assertInvalidMessage(String.format(EQ_AMBIGUOUS_ERROR, 'v', getIndex(0), getIndex(1)),
                                  "SELECT k FROM %s WHERE v = 'apple' OR v : 'juice'");
         });
     }
@@ -135,14 +183,7 @@ public class BM25Test extends SAITester
 
         // Create mix of analyzed, unanalyzed, and non-text indexes
         createIndex("CREATE CUSTOM INDEX ON %s(v1) USING 'org.apache.cassandra.index.sai.StorageAttachedIndex'");
-        createIndex("CREATE CUSTOM INDEX ON %s(v2) " +
-                    "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
-                    "WITH OPTIONS = {" +
-                    "'index_analyzer': '{" +
-                    "\"tokenizer\" : {\"name\" : \"standard\"}, " +
-                    "\"filters\" : [{\"name\" : \"porterstem\"}]" +
-                    "}'" +
-                    "}");
+        createAnalyzedIndex("v2");
         createIndex("CREATE CUSTOM INDEX ON %s(v3) USING 'org.apache.cassandra.index.sai.StorageAttachedIndex'");
 
         execute("INSERT INTO %s (k, v1, v2, v3) VALUES (1, 'apple', 'orange juice', 5)");
@@ -220,10 +261,8 @@ public class BM25Test extends SAITester
         execute("INSERT INTO %s (k, v) VALUES (1, 'apple')");
 
         beforeAndAfterFlush(() ->
-                            {
-                                assertInvalidMessage("BM25 query must contain at least one term (perhaps your analyzer is discarding tokens you didn't expect)",
-                                                     "SELECT k FROM %s ORDER BY v BM25 OF '+' LIMIT 1");
-                            });
+                            assertInvalidMessage("BM25 query must contain at least one term (perhaps your analyzer is discarding tokens you didn't expect)",
+                                                 "SELECT k FROM %s ORDER BY v BM25 OF '+' LIMIT 1"));
     }
 
     @Test
@@ -368,18 +407,29 @@ public class BM25Test extends SAITester
     private void createSimpleTable()
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v text)");
-        analyzeIndex();
+        createAnalyzedIndex();
     }
 
-    private String analyzeIndex()
+    private String createAnalyzedIndex()
     {
-        return createIndex("CREATE CUSTOM INDEX ON %s(v) " +
+        return createAnalyzedIndex("v");
+    }
+
+    private String createAnalyzedIndex(String column)
+    {
+        return createAnalyzedIndex(column, false);
+    }
+
+    private String createAnalyzedIndex(String column, boolean lowercase)
+    {
+        return createIndex("CREATE CUSTOM INDEX ON %s(" + column + ") " +
                            "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
                            "WITH OPTIONS = {" +
                            "'index_analyzer': '{" +
                            "\"tokenizer\" : {\"name\" : \"standard\"}, " +
-                           "\"filters\" : [{\"name\" : \"porterstem\"}]" +
-                           "}'}"
+                           "\"filters\" : [{\"name\" : \"porterstem\"}" +
+                           (lowercase ? ", {\"name\" : \"lowercase\"}]" : "]")
+                           + "}'}"
         );
     }
 
@@ -387,7 +437,7 @@ public class BM25Test extends SAITester
     public void testWithPredicate() throws Throwable
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, p int, v text)");
-        analyzeIndex();
+        createAnalyzedIndex();
         execute("CREATE CUSTOM INDEX ON %s(p) USING 'StorageAttachedIndex'");
 
         // Insert documents with varying frequencies of the term "apple"
@@ -412,7 +462,7 @@ public class BM25Test extends SAITester
     public void testWidePartition() throws Throwable
     {
         createTable("CREATE TABLE %s (k1 int, k2 int, v text, PRIMARY KEY (k1, k2))");
-        analyzeIndex();
+        createAnalyzedIndex();
 
         // Insert documents with varying frequencies of the term "apple"
         execute("INSERT INTO %s (k1, k2, v) VALUES (0, 1, 'apple')");
@@ -434,7 +484,7 @@ public class BM25Test extends SAITester
     public void testWidePartitionWithPkPredicate() throws Throwable
     {
         createTable("CREATE TABLE %s (k1 int, k2 int, v text, PRIMARY KEY (k1, k2))");
-        analyzeIndex();
+        createAnalyzedIndex();
 
         // Insert documents with varying frequencies of the term "apple"
         execute("INSERT INTO %s (k1, k2, v) VALUES (0, 1, 'apple')");
@@ -458,7 +508,7 @@ public class BM25Test extends SAITester
     public void testWidePartitionWithPredicate() throws Throwable
     {
         createTable("CREATE TABLE %s (k1 int, k2 int, p int, v text, PRIMARY KEY (k1, k2))");
-        analyzeIndex();
+        createAnalyzedIndex();
         execute("CREATE CUSTOM INDEX ON %s(p) USING 'StorageAttachedIndex'");
 
         // Insert documents with varying frequencies of the term "apple"
@@ -519,7 +569,7 @@ public class BM25Test extends SAITester
     public void testBM25RaceConditionConcurrentQueriesInInvertedIndexSearcher() throws Throwable
     {
         createTable("CREATE TABLE %s (pk int, v text, PRIMARY KEY (pk))");
-        analyzeIndex();
+        createAnalyzedIndex();
 
         // Create 3 docs that have the same BM25 score and will be our top docs
         execute("INSERT INTO %s (pk, v) VALUES (1, 'apple apple apple')");
@@ -552,13 +602,299 @@ public class BM25Test extends SAITester
     public void testWildcardSelection()
     {
         createTable("CREATE TABLE %s (k int, c int, v text, PRIMARY KEY (k, c))");
-        analyzeIndex();
+        createAnalyzedIndex();
         execute("INSERT INTO %s (k, c, v) VALUES (1, 1, 'apple')");
 
         var result = execute("SELECT * FROM %s ORDER BY v BM25 OF 'apple' LIMIT 3");
         assertThat(result).hasSize(1);
+    }
 
-        var result2 = execute("SELECT * FROM %s GROUP BY k, c ORDER BY v BM25 OF 'apple' LIMIT 3");
-        assertThat(result2).hasSize(1);
+    @Test
+    public void cannotHaveAggregationOnBM25Query()
+    {
+        createSimpleTable();
+
+        execute("INSERT INTO %s (k, v) VALUES (1, '4')");
+        execute("INSERT INTO %s (k, v) VALUES (2, '3')");
+        execute("INSERT INTO %s (k, v) VALUES (3, '2')");
+        execute("INSERT INTO %s (k, v) VALUES (4, '1')");
+
+        assertThatThrownBy(() -> execute("SELECT max(v) FROM %s ORDER BY v BM25 OF 'apple' LIMIT 4"))
+                .isInstanceOf(InvalidRequestException.class)
+                .hasMessage(SelectStatement.TOPK_AGGREGATION_ERROR);
+
+        assertThatThrownBy(() -> execute("SELECT max(v) FROM %s WHERE k = 1 ORDER BY v BM25 OF 'apple' LIMIT 4"))
+                .isInstanceOf(InvalidRequestException.class)
+                .hasMessage(SelectStatement.TOPK_AGGREGATION_ERROR);
+
+        assertThatThrownBy(() -> execute("SELECT * FROM %s GROUP BY k ORDER BY v BM25 OF 'apple' LIMIT 4"))
+                .isInstanceOf(InvalidRequestException.class)
+                .hasMessage(SelectStatement.TOPK_AGGREGATION_ERROR);
+
+        assertThatThrownBy(() -> execute("SELECT count(*) FROM %s ORDER BY v BM25 OF 'apple' LIMIT 4"))
+                .isInstanceOf(InvalidRequestException.class)
+                .hasMessage(SelectStatement.TOPK_AGGREGATION_ERROR);
+    }
+
+    @Test
+    public void testBM25andFilterz() throws Throwable
+    {
+        createTable("CREATE TABLE %s (id int PRIMARY KEY, category text, score int, title text, body text)");
+        createAnalyzedIndex("body");
+        createIndex("CREATE CUSTOM INDEX ON %s (score) USING 'StorageAttachedIndex'");
+        insertPrimitiveData();
+        beforeAndAfterFlush(
+                () -> {
+                    // 10 docs have score 3 and 3 of those have "health"
+                    var result = execute("SELECT * FROM %s WHERE score = 3 ORDER BY body BM25 OF ? LIMIT 10",
+                                         "health");
+                    assertThat(result).hasSize(3);
+
+                    // 4 docs have score 2 and one of those has "discussed"
+                    result = execute("SELECT * FROM %s WHERE score = 2 ORDER BY body BM25 OF ? LIMIT 10",
+                                         "discussed");
+                    assertThat(result).hasSize(1);
+                });
+    }
+
+    @Test
+    public void testErrorMessages()
+    {
+        createTable("CREATE TABLE %s (id int PRIMARY KEY, category text, score int, " +
+                    "title text, body text, bodyset set<text>, " +
+                    "map_category map<int, text>, map_body map<text, text>)");
+        createAnalyzedIndex("body", true);
+        createAnalyzedIndex("bodyset", true);
+        createAnalyzedIndex("map_body", true);
+
+        // Improve message issue CNDB-13514
+        assertInvalidMessage("BM25 ordering on column bodyset requires an analyzed index",
+                             "SELECT * FROM %s ORDER BY bodyset BM25 OF ? LIMIT 10");
+
+        // Discussion of message incosistency CNDB-13526
+        assertInvalidMessage("Ordering on non-clustering column requires each restricted column to be indexed except for fully-specified partition keys",
+                             "SELECT * FROM %s WHERE map_body CONTAINS KEY 'Climate' ORDER BY body BM25 OF ? LIMIT 10");
+    }
+
+    @Test
+    public void testWithLowercase() throws Throwable
+    {
+        createTable("CREATE TABLE %s (id int PRIMARY KEY, body text)");
+        createAnalyzedIndex("body", true);
+        execute("INSERT INTO %s (id, body) VALUES (?, ?)", 1, "Hi hi");
+        execute("INSERT INTO %s (id, body) VALUES (?, ?)", 2, "hi hi longer");
+        executeQuery(Arrays.asList(1, 2), "SELECT * FROM %s ORDER BY body BM25 OF 'hi' LIMIT 4");
+    }
+
+    @Test
+    public void testCollections() throws Throwable
+    {
+        createTable("CREATE TABLE %s (id int PRIMARY KEY, category text, score int, " +
+                    "title text, body text, bodyset set<text>, " +
+                    "map_category map<int, text>, map_body map<text, text>)");
+        createAnalyzedIndex("body", true);
+        createAnalyzedIndex("bodyset", true);
+        createAnalyzedIndex("map_body", true);
+        createIndex("CREATE CUSTOM INDEX ON %s (score) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s (category) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s (map_category) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s (KEYS(map_body)) USING 'StorageAttachedIndex'");
+        insertCollectionData();
+        analyzeDataset("climate");
+        analyzeDataset("health");
+
+        beforeAndAfterFlush(
+        () -> {
+            // ID 11: total words = 12, climate occurrences = 4
+            // ID 19: total words = 13, climate occurrences = 4
+            // ID 1: total words = 16, climate occurrences = 3
+            // ID 16: total words = 11, climate occurrences = 2
+            // ID 6: total words = 13, climate occurrences = 2
+            // ID 12: total words = 12, climate occurrences = 1
+            // ID 18: total words = 14, climate occurrences = 1
+            executeQuery(Arrays.asList(11, 19, 1, 16, 6, 12, 18), "SELECT * FROM %s  ORDER BY body BM25 OF ? LIMIT 10",
+                         "climate");
+            executeQuery(Arrays.asList(11, 19, 1), "SELECT * FROM %s WHERE score = 5 ORDER BY body BM25 OF ? LIMIT 10",
+                         "climate");
+            executeQuery(Arrays.asList(11, 19, 1, 16, 6, 12, 18), "SELECT * FROM %s WHERE bodyset CONTAINS 'climate' ORDER BY body BM25 OF ? LIMIT 10",
+                         "climate");
+            executeQuery(Arrays.asList(16, 6, 12, 18), "SELECT * FROM %s WHERE bodyset CONTAINS 'health' ORDER BY body BM25 OF ? LIMIT 10",
+                         "climate");
+            executeQuery(Arrays.asList(11, 19, 1, 16, 6, 12, 18), "SELECT * FROM %s WHERE map_category CONTAINS 'Climate' ORDER BY body BM25 OF ? LIMIT 10",
+                         "climate");
+            executeQuery(Arrays.asList(19, 16, 6, 12, 18), "SELECT * FROM %s WHERE map_category CONTAINS 'Health' ORDER BY body BM25 OF ? LIMIT 10",
+                         "climate");
+            executeQuery(Arrays.asList(11, 19, 1, 16, 6, 12, 18), "SELECT * FROM %s WHERE map_body CONTAINS 'Climate' ORDER BY body BM25 OF ? LIMIT 10",
+                         "climate");
+            executeQuery(Arrays.asList(11, 19, 16, 6, 12, 18), "SELECT * FROM %s WHERE map_body CONTAINS 'health' ORDER BY body BM25 OF ? LIMIT 10",
+                         "climate");
+            executeQuery(Arrays.asList(11, 19, 16, 6, 12, 18), "SELECT * FROM %s WHERE map_body CONTAINS KEY 'Health' ORDER BY body BM25 OF ? LIMIT 10",
+                         "climate");
+
+            // ID 4: total words = 15, health occurrences = 3
+            // ID 12: total words = 12, health occurrences = 2
+            // ID 6: total words = 13, health occurrences = 2
+            // ID 9: total words = 13, health occurrences = 2
+            // ID 18: total words = 14, health occurrences = 2
+            // ID 14: total words = 11, health occurrences = 1
+            // ID 16: total words = 11, health occurrences = 1
+            executeQuery(Arrays.asList(6, 16), "SELECT * FROM %s WHERE score > 3 ORDER BY body BM25 OF ? LIMIT 10",
+                         "health");
+            executeQuery(Arrays.asList(4, 12, 9, 18, 14), "SELECT * FROM %s WHERE category = 'Health' " +
+                                                          "ORDER BY body BM25 OF ? LIMIT 10",
+                         "Health");
+            executeQuery(Arrays.asList(4, 12, 9, 18, 14), "SELECT * FROM %s WHERE score <= 3 AND category = 'Health' " +
+                                                          "ORDER BY body BM25 OF ? LIMIT 10",
+                         "health");
+        });
+    }
+
+    @Test
+    public void testOrderingSeveralSegments() throws Throwable
+    {
+        createTable("CREATE TABLE %s (id int PRIMARY KEY, category text, score int," +
+                    "title text, body text)");
+        createAnalyzedIndex("body", true);
+        createIndex("CREATE CUSTOM INDEX ON %s (score) USING 'StorageAttachedIndex'");
+        insertPrimitiveData(0, 10);
+        flush();
+        insertPrimitiveData(10, 20);
+
+        // One memtable, one sstable - different result from the reference in testCollections
+        // ID 1 and 6 contain 3 and 2 climate occurrences correspondingly,
+        // while ID 11 and 19 - 4 climate occurrences. However,
+        // since the segment with 0-9 IDs have only 2 rows with climate and 10-19 - 5,
+        // 1 and 6 win over 11 and 19.
+        executeQuery(Arrays.asList(1, 6, 11, 19, 16, 12, 18), "SELECT * FROM %s  ORDER BY body BM25 OF ? LIMIT 10",
+                "climate");
+        executeQuery(Arrays.asList(1, 11, 19), "SELECT * FROM %s WHERE score = 5 ORDER BY body BM25 OF ? LIMIT 10",
+                "climate");
+
+        // Flush into Two sstables - same result as the different above
+        flush();
+        executeQuery(Arrays.asList(1, 6, 11, 19, 16, 12, 18), "SELECT * FROM %s  ORDER BY body BM25 OF ? LIMIT 10",
+                "climate");
+        executeQuery(Arrays.asList(1, 11, 19), "SELECT * FROM %s WHERE score = 5 ORDER BY body BM25 OF ? LIMIT 10",
+                "climate");
+
+        // Compact into one sstable - same as reference from testCollections
+        compact();
+        executeQuery(Arrays.asList(11, 19, 1, 16, 6, 12, 18), "SELECT * FROM %s  ORDER BY body BM25 OF ? LIMIT 10",
+                "climate");
+        executeQuery(Arrays.asList(11, 19, 1), "SELECT * FROM %s WHERE score = 5 ORDER BY body BM25 OF ? LIMIT 10",
+                "climate");
+    }
+
+    private final static Object[][] DATASET =
+    {
+    { 1, "Climate", 5, "Climate change is a pressing issue. Climate patterns are shifting globally. Scientists study climate data daily.", 1 },
+    { 2, "Technology", 3, "Technology is advancing. New technology in AI and robotics is groundbreaking.", 1 },
+    { 3, "Economy", 4, "The economy is recovering. Economy experts are optimistic. However, the global economy still faces risks.", 1 },
+    { 4, "Health", 3, "Health is wealth. Health policies need to be improved to ensure better public health outcomes.", 1 },
+    { 5, "Education", 2, "Education is the foundation of success. Online education is booming.", 4 },
+    { 6, "Climate", 4, "Climate and health are closely linked. Climate affects air quality and health outcomes.", 2 },
+    { 7, "Education", 3, "Technology and education go hand in hand. EdTech is revolutionizing education through technology.", 3 },
+    { 8, "Economy", 3, "The global economy is influenced by technology. Fintech is a key part of the economy today.", 2 },
+    { 9, "Health", 3, "Education and health programs must be prioritized. Health education is vital in schools.", 2 },
+    { 10, "Mixed", 3, "Technology, economy, and education are pillars of development.", 2 },
+    { 11, "Climate", 5, "Climate climate climate. It's everywhere. Climate drives political and economic decisions.", 1 },
+    { 12, "Health", 2, "Health concerns rise with climate issues. Health organizations are sounding the alarm.", 2 },
+    { 13, "Economy", 3, "The economy is fluctuating. Uncertainty looms over the economy.", 1 },
+    { 14, "Health", 3, "Cutting-edge technology is transforming healthcare. Healthtech merges health and technology.", 1 },
+    { 15, "Education", 2, "Education reforms are underway. Education experts suggest holistic changes.", 1 },
+    { 16, "Climate", 4, "Climate affects the economy and health. Climate events cost billions annually.", 1 },
+    { 17, "Technology", 3, "Technology is the backbone of the modern economy. Without technology, economic growth stagnates.", 2 },
+    { 18, "Health", 2, "Health is discussed less than economy or climate or technology, but health matters deeply.", 1 },
+    { 19, "Climate", 5, "Climate change, climate policies, climate research—climate is the buzzword of our time.", 2 },
+    { 20, "Mixed", 3, "Investments in education and technology will shape the future of the global economy.", 1 }
+    };
+    
+    private void analyzeDataset(String term)
+    {
+        final Pattern PATTERN = Pattern.compile("\\W+");
+        for (Object[] row : DATASET)
+        {
+            String body = (String) row[3];
+            String[] words = PATTERN.split(body.toLowerCase());
+
+            long totalWords = words.length;
+            long termCount = Arrays.stream(words)
+                                   .filter(word -> word.equals(term))
+                                   .count();
+
+            if (termCount > 0)
+                System.out.printf("            // ID %d: total words = %d, %s occurrences = %d%n",
+                                  (Integer) row[0], totalWords, term, termCount);
+        }
+    }
+
+    private void insertPrimitiveData()
+    {
+        insertPrimitiveData(0, DATASET.length);
+    }
+
+    private void insertPrimitiveData(int start, int end)
+    {
+        for (int i = start; i < end; i++)
+        {
+            Object[] row = DATASET[i];
+            execute(
+            "INSERT INTO %s (id, category, score, body) VALUES (?, ?, ?, ?)",
+            row[0],
+            row[1],
+            row[2],
+            row[3]
+            );
+        }
+    }
+
+    private void insertCollectionData()
+    {
+        int setsize = 1;
+        for (int row = 0; row < DATASET.length; row++)
+        {
+            var set = new HashSet<String>();
+            for (int j = 0; j < setsize; j++)
+                set.add((String) DATASET[row - j][3]);
+            if (setsize >= 3)
+                setsize -= 2;
+            else
+                setsize++;
+            var map = new HashMap<Integer, String>();
+            var map_text = new HashMap<String, String>();
+            for (int j = 0; j <= row && j < 3; j++)
+            {
+                map.putIfAbsent((Integer) DATASET[row - j][2], (String) DATASET[row - j][1]);
+                map_text.putIfAbsent((String) DATASET[row - j][1], (String) DATASET[row - j][3]);
+            }
+
+            execute(
+            "INSERT INTO %s (id, category, score, body, bodyset, map_category, map_body) " +
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            DATASET[row][0],
+            DATASET[row][1],
+            DATASET[row][2],
+            DATASET[row][3],
+            set,
+            map,
+            map_text
+            );
+        }
+    }
+
+    private void executeQuery(List<Integer> expected, String query, Object... values) throws Throwable
+    {
+        assertResult(execute(query, values), expected);
+        prepare(query);
+        assertResult(execute(query, values), expected);
+    }
+
+    private void assertResult(UntypedResultSet result, List<Integer> expected)
+    {
+        Assertions.assertThat(result).hasSize(expected.size());
+        var ids = result.stream()
+                        .map(row -> row.getInt("id"))
+                        .collect(Collectors.toList());
+        Assertions.assertThat(ids).isEqualTo(expected);
     }
 }

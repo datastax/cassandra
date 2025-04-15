@@ -44,6 +44,12 @@ public interface OnDiskOrdinalsMap extends AutoCloseable
 
     V5VectorPostingsWriter.Structure getStructure();
 
+    /**
+     * Ignoring the constant overhead of the object, return the variable overhead of the object. This helps
+     * identify the cost of caching.
+     */
+    long cachedBytesUsed();
+
     class OneToOneRowIdsView implements RowIdsView {
 
         @Override

@@ -29,8 +29,7 @@ import org.slf4j.LoggerFactory;
 
 import io.github.jbellis.jvector.graph.GraphIndex;
 import io.github.jbellis.jvector.graph.GraphSearcher;
-import io.github.jbellis.jvector.graph.disk.CachingGraphIndex;
-import io.github.jbellis.jvector.graph.disk.FeatureId;
+import io.github.jbellis.jvector.graph.disk.feature.FeatureId;
 import io.github.jbellis.jvector.graph.disk.OnDiskGraphIndex;
 import io.github.jbellis.jvector.graph.similarity.SearchScoreProvider;
 import io.github.jbellis.jvector.quantization.BQVectors;
@@ -50,6 +49,7 @@ import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter.Structure;
 import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph.PQVersion;
+import org.apache.cassandra.index.sai.metrics.ColumnQueryMetrics;
 import org.apache.cassandra.index.sai.utils.RowIdWithScore;
 import org.apache.cassandra.io.sstable.SSTableId;
 import org.apache.cassandra.io.util.FileHandle;
@@ -57,7 +57,6 @@ import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.CloseableIterator;
 
-import static java.lang.Math.min;
 
 public class CassandraDiskAnn
 {
@@ -65,6 +64,7 @@ public class CassandraDiskAnn
 
     public static final int PQ_MAGIC = 0xB011A61C; // PQ_MAGIC, with a lot of liberties taken
     protected final PerIndexFiles indexFiles;
+    private final ColumnQueryMetrics.VectorIndexMetrics columnQueryMetrics;
     protected final SegmentMetadata.ComponentMetadataMap componentMetadatas;
 
     private final SSTableId<?> source;
@@ -87,6 +87,7 @@ public class CassandraDiskAnn
         this.source = sstableContext.sstable().getId();
         this.componentMetadatas = componentMetadatas;
         this.indexFiles = indexFiles;
+        this.columnQueryMetrics = (ColumnQueryMetrics.VectorIndexMetrics) context.getColumnQueryMetrics();
 
         similarityFunction = context.getIndexWriterConfig().getSimilarityFunction();
 
@@ -94,7 +95,7 @@ public class CassandraDiskAnn
         graphHandle = indexFiles.termsData();
         var rawGraph = OnDiskGraphIndex.load(graphHandle::createReader, termsMetadata.offset);
         features = rawGraph.getFeatureSet();
-        graph = V3OnDiskFormat.ENABLE_EDGES_CACHE ? cachingGraphFor(rawGraph) : rawGraph;
+        graph = rawGraph;
 
         long pqSegmentOffset = this.componentMetadatas.get(IndexComponentType.PQ).offset;
         try (var pqFile = indexFiles.pq();
@@ -154,8 +155,16 @@ public class CassandraDiskAnn
 
         SegmentMetadata.ComponentMetadata postingListsMetadata = this.componentMetadatas.get(IndexComponentType.POSTING_LISTS);
         ordinalsMap = omFactory.create(indexFiles.postingLists(), postingListsMetadata.offset, postingListsMetadata.length);
+        if (ordinalsMap.getStructure() == Structure.ZERO_OR_ONE_TO_MANY)
+            logger.warn("Index {} has structure ZERO_OR_ONE_TO_MANY, which requires on reading the on disk row id" +
+                        " to ordinal mapping for each search. This will be slower.", source);
 
         searchers = ExplicitThreadLocal.withInitial(() -> new GraphSearcherAccessManager(new GraphSearcher(graph)));
+
+        // Record metrics for this graph
+        columnQueryMetrics.onGraphLoaded(compressedVectors == null ? 0 : compressedVectors.ramBytesUsed(),
+                                         ordinalsMap.cachedBytesUsed(),
+                                         graph.size(0));
     }
 
     public Structure getPostingsStructure()
@@ -175,27 +184,6 @@ public class CassandraDiskAnn
         return pq;
     }
 
-    private GraphIndex cachingGraphFor(OnDiskGraphIndex rawGraph)
-    {
-        // cache edges around the entry point
-        // we can easily hold 1% of the edges in memory for typical index sizes, but
-        // there is a lot of redundancy in the nodes we observe in practice around the entry point
-        // (only 10%-20% are unique), so use 5% as our target.
-        //
-        // 32**3 = 32k, which would be 4MB if all the nodes are unique, so 3 levels deep is a safe upper bound
-        int distance = min(logBaseX(0.05d * rawGraph.size(), rawGraph.maxDegree()), 3);
-        var result = new CachingGraphIndex(rawGraph, distance);
-        logger.debug("Cached {}@{} to distance {} in {}B",
-                     this, graphHandle.path(), distance, result.ramBytesUsed());
-        return result;
-    }
-
-    private static int logBaseX(double val, double base) {
-        if (base <= 1.0d || val <= 1.0d)
-            return 0;
-        return (int)Math.floor(Math.log(val) / Math.log(base));
-    }
-
     public long ramBytesUsed()
     {
         return graph.ramBytesUsed();
@@ -203,7 +191,8 @@ public class CassandraDiskAnn
 
     public int size()
     {
-        return graph.size();
+        // The base layer of the graph has all nodes.
+        return graph.size(0);
     }
 
     /**
@@ -233,6 +222,8 @@ public class CassandraDiskAnn
         {
             var view = (GraphIndex.ScoringView) searcher.getView();
             SearchScoreProvider ssp;
+            // FusedADC can no longer be written due to jvector upgrade. However, it's possible these index files
+            // still exist, so we have to support them.
             if (features.contains(FeatureId.FUSED_ADC))
             {
                 var asf = view.approximateScoreFunctionFor(queryVector, similarityFunction);
@@ -254,11 +245,15 @@ public class CassandraDiskAnn
                 var rr = view.rerankerFor(queryVector, similarityFunction);
                 ssp = new SearchScoreProvider(asf, rr);
             }
+            long start = System.nanoTime();
             var result = searcher.search(ssp, limit, rerankK, threshold, context.getAnnRerankFloor(), ordinalsMap.ignoringDeleted(acceptBits));
+            long elapsed = System.nanoTime() - start;
             if (V3OnDiskFormat.ENABLE_RERANK_FLOOR)
                 context.updateAnnRerankFloor(result.getWorstApproximateScoreInTopK());
             Tracing.trace("DiskANN search for {}/{} visited {} nodes, reranked {} to return {} results from {}",
                           limit, rerankK, result.getVisitedCount(), result.getRerankedCount(), result.getNodes().length, source);
+            columnQueryMetrics.onSearchResult(result, elapsed, false);
+            context.addAnnGraphSearchLatency(elapsed);
             if (threshold > 0)
             {
                 // Threshold based searches are comprehensive and do not need to resume the search.
@@ -269,7 +264,7 @@ public class CassandraDiskAnn
             }
             else
             {
-                var nodeScores = new AutoResumingNodeScoreIterator(searcher, graphAccessManager, result, nodesVisitedConsumer, limit, rerankK, false, source.toString());
+                var nodeScores = new AutoResumingNodeScoreIterator(searcher, graphAccessManager, result, context, columnQueryMetrics, nodesVisitedConsumer, limit, rerankK, false, source.toString());
                 return new NodeScoreToRowIdWithScoreIterator(nodeScores, ordinalsMap.getRowIdsView());
             }
         }
@@ -294,6 +289,9 @@ public class CassandraDiskAnn
     public void close() throws IOException
     {
         FileUtils.close(ordinalsMap, searchers, graph, graphHandle);
+        columnQueryMetrics.onGraphClosed(compressedVectors == null ? 0 : compressedVectors.ramBytesUsed(),
+                                         ordinalsMap.cachedBytesUsed(),
+                                         graph.size(0));
     }
 
     public OrdinalsView getOrdinalsView()

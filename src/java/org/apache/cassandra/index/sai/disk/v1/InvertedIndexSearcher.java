@@ -25,6 +25,7 @@ import java.nio.ByteBuffer;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -36,6 +37,7 @@ import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.Slice;
 import org.apache.cassandra.db.Slices;
+import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.dht.AbstractBounds;
@@ -44,6 +46,7 @@ import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SSTableContext;
 import org.apache.cassandra.index.sai.disk.PostingList;
+import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.TermsIterator;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.Version;
@@ -54,11 +57,13 @@ import org.apache.cassandra.index.sai.metrics.QueryEventListener;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.plan.Orderer;
 import org.apache.cassandra.index.sai.utils.BM25Utils;
-import org.apache.cassandra.index.sai.utils.BM25Utils.DocTF;
+import org.apache.cassandra.index.sai.utils.BM25Utils.EagerDocTF;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.index.sai.utils.PrimaryKeyWithScore;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.RowIdWithByteComparable;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
+import org.apache.cassandra.io.sstable.SSTableId;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
 import org.apache.cassandra.io.util.FileHandle;
@@ -163,6 +168,9 @@ public class InvertedIndexSearcher extends IndexSearcher
         var slices = Slices.with(indexContext.comparator(), Slice.make(primaryKey.clustering()));
         try (var rowIterator = sstable.iterator(dk, slices, columnFilter, false, SSTableReadsListener.NOOP_LISTENER))
         {
+            // primaryKey might not belong to this sstable, thus the iterator will be empty
+            if (rowIterator.isEmpty())
+                return null;
             var unfiltered = rowIterator.next();
             assert unfiltered.isRow() : unfiltered;
             Row row = (Row) unfiltered;
@@ -199,20 +207,23 @@ public class InvertedIndexSearcher extends IndexSearcher
         var docLengthsReader = new DocLengthsReader(docLengths, docLengthsMeta);
 
         // Wrap the iterator with resource management
-        var it = new AbstractIterator<DocTF>() { // Anonymous class extends AbstractIterator
+        var it = new AbstractIterator<BM25Utils.DocTF>() { // Anonymous class extends AbstractIterator
             private boolean closed;
 
             @Override
-            protected DocTF computeNext()
+            protected BM25Utils.DocTF computeNext()
             {
                 try
                 {
                     int rowId = merged.nextPosting();
                     if (rowId == PostingList.END_OF_STREAM)
                         return endOfData();
+                    // Reads from disk.
                     int docLength = docLengthsReader.get(rowId); // segment-local rowid
-                    var pk = pkm.primaryKeyFromRowId(segmentRowIdOffset + rowId); // sstable-global rowid
-                    return new DocTF(pk, docLength, merged.frequencies());
+                    // We defer creating the primary key because it reads the token from disk, which is only needed
+                    // for the top rows just before they are materialized from disk, so we wait until after scoring
+                    // and sorting to read the token.
+                    return new LazyDocTF(pkm, segmentRowIdOffset + rowId, docLength, merged.frequencies());
                 }
                 catch (IOException e)
                 {
@@ -231,7 +242,7 @@ public class InvertedIndexSearcher extends IndexSearcher
         return bm25Internal(it, queryTerms, documentFrequencies);
     }
 
-    private CloseableIterator<PrimaryKeyWithSortKey> bm25Internal(CloseableIterator<DocTF> keyIterator,
+    private CloseableIterator<PrimaryKeyWithSortKey> bm25Internal(CloseableIterator<BM25Utils.DocTF> keyIterator,
                                                                   List<ByteBuffer> queryTerms,
                                                                   Map<ByteBuffer, Long> documentFrequencies)
     {
@@ -267,7 +278,10 @@ public class InvertedIndexSearcher extends IndexSearcher
             documentFrequencies.put(term, matches);
         }
         var analyzer = indexContext.getAnalyzerFactory().create();
-        var it = keys.stream().map(pk -> DocTF.createFromDocument(pk, readColumn(sstable, pk), analyzer, queryTerms)).iterator();
+        var it = keys.stream()
+                     .map(pk -> EagerDocTF.createFromDocument(pk, readColumn(sstable, pk), analyzer, queryTerms))
+                     .filter(Objects::nonNull)
+                     .iterator();
         return bm25Internal(CloseableIterator.wrap(it), queryTerms, documentFrequencies);
     }
 
@@ -328,6 +342,52 @@ public class InvertedIndexSearcher extends IndexSearcher
         public void close()
         {
             FileUtils.closeQuietly(source, currentPostingList);
+        }
+    }
+
+    /**
+     * A {@link BM25Utils.DocTF} that is lazy in that it does not create the {@link PrimaryKey} until it is required.
+     */
+    private static class LazyDocTF implements BM25Utils.DocTF
+    {
+        private final PrimaryKeyMap pkm;
+        private final long sstableRowId;
+        private final int docLength;
+        private final Map<ByteBuffer, Integer> frequencies;
+
+        LazyDocTF(PrimaryKeyMap pkm, long sstableRowId, int docLength, Map<ByteBuffer, Integer> frequencies)
+        {
+            this.pkm = pkm;
+            this.sstableRowId = sstableRowId;
+            this.docLength = docLength;
+            this.frequencies = frequencies;
+        }
+
+        @Override
+        public int getTermFrequency(ByteBuffer term)
+        {
+            return frequencies.getOrDefault(term, 0);
+        }
+
+        @Override
+        public int termCount()
+        {
+            return docLength;
+        }
+
+        @Override
+        public PrimaryKeyWithSortKey primaryKey(IndexContext context, Memtable source, float score)
+        {
+            // Only sstables use this class, so this should never be called
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public PrimaryKeyWithSortKey primaryKey(IndexContext context, SSTableId<?> source, float score)
+        {
+            // We can eagerly get the token now, even though it might not technically be required until we know
+            // we have the best score. (Perhaps this should be lazy too?)
+            return new PrimaryKeyWithScore(context, source, pkm.primaryKeyFromRowId(sstableRowId), score);
         }
     }
 }

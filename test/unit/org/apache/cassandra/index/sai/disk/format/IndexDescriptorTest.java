@@ -39,8 +39,10 @@ import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.PathUtils;
+import org.mockito.Mockito;
 import org.mortbay.util.IO;
 
 import static org.apache.cassandra.index.sai.SAIUtil.setLatestVersion;
@@ -90,9 +92,9 @@ public class IndexDescriptorTest
     static IndexDescriptor loadDescriptor(Descriptor sstableDescriptor, IndexContext... contexts)
     {
         IndexDescriptor indexDescriptor = IndexDescriptor.empty(sstableDescriptor);
-        // Note: passing `null` as metadata is a bit hacky, but it only exists to be passed to the underlying index
-        // discovery class, and the default one ignores it so ... keeping it simple.
-        indexDescriptor.reload(null, new HashSet<>(Arrays.asList(contexts)));
+        SSTableReader sstable = Mockito.mock(SSTableReader.class);
+        Mockito.when(sstable.getDescriptor()).thenReturn(sstableDescriptor);
+        indexDescriptor.reload(sstable, new HashSet<>(Arrays.asList(contexts)));
         return indexDescriptor;
     }
 
@@ -215,6 +217,32 @@ public class IndexDescriptorTest
         assertTrue(components.has(IndexComponentType.KD_TREE_POSTING_LISTS));
     }
 
+    // CNDB-13582
+    @Test
+    public void componentsAreLoadedAfterUpgradeDespiteBrokenTOC() throws Throwable
+    {
+        setLatestVersion(Version.AA);
+
+        // Force old version of sstables to simulate upgrading from DSE
+        Descriptor descriptor = Descriptor.fromFilename(temporaryFolder.newFolder().getAbsolutePath() + "/bb-2-bti-Data.db");
+
+        IndexContext indexContext = SAITester.createIndexContext("test_index", Int32Type.instance);
+
+        createFakeDataFile(descriptor);
+        createFakeTOCFile(descriptor);
+        createFakePerSSTableComponents(descriptor, Version.AA, 0);
+        createFakePerIndexComponents(descriptor, indexContext, Version.AA, 0);
+
+        IndexDescriptor indexDescriptor = loadDescriptor(descriptor, indexContext);
+
+        IndexComponents.ForRead components = indexDescriptor.perIndexComponents(indexContext);
+        assertTrue(components.has(IndexComponentType.COLUMN_COMPLETION_MARKER));
+        assertTrue(components.has(IndexComponentType.META));
+        assertTrue(components.has(IndexComponentType.KD_TREE));
+        assertTrue(components.has(IndexComponentType.KD_TREE_POSTING_LISTS));
+    }
+
+
     @Test
     public void testReload() throws Throwable
     {
@@ -232,8 +260,9 @@ public class IndexDescriptorTest
         createFakePerSSTableComponents(descriptor, latest, 0);
         createFakePerIndexComponents(descriptor, indexContext, latest, 0);
 
-        // See comment on `loadDescriptor` regarding passing null
-        indexDescriptor.reload(null, Set.of(indexContext));
+        SSTableReader sstable = Mockito.mock(SSTableReader.class);
+        Mockito.when(sstable.getDescriptor()).thenReturn(descriptor);
+        indexDescriptor.reload(sstable, Set.of(indexContext));
 
         // Both the perSSTableComponents and perIndexComponents should now be complete and the components should be present
 
@@ -254,6 +283,11 @@ public class IndexDescriptorTest
     static void createFakeDataFile(Descriptor descriptor) throws IOException
     {
         createFileOnDisk(descriptor, Component.DATA.name());
+    }
+
+    static void createFakeTOCFile(Descriptor descriptor) throws IOException
+    {
+        createFileOnDisk(descriptor, Component.TOC.name());
     }
 
     static void createFakePerSSTableComponents(Descriptor descriptor, Version version, int generation) throws IOException

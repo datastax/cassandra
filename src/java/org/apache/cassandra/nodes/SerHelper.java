@@ -24,6 +24,7 @@ import java.nio.ByteBuffer;
 import java.util.UUID;
 
 import com.fasterxml.jackson.core.JsonGenerator;
+import com.fasterxml.jackson.core.JsonParseException;
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.databind.DeserializationContext;
 import com.fasterxml.jackson.databind.JsonDeserializer;
@@ -31,17 +32,21 @@ import com.fasterxml.jackson.databind.JsonSerializer;
 import com.fasterxml.jackson.databind.Module;
 import com.fasterxml.jackson.databind.SerializerProvider;
 import com.fasterxml.jackson.databind.module.SimpleModule;
+import com.google.common.annotations.VisibleForTesting;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
 import org.apache.cassandra.dht.Token;
-import org.apache.cassandra.io.util.DataInputBuffer;
-import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.CassandraVersion;
 
 final class SerHelper
 {
+    private static final Logger logger = LoggerFactory.getLogger(SerHelper.class);
+
     static Module createMsgpackModule()
     {
         SimpleModule module = new SimpleModule();
@@ -110,18 +115,34 @@ final class SerHelper
         }
     }
 
-    private static final class InetAddressAndPortDeserializer extends JsonDeserializer<InetAddressAndPort>
+    @VisibleForTesting
+    static final class InetAddressAndPortDeserializer extends JsonDeserializer<InetAddressAndPort>
     {
         @Override
         public InetAddressAndPort deserialize(JsonParser jsonParser, DeserializationContext deserializationContext) throws IOException
         {
-            jsonParser.isExpectedStartArrayToken();
-            jsonParser.nextToken();
-            InetAddress address = InetAddress.getByAddress(jsonParser.getBinaryValue());
-            jsonParser.nextToken();
-            int port = jsonParser.getIntValue();
-            jsonParser.nextToken();
-            return InetAddressAndPort.getByAddressOverrideDefaults(address, port);
+            if (jsonParser.isExpectedStartArrayToken())
+            {
+                jsonParser.nextToken();
+                InetAddress address = InetAddress.getByAddress(jsonParser.getBinaryValue());
+                jsonParser.nextToken();
+                int port = jsonParser.getIntValue();
+                jsonParser.nextToken();
+                return InetAddressAndPort.getByAddressOverrideDefaults(address, port);
+            }
+            try
+            {
+                logger.trace("deserializing legacy InetAddress for field {}",
+                             jsonParser.getParsingContext().hasCurrentName() ? jsonParser.getParsingContext().getCurrentName() : "unknown");
+
+                return InetAddressAndPort.getByAddress(jsonParser.getBinaryValue());
+            }
+            catch (JsonParseException e)
+            {
+                // legacy serialisation of InetAddress can also be text hostname, as well as byte[] address (above)
+                jsonParser.nextToken();
+                return InetAddressAndPort.getByName(jsonParser.getText());
+            }
         }
     }
 

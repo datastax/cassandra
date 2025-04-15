@@ -1062,7 +1062,8 @@ public abstract class ReadCommand extends AbstractReadQuery
                 // synthetic columns sort first, so when we hit the first non-synthetic, we're done
                 if (!c.isSynthetic())
                     break;
-                tmb.addColumn(ColumnMetadata.syntheticColumn(c.ksName, c.cfName, c.name, c.type));
+                assert c.sythenticSourceColumn != null;
+                tmb.addColumn(c);
             }
             metadata = tmb.build();
 

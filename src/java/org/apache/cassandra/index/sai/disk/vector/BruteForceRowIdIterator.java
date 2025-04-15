@@ -18,11 +18,14 @@
 
 package org.apache.cassandra.index.sai.disk.vector;
 
+import io.github.jbellis.jvector.graph.NodeQueue;
+import io.github.jbellis.jvector.util.BoundedLongHeap;
+import org.apache.cassandra.index.sai.metrics.ColumnQueryMetrics;
+import org.apache.cassandra.index.sai.utils.SegmentRowIdOrdinalPairs;
 import org.apache.cassandra.index.sai.utils.RowIdWithMeta;
 import org.apache.cassandra.index.sai.utils.RowIdWithScore;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.AbstractIterator;
-import org.apache.cassandra.utils.LucenePriorityQueue;
 import org.apache.cassandra.utils.SortingIterator;
 
 
@@ -45,59 +48,47 @@ import org.apache.cassandra.utils.SortingIterator;
  * is consumed. We do this because we expect that most often the first limit-many will pass the final verification
  * and only query more if some didn't (e.g. because the vector was deleted in a newer sstable).
  * <p>
- * As an implementation detail, we use a PriorityQueue to maintain state rather than a List and sorting.
+ * As an implementation detail, we use a heap to maintain state rather than a List and sorting.
  */
 public class BruteForceRowIdIterator extends AbstractIterator<RowIdWithScore>
 {
-    public static class RowWithApproximateScore
-    {
-        private final int rowId;
-        private final int ordinal;
-        private final float appoximateScore;
-
-        public RowWithApproximateScore(int rowId, int ordinal, float appoximateScore)
-        {
-            this.rowId = rowId;
-            this.ordinal = ordinal;
-            this.appoximateScore = appoximateScore;
-        }
-
-        public static int compare(RowWithApproximateScore l, RowWithApproximateScore r)
-        {
-            // Inverted comparison to sort in descending order
-            return Float.compare(r.appoximateScore, l.appoximateScore);
-        }
-    }
-
-    // We use two binary heaps (a SortingIterator and LucenePriorityQueue) because we do not need an eager ordering of
+    // We use two binary heaps (NodeQueue) because we do not need an eager ordering of
     // these results. Depending on how many sstables the query hits and the relative scores of vectors from those
     // sstables, we may not need to return more than the first handful of scores.
-    // Priority queue with compressed vector scores
-    private final SortingIterator<RowWithApproximateScore> approximateScoreQueue;
-    // Priority queue with full resolution scores
-    private final LucenePriorityQueue<RowIdWithScore> exactScoreQueue;
+    // Heap with compressed vector scores
+    private final NodeQueue approximateScoreQueue;
+    private final SegmentRowIdOrdinalPairs segmentOrdinalPairs;
+    // Use the jvector NodeQueue to avoid unnecessary object allocations
+    private final NodeQueue exactScoreQueue;
     private final CloseableReranker reranker;
     private final int topK;
     private final int limit;
+    private final ColumnQueryMetrics.VectorIndexMetrics columnQueryMetrics;
     private int rerankedCount;
 
     /**
-     * @param approximateScoreQueue A priority queue of rows and their ordinal ordered by their approximate similarity scores
+     * @param approximateScoreQueue A heap of indexes ordered by their approximate similarity scores
+     * @param segmentOrdinalPairs A mapping from the index in the approximateScoreQueue to the node's rowId and ordinal
      * @param reranker A function that takes a graph ordinal and returns the exact similarity score
      * @param limit The query limit
      * @param topK The number of vectors to resolve and score before returning results
+     * @param columnQueryMetrics object to record metrics
      */
-    public BruteForceRowIdIterator(SortingIterator<RowWithApproximateScore> approximateScoreQueue,
+    public BruteForceRowIdIterator(NodeQueue approximateScoreQueue,
+                                   SegmentRowIdOrdinalPairs segmentOrdinalPairs,
                                    CloseableReranker reranker,
                                    int limit,
-                                   int topK)
+                                   int topK,
+                                   ColumnQueryMetrics.VectorIndexMetrics columnQueryMetrics)
     {
         this.approximateScoreQueue = approximateScoreQueue;
-        this.exactScoreQueue = new LucenePriorityQueue<>(topK, RowIdWithScore::compare);
+        this.segmentOrdinalPairs = segmentOrdinalPairs;
+        this.exactScoreQueue = new NodeQueue(new BoundedLongHeap(topK), NodeQueue.Order.MAX_HEAP);
         this.reranker = reranker;
         assert topK >= limit : "topK must be greater than or equal to limit. Found: " + topK + " < " + limit;
         this.limit = limit;
         this.topK = topK;
+        this.columnQueryMetrics = columnQueryMetrics;
         this.rerankedCount = topK; // placeholder to kick off computeNext
     }
 
@@ -105,16 +96,25 @@ public class BruteForceRowIdIterator extends AbstractIterator<RowIdWithScore>
     protected RowIdWithScore computeNext() {
         int consumed = rerankedCount - exactScoreQueue.size();
         if (consumed >= limit) {
+            int exactComparisons = 0;
             // Refill the exactScoreQueue until it reaches topK exact scores, or the approximate score queue is empty
-            while (approximateScoreQueue.hasNext() && exactScoreQueue.size() < topK) {
-                RowWithApproximateScore rowOrdinalScore = approximateScoreQueue.next();
-                float score = reranker.similarityTo(rowOrdinalScore.ordinal);
-                exactScoreQueue.add(new RowIdWithScore(rowOrdinalScore.rowId, score));
+            while (approximateScoreQueue.size() > 0 && exactScoreQueue.size() < topK) {
+                int segmentOrdinalIndex = approximateScoreQueue.pop();
+                int rowId = segmentOrdinalPairs.getSegmentRowId(segmentOrdinalIndex);
+                int ordinal = segmentOrdinalPairs.getOrdinal(segmentOrdinalIndex);
+                float score = reranker.similarityTo(ordinal);
+                exactComparisons++;
+                exactScoreQueue.push(rowId, score);
             }
+            columnQueryMetrics.onBruteForceNodesReranked(exactComparisons);
             rerankedCount = exactScoreQueue.size();
         }
-        RowIdWithScore top = exactScoreQueue.pop();
-        return top == null ? endOfData() : top;
+        if (exactScoreQueue.size() == 0)
+            return endOfData();
+
+        float score = exactScoreQueue.topScore();
+        int rowId = exactScoreQueue.pop();
+        return new RowIdWithScore(rowId, score);
     }
 
     @Override

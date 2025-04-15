@@ -20,6 +20,7 @@ package org.apache.cassandra.index.sai.memory;
 
 import org.junit.BeforeClass;
 
+
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.memtable.TrieMemtable;
@@ -29,6 +30,7 @@ import static org.junit.Assert.assertEquals;
 
 public class TrieMemtableIndexTest extends TrieMemtableIndexTestBase
 {
+
     @BeforeClass
     public static void setUpClass()
     {

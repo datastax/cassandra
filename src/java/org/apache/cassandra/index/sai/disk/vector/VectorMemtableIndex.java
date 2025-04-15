@@ -56,6 +56,7 @@ import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.memory.MemoryIndex;
 import org.apache.cassandra.index.sai.memory.MemtableIndex;
+import org.apache.cassandra.index.sai.metrics.ColumnQueryMetrics;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.plan.Orderer;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
@@ -84,6 +85,7 @@ public class VectorMemtableIndex implements MemtableIndex
     public static int GLOBAL_BRUTE_FORCE_ROWS = Integer.MAX_VALUE; // not final so test can inject its own setting
 
     private final IndexContext indexContext;
+    private final ColumnQueryMetrics.VectorIndexMetrics columnQueryMetrics;
     private final CassandraOnHeapGraph<PrimaryKey> graph;
     private final LongAdder writeCount = new LongAdder();
     private final LongAdder overwriteCount = new LongAdder();
@@ -98,6 +100,7 @@ public class VectorMemtableIndex implements MemtableIndex
     public VectorMemtableIndex(IndexContext indexContext, Memtable mt)
     {
         this.indexContext = indexContext;
+        this.columnQueryMetrics = (ColumnQueryMetrics.VectorIndexMetrics) indexContext.getColumnQueryMetrics();
         this.graph = new CassandraOnHeapGraph<>(indexContext, true, mt);
         this.mt = mt;
     }
@@ -173,6 +176,12 @@ public class VectorMemtableIndex implements MemtableIndex
                 removedCount.increment();
             }
         }
+    }
+
+    @Override
+    public void update(DecoratedKey key, Clustering clustering, Iterator<ByteBuffer> oldValues, Iterator<ByteBuffer> newValues, Memtable memtable, OpOrder.Group opGroup)
+    {
+        throw new UnsupportedOperationException("Vector index does not support multi-value updates");
     }
 
     private void updateKeyBounds(PrimaryKey primaryKey) {
@@ -266,14 +275,18 @@ public class VectorMemtableIndex implements MemtableIndex
             Tracing.trace("Search range covers {} rows; max brute force rows is {} for memtable index with {} nodes, rerankK {}, LIMIT {}",
                           resultKeys.size(), bruteForceRows, graph.size(), rerankK, limit);
             if (resultKeys.size() <= bruteForceRows)
+            {
                 // When we have a threshold, we only need to filter the results, not order them, because it means we're
                 // evaluating a boolean predicate in the SAI pipeline that wants to collate by PK
                 if (threshold > 0)
                     return filterByBruteForce(queryVector, threshold, resultKeys);
                 else
                     return orderByBruteForce(queryVector, resultKeys);
+            }
             else
+            {
                 bits = new KeyRangeFilteringBits(keyRange);
+            }
         }
 
         var nodeScoreIterator = graph.search(context, queryVector, limit, rerankK, threshold, bits);
@@ -339,6 +352,7 @@ public class VectorMemtableIndex implements MemtableIndex
      */
     private CloseableIterator<PrimaryKeyWithSortKey> filterByBruteForce(VectorFloat<?> queryVector, float threshold, NavigableSet<PrimaryKey> keys)
     {
+        columnQueryMetrics.onBruteForceNodesReranked(keys.size());
         // Keys are already ordered in ascending PK order, so just use an ArrayList to collect the results.
         var results = new ArrayList<PrimaryKeyWithSortKey>(keys.size());
         scoreKeysAndAddToCollector(queryVector, keys, threshold, results);
@@ -347,6 +361,7 @@ public class VectorMemtableIndex implements MemtableIndex
 
     private CloseableIterator<PrimaryKeyWithSortKey> orderByBruteForce(VectorFloat<?> queryVector, Collection<PrimaryKey> keys)
     {
+        columnQueryMetrics.onBruteForceNodesReranked(keys.size());
         // Use a sorting iterator because we often don't need to consume the entire iterator
         var similarityFunction = indexContext.getIndexWriterConfig().getSimilarityFunction();
         return SortingIterator.createCloseable(Comparator.naturalOrder(),
@@ -427,7 +442,7 @@ public class VectorMemtableIndex implements MemtableIndex
     }
 
     @Override
-    public Iterator<Pair<ByteComparable, List<MemoryIndex.PkWithFrequency>>> iterator(DecoratedKey min, DecoratedKey max)
+    public Iterator<Pair<ByteComparable.Preencoded, List<MemoryIndex.PkWithFrequency>>> iterator(DecoratedKey min, DecoratedKey max)
     {
         // This method is only used when merging an in-memory index with a RowMapping. This is done a different
         // way with the graph using the writeData method below.

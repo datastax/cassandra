@@ -23,6 +23,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
@@ -32,6 +33,7 @@ import javax.annotation.Nullable;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Iterators;
+import com.google.common.collect.Streams;
 import com.google.common.util.concurrent.Runnables;
 
 import org.apache.cassandra.cql3.Operator;
@@ -45,6 +47,7 @@ import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.memtable.ShardBoundaries;
 import org.apache.cassandra.db.memtable.TrieMemtable;
+import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Bounds;
@@ -91,7 +94,13 @@ public class TrieMemtableIndex implements MemtableIndex
 
     public TrieMemtableIndex(IndexContext indexContext, Memtable memtable)
     {
-        this.boundaries = indexContext.columnFamilyStore().localRangeSplits(TrieMemtable.SHARD_COUNT);
+        this(indexContext, memtable, TrieMemtable.SHARD_COUNT);
+    }
+
+    @VisibleForTesting
+    public TrieMemtableIndex(IndexContext indexContext, Memtable memtable, int shardCount)
+    {
+        this.boundaries = indexContext.columnFamilyStore().localRangeSplits(shardCount);
         this.rangeIndexes = new MemoryIndex[boundaries.shardCount()];
         this.indexContext = indexContext;
         this.validator = indexContext.getValidator();
@@ -202,6 +211,54 @@ public class TrieMemtableIndex implements MemtableIndex
     }
 
     @Override
+    public void update(DecoratedKey key, Clustering clustering, ByteBuffer oldValue, ByteBuffer newValue, Memtable memtable, OpOrder.Group opGroup)
+    {
+        int oldRemaining = oldValue == null ? 0 : oldValue.remaining();
+        int newRemaining = newValue == null ? 0 : newValue.remaining();
+        if (oldRemaining == 0 && newRemaining == 0)
+            return;
+
+        if (oldRemaining == newRemaining && validator.compare(oldValue, newValue) == 0)
+            return;
+
+        // The terms inserted into the index could still be the same in the case of certain analyzer configs.
+        // We don't know yet though, and instead of eagerly determining it, we leave it to the index to handle it.
+        rangeIndexes[boundaries.getShardForKey(key)].update(key,
+                                                            clustering,
+                                                            oldValue,
+                                                            newValue,
+                                                            allocatedBytes -> {
+                                                                memtable.markExtraOnHeapUsed(allocatedBytes, opGroup);
+                                                                estimatedOnHeapMemoryUsed.add(allocatedBytes);
+                                                                },
+                                                            allocatedBytes -> {
+                                                                memtable.markExtraOffHeapUsed(allocatedBytes, opGroup);
+                                                                estimatedOffHeapMemoryUsed.add(allocatedBytes);
+                                                            });
+        writeCount.increment();
+    }
+
+    @Override
+    public void update(DecoratedKey key, Clustering clustering, Iterator<ByteBuffer> oldValues, Iterator<ByteBuffer> newValues, Memtable memtable, OpOrder.Group opGroup)
+    {
+        // We defer on comparing old and new values here. Instead, we rely on the index to do the comparison and then
+        // have custom logic in the aggregator to ensure that we properly add/keep new values and remove old values
+        // that are not present in the new values.
+        rangeIndexes[boundaries.getShardForKey(key)].update(key,
+                                                            clustering,
+                                                            oldValues,
+                                                            newValues,
+                                                            allocatedBytes -> {
+                                                                memtable.markExtraOnHeapUsed(allocatedBytes, opGroup);
+                                                                estimatedOnHeapMemoryUsed.add(allocatedBytes);
+                                                            },
+                                                            allocatedBytes -> {
+                                                                memtable.markExtraOffHeapUsed(allocatedBytes, opGroup);
+                                                                estimatedOffHeapMemoryUsed.add(allocatedBytes);
+                                                            });
+        writeCount.increment();
+    }
+
     public KeyRangeIterator search(QueryContext queryContext, Expression expression, AbstractBounds<PartitionPosition> keyRange, int limit)
     {
         int startShard = boundaries.getShardForToken(keyRange.left.getToken());
@@ -266,7 +323,11 @@ public class TrieMemtableIndex implements MemtableIndex
         // Compute BM25 scores
         var docStats = computeDocumentFrequencies(queryContext, queryTerms);
         var analyzer = indexContext.getAnalyzerFactory().create();
-        var it = Iterators.transform(intersectedIterator, pk -> BM25Utils.DocTF.createFromDocument(pk, getCellForKey(pk), analyzer, queryTerms));
+        var it = Streams.stream(intersectedIterator)
+                 .map(pk -> BM25Utils.EagerDocTF.createFromDocument(pk, getCellForKey(pk), analyzer, queryTerms))
+                 .filter(Objects::nonNull)
+                 .iterator();
+
         return List.of(BM25Utils.computeScores(CloseableIterator.wrap(it),
                                                queryTerms,
                                                docStats,
@@ -331,7 +392,10 @@ public class TrieMemtableIndex implements MemtableIndex
         var analyzer = indexContext.getAnalyzerFactory().create();
         var queryTerms = orderer.getQueryTerms();
         var docStats = computeDocumentFrequencies(queryContext, queryTerms);
-        var it = keys.stream().map(pk -> BM25Utils.DocTF.createFromDocument(pk, getCellForKey(pk), analyzer, queryTerms)).iterator();
+        var it = keys.stream()
+                     .map(pk -> BM25Utils.EagerDocTF.createFromDocument(pk, getCellForKey(pk), analyzer, queryTerms))
+                     .filter(Objects::nonNull)
+                     .iterator();
         return BM25Utils.computeScores(CloseableIterator.wrap(it),
                                        queryTerms,
                                        docStats,
@@ -350,8 +414,15 @@ public class TrieMemtableIndex implements MemtableIndex
         {
             // KeyRangeIterator.getMaxKeys is not accurate enough, we have to count them
             long keys = 0;
-            for (var it = termIterators.get(i); it.hasNext(); it.next())
+            for (var it = termIterators.get(i); it.hasNext(); )
+            {
+                PrimaryKey pk = it.next();
+                Cell<?> cellForKey = getCellForKey(pk);
+                if (cellForKey == null)
+                    // skip deleted rows
+                    continue;
                 keys++;
+            }
             documentFrequencies.put(queryTerms.get(i), keys);
         }
         long docCount = 0;
@@ -409,17 +480,17 @@ public class TrieMemtableIndex implements MemtableIndex
      * @return iterator of indexed term to primary keys mapping in sorted by indexed term and primary key.
      */
     @Override
-    public Iterator<Pair<ByteComparable, List<PkWithFrequency>>> iterator(DecoratedKey min, DecoratedKey max)
+    public Iterator<Pair<ByteComparable.Preencoded, List<PkWithFrequency>>> iterator(DecoratedKey min, DecoratedKey max)
     {
         int minSubrange = min == null ? 0 : boundaries.getShardForKey(min);
         int maxSubrange = max == null ? rangeIndexes.length - 1 : boundaries.getShardForKey(max);
 
-        List<Iterator<Pair<ByteComparable, List<PkWithFrequency>>>> rangeIterators = new ArrayList<>(maxSubrange - minSubrange + 1);
+        List<Iterator<Pair<ByteComparable.Preencoded, List<PkWithFrequency>>>> rangeIterators = new ArrayList<>(maxSubrange - minSubrange + 1);
         for (int i = minSubrange; i <= maxSubrange; i++)
             rangeIterators.add(rangeIndexes[i].iterator());
 
         return MergeIterator.get(rangeIterators,
-                                 (o1, o2) -> ByteComparable.compare(o1.left, o2.left, TypeUtil.BYTE_COMPARABLE_VERSION),
+                                 (o1, o2) -> ByteComparable.compare(o1.left, o2.left),
                                  new PrimaryKeysMergeReducer(rangeIterators.size()));
     }
 
@@ -434,12 +505,12 @@ public class TrieMemtableIndex implements MemtableIndex
      * appears at most once per shard, and each key will only be found in a given shard, so there are no values to aggregate;
      * we simply combine and sort the primary keys from each shard that contains the term.
      */
-    private static class PrimaryKeysMergeReducer extends Reducer<Pair<ByteComparable, List<PkWithFrequency>>, Pair<ByteComparable, List<PkWithFrequency>>>
+    private static class PrimaryKeysMergeReducer extends Reducer<Pair<ByteComparable.Preencoded, List<PkWithFrequency>>, Pair<ByteComparable.Preencoded, List<PkWithFrequency>>>
     {
-        private final Pair<ByteComparable, List<PkWithFrequency>>[] rangeIndexEntriesToMerge;
+        private final Pair<ByteComparable.Preencoded, List<PkWithFrequency>>[] rangeIndexEntriesToMerge;
         private final Comparator<PrimaryKey> comparator;
 
-        private ByteComparable term;
+        private ByteComparable.Preencoded term;
 
         @SuppressWarnings("unchecked")
             // The size represents the number of range indexes that have been selected for the merger
@@ -452,7 +523,7 @@ public class TrieMemtableIndex implements MemtableIndex
         @Override
         // Receive the term entry for a range index. This should only be called once for each
         // range index before reduction.
-        public void reduce(int index, Pair<ByteComparable, List<PkWithFrequency>> termPair)
+        public void reduce(int index, Pair<ByteComparable.Preencoded, List<PkWithFrequency>> termPair)
         {
             Preconditions.checkArgument(rangeIndexEntriesToMerge[index] == null, "Terms should be unique in the memory index");
 
@@ -463,7 +534,7 @@ public class TrieMemtableIndex implements MemtableIndex
 
         @Override
         // Return a merger of the term keys for the term.
-        public Pair<ByteComparable, List<PkWithFrequency>> getReduced()
+        public Pair<ByteComparable.Preencoded, List<PkWithFrequency>> getReduced()
         {
             Preconditions.checkArgument(term != null, "The term must exist in the memory index");
 

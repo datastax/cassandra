@@ -50,7 +50,14 @@ public class V3OnDiskFormat extends V2OnDiskFormat
     public static volatile boolean WRITE_JVECTOR3_FORMAT = Boolean.parseBoolean(System.getProperty("cassandra.sai.write_jv3_format", "false"));
     public static final boolean ENABLE_LTM_CONSTRUCTION = Boolean.parseBoolean(System.getProperty("cassandra.sai.ltm_construction", "true"));
 
-    public static final int JVECTOR_2_VERSION = 2;
+    // These are built to be backwards and forwards compatible. Not final only for testing.
+    public static int JVECTOR_VERSION = Integer.parseInt(System.getProperty("cassandra.sai.jvector_version", "4"));
+    static
+    {
+        // JVector 3 is not compatible with the latest jvector changes, so we fail fast if the config is enabled.
+        assert JVECTOR_VERSION != 3 : "JVector version 3 is no longer suppoerted";
+        assert !WRITE_JVECTOR3_FORMAT : "JVector version 3 is no longer suppoerted";
+    }
 
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
@@ -109,11 +116,5 @@ public class V3OnDiskFormat extends V2OnDiskFormat
         if (validator.isVector())
             return VECTOR_COMPONENTS_V3;
         return super.perIndexComponentTypes(validator);
-    }
-
-    @VisibleForTesting
-    public static void enableJVector3Format()
-    {
-        WRITE_JVECTOR3_FORMAT = true;
     }
 }

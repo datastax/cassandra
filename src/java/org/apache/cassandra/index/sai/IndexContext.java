@@ -193,7 +193,8 @@ public class IndexContext
             this.hasEuclideanSimilarityFunc = vectorSimilarityFunction == VectorSimilarityFunction.EUCLIDEAN;
 
             this.indexMetrics = new IndexMetrics(this);
-            this.columnQueryMetrics = isLiteral() ? new ColumnQueryMetrics.TrieIndexMetrics(keyspace, table, getIndexName())
+            this.columnQueryMetrics = isVector() ? new ColumnQueryMetrics.VectorIndexMetrics(keyspace, table, getIndexName()) :
+                                      isLiteral() ? new ColumnQueryMetrics.TrieIndexMetrics(keyspace, table, getIndexName())
                                                   : new ColumnQueryMetrics.BKDIndexMetrics(keyspace, table, getIndexName());
 
         }
@@ -402,22 +403,26 @@ public class IndexContext
 
     public void update(DecoratedKey key, Row oldRow, Row newRow, Memtable memtable, OpOrder.Group opGroup)
     {
-        if (!isVector())
-        {
-            index(key, newRow, memtable, opGroup);
-            return;
-        }
-
         MemtableIndex target = liveMemtables.get(memtable);
         if (target == null)
             return;
-        // Use 0 for nowInSecs to get the value from the oldRow regardless of its liveness status. To get to this point,
+
+        // Use 0 for nowInSecs to get the value(s) from the oldRow regardless of its liveness status. To get to this point,
         // C* has already determined this is the current represntation of the oldRow in the memtable, and that means
         // we need to add the newValue to the index and remove the oldValue from it, even if it has already expired via
         // TTL.
-        ByteBuffer oldValue = getValueOf(key, oldRow, 0);
-        ByteBuffer newValue = getValueOf(key, newRow, FBUtilities.nowInSeconds());
-        target.update(key, oldRow.clustering(), oldValue, newValue, memtable, opGroup);
+        if (isNonFrozenCollection())
+        {
+            Iterator<ByteBuffer> oldValues = getValuesOf(oldRow, 0);
+            Iterator<ByteBuffer> newValues = getValuesOf(newRow, FBUtilities.nowInSeconds());
+            target.update(key, oldRow.clustering(), oldValues, newValues, memtable, opGroup);
+        }
+        else
+        {
+            ByteBuffer oldValue = getValueOf(key, oldRow, 0);
+            ByteBuffer newValue = getValueOf(key, newRow, FBUtilities.nowInSeconds());
+            target.update(key, oldRow.clustering(), oldValue, newValue, memtable, opGroup);
+        }
     }
 
     public void renewMemtable(Memtable renewed)
@@ -720,7 +725,10 @@ public class IndexContext
         if (op.isLike() || op == Operator.LIKE) return false;
         // Analyzed columns store the indexed result, so we are unable to compute raw equality.
         // The only supported operators are ANALYZER_MATCHES and BM25.
-        if (op == Operator.ANALYZER_MATCHES || op == Operator.BM25) return isAnalyzed;
+        if (op == Operator.ANALYZER_MATCHES) return isAnalyzed;
+        // BM25 frequency calculations only work on non-collection columns because it assumes a 1:1 mapping from PrK
+        // to frequency, but collections have mulitple documents.
+        if (op == Operator.BM25) return isAnalyzed && !isCollection();
 
         // If the column is analyzed and the operator is EQ, we need to check if the analyzer supports it.
         if (op == Operator.EQ && isAnalyzed && !analyzerFactory.supportsEquals())
@@ -738,7 +746,8 @@ public class IndexContext
         if (op == Operator.ORDER_BY_ASC || op == Operator.ORDER_BY_DESC)
             return !isCollection()
                    && column.isRegular()
-                   &&  !(column.type instanceof InetAddressType  // Possible, but need to add decoding logic based on
+                   && !isAnalyzed
+                   && !(column.type instanceof InetAddressType  // Possible, but need to add decoding logic based on
                                                                  // SAI's TypeUtil.encode method.
                          || column.type instanceof DecimalType   // Currently truncates to 24 bytes
                          || column.type instanceof IntegerType); // Currently truncates to 20 bytes
@@ -925,7 +934,7 @@ public class IndexContext
             var perIndexComponents = perSSTableComponents.indexDescriptor().perIndexComponents(this);
             if (!perSSTableComponents.isComplete() || !perIndexComponents.isComplete())
             {
-                logger.debug(logMessage("An on-disk index build for SSTable {} has not completed."), context.descriptor());
+                logger.debug(logMessage("An on-disk index build for SSTable {} has not completed (per-index components={})."), context.descriptor(), perIndexComponents.all());
                 return;
             }
 
@@ -943,7 +952,7 @@ public class IndexContext
 
                 SSTableIndex index = new SSTableIndex(context, perIndexComponents);
                 long count = context.primaryKeyMapFactory().count();
-                logger.debug(logMessage("Successfully created index for SSTable {} with {} rows."), context.descriptor(), count);
+                logger.debug(logMessage("Successfully loaded index for SSTable {} with {} rows."), context.descriptor(), count);
 
                 // Try to add new index to the set, if set already has such index, we'll simply release and move on.
                 // This covers situation when SSTable collection has the same SSTable multiple
