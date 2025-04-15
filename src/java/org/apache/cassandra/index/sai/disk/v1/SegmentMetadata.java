@@ -148,25 +148,33 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
         this.minSSTableRowId = input.readLong();
         this.maxSSTableRowId = input.readLong();
 
-        // The next values are the min/max partition keys. As a tempory test, we are skipping them because they are
-        // not as useful as the min/max row ids, which are always correct for both flushed and compacted sstables.
-        skipBytes(input);
-        skipBytes(input);
-
-        // Get the fully qualified PrimaryKey min and max objects to ensure that we skip several edge cases related
-        // to possibly confusing equality semantics where PrimaryKeyWithSource slightly diverges from PrimaryKey where
-        // PrimaryKey is just a partition key without a materializable clustering key.
-        final PrimaryKey min, max;
-        try (var pkm = sstableContext.primaryKeyMapFactory().newPerSSTablePrimaryKeyMap())
+        if (sstableContext == null)
         {
-            // We need to load eagerly to allow us to close the partition key map. Otherwise, all tests will
-            // pass due to the side effect of calling partitionKey(), but it'll fail when you remove the -ea flag.
-            min = pkm.primaryKeyFromRowId(minSSTableRowId).loadDeferred();
-            max = pkm.primaryKeyFromRowId(maxSSTableRowId).loadDeferred();
+            // Legacy use case. Only exercised by tests now.
+            PrimaryKey.Factory primaryKeyFactory = context.keyFactory();
+            this.minKey = primaryKeyFactory.createPartitionKeyOnly(DatabaseDescriptor.getPartitioner().decorateKey(readBytes(input)));
+            this.maxKey = primaryKeyFactory.createPartitionKeyOnly(DatabaseDescriptor.getPartitioner().decorateKey(readBytes(input)));
         }
+        else
+        {
+            // Skip the min/max partition keys since we want the fully resolved PrimaryKey for better semantics.
+            skipBytes(input);
+            skipBytes(input);
 
-        this.minKey = new PrimaryKeyWithSource(min, sstableContext.sstable.getId(), minSSTableRowId, min, max);
-        this.maxKey = new PrimaryKeyWithSource(max, sstableContext.sstable.getId(), maxSSTableRowId, min, max);
+            // Get the fully qualified PrimaryKey min and max objects to ensure that we skip several edge cases related
+            // to possibly confusing equality semantics where PrimaryKeyWithSource slightly diverges from PrimaryKey where
+            // PrimaryKey is just a partition key without a materializable clustering key.
+            final PrimaryKey min, max;
+            try (var pkm = sstableContext.primaryKeyMapFactory().newPerSSTablePrimaryKeyMap())
+            {
+                // We need to load eagerly to allow us to close the partition key map.
+                min = pkm.primaryKeyFromRowId(minSSTableRowId).loadDeferred();
+                max = pkm.primaryKeyFromRowId(maxSSTableRowId).loadDeferred();
+            }
+
+            this.minKey = new PrimaryKeyWithSource(min, sstableContext.sstable.getId(), minSSTableRowId, min, max);
+            this.maxKey = new PrimaryKeyWithSource(max, sstableContext.sstable.getId(), maxSSTableRowId, min, max);
+        }
 
         this.minTerm = readBytes(input);
         this.maxTerm = readBytes(input);
