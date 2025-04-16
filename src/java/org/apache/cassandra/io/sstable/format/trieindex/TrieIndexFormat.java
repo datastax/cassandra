@@ -320,7 +320,8 @@ public class TrieIndexFormat implements SSTableFormat
         // ca (DSE-DB aka Stargazer based on OSS 4.0): bb fields without maxColumnValueLengths + all OSS fields
         // cb (OSS 5.0): token space coverage
         // cc : added explicitly frozen tuples in header, non-frozen UDT columns dropping support
-        // cd : encrypted indices
+        // cd : encrypted indices and metadata
+        //      new BloomFilter serialization format
         // NOTE: when adding a new version, please add that to LegacySSTableTest, too.
 
         private final boolean isLatestVersion;
@@ -397,6 +398,12 @@ public class TrieIndexFormat implements SSTableFormat
 
         @Override
         public boolean indicesAreEncrypted()
+        {
+            return version.compareTo("b") >= 0;
+        }
+
+        @Override
+        public boolean metadataAreEncrypted()
         {
             return version.compareTo("b") >= 0;
         }
