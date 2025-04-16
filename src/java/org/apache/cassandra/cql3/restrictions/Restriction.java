@@ -80,9 +80,10 @@ public interface Restriction
      * Returns whether this restriction would need filtering if the specified index group were used.
      *
      * @param indexGroup an index group
+     * @param indexHints the user-provided index hints, which might exclude some indexes
      * @return {@code true} if this would need filtering if {@code indexGroup} were used, {@code false} otherwise
      */
-    boolean needsFiltering(Index.Group indexGroup);
+    boolean needsFiltering(Index.Group indexGroup, IndexHints indexHints);
 
     /**
      * Adds to the specified row filter the expressions corresponding to this <code>Restriction</code>.

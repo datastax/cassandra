@@ -108,7 +108,7 @@ public abstract class RestrictionSet implements Restrictions
         }
 
         @Override
-        public boolean needsFiltering(Index.Group indexGroup)
+        public boolean needsFiltering(Index.Group indexGroup, IndexHints indexHints)
         {
             return false;
         }
@@ -287,10 +287,10 @@ public abstract class RestrictionSet implements Restrictions
         }
 
         @Override
-        public boolean needsFiltering(Index.Group indexGroup)
+        public boolean needsFiltering(Index.Group indexGroup, IndexHints indexHints)
         {
             for (SingleRestriction restriction : restrictionsMap.values())
-                if (restriction.needsFiltering(indexGroup))
+                if (restriction.needsFiltering(indexGroup, indexHints))
                     return true;
 
             return false;

@@ -1826,15 +1826,15 @@ public class RowFilter
         public void serialize(RowFilter filter, DataOutputPlus out, int version) throws IOException
         {
             out.writeBoolean(false); // Old "is for thrift" boolean
+            IndexHints.serializer.serialize(filter.indexHints, out, version); // hints first because the expressions might need them
             FilterElement.serializer.serialize(filter.root, out, version);
-            IndexHints.serializer.serialize(filter.indexHints, out, version);
         }
 
         public RowFilter deserialize(DataInputPlus in, int version, TableMetadata metadata) throws IOException
         {
             in.readBoolean(); // Unused
-            FilterElement operation = FilterElement.serializer.deserialize(in, version, metadata);
             IndexHints hints = IndexHints.serializer.deserialize(in, version, metadata);
+            FilterElement operation = FilterElement.serializer.deserialize(in, version, metadata);
             return new RowFilter(operation, hints);
         }
 

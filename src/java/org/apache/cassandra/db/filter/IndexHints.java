@@ -74,9 +74,30 @@ public class IndexHints
         this.excluded = excluded;
     }
 
+    public boolean prefers(String indexName)
+    {
+        return preferred.stream().anyMatch(i -> i.name.equals(indexName));
+    }
+
     public boolean excludes(Index index)
     {
         return excluded.contains(index.getIndexMetadata());
+    }
+
+    public boolean excludes(String indexName)
+    {
+        return excluded.stream().anyMatch(i -> i.name.equals(indexName));
+    }
+
+    public <T extends Index> Set<T> preferredIndexes(Set<T> indexes)
+    {
+        Set<T> preferredIndexes = new HashSet<>();
+        for (T index : indexes)
+        {
+            if (preferred.contains(index.getIndexMetadata()))
+                preferredIndexes.add(index);
+        }
+        return preferredIndexes.isEmpty() ? indexes : preferredIndexes;
     }
 
     public static IndexHints create(Set<IndexMetadata> preferred, Set<IndexMetadata> excluded)
