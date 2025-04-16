@@ -189,7 +189,7 @@ public class SSTableCorruptionDetectionTest extends SSTableWriterTestBase
             finally
             {
                 if (ChunkCache.instance != null)
-                    ChunkCache.instance.invalidateFile(ssTableReader.getDataFile());
+                    ChunkCache.instance.invalidateFileNow(ssTableReader.getDataFile());
 
                 restore(fc, corruptionPosition, backup);
             }
