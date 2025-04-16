@@ -488,7 +488,7 @@ public class CompressionMetadata implements AutoCloseable
         {
             try
             {
-                out.writeUTF(parameters.getSstableCompressor().getClass().getSimpleName());
+                out.writeUTF(CompressionParams.prepareCompressorName(parameters.getSstableCompressor().getClass()));
                 out.writeInt(parameters.getOtherOptions().size());
                 for (Map.Entry<String, String> entry : parameters.getOtherOptions().entrySet())
                 {
