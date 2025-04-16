@@ -292,13 +292,16 @@ public class CompressionMetadata implements AutoCloseable
         try
         {
             chunkCount = input.readInt();
-            if (chunkCount <= 0)
+            if (chunkCount < 0)
                 throw new IOException("Compressed file with 0 chunks encountered: " + input);
         }
         catch (IOException e)
         {
             throw new FSReadError(e, input.path);
         }
+
+        if (chunkCount == 0)
+            return Pair.create(null, 0L);
 
         Preconditions.checkState(startIndex < chunkCount, "The start index %s has to be < chunk count %s", startIndex, chunkCount);
         Preconditions.checkState(endIndex <= chunkCount, "The end index %s has to be <= chunk count %s", endIndex, chunkCount);
@@ -526,8 +529,13 @@ public class CompressionMetadata implements AutoCloseable
             if (offsets.size() != count * 8L)
             {
                 SafeMemory tmp = offsets;
-                offsets = offsets.copy(count * 8L);
-                NATIVE_MEMORY_USAGE.addAndGet(offsets.size() - tmp.size());
+                if (count > 0)
+                {
+                    offsets = offsets.copy(count * 8L);
+                    NATIVE_MEMORY_USAGE.addAndGet(offsets.size() - tmp.size());
+                }
+                else
+                    offsets = null;
                 tmp.free();
             }
 
@@ -599,8 +607,13 @@ public class CompressionMetadata implements AutoCloseable
 
         protected Throwable doPostCleanup(Throwable failed)
         {
-            NATIVE_MEMORY_USAGE.addAndGet(-offsets.size());
-            return offsets.close(failed);
+            if (offsets != null)
+            {
+                NATIVE_MEMORY_USAGE.addAndGet(-offsets.size());
+                return offsets.close(failed);
+            }
+            else
+                return null;
         }
 
         protected Throwable doCommit(Throwable accumulate)
