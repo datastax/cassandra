@@ -106,8 +106,10 @@ public class ExecutorLocals
         TraceState traceState = locals == null ? null : locals.traceState;
         ClientWarn.State clientWarnState = locals == null ? null : locals.clientWarnState;
         RequestSensors sensors = locals == null ? null : locals.sensors;
+        OperationContext operationContext = locals == null ? null : locals.operationContext;
         tracing.set(traceState);
         clientWarn.set(clientWarnState);
         requestTracker.set(sensors);
+        operationContextTracker.set(operationContext);
     }
 }
