@@ -59,6 +59,7 @@ public class EncryptedSequentialWriterTest extends SequentialWriterTest
     }
 
     static final ICompressor AESEncryptor;
+    static final CompressionParams AESEncryptorParams;
     static
     {
         Map<String, String> opts = new HashMap<>();
@@ -71,6 +72,7 @@ public class EncryptedSequentialWriterTest extends SequentialWriterTest
         opts.put(EncryptionConfig.KEY_PROVIDER, EncryptorTest.KeyProviderFactoryStub.class.getName());
 
         AESEncryptor = Encryptor.create(opts);
+        AESEncryptorParams = CompressionParams.fromMap(opts);
     }
 
     private void runTests(String cipher, int strength) throws IOException
@@ -280,6 +282,27 @@ public class EncryptedSequentialWriterTest extends SequentialWriterTest
         {
             Assert.fail();
         }
+    }
+
+    @Test
+    public void emptyFileTest() throws IOException
+    {
+        File tempFile = createTempFile("empty", ".txt");
+        try (SequentialWriter writer = new EncryptedSequentialWriter(tempFile, SequentialWriterOption.DEFAULT, AESEncryptor))
+        {
+            // do not write anything, but finalize to do a sync
+            writer.finish();
+        }
+
+        try (FileHandle.Builder builder = new FileHandle.Builder(tempFile)
+        .withCompressionMetadata(CompressionMetadata.encryptedOnly(AESEncryptorParams));
+             FileHandle fh = builder.complete();
+             RandomAccessReader reader = fh.createReader())
+        {
+            assertTrue(reader.isEOF());
+            assertEquals(0, reader.length());
+        }
+        assertEquals(0, tempFile.length());
     }
 
     protected TestableTransaction newTest() throws IOException
