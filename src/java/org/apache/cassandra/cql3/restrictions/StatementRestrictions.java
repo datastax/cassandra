@@ -1236,7 +1236,7 @@ public class StatementRestrictions
         IndexRegistry indexRegistry = IndexRegistry.obtain(table);
         boolean hasClusteringColumnRestrictions = !clusteringColumnsRestrictions.isEmpty();
         boolean hasMultipleContains = nonPrimaryKeyRestrictions.hasMultipleContains();
-        if (filterRestrictions.needFiltering(indexRegistry, hasClusteringColumnRestrictions, hasMultipleContains))
+        if (filterRestrictions.needFiltering(indexRegistry, indexHints, hasClusteringColumnRestrictions, hasMultipleContains))
             return true;
 
         for (StatementRestrictions child : children)
@@ -1256,7 +1256,7 @@ public class StatementRestrictions
         IndexRegistry indexRegistry = IndexRegistry.obtain(table);
 
         for (Index.Group group : indexRegistry.listIndexGroups())
-            if (filterRestrictions.indexBeingUsed(group) && !group.supportsDisjunction())
+            if (filterRestrictions.indexBeingUsed(group, indexHints) && !group.supportsDisjunction())
                 return true;
 
         for (StatementRestrictions child : children)

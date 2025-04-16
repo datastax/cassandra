@@ -1270,7 +1270,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
     }
 
     @Override
-    public Optional<Index> getBestIndexFor(RowFilter.Expression expression, IndexHints hints)
+    public Optional<Index> getBestIndexFor(RowFilter.Expression expression, IndexHints hints) // TODO CNDB-13129: should use preferred?
     {
         for (Index index : indexes.values())
         {
@@ -1282,7 +1282,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         return Optional.empty();
     }
 
-    public <T extends Index> Optional<T> getBestIndexFor(RowFilter.Expression expression, Class<T> indexType) // TODO CNDB-13129: Use hints
+    public <T extends Index> Optional<T> getBestIndexFor(RowFilter.Expression expression, Class<T> indexType) // TODO CNDB-13129: should use hints?
     {
         return indexes.values()
                       .stream()

@@ -89,9 +89,9 @@ class RestrictionSetWrapper implements Restrictions
     }
 
     @Override
-    public boolean needsFiltering(Index.Group indexGroup)
+    public boolean needsFiltering(Index.Group indexGroup, IndexHints indexHints)
     {
-        return restrictions.needsFiltering(indexGroup);
+        return restrictions.needsFiltering(indexGroup, indexHints);
     }
 
     @Override

@@ -29,6 +29,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.ReadCommand;
+import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.rows.Row;
@@ -75,7 +76,7 @@ public class StorageAttachedIndexQueryPlan implements Index.QueryPlan
     {
         // collect the indexes that can be used with the provided row filter
         Set<StorageAttachedIndex> selectedIndexes = new HashSet<>();
-        if (!selectedIndexes(rowFilter.root(), allIndexes, selectedIndexes))
+        if (!selectedIndexes(rowFilter.root(), allIndexes, selectedIndexes, rowFilter.indexHints()))
             return null;
 
         // collect the features of the selected indexes
@@ -108,23 +109,25 @@ public class StorageAttachedIndexQueryPlan implements Index.QueryPlan
      * @param element a row filter tree node
      * @param allIndexes all the indexes in the index group
      * @param selectedIndexes the set of indexes where we'll add those indexes can be used with the specified expression
+     * @param hints the user-provided index hints for the query, used to exclude indexes
      * @return {@code true} if this has collected any indexes, {@code false} otherwise
      */
     private static boolean selectedIndexes(RowFilter.FilterElement element,
                                            Set<StorageAttachedIndex> allIndexes,
-                                           Set<StorageAttachedIndex> selectedIndexes)
+                                           Set<StorageAttachedIndex> selectedIndexes,
+                                           IndexHints hints)
     {
         if (element.isDisjunction()) // OR, all restrictions should have an index
         {
             Set<StorageAttachedIndex> orIndexes = new HashSet<>();
             for (RowFilter.Expression expression : element.expressions())
             {
-                if (!selectedIndexes(expression, allIndexes, orIndexes))
+                if (!selectedIndexes(expression, allIndexes, orIndexes, hints))
                     return false;
             }
             for (RowFilter.FilterElement child : element.children())
             {
-                if (!selectedIndexes(child, allIndexes, orIndexes))
+                if (!selectedIndexes(child, allIndexes, orIndexes, hints))
                     return false;
             }
             selectedIndexes.addAll(orIndexes);
@@ -135,11 +138,11 @@ public class StorageAttachedIndexQueryPlan implements Index.QueryPlan
             boolean hasIndex = false;
             for (RowFilter.Expression expression : element.expressions())
             {
-                hasIndex |= selectedIndexes(expression, allIndexes, selectedIndexes);
+                hasIndex |= selectedIndexes(expression, allIndexes, selectedIndexes, hints);
             }
             for (RowFilter.FilterElement child : element.children())
             {
-                hasIndex |= selectedIndexes(child, allIndexes, selectedIndexes);
+                hasIndex |= selectedIndexes(child, allIndexes, selectedIndexes, hints);
             }
             return hasIndex;
         }
@@ -151,27 +154,32 @@ public class StorageAttachedIndexQueryPlan implements Index.QueryPlan
      * @param expression a row filter expression
      * @param allIndexes all the indexes in the index group
      * @param selectedIndexes the set of indexes where we'll add those indexes can be used with the specified expression
+     * @param hints the user-provided index hints for the query, used to exclude indexes
      * @return {@code true} if this has collected any indexes, {@code false} otherwise
      */
     private static boolean selectedIndexes(RowFilter.Expression expression,
                                            Set<StorageAttachedIndex> allIndexes,
-                                           Set<StorageAttachedIndex> selectedIndexes)
+                                           Set<StorageAttachedIndex> selectedIndexes,
+                                           IndexHints hints)
     {
         // we ignore user-defined expressions here because we don't have a way to translate their #isSatifiedBy
         // method, they will be included in the filter returned by QueryPlan#postIndexQueryFilter()
         if (expression.isUserDefined())
             return false;
 
-        boolean hasIndex = false;
+        Set<StorageAttachedIndex> candidates = new HashSet<>();
         for (StorageAttachedIndex index : allIndexes)
         {
-            if (index.supportsExpression(expression.column(), expression.operator()))
+            if (!hints.excludes(index) && index.supportsExpression(expression.column(), expression.operator()))
             {
-                selectedIndexes.add(index);
-                hasIndex = true;
+                candidates.add(index);
             }
         }
-        return hasIndex;
+
+        Set<StorageAttachedIndex> preferred = hints.preferredIndexes(candidates);
+        selectedIndexes.addAll(preferred);
+
+        return !preferred.isEmpty();
     }
 
     @Override
@@ -196,7 +204,7 @@ public class StorageAttachedIndexQueryPlan implements Index.QueryPlan
     }
 
     @Override
-    public Index.Searcher searcherFor(ReadCommand command)
+    public StorageAttachedIndexSearcher searcherFor(ReadCommand command)
     {
         return new StorageAttachedIndexSearcher(cfs,
                                                 queryMetrics,

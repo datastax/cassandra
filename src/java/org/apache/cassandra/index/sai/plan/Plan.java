@@ -31,6 +31,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.cache.ChunkCache;
+import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.disk.format.Version;
@@ -183,6 +184,21 @@ abstract public class Plan
             return ControlFlow.Continue;
         });
         return result;
+    }
+
+    @VisibleForTesting
+    public final Set<String> scannedIndexes()
+    {
+        Set<String> indexes = new HashSet<>();
+        forEach(node -> {
+            if (node instanceof IndexScan)
+            {
+                IndexScan indexScan = (IndexScan) node;
+                indexes.add(indexScan.getIndexName());
+            }
+            return ControlFlow.Continue;
+        });
+        return indexes;
     }
 
     /**
@@ -353,6 +369,10 @@ abstract public class Plan
         leaves.sort(Comparator.comparingDouble(Plan::selectivity).reversed());
         for (Leaf leaf : leaves)
         {
+            // We won't try to skip leaves with a preferred index
+            if (leaf.usesPreferredIndex())
+                continue;
+
             Plan candidate = bestPlanSoFar.removeRestriction(leaf.id);
             if (logger.isTraceEnabled())
                 logger.trace("Candidate query plan:\n{}", candidate.toStringRecursive());
@@ -650,6 +670,8 @@ abstract public class Plan
             // There are no subplans so it is a noop
             return this;
         }
+
+        protected abstract boolean usesPreferredIndex();
     }
 
     /**
@@ -667,6 +689,12 @@ abstract public class Plan
         protected KeysIterationCost estimateCost()
         {
             return new KeysIterationCost(0, 0.0, 0.0);
+        }
+
+        @Override
+        protected boolean usesPreferredIndex()
+        {
+            return false;
         }
 
         @Nullable
@@ -719,6 +747,12 @@ abstract public class Plan
             return new KeysIterationCost(access.expectedAccessCount(factory.tableMetrics.rows),
                                          Double.POSITIVE_INFINITY,
                                          Double.POSITIVE_INFINITY);
+        }
+
+        @Override
+        protected boolean usesPreferredIndex()
+        {
+            return false;
         }
 
         @Nullable
@@ -828,6 +862,12 @@ abstract public class Plan
             return factory.tableMetrics.rows > 0
                    ? ((double) matchingKeysCount / factory.tableMetrics.rows)
                    : 0.0;
+        }
+
+        @Override
+        protected boolean usesPreferredIndex()
+        {
+            return factory.hints.prefers(getIndexName());
         }
 
         private double estimateCostPerSkip(double step)
@@ -996,7 +1036,6 @@ abstract public class Plan
                 inverseSelectivity *= (1.0 - plan.selectivity());
             return 1.0 - inverseSelectivity;
         }
-
 
         @Override
         protected ControlFlow forEachSubplan(Function<Plan, ControlFlow> function)
@@ -1354,6 +1393,12 @@ abstract public class Plan
         }
 
         @Override
+        protected boolean usesPreferredIndex()
+        {
+            return true;
+        }
+
+        @Override
         protected Iterator<? extends PrimaryKey> execute(Executor executor)
         {
             int softLimit = max(1, round((float) access.expectedAccessCount(factory.tableMetrics.rows)));
@@ -1439,7 +1484,6 @@ abstract public class Plan
             return ordering.context;
         }
     }
-
 
     abstract public static class RowsIteration extends Plan
     {
@@ -1703,6 +1747,8 @@ abstract public class Plan
 
         public final CostEstimator costEstimator;
 
+        public final IndexHints hints;
+
         /** A plan returning no keys */
         public final KeysIteration nothing;
 
@@ -1719,10 +1765,11 @@ abstract public class Plan
          * Creates a factory that produces Plan nodes.
          * @param tableMetrics allows the planner to adapt the cost estimates to the actual amount of data stored in the table
          */
-        public Factory(TableMetrics tableMetrics, CostEstimator costEstimator)
+        public Factory(TableMetrics tableMetrics, CostEstimator costEstimator, IndexHints hints)
         {
             this.tableMetrics = tableMetrics;
             this.costEstimator = costEstimator;
+            this.hints = hints;
             this.nothing = new Nothing(-1, this);
             this.defaultAccess = Access.sequential(tableMetrics.rows);
             this.everything = new Everything(-1, this, defaultAccess);

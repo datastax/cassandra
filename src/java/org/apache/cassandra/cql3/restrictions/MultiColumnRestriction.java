@@ -136,19 +136,19 @@ public abstract class MultiColumnRestriction implements SingleRestriction
     }
 
     @Override
-    public boolean needsFiltering(Index.Group indexGroup)
+    public boolean needsFiltering(Index.Group indexGroup, IndexHints indexHints)
     {
         for (ColumnMetadata column : columnDefs)
-            if (!isSupportedBy(indexGroup, column))
+            if (!isSupportedBy(indexGroup, indexHints, column))
                 return true;
 
         return false;
     }
 
-    private boolean isSupportedBy(Index.Group indexGroup, ColumnMetadata column)
+    private boolean isSupportedBy(Index.Group indexGroup, IndexHints indexHints, ColumnMetadata column)
     {
         for (Index index : indexGroup.getIndexes())
-            if (isSupportedBy(index, column))
+            if (!indexHints.excludes(index) && isSupportedBy(index, column))
                 return true;
 
         return false;

@@ -126,7 +126,7 @@ public abstract class TokenRestriction implements PartitionKeyRestrictions
     }
 
     @Override
-    public boolean needsFiltering(Index.Group indexGroup)
+    public boolean needsFiltering(Index.Group indexGroup, IndexHints indexHints)
     {
         return false;
     }
