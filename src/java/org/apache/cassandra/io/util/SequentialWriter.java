@@ -223,15 +223,18 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
     @Override
     protected void doFlush(int count)
     {
-        flushData();
-
-        if (option.trickleFsync())
+        if (buffer.position() > 0)
         {
-            bytesSinceTrickleFsync += buffer.position();
-            if (bytesSinceTrickleFsync >= option.trickleFsyncByteInterval())
+            flushData();
+
+            if (option.trickleFsync())
             {
-                syncDataOnlyInternal();
-                bytesSinceTrickleFsync = 0;
+                bytesSinceTrickleFsync += buffer.position();
+                if (bytesSinceTrickleFsync >= option.trickleFsyncByteInterval())
+                {
+                    syncDataOnlyInternal();
+                    bytesSinceTrickleFsync = 0;
+                }
             }
         }
 
