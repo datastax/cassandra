@@ -301,6 +301,12 @@ public class BigFormat implements SSTableFormat
         }
 
         @Override
+        public boolean metadataAreEncrypted()
+        {
+            return false;
+        }
+
+        @Override
         public boolean hasAccurateMinMax()
         {
             return hasAccurateMinMax;
