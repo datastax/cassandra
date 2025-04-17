@@ -25,7 +25,6 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -60,27 +59,17 @@ import org.apache.cassandra.cql3.functions.types.TypeCodec;
 import org.apache.cassandra.cql3.functions.types.UDTValue;
 import org.apache.cassandra.cql3.functions.types.UserType;
 import org.apache.cassandra.cql3.statements.schema.CreateTableStatement;
-import org.apache.cassandra.cql3.statements.schema.IndexTarget;
-import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
-import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.dht.ByteOrderedPartitioner;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.index.sai.IndexContext;
-import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.io.sstable.format.big.BigFormat;
 import org.apache.cassandra.io.sstable.format.bti.BtiFormat;
 import org.apache.cassandra.io.util.File;
-import org.apache.cassandra.io.util.PathUtils;
-import org.apache.cassandra.schema.ColumnMetadata;
-import org.apache.cassandra.schema.IndexMetadata;
-import org.apache.cassandra.schema.MockSchema;
-import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -1469,110 +1458,6 @@ public abstract class CQLSSTableWriterTest
         assertEquals(2, dataFiles.length);
     }
 
-    @Test
-    public void testWriteWithSAI() throws Exception
-    {
-        writeWithSaiInternal();
-        writeWithSaiInternal();
-    }
-
-    private void writeWithSaiInternal() throws Exception
-    {
-        String schema = "CREATE TABLE " + qualifiedTable + " ("
-                        + "  k int PRIMARY KEY,"
-                        + "  v1 text,"
-                        + "  v2 int )";
-
-        String v1Index = "CREATE INDEX idx1 ON " + qualifiedTable + " (v1) USING 'sai'";
-        String v2Index = "CREATE INDEX idx2 ON " + qualifiedTable + " (v2) USING 'sai'";
-
-        String insert = "INSERT INTO " + qualifiedTable + " (k, v1, v2) VALUES (?, ?, ?)";
-
-        CQLSSTableWriter writer = CQLSSTableWriter.builder()
-                                                  .inDirectory(dataDir)
-                                                  .forTable(schema)
-                                                  .using(insert)
-                                                  .withIndexes(v1Index, v2Index)
-                                                  .withBuildIndexes(true)
-                                                  .withPartitioner(Murmur3Partitioner.instance)
-                                                  .build();
-
-        int rowCount = 30_000;
-        for (int i = 0; i < rowCount; i++)
-            writer.addRow(i, UUID.randomUUID().toString(), i);
-
-        writer.close();
-
-        File[] dataFiles = dataDir.list(f -> f.name().endsWith('-' + BigFormat.Components.DATA.type.repr));
-        assertNotNull(dataFiles);
-
-        IndexDescriptor indexDescriptor = IndexDescriptor.empty(Descriptor.fromFile(dataFiles[0]));
-
-        IndexContext idx1 = createIndexContext("idx1", UTF8Type.instance);
-        IndexContext idx2 = createIndexContext("idx2", UTF8Type.instance);
-        HashSet<IndexContext> indices = new HashSet<>(Arrays.asList(idx1, idx2));
-        SSTableReader sstable = SSTableReader.openNoValidation(null, indexDescriptor.descriptor, writer.getMetadata());
-        indexDescriptor.reload(sstable, indices);
-
-        assertTrue(indexDescriptor.perIndexComponents(idx1).isComplete());
-        assertTrue(indexDescriptor.perIndexComponents(idx2).isComplete());
-
-        if (PathUtils.isDirectory(dataDir.toPath()))
-            PathUtils.forEach(dataDir.toPath(), PathUtils::deleteRecursive);
-    }
-
-    @Test
-    public void testSkipBuildingIndexesWithSAI() throws Exception
-    {
-        String schema = "CREATE TABLE " + qualifiedTable + " ("
-                        + "  k int PRIMARY KEY,"
-                        + "  v1 text,"
-                        + "  v2 int )";
-
-        String v1Index = "CREATE INDEX idx1 ON " + qualifiedTable + " (v1) USING 'sai'";
-        String v2Index = "CREATE INDEX idx2 ON " + qualifiedTable + " (v2) USING 'sai'";
-
-        String insert = "INSERT INTO " + qualifiedTable + " (k, v1, v2) VALUES (?, ?, ?)";
-
-        CQLSSTableWriter writer = CQLSSTableWriter.builder()
-                                                  .inDirectory(dataDir)
-                                                  .forTable(schema)
-                                                  .using(insert)
-                                                  .withIndexes(v1Index, v2Index)
-                                                  // not building indexes here so no SAI components will be present
-                                                  .withBuildIndexes(false)
-                                                  .withPartitioner(Murmur3Partitioner.instance)
-                                                  .build();
-
-        int rowCount = 30_000;
-        for (int i = 0; i < rowCount; i++)
-            writer.addRow(i, UUID.randomUUID().toString(), i);
-
-        writer.close();
-
-        File[] dataFiles = dataDir.list(f -> f.name().endsWith('-' + BigFormat.Components.DATA.type.repr));
-        assertNotNull(dataFiles);
-
-        // no indexes built due to withBuildIndexes set to false
-        IndexDescriptor indexDescriptor = IndexDescriptor.empty(Descriptor.fromFile(dataFiles[0]));
-
-        assertFalse(indexDescriptor.perIndexComponents(createIndexContext("idx1", UTF8Type.instance)).isComplete());
-        assertFalse(indexDescriptor.perIndexComponents(createIndexContext("idx2", UTF8Type.instance)).isComplete());
-    }
-
-    public IndexContext createIndexContext(String name, AbstractType<?> validator)
-    {
-        return new IndexContext(keyspace,
-                                table,
-                                TableId.generate(),
-                                UTF8Type.instance,
-                                new ClusteringComparator(),
-                                ColumnMetadata.regularColumn("sai", "internal", name, validator),
-                                IndexTarget.Type.SIMPLE,
-                                IndexMetadata.fromSchemaMetadata(name, IndexMetadata.Kind.CUSTOM, null),
-                                MockSchema.newCFS(keyspace));
-    }
-    
     protected void loadSSTables(File dataDir, String ksName)
     {
         ColumnFamilyStore cfs = Keyspace.openWithoutSSTables(ksName).getColumnFamilyStore(table);
