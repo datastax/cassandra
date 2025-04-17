@@ -834,14 +834,22 @@ public class BM25Test extends SAITester
         String scoreIndexName = createIndex("CREATE CUSTOM INDEX ON %s (score) USING 'StorageAttachedIndex'");
         insertPrimitiveData();
 
-        assertNumRowsMemtable(scoreIndexName);
-        assertNumRowsMemtable(bodyIndexName);
+        assertNumRowsMemtable(scoreIndexName, DATASET.length);
+        assertNumRowsMemtable(bodyIndexName, DATASET.length);
+        execute("DELETE FROM %s WHERE id = ?", 5);
         flush();
-        assertNumRowsSSTable(scoreIndexName);
-        assertNumRowsSSTable(bodyIndexName);
+        assertNumRowsSSTable(scoreIndexName, DATASET.length - 1);
+        assertNumRowsSSTable(bodyIndexName, DATASET.length - 1);
+        execute("DELETE FROM %s WHERE id = ?", 10);
+        flush();
+        assertNumRowsSSTable(scoreIndexName, DATASET.length - 1);
+        assertNumRowsSSTable(bodyIndexName, DATASET.length - 1);
+        compact();
+        assertNumRowsSSTable(scoreIndexName, DATASET.length - 2);
+        assertNumRowsSSTable(bodyIndexName, DATASET.length - 2);
     }
 
-    private void assertNumRowsMemtable(String indexName)
+    private void assertNumRowsMemtable(String indexName, int expectedNumRows)
     {
         int rowCount = 0;
 
@@ -853,10 +861,10 @@ public class BM25Test extends SAITester
                              .map(index -> ((TrieMemoryIndex) index).getDocLengths().size())
                              .mapToInt(Integer::intValue).sum();
         }
-        assertEquals(DATASET.length, rowCount);
+        assertEquals(expectedNumRows, rowCount);
     }
 
-    private void assertNumRowsSSTable(String indexName)
+    private void assertNumRowsSSTable(String indexName, int expectedNumRows)
     {
         long indexRowCount = 0;
         long segmentRowCount = 0;
@@ -868,7 +876,7 @@ public class BM25Test extends SAITester
                                            .mapToLong(Long::longValue).sum();
         }
         assertEquals(indexRowCount, segmentRowCount);
-        assertEquals(DATASET.length, indexRowCount);
+        assertEquals(expectedNumRows, indexRowCount);
     }
 
     private final static Object[][] DATASET =
