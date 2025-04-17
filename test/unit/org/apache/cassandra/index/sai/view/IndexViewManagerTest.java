@@ -52,8 +52,14 @@ import org.apache.cassandra.utils.FBUtilities;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 public class IndexViewManagerTest extends SAITester
 {
@@ -201,7 +207,9 @@ public class IndexViewManagerTest extends SAITester
 
             for (SSTableIndex index : initialIndexes)
             {
-                assertEquals(1, ((MockSSTableIndex) index).releaseCount);
+                // Since there is a race, we expect these to be released at least 2 times, but it could be more.
+                assertTrue("Expected at least 2 releases",2 <= ((MockSSTableIndex) index).releaseCount);
+                assertTrue(index.isReleased());
             }
 
             // release original SSTableContext objects.
@@ -219,6 +227,34 @@ public class IndexViewManagerTest extends SAITester
         sstables.forEach(sstable -> sstable.selfRef().release());
         executor.shutdown();
         executor.awaitTermination(1, TimeUnit.MINUTES);
+    }
+
+
+    @Test
+    public void testMarkIndexWasDropped()
+    {
+        IndexContext mockContext = mock(IndexContext.class);
+        when(mockContext.isVector()).thenReturn(true);
+        Descriptor descriptor = mock(Descriptor.class);
+        SSTableReader sstable = mock(SSTableReader.class);
+        when(sstable.getDescriptor()).thenReturn(descriptor);
+        SSTableIndex index = mock(SSTableIndex.class);
+        when(index.reference()).thenReturn(true);
+        when(index.getSSTable()).thenReturn(sstable);
+        when(index.getIndexContext()).thenReturn(mockContext);
+
+        IndexViewManager tracker = new IndexViewManager(mockContext, Collections.singleton(descriptor), Collections.singleton(index));
+        var view = tracker.getView();
+        // Now we have 2 references to the view.
+        assertTrue(view.reference());
+        // Invalidate and trigger markIndexWasDropped in the view, but not in the index since we have an extra ref.
+        tracker.invalidate(true);
+        // Assert index hasn't had markIndexDropped called yet.
+        verify(index, never()).markIndexDropped();
+        // Release and trigger/validate markIndexDropped in the index.
+        view.release();
+        verify(index, times(1)).markIndexDropped();
+        assertFalse(view.reference());
     }
 
     private IndexContext columnIndex(ColumnFamilyStore store, String indexName)

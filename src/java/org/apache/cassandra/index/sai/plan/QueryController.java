@@ -449,7 +449,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     private KeyRangeIterator buildIterator(Expression predicate)
     {
         QueryView view = getQueryView(predicate.context);
-        return KeyRangeTermIterator.build(predicate, view.referencedIndexes, mergeRange, queryContext, false, Integer.MAX_VALUE);
+        return KeyRangeTermIterator.build(predicate, view.sstableIndexes, mergeRange, queryContext, false, Integer.MAX_VALUE);
     }
 
     /**
@@ -460,7 +460,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     QueryView getQueryView(IndexContext context) throws QueryView.Builder.MissingIndexException
     {
         return queryViews.computeIfAbsent(context,
-                                          c -> new QueryView.Builder(c, mergeRange, queryContext).build());
+                                          c -> new QueryView.Builder(c, mergeRange).build());
 
     }
 
@@ -720,7 +720,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     private List<CloseableIterator<PrimaryKeyWithSortKey>> searchSSTables(QueryView queryView, SSTableSearcher searcher)
     {
         List<CloseableIterator<PrimaryKeyWithSortKey>> results = new ArrayList<>();
-        for (var index : queryView.referencedIndexes)
+        for (var index : queryView.sstableIndexes)
         {
             try
             {

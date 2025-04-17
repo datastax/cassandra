@@ -51,8 +51,7 @@ public class IndexViewManager
     private static final Logger logger = LoggerFactory.getLogger(IndexViewManager.class);
     
     private final IndexContext context;
-    private final AtomicReference<View> view = new AtomicReference<>();
-
+    private final AtomicReference<View> viewRef = new AtomicReference<>();
 
     public IndexViewManager(IndexContext context)
     {
@@ -63,12 +62,14 @@ public class IndexViewManager
     IndexViewManager(IndexContext context, Collection<Descriptor> sstables, Collection<SSTableIndex> indices)
     {
         this.context = context;
-        this.view.set(new View(context, sstables, indices));
+        this.viewRef.set(new View(context, sstables, indices));
+        // View references the indices, so we release them here.
+        indices.forEach(SSTableIndex::release);
     }
 
     public View getView()
     {
-        return view.get();
+        return viewRef.get();
     }
 
     /**
@@ -87,18 +88,21 @@ public class IndexViewManager
                                       boolean validate)
     {
         // Valid indexes on the left and invalid SSTable contexts on the right...
+        // The valid indexes are referenced as a part of object initialization.
         Pair<Set<SSTableIndex>, Set<SSTableContext>> indexes = context.getBuiltIndexes(newSSTableContexts, validate);
 
-        View currentView, newView;
+        View currentView, newView = null;
         Map<Descriptor, SSTableIndex> newViewIndexes = new HashMap<>();
-        Collection<SSTableIndex> releasableIndexes = new ArrayList<>();
         Collection<SSTableReader> toRemove = new HashSet<>(oldSSTables);
 
         do
         {
-            currentView = view.get();
+            currentView = viewRef.get();
+            if (!currentView.reference())
+                continue;
+            if (newView != null)
+                newView.release();
             newViewIndexes.clear();
-            releasableIndexes.clear();
 
             Set<Descriptor> sstables = new HashSet<>(currentView.getSSTables());
             for (SSTableReader sstable : oldSSTables)
@@ -112,30 +116,28 @@ public class IndexViewManager
                 // but different SSTableReader java objects with different start positions. So we need to release them
                 // from existing view.  see DSP-19677
                 SSTableReader sstable = sstableIndex.getSSTable();
-                if (toRemove.contains(sstable))
-                    releasableIndexes.add(sstableIndex);
-                else
-                    addOrUpdateSSTableIndex(sstableIndex, newViewIndexes, releasableIndexes);
+                if (!toRemove.contains(sstable))
+                    addOrUpdateSSTableIndex(sstableIndex, newViewIndexes);
             }
 
             for (SSTableIndex sstableIndex : indexes.left)
-            {
-                addOrUpdateSSTableIndex(sstableIndex, newViewIndexes, releasableIndexes);
-            }
+                addOrUpdateSSTableIndex(sstableIndex, newViewIndexes);
 
             newView = new View(context, sstables, newViewIndexes.values());
-        }
-        while (!view.compareAndSet(currentView, newView));
+            currentView.release();
+        } while (newView == null || !viewRef.compareAndSet(currentView, newView));
 
-        releasableIndexes.forEach(SSTableIndex::release);
+        // newView referenced these for a second time in this method, so we call release once here.
+        indexes.left.forEach(SSTableIndex::release);
+        currentView.release();
 
         if (logger.isTraceEnabled())
-            logger.trace(context.logMessage("There are now {} active SSTable indexes."), view.get().getIndexes().size());
+            logger.trace(context.logMessage("There are now {} active SSTable indexes."), viewRef.get().getIndexes().size());
 
         return indexes.right;
     }
 
-    private static void addOrUpdateSSTableIndex(SSTableIndex ssTableIndex, Map<Descriptor, SSTableIndex> addTo, Collection<SSTableIndex> toRelease)
+    private static void addOrUpdateSSTableIndex(SSTableIndex ssTableIndex, Map<Descriptor, SSTableIndex> addTo)
     {
         var descriptor = ssTableIndex.getSSTable().descriptor;
         SSTableIndex previous = addTo.get(descriptor);
@@ -144,13 +146,7 @@ public class IndexViewManager
             // If the new index use the same files that the exiting one (and the previous one is still complete, meaning
             // that the files weren't corrupted), then keep the old one (no point in changing for the same thing).
             if (previous.usedPerIndexComponents().isComplete() && ssTableIndex.usedPerIndexComponents().buildId().equals(previous.usedPerIndexComponents().buildId()))
-            {
-                toRelease.add(ssTableIndex);
                 return;
-            }
-
-            // Otherwise, release the old, and we'll replace by the new one below.
-            toRelease.add(previous);
         }
         addTo.put(descriptor, ssTableIndex);
     }
@@ -158,23 +154,29 @@ public class IndexViewManager
     public void prepareSSTablesForRebuild(Collection<SSTableReader> sstablesToRebuild)
     {
         Set<SSTableReader> toRemove = new HashSet<>(sstablesToRebuild);
-        View oldView, newView;
+        View oldView, newView = null;
         Set<SSTableIndex> indexesToRemove;
         do
         {
-            oldView = view.get();
+            oldView = viewRef.get();
+            if (!oldView.reference())
+                continue;
+            if (newView != null)
+                newView.release();
+
             indexesToRemove = oldView.getIndexes()
                                      .stream()
                                      .filter(index -> toRemove.contains(index.getSSTable()))
                                      .collect(Collectors.toSet());
             var newIndexes = new HashSet<>(oldView.getIndexes());
             newIndexes.removeAll(indexesToRemove);
+            // TODO why are we storing more sstables than indexes here? Are we non-queryable until we get the
+            // count back up?
             newView = new View(context, oldView.getSSTables(), newIndexes);
+            oldView.release();
         }
-        while (!view.compareAndSet(oldView, newView));
-
-        for (SSTableIndex index : indexesToRemove)
-            index.release();
+        while (newView == null || !viewRef.compareAndSet(oldView, newView));
+        oldView.release();
     }
 
     /**
@@ -186,20 +188,20 @@ public class IndexViewManager
      */
     public void invalidate(boolean indexWasDropped)
     {
-        View oldView, newView;
+        View oldView, newView = null;
         do
         {
-            oldView = view.get();
+            // We skip referencing becuase we do not use its indexes.
+            oldView = viewRef.get();
+            if (newView != null)
+                newView.release();
+            // TODO are we non queryable at this point?
             newView = new View(context, oldView.getSSTables(), Collections.emptySet());
+        } while (!viewRef.compareAndSet(oldView, newView));
 
-        } while (!view.compareAndSet(oldView, newView));
-
-        for (SSTableIndex index : oldView)
-        {
-            if (indexWasDropped)
-                index.markIndexDropped();
-            else
-                index.release();
-        }
+        if (indexWasDropped)
+            oldView.markIndexWasDropped();
+        else
+            oldView.release();
     }
 }

@@ -26,6 +26,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import javax.annotation.Nullable;
 
@@ -33,16 +34,22 @@ import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SSTableIndex;
+import org.apache.cassandra.index.sai.disk.EmptyIndex;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.io.sstable.Descriptor;
+import org.apache.cassandra.io.sstable.SSTableWatcher;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.Interval;
 import org.apache.cassandra.utils.IntervalTree;
+import org.apache.cassandra.utils.concurrent.RefCounted;
 
 public class View implements Iterable<SSTableIndex>
 {
     private final Set<Descriptor> sstables;
     private final Map<Descriptor, SSTableIndex> view;
+    private final AtomicInteger references = new AtomicInteger(1);
+    private volatile boolean indexWasDropped;
 
     private final TermTree termTree;
     private final AbstractType<?> keyValidator;
@@ -61,6 +68,12 @@ public class View implements Iterable<SSTableIndex>
         List<Interval<Key, SSTableIndex>> keyIntervals = new ArrayList<>();
         for (SSTableIndex sstableIndex : indexes)
         {
+            if (!sstableIndex.reference())
+            {
+                this.view.values().forEach(SSTableIndex::release);
+                throw new IllegalStateException("Failed to reference the index " + sstableIndex);
+            }
+
             this.view.put(sstableIndex.getSSTable().descriptor, sstableIndex);
             if (!sstableIndex.getIndexContext().isVector())
                 termTreeBuilder.add(sstableIndex);
@@ -108,6 +121,37 @@ public class View implements Iterable<SSTableIndex>
         return view.values();
     }
 
+    public boolean reference()
+    {
+        while (true)
+        {
+            int n = references.get();
+            if (n <= 0)
+                return false;
+            if (references.compareAndSet(n, n + 1))
+            {
+                return true;
+            }
+        }
+    }
+
+    public void release()
+    {
+        int n = references.decrementAndGet();
+        if (n == 0)
+            if (indexWasDropped)
+                view.values().forEach(SSTableIndex::markIndexDropped);
+            else
+                view.values().forEach(SSTableIndex::release);
+    }
+
+    public void markIndexWasDropped()
+    {
+        // This ordering allows us to guarantee that in flight queries will not be interrupted in problematic ways.
+        indexWasDropped = true;
+        release();
+    }
+
     public int size()
     {
         return view.size();
@@ -117,7 +161,7 @@ public class View implements Iterable<SSTableIndex>
     {
         return view.get(descriptor);
     }
-    
+
     /**
      * Tells if an index for the given sstable exists.
      * It's equivalent to {@code getSSTableIndex(descriptor) != null }.
