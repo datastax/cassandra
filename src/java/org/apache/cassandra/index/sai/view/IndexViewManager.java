@@ -191,7 +191,7 @@ public class IndexViewManager
         View oldView, newView = null;
         do
         {
-            // We skip referencing becuase we do not use its indexes.
+            // We skip referencing because we do not use its indexes.
             oldView = viewRef.get();
             if (newView != null)
                 newView.release();

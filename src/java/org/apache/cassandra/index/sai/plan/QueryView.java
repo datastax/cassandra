@@ -101,19 +101,21 @@ public class QueryView implements AutoCloseable
          */
         static class MissingIndexException extends RuntimeException
         {
-            final IndexContext context;
+            final boolean isDropped;
+            final String indexName;
 
             private MissingIndexException(IndexContext context)
             {
                 super();
-                this.context = context;
+                this.isDropped = context.isDropped();
+                this.indexName = context.getIndexName();
             }
 
             @Override
             public String getMessage()
             {
-                return context.isDropped() ? "Index " + context.getIndexName() + " was dropped."
-                                           : "Unable to acquire lock on index view: " + context.getIndexName() + ".";
+                return isDropped ? "Index " + indexName + " was dropped."
+                                 : "Unable to acquire lock on index view: " + indexName + '.';
             }
         }
 
