@@ -167,7 +167,10 @@ public class KeyRangeUnionIterator extends KeyRangeIterator
                     boolean isDisjoint = true;
                     for (int i = 0; i < rangeIterators.size() - 1; i++)
                     {
-                        if (rangeIterators.get(i).getMaximum().compareTo(rangeIterators.get(i + 1).getMinimum()) > 0)
+                        // If a's max is greater than or equal to b's min, then the ranges are not disjoint
+                        var a = rangeIterators.get(i);
+                        var b = rangeIterators.get(i + 1);
+                        if (a.getMaximum().compareTo(b.getMinimum()) >= 0)
                         {
                             isDisjoint = false;
                             break;
