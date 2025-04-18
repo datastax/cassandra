@@ -39,10 +39,8 @@ public class PrimaryKeyListUtil
         if (index < 0)
             return -index - 1;
 
-        if (findMax)
-            // We use this value for the subList upper bound, which is exclusive, so increment by 1.
-            index++;
-
-        return index;
+        // When findMax is true, we are finding and exclusive upper bound, but binary search is inclusive, so we
+        // increment by 1 to get the exclusive upper bound.
+        return findMax ? index + 1 : index;
     }
 }

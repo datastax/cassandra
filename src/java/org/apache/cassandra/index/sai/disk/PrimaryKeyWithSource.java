@@ -124,11 +124,18 @@ public class PrimaryKeyWithSource implements PrimaryKey
             if (sourceSstableId.equals(other.sourceSstableId))
                 return Long.compare(sourceRowId, other.sourceRowId);
             // Compare to the other source sstable's min and max keys to determine if the keys are comparable.
-            // Note that these are already loaded into memory as part of the segment's metadata, so they comparison
+            // Note that these are already loaded into memory as part of the segment's metadata, so the comparison
             // is cheaper than loading the actual keys.
             if (sourceSstableMinKey.compareTo(other.sourceSstableMaxKey) > 0)
                 return 1;
             if (sourceSstableMaxKey.compareTo(other.sourceSstableMinKey) < 0)
+                return -1;
+        }
+        else
+        {
+            if (sourceSstableMinKey.compareTo(o) > 0)
+                return 1;
+            if (sourceSstableMaxKey.compareTo(o) < 0)
                 return -1;
         }
 
@@ -145,7 +152,7 @@ public class PrimaryKeyWithSource implements PrimaryKey
             if (sourceSstableId.equals(other.sourceSstableId))
                 return sourceRowId == other.sourceRowId;
 
-            // If the source sstable does not contain the PrimaryKey, the keys cannot be equal.
+            // If the source sstable primary key ranges do not intersect, the keys cannot be equal.
             if (sourceSstableMinKey.compareTo(other.sourceSstableMaxKey) > 0
                 || sourceSstableMaxKey.compareTo(other.sourceSstableMinKey) < 0)
                 return false;

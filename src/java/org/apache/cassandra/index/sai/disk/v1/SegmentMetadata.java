@@ -162,8 +162,9 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
             skipBytes(input);
 
             // Get the fully qualified PrimaryKey min and max objects to ensure that we skip several edge cases related
-            // to possibly confusing equality semantics where PrimaryKeyWithSource slightly diverges from PrimaryKey where
-            // PrimaryKey is just a partition key without a materializable clustering key.
+            // to possibly confusing equality semantics. The main issue is how we handl PrimaryKey objects that
+            // are not fully qualified when doing a binary search on a collection of PrimaryKeyWithSource objects.
+            // By materializing the fully qualified PrimaryKey objects, we get the right binary search result.
             final PrimaryKey min, max;
             try (var pkm = sstableContext.primaryKeyMapFactory().newPerSSTablePrimaryKeyMap())
             {
