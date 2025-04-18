@@ -19,6 +19,7 @@
 package org.apache.cassandra.distributed.test;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.NoSuchAlgorithmException;
@@ -38,13 +39,13 @@ import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.distributed.api.ConsistencyLevel;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.utils.ChecksumType;
 
 import static org.apache.cassandra.distributed.api.ConsistencyLevel.ALL;
 import static org.apache.cassandra.distributed.api.Feature.GOSSIP;
 import static org.apache.cassandra.distributed.api.Feature.NETWORK;
-import static org.apache.cassandra.distributed.shared.AssertUtils.assertRows;
-import static org.apache.cassandra.distributed.shared.AssertUtils.row;
 import static org.apache.cassandra.distributed.shared.FutureUtils.waitOn;
+import static org.apache.cassandra.io.compress.EncryptedSequentialWriter.CHUNK_SIZE;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.ThrowableAssert.catchThrowable;
 import static org.junit.Assert.assertTrue;
@@ -123,8 +124,10 @@ public class SSTableEncryptionTest extends TestBaseImpl
         }
     }
 
+    //a test that checks encrypted sstables loaded into non encrypted table fail
+
     @Test
-    public void shouldVerifyUnencryptedSSTablesDifferFromEncryptedOnes() throws Exception
+    public void shouldVerifyPartitionAndRowIndexesAreEncrypted() throws Exception
     {
         try (Cluster cluster = builder().withNodes(1)
                                         .withConfig(config -> config.with(GOSSIP).with(NETWORK))
@@ -132,29 +135,59 @@ public class SSTableEncryptionTest extends TestBaseImpl
         {
             // given tables with and without encryption
             String keyspace = createKeyspace(cluster);
-            TestTable nonEncryptedTable1 = createTableWithSampleData(cluster, keyspace, "");
-            TestTable nonEncryptedTable2 = createTableWithSampleData(cluster, keyspace, "");
+            TestTable nonEncryptedTable = createTableWithSampleData(cluster, keyspace, "");
             Path secretKey = createLocalSecretKey();
             TestTable encryptedTable = createTableWithSampleData(cluster, keyspace, localSystemKeyEncryptionCompressionSuffix("Encryptor", secretKey.toAbsolutePath().toString()));
 
             // then
-            // tables without encryption should have the same bytes
-            assertThat(nonEncryptedTable1.sstablePath).isNotEqualTo(nonEncryptedTable2.sstablePath);
-            assertThat(nonEncryptedTable1.partitionIndexPath).isNotEqualTo(nonEncryptedTable2.partitionIndexPath);
-            assertThat(nonEncryptedTable1.rowIndexPath).isNotEqualTo(nonEncryptedTable2.rowIndexPath);
-            assertThat(nonEncryptedTable1.sstableBytes).isEqualTo(nonEncryptedTable2.sstableBytes);
-            assertThat(nonEncryptedTable1.partitionIndexBytes).isEqualTo(nonEncryptedTable2.partitionIndexBytes);
-            assertThat(nonEncryptedTable1.rowIndexBytes).isEqualTo(nonEncryptedTable2.rowIndexBytes);
-            // table with encryption should have different bytes
-            assertThat(encryptedTable.sstablePath).isNotEqualTo(nonEncryptedTable1.sstablePath);
-            assertThat(encryptedTable.partitionIndexPath).isNotEqualTo(nonEncryptedTable1.partitionIndexPath);
-            assertThat(encryptedTable.rowIndexPath).isNotEqualTo(nonEncryptedTable1.rowIndexPath);
-            assertThat(encryptedTable.sstableBytes).isNotEqualTo(nonEncryptedTable1.sstableBytes);
-            assertThat(encryptedTable.rowIndexBytes).isNotEqualTo(nonEncryptedTable1.rowIndexBytes);
-            assertThat(encryptedTable.partitionIndexBytes).isNotEqualTo(nonEncryptedTable1.partitionIndexBytes);
+            // indexes with encryption should pass the checksum check
+            assertThat(checkEncryptionCrc(encryptedTable.partitionIndexBytes)).isTrue();
+            assertThat(checkEncryptionCrc(encryptedTable.rowIndexBytes)).isTrue();
+            // indexes without encryption should fail the checksum check
+            assertThat(checkEncryptionCrc(nonEncryptedTable.partitionIndexBytes)).isFalse();
+            assertThat(checkEncryptionCrc(nonEncryptedTable.rowIndexBytes)).isFalse();
         }
     }
 
+
+    @Test
+    public void shouldFail() throws Exception
+    {
+        try (Cluster cluster = builder().withNodes(1)
+                                        .withConfig(config -> config.with(GOSSIP).with(NETWORK))
+                                        .start())
+        {
+            // given tables with and without encryption
+            String keyspace = createKeyspace(cluster);
+
+            String tableName = randomTableName();
+            String createTableCql = "CREATE TABLE %s.%s (id text, cc text, value text, PRIMARY KEY ((id), cc))";
+            cluster.schemaChange(String.format(createTableCql, keyspace, tableName));
+
+            Path secretKey = createLocalSecretKey();
+            TestTable encryptedTable = createTableWithSampleData(cluster, keyspace, localSystemKeyEncryptionCompressionSuffix("Encryptor", secretKey.toAbsolutePath().toString()));
+
+
+        }
+    }
+
+    private boolean checkEncryptionCrc(byte[] bytes)
+    {
+        try
+        {
+            ByteBuffer buffer = ByteBuffer.wrap(bytes);
+            buffer.position(0).limit(CHUNK_SIZE - 4);
+            int calculatedChecksum = (int) ChecksumType.CRC32.of(buffer);
+            //Change the limit to include the checksum
+            buffer.limit(CHUNK_SIZE);
+            int readChecksum = buffer.getInt();
+            return calculatedChecksum == readChecksum;
+        }
+        catch (Exception e)
+        {
+            return false;
+        }
+    }
 
     @Test
     public void shouldNotReadRowsFromEncryptedTableWithoutTheSecretKey() throws Exception
@@ -198,8 +231,17 @@ public class SSTableEncryptionTest extends TestBaseImpl
         String tableName = randomTableName();
         String createTableCql = "CREATE TABLE %s.%s (id text, cc text, value text, PRIMARY KEY ((id), cc))" + tableDefSuffix;
         cluster.schemaChange(String.format(createTableCql, keyspace, tableName));
-        cluster.coordinator(1).execute(String.format("INSERT INTO %s.%s (id, cc, value) VALUES ('%s', '%s', '%s')", keyspace, tableName, 0, 0, 0), ALL);
-        assertRows(cluster.coordinator(1).execute(String.format("SELECT * FROM %s.%s ", keyspace, tableName), ALL), row("0", "0", "0"));
+
+        int k = 0;
+        for (int i = 0; i < 3; i++)
+        {
+            for (int j = 0; j < 10000; j++)
+            {
+                cluster.coordinator(1).execute(String.format("INSERT INTO %s.%s (id, cc, value) VALUES ('%s', '%s', '%s')", keyspace, tableName, i, j, k), ALL);
+                k++;
+            }
+        }
+
         // flush to make sure we have sstable
         cluster.get(1).flush(keyspace);
 
