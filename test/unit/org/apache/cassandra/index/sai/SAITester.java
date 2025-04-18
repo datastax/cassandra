@@ -46,6 +46,7 @@ import com.google.common.base.Predicates;
 import com.google.common.collect.Sets;
 import org.junit.After;
 import org.junit.Assert;
+import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Rule;
 import org.junit.rules.TestRule;
@@ -71,6 +72,7 @@ import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.format.Version;
+import org.apache.cassandra.index.sai.plan.QueryController;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.ResourceLeakDetector;
 import org.apache.cassandra.inject.ActionBuilder;
@@ -212,6 +214,13 @@ public class SAITester extends CQLTester
 
     @Rule
     public TestRule testRules = new ResourceLeakDetector();
+
+    @Before
+    public void resetQueryOptimizationLevel() throws Throwable
+    {
+        // Enable the optimizer by default. If there are any tests that need to disable it, they can do so explicitly.
+        QueryController.QUERY_OPT_LEVEL = 1;
+    }
 
     @After
     public void removeAllInjections()

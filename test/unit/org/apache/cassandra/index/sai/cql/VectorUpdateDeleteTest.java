@@ -34,15 +34,6 @@ import static org.junit.Assert.assertEquals;
 
 public class VectorUpdateDeleteTest extends VectorTester.VersionedWithChecksums
 {
-    @Before
-    public void setup() throws Throwable
-    {
-        super.setup();
-
-        // Enable the optimizer by default. If there are any tests that need to disable it, they can do so explicitly.
-        QueryController.QUERY_OPT_LEVEL = 1;
-    }
-
     // partition delete won't trigger UpdateTransaction#onUpdated
     @Test
     public void partitionDeleteVectorInMemoryTest()
