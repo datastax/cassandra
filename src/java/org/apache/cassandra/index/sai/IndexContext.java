@@ -272,9 +272,14 @@ public class IndexContext
         return cfs.getPartitioner();
     }
 
+    public MemtableIndex initializeMemtableIndex(Memtable memtable)
+    {
+        return liveMemtables.computeIfAbsent(memtable, mt -> MemtableIndex.createIndex(this, mt));
+    }
+
     public void index(DecoratedKey key, Row row, Memtable memtable, OpOrder.Group opGroup)
     {
-        MemtableIndex target = liveMemtables.computeIfAbsent(memtable, mt -> MemtableIndex.createIndex(this, mt));
+        MemtableIndex target = initializeMemtableIndex(memtable);
 
         long start = System.nanoTime();
 

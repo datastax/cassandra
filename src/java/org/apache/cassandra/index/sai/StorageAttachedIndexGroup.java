@@ -41,6 +41,8 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.DeletionTime;
+import org.apache.cassandra.db.RangeTombstone;
 import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.WriteContext;
 import org.apache.cassandra.db.filter.RowFilter;
@@ -225,6 +227,18 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
             public void removeRow(Row row)
             {
                 forEach(indexer -> indexer.removeRow(row));
+            }
+
+            @Override
+            public void partitionDelete(DeletionTime deletionTime)
+            {
+                forEach(indexer -> indexer.partitionDelete(deletionTime));
+            }
+
+            @Override
+            public void rangeTombstone(RangeTombstone tombstone)
+            {
+                forEach(indexer -> indexer.rangeTombstone(tombstone));
             }
 
             private void forEach(Consumer<Index.Indexer> action)
