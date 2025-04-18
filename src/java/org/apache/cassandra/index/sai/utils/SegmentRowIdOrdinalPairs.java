@@ -138,16 +138,15 @@ public class SegmentRowIdOrdinalPairs
             }
 
             @Override
-            public int nextNode()
+            public int pop()
             {
-                return mapToIndex ? i : array[i * 2];
+                return mapToIndex ? i++ : array[i++ * 2];
             }
 
             @Override
-            public float nextScore()
+            public float topScore()
             {
-                // Score advances the iterator
-                return scoreFunction.similarityTo(array[i++ * 2 + 1]);
+                return scoreFunction.similarityTo(array[i * 2 + 1]);
             }
         };
     }

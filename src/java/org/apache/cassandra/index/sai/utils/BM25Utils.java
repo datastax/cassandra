@@ -183,18 +183,18 @@ public class BM25Utils
             }
 
             @Override
-            public int nextNode() {
-                return current;
+            public int pop() {
+                return current++;
             }
 
             @Override
-            public float nextScore() {
-                // Compute BM25 for the current document (nextScore advances the iterator)
-                return scoreDoc(documents.get(current++), docStats, queryTerms, avgDocLength);
+            public float topScore() {
+                // Compute BM25 for the current document
+                return scoreDoc(documents.get(current), docStats, queryTerms, avgDocLength);
             }
         };
-        // pushAll is an O(n) operation while iterative calls to push is O(n log n).
-        nodeQueue.pushAll(iter, documents.size());
+        // pushMany is an O(n) operation where n is the final size of the queue. Iterative calls to push is O(n log n).
+        nodeQueue.pushMany(iter, documents.size());
 
         return new NodeQueueDocTFIterator(nodeQueue, documents, indexContext, source, docIterator);
     }

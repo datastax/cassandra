@@ -300,7 +300,7 @@ public class V2VectorIndexSearcher extends IndexSearcher
         // retrieve both values with O(1) lookup when we need to resolve the full resolution score in the
         // BruteForceRowIdIterator.
         var iter = segmentOrdinalPairs.mapToIndexScoreIterator(scoreFunction);
-        approximateScores.pushAll(iter, segmentOrdinalPairs.size());
+        approximateScores.pushMany(iter, segmentOrdinalPairs.size());
         columnQueryMetrics.onBruteForceNodesVisited(segmentOrdinalPairs.size());
         var reranker = new CloseableReranker(similarityFunction, queryVector, graph.getView());
         return new BruteForceRowIdIterator(approximateScores, segmentOrdinalPairs, reranker, limit, rerankK, columnQueryMetrics);
@@ -320,7 +320,7 @@ public class V2VectorIndexSearcher extends IndexSearcher
             var esf = vectorsView.rerankerFor(queryVector, similarityFunction);
             // Because the scores are exact, we only store the rowid, score pair.
             var iter = segmentOrdinalPairs.mapToSegmentRowIdScoreIterator(esf);
-            scoredRowIds.pushAll(iter, segmentOrdinalPairs.size());
+            scoredRowIds.pushMany(iter, segmentOrdinalPairs.size());
             columnQueryMetrics.onBruteForceNodesReranked(segmentOrdinalPairs.size());
             return new NodeQueueRowIdIterator(scoredRowIds);
         }

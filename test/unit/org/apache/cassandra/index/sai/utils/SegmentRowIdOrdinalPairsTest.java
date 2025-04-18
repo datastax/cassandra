@@ -161,18 +161,18 @@ public class SegmentRowIdOrdinalPairsTest
 
         // Test first pair
         assertTrue(iterator.hasNext());
-        assertEquals(1, iterator.nextNode());
-        assertEquals(1.0f, iterator.nextScore(), 0.001f);
+        assertEquals(1.0f, iterator.topScore(), 0.001f);
+        assertEquals(1, iterator.pop());
 
         // Test second pair
         assertTrue(iterator.hasNext());
-        assertEquals(2, iterator.nextNode());
-        assertEquals(2.0f, iterator.nextScore(), 0.001f);
+        assertEquals(2.0f, iterator.topScore(), 0.001f);
+        assertEquals(2, iterator.pop());
 
         // Test third pair
         assertTrue(iterator.hasNext());
-        assertEquals(3, iterator.nextNode());
-        assertEquals(3.0f, iterator.nextScore(), 0.001f);
+        assertEquals(3.0f, iterator.topScore(), 0.001f);
+        assertEquals(3, iterator.pop());
 
         // Test end of iteration
         assertFalse(iterator.hasNext());
@@ -193,18 +193,18 @@ public class SegmentRowIdOrdinalPairsTest
 
         // Test first pair
         assertTrue(iterator.hasNext());
-        assertEquals(0, iterator.nextNode());
-        assertEquals(1.0f, iterator.nextScore(), 0.001f);
+        assertEquals(1.0f, iterator.topScore(), 0.001f);
+        assertEquals(0, iterator.pop());
 
         // Test second pair
         assertTrue(iterator.hasNext());
-        assertEquals(1, iterator.nextNode());
-        assertEquals(2.0f, iterator.nextScore(), 0.001f);
+        assertEquals(2.0f, iterator.topScore(), 0.001f);
+        assertEquals(1, iterator.pop());
 
         // Test third pair
         assertTrue(iterator.hasNext());
-        assertEquals(2, iterator.nextNode());
-        assertEquals(3.0f, iterator.nextScore(), 0.001f);
+        assertEquals(3.0f, iterator.topScore(), 0.001f);
+        assertEquals(2, iterator.pop());
 
         // Test end of iteration
         assertFalse(iterator.hasNext());
