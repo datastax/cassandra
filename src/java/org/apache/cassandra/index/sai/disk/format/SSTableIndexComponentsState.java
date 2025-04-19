@@ -342,7 +342,7 @@ public class SSTableIndexComponentsState
             return new State(components.buildId(), toMB(components.liveSizeOnDiskInBytes()));
         }
 
-        private static long toMB(long bytes)
+        public static long toMB(long bytes)
         {
             if (bytes == 0)
                 return 0;
