@@ -42,6 +42,7 @@ import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.NoSpamLogger;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_CUSTOM_COMPONENTS_DISCOVERY_CLASS;
+import static org.apache.cassandra.index.sai.disk.format.SSTableIndexComponentsState.State.toMB;
 
 /**
  * Handles "discovering" SAI index components files from disk for a given sstable.
@@ -253,9 +254,9 @@ public abstract class IndexComponentDiscovery
         void addTo(SSTableIndexComponentsState.Builder builder, @Nullable String indexName)
         {
             if (indexName == null)
-                builder.addPerSSTable(buildId, totalSizeInBytes);
+                builder.addPerSSTable(buildId, toMB(totalSizeInBytes));
             else
-                builder.addPerIndex(indexName, buildId, totalSizeInBytes);
+                builder.addPerIndex(indexName, buildId, toMB(totalSizeInBytes));
         }
 
         static SSTableIndexComponentsState convert(Map<String, StateBuilder> states)
