@@ -154,7 +154,7 @@ public class PendingAntiCompactionTest extends AbstractPendingAntiCompactionTest
         try
         {
             pac = new PendingAntiCompaction(sessionID, tables, atEndpoint(ranges, NO_RANGES), executor, () -> false);
-            pac.run().get();
+            pac.run().get(30, TimeUnit.SECONDS);
         }
         finally
         {
@@ -640,7 +640,7 @@ public class PendingAntiCompactionTest extends AbstractPendingAntiCompactionTest
     }
 
     @Test
-    public void testRetries() throws InterruptedException, ExecutionException
+    public void testRetries() throws InterruptedException, ExecutionException, TimeoutException
     {
         ColumnFamilyStore cfs = MockSchema.newCFS();
         cfs.addSSTable(MockSchema.sstable(1, true, cfs));
@@ -683,7 +683,7 @@ public class PendingAntiCompactionTest extends AbstractPendingAntiCompactionTest
             };
             Future f = es.submit(acquisitionCallable);
             cdl.await();
-            assertNotNull(f.get());
+            assertNotNull(f.get(30, TimeUnit.SECONDS));
         }
         finally
         {
@@ -692,7 +692,7 @@ public class PendingAntiCompactionTest extends AbstractPendingAntiCompactionTest
     }
 
     @Test
-    public void testRetriesTimeout() throws InterruptedException, ExecutionException, IOException
+    public void testRetriesTimeout() throws InterruptedException, ExecutionException, IOException, TimeoutException
     {
         ColumnFamilyStore cfs = MockSchema.newCFS();
         cfs.addSSTable(MockSchema.sstable(1, true, cfs));
@@ -721,7 +721,7 @@ public class PendingAntiCompactionTest extends AbstractPendingAntiCompactionTest
             };
             PendingAntiCompaction.AcquisitionCallable acquisitionCallable = new PendingAntiCompaction.AcquisitionCallable(cfs, nextTimeUUID(), 2, 1000, acp);
             Future fut = es.submit(acquisitionCallable);
-            assertNull(fut.get());
+            assertNull(fut.get(30, TimeUnit.SECONDS));
         }
         finally
         {
@@ -730,7 +730,7 @@ public class PendingAntiCompactionTest extends AbstractPendingAntiCompactionTest
     }
 
     @Test
-    public void testWith2i() throws ExecutionException, InterruptedException
+    public void testWith2i() throws ExecutionException, InterruptedException, TimeoutException
     {
         cfs2.disableAutoCompaction();
         makeSSTables(2, cfs2, 100);
@@ -746,7 +746,7 @@ public class PendingAntiCompactionTest extends AbstractPendingAntiCompactionTest
             try (LifecycleTransaction txn = idx.getTracker().tryModify(idx.getLiveSSTables(), OperationType.COMPACTION))
             {
                 PendingAntiCompaction pac = new PendingAntiCompaction(prsid, Collections.singleton(cfs2), atEndpoint(FULL_RANGE, NO_RANGES), es, () -> false);
-                pac.run().get();
+                pac.run().get(30, TimeUnit.SECONDS);
             }
             // and make sure it succeeded;
             for (SSTableReader sstable : cfs2.getLiveSSTables())
