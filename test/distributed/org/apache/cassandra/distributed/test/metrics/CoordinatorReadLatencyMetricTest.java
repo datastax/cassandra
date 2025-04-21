@@ -22,9 +22,11 @@ import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
+import org.apache.commons.lang3.StringUtils;
 import org.junit.Test;
 
 import org.apache.cassandra.config.Config;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.distributed.api.ConsistencyLevel;
 import org.apache.cassandra.distributed.test.TestBaseImpl;
@@ -41,9 +43,14 @@ public class CoordinatorReadLatencyMetricTest extends TestBaseImpl
     {
         try (Cluster cluster = init(builder().withNodes(1).start()))
         {
-            cluster.schemaChange(withKeyspace("CREATE TABLE %s.tbl (pk int, ck int, v int, PRIMARY KEY (pk, ck))"));
+            // CC only supports paging in bytes. Set the smallest page size allowed.
+            cluster.get(1).callOnInstance(() -> DatabaseDescriptor.getRawConfig().aggregation_subpage_size_in_kb = 1);
+
+            // Create rows greater than the 1kb subpage size
+            String payload = StringUtils.repeat('1', 1024 * 2);
+            cluster.schemaChange(withKeyspace("CREATE TABLE %s.tbl (pk int, ck int, v text, PRIMARY KEY (pk, ck))"));
             for (int i = 0; i < 100; i++)
-                cluster.coordinator(1).execute(withKeyspace("insert into %s.tbl (pk, ck ,v) values (0, ?, 1)"), ConsistencyLevel.ALL, i);
+                cluster.coordinator(1).execute(withKeyspace("insert into %s.tbl (pk, ck ,v) values (0, ?, ?)"), ConsistencyLevel.ALL, i, payload);
 
             // Serial and non-serial reads have separates code paths, so exercise them both
             testAggregationQuery(cluster, ConsistencyLevel.ALL);
