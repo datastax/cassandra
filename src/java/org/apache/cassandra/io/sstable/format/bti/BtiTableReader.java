@@ -55,6 +55,7 @@ import org.apache.cassandra.io.sstable.format.SSTableReaderWithFilter;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.RandomAccessReader;
+import org.apache.cassandra.io.util.ReadPattern;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.IFilter;
 import org.apache.cassandra.utils.OutputHandler;
@@ -213,7 +214,7 @@ public class BtiTableReader extends SSTableReaderWithFilter
     @Override
     public IKeyFetcher openKeyFetcher(boolean isForSASI)
     {
-        return new AbstractKeyFetcher(openDataReader())
+        return new AbstractKeyFetcher(openDataReader(ReadPattern.RANDOM))
         {
             @Override
             public DecoratedKey readKey(RandomAccessReader reader) throws IOException

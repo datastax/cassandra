@@ -41,6 +41,7 @@ import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.PageAware;
+import org.apache.cassandra.io.util.ReadPattern;
 import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.io.util.SizedInts;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -285,7 +286,7 @@ public class PartitionIndex implements SharedCloseable
 
     protected Rebufferer instantiateRebufferer()
     {
-        return fh.instantiateRebufferer(null);
+        return fh.instantiateRebufferer(null, ReadPattern.SEQUENTIAL);
     }
 
 
