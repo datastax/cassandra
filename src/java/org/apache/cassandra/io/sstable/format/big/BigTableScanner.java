@@ -20,6 +20,7 @@ package org.apache.cassandra.io.sstable.format.big;
 import java.io.IOException;
 import java.util.Iterator;
 
+import org.apache.cassandra.io.util.ReadPattern;
 import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
@@ -64,7 +65,7 @@ public class BigTableScanner extends SSTableScanner<BigTableReader, RowIndexEntr
         RandomAccessReader ifile = null;
         try
         {
-            ifile = sstable.openIndexReader();
+            ifile = sstable.openIndexReader(ReadPattern.SEQUENTIAL);
             this.rowIndexEntrySerializer = new RowIndexEntry.Serializer(sstable.descriptor.version, sstable.header, sstable.owner().map(SSTable.Owner::getMetrics).orElse(null));
         }
         catch (Throwable t)

@@ -41,6 +41,7 @@ import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.io.util.ReadPattern;
 import org.apache.cassandra.schema.CompactionParams.TombstoneOption;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 
@@ -380,6 +381,6 @@ public class CompactionController extends AbstractCompactionController
 
     private FileDataInput openDataFile(SSTableReader reader)
     {
-        return limiter != null ? reader.openDataReader(limiter) : reader.openDataReader();
+        return limiter != null ? reader.openDataReader(limiter, ReadPattern.SEQUENTIAL) : reader.openDataReader(ReadPattern.SEQUENTIAL);
     }
 }
