@@ -98,16 +98,24 @@ public class ANNOptionsDistributedTest extends TestBaseImpl
         cluster.schemaChange(withKeyspace("CREATE CUSTOM INDEX ON %s.t(v) USING 'StorageAttachedIndex'"));
         SAIUtil.waitForIndexQueryable(cluster, KEYSPACE);
 
-        String select = withKeyspace("SELECT * FROM %s.t ORDER BY v ANN OF [1, 1] LIMIT 10 WITH ann_options = {'rerank_k': 10}");
+        String selectRerankk = withKeyspace("SELECT * FROM %s.t ORDER BY v ANN OF [1, 1] LIMIT 10 WITH ann_options = {'rerank_k': 10}");
+        String selectUsePruning = withKeyspace("SELECT * FROM %s.t ORDER BY v ANN OF [1, 1] LIMIT 10 WITH ann_options = {'use_pruning': false}");
 
         for (int i = 1; i <= cluster.size(); i++)
         {
             ICoordinator coordinator = cluster.coordinator(i);
             if (expectedErrorMessage == null)
-                coordinator.execute(select, ConsistencyLevel.ONE);
+            {
+                coordinator.execute(selectRerankk, ConsistencyLevel.ONE);
+                coordinator.execute(selectUsePruning, ConsistencyLevel.ONE);
+            }
             else
-                Assertions.assertThatThrownBy(() -> coordinator.execute(select, ConsistencyLevel.ONE))
+            {
+                Assertions.assertThatThrownBy(() -> coordinator.execute(selectRerankk, ConsistencyLevel.ONE))
                           .hasMessageContaining(expectedErrorMessage);
+                Assertions.assertThatThrownBy(() -> coordinator.execute(selectUsePruning, ConsistencyLevel.ONE))
+                          .hasMessageContaining(expectedErrorMessage);
+            }
         }
     }
 

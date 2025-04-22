@@ -49,6 +49,8 @@ public class V3OnDiskFormat extends V2OnDiskFormat
 
     public static volatile boolean WRITE_JVECTOR3_FORMAT = Boolean.parseBoolean(System.getProperty("cassandra.sai.write_jv3_format", "false"));
     public static final boolean ENABLE_LTM_CONSTRUCTION = Boolean.parseBoolean(System.getProperty("cassandra.sai.ltm_construction", "true"));
+    // JVector doesn't give us a way to access its default, so we set it here, but allow it to be overridden.
+    public static boolean JVECTOR_USE_PRUNING_DEFAULT = Boolean.parseBoolean(System.getProperty("cassandra.sai.jvector.use_pruning_default", "true"));
 
     // These are built to be backwards and forwards compatible. Not final only for testing.
     public static int JVECTOR_VERSION = Integer.parseInt(System.getProperty("cassandra.sai.jvector_version", "4"));
