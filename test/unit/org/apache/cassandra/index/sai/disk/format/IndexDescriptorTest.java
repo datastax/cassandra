@@ -19,6 +19,7 @@
 package org.apache.cassandra.index.sai.disk.format;
 
 import java.io.IOException;
+import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Set;
@@ -30,11 +31,9 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
-import jnr.ffi.annotations.In;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.UTF8Type;
-import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.io.sstable.Component;
@@ -43,7 +42,6 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.PathUtils;
 import org.mockito.Mockito;
-import org.mortbay.util.IO;
 
 import static org.apache.cassandra.index.sai.SAIUtil.setLatestVersion;
 import static org.junit.Assert.assertEquals;
@@ -217,6 +215,32 @@ public class IndexDescriptorTest
         assertTrue(components.has(IndexComponentType.KD_TREE_POSTING_LISTS));
     }
 
+    // CNDB-13582
+    @Test
+    public void componentsAreLoadedAfterUpgradeDespiteBrokenTOC() throws Throwable
+    {
+        setLatestVersion(Version.AA);
+
+        // Force old version of sstables to simulate upgrading from DSE
+        Descriptor descriptor = Descriptor.fromFilename(temporaryFolder.newFolder().getAbsolutePath() + "/bb-2-bti-Data.db");
+
+        IndexContext indexContext = SAITester.createIndexContext("test_index", Int32Type.instance);
+
+        createFakeDataFile(descriptor);
+        createFakeTOCFile(descriptor);
+        createFakePerSSTableComponents(descriptor, Version.AA, 0);
+        createFakePerIndexComponents(descriptor, indexContext, Version.AA, 0);
+
+        IndexDescriptor indexDescriptor = loadDescriptor(descriptor, indexContext);
+
+        IndexComponents.ForRead components = indexDescriptor.perIndexComponents(indexContext);
+        assertTrue(components.has(IndexComponentType.COLUMN_COMPLETION_MARKER));
+        assertTrue(components.has(IndexComponentType.META));
+        assertTrue(components.has(IndexComponentType.KD_TREE));
+        assertTrue(components.has(IndexComponentType.KD_TREE_POSTING_LISTS));
+    }
+
+
     @Test
     public void testReload() throws Throwable
     {
@@ -249,25 +273,53 @@ public class IndexDescriptorTest
         assertTrue(components.has(IndexComponentType.KD_TREE_POSTING_LISTS));
     }
 
-    private static void createFileOnDisk(Descriptor descriptor, String componentStr) throws IOException
+    private static void createEmptyFileOnDisk(Descriptor descriptor, String componentStr) throws IOException
     {
         Files.touch(new File(PathUtils.getPath(descriptor.baseFileUri() + '-' + componentStr)).toJavaIOFile());
     }
 
+    private static void createileOnDisk(Descriptor descriptor, String componentStr, int size) throws IOException
+    {
+        if (size == 0)
+        {
+            createEmptyFileOnDisk(descriptor, componentStr);
+        }
+        else
+        {
+            Path filePath = PathUtils.getPath(descriptor.baseFileUri() + '-' + componentStr);
+            Files.write(new byte[size], filePath.toFile());
+        }
+    }
+
     static void createFakeDataFile(Descriptor descriptor) throws IOException
     {
-        createFileOnDisk(descriptor, Component.DATA.name());
+        createEmptyFileOnDisk(descriptor, Component.DATA.name());
+    }
+
+    static void createFakeTOCFile(Descriptor descriptor) throws IOException
+    {
+        createEmptyFileOnDisk(descriptor, Component.TOC.name());
     }
 
     static void createFakePerSSTableComponents(Descriptor descriptor, Version version, int generation) throws IOException
     {
+        createFakePerSSTableComponents(descriptor, version, generation, 0);
+    }
+
+    static void createFakePerSSTableComponents(Descriptor descriptor, Version version, int generation, int sizeInBytes) throws IOException
+    {
         for (IndexComponentType type : version.onDiskFormat().perSSTableComponentTypes())
-            createFileOnDisk(descriptor, version.fileNameFormatter().format(type, (String)null, generation));
+            createileOnDisk(descriptor, version.fileNameFormatter().format(type, (String)null, generation), sizeInBytes);
     }
 
     static void createFakePerIndexComponents(Descriptor descriptor, IndexContext context, Version version, int generation) throws IOException
     {
+        createFakePerIndexComponents(descriptor, context, version, generation, 0);
+    }
+
+    static void createFakePerIndexComponents(Descriptor descriptor, IndexContext context, Version version, int generation, int sizeInBytes) throws IOException
+    {
         for (IndexComponentType type : version.onDiskFormat().perIndexComponentTypes(context))
-            createFileOnDisk(descriptor, version.fileNameFormatter().format(type, context, generation));
+            createileOnDisk(descriptor, version.fileNameFormatter().format(type, context, generation), sizeInBytes);
     }
 }
