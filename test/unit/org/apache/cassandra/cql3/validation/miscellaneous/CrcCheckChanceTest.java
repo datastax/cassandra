@@ -35,6 +35,7 @@ import org.apache.cassandra.db.compaction.CompactionInterruptedException;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.RandomAccessReader;
+import org.apache.cassandra.io.util.ReadPattern;
 import org.apache.cassandra.utils.FBUtilities;
 
 public class CrcCheckChanceTest extends CQLTester
@@ -147,8 +148,8 @@ public class CrcCheckChanceTest extends CQLTester
         if (indexCfs != null)
         {
             SSTableReader idxSSTable = indexCfs.getLiveSSTables().iterator().next();
-            try (RandomAccessReader baseDataReader = baseSSTable.openDataReader();
-                 RandomAccessReader idxDataReader = idxSSTable.openDataReader())
+            try (RandomAccessReader baseDataReader = baseSSTable.openDataReader(ReadPattern.RANDOM);
+                 RandomAccessReader idxDataReader = idxSSTable.openDataReader(ReadPattern.RANDOM))
             {
                 Assert.assertEquals(0.03, baseDataReader.getCrcCheckChance(), 0.0);
                 Assert.assertEquals(0.03, idxDataReader.getCrcCheckChance(), 0.0);
@@ -160,7 +161,7 @@ public class CrcCheckChanceTest extends CQLTester
         }
         else
         {
-            try (RandomAccessReader baseDataReader = baseSSTable.openDataReader())
+            try (RandomAccessReader baseDataReader = baseSSTable.openDataReader(ReadPattern.RANDOM))
             {
                 Assert.assertEquals(0.03, baseDataReader.getCrcCheckChance(), 0.0);
                 cfs.setCrcCheckChance(0.31);

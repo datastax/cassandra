@@ -33,6 +33,7 @@ import org.apache.cassandra.index.sai.disk.v1.trie.TrieTermsDictionaryReader;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.io.util.ReadPattern;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.util.BytesRef;
@@ -156,7 +157,7 @@ public class SortedTermsReader
                 this.termsDataFp = this.termsData.getFilePointer();
                 this.blockOffsets = new LongArray.DeferredLongArray(blockOffsetsFactory::open);
                 this.currentTerm = new BytesRef(Math.max(meta.maxTermLength, 0));  // maxTermLength can be negative if meta.count == 0
-                this.reader = new TrieTermsDictionaryReader(termsTrie.instantiateRebufferer(null), meta.trieFP, TypeUtil.BYTE_COMPARABLE_VERSION);
+                this.reader = new TrieTermsDictionaryReader(termsTrie.instantiateRebufferer(null, ReadPattern.SEQUENTIAL), meta.trieFP, TypeUtil.BYTE_COMPARABLE_VERSION);
             }
             catch (Throwable t)
             {
