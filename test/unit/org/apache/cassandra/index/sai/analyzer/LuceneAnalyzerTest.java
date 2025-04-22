@@ -28,8 +28,10 @@ package org.apache.cassandra.index.sai.analyzer;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
+import java.util.stream.Collectors;
 
 import com.google.common.base.Charsets;
 import org.junit.Test;
@@ -39,8 +41,11 @@ import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.core.WhitespaceAnalyzer;
+import org.apache.lucene.analysis.en.EnglishAnalyzer;
 
 import static org.junit.Assert.assertArrayEquals;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 
 public class LuceneAnalyzerTest
 {
@@ -150,6 +155,37 @@ public class LuceneAnalyzerTest
         String testString = "one stopword";
         List<String> list = tokenize(testString, json);
         assertArrayEquals(new String[]{}, list.toArray(new String[0]));
+    }
+
+    @Test
+    public void testStopwordWithoutArgsDefaultsToEnglish() throws Exception
+    {
+        String json = "{\"tokenizer\":{\"name\" : \"whitespace\"}," +
+                      "\"filters\":[{\"name\":\"stop\"}]}";
+        // Assert that when we do not pass any arguments to the stop filter, it defaults to english, and
+        // show this by joining the stop words together and asserting it produces no tokens
+        String testString = EnglishAnalyzer.ENGLISH_STOP_WORDS_SET.stream()
+                                                                  .map(s -> ((char[]) s))
+                                                                  .map(String::new)
+                                                                  .reduce((a, b) -> a + " " + b)
+                                                                  .get();
+        assertFalse(testString.isEmpty());
+        List<String> list = tokenize(testString, json);
+        assertArrayEquals(new String[]{}, list.toArray(new String[0]));
+
+        // Let's also confirm the stop words are the expected ones. (We rely on this set for some indexes, so if
+        // it were to change (it shouldn't), that would create inconsistencies in existing indexes which means
+        // we want to know before any changes get released.)
+        var expectedStopWords = Arrays.asList("a", "an", "and", "are", "as", "at", "be", "but", "by", "for", "if", "in",
+                                              "into", "is", "it", "no", "not", "of", "on", "or", "such", "that", "the",
+                                              "their", "then", "there", "these", "they", "this", "to", "was", "will",
+                                              "with");
+        var actualStopWords = EnglishAnalyzer.ENGLISH_STOP_WORDS_SET.stream()
+                                                                    .map(s -> ((char[]) s))
+                                                                    .map(String::new)
+                                                                    .sorted()
+                                                                    .collect(Collectors.toList());
+        assertEquals(expectedStopWords, actualStopWords);
     }
 
     @Test(expected = InvalidRequestException.class)
