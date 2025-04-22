@@ -124,6 +124,7 @@ public class SegmentRowIdOrdinalPairs
     /**
      * Create an iterator over the index or the segment row id and the score for the ordinal.
      * @param scoreFunction the score function to use to compute the next score based on the ordinal
+     * @param mapToIndex whether to map to the index or the segment row id
      */
     private NodeQueue.NodeScoreIterator mapToScoreIterator(ScoreFunction scoreFunction, boolean mapToIndex)
     {
