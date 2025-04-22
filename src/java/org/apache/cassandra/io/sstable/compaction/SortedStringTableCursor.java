@@ -41,6 +41,7 @@ import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.RandomAccessReader;
+import org.apache.cassandra.io.util.ReadPattern;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
@@ -82,17 +83,17 @@ public class SortedStringTableCursor implements SSTableCursor
 
     public SortedStringTableCursor(SSTableReader sstable)
     {
-        this(sstable, sstable.openDataReader(), null);
+        this(sstable, sstable.openDataReader(ReadPattern.SEQUENTIAL), null);
     }
 
     public SortedStringTableCursor(SSTableReader sstable, Range<Token> range)
     {
-        this(sstable, sstable.openDataReader(), range);
+        this(sstable, sstable.openDataReader(ReadPattern.SEQUENTIAL), range);
     }
 
     public SortedStringTableCursor(SSTableReader sstable, Range<Token> tokenRange, RateLimiter limiter)
     {
-        this(sstable, sstable.openDataReader(limiter), tokenRange);
+        this(sstable, sstable.openDataReader(limiter, ReadPattern.SEQUENTIAL), tokenRange);
     }
 
     public SortedStringTableCursor(SSTableReader sstable, RandomAccessReader dataFile, Range<Token> tokenRange)
