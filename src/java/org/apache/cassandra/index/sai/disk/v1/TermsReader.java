@@ -47,6 +47,7 @@ import org.apache.cassandra.index.sai.utils.AbortedOperationException;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.io.util.ReadPattern;
 import org.apache.cassandra.utils.Clock;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.Throwables;
@@ -213,7 +214,7 @@ public class TermsReader implements Closeable
 
         public long lookupTermDictionary(ByteComparable term)
         {
-            try (TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(termDictionaryFile.instantiateRebufferer(null), termDictionaryRoot, termDictionaryFileEncodingVersion))
+            try (TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(termDictionaryFile.instantiateRebufferer(null, ReadPattern.SEQUENTIAL), termDictionaryRoot, termDictionaryFileEncodingVersion))
             {
                 final long offset = reader.exactMatch(term);
 
@@ -260,7 +261,7 @@ public class TermsReader implements Closeable
             // Note: we always pass true for include start because we use the ByteComparable terminator above
             // to selectively determine when we have a match on the first/last term. This is probably part of the API
             // that could change, but it's been there for a bit, so we'll leave it for now.
-            try (TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(termDictionaryFile.instantiateRebufferer(null),
+            try (TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(termDictionaryFile.instantiateRebufferer(null, ReadPattern.SEQUENTIAL),
                                                                                   termDictionaryRoot,
                                                                                   lower,
                                                                                   upper,
@@ -386,7 +387,7 @@ public class TermsReader implements Closeable
 
         private TermsScanner(Version version, AbstractType<?> type)
         {
-            this.termsDictionaryReader = new TrieTermsDictionaryReader(termDictionaryFile.instantiateRebufferer(null), termDictionaryRoot, termDictionaryFileEncodingVersion);
+            this.termsDictionaryReader = new TrieTermsDictionaryReader(termDictionaryFile.instantiateRebufferer(null, ReadPattern.SEQUENTIAL), termDictionaryRoot, termDictionaryFileEncodingVersion);
             this.postingsInput = IndexFileUtils.instance().openInput(postingsFile);
             this.postingsSummaryInput = IndexFileUtils.instance().openInput(postingsFile);
             // We decode based on the logic used to encode the min and max terms in the trie.
@@ -458,7 +459,7 @@ public class TermsReader implements Closeable
 
         private ReverseTermsScanner()
         {
-            this.iterator = new ReverseTrieTermsDictionaryReader(termDictionaryFile.instantiateRebufferer(null), termDictionaryRoot);
+            this.iterator = new ReverseTrieTermsDictionaryReader(termDictionaryFile.instantiateRebufferer(null, ReadPattern.SEQUENTIAL), termDictionaryRoot);
             this.postingsInput = IndexFileUtils.instance().openInput(postingsFile);
             this.postingsSummaryInput = IndexFileUtils.instance().openInput(postingsFile);
         }

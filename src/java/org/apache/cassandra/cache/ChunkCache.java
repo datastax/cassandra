@@ -702,6 +702,12 @@ public class ChunkCache
         }
 
         @Override
+        public int chunkSize()
+        {
+            return source.chunkSize();
+        }
+
+        @Override
         public Rebufferer instantiateRebufferer(boolean isScan)
         {
             return this;
