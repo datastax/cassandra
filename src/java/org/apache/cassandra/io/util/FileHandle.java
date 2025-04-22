@@ -146,17 +146,27 @@ public class FileHandle extends SharedCloseableImpl
      */
     public RandomAccessReader createReader()
     {
-        return createReader(null);
+        return createReader(ReadPattern.RANDOM);
     }
 
-    public RandomAccessReader createReader(RateLimiter limiter)
+    public RandomAccessReader createReader(ReadPattern accessPattern)
     {
-        return createReader(limiter, sliceDescriptor.dataStart);
+        return createReader(null, accessPattern);
+    }
+
+    public RandomAccessReader createReader(RateLimiter limiter, ReadPattern accessPattern)
+    {
+        return createReader(limiter, sliceDescriptor.dataStart, accessPattern);
     }
 
     public RandomAccessReader createReader(long position)
     {
-        return createReader(null, position);
+        return createReader(null, position, ReadPattern.RANDOM);
+    }
+
+    public RandomAccessReader createReader(long position, ReadPattern accessPattern)
+    {
+        return createReader(null, position, accessPattern);
     }
 
     /**
@@ -165,15 +175,18 @@ public class FileHandle extends SharedCloseableImpl
      *
      * @param limiter RateLimiter to use for rate limiting read
      * @param position Position in the file to start reading from
+     * @param accessPattern the access pattern expected for the reads made against the returned reader (this is
+     *                      mostly a hint that may optimize the reader for the provided patter, typically enabling
+     *                      prefetching for {@link ReadPattern#SEQUENTIAL}).
      * @return RandomAccessReader for the file
      */
-    public RandomAccessReader createReader(RateLimiter limiter, long position)
+    public RandomAccessReader createReader(RateLimiter limiter, long position, ReadPattern accessPattern)
     {
         assert position >= 0 : "Position must be non-negative - file: " + channel.filePath() + ", position: " + position;
         Rebufferer.BufferHolder bufferHolder = position > 0
                                                ? Rebufferer.emptyBufferHolderAt(position)
                                                : Rebufferer.EMPTY;
-        return new RandomAccessReader(instantiateRebufferer(limiter), order, bufferHolder);
+        return new RandomAccessReader(instantiateRebufferer(limiter, accessPattern), order, bufferHolder);
     }
 
     /**
@@ -196,9 +209,11 @@ public class FileHandle extends SharedCloseableImpl
             channel.trySkipCache(0, onDiskLength);
     }
 
-    public Rebufferer instantiateRebufferer(RateLimiter limiter)
+    public Rebufferer instantiateRebufferer(RateLimiter limiter, ReadPattern accessPattern)
     {
-        Rebufferer rebufferer = rebuffererFactory.instantiateRebufferer();
+        Rebufferer rebufferer = accessPattern == ReadPattern.SEQUENTIAL
+                                ? PrefetchingRebufferer.withPrefetching(rebuffererFactory)
+                                : rebuffererFactory.instantiateRebufferer();
 
         if (limiter != null)
             rebufferer = new LimitingRebufferer(rebufferer, limiter, DiskOptimizationStrategy.MAX_BUFFER_SIZE);

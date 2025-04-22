@@ -30,6 +30,7 @@ import org.apache.cassandra.io.tries.TrieSerializer;
 import org.apache.cassandra.io.tries.Walker;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.io.util.ReadPattern;
 import org.apache.cassandra.io.util.SizedInts;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
@@ -65,7 +66,7 @@ public class RowIndexReader extends Walker<RowIndexReader>
 
     public RowIndexReader(FileHandle file, long root, Version version)
     {
-        super(file.instantiateRebufferer(null), root, version.getByteComparableVersion());
+        super(file.instantiateRebufferer(null, ReadPattern.SEQUENTIAL), root, version.getByteComparableVersion());
         this.version = version;
     }
 

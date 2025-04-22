@@ -72,6 +72,7 @@ import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.io.util.ReadPattern;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -383,7 +384,7 @@ public class BigTableReader extends SSTableReaderWithFilter implements IndexSumm
     @Override
     public IKeyFetcher openKeyFetcher(boolean isForSASI)
     {
-        return new AbstractKeyFetcher(isForSASI ? openIndexReader() : openDataReader())
+        return new AbstractKeyFetcher(isForSASI ? openIndexReader(ReadPattern.RANDOM) : openDataReader(ReadPattern.SEQUENTIAL))
         {
             @Override
             public DecoratedKey readKey(RandomAccessReader reader) throws IOException
@@ -464,10 +465,10 @@ public class BigTableReader extends SSTableReaderWithFilter implements IndexSumm
         return Iterables.transform(indexSummary.getKeySamples(range), bytes -> decorateKey(ByteBuffer.wrap(bytes)));
     }
 
-    public RandomAccessReader openIndexReader()
+    public RandomAccessReader openIndexReader(ReadPattern pattern)
     {
         if (ifile != null)
-            return ifile.createReader();
+            return ifile.createReader(pattern);
         return null;
     }
 
