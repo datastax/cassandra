@@ -39,6 +39,8 @@ import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.distributed.api.ConsistencyLevel;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.tools.SSTableExport;
+import org.apache.cassandra.tools.ToolRunner;
 import org.apache.cassandra.utils.ChecksumType;
 
 import static org.apache.cassandra.distributed.api.ConsistencyLevel.ALL;
@@ -48,6 +50,7 @@ import static org.apache.cassandra.distributed.shared.FutureUtils.waitOn;
 import static org.apache.cassandra.io.compress.EncryptedSequentialWriter.CHUNK_SIZE;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.ThrowableAssert.catchThrowable;
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
 public class SSTableEncryptionTest extends TestBaseImpl
@@ -123,8 +126,6 @@ public class SSTableEncryptionTest extends TestBaseImpl
             assertThat(byIdRows[0][2]).isEqualTo(String.valueOf(2));
         }
     }
-
-    //a test that checks encrypted sstables loaded into non encrypted table fail
 
     @Test
     public void shouldVerifyPartitionAndRowIndexesAreEncrypted() throws Exception
@@ -226,6 +227,47 @@ public class SSTableEncryptionTest extends TestBaseImpl
         }
     }
 
+    @Test
+    public void shouldFailWhenReadingWithDifferentKey() throws Exception
+    {
+        try (Cluster cluster = builder().withNodes(1)
+                                        .withConfig(config -> config.with(GOSSIP).with(NETWORK))
+                                        .start())
+        {
+            // ignore throwing an exception when closing the cluster as missing key will result in exceptions in logs
+            cluster.setUncaughtExceptionsFilter(t -> true);
+
+            // given a table with data encrypted using local key
+            String keyspace = createKeyspace(cluster);
+            Path secretKey = createLocalSecretKey();
+            String encryptedTableName = createEncryptedTable(cluster, keyspace, secretKey);
+            String nonEncryptedTableName = createTable(cluster, keyspace);
+            int numberOfRows = 10;
+            insertAndFlush(cluster, keyspace, encryptedTableName, numberOfRows);
+            insertAndFlush(cluster, keyspace, nonEncryptedTableName, numberOfRows);
+
+            // delete secret key file
+            assertTrue("secret key should be deleted", Files.deleteIfExists(secretKey));
+
+            Path secretKey2 = createLocalSecretKey(secretKey.toString());
+
+            assertEquals(secretKey, secretKey2);
+
+            // restart to clear in memory secret key cache
+            waitOn(cluster.get(1).shutdown());
+            cluster.get(1).startup();
+
+            // when
+            Object[][] rows = cluster. get(1).executeInternal(String.format("SELECT * FROM %s.%s", keyspace, nonEncryptedTableName));
+            Throwable throwable = catchThrowable(() -> cluster.get(0).executeInternal(String.format("SELECT * FROM %s.%s ", keyspace, encryptedTableName)));
+
+            // then it should be possible to read the table without encryption
+            assertThat(rows.length).isEqualTo(numberOfRows);
+            // then it should not be possible to read the encrypted table
+            assertThat(throwable).isInstanceOf(IndexOutOfBoundsException.class);
+        }
+    }
+
     private TestTable createTableWithSampleData(Cluster cluster, String keyspace, String tableDefSuffix) throws IOException
     {
         String tableName = randomTableName();
@@ -281,7 +323,12 @@ public class SSTableEncryptionTest extends TestBaseImpl
     private Path createLocalSecretKey() throws IOException, NoSuchAlgorithmException, NoSuchPaddingException
     {
         String keyPath = "system_key_" + RandomStringUtils.random(10, true, true);
-        return LocalSystemKey.createKey(keyPath, "AES", 128);
+        return createLocalSecretKey(keyPath);
+    }
+
+    private Path createLocalSecretKey(String keyPath) throws IOException, NoSuchAlgorithmException, NoSuchPaddingException
+    {
+        return LocalSystemKey.createKey(keyPath, "AES", 256);
     }
 
     private String createEncryptedTable(Cluster cluster, String keyspace, Path secretKey)
