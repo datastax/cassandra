@@ -18,23 +18,7 @@
 
 package org.apache.cassandra.io.util;
 
-/**
- * Interface for the classes that can be used to instantiate rebufferers over a given file.
- *
- * These are one of two types:
- *  - chunk sources (e.g. SimpleReadRebufferer) which instantiate a buffer managing rebufferer referencing
- *    themselves.
- *  - thread-safe shared rebufferers (e.g. MmapRebufferer) which directly return themselves.
- */
-public interface RebuffererFactory extends ReaderFileProxy
+public enum ReadPattern
 {
-    Rebufferer instantiateRebufferer(boolean isScan);
-
-    /**
-     * If the {@link Rebufferer} created by this factory rebuffered in "chunks" of a fixed size, the size (> 0) of those
-     * chunks. Otherwise, this should return a value <= 0.
-     */
-    int chunkSize();
-
-    void invalidateIfCached(long position);
+    SEQUENTIAL, RANDOM
 }
