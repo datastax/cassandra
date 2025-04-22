@@ -273,7 +273,6 @@ public class TrieMemoryIndex extends MemoryIndex
     }
 
     @Override
-//<<<<<<< HEAD
     public KeyRangeIterator search(Expression expression, AbstractBounds<PartitionPosition> keyRange)
     {
         if (logger.isTraceEnabled())
@@ -294,10 +293,7 @@ public class TrieMemoryIndex extends MemoryIndex
     }
 
     @Override
-//    public Iterator<Pair<ByteComparable, List<PkWithFrequency>>> iterator()
-//=======
     public Iterator<Pair<ByteComparable.Preencoded, List<PkWithFrequency>>> iterator()
-//>>>>>>> 362af8d863 (CNDB-13457: Fix problems with byte-comparable versions in SAI  (#1655))
     {
         Iterator<Map.Entry<ByteComparable.Preencoded, PrimaryKeys>> iterator = data.entrySet().iterator();
         return new Iterator<>()
