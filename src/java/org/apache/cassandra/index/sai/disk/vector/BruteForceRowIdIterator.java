@@ -26,12 +26,10 @@ import org.apache.cassandra.index.sai.utils.RowIdWithMeta;
 import org.apache.cassandra.index.sai.utils.RowIdWithScore;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.AbstractIterator;
-import org.apache.cassandra.utils.SortingIterator;
 
 
 /**
- * An iterator over {@link RowIdWithMeta} that lazily consumes from a {@link SortingIterator} of
- * {@link RowWithApproximateScore}.
+ * An iterator over {@link RowIdWithMeta} that lazily consumes from a {@link NodeQueue} of approximate scores.
  * <p>
  * The idea is that we maintain the same level of accuracy as we would get from a graph search, by re-ranking the top
  * `k` best approximate scores at a time with the full resolution vectors to return the top `limit`.
