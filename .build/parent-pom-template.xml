@@ -1250,17 +1250,17 @@
       <dependency>
         <groupId>org.apache.lucene</groupId>
         <artifactId>lucene-core</artifactId>
-        <version>9.8.0-5ea8bb4f21</version>
+        <version>9.8.0</version>
       </dependency>
       <dependency>
         <groupId>org.apache.lucene</groupId>
         <artifactId>lucene-analysis-common</artifactId>
-        <version>9.8.0-5ea8bb4f21</version>
+        <version>9.8.0</version>
       </dependency>
       <dependency>
         <groupId>org.apache.lucene</groupId>
         <artifactId>lucene-backward-codecs</artifactId>
-        <version>9.8.0-5ea8bb4f21</version>
+        <version>9.8.0</version>
       </dependency>
       <dependency>
         <groupId>io.github.jbellis</groupId>
