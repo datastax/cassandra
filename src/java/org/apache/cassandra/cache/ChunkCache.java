@@ -52,6 +52,8 @@ import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.util.ChannelProxy;
 import org.apache.cassandra.io.util.ChunkReader;
 import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.io.util.PrefetchingRebufferer;
+import org.apache.cassandra.io.util.ReadPattern;
 import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.io.util.RebuffererFactory;
 import org.apache.cassandra.metrics.ChunkCacheMetrics;
@@ -686,6 +688,12 @@ public class ChunkCache
                 Throwables.propagateIfInstanceOf(t.getCause(), CorruptSSTableException.class);
                 throw Throwables.propagate(t);
             }
+        }
+
+        @Override
+        public int chunkSize()
+        {
+            return source.chunkSize();
         }
 
         @Override
