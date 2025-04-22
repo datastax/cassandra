@@ -299,9 +299,8 @@ public class V2VectorIndexSearcher extends IndexSearcher
         // Store the index of the (rowId, ordinal) pair from the segmentOrdinalPairs in the NodeQueue so that we can
         // retrieve both values with O(1) lookup when we need to resolve the full resolution score in the
         // BruteForceRowIdIterator.
-        segmentOrdinalPairs.forEachIndexOrdinalPair((i, ordinal) -> {
-            approximateScores.push(i, scoreFunction.similarityTo(ordinal));
-        });
+        var iter = segmentOrdinalPairs.mapToIndexScoreIterator(scoreFunction);
+        approximateScores.pushMany(iter, segmentOrdinalPairs.size());
         columnQueryMetrics.onBruteForceNodesVisited(segmentOrdinalPairs.size());
         var reranker = new CloseableReranker(similarityFunction, queryVector, graph.getView());
         return new BruteForceRowIdIterator(approximateScores, segmentOrdinalPairs, reranker, limit, rerankK, columnQueryMetrics);
@@ -320,9 +319,8 @@ public class V2VectorIndexSearcher extends IndexSearcher
             var similarityFunction = indexContext.getIndexWriterConfig().getSimilarityFunction();
             var esf = vectorsView.rerankerFor(queryVector, similarityFunction);
             // Because the scores are exact, we only store the rowid, score pair.
-            segmentOrdinalPairs.forEachSegmentRowIdOrdinalPair((segmentRowId, ordinal) -> {
-                scoredRowIds.push(segmentRowId, esf.similarityTo(ordinal));
-            });
+            var iter = segmentOrdinalPairs.mapToSegmentRowIdScoreIterator(esf);
+            scoredRowIds.pushMany(iter, segmentOrdinalPairs.size());
             columnQueryMetrics.onBruteForceNodesReranked(segmentOrdinalPairs.size());
             return new NodeQueueRowIdIterator(scoredRowIds);
         }

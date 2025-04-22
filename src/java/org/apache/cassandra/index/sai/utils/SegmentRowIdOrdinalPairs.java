@@ -20,6 +20,8 @@ package org.apache.cassandra.index.sai.utils;
 
 import java.util.function.IntConsumer;
 
+import io.github.jbellis.jvector.graph.NodeQueue;
+import io.github.jbellis.jvector.graph.similarity.ScoreFunction;
 import org.agrona.collections.IntIntConsumer;
 
 /**
@@ -33,7 +35,7 @@ public class SegmentRowIdOrdinalPairs
     private final int[] array;
 
     /**
-     * Create a new IntIntPairArray with the given capacity.
+     * Create a new SegmentRowIdOrdinalPairs with the given capacity.
      * @param capacity the capacity
      */
     public SegmentRowIdOrdinalPairs(int capacity)
@@ -102,15 +104,53 @@ public class SegmentRowIdOrdinalPairs
     }
 
     /**
-     * Iterate over the pairs in the array, calling the consumer for each pair passing (index, x, y).
-     * @param consumer the consumer to call for each pair
+     * Create an iterator over the segment row id and scored ordinal pairs in the array.
+     * @param scoreFunction the score function to use to compute the next score based on the ordinal
      */
-    public void forEachIndexOrdinalPair(IntIntConsumer consumer)
+    public NodeQueue.NodeScoreIterator mapToSegmentRowIdScoreIterator(ScoreFunction scoreFunction)
     {
-        for (int i = 0; i < size; i++)
-            consumer.accept(i, array[i * 2 + 1]);
+        return mapToScoreIterator(scoreFunction, false);
     }
 
+    /**
+     * Create an iterator over the index and scored ordinal pairs in the array.
+     * @param scoreFunction the score function to use to compute the next score based on the ordinal
+     */
+    public NodeQueue.NodeScoreIterator mapToIndexScoreIterator(ScoreFunction scoreFunction)
+    {
+        return mapToScoreIterator(scoreFunction, true);
+    }
+
+    /**
+     * Create an iterator over the index or the segment row id and the score for the ordinal.
+     * @param scoreFunction the score function to use to compute the next score based on the ordinal
+     * @param mapToIndex whether to map to the index or the segment row id
+     */
+    private NodeQueue.NodeScoreIterator mapToScoreIterator(ScoreFunction scoreFunction, boolean mapToIndex)
+    {
+        return new NodeQueue.NodeScoreIterator()
+        {
+            int i = 0;
+
+            @Override
+            public boolean hasNext()
+            {
+                return i < size;
+            }
+
+            @Override
+            public int pop()
+            {
+                return mapToIndex ? i++ : array[i++ * 2];
+            }
+
+            @Override
+            public float topScore()
+            {
+                return scoreFunction.similarityTo(array[i * 2 + 1]);
+            }
+        };
+    }
 
     /**
      * Calls the consumer for each right value in each pair of the array.
