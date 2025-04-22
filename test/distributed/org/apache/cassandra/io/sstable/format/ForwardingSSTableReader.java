@@ -57,6 +57,7 @@ import org.apache.cassandra.io.util.CheckedFunction;
 import org.apache.cassandra.io.util.DataIntegrityMetadata;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.RandomAccessReader;
+import org.apache.cassandra.io.util.ReadPattern;
 import org.apache.cassandra.metrics.RestorableMeter;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.EstimatedHistogram;
@@ -528,15 +529,15 @@ public abstract class ForwardingSSTableReader extends SSTableReader
     }
 
     @Override
-    public RandomAccessReader openDataReader(RateLimiter limiter)
+    public RandomAccessReader openDataReader(RateLimiter limiter, ReadPattern accessPattern)
     {
-        return delegate.openDataReader(limiter);
+        return delegate.openDataReader(limiter, accessPattern);
     }
 
     @Override
-    public RandomAccessReader openDataReader()
+    public RandomAccessReader openDataReader(ReadPattern accessPattern)
     {
-        return delegate.openDataReader();
+        return delegate.openDataReader(accessPattern);
     }
 
     @Override
