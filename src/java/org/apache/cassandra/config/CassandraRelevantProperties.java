@@ -615,6 +615,26 @@ public enum CassandraRelevantProperties
      */
     RANGE_READ_ENDPOINT_GROUPING_ENABLED("cassandra.range_read_endpoint_grouping_enabled", "true"),
     READS_THRESHOLDS_COORDINATOR_DEFENSIVE_CHECKS_ENABLED("cassandra.reads.thresholds.coordinator.defensive_checks_enabled"),
+    /**
+     * For reads that use prefetching (sequential ones), how much data is prefetced in kilobytes. If the value set is <= 0, then
+     * prefetching is disabled. Also see {@link #READ_PREFETCHING_WINDOW}.
+     * <p>
+     * This is disabled by default because read prefectching is already provided by the OS when working with local disks.
+     * But this is meant for tiered storage extensions, where prefetching may not be provided by the underlying
+     * (custom) "filesystem".
+     */
+    READ_PREFETCHING_SIZE_KB("cassandra.read_prefetching_size_kb", "-1"),
+    /**
+     * Number of threads used for read prefetching (when enabled). If unsed, a default based on the number of processors
+     * is used.
+     */
+    READ_PREFETCHING_THREADS("cassandra.read_prefetching_threads"),
+    /**
+     * The window (on the prefetching size) used to triggered prefetching. The prefetching algorithm ensures that at least
+     * {@link #READ_PREFETCHING_WINDOW} * {@link #READ_PREFETCHING_SIZE_KB} prefetching has been requested, and if that's
+     * not the case it requests up to {@link #READ_PREFETCHING_SIZE_KB}.
+     */
+    READ_PREFETCHING_WINDOW("cassandra.read_prefetching_window", "0.5"),
     RELEASE_VERSION("cassandra.releaseVersion"),
     RELOCATED_SHADED_IO_NETTY_TRANSPORT_NONATIVE("relocated.shaded.io.netty.transport.noNative"),
     /**

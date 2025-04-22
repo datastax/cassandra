@@ -70,6 +70,12 @@ public class EmptyRebufferer implements Rebufferer, RebuffererFactory
     }
 
     @Override
+    public int chunkSize()
+    {
+        return -1;
+    }
+
+    @Override
     public void invalidateIfCached(long position)
     {
     }

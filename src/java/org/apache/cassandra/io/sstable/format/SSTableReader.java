@@ -98,6 +98,7 @@ import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.RandomAccessReader;
+import org.apache.cassandra.io.util.ReadPattern;
 import org.apache.cassandra.io.util.SliceDescriptor;
 import org.apache.cassandra.metrics.RestorableMeter;
 import org.apache.cassandra.schema.SchemaConstants;
@@ -1217,7 +1218,9 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
      */
     public FileDataInput getFileDataInput(long position)
     {
-        return dfile.createReader(position);
+        // While `FileDataInput` supports a `seek` method in practive, it's an interface predominently made for
+        // sequential access. If random access on the returned input is desired, caller should use `#openDataReader`
+        return dfile.createReader(position, ReadPattern.SEQUENTIAL);
     }
 
     /**
@@ -1500,15 +1503,15 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
         return sstableMetadata;
     }
 
-    public RandomAccessReader openDataReader(RateLimiter limiter)
+    public RandomAccessReader openDataReader(RateLimiter limiter, ReadPattern accessPattern)
     {
         assert limiter != null;
-        return dfile.createReader(limiter);
+        return dfile.createReader(limiter, accessPattern);
     }
 
-    public RandomAccessReader openDataReader()
+    public RandomAccessReader openDataReader(ReadPattern accessPattern)
     {
-        return dfile.createReader();
+        return dfile.createReader(accessPattern);
     }
 
     public RandomAccessReader openDataReaderForScan()
