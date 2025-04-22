@@ -381,6 +381,12 @@ public class ChunkCacheLoadingTest
             return this;
         }
 
+        @Override
+        public int chunkSize()
+        {
+            return -1;
+        }
+
         public void invalidateIfCached(long position)
         {
             // do nothing
