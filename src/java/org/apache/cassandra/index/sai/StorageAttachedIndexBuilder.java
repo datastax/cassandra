@@ -54,6 +54,7 @@ import org.apache.cassandra.io.sstable.SSTableIdentityIterator;
 import org.apache.cassandra.io.sstable.SSTableWatcher;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.RandomAccessReader;
+import org.apache.cassandra.io.util.ReadPattern;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Throwables;
@@ -151,7 +152,7 @@ public class StorageAttachedIndexBuilder extends SecondaryIndexBuilder
 
         Set<Component> replacedComponents = new HashSet<>();
 
-        try (RandomAccessReader dataFile = sstable.openDataReader();
+        try (RandomAccessReader dataFile = sstable.openDataReader(ReadPattern.SEQUENTIAL);
              LifecycleTransaction txn = LifecycleTransaction.offline(OperationType.INDEX_BUILD, sstable))
         {
             perSSTableFileLock = shouldWritePerSSTableFiles(sstable, indexDescriptor, replacedComponents);
