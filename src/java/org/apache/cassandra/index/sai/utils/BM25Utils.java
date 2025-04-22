@@ -170,30 +170,53 @@ public class BM25Utils
         // Calculate average document length
         double avgDocLength = totalTermCount / documents.size();
 
-        // Calculate BM25 scores. Uses a nodequeue that avoids additional allocations and has heap time complexity
+        // Calculate BM25 scores.
+        // Uses a NodeQueue that avoids allocating an object for each document.
         var nodeQueue = new NodeQueue(new BoundedLongHeap(documents.size()), NodeQueue.Order.MAX_HEAP);
-        for (int i = 0; i < documents.size(); i++)
-        {
-            var doc = documents.get(i);
-            double score = 0.0;
-            for (var queryTerm : queryTerms)
-            {
-                int tf = doc.getTermFrequency(queryTerm);
-                Long df = docStats.frequencies.get(queryTerm);
-                // we shouldn't have more hits for a term than we counted total documents
-                assert df <= docStats.docCount : String.format("df=%d, totalDocs=%d", df, docStats.docCount);
+        // Create an anonymous NodeScoreIterator that holds the logic for computing BM25
+        var iter = new NodeQueue.NodeScoreIterator() {
+            int current = 0;
 
-                double normalizedTf = tf / (tf + K1 * (1 - B + B * doc.termCount() / avgDocLength));
-                double idf = Math.log(1 + (docStats.docCount - df + 0.5) / (df + 0.5));
-                double deltaScore = normalizedTf * idf;
-                assert deltaScore >= 0 : String.format("BM25 score for tf=%d, df=%d, tc=%d, totalDocs=%d is %f",
-                                                       tf, df, doc.termCount(), docStats.docCount, deltaScore);
-                score += deltaScore;
+            @Override
+            public boolean hasNext() {
+                return current < documents.size();
             }
-            nodeQueue.push(i, (float) score);
-        }
+
+            @Override
+            public int pop() {
+                return current++;
+            }
+
+            @Override
+            public float topScore() {
+                // Compute BM25 for the current document
+                return scoreDoc(documents.get(current), docStats, queryTerms, avgDocLength);
+            }
+        };
+        // pushMany is an O(n) operation where n is the final size of the queue. Iterative calls to push is O(n log n).
+        nodeQueue.pushMany(iter, documents.size());
 
         return new NodeQueueDocTFIterator(nodeQueue, documents, indexContext, source, docIterator);
+    }
+
+    private static float scoreDoc(DocTF doc, DocStats docStats, List<ByteBuffer> queryTerms, double avgDocLength)
+    {
+        double score = 0.0;
+        for (var queryTerm : queryTerms)
+        {
+            int tf = doc.getTermFrequency(queryTerm);
+            Long df = docStats.frequencies.get(queryTerm);
+            // we shouldn't have more hits for a term than we counted total documents
+            assert df <= docStats.docCount : String.format("df=%d, totalDocs=%d", df, docStats.docCount);
+
+            double normalizedTf = tf / (tf + K1 * (1 - B + B * doc.termCount() / avgDocLength));
+            double idf = Math.log(1 + (docStats.docCount - df + 0.5) / (df + 0.5));
+            double deltaScore = normalizedTf * idf;
+            assert deltaScore >= 0 : String.format("BM25 score for tf=%d, df=%d, tc=%d, totalDocs=%d is %f",
+                                                   tf, df, doc.termCount(), docStats.docCount, deltaScore);
+            score += deltaScore;
+        }
+        return (float) score;
     }
 
     private static class NodeQueueDocTFIterator extends AbstractIterator<PrimaryKeyWithSortKey>
