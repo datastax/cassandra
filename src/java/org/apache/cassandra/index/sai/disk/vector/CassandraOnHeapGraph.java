@@ -321,7 +321,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
     /**
      * @return an itererator over {@link PrimaryKeyWithSortKey} in the graph's {@link SearchResult} order
      */
-    public CloseableIterator<SearchResult.NodeScore> search(QueryContext context, VectorFloat<?> queryVector, int limit, int rerankK, float threshold, Bits toAccept)
+    public CloseableIterator<SearchResult.NodeScore> search(QueryContext context, VectorFloat<?> queryVector, int limit, int rerankK, float threshold, boolean usePruning, Bits toAccept)
     {
         VectorValidation.validateIndexable(queryVector, similarityFunction);
 
@@ -336,14 +336,15 @@ public class CassandraOnHeapGraph<T> implements Accountable
         Bits bits = hasDeletions ? BitsUtil.bitsIgnoringDeleted(toAccept, postingsByOrdinal) : toAccept;
         var graphAccessManager = searchers.get();
         var searcher = graphAccessManager.get();
+        searcher.usePruning(usePruning);
         try
         {
             var ssf = SearchScoreProvider.exact(queryVector, similarityFunction, vectorValues);
             long start = System.nanoTime();
             var result = searcher.search(ssf, limit, rerankK, threshold, 0.0f, bits);
             long elapsed = System.nanoTime() - start;
-            Tracing.trace("ANN search for {}/{} visited {} nodes, reranked {} to return {} results from {}",
-                          limit, rerankK, result.getVisitedCount(), result.getRerankedCount(), result.getNodes().length, source);
+            Tracing.trace("ANN search for {}/{} (usePruning: {}) visited {} nodes, reranked {} to return {} results from {}",
+                          limit, rerankK, usePruning, result.getVisitedCount(), result.getRerankedCount(), result.getNodes().length, source);
             columnQueryMetrics.onSearchResult(result, elapsed, false);
             context.addAnnGraphSearchLatency(elapsed);
             if (threshold > 0)

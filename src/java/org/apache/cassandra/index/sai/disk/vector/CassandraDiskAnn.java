@@ -202,6 +202,7 @@ public class CassandraDiskAnn
      *                non-positive, then we will use limit as the value and will skip reranking. Rerankless search
      *                only applies when the graph has compressed vectors.
      * @param threshold the minimum similarity score to accept
+     * @param usePruning whether to use pruning to speed up the search
      * @param acceptBits a Bits indicating which row IDs are acceptable, or null if no constraints
      * @param context unused (vestige from HNSW, retained in signature to allow calling both easily)
      * @param nodesVisitedConsumer a consumer that will be called with the number of nodes visited during the search
@@ -212,6 +213,7 @@ public class CassandraDiskAnn
                                                     int limit,
                                                     int rerankK,
                                                     float threshold,
+                                                    boolean usePruning,
                                                     Bits acceptBits,
                                                     QueryContext context,
                                                     IntConsumer nodesVisitedConsumer)
@@ -223,6 +225,9 @@ public class CassandraDiskAnn
 
         var graphAccessManager = searchers.get();
         var searcher = graphAccessManager.get();
+        // This searcher is reused across searches. We set here every time to ensure it is configured correctly
+        // for this search. Note that resume search in AutoResumingNodeScoreIterator will continue to use this setting.
+        searcher.usePruning(usePruning);
         try
         {
             var view = (GraphIndex.ScoringView) searcher.getView();
@@ -256,8 +261,8 @@ public class CassandraDiskAnn
             long elapsed = System.nanoTime() - start;
             if (V3OnDiskFormat.ENABLE_RERANK_FLOOR)
                 context.updateAnnRerankFloor(result.getWorstApproximateScoreInTopK());
-            Tracing.trace("DiskANN search for {}/{} rerankless={} visited {} nodes, reranked {} to return {} results from {}",
-                          limit, rerankK, isRerankless, result.getVisitedCount(), result.getRerankedCount(), result.getNodes().length, source);
+            Tracing.trace("DiskANN search for {}/{} rerankless={}, usePruning: {} visited {} nodes, reranked {} to return {} results from {}",
+                          limit, rerankK, isRerankless, usePruning, result.getVisitedCount(), result.getRerankedCount(), result.getNodes().length, source);
             columnQueryMetrics.onSearchResult(result, elapsed, false);
             context.addAnnGraphSearchLatency(elapsed);
             if (threshold > 0)
