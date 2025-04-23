@@ -90,11 +90,21 @@ public class ANNOptionsTest extends CQLTester
         execute("SELECT * FROM %s ORDER BY v ANN OF [1, 1] ALLOW FILTERING WITH ann_options = {}");
         execute("SELECT * FROM %s WHERE k=0 ORDER BY v ANN OF [1, 1] WITH ann_options = {}");
 
-        // correct queries with specific ANN options
+        // correct queries with specific ANN options - rerank_k
         execute("SELECT * FROM %s ORDER BY v ANN OF [1, 1] LIMIT 10 WITH ann_options = {'rerank_k': 10}");
         execute("SELECT * FROM %s ORDER BY v ANN OF [1, 1] LIMIT 10 WITH ann_options = {'rerank_k': 11}");
         execute("SELECT * FROM %s ORDER BY v ANN OF [1, 1] LIMIT 10 WITH ann_options = {'rerank_k': 1000}");
         execute("SELECT * FROM %s ORDER BY v ANN OF [1, 1] LIMIT 10 WITH ann_options = {'rerank_k': '1000'}");
+
+        // correct queries with specific ANN options - use_pruning
+        execute("SELECT * FROM %s ORDER BY v ANN OF [1, 1] WITH ann_options = {'use_pruning': true}");
+        execute("SELECT * FROM %s ORDER BY v ANN OF [1, 1] WITH ann_options = {'use_pruning': false}");
+        execute("SELECT * FROM %s ORDER BY v ANN OF [1, 1] WITH ann_options = {'use_pruning': 'true'}");
+        execute("SELECT * FROM %s ORDER BY v ANN OF [1, 1] WITH ann_options = {'use_pruning': 'false'}");
+
+        // correct queries with both options
+        execute("SELECT * FROM %s ORDER BY v ANN OF [1, 1] LIMIT 10 WITH ann_options = {'rerank_k': 10, 'use_pruning': true}");
+        execute("SELECT * FROM %s ORDER BY v ANN OF [1, 1] LIMIT 10 WITH ann_options = {'use_pruning': false, 'rerank_k': 20}");
 
         // Queries with invalid ann options that will eventually be valid when we support disabling reranking
         assertInvalidThrowMessage("Invalid rerank_k value -1 lesser than limit 100",
@@ -148,6 +158,14 @@ public class ANNOptionsTest extends CQLTester
                                   InvalidRequestException.class,
                                   baseQuery + "LIMIT 100 WITH ann_options = {'rerank_k': 10}");
 
+        // invalid use_pruning values
+        assertInvalidThrowMessage("Invalid 'use_pruning' ANN option. Expected a boolean but found: notaboolean",
+                                  InvalidRequestException.class,
+                                  baseQuery + " WITH ann_options = {'use_pruning': 'notaboolean'}");
+        assertInvalidThrowMessage("Invalid 'use_pruning' ANN option. Expected a boolean but found: 42",
+                                  InvalidRequestException.class,
+                                  baseQuery + " WITH ann_options = {'use_pruning': '42'}");
+
         // ANN options without ORDER BY ANN with empty options
         assertInvalidThrowMessage(StatementRestrictions.ANN_OPTIONS_WITHOUT_ORDER_BY_ANN,
                                   InvalidRequestException.class,
@@ -178,10 +196,20 @@ public class ANNOptionsTest extends CQLTester
         ReadCommand command = parseReadCommand(formattedQuery);
         Assertions.assertThat(command.toCQLString()).doesNotContain("WITH ann_options");
 
-        // with ANN options
+        // with rerank_k option
         formattedQuery = formatQuery("SELECT * FROM %%s ORDER BY v ANN OF [1, 1] LIMIT 1 WITH ann_options = {'rerank_k': 2}");
         command = parseReadCommand(formattedQuery);
         Assertions.assertThat(command.toCQLString()).contains("WITH ann_options = {'rerank_k': 2}");
+
+        // with use_pruning option
+        formattedQuery = formatQuery("SELECT * FROM %%s ORDER BY v ANN OF [1, 1] WITH ann_options = {'use_pruning': true}");
+        command = parseReadCommand(formattedQuery);
+        Assertions.assertThat(command.toCQLString()).contains("WITH ann_options = {'use_pruning': true}");
+
+        // with both options
+        formattedQuery = formatQuery("SELECT * FROM %%s ORDER BY v ANN OF [1, 1] LIMIT 1 WITH ann_options = {'rerank_k': 2, 'use_pruning': false}");
+        command = parseReadCommand(formattedQuery);
+        Assertions.assertThat(command.toCQLString()).contains("WITH ann_options = {'rerank_k': 2, 'use_pruning': false}");
     }
 
     /**
@@ -194,7 +222,7 @@ public class ANNOptionsTest extends CQLTester
         createTable("CREATE TABLE %s (k int PRIMARY KEY, n int, v vector<float, 2>)");
         createIndex(String.format("CREATE CUSTOM INDEX ON %%s(v) USING '%s'", ANNIndex.class.getName()));
 
-        // unespecified ANN options, should be mapped to NONE
+        // unspecified ANN options, should be mapped to NONE
         testTransport("SELECT * FROM %s ORDER BY v ANN OF [1, 1]", ANNOptions.NONE);
         testTransport("SELECT * FROM %s ORDER BY v ANN OF [1, 1] WITH ann_options = {}", ANNOptions.NONE);
 
@@ -206,12 +234,21 @@ public class ANNOptionsTest extends CQLTester
 //                   .forAll(integers().allPositive())
 //                   .checkAssert(i -> testTransport(String.format(negativeQuery, -i), ANNOptions.create(-i)));
 
-        // some random positive values, all should be accepted
-        String positiveQuery = "SELECT * FROM %%s ORDER BY v ANN OF [1, 1] LIMIT %d WITH ann_options = {'rerank_k': %<d}";
+        // test use_pruning values
+        testTransport("SELECT * FROM %s ORDER BY v ANN OF [1, 1] WITH ann_options = {'use_pruning': true}", 
+                     ANNOptions.create(null, true));
+        testTransport("SELECT * FROM %s ORDER BY v ANN OF [1, 1] WITH ann_options = {'use_pruning': false}", 
+                     ANNOptions.create(null, false));
+
+        // test combinations of rerank_k and use_pruning
+        String combinedQuery = "SELECT * FROM %%s ORDER BY v ANN OF [1, 1] LIMIT %d WITH ann_options = {'rerank_k': %<d, 'use_pruning': %b}";
         QuickTheory.qt()
                    .withExamples(100)
                    .forAll(integers().allPositive())
-                   .checkAssert(i -> testTransport(String.format(positiveQuery, i), ANNOptions.create(i)));
+                   .checkAssert(i -> {
+                       testTransport(String.format(combinedQuery, i, true), ANNOptions.create(i, true));
+                       testTransport(String.format(combinedQuery, i, false), ANNOptions.create(i, false));
+                   });
     }
 
     private void testTransport(String query, ANNOptions expectedOptions)
@@ -269,25 +306,32 @@ public class ANNOptionsTest extends CQLTester
     }
 
     /**
-     * Tests that any future versions of {@link ANNOptions} can be able to read the current options.
+     * Tests that the current version of {@link ANNOptions} can correctly serialize and deserialize all combinations
+     * of current options.
      */
     @Test
-    public void testSerializationForFutureVersions() throws IOException
+    public void testCurrentVersionSerialization() throws IOException
     {
-        // the current version of the ANN options...
-        ANNOptions sentOptions = ANNOptions.create(7);
-        DataOutputBuffer out = new DataOutputBuffer();
-        ANNOptions.serializer.serialize(sentOptions, out, MessagingService.current_version);
-        int serializedSize = out.buffer().remaining();
-        Assertions.assertThat(ANNOptions.serializer.serializedSize(sentOptions, MessagingService.current_version))
-                  .isEqualTo(serializedSize);
+        // Test different combinations of options
+        ANNOptions[] optionsToTest = {
+            ANNOptions.NONE,
+            ANNOptions.create(7, null),
+            ANNOptions.create(null, true),
+            ANNOptions.create(7, false)
+        };
 
-        // ...should be readable with the future serializer
-        DataInputBuffer in = new DataInputBuffer(out.buffer(), true);
-        FutureANNOptions receivedOptions = FutureANNOptions.serializer.deserialize(in);
-        Assertions.assertThat(receivedOptions).isEqualTo(new FutureANNOptions(sentOptions));
-        Assertions.assertThat(FutureANNOptions.serializer.serializedSize(receivedOptions))
-                  .isEqualTo(serializedSize);
+        for (ANNOptions options : optionsToTest)
+        {
+            DataOutputBuffer out = new DataOutputBuffer();
+            ANNOptions.serializer.serialize(options, out, MessagingService.current_version);
+            int serializedSize = out.buffer().remaining();
+            Assertions.assertThat(ANNOptions.serializer.serializedSize(options, MessagingService.current_version))
+                      .isEqualTo(serializedSize);
+
+            DataInputBuffer in = new DataInputBuffer(out.buffer(), true);
+            ANNOptions deserialized = ANNOptions.serializer.deserialize(in, MessagingService.current_version);
+            Assertions.assertThat(deserialized).isEqualTo(options);
+        }
     }
 
     /**
@@ -308,7 +352,7 @@ public class ANNOptionsTest extends CQLTester
         // ...should be readable with the current serializer
         DataInputBuffer in = new DataInputBuffer(out.buffer(), true);
         ANNOptions receivedOptions = ANNOptions.serializer.deserialize(in, MessagingService.current_version);
-        Assertions.assertThat(receivedOptions).isEqualTo(ANNOptions.create(sentOptions.rerankK));
+        Assertions.assertThat(receivedOptions).isEqualTo(ANNOptions.create(sentOptions.rerankK, null));
         Assertions.assertThat(ANNOptions.serializer.serializedSize(receivedOptions, MessagingService.current_version))
                   .isEqualTo(serializedSize);
     }
