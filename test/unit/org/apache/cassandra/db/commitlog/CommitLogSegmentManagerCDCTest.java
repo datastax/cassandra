@@ -511,7 +511,7 @@ public class CommitLogSegmentManagerCDCTest extends CQLTester
             // Clear out archived CDC files
             for (File f : DatabaseDescriptor.getCDCLogLocation().tryList()) {
                 logger.debug("delete {}", f.absolutePath());
-                FileUtils.deleteWithConfirm(f);
+                FileUtils.delete(f);
             }
         });
     }
