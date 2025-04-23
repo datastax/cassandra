@@ -27,12 +27,12 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.stream.Stream;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SSTableContext;
@@ -47,7 +47,6 @@ import org.apache.cassandra.index.sai.disk.v6.TermsDistribution;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
-import org.apache.cassandra.io.sstable.SSTableId;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
@@ -138,8 +137,12 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
     private static final Logger logger = LoggerFactory.getLogger(SegmentMetadata.class);
 
     @SuppressWarnings("resource")
-    private SegmentMetadata(IndexInput input, IndexContext context, Version version, SSTableContext sstableContext) throws IOException
+    private SegmentMetadata(IndexInput input, IndexContext context, Version version, SSTableContext sstableContext, boolean loadFullResolutionBounds) throws IOException
     {
+        if (!loadFullResolutionBounds)
+            logger.warn("Loading segment metadata without full primary key boundary resolution. Some ORDER BY queries" +
+                        " may not work correctly.");
+
         AbstractType<?> termsType = context.getValidator();
 
         this.version = version;
@@ -148,16 +151,11 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
         this.minSSTableRowId = input.readLong();
         this.maxSSTableRowId = input.readLong();
 
-        if (sstableContext == null)
-        {
-            // Legacy use case. Only exercised by tests now.
-            PrimaryKey.Factory primaryKeyFactory = context.keyFactory();
-            this.minKey = primaryKeyFactory.createPartitionKeyOnly(DatabaseDescriptor.getPartitioner().decorateKey(readBytes(input)));
-            this.maxKey = primaryKeyFactory.createPartitionKeyOnly(DatabaseDescriptor.getPartitioner().decorateKey(readBytes(input)));
-        }
-        else
+        if (loadFullResolutionBounds)
         {
             // Skip the min/max partition keys since we want the fully resolved PrimaryKey for better semantics.
+            // Also, these values are not always correct for flushed sstables, but the min/max row ids are, which
+            // provides further justification for skipping them.
             skipBytes(input);
             skipBytes(input);
 
@@ -175,6 +173,14 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
 
             this.minKey = new PrimaryKeyWithSource(min, sstableContext.sstable.getId(), minSSTableRowId, min, max);
             this.maxKey = new PrimaryKeyWithSource(max, sstableContext.sstable.getId(), maxSSTableRowId, min, max);
+        }
+        else
+        {
+            assert sstableContext == null;
+            // Only valid in some very specific tests.
+            PrimaryKey.Factory primaryKeyFactory = context.keyFactory();
+            this.minKey = primaryKeyFactory.createPartitionKeyOnly(DatabaseDescriptor.getPartitioner().decorateKey(readBytes(input)));
+            this.maxKey = primaryKeyFactory.createPartitionKeyOnly(DatabaseDescriptor.getPartitioner().decorateKey(readBytes(input)));
         }
 
         this.minTerm = readBytes(input);
@@ -197,6 +203,26 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
     @SuppressWarnings("resource")
     public static List<SegmentMetadata> load(MetadataSource source, IndexContext context, SSTableContext sstableContext) throws IOException
     {
+        return load(source, context, sstableContext, true);
+    }
+
+    /**
+     * This is only visible for testing because the SegmentFlushTest creates fake boundary scenarios that break
+     * normal assumptions about the min/max row ids mapping to specific positions in the per-sstable index components.
+     * Only set loadFullResolutionBounds to false in tests when you are sure that is the only possible solution.
+     */
+    @VisibleForTesting
+    @SuppressWarnings("resource")
+    public static List<SegmentMetadata> loadForTesting(MetadataSource source, IndexContext context) throws IOException
+    {
+        return load(source, context, null, false);
+    }
+
+    /**
+     * Only set loadFullResolutionBounds to false in tests when you are sure that is exactly what you want.
+     */
+    private static List<SegmentMetadata> load(MetadataSource source, IndexContext context, SSTableContext sstableContext, boolean loadFullResolutionBounds) throws IOException
+    {
 
         IndexInput input = source.get(NAME);
 
@@ -206,7 +232,7 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
 
         for (int i = 0; i < segmentCount; i++)
         {
-            segmentMetadata.add(new SegmentMetadata(input, context, source.getVersion(), sstableContext));
+            segmentMetadata.add(new SegmentMetadata(input, context, source.getVersion(), sstableContext, loadFullResolutionBounds));
         }
 
         return segmentMetadata;
