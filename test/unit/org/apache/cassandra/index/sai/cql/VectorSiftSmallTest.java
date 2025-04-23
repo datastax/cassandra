@@ -71,6 +71,9 @@ public class VectorSiftSmallTest extends VectorTester
         // Run a few queries with increasing rerank_k to validate that recall increases
         ensureIncreasingRerankKIncreasesRecall(queryVectors, groundTruth);
 
+        // Run queries with and without pruning to validate recall improves
+        ensureDisablingPruningIncreasesRecall(queryVectors, groundTruth);
+
         flush();
         var diskRecall = testRecall(100, queryVectors, groundTruth);
         assertTrue("Disk recall is " + diskRecall, diskRecall > 0.975);
@@ -88,7 +91,7 @@ public class VectorSiftSmallTest extends VectorTester
         // Testing shows that we acheive 100% recall at about rerank_k = 45, so no need to go higher
         for (int rerankK = limit; rerankK <= 50; rerankK += 5)
         {
-            var recall = testRecall(limit, queryVectors, groundTruth, rerankK);
+            var recall = testRecall(limit, queryVectors, groundTruth, rerankK, null);
             // Recall varies, so we can only assert that it does not get worse on a per-run basis. However, it should
             // get better strictly at least some of the time
             assertTrue("Recall for rerank_k = " + rerankK + " is " + recall, recall >= previousRecall);
@@ -100,6 +103,21 @@ public class VectorSiftSmallTest extends VectorTester
         // we observed a strict increase of 6 times for in memory and 5 times for on disk.
         assertTrue("Recall should have strictly increased at least 4 times but only increased " + strictlyIncreasedCount + " times",
                    strictlyIncreasedCount > 3);
+    }
+
+    private void ensureDisablingPruningIncreasesRecall(List<float[]> queryVectors, List<List<Integer>> groundTruth)
+    {
+        int limit = 10;
+        // Test with pruning enabled
+        double recallWithPruning = testRecall(limit, queryVectors, groundTruth, null, true);
+
+        // Test with pruning disabled
+        double recallWithoutPruning = testRecall(limit, queryVectors, groundTruth, null, false);
+
+        // Recall should be at least as good when pruning is disabled
+        assertTrue("Recall without pruning (" + recallWithoutPruning +
+                  ") should be at least as good as recall with pruning (" + recallWithPruning + ')',
+                  recallWithoutPruning >= recallWithPruning);
     }
 
     @Test
@@ -228,10 +246,10 @@ public class VectorSiftSmallTest extends VectorTester
 
     public double testRecall(int topK, List<float[]> queryVectors, List<List<Integer>> groundTruth)
     {
-        return testRecall(topK, queryVectors, groundTruth, null);
+        return testRecall(topK, queryVectors, groundTruth, null, null);
     }
 
-    public double testRecall(int topK, List<float[]> queryVectors, List<List<Integer>> groundTruth, Integer rerankK)
+    public double testRecall(int topK, List<float[]> queryVectors, List<List<Integer>> groundTruth, Integer rerankK, Boolean usePruning)
     {
         AtomicInteger topKfound = new AtomicInteger(0);
 
@@ -242,11 +260,28 @@ public class VectorSiftSmallTest extends VectorTester
             String queryVectorAsString = Arrays.toString(queryVector);
 
             try {
-                String query = "SELECT pk FROM %s ORDER BY val ANN OF " + queryVectorAsString + " LIMIT " + topK;
-                if (rerankK != null)
-                    query += " with ann_options = {'rerank_k': " + rerankK + '}';
+                StringBuilder query = new StringBuilder()
+                    .append("SELECT pk FROM %s ORDER BY val ANN OF ")
+                    .append(queryVectorAsString)
+                    .append(" LIMIT ")
+                    .append(topK);
 
-                UntypedResultSet result = execute(query);
+                if (rerankK != null || usePruning != null)
+                {
+                    query.append(" WITH ann_options = {");
+                    List<String> options = new ArrayList<>();
+
+                    if (rerankK != null)
+                        options.add("'rerank_k': " + rerankK);
+
+                    if (usePruning != null)
+                        options.add("'use_pruning': " + usePruning);
+
+                    query.append(String.join(", ", options));
+                    query.append('}');
+                }
+
+                UntypedResultSet result = execute(query.toString());
                 var gt = groundTruth.get(i);
                 assert topK <= gt.size();
                 // we don't care about order within the topK but we do need to restrict the size first

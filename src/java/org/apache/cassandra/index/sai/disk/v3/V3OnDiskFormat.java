@@ -36,13 +36,7 @@ import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.v2.V2OnDiskFormat;
 
-import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_ENABLE_EDGES_CACHE;
-import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_ENABLE_JVECTOR_DELETES;
-import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_ENABLE_LTM_CONSTRUCTION;
-import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_ENABLE_RERANK_FLOOR;
-import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_JVECTOR_VERSION;
-import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_REDUCE_TOPK_ACROSS_SSTABLES;
-import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_WRITE_JVECTOR3_FORMAT;
+import static org.apache.cassandra.config.CassandraRelevantProperties.*;
 
 /**
  * Different vector components compared to V2OnDiskFormat (supporting DiskANN/jvector instead of HNSW/lucene).
@@ -56,6 +50,8 @@ public class V3OnDiskFormat extends V2OnDiskFormat
 
     public static volatile boolean WRITE_JVECTOR3_FORMAT = SAI_WRITE_JVECTOR3_FORMAT.getBoolean();
     public static final boolean ENABLE_LTM_CONSTRUCTION = SAI_ENABLE_LTM_CONSTRUCTION.getBoolean();
+    // JVector doesn't give us a way to access its default, so we set it here, but allow it to be overridden.
+    public static boolean JVECTOR_USE_PRUNING_DEFAULT = SAI_VECTOR_USE_PRUNING_DEFAULT.getBoolean();
 
     // These are built to be backwards and forwards compatible. Not final only for testing.
     public static int JVECTOR_VERSION = SAI_JVECTOR_VERSION.getInt();
