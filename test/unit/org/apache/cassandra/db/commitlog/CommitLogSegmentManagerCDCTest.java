@@ -29,8 +29,6 @@ import java.util.Random;
 import java.util.concurrent.TimeUnit;
 
 import com.google.common.util.concurrent.Uninterruptibles;
-
-import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.BeforeClass;
@@ -67,18 +65,11 @@ public class CommitLogSegmentManagerCDCTest extends CQLTester
     @Before
     public void beforeTest() throws Throwable
     {
-        CommitLog.instance.start();
         super.beforeTest();
-        ((CommitLogSegmentManagerCDC)CommitLog.instance.getSegmentManager()).updateCDCTotalSize();
-    }
-
-    @After
-    public void afterTest() throws Throwable
-    {
-        super.afterTest();
-        // free up (a lot of) diskspace by deleting commitlog and cdc_raw after each test method
+        // Need to clean out any files from previous test runs. Prevents flaky test failures.
         CommitLog.instance.stopUnsafe(true);
-        deleteCDCRawFiles();
+        CommitLog.instance.start();
+        ((CommitLogSegmentManagerCDC)CommitLog.instance.getSegmentManager()).updateCDCTotalSize();
     }
 
     @Test
@@ -99,10 +90,11 @@ public class CommitLogSegmentManagerCDCTest extends CQLTester
                     .forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
             CommitLog.instance.forceRecycleAllSegments();
             cdcMgr.awaitManagementTasksCompletion();
-            Assert.assertTrue("Expected files to be moved to overflow.", getCDCRawFiles().length > 0);
+            Assert.assertTrue("Expected files to be moved to overflow.", getCDCRawCount() > 0);
 
             // Simulate a CDC consumer reading files then deleting them
-            deleteCDCRawFiles();
+            for (File f : DatabaseDescriptor.getCDCLogLocation().tryList())
+                FileUtils.deleteWithConfirm(f);
 
             // Update size tracker to reflect deleted files. Should flip flag on current allocatingFrom to allow.
             cdcMgr.updateCDCTotalSize();
@@ -283,12 +275,13 @@ public class CommitLogSegmentManagerCDCTest extends CQLTester
 
         // Build up a list of expected index files after replay and then clear out cdc_raw
         List<CDCIndexData> oldData = parseCDCIndexData();
-        deleteCDCRawFiles();
+        for (File f : DatabaseDescriptor.getCDCLogLocation().tryList())
+            FileUtils.deleteWithConfirm(f.absolutePath());
 
         try
         {
             Assert.assertEquals("Expected 0 files in CDC folder after deletion. ",
-                                0, getCDCRawFiles().length);
+                                0, DatabaseDescriptor.getCDCLogLocation().tryList().length);
         }
         finally
         {
@@ -303,7 +296,7 @@ public class CommitLogSegmentManagerCDCTest extends CQLTester
 
         // Rough sanity check -> should be files there now.
         Assert.assertTrue("Expected non-zero number of files in CDC folder after restart.",
-                          getCDCRawFiles().length > 0);
+                          DatabaseDescriptor.getCDCLogLocation().tryList().length > 0);
 
         // Confirm all the old indexes in old are present and >= the original offset, as we flag the entire segment
         // as cdc written on a replay.
@@ -349,7 +342,7 @@ public class CommitLogSegmentManagerCDCTest extends CQLTester
         List<CDCIndexData> results = new ArrayList<>();
         try
         {
-            for (File f : getCDCRawFiles())
+            for (File f : DatabaseDescriptor.getCDCLogLocation().tryList())
             {
                 if (f.name().contains("_cdc.idx"))
                     results.add(new CDCIndexData(f));
@@ -518,22 +511,9 @@ public class CommitLogSegmentManagerCDCTest extends CQLTester
             // Clear out archived CDC files
             for (File f : DatabaseDescriptor.getCDCLogLocation().tryList()) {
                 logger.debug("delete {}", f.absolutePath());
-                FileUtils.deleteWithConfirm(f);
+                FileUtils.delete(f);
             }
         });
-    }
-
-    private static File[] getCDCRawFiles()
-    {
-        return new File(DatabaseDescriptor.getCDCLogLocation()).tryList();
-    }
-
-    private static void deleteCDCRawFiles()
-    {
-        for (File f : getCDCRawFiles())
-        {
-            f.deleteIfExists();
-        }
     }
 
     private interface Testable
