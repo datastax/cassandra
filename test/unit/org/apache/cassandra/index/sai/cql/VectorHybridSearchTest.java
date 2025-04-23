@@ -220,7 +220,7 @@ public class VectorHybridSearchTest extends VectorTester.VersionedWithChecksums
     }
 
     @Test
-    public void testReranklessHybidSearch()
+    public void testReranklessHybridSearch()
     {
         // Want to test the search then order path
         QueryController.QUERY_OPT_LEVEL = 0;

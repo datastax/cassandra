@@ -198,7 +198,7 @@ public class CassandraDiskAnn
     /**
      * @param queryVector the query vector
      * @param limit the number of results to look for in the index (>= limit)
-     * @param rerankK the number of quantized results to look for in the index (>= limit or < 0). If rerankK is
+     * @param rerankK the number of quantized results to look for in the index (>= limit or <= 0). If rerankK is
      *                non-positive, then we will use limit as the value and will skip reranking. Rerankless search
      *                only applies when the graph has compressed vectors.
      * @param threshold the minimum similarity score to accept
@@ -237,7 +237,7 @@ public class CassandraDiskAnn
             if (features.contains(FeatureId.FUSED_ADC))
             {
                 var asf = view.approximateScoreFunctionFor(queryVector, similarityFunction);
-                var rr = !isRerankless ? view.rerankerFor(queryVector, similarityFunction) : null;
+                var rr = isRerankless ? null : view.rerankerFor(queryVector, similarityFunction);
                 ssp = new SearchScoreProvider(asf, rr);
             }
             else if (compressedVectors == null)
@@ -253,7 +253,7 @@ public class CassandraDiskAnn
                          ? VectorSimilarityFunction.COSINE
                          : similarityFunction;
                 var asf = compressedVectors.precomputedScoreFunctionFor(queryVector, sf);
-                var rr = !isRerankless ? view.rerankerFor(queryVector, similarityFunction) : null;
+                var rr = isRerankless ? null : view.rerankerFor(queryVector, similarityFunction);
                 ssp = new SearchScoreProvider(asf, rr);
             }
             long start = System.nanoTime();
@@ -261,7 +261,7 @@ public class CassandraDiskAnn
             long elapsed = System.nanoTime() - start;
             if (V3OnDiskFormat.ENABLE_RERANK_FLOOR)
                 context.updateAnnRerankFloor(result.getWorstApproximateScoreInTopK());
-            Tracing.trace("DiskANN search for {}/{} rerankless={}, usePruning: {} visited {} nodes, reranked {} to return {} results from {}",
+            Tracing.trace("DiskANN search for {}/{} rerankless={}, usePruning={} visited {} nodes, reranked {} to return {} results from {}",
                           limit, rerankK, isRerankless, usePruning, result.getVisitedCount(), result.getRerankedCount(), result.getNodes().length, source);
             columnQueryMetrics.onSearchResult(result, elapsed, false);
             context.addAnnGraphSearchLatency(elapsed);
