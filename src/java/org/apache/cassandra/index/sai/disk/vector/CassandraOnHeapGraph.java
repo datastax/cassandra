@@ -329,6 +329,10 @@ public class CassandraOnHeapGraph<T> implements Accountable
         // search() errors out when an empty graph is passed to it
         if (vectorValues.size() == 0)
             return CloseableIterator.emptyIterator();
+        // This configuration indicates rerankless search, but that is only applicable to disk search, so we set
+        // rerankK to limit and otherwise ignore the setting.
+        if (rerankK <= 0)
+            rerankK = limit;
 
         Bits bits = hasDeletions ? BitsUtil.bitsIgnoringDeleted(toAccept, postingsByOrdinal) : toAccept;
         var graphAccessManager = searchers.get();
