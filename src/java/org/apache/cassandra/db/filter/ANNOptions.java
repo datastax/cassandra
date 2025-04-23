@@ -38,8 +38,9 @@ import org.apache.cassandra.utils.FBUtilities;
 public class ANNOptions
 {
     public static final String RERANK_K_OPTION_NAME = "rerank_k";
+    public static final String USE_PRUNING_OPTION_NAME = "use_pruning";
 
-    public static final ANNOptions NONE = new ANNOptions(null);
+    public static final ANNOptions NONE = new ANNOptions(null, null);
 
     public static final Serializer serializer = new Serializer();
 
@@ -51,15 +52,22 @@ public class ANNOptions
     @Nullable
     public final Integer rerankK;
 
-    private ANNOptions(@Nullable Integer rerankK)
+    /**
+     * Whether to use pruning to speed up the ANN search. If {@code null}, the default value is used.
+     */
+    @Nullable
+    public final Boolean usePruning;
+
+    private ANNOptions(@Nullable Integer rerankK, @Nullable Boolean usePruning)
     {
         this.rerankK = rerankK;
+        this.usePruning = usePruning;
     }
 
-    public static ANNOptions create(@Nullable Integer rerankK)
+    public static ANNOptions create(@Nullable Integer rerankK, @Nullable Boolean usePruning)
     {
         // if all the options are null, return the NONE instance
-        return rerankK == null ? NONE : new ANNOptions(rerankK);
+        return rerankK == null && usePruning == null ? NONE : new ANNOptions(rerankK, usePruning);
     }
 
     /**
@@ -67,13 +75,16 @@ public class ANNOptions
      */
     public void validate(ClientState state, String keyspace, int limit)
     {
-        if (rerankK == null)
+        if (rerankK == null && usePruning == null)
             return;
 
-        if (rerankK < limit)
-            throw new InvalidRequestException(String.format("Invalid rerank_k value %d lesser than limit %d", rerankK, limit));
+        if (rerankK != null)
+        {
+            if (rerankK < limit)
+                throw new InvalidRequestException(String.format("Invalid rerank_k value %d lesser than limit %d", rerankK, limit));
 
-        Guardrails.annRerankKMaxValue.guard(rerankK, "ANN options", false, state);
+            Guardrails.annRerankKMaxValue.guard(rerankK, "ANN options", false, state);
+        }
 
         // Ensure that all nodes in the cluster are in a version that supports ANN options, including this one
         assert keyspace != null;
@@ -93,6 +104,7 @@ public class ANNOptions
     public static ANNOptions fromMap(Map<String, String> map)
     {
         Integer rerankK = null;
+        Boolean usePruning = null;
 
         for (Map.Entry<String, String> entry : map.entrySet())
         {
@@ -103,13 +115,17 @@ public class ANNOptions
             {
                 rerankK = parseRerankK(value);
             }
+            else if (name.equals(USE_PRUNING_OPTION_NAME))
+            {
+                usePruning = parseUsePruning(value);
+            }
             else
             {
                 throw new InvalidRequestException("Unknown ANN option: " + name);
             }
         }
 
-        return ANNOptions.create(rerankK);
+        return ANNOptions.create(rerankK, usePruning);
     }
 
     private static int parseRerankK(String value)
@@ -129,9 +145,28 @@ public class ANNOptions
         return rerankK;
     }
 
+    private static boolean parseUsePruning(String value)
+    {
+        value = value.toLowerCase();
+        if (!value.equals("true") && !value.equals("false"))
+            throw new InvalidRequestException(String.format("Invalid '%s' ANN option. Expected a boolean but found: %s",
+                                                            USE_PRUNING_OPTION_NAME, value));
+        return Boolean.parseBoolean(value);
+    }
+
     public String toCQLString()
     {
-        return String.format("{'%s': %d}", RERANK_K_OPTION_NAME, rerankK);
+        StringBuilder sb = new StringBuilder("{");
+        if (rerankK != null)
+            sb.append(String.format("'%s': %d", RERANK_K_OPTION_NAME, rerankK));
+        if (usePruning != null)
+        {
+            if (rerankK != null)
+                sb.append(", ");
+            sb.append(String.format("'%s': %b", USE_PRUNING_OPTION_NAME, usePruning));
+        }
+        sb.append("}");
+        return sb.toString();
     }
 
     @Override
@@ -140,13 +175,14 @@ public class ANNOptions
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
         ANNOptions that = (ANNOptions) o;
-        return Objects.equals(rerankK, that.rerankK);
+        return Objects.equals(rerankK, that.rerankK) &&
+               Objects.equals(usePruning, that.usePruning);
     }
 
     @Override
     public int hashCode()
     {
-        return Objects.hash(rerankK);
+        return Objects.hash(rerankK, usePruning);
     }
 
     /**
@@ -166,9 +202,9 @@ public class ANNOptions
     {
         /** Bit flags mask to check if the rerank K option is present. */
         private static final int RERANK_K_MASK = 1;
-
+        private static final int USE_PRUNING_MASK = 2;
         /** Bit flags mask to check if there are any unknown options. It's the negation of all the known flags. */
-        private static final int UNKNOWN_OPTIONS_MASK = ~RERANK_K_MASK;
+        private static final int UNKNOWN_OPTIONS_MASK = ~(RERANK_K_MASK | USE_PRUNING_MASK);
 
         /*
          * If you add a new option, then update ANNOptionsTest.FutureANNOptions and possibly add a new test verifying
@@ -190,6 +226,8 @@ public class ANNOptions
 
             if (options.rerankK != null)
                 out.writeUnsignedVInt32(options.rerankK);
+            if (options.usePruning != null)
+                out.writeBoolean(options.usePruning);
         }
 
         public ANNOptions deserialize(DataInputPlus in, int version) throws IOException
@@ -206,8 +244,9 @@ public class ANNOptions
                                       "new options that are not supported by this node.");
 
             Integer rerankK = hasRerankK(flags) ? (int) in.readUnsignedVInt() : null;
+            Boolean usePruning = hasUsePruning(flags) ? in.readBoolean() : null;
 
-            return ANNOptions.create(rerankK);
+            return ANNOptions.create(rerankK, usePruning);
         }
 
         public long serializedSize(ANNOptions options, int version)
@@ -221,6 +260,8 @@ public class ANNOptions
 
             if (options.rerankK != null)
                 size += TypeSizes.sizeofUnsignedVInt(options.rerankK);
+            if (options.usePruning != null)
+                size += TypeSizes.sizeof(options.usePruning);
 
             return size;
         }
@@ -234,6 +275,8 @@ public class ANNOptions
 
             if (options.rerankK != null)
                 flags |= RERANK_K_MASK;
+            if (options.usePruning != null)
+                flags |= USE_PRUNING_MASK;
 
             return flags;
         }
@@ -241,6 +284,11 @@ public class ANNOptions
         private static boolean hasRerankK(int flags)
         {
             return (flags & RERANK_K_MASK) == RERANK_K_MASK;
+        }
+
+        private static boolean hasUsePruning(int flags)
+        {
+            return (flags & USE_PRUNING_MASK) == USE_PRUNING_MASK;
         }
     }
 }

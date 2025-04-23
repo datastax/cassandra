@@ -203,7 +203,8 @@ public class VectorMemtableIndex implements MemtableIndex
         float threshold = expr.getEuclideanSearchThreshold();
 
         SortingIterator.Builder<PrimaryKey> keyQueue;
-        try (var pkIterator = searchInternal(context, qv, keyRange, graph.size(), graph.size(), threshold))
+        // Threshold queries do not use pruning.
+        try (var pkIterator = searchInternal(context, qv, keyRange, graph.size(), graph.size(), threshold, false))
         {
             keyQueue = new SortingIterator.Builder<>();
             while (pkIterator.hasNext())
@@ -235,15 +236,16 @@ public class VectorMemtableIndex implements MemtableIndex
         var qv = vts.createFloatVector(orderer.getVectorTerm());
         var rerankK = orderer.rerankKFor(limit, VectorCompression.NO_COMPRESSION);
 
-        return List.of(searchInternal(context, qv, keyRange, limit, rerankK, 0));
+        return List.of(searchInternal(context, qv, keyRange, limit, rerankK, 0, orderer.usePruning()));
     }
 
     private CloseableIterator<PrimaryKeyWithSortKey> searchInternal(QueryContext context,
-                                                                  VectorFloat<?> queryVector,
-                                                                  AbstractBounds<PartitionPosition> keyRange,
-                                                                  int limit,
-                                                                  int rerankK,
-                                                                  float threshold)
+                                                                    VectorFloat<?> queryVector,
+                                                                    AbstractBounds<PartitionPosition> keyRange,
+                                                                    int limit,
+                                                                    int rerankK,
+                                                                    float threshold,
+                                                                    boolean usePruning)
     {
         Bits bits;
         if (RangeUtil.coversFullRing(keyRange))
@@ -288,7 +290,7 @@ public class VectorMemtableIndex implements MemtableIndex
             }
         }
 
-        var nodeScoreIterator = graph.search(context, queryVector, limit, rerankK, threshold, bits);
+        var nodeScoreIterator = graph.search(context, queryVector, limit, rerankK, threshold, usePruning, bits);
         return new NodeScoreToScoredPrimaryKeyIterator(nodeScoreIterator);
     }
 
@@ -336,7 +338,7 @@ public class VectorMemtableIndex implements MemtableIndex
             return orderByBruteForce(qv, keysInGraph);
         }
         // indexed path
-        var nodeScoreIterator = graph.search(context, qv, limit, rerankK, 0, relevantOrdinals::contains);
+        var nodeScoreIterator = graph.search(context, qv, limit, rerankK, 0, orderer.usePruning(), relevantOrdinals::contains);
         return new NodeScoreToScoredPrimaryKeyIterator(nodeScoreIterator);
     }
 
