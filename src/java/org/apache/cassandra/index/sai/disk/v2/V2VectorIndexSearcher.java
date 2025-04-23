@@ -272,6 +272,8 @@ public class V2VectorIndexSearcher extends IndexSearcher
 
     private CloseableIterator<RowIdWithScore> orderByBruteForce(VectorFloat<?> queryVector, SegmentRowIdOrdinalPairs segmentOrdinalPairs, int limit, int rerankK) throws IOException
     {
+        // We allow for negative rerankK, but for our cost calculations, it only makes sense to use 0 here.
+        rerankK = Math.max(0, rerankK);
         // If we use compressed vectors, we still have to order rerankK results using full resolution similarity
         // scores, so only use the compressed vectors when there are enough vectors to make it worthwhile.
         double twoPassCost = segmentOrdinalPairs.size() * CostCoefficients.ANN_SIMILARITY_COST
@@ -291,20 +293,28 @@ public class V2VectorIndexSearcher extends IndexSearcher
                                                                 VectorFloat<?> queryVector,
                                                                 SegmentRowIdOrdinalPairs segmentOrdinalPairs,
                                                                 int limit,
-                                                                int rerankK) throws IOException
+                                                                int rerankK)
     {
         // Use the jvector NodeQueue to avoid unnecessary object allocations since this part of the code operates on
         // many rows.
         var approximateScores = new NodeQueue(new BoundedLongHeap(segmentOrdinalPairs.size()), NodeQueue.Order.MAX_HEAP);
         var similarityFunction = indexContext.getIndexWriterConfig().getSimilarityFunction();
         var scoreFunction = cv.precomputedScoreFunctionFor(queryVector, similarityFunction);
+        columnQueryMetrics.onBruteForceNodesVisited(segmentOrdinalPairs.size());
+
+        if (rerankK <= 0)
+        {
+            // Rerankless search, so we go straight to the NodeQueueRowIdIterator.
+            var iter = segmentOrdinalPairs.mapToSegmentRowIdScoreIterator(scoreFunction);
+            approximateScores.pushMany(iter, segmentOrdinalPairs.size());
+            return new NodeQueueRowIdIterator(approximateScores);
+        }
 
         // Store the index of the (rowId, ordinal) pair from the segmentOrdinalPairs in the NodeQueue so that we can
         // retrieve both values with O(1) lookup when we need to resolve the full resolution score in the
         // BruteForceRowIdIterator.
         var iter = segmentOrdinalPairs.mapToIndexScoreIterator(scoreFunction);
         approximateScores.pushMany(iter, segmentOrdinalPairs.size());
-        columnQueryMetrics.onBruteForceNodesVisited(segmentOrdinalPairs.size());
         var reranker = new CloseableReranker(similarityFunction, queryVector, graph.getView());
         return new BruteForceRowIdIterator(approximateScores, segmentOrdinalPairs, reranker, limit, rerankK, columnQueryMetrics);
     }

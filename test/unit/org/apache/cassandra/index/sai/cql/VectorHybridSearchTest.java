@@ -18,9 +18,13 @@
 
 package org.apache.cassandra.index.sai.cql;
 
+import java.util.stream.IntStream;
+
 import org.junit.Test;
 
 import org.apache.cassandra.index.sai.plan.QueryController;
+
+import static org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph.MIN_PQ_ROWS;
 
 public class VectorHybridSearchTest extends VectorTester.VersionedWithChecksums
 {
@@ -213,5 +217,37 @@ public class VectorHybridSearchTest extends VectorTester.VersionedWithChecksums
             assertRows(execute("SELECT i FROM %s WHERE c <= 1 ORDER BY v ANN OF [1,1] LIMIT 1"), row(1));
             assertRows(execute("SELECT i FROM %s WHERE c >= 1 ORDER BY v ANN OF [1,1] LIMIT 1"), row(1));
         });
+    }
+
+    @Test
+    public void testReranklessHybridSearch()
+    {
+        // Want to test the search then order path
+        QueryController.QUERY_OPT_LEVEL = 0;
+
+        createTable("CREATE TABLE %s (pk int, val int, vec vector<float, 128>, PRIMARY KEY(pk))");
+        createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+
+        // Insert many rows in parallel
+        IntStream.range(0, MIN_PQ_ROWS * 2).parallel().forEach(i -> {
+            execute("INSERT INTO %s (pk, val, vec) VALUES (?, ?, ?)", i, i, randomVectorBoxed(128));
+        });
+
+        flush();
+
+        // Search the graph with rerankless search. We restrict val to 1/4th of the dataset
+        setMaxBruteForceRows(0);
+        var result = execute("SELECT pk FROM %s WHERE val < ? ORDER BY vec ANN OF ? LIMIT 10 with ann_options = { 'rerank_k': 0 }", MIN_PQ_ROWS / 2, randomVectorBoxed(128));
+        // Just testing that we can run the query, so only assert that we got results
+        assertRowCount(result, 10);
+
+        // Now search with brute force (skipping the graph). We restrict to 1/10th of the dataset to trigger brute force.
+        setMaxBruteForceRows(MIN_PQ_ROWS * 2);
+        result = execute("SELECT pk FROM %s WHERE val < ? ORDER BY vec ANN OF ? LIMIT 10 with ann_options = { 'rerank_k': 0 }", MIN_PQ_ROWS / 5, randomVectorBoxed(128));
+        assertRowCount(result, 10);
+        // Also ensure that a negative rerank_k value works
+        result = execute("SELECT pk FROM %s WHERE val < ? ORDER BY vec ANN OF ? LIMIT 10 with ann_options = { 'rerank_k': -1 }", MIN_PQ_ROWS / 5, randomVectorBoxed(128));
+        assertRowCount(result, 10);
     }
 }

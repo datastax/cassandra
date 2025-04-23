@@ -88,10 +88,18 @@ public class VectorSiftSmallTest extends VectorTester
         double previousRecall = 0;
         int limit = 10;
         int strictlyIncreasedCount = 0;
-        // Testing shows that we acheive 100% recall at about rerank_k = 45, so no need to go higher
+
+        // First test with rerank_k = 0, which should have the worst recall
+        double zeroRerankRecall = testRecall(limit, queryVectors, groundTruth, 0, null);
+
+        // Testing shows that we achieve 100% recall at about rerank_k = 45, so no need to go higher
         for (int rerankK = limit; rerankK <= 50; rerankK += 5)
         {
             var recall = testRecall(limit, queryVectors, groundTruth, rerankK, null);
+            // All recalls should be better than rerank_k = 0
+            assertTrue("Recall for rerank_k = " + rerankK + " should be at least as good as with rerank_k = 0",
+                      recall >= zeroRerankRecall);
+
             // Recall varies, so we can only assert that it does not get worse on a per-run basis. However, it should
             // get better strictly at least some of the time
             assertTrue("Recall for rerank_k = " + rerankK + " is " + recall, recall >= previousRecall);
