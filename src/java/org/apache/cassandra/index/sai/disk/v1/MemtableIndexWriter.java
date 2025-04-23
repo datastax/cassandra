@@ -146,7 +146,7 @@ public class MemtableIndexWriter implements PerIndexWriter
 
     private long flush(DecoratedKey minKey, DecoratedKey maxKey, AbstractType<?> termComparator, MemtableTermsIterator terms, int maxSegmentRowId) throws IOException
     {
-        long numRowsForEachTerm;
+        long cellCount;
         long numRows;
         SegmentMetadataBuilder metadataBuilder = new SegmentMetadataBuilder(0, perIndexComponents);
         SegmentMetadata.ComponentMetadataMap indexMetas;
@@ -167,7 +167,7 @@ public class MemtableIndexWriter implements PerIndexWriter
                       );
 
                 indexMetas = writer.writeAll(metadataBuilder.intercept(terms), docLengths);
-                numRowsForEachTerm = writer.getPostingsCount();
+                cellCount = writer.getPostingsCount();
                 numRows = docLengths.size();
             }
         }
@@ -182,14 +182,14 @@ public class MemtableIndexWriter implements PerIndexWriter
             {
                 ImmutableOneDimPointValues values = ImmutableOneDimPointValues.fromTermEnum(terms, termComparator);
                 indexMetas = writer.writeAll(metadataBuilder.intercept(values));
-                numRowsForEachTerm = writer.getPointCount();
-                numRows = numRowsForEachTerm;
+                cellCount = writer.getPointCount();
+                numRows = cellCount;
             }
         }
 
         // If no rows were written we need to delete any created column index components
         // so that the index is correctly identified as being empty (only having a completion marker)
-        if (numRowsForEachTerm == 0)
+        if (cellCount == 0)
         {
             perIndexComponents.forceDeleteAllComponents();
             return 0;
@@ -207,7 +207,7 @@ public class MemtableIndexWriter implements PerIndexWriter
             SegmentMetadata.write(writer, Collections.singletonList(metadata));
         }
 
-        return numRowsForEachTerm;
+        return cellCount;
     }
 
     private boolean writeFrequencies()

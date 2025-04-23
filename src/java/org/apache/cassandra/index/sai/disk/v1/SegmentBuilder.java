@@ -504,8 +504,6 @@ public abstract class SegmentBuilder
             maxTerm = TypeUtil.max(term, maxTerm, termComparator, Version.latest());
         }
 
-        rowCount++;
-
         // segmentRowIdOffset should encode sstableRowId into Integer
         int segmentRowId = Math.toIntExact(sstableRowId - segmentRowIdOffset);
 
@@ -600,6 +598,11 @@ public abstract class SegmentBuilder
     int getRowCount()
     {
         return rowCount;
+    }
+
+    void incRowCount()
+    {
+        rowCount++;
     }
 
     /**

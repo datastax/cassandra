@@ -829,24 +829,31 @@ public class BM25Test extends SAITester
     @Test
     public void testIndexMetaForNumRows()
     {
-        createTable("CREATE TABLE %s (id int PRIMARY KEY, category text, score int, title text, body text)");
+        createTable("CREATE TABLE %s (id int PRIMARY KEY, category text, score int, " +
+                    "title text, body text, bodyset set<text>, " +
+                    "map_category map<int, text>, map_body map<text, text>)");
         String bodyIndexName = createAnalyzedIndex("body", true);
         String scoreIndexName = createIndex("CREATE CUSTOM INDEX ON %s (score) USING 'StorageAttachedIndex'");
-        insertPrimitiveData();
+        String mapIndexName = createIndex("CREATE CUSTOM INDEX ON %s (map_category) USING 'StorageAttachedIndex'");
+        insertCollectionData();
 
         assertNumRowsMemtable(scoreIndexName, DATASET.length);
         assertNumRowsMemtable(bodyIndexName, DATASET.length);
+        assertNumRowsMemtable(mapIndexName, DATASET.length);
         execute("DELETE FROM %s WHERE id = ?", 5);
         flush();
         assertNumRowsSSTable(scoreIndexName, DATASET.length - 1);
         assertNumRowsSSTable(bodyIndexName, DATASET.length - 1);
+        assertNumRowsSSTable(mapIndexName, DATASET.length - 1);
         execute("DELETE FROM %s WHERE id = ?", 10);
         flush();
         assertNumRowsSSTable(scoreIndexName, DATASET.length - 1);
         assertNumRowsSSTable(bodyIndexName, DATASET.length - 1);
+        assertNumRowsSSTable(mapIndexName, DATASET.length - 1);
         compact();
         assertNumRowsSSTable(scoreIndexName, DATASET.length - 2);
         assertNumRowsSSTable(bodyIndexName, DATASET.length - 2);
+        assertNumRowsSSTable(mapIndexName, DATASET.length - 2);
     }
 
     private void assertNumRowsMemtable(String indexName, int expectedNumRows)
