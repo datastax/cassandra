@@ -153,7 +153,8 @@ public class V2VectorIndexSearcher extends IndexSearcher
         var queryVector = vts.createFloatVector(exp.lower.value.vector);
 
         // this is a thresholded query, so pass graph.size() as top k to get all results satisfying the threshold
-        var result = searchInternal(keyRange, context, queryVector, graph.size(), graph.size(), exp.getEuclideanSearchThreshold());
+        // Threshold queries do not use pruning.
+        var result = searchInternal(keyRange, context, queryVector, graph.size(), graph.size(), exp.getEuclideanSearchThreshold(), false);
         return new ReorderingPostingList(result, RowIdWithMeta::getSegmentRowId);
     }
 
@@ -169,7 +170,7 @@ public class V2VectorIndexSearcher extends IndexSearcher
         int rerankK = orderer.rerankKFor(limit, graph.getCompression());
         var queryVector = vts.createFloatVector(orderer.getVectorTerm());
 
-        var result = searchInternal(keyRange, context, queryVector, limit, rerankK, 0);
+        var result = searchInternal(keyRange, context, queryVector, limit, rerankK, 0, orderer.usePruning());
         return toMetaSortedIterator(result, context);
     }
 
@@ -183,13 +184,15 @@ public class V2VectorIndexSearcher extends IndexSearcher
      * @param rerankK the amplified limit for the query to get more accurate results
      * @param threshold the threshold for the query. When the threshold is greater than 0 and brute force logic is used,
      *                  the results will be filtered by the threshold.
+     * @param usePruning whether to use pruning to speed up the ANN search
      */
     private CloseableIterator<RowIdWithScore> searchInternal(AbstractBounds<PartitionPosition> keyRange,
                                                              QueryContext context,
                                                              VectorFloat<?> queryVector,
                                                              int limit,
                                                              int rerankK,
-                                                             float threshold) throws IOException
+                                                             float threshold,
+                                                             boolean usePruning) throws IOException
     {
         try (PrimaryKeyMap primaryKeyMap = primaryKeyMapFactory.newPerSSTablePrimaryKeyMap())
         {
@@ -197,7 +200,7 @@ public class V2VectorIndexSearcher extends IndexSearcher
             if (RangeUtil.coversFullRing(keyRange))
             {
                 var estimate = estimateCost(rerankK, graph.size());
-                return graph.search(queryVector, limit, rerankK, threshold, Bits.ALL, context, estimate::updateStatistics);
+                return graph.search(queryVector, limit, rerankK, threshold, usePruning, Bits.ALL, context, estimate::updateStatistics);
             }
 
             PrimaryKey firstPrimaryKey = keyFactory.createTokenOnly(keyRange.left.getToken());
@@ -214,7 +217,7 @@ public class V2VectorIndexSearcher extends IndexSearcher
 
             // if the range covers the entire segment, skip directly to an index search
             if (minSSTableRowId <= metadata.minSSTableRowId && maxSSTableRowId >= metadata.maxSSTableRowId)
-                return graph.search(queryVector, limit, rerankK, threshold, Bits.ALL, context, visited -> {});
+                return graph.search(queryVector, limit, rerankK, threshold, usePruning, Bits.ALL, context, visited -> {});
 
             minSSTableRowId = Math.max(minSSTableRowId, metadata.minSSTableRowId);
             maxSSTableRowId = min(maxSSTableRowId, metadata.maxSSTableRowId);
@@ -263,7 +266,7 @@ public class V2VectorIndexSearcher extends IndexSearcher
             // the trouble to add it.
             var betterCostEstimate = estimateCost(rerankK, cardinality);
 
-            return graph.search(queryVector, limit, rerankK, threshold, bits, context, betterCostEstimate::updateStatistics);
+            return graph.search(queryVector, limit, rerankK, threshold, usePruning, bits, context, betterCostEstimate::updateStatistics);
         }
     }
 
@@ -493,7 +496,7 @@ public class V2VectorIndexSearcher extends IndexSearcher
         segmentOrdinalPairs.forEachOrdinal(bits::set);
         // else ask the index to perform a search limited to the bits we created
         var queryVector = vts.createFloatVector(orderer.getVectorTerm());
-        var results = graph.search(queryVector, limit, rerankK, 0, bits, context, cost::updateStatistics);
+        var results = graph.search(queryVector, limit, rerankK, 0, orderer.usePruning(), bits, context, cost::updateStatistics);
         return toMetaSortedIterator(results, context);
     }
 
