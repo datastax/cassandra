@@ -41,6 +41,7 @@ import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
+import org.apache.cassandra.db.filter.ANNOptions;
 import org.apache.cassandra.db.marshal.FloatType;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.VectorType;
@@ -212,7 +213,7 @@ public class VectorMemtableIndexTest extends SAITester
 
     private Orderer randomVectorOrderer()
     {
-        return new Orderer(indexContext, Operator.ANN, randomVectorSerialized(), null);
+        return new Orderer(indexContext, Operator.ANN, randomVectorSerialized(), ANNOptions.NONE);
     }
 
     private ByteBuffer randomVectorSerialized() {
