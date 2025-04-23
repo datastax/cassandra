@@ -138,7 +138,7 @@ public class ANNOptionsTest extends CQLTester
                                   baseQuery + " WITH ann_options = {'rerank_k': 'a'}");
 
         // ANN options with rerank lesser than limit
-        assertInvalidThrowMessage("Invalid rerank_k value 10 lesser than limit 100",
+        assertInvalidThrowMessage("Invalid rerank_k value 10 greater than 0 and less than limit 100",
                                   InvalidRequestException.class,
                                   baseQuery + "LIMIT 100 WITH ann_options = {'rerank_k': 10}");
 
