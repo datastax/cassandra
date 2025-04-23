@@ -91,18 +91,12 @@ public class ANNOptionsTest extends CQLTester
         execute("SELECT * FROM %s WHERE k=0 ORDER BY v ANN OF [1, 1] WITH ann_options = {}");
 
         // correct queries with specific ANN options
+        execute("SELECT * FROM %s ORDER BY v ANN OF [1, 1] LIMIT 100 WITH ann_options = {'rerank_k': -1}");
+        execute("SELECT * FROM %s ORDER BY v ANN OF [1, 1] LIMIT 100 WITH ann_options = {'rerank_k': 0}");
         execute("SELECT * FROM %s ORDER BY v ANN OF [1, 1] LIMIT 10 WITH ann_options = {'rerank_k': 10}");
         execute("SELECT * FROM %s ORDER BY v ANN OF [1, 1] LIMIT 10 WITH ann_options = {'rerank_k': 11}");
         execute("SELECT * FROM %s ORDER BY v ANN OF [1, 1] LIMIT 10 WITH ann_options = {'rerank_k': 1000}");
         execute("SELECT * FROM %s ORDER BY v ANN OF [1, 1] LIMIT 10 WITH ann_options = {'rerank_k': '1000'}");
-
-        // Queries with invalid ann options that will eventually be valid when we support disabling reranking
-        assertInvalidThrowMessage("Invalid rerank_k value -1 lesser than limit 100",
-                                  InvalidRequestException.class,
-                                  "SELECT * FROM %s ORDER BY v ANN OF [1, 1] LIMIT 100 WITH ann_options = {'rerank_k': -1}");
-        assertInvalidThrowMessage("Invalid rerank_k value 0 lesser than limit 100",
-                                  InvalidRequestException.class,
-                                  "SELECT * FROM %s ORDER BY v ANN OF [1, 1] LIMIT 100 WITH ann_options = {'rerank_k': 0}");
 
         // Queries that exceed the failure threshold for the guardrail. Specifies a protocol version to trigger
         // validation in the coordinator.
@@ -206,7 +200,7 @@ public class ANNOptionsTest extends CQLTester
                    .checkAssert(i -> testTransport(String.format(negativeQuery, -i), ANNOptions.create(-i)));
 
         // rerankK = 0 must also work
-        testTransport("SELECT * FROM %%s ORDER BY v ANN OF [1, 1] LIMIT 10 WITH ann_options = {'rerank_k': 0}", ANNOptions.create(0));
+        testTransport("SELECT * FROM %s ORDER BY v ANN OF [1, 1] LIMIT 10 WITH ann_options = {'rerank_k': 0}", ANNOptions.create(0));
 
         // some random positive values, all should be accepted
         String positiveQuery = "SELECT * FROM %%s ORDER BY v ANN OF [1, 1] LIMIT %d WITH ann_options = {'rerank_k': %<d}";
