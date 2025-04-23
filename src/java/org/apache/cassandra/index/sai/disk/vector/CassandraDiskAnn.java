@@ -200,7 +200,9 @@ public class CassandraDiskAnn
     /**
      * @param queryVector the query vector
      * @param limit the number of results to look for in the index (>= limit)
-     * @param rerankK the number of results to look for in the index (>= limit)
+     * @param rerankK the number of quantized results to look for in the index (>= limit or <= 0). If rerankK is
+     *                non-positive, then we will use limit as the value and will skip reranking. Rerankless search
+     *                only applies when the graph has compressed vectors.
      * @param threshold the minimum similarity score to accept
      * @param usePruning whether to use pruning to speed up the search
      * @param acceptBits a Bits indicating which row IDs are acceptable, or null if no constraints
@@ -219,6 +221,9 @@ public class CassandraDiskAnn
                                                     IntConsumer nodesVisitedConsumer)
     {
         VectorValidation.validateIndexable(queryVector, similarityFunction);
+        boolean isRerankless = rerankK <= 0;
+        if (isRerankless)
+            rerankK = limit;
 
         var graphAccessManager = searchers.get();
         var searcher = graphAccessManager.get();
@@ -234,11 +239,12 @@ public class CassandraDiskAnn
             if (features.contains(FeatureId.FUSED_ADC))
             {
                 var asf = view.approximateScoreFunctionFor(queryVector, similarityFunction);
-                var rr = view.rerankerFor(queryVector, similarityFunction);
+                var rr = isRerankless ? null : view.rerankerFor(queryVector, similarityFunction);
                 ssp = new SearchScoreProvider(asf, rr);
             }
             else if (compressedVectors == null)
             {
+                // no compression, so we ignore isRerankless (except for setting rerankK to limit)
                 ssp = new SearchScoreProvider(view.rerankerFor(queryVector, similarityFunction));
             }
             else
@@ -249,7 +255,7 @@ public class CassandraDiskAnn
                          ? VectorSimilarityFunction.COSINE
                          : similarityFunction;
                 var asf = compressedVectors.precomputedScoreFunctionFor(queryVector, sf);
-                var rr = view.rerankerFor(queryVector, similarityFunction);
+                var rr = isRerankless ? null : view.rerankerFor(queryVector, similarityFunction);
                 ssp = new SearchScoreProvider(asf, rr);
             }
             long start = nanoTime();
@@ -257,8 +263,8 @@ public class CassandraDiskAnn
             long elapsed = nanoTime() - start;
             if (V3OnDiskFormat.ENABLE_RERANK_FLOOR)
                 context.updateAnnRerankFloor(result.getWorstApproximateScoreInTopK());
-            Tracing.trace("DiskANN search for {}/{} (usePruning: {}) visited {} nodes, reranked {} to return {} results from {}",
-                          limit, rerankK, usePruning, result.getVisitedCount(), result.getRerankedCount(), result.getNodes().length, source);
+            Tracing.trace("DiskANN search for {}/{} rerankless={}, usePruning={} visited {} nodes, reranked {} to return {} results from {}",
+                          limit, rerankK, isRerankless, usePruning, result.getVisitedCount(), result.getRerankedCount(), result.getNodes().length, source);
             columnQueryMetrics.onSearchResult(result, elapsed, false);
             context.addAnnGraphSearchLatency(elapsed);
             if (threshold > 0)
