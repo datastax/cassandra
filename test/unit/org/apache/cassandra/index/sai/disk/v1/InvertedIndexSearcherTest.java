@@ -193,7 +193,7 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
             MemtableTermsIterator termsIterator = new MemtableTermsIterator(null, null, iter);
             SegmentMetadata.ComponentMetadataMap indexMetas = writer.writeAll(metadataBuilder.intercept(termsIterator), docLengths);
             metadataBuilder.setComponentsMetadata(indexMetas);
-            metadataBuilder.setNumRows(writer.getPostingsCount());
+            metadataBuilder.setNumRows(docLengths.values().stream().mapToInt(i -> i).sum());
         }
 
         final SegmentMetadata segmentMetadata = metadataBuilder.build();
