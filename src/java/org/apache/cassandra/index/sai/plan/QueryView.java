@@ -126,44 +126,44 @@ public class QueryView implements AutoCloseable
         protected QueryView build() throws IllegalStateException
         {
             var sstableIndexes = new HashSet<SSTableIndex>();
+            View saiView = null;
             try
             {
-                long start = MonotonicClock.approxTime.now();
-                while (!MonotonicClock.approxTime.isAfter(start + TimeUnit.MILLISECONDS.toNanos(2000)))
+                // Get memtables first in case we are in the middle of flushing one.
+                var memtableIndexes = new HashSet<>(indexContext.getLiveMemtables().values());
+                // This is an atomic operation to get an already referenced view of all current local indexes for the table
+                saiView = indexContext.getReferencedView();
+
+                // Now that we referenced a view, need to confirm that the view we referenced isn't somehow invalid.
+                if (!indexContext.isIndexed())
+                    throw new MissingIndexException(indexContext);
+
+                var sstableReaders = new ArrayList<SSTableReader>(saiView.size());
+                // These are already referenced because they are referenced by the same view we just referenced.
+                // TODO review saiView.match() method for boolean predicates.
+                for (var index : saiView.getIndexes())
                 {
-                    // Get memtables first in case we are in the middle of flushing one.
-                    var memtableIndexes = new HashSet<>(indexContext.getLiveMemtables().values());
-                    // This is an atomic operation to get the current view of all local indexes for the table
-                    var saiView = indexContext.getView();
-                    if (!saiView.reference())
+                    if (!indexInRange(index))
                         continue;
-
-                    // Can happen if we are spinning and index is dropped. We check after getting a reference.
-                    if (!indexContext.isIndexed())
-                        throw new MissingIndexException(indexContext);
-
-                    var sstableReaders = new ArrayList<SSTableReader>(saiView.size());
-                    // These are already referenced because they are referenced by the same view we just referenced.
-                    // TODO review saiView.match() method for boolean predicates.
-                    for (var index : saiView.getIndexes())
-                    {
-                        if (!indexInRange(index))
-                            continue;
-                        sstableIndexes.add(index);
-                        sstableReaders.add(index.getSSTable());
-                    }
-
-                    var memtables = new ArrayList<Memtable>(memtableIndexes.size());
-                    for (var index : memtableIndexes)
-                    {
-                        var memtable = index.getMemtable();
-                        memtables.add(memtable);
-                    }
-
-                    var viewFragment = new ColumnFamilyStore.ViewFragment(sstableReaders, memtables);
-                    return new QueryView(saiView, viewFragment, sstableIndexes, memtableIndexes);
+                    sstableIndexes.add(index);
+                    sstableReaders.add(index.getSSTable());
                 }
-                throw new MissingIndexException(indexContext);
+
+                var memtables = new ArrayList<Memtable>(memtableIndexes.size());
+                for (var index : memtableIndexes)
+                {
+                    var memtable = index.getMemtable();
+                    memtables.add(memtable);
+                }
+
+                var viewFragment = new ColumnFamilyStore.ViewFragment(sstableReaders, memtables);
+                return new QueryView(saiView, viewFragment, sstableIndexes, memtableIndexes);
+            }
+            catch (Exception e)
+            {
+                if (saiView != null)
+                    saiView.release();
+                throw e;
             }
             finally
             {

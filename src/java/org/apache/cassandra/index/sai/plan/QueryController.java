@@ -911,15 +911,13 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     private long estimateMatchingRowCountUsingHistograms(Expression predicate)
     {
         assert indexFeatureSet.hasTermsHistogram();
-        var context = predicate.context;
+        var queryView = getQueryView(predicate.context);
 
-        Collection<MemtableIndex> memtables = context.getLiveMemtables().values();
         long rowCount = 0;
-        for (MemtableIndex index : memtables)
+        for (MemtableIndex index : queryView.memtableIndexes)
             rowCount += index.estimateMatchingRowsCount(predicate, mergeRange);
 
-        var queryView = context.getView();
-        for (SSTableIndex index : queryView.getIndexes())
+        for (SSTableIndex index : queryView.sstableIndexes)
             rowCount += index.estimateMatchingRowsCount(predicate, mergeRange);
 
         return rowCount;
@@ -948,13 +946,11 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     {
         Preconditions.checkArgument(limit > 0, "limit must be > 0");
 
-        IndexContext context = orderer.context;
-        Collection<MemtableIndex> memtables = context.getLiveMemtables().values();
-        View queryView = context.getView();
+        QueryView queryView = getQueryView(orderer.context);
 
         int memoryRerankK = orderer.rerankKFor(limit, VectorCompression.NO_COMPRESSION);
         double cost = 0;
-        for (MemtableIndex index : memtables)
+        for (MemtableIndex index : queryView.memtableIndexes)
         {
             // FIXME convert nodes visited to search cost
             int memtableCandidates = (int) Math.min(Integer.MAX_VALUE, candidates);
@@ -962,10 +958,10 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         }
 
         long totalRows = 0;
-        for (SSTableIndex index : queryView.getIndexes())
+        for (SSTableIndex index : queryView.sstableIndexes)
             totalRows += index.getSSTable().getTotalRows();
 
-        for (SSTableIndex index : queryView.getIndexes())
+        for (SSTableIndex index : queryView.sstableIndexes)
         {
             for (Segment segment : index.getSegments())
             {

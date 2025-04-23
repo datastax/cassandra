@@ -658,6 +658,16 @@ public class IndexContext
         return viewManager.getView();
     }
 
+    public View getReferencedView()
+    {
+        do
+        {
+            View view = viewManager.getView();
+            if (view.reference())
+                return view;
+        } while (true);
+    }
+
     /**
      * @return total number of per-index open files
      */
@@ -713,16 +723,6 @@ public class IndexContext
     public ConcurrentMap<Memtable, MemtableIndex> getLiveMemtables()
     {
         return liveMemtables;
-    }
-
-    public @Nullable MemtableIndex getMemtableIndex(Memtable memtable)
-    {
-        return liveMemtables.get(memtable);
-    }
-
-    public @Nullable SSTableIndex getSSTableIndex(Descriptor descriptor)
-    {
-        return getView().getSSTableIndex(descriptor);
     }
 
     public boolean supports(Operator op)
