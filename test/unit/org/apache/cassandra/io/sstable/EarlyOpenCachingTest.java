@@ -149,7 +149,7 @@ public class EarlyOpenCachingTest extends CQLTester
                 firstKey = partition.partitionKey();
             lastKey = partition.partitionKey();
         }
-        assertEquals("Simple scanner does not iterate all content", firstKey, s.first);
-        assertEquals("Simple scanner does not iterate all content", lastKey, s.last);
+        assertEquals("Simple scanner does not iterate all content", s.first, firstKey);
+        assertEquals("Simple scanner does not iterate all content", s.last, lastKey);
     }
 }
