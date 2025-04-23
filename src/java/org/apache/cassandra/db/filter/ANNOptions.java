@@ -80,8 +80,8 @@ public class ANNOptions
 
         if (rerankK != null)
         {
-            if (rerankK < limit)
-                throw new InvalidRequestException(String.format("Invalid rerank_k value %d lesser than limit %d", rerankK, limit));
+            if (rerankK > 0 && rerankK < limit)
+                throw new InvalidRequestException(String.format("Invalid rerank_k value %d greater than 0 and less than limit %d", rerankK, limit));
 
             Guardrails.annRerankKMaxValue.guard(rerankK, "ANN options", false, state);
         }
