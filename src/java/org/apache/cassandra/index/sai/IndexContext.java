@@ -91,6 +91,7 @@ import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.MonotonicClock;
 import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.concurrent.OpOrder;
@@ -657,14 +658,17 @@ public class IndexContext
         return viewManager.getView();
     }
 
-    public View getReferencedView()
+    public View getReferencedView(long timeoutNanos)
     {
+        var deadline = MonotonicClock.approxTime.now() + timeoutNanos;
         do
         {
             View view = viewManager.getView();
             if (view.reference())
                 return view;
-        } while (true);
+        } while (MonotonicClock.approxTime.isAfter(deadline));
+
+        return null;
     }
 
     /**

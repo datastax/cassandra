@@ -28,6 +28,7 @@ import java.util.Comparator;
 import java.util.Map;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ConcurrentSkipListMap;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.function.IntUnaryOperator;
@@ -507,7 +508,13 @@ public class CassandraOnHeapGraph<T> implements Accountable
     {
         // Retrieve the first compressed vectors for a segment with at least MAX_PQ_TRAINING_SET_SIZE rows
         // or the one with the most rows if none reach that size
-        var view = indexContext.getReferencedView();
+        var view = indexContext.getReferencedView(TimeUnit.SECONDS.toNanos(5));
+        if (view == null)
+        {
+            logger.warn("Unable to get view of already built indexes for {}", indexContext);
+            return null;
+        }
+
         try
         {
             var indexes = new ArrayList<>(view.getIndexes());
