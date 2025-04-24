@@ -125,6 +125,11 @@ public class LengthPartitioner implements IPartitioner
             return new BigIntegerToken(ByteBufferUtil.toLong(bytes));
         }
 
+        public Token fromLongValue(long longValue)
+        {
+            return new BigIntegerToken(longValue);
+        }
+
         @Override
         public Token fromComparableBytes(ByteSource.Peekable comparableBytes, ByteComparable.Version version)
         {

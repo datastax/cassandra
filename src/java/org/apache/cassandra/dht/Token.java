@@ -41,6 +41,20 @@ public abstract class Token implements RingPosition<Token>, Serializable
         public abstract Token fromByteArray(ByteBuffer bytes);
 
         /**
+         * This method exists so that callers can create tokens from the primitive {@code long} value for this {@link Token}, if
+         * one exits. It is especially useful to skip ByteBuffer serde operations where performance is critical.
+         *
+         * @param token the primitive {@code long} value of this token
+         * @return the {@link Token} instance corresponding to the given primitive {@code long} value
+         *
+         * @throws UnsupportedOperationException if this {@link Token} is not backed by a primitive {@code long} value
+         */
+        public Token fromLongValue(long token)
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        /**
          * Produce a byte-comparable representation of the token.
          * See {@link Token#asComparableBytes}
          */
