@@ -391,7 +391,10 @@ public abstract class SSTable
         try (PrintWriter w = new PrintWriter((fos = tocFile.newOutputStream(writeMode))))
         {
             for (Component component : components)
+            {
+                logger.info("Writing component {} to TOC file {}", component.name, tocFile.path());
                 w.println(component.name);
+            }
             w.flush();
             fos.sync();
         }
