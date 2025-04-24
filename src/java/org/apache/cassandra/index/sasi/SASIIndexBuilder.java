@@ -44,6 +44,7 @@ import org.apache.cassandra.io.sstable.format.RowIndexEntry;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.RandomAccessReader;
+import org.apache.cassandra.io.util.ReadPattern;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.UUIDGen;
@@ -80,7 +81,7 @@ class SASIIndexBuilder extends SecondaryIndexBuilder
             Map<ColumnMetadata, ColumnIndex> indexes = e.getValue();
 
             SSTableWatcher.instance.onIndexBuild(sstable, builtIndexes);
-            try (RandomAccessReader dataFile = sstable.openDataReader())
+            try (RandomAccessReader dataFile = sstable.openDataReader(ReadPattern.SEQUENTIAL))
             {
                 PerSSTableIndexWriter indexWriter = SASIIndex.newWriter(keyValidator, sstable.descriptor, indexes, OperationType.COMPACTION);
 

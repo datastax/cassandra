@@ -578,7 +578,7 @@ public class Injections
         public PauseBuilder(String name, long timeout)
         {
             super(String.format("pause/%s/%s", name, UUID.randomUUID().toString()));
-            actionBuilder.actions().doAction(expr("Thread.sleep").args(timeout));
+            actionBuilder.actions().doAction(expr("Thread.sleep").args(timeout+"L"));
         }
 
         /**
