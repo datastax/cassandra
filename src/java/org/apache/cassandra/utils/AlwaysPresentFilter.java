@@ -53,4 +53,10 @@ public class AlwaysPresentFilter implements IFilter
     {
         return 0;
     }
+
+    @Override
+    public String toString()
+    {
+        return "AlwaysPresentFilter";
+    }
 }

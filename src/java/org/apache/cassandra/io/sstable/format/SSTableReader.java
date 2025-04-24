@@ -894,6 +894,12 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
 
     public static void saveBloomFilter(Descriptor descriptor, IFilter filter)
     {
+        if (!(filter instanceof BloomFilter))
+        {
+            logger.info("Skipped saving bloom filter {} for {} to disk", filter, descriptor);
+            return;
+        }
+
         File filterFile = descriptor.fileFor(Component.FILTER);
         try (DataOutputStreamPlus stream = new FileOutputStreamPlus(filterFile))
         {
