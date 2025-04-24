@@ -175,10 +175,4 @@ public abstract class SystemKey
     {
         return cipherName.replaceAll("/.*", "");
     }
-
-    /**
-     * Returns a backup of this system key as an {@link EncryptionKeyBackup} that can be restored later on.
-     * @return a backup of this system key.
-     */
-    public abstract EncryptionKeyBackup asEncryptionKeyBackup();
 }

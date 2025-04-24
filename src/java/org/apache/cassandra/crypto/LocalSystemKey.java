@@ -167,10 +167,4 @@ public class LocalSystemKey extends SystemKey
     {
         return keyPath.toAbsolutePath().toString();
     }
-
-    @Override
-    public EncryptionKeyBackup asEncryptionKeyBackup()
-    {
-        throw new UnsupportedOperationException();
-    }
 }

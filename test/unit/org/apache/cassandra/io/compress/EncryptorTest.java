@@ -19,7 +19,6 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Collections;
-import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.Set;
@@ -33,7 +32,6 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.crypto.EncryptionKeyBackup;
 import org.apache.cassandra.crypto.IKeyProvider;
 import org.apache.cassandra.crypto.IKeyProviderFactory;
 import org.apache.cassandra.crypto.LocalFileSystemKeyProviderFactory;
@@ -75,12 +73,6 @@ public class EncryptorTest
         public SecretKey getSecretKey(String cipherName, int keyStrength)
         {
             return new SecretKeySpec(new byte[keyStrength / 8], cipherName.replaceAll("/.*", ""));
-        }
-
-        @Override
-        public List<EncryptionKeyBackup> getEncryptionKeyBackups(String cipherName, int keyStrength)
-        {
-            return Collections.emptyList();
         }
     }
 

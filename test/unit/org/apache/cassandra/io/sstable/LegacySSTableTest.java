@@ -48,7 +48,6 @@ import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.UntypedResultSet;
-import org.apache.cassandra.crypto.EncryptionKeyBackup;
 import org.apache.cassandra.crypto.IKeyProvider;
 import org.apache.cassandra.crypto.IKeyProviderFactory;
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -350,12 +349,6 @@ public class LegacySSTableTest
             byte[] bytes = new byte[keyStrength / 8];
             Arrays.fill(bytes, (byte) 6);
             return new SecretKeySpec(bytes, cipherName.replaceAll("/.*", ""));
-        }
-
-        @Override
-        public List<EncryptionKeyBackup> getEncryptionKeyBackups(String cipherName, int keyStrength)
-        {
-            return Collections.emptyList();
         }
     }
 

@@ -18,7 +18,6 @@
 package org.apache.cassandra.crypto;
 
 
-import java.util.List;
 import javax.crypto.SecretKey;
 
 /**
@@ -39,20 +38,4 @@ public interface IKeyProvider
      * @throws KeyGenerationException when invalid cipherName was given, or keyStrength does not match the algorithm
      */
     SecretKey getSecretKey(String cipherName, int keyStrength) throws KeyAccessException, KeyGenerationException;
-
-    /**
-     * Returns a list of backup encryption keys for the given cipher algorithm and key strength.
-     *
-     * There are two reasons to return a List instead of just a single {@link EncryptionKeyBackup}:
-     * <ul>
-     *     <li>If the key has dependencies it would return a backup of those dependencies too, so it would be possible to restore the requested key.</li>
-     *     <li>Some key providers might store multiple keys per cipher and keyStrength combination, so we should return all of those</li>
-     * </ul>
-     *
-     *
-     * @param cipherName name of the JCE cipher, optionally with mode and padding
-     * @param keyStrength key length in bits
-     * @return a list of encryption key backups.
-     */
-    List<EncryptionKeyBackup> getEncryptionKeyBackups(String cipherName, int keyStrength);
 }
