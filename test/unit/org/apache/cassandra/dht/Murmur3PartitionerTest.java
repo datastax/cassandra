@@ -77,5 +77,16 @@ public class Murmur3PartitionerTest extends PartitionerTestCase
                 return Murmur3Partitioner.instance.getToken(key).token == token;
             });
     }
+
+    @Test
+    public void testFromLongValue()
+    {
+        qt().forAll(longs().between(Long.MIN_VALUE + 1, Long.MAX_VALUE))
+            .check(token -> {
+                Token fromLongValue = Murmur3Partitioner.instance.getTokenFactory().fromLongValue(token);
+                Token constructed = new Murmur3Partitioner.LongToken(token);
+                return constructed.equals(fromLongValue);
+            });
+    }
 }
 
