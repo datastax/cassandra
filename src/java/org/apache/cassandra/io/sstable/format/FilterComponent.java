@@ -74,6 +74,12 @@ public class FilterComponent
 
     public static void save(IFilter filter, Descriptor descriptor, boolean deleteOnFailure) throws IOException
     {
+        if (!(filter instanceof BloomFilter))
+        {
+            logger.info("Skipped saving bloom filter {} for {} to disk", filter, descriptor);
+            return;
+        }
+
         File filterFile = descriptor.fileFor(Components.FILTER);
         try (FileOutputStreamPlus stream = filterFile.newOutputStream(File.WriteMode.OVERWRITE))
         {
