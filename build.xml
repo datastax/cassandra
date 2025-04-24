@@ -751,10 +751,10 @@
           </dependency>
           <dependency groupId="org.hamcrest" artifactId="hamcrest" version="2.2" scope="test"/>
           <dependency groupId="org.agrona" artifactId="agrona" version="1.20.0" />
-          <dependency groupId="org.apache.lucene" artifactId="lucene-core" version="9.8.0-5ea8bb4f21" />
-          <dependency groupId="org.apache.lucene" artifactId="lucene-analysis-common" version="9.8.0-5ea8bb4f21" />
-          <dependency groupId="org.apache.lucene" artifactId="lucene-backward-codecs" version="9.8.0-5ea8bb4f21" />
-          <dependency groupId="io.github.jbellis" artifactId="jvector" version="4.0.0-beta.3" />
+          <dependency groupId="org.apache.lucene" artifactId="lucene-core" version="9.8.0" />
+          <dependency groupId="org.apache.lucene" artifactId="lucene-analysis-common" version="9.8.0" />
+          <dependency groupId="org.apache.lucene" artifactId="lucene-backward-codecs" version="9.8.0" />
+          <dependency groupId="io.github.jbellis" artifactId="jvector" version="4.0.0-beta.4" />
           <dependency groupId="com.bpodgursky" artifactId="jbool_expressions" version="1.14" scope="test"/>
 
           <dependency groupId="com.carrotsearch.randomizedtesting" artifactId="randomizedtesting-runner" version="2.1.2" scope="test">

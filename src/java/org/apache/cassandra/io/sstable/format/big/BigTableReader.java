@@ -51,6 +51,7 @@ import org.apache.cassandra.io.sstable.format.ScrubPartitionIterator;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.RandomAccessReader;
+import org.apache.cassandra.io.util.ReadPattern;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
@@ -311,7 +312,7 @@ public class BigTableReader extends SSTableReader
     @Override
     public RandomAccessReader openKeyComponentReader()
     {
-        return openIndexReader();
+        return openIndexReader(ReadPattern.RANDOM);
     }
 
     @Override

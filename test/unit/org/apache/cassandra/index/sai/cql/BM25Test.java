@@ -750,6 +750,37 @@ public class BM25Test extends SAITester
     }
 
     @Test
+    public void testOrderingSeveralSSTablesWithMapPredicate() throws Throwable
+    {
+        // Force search-then-sort
+        QueryController.QUERY_OPT_LEVEL = 0;
+        createTable("CREATE TABLE %s (id int PRIMARY KEY, category text, map_category map<int, int>)");
+        createAnalyzedIndex("category", true);
+        createIndex("CREATE CUSTOM INDEX ON %s (entries(map_category)) USING 'StorageAttachedIndex'");
+        // We don't want compaction to merge the two sstables since they are key to testing this code path.
+        disableCompaction();
+
+        // Insert documents so that they all have the same bm25 score and are easy to query across sstables
+        for (int i = 0; i < 10; i++)
+        {
+            execute("INSERT INTO %s (id, category, map_category) VALUES (?, ?, ?)",
+                    i, "Health", map(0, i));
+            if (i == 4)
+                flush();
+        }
+
+        // Confirm that the memtable/sstable and sstable/sstable pairings work as expected.
+        beforeAndAfterFlush(() -> {
+            // Submit a query that will fetch keys from 2 overlapping sstables. The key is that they are overlapping
+            // because we have optimizations that will skip keys that are out of the sstable's range. In this case,
+            // the actual bm25 data doesn't matter because we are covering the edge case of mapping PrK back to
+            // its value here.
+            assertRowsIgnoringOrder(execute("SELECT id FROM %s WHERE map_category[0] >= 4 AND map_category[0] <= 6 ORDER BY category BM25 OF 'health' LIMIT 10"),
+                                   row(4), row(5), row(6));
+        });
+    }
+
+    @Test
     public void testOrderingSeveralSegments() throws Throwable
     {
         createTable("CREATE TABLE %s (id int PRIMARY KEY, category text, score int," +
