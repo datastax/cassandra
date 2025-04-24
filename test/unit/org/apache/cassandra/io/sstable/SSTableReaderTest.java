@@ -43,6 +43,8 @@ import java.util.stream.Stream;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Sets;
 import com.google.common.util.concurrent.Uninterruptibles;
+import org.apache.cassandra.io.sstable.format.*;
+import org.apache.cassandra.utils.*;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Assume;
@@ -81,11 +83,7 @@ import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.io.FSReadError;
-import org.apache.cassandra.io.sstable.format.CompressionInfoComponent;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReader.PartitionPositionBounds;
-import org.apache.cassandra.io.sstable.format.SSTableReaderWithFilter;
-import org.apache.cassandra.io.sstable.format.TOCComponent;
 import org.apache.cassandra.io.sstable.format.big.BigFormat;
 import org.apache.cassandra.io.sstable.format.big.BigFormat.Components;
 import org.apache.cassandra.io.sstable.format.big.BigTableReader;
@@ -102,16 +100,13 @@ import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.MmappedRegions;
 import org.apache.cassandra.io.util.PageAware;
+import org.apache.cassandra.io.util.PathUtils;
 import org.apache.cassandra.schema.CachingParams;
 import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.service.CacheService;
-import org.apache.cassandra.utils.BloomCalculations;
-import org.apache.cassandra.utils.ByteBufferUtil;
-import org.apache.cassandra.utils.FilterFactory;
-import org.apache.cassandra.utils.IFilter;
 import org.mockito.Mockito;
 
 import static java.lang.String.format;
@@ -1593,6 +1588,29 @@ public class SSTableReaderTest
         assertTrue(sstable.components().contains(Components.DATA));
         assertTrue(sstable.components().size() > 1);
         assertTrue(sstable.onDiskComponentsSize() > sstable.onDiskLength());
+    }
+
+    @Test
+    public void testSSTableFlushBloomFilterReachedLimit() throws Exception
+    {
+        final int numKeys = 100; // will use about 128 bytes
+        final Keyspace keyspace = Keyspace.open(KEYSPACE1);
+        final ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF_STANDARD);
+
+        SSTableReader sstable;
+        long bfSpace = BloomFilter.memoryLimiter.maxMemory -  BloomFilter.memoryLimiter.memoryAllocated() - 100;
+        try
+        {
+            BloomFilter.memoryLimiter.increment(bfSpace);
+            sstable = getNewSSTable(cfs, numKeys, 1);
+            Assert.assertFalse(PathUtils.exists(sstable.descriptor.pathFor(Components.FILTER)));
+            Assert.assertSame(FilterFactory.AlwaysPresent, getFilter(sstable));
+        }
+        finally
+        {
+            // reset
+            BloomFilter.memoryLimiter.decrement(bfSpace);
+        }
     }
 
     private void checkSSTableOpenedWithGivenFPChance(ColumnFamilyStore cfs, SSTableReader sstable, double fpChance, boolean bfShouldExist, int numKeys, boolean expectRecreated) throws IOException

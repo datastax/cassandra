@@ -39,7 +39,8 @@ public class MemoryLimiter
     {
         assert bytesCount >= 0;
         long bytesCountAfterAllocation = this.currentMemory.addAndGet(bytesCount);
-        if (bytesCountAfterAllocation >= maxMemory)
+        // if overflow or exceeded max memory
+        if (bytesCountAfterAllocation < 0 || bytesCountAfterAllocation >= maxMemory)
         {
             this.currentMemory.addAndGet(-bytesCount);
 

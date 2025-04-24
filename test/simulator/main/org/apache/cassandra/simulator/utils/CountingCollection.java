@@ -51,4 +51,10 @@ public class CountingCollection<T> extends AbstractCollection<T>
     {
         return count;
     }
+
+    @Override
+    public String toString()
+    {
+        return "AlwaysPresentFilter";
+    }
 }
