@@ -34,7 +34,6 @@ import com.google.common.collect.Sets;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.crypto.EncryptionKeyBackup;
 import org.apache.cassandra.crypto.KeyAccessException;
 import org.apache.cassandra.crypto.KeyGenerationException;
 import org.apache.cassandra.service.StorageService;
@@ -220,17 +219,5 @@ public class Encryptor implements ICompressor
         // is earlier, or at most equal, to the read position, which means decryptors (being copy-safe) can work
         // correctly with the same buffer as both input and output.
         return true;
-    }
-
-    /**
-     * Returns a list of {@link EncryptionKeyBackup} that this encryptor uses for encrypting/decrypting data.
-     * @return a list of Encryption key backups.
-     */
-    public List<EncryptionKeyBackup> getEncryptionKeyBackups()
-    {
-        return encryptionConfig
-                .getKeyProvider()
-                .getEncryptionKeyBackups(encryptionConfig.getCipherName(),
-                        encryptionConfig.getKeyStrength());
     }
 }

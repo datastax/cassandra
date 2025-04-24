@@ -23,7 +23,6 @@ import java.nio.file.Path;
 import java.security.InvalidKeyException;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
-import java.util.List;
 import java.util.concurrent.ConcurrentMap;
 import javax.crypto.Cipher;
 import javax.crypto.KeyGenerator;
@@ -160,11 +159,5 @@ public class LocalFileSystemKeyProvider implements IKeyProvider
     String getFileName()
     {
         return keyPath.toAbsolutePath().toString();
-    }
-
-    @Override
-    public List<EncryptionKeyBackup> getEncryptionKeyBackups(String cipherName, int keyStrength)
-    {
-        throw new UnsupportedOperationException();
     }
 }
