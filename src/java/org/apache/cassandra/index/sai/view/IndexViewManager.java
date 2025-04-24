@@ -55,14 +55,14 @@ public class IndexViewManager
 
     public IndexViewManager(IndexContext context)
     {
-        this(context, Collections.emptySet(), Collections.emptySet());
+        this(context, Collections.emptySet());
     }
 
     @VisibleForTesting
-    IndexViewManager(IndexContext context, Collection<Descriptor> sstables, Collection<SSTableIndex> indices)
+    IndexViewManager(IndexContext context, Collection<SSTableIndex> indices)
     {
         this.context = context;
-        this.viewRef.set(new View(context, sstables, indices));
+        this.viewRef.set(new View(context, indices));
         // View references the indices, so we release them here.
         indices.forEach(SSTableIndex::release);
     }
@@ -76,14 +76,12 @@ public class IndexViewManager
      * Replaces old SSTables with new by creating new immutable view.
      *
      * @param oldSSTables A set of SSTables to remove.
-     * @param newSSTables A set of SSTables added in Cassandra.
      * @param newSSTableContexts A set of SSTableContexts to add to tracker.
      * @param validate if true, per-column index files' header and footer will be validated.
      *
      * @return A set of SSTables which have attached to them invalid index components.
      */
     public Set<SSTableContext> update(Collection<SSTableReader> oldSSTables,
-                                      Collection<SSTableReader> newSSTables,
                                       Collection<SSTableContext> newSSTableContexts,
                                       boolean validate)
     {
@@ -104,12 +102,6 @@ public class IndexViewManager
                 newView.release();
             newViewIndexes.clear();
 
-            Set<Descriptor> sstables = new HashSet<>(currentView.getSSTables());
-            for (SSTableReader sstable : oldSSTables)
-                sstables.remove(sstable.descriptor);
-            for (SSTableReader sstable : newSSTables)
-                sstables.add(sstable.descriptor);
-
             for (SSTableIndex sstableIndex : currentView)
             {
                 // When aborting early open transaction, toRemove may have the same sstable files as newSSTableContexts,
@@ -123,7 +115,7 @@ public class IndexViewManager
             for (SSTableIndex sstableIndex : indexes.left)
                 addOrUpdateSSTableIndex(sstableIndex, newViewIndexes);
 
-            newView = new View(context, sstables, newViewIndexes.values());
+            newView = new View(context, newViewIndexes.values());
             currentView.release();
         } while (newView == null || !viewRef.compareAndSet(currentView, newView));
 
@@ -170,9 +162,7 @@ public class IndexViewManager
                                      .collect(Collectors.toSet());
             var newIndexes = new HashSet<>(oldView.getIndexes());
             newIndexes.removeAll(indexesToRemove);
-            // TODO why are we storing more sstables than indexes here? Are we non-queryable until we get the
-            // count back up?
-            newView = new View(context, oldView.getSSTables(), newIndexes);
+            newView = new View(context, newIndexes);
             oldView.release();
         }
         while (newView == null || !viewRef.compareAndSet(oldView, newView));
@@ -195,8 +185,7 @@ public class IndexViewManager
             oldView = viewRef.get();
             if (newView != null)
                 newView.release();
-            // TODO are we non queryable at this point?
-            newView = new View(context, oldView.getSSTables(), Collections.emptySet());
+            newView = new View(context, Collections.emptySet());
         } while (!viewRef.compareAndSet(oldView, newView));
 
         if (indexWasDropped)

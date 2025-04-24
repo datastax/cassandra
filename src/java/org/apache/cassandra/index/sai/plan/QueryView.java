@@ -130,6 +130,9 @@ public class QueryView implements AutoCloseable
             try
             {
                 // Get memtables first in case we are in the middle of flushing one.
+                // Note that we get the memtables from the index context, which is updated via notifications after
+                // the index context's view is updated, which guarantees a complete and correct view of the table in
+                // favor of possibly duplicated search on a recently flushed memtable and its corresponding sstable.
                 var memtableIndexes = new HashSet<>(indexContext.getLiveMemtables().values());
                 // This is an atomic operation to get an already referenced view of all current local indexes for the table
                 saiView = indexContext.getReferencedView();

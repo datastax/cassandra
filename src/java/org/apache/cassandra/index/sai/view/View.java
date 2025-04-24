@@ -46,7 +46,6 @@ import org.apache.cassandra.utils.concurrent.RefCounted;
 
 public class View implements Iterable<SSTableIndex>
 {
-    private final Set<Descriptor> sstables;
     private final Map<Descriptor, SSTableIndex> view;
     private final AtomicInteger references = new AtomicInteger(1);
     private volatile boolean indexWasDropped;
@@ -55,10 +54,9 @@ public class View implements Iterable<SSTableIndex>
     private final AbstractType<?> keyValidator;
     private final IntervalTree<Key, SSTableIndex, Interval<Key, SSTableIndex>> keyIntervalTree;
 
-    public View(IndexContext context, Collection<Descriptor> sstables, Collection<SSTableIndex> indexes)
+    public View(IndexContext context, Collection<SSTableIndex> indexes)
     {
         this.view = new HashMap<>();
-        this.sstables = new HashSet<>(sstables);
         this.keyValidator = context.keyValidator();
 
         AbstractType<?> validator = context.getValidator();
@@ -111,11 +109,6 @@ public class View implements Iterable<SSTableIndex>
         return view.values().iterator();
     }
 
-    public Collection<Descriptor> getSSTables()
-    {
-        return sstables;
-    }
-
     public Collection<SSTableIndex> getIndexes()
     {
         return view.values();
@@ -157,11 +150,6 @@ public class View implements Iterable<SSTableIndex>
         return view.size();
     }
 
-    public @Nullable SSTableIndex getSSTableIndex(Descriptor descriptor)
-    {
-        return view.get(descriptor);
-    }
-
     /**
      * Tells if an index for the given sstable exists.
      * It's equivalent to {@code getSSTableIndex(descriptor) != null }.
@@ -170,21 +158,6 @@ public class View implements Iterable<SSTableIndex>
     public boolean containsSSTableIndex(Descriptor descriptor)
     {
         return view.containsKey(descriptor);
-    }
-
-    /**
-     * Returns true if this view has been based on the Cassandra view containing given sstable.
-     * In other words, it tells if SAI was given a chance to load the index for the given sstable.
-     * It does not determine if the index exists and was actually loaded.
-     * To check the existence of the index, use {@link #containsSSTableIndex(Descriptor)}.
-     * <p>
-     * This method allows to distinguish a situation when the sstable has no index, the index is
-     * invalid, or was not loaded for whatever reason,
-     * from a situation where the view hasn't been updated yet to reflect the newly added sstable.
-     */
-    public boolean isAwareOfSSTable(Descriptor descriptor)
-    {
-        return sstables.contains(descriptor);
     }
 
     /**

@@ -185,7 +185,7 @@ public class IndexViewManagerTest extends SAITester
                 initialIndexes.add(mockSSTableIndex);
             }
 
-            IndexViewManager tracker = new IndexViewManager(columnContext, descriptors, initialIndexes);
+            IndexViewManager tracker = new IndexViewManager(columnContext, initialIndexes);
             View initialView = tracker.getView();
             assertEquals(2, initialView.size());
 
@@ -196,8 +196,8 @@ public class IndexViewManagerTest extends SAITester
             List<SSTableContext> flushedContexts = flushed.stream().map(s -> SSTableContext.create(s, loadDescriptor(s, store).perSSTableComponents())).collect(Collectors.toList());
 
             // concurrently update from both flush and compaction
-            Future<?> compaction = executor.submit(() -> tracker.update(initial, compacted, compactedContexts, true));
-            Future<?> flush = executor.submit(() -> tracker.update(none, flushed, flushedContexts, true));
+            Future<?> compaction = executor.submit(() -> tracker.update(initial, compactedContexts, true));
+            Future<?> flush = executor.submit(() -> tracker.update(none, flushedContexts, true));
 
             FBUtilities.waitOnFutures(Arrays.asList(compaction, flush));
 
@@ -235,15 +235,13 @@ public class IndexViewManagerTest extends SAITester
     {
         IndexContext mockContext = mock(IndexContext.class);
         when(mockContext.isVector()).thenReturn(true);
-        Descriptor descriptor = mock(Descriptor.class);
         SSTableReader sstable = mock(SSTableReader.class);
-        when(sstable.getDescriptor()).thenReturn(descriptor);
         SSTableIndex index = mock(SSTableIndex.class);
         when(index.reference()).thenReturn(true);
         when(index.getSSTable()).thenReturn(sstable);
         when(index.getIndexContext()).thenReturn(mockContext);
 
-        IndexViewManager tracker = new IndexViewManager(mockContext, Collections.singleton(descriptor), Collections.singleton(index));
+        IndexViewManager tracker = new IndexViewManager(mockContext, Collections.singleton(index));
         var view = tracker.getView();
         // Now we have 2 references to the view.
         assertTrue(view.reference());
