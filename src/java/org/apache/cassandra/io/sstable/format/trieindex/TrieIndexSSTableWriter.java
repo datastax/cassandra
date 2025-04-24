@@ -369,6 +369,12 @@ public class TrieIndexSSTableWriter extends SortedTableWriter
         {
             if (components().contains(Component.FILTER))
             {
+                if (!(bf instanceof BloomFilter))
+                {
+                    logger.info("Skipped flushing bloom filter {} to disk", bf);
+                    return;
+                }
+
                 File path = descriptor.fileFor(Component.FILTER);
                 try (SeekableByteChannel fos = Files.newByteChannel(path.toPath(), StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
                      DataOutputStreamPlus stream = new BufferedDataOutputStreamPlus(fos))

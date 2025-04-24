@@ -851,20 +851,6 @@ public class TrieIndexSSTableReader extends SSTableReader
         throw new UnsupportedOperationException("tries do not have primary index");
     }
 
-    private static IFilter deserializeBloomFilter(Descriptor descriptor, boolean oldBfFormat)
-    {
-        try (FileInputStreamPlus stream = descriptor.fileFor(Component.FILTER).newInputStream())
-        {
-            return BloomFilter.serializer.deserialize(stream, oldBfFormat);
-        }
-        catch (Throwable t)
-        {
-            JVMStabilityInspector.inspectThrowable(t);
-            logger.error("Failed to deserialize bloom filter: {}", t.getMessage());
-            return null;
-        }
-    }
-
     private static IFilter recreateBloomFilter(Descriptor descriptor, TableMetadata metadata, long estimatedKeysCount, double fpChance)
     {
         logger.debug("Recreating bloom filter for {} with fpChance={}", descriptor, fpChance);
@@ -879,6 +865,11 @@ public class TrieIndexSSTableReader extends SSTableReader
         try
         {
             bf = FilterFactory.getFilter(estimatedKeysCount, fpChance);
+            if (!(bf instanceof BloomFilter))
+            {
+                logger.info("Skipped saving recreated bloom filter {} to disk", bf);
+                return bf;
+            }
 
             Factory readerFactory = descriptor.getFormat().getReaderFactory();
             try (PartitionIterator iter = (PartitionIterator) readerFactory.indexIterator(descriptor, metadata))
