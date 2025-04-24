@@ -19,7 +19,11 @@
 package org.apache.cassandra.utils.bytecomparable;
 
 import java.nio.ByteBuffer;
+import java.util.Arrays;
 
+import com.google.common.primitives.UnsignedBytes;
+
+import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FastByteOperations;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -75,11 +79,6 @@ public interface ByteComparable
         return ByteSourceInverse.readBytes(asComparableBytes(version));
     }
 
-    default Preencoded preencode(Version version)
-    {
-        return preencoded(version, asByteComparableArray(version));
-    }
-
     // Simple factories used for testing
 
     @VisibleForTesting
@@ -99,60 +98,48 @@ public interface ByteComparable
         return v -> ByteSource.of(value);
     }
 
-    interface Preencoded extends ByteComparable
+    private static void checkVersion(Version expected, Version actual)
     {
-        Version encodingVersion();
-
-        ByteSource.Duplicatable getPreencodedBytes();
-
-        @Override
-        default ByteSource.Duplicatable asComparableBytes(Version version)
-        {
-            Preconditions.checkState(version == encodingVersion(),
-                                     "Preencoded byte-source at version %s queried at version %s",
-                                     encodingVersion(),
-                                     version);
-            return getPreencodedBytes();
-        }
-
-        @Override
-        default ByteSource.Peekable asPeekableBytes(Version version)
-        {
-            return asComparableBytes(version);
-        }
-
-        @Override
-        default byte[] asByteComparableArray(Version version)
-        {
-            return asComparableBytes(version).remainingBytesToArray();
-        }
+        Preconditions.checkState(actual == expected,
+                                 "Preprocessed byte-source at version %s queried at version %s",
+                                 actual,
+                                 expected);
     }
 
     /**
      * A ByteComparable value that is already encoded for a specific version. Requesting the source with a different
      * version will result in an exception.
      */
-    static Preencoded preencoded(Version version, ByteBuffer bytes)
+    static ByteComparable preencoded(Version version, ByteBuffer bytes)
     {
-        return new PreencodedByteComparable.Buffer(version, bytes);
+        return v -> {
+            checkVersion(version, v);
+            return ByteSource.preencoded(bytes);
+        };
     }
 
     /**
      * A ByteComparable value that is already encoded for a specific version. Requesting the source with a different
      * version will result in an exception.
      */
-    static Preencoded preencoded(Version version, byte[] bytes)
+    static ByteComparable preencoded(Version version, byte[] bytes)
     {
-        return new PreencodedByteComparable.Array(version, bytes);
+        return v -> {
+            checkVersion(version, v);
+            return ByteSource.preencoded(bytes);
+        };
     }
 
     /**
      * A ByteComparable value that is already encoded for a specific version. Requesting the source with a different
      * version will result in an exception.
      */
-    static Preencoded preencoded(Version version, byte[] bytes, int offset, int len)
+    static ByteComparable preencoded(Version version, byte[] bytes, int offset, int len)
     {
-        return new PreencodedByteComparable.Array(version, bytes, offset, len);
+        return v -> {
+            checkVersion(version, v);
+            return ByteSource.preencoded(bytes, offset, len);
+        };
     }
 
     /**
@@ -201,22 +188,30 @@ public interface ByteComparable
      */
     static int compare(ByteComparable bytes1, ByteComparable bytes2, Version version)
     {
-        return ByteSource.compare(bytes1.asComparableBytes(version), bytes2.asComparableBytes(version));
+        ByteSource s1 = bytes1.asComparableBytes(version);
+        ByteSource s2 = bytes2.asComparableBytes(version);
+
+        if (s1 == null || s2 == null)
+            return Boolean.compare(s1 != null, s2 != null);
+
+        while (true)
+        {
+            int b1 = s1.next();
+            int b2 = s2.next();
+            int cmp = Integer.compare(b1, b2);
+            if (cmp != 0)
+                return cmp;
+            if (b1 == ByteSource.END_OF_STREAM)
+                return 0;
+        }
     }
 
     /**
-     * Compare two preencoded byte-comparable values, using their encoding versions.
-     *
-     * @return the result of the lexicographic unsigned byte comparison of the byte-comparable representations of the
-     *         two arguments
+     * Compares two bytecomparable encodings lexicographically
      */
-    static int compare(Preencoded a, Preencoded b)
+    static int compare(ByteBuffer value1, ByteBuffer value2)
     {
-        Preconditions.checkArgument(a.encodingVersion() == b.encodingVersion(),
-                                    "Cannot compare preencoded byte-comparables of different versions %s vs %s",
-                                    a.encodingVersion(),
-                                    b.encodingVersion());
-        return ByteSource.compare(a.getPreencodedBytes(), b.getPreencodedBytes());
+        return FastByteOperations.compareUnsigned(value1, value2);
     }
 
     /**

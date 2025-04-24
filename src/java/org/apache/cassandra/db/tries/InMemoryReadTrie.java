@@ -1132,11 +1132,6 @@ public class InMemoryReadTrie<T> extends Trie<T>
         return isNull(root);
     }
 
-    public ByteComparable.Version byteComparableVersion()
-    {
-        return byteComparableVersion;
-    }
-
     /**
      * Override of dump to provide more detailed printout that includes the type of each node in the trie.
      * We do this via a wrapping cursor that returns a content string for the type of node for every node we return.

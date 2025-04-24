@@ -375,7 +375,7 @@ public abstract class Trie<T>
     /**
      * Call the given consumer on all (path, content) pairs with non-null content in the trie in order.
      */
-    public void forEachEntry(BiConsumer<ByteComparable.Preencoded, T> consumer)
+    public void forEachEntry(BiConsumer<ByteComparable, T> consumer)
     {
         forEachEntry(Direction.FORWARD, consumer);
     }
@@ -383,7 +383,7 @@ public abstract class Trie<T>
     /**
      * Call the given consumer on all (path, content) pairs with non-null content in the trie in order.
      */
-    public void forEachEntry(Direction direction, BiConsumer<ByteComparable.Preencoded, T> consumer)
+    public void forEachEntry(Direction direction, BiConsumer<ByteComparable, T> consumer)
     {
         Cursor<T> cursor = cursor(direction);
         process(new TrieEntriesWalker.WithConsumer<T>(consumer, cursor.byteComparableVersion()), cursor);
@@ -427,7 +427,7 @@ public abstract class Trie<T>
      * Call the given consumer on all (path, content) pairs with non-null content in the trie in order, skipping all
      * branches below the top content-bearing node.
      */
-    public void forEachEntrySkippingBranches(Direction direction, BiConsumer<ByteComparable.Preencoded, T> consumer)
+    public void forEachEntrySkippingBranches(Direction direction, BiConsumer<ByteComparable, T> consumer)
     {
         Cursor<T> cursor = cursor(direction);
         processSkippingBranches(new TrieEntriesWalker.WithConsumer<T>(consumer, cursor.byteComparableVersion()), cursor);
@@ -545,7 +545,7 @@ public abstract class Trie<T>
     /**
      * Returns the ordered entry set of this trie's content as an iterable.
      */
-    public Iterable<Map.Entry<ByteComparable.Preencoded, T>> entrySet()
+    public Iterable<Map.Entry<ByteComparable, T>> entrySet()
     {
         return this::entryIterator;
     }
@@ -553,7 +553,7 @@ public abstract class Trie<T>
     /**
      * Returns the ordered entry set of this trie's content as an iterable.
      */
-    public Iterable<Map.Entry<ByteComparable.Preencoded, T>> entrySet(Direction direction)
+    public Iterable<Map.Entry<ByteComparable, T>> entrySet(Direction direction)
     {
         return () -> entryIterator(direction);
     }
@@ -561,7 +561,7 @@ public abstract class Trie<T>
     /**
      * Returns the ordered entry set of this trie's content in an iterator.
      */
-    public Iterator<Map.Entry<ByteComparable.Preencoded, T>> entryIterator()
+    public Iterator<Map.Entry<ByteComparable, T>> entryIterator()
     {
         return entryIterator(Direction.FORWARD);
     }
@@ -569,7 +569,7 @@ public abstract class Trie<T>
     /**
      * Returns the ordered entry set of this trie's content in an iterator.
      */
-    public Iterator<Map.Entry<ByteComparable.Preencoded, T>> entryIterator(Direction direction)
+    public Iterator<Map.Entry<ByteComparable, T>> entryIterator(Direction direction)
     {
         return new TrieEntriesIterator.AsEntries<>(cursor(direction));
     }
@@ -577,7 +577,7 @@ public abstract class Trie<T>
     /**
      * Returns the ordered entry set of this trie's content in an iterable, filtered by the given type.
      */
-    public <U extends T> Iterable<Map.Entry<ByteComparable.Preencoded, U>> filteredEntrySet(Class<U> clazz)
+    public <U extends T> Iterable<Map.Entry<ByteComparable, U>> filteredEntrySet(Class<U> clazz)
     {
         return filteredEntrySet(Direction.FORWARD, clazz);
     }
@@ -585,7 +585,7 @@ public abstract class Trie<T>
     /**
      * Returns the ordered entry set of this trie's content in an iterable, filtered by the given type.
      */
-    public <U extends T> Iterable<Map.Entry<ByteComparable.Preencoded, U>> filteredEntrySet(Direction direction, Class<U> clazz)
+    public <U extends T> Iterable<Map.Entry<ByteComparable, U>> filteredEntrySet(Direction direction, Class<U> clazz)
     {
         return () -> filteredEntryIterator(direction, clazz);
     }
@@ -593,7 +593,7 @@ public abstract class Trie<T>
     /**
      * Returns the ordered entry set of this trie's content in an iterator, filtered by the given type.
      */
-    public <U extends T> Iterator<Map.Entry<ByteComparable.Preencoded, U>> filteredEntryIterator(Direction direction, Class<U> clazz)
+    public <U extends T> Iterator<Map.Entry<ByteComparable, U>> filteredEntryIterator(Direction direction, Class<U> clazz)
     {
         return new TrieEntriesIterator.AsEntriesFilteredByType<>(cursor(direction), clazz);
     }
@@ -801,7 +801,7 @@ public abstract class Trie<T>
      * Returns an entry set containing all tail tree constructed at the points that contain content of
      * the given type.
      */
-    public Iterable<Map.Entry<ByteComparable.Preencoded, Trie<T>>> tailTries(Direction direction, Class<? extends T> clazz)
+    public Iterable<Map.Entry<ByteComparable, Trie<T>>> tailTries(Direction direction, Class<? extends T> clazz)
     {
         return () -> new TrieTailsIterator.AsEntries<>(cursor(direction), clazz);
     }
