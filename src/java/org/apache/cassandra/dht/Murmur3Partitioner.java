@@ -377,6 +377,12 @@ public class Murmur3Partitioner implements IPartitioner
         }
 
         @Override
+        public Token fromLongValue(long token)
+        {
+            return new LongToken(token);
+        }
+
+        @Override
         public Token fromByteBuffer(ByteBuffer bytes, int position, int length)
         {
             return new LongToken(bytes.getLong(position));
