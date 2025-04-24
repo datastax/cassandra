@@ -161,6 +161,12 @@ public class FilterFactory
         {
             return false;
         }
+
+        @Override
+        public String toString()
+        {
+            return "AlwaysPresentFilter";
+        }
     }
 
     public interface FilterFactoryMetrics
