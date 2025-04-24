@@ -42,7 +42,6 @@ import org.apache.cassandra.index.sai.SSTableContext;
 import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
-import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTable;
@@ -207,8 +206,11 @@ public class IndexViewManagerTest extends SAITester
 
             for (SSTableIndex index : initialIndexes)
             {
-                // Since there is a race, we expect these to be released at least 2 times, but it could be more.
-                assertTrue("Expected at least 2 releases",2 <= ((MockSSTableIndex) index).releaseCount);
+                // Because of the race condition, it is released either once or twice. It won't be more
+                // because there are only two updates. The only real requirement is that it is released.
+                var releaseCount = ((MockSSTableIndex) index).releaseCount;
+                assertTrue("releaseCount should be 1 or 2 but it is " + releaseCount,
+                           releaseCount == 1 || releaseCount == 2);
                 assertTrue(index.isReleased());
             }
 

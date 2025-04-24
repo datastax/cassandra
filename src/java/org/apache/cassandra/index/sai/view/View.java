@@ -54,6 +54,13 @@ public class View implements Iterable<SSTableIndex>
     private final AbstractType<?> keyValidator;
     private final IntervalTree<Key, SSTableIndex, Interval<Key, SSTableIndex>> keyIntervalTree;
 
+    /**
+     * Construct a threadsafe view.
+     * @param context the index context
+     * @param indexes the indexes. Note that the referencing logic for these indexes is handled
+     *                outside of this constructor and all indexes are assumed to have been referenced already.
+     *                The view will release the indexes when it is finally released.
+     */
     public View(IndexContext context, Collection<SSTableIndex> indexes)
     {
         this.view = new HashMap<>();
@@ -66,12 +73,6 @@ public class View implements Iterable<SSTableIndex>
         List<Interval<Key, SSTableIndex>> keyIntervals = new ArrayList<>();
         for (SSTableIndex sstableIndex : indexes)
         {
-            if (!sstableIndex.reference())
-            {
-                this.view.values().forEach(SSTableIndex::release);
-                throw new IllegalStateException("Failed to reference the index " + sstableIndex);
-            }
-
             this.view.put(sstableIndex.getSSTable().descriptor, sstableIndex);
             if (!sstableIndex.getIndexContext().isVector())
                 termTreeBuilder.add(sstableIndex);

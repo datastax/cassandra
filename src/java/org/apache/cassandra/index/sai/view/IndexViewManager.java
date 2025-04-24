@@ -63,8 +63,6 @@ public class IndexViewManager
     {
         this.context = context;
         this.viewRef.set(new View(context, indices));
-        // View references the indices, so we release them here.
-        indices.forEach(SSTableIndex::release);
     }
 
     public View getView()
@@ -91,15 +89,15 @@ public class IndexViewManager
 
         View currentView, newView = null;
         Map<Descriptor, SSTableIndex> newViewIndexes = new HashMap<>();
+        Collection<SSTableIndex> referencedSSTableIndexes = new ArrayList<>();
         Collection<SSTableReader> toRemove = new HashSet<>(oldSSTables);
 
+        outer:
         do
         {
             currentView = viewRef.get();
-            if (!currentView.reference())
-                continue;
-            if (newView != null)
-                newView.release();
+            referencedSSTableIndexes.forEach(SSTableIndex::release);
+            referencedSSTableIndexes.clear();
             newViewIndexes.clear();
 
             for (SSTableIndex sstableIndex : currentView)
@@ -115,12 +113,26 @@ public class IndexViewManager
             for (SSTableIndex sstableIndex : indexes.left)
                 addOrUpdateSSTableIndex(sstableIndex, newViewIndexes);
 
-            newView = new View(context, newViewIndexes.values());
-            currentView.release();
+            // Reference all the new indexes before publishing the new view. Becuase addOrUpdateSSTableIndex
+            // can overwrite entries, it is simpler to just reference all the ones we know we need here instead of
+            // tracking state across multiple iterations. By doing it the naive way, we reduce the complexity of this
+            // method quite a bit.
+            for (var sstableIndex : newViewIndexes.values())
+            {
+                if (!sstableIndex.reference())
+                    continue outer;
+                referencedSSTableIndexes.add(sstableIndex);
+            }
+
+            newView = new View(context, referencedSSTableIndexes);
         } while (newView == null || !viewRef.compareAndSet(currentView, newView));
 
-        // newView referenced these for a second time in this method, so we call release once here.
+        // These were referenced when created and then the ones we are keeping were re-referenced if they made it into
+        // the newViewIndexes.
         indexes.left.forEach(SSTableIndex::release);
+
+        // Release the old view now that the new view is in place and we have successfully renewed the indexes
+        // that were transferred from the old view to the new view.
         currentView.release();
 
         if (logger.isTraceEnabled())
