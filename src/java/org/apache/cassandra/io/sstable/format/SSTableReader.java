@@ -896,7 +896,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
     {
         if (!(filter instanceof BloomFilter))
         {
-            logger.info("Skipped saving bloom filter {} to disk", filter);
+            logger.info("Skipped saving bloom filter {} for {} to disk", filter, descriptor);
             return;
         }
 

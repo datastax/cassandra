@@ -867,7 +867,7 @@ public class TrieIndexSSTableReader extends SSTableReader
             bf = FilterFactory.getFilter(estimatedKeysCount, fpChance);
             if (!(bf instanceof BloomFilter))
             {
-                logger.info("Skipped saving recreated bloom filter {} to disk", bf);
+                logger.info("Skipped saving recreated bloom filter {} for {} to disk", bf, descriptor);
                 return bf;
             }
 

@@ -371,7 +371,7 @@ public class TrieIndexSSTableWriter extends SortedTableWriter
             {
                 if (!(bf instanceof BloomFilter))
                 {
-                    logger.info("Skipped flushing bloom filter {} to disk", bf);
+                    logger.info("Skipped flushing bloom filter {} for {} to disk", bf, descriptor);
                     return;
                 }
 
