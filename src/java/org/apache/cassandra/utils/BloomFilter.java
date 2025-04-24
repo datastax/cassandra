@@ -215,6 +215,18 @@ public class BloomFilter extends WrappedSharedCloseable implements IFilter
         return bitset.offHeapSize();
     }
 
+    @Override
+    public boolean isSerializable()
+    {
+        return true;
+    }
+
+    @Override
+    public IFilterSerializer getSerializer()
+    {
+        return serializer;
+    }
+
     public String toString()
     {
         return "BloomFilter[hashCount=" + hashCount + ";capacity=" + bitset.capacity() + ']';

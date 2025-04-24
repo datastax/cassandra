@@ -57,7 +57,6 @@ import org.apache.cassandra.io.util.SequentialWriter;
 import org.apache.cassandra.io.util.SequentialWriterOption;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
-import org.apache.cassandra.utils.BloomFilter;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FilterFactory;
 import org.apache.cassandra.utils.IFilter;
@@ -353,17 +352,16 @@ public class BigTableWriter extends SortedTableWriter
         {
             if (components().contains(Component.FILTER))
             {
-                if (!(bf instanceof BloomFilter))
+                if (!bf.isSerializable())
                 {
-                    logger.info("Skipped flushing bloom filter {} for {} to disk", bf, descriptor);
+                    logger.info("Skipped flushing non-serializable bloom filter {} for {} to disk", bf, descriptor);
                     return;
                 }
 
                 File path = descriptor.fileFor(Component.FILTER);
                 try (FileOutputStreamPlus stream = new FileOutputStreamPlus(path))
                 {
-                    // bloom filter
-                    BloomFilter.serializer.serialize((BloomFilter) bf, stream);
+                    bf.getSerializer().serialize(bf, stream);
                     stream.flush();
                     stream.sync();
                 }

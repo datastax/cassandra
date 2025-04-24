@@ -21,6 +21,7 @@ import java.io.DataInput;
 import java.io.IOException;
 import java.io.InputStream;
 
+import com.google.common.base.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -32,7 +33,7 @@ import org.apache.cassandra.utils.obs.OffHeapBitSet;
 
 import static org.apache.cassandra.utils.FilterFactory.AlwaysPresent;
 
-public final class BloomFilterSerializer
+public final class BloomFilterSerializer implements IFilterSerializer
 {
     private final static Logger logger = LoggerFactory.getLogger(BloomFilterSerializer.class);
 
@@ -43,8 +44,11 @@ public final class BloomFilterSerializer
         this.memoryLimiter = memoryLimiter;
     }
 
-    public void serialize(BloomFilter bf, DataOutputPlus out) throws IOException
+    @Override
+    public void serialize(IFilter filter, DataOutputPlus out) throws IOException
     {
+        Preconditions.checkArgument(filter instanceof BloomFilter);
+        BloomFilter bf = (BloomFilter) filter;
         out.writeInt(bf.hashCount);
         bf.bitset.serialize(out);
     }
