@@ -353,6 +353,12 @@ public class BigTableWriter extends SortedTableWriter
         {
             if (components().contains(Component.FILTER))
             {
+                if (!(bf instanceof BloomFilter))
+                {
+                    logger.info("Skipped flushing bloom filter {} for {} to disk", bf, descriptor);
+                    return;
+                }
+
                 File path = descriptor.fileFor(Component.FILTER);
                 try (FileOutputStreamPlus stream = new FileOutputStreamPlus(path))
                 {
