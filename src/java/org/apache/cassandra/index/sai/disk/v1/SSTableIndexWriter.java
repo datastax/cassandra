@@ -51,6 +51,7 @@ import org.apache.cassandra.index.sai.disk.v5.V5VectorIndexSearcher;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
 import org.apache.cassandra.index.sai.disk.vector.CassandraDiskAnn;
 import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
+import org.apache.cassandra.index.sai.disk.vector.ProductQuantizationFetcher;
 import org.apache.cassandra.index.sai.disk.vector.VectorCompression;
 import org.apache.cassandra.index.sai.disk.vector.VectorCompression.CompressionType;
 import org.apache.cassandra.index.sai.utils.NamedMemoryLimiter;
@@ -355,7 +356,7 @@ public class SSTableIndexWriter implements PerIndexWriter
 
             // if we have a PQ instance available, we can use it to build a CompactionGraph;
             // otherwise, build on heap (which will create PQ for next time, if we have enough vectors)
-            var pqi = CassandraOnHeapGraph.getPqIfPresent(indexContext);
+            var pqi = ProductQuantizationFetcher.getPqIfPresent(indexContext);
             // If no PQ instance available in indexes of completed sstables, check if we just wrote one in the previous segment
             if (pqi == null && !segments.isEmpty())
                 pqi = maybeReadPqFromLastSegment();
@@ -408,42 +409,13 @@ public class SSTableIndexWriter implements PerIndexWriter
         return true;
     }
 
-    private CassandraOnHeapGraph.PqInfo maybeReadPqFromLastSegment() throws IOException
+    private ProductQuantizationFetcher.PqInfo maybeReadPqFromLastSegment() throws IOException
     {
         var pqComponent = perIndexComponents.get(IndexComponentType.PQ);
         assert pqComponent != null; // we always have a PQ component even if it's not actually PQ compression
         try (var fhBuilder = StorageProvider.instance.indexBuildTimeFileHandleBuilderFor(pqComponent))
         {
-            return maybeReadPqFromSegment(segments.get(segments.size() - 1), fhBuilder.complete());
+            return ProductQuantizationFetcher.maybeReadPqFromSegment(segments.get(segments.size() - 1), fhBuilder.complete());
         }
-    }
-
-    public static CassandraOnHeapGraph.PqInfo maybeReadPqFromSegment(SegmentMetadata sm, FileHandle fh) throws IOException
-    {
-        try (fh; var reader = fh.createReader())
-        {
-            long offset = sm.componentMetadatas.get(IndexComponentType.PQ).offset;
-            // close parallel to code in CassandraDiskANN constructor, but different enough
-            // (we only want the PQ codebook) that it's difficult to extract into a common method
-            reader.seek(offset);
-            boolean unitVectors;
-            if (reader.readInt() == CassandraDiskAnn.PQ_MAGIC)
-            {
-                reader.readInt(); // skip over version
-                unitVectors = reader.readBoolean();
-            }
-            else
-            {
-                unitVectors = true;
-                reader.seek(offset);
-            }
-            var compressionType = CompressionType.values()[reader.readByte()];
-            if (compressionType == CompressionType.PRODUCT_QUANTIZATION)
-            {
-                var pq = ProductQuantization.load(reader);
-                return new CassandraOnHeapGraph.PqInfo(pq, unitVectors, sm.numRows);
-            }
-        }
-        return null;
     }
 }

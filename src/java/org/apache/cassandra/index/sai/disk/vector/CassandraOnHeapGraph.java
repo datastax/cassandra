@@ -496,35 +496,6 @@ public class CassandraOnHeapGraph<T> implements Accountable
         return metadataMap;
     }
 
-    /**
-     * Return the best previous CompressedVectors for this column that matches the `matcher` predicate.
-     * "Best" means the most recent one that hits the row count target of {@link ProductQuantization#MAX_PQ_TRAINING_SET_SIZE},
-     * or the one with the most rows if none are larger than that.
-     */
-    public static PqInfo getPqIfPresent(IndexContext indexContext) throws IOException
-    {
-        // TODO when compacting, this view is likely the whole table, is it worth only considering the sstables that
-        //  are being compacted?
-        // Flatten all segments, sorted by size then timestamp (size is capped to MAX_PQ_TRAINING_SET_SIZE)
-        var sortedSegments = indexContext.getView().getIndexes().stream()
-                                         .flatMap(CustomSegmentSorter::streamSegments)
-                                         .filter(customSegment -> customSegment.numRowsOrMaxPQTrainingSetSize > MIN_PQ_ROWS)
-                                         .sorted()
-                                         .iterator();
-
-        while (sortedSegments.hasNext())
-        {
-            var customSegment = sortedSegments.next();
-            // Because we sorted based on size then timestamp, this is the best match (assuming it exists)
-            var pqInfo = customSegment.getPqInfo();
-            if (pqInfo != null)
-                return pqInfo;
-        }
-
-        return null;  // nothing matched
-    }
-
-
     private long writePQ(SequentialWriter writer, V5VectorPostingsWriter.RemappedPostings remapped, IndexContext indexContext) throws IOException
     {
         var preferredCompression = sourceModel.compressionProvider.apply(vectorValues.dimension());
@@ -540,7 +511,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
             // build encoder (expensive for PQ, cheaper for BQ)
             if (preferredCompression.type == CompressionType.PRODUCT_QUANTIZATION)
             {
-                var pqi = getPqIfPresent(indexContext);
+                var pqi = ProductQuantizationFetcher.getPqIfPresent(indexContext);
                 compressor = computeOrRefineFrom(pqi, preferredCompression);
             }
             else
@@ -584,7 +555,8 @@ public class CassandraOnHeapGraph<T> implements Accountable
         writer.writeByte(type.ordinal());
     }
 
-    ProductQuantization computeOrRefineFrom(PqInfo existingInfo, VectorCompression preferredCompression)
+    ProductQuantization computeOrRefineFrom(ProductQuantizationFetcher.PqInfo existingInfo,
+                                            VectorCompression preferredCompression)
     {
         if (existingInfo == null)
         {
@@ -621,21 +593,6 @@ public class CassandraOnHeapGraph<T> implements Accountable
     {
         IGNORE,
         FAIL
-    }
-
-    public static class PqInfo
-    {
-        public final ProductQuantization pq;
-        /** an empty Optional indicates that the index was written with an older version that did not record this information */
-        public final boolean unitVectors;
-        public final long rowCount;
-
-        public PqInfo(ProductQuantization pq, boolean unitVectors, long rowCount)
-        {
-            this.pq = pq;
-            this.unitVectors = unitVectors;
-            this.rowCount = rowCount;
-        }
     }
 
     /** ensures that the graph is connected -- normally not necessary but it can help tests reason about the state */
@@ -690,67 +647,6 @@ public class CassandraOnHeapGraph<T> implements Accountable
         public RandomAccessVectorValues copy()
         {
             return new RemappedVectorValues(remapped, maxNewOrdinal, vectorValues.copy());
-        }
-    }
-
-    private static class CustomSegmentSorter implements Comparable<CustomSegmentSorter>
-    {
-        private final SSTableIndex sstableIndex;
-        private final int numRowsOrMaxPQTrainingSetSize;
-        private final long timestamp;
-        private final int segmentPosition;
-
-        private CustomSegmentSorter(SSTableIndex sstableIndex, long numRows, int segmentPosition)
-        {
-            this.sstableIndex = sstableIndex;
-            // TODO give the size cost of larger PQ sets, is it worth trying to get the PQ object closest to this
-            // value? I'm concerned that we'll grab something pretty large for mem.
-            this.numRowsOrMaxPQTrainingSetSize = (int) Math.min(numRows, ProductQuantization.MAX_PQ_TRAINING_SET_SIZE);
-            this.timestamp = sstableIndex.getSSTable().getMaxTimestamp();
-            this.segmentPosition = segmentPosition;
-        }
-
-        private PqInfo getPqInfo() throws IOException
-        {
-            if (sstableIndex.areSegmentsLoaded())
-            {
-                var segment = sstableIndex.getSegments().get(segmentPosition);
-                V2VectorIndexSearcher searcher = (V2VectorIndexSearcher) segment.getIndexSearcher();
-                // Skip segments that don't have PQ
-                if (CompressionType.PRODUCT_QUANTIZATION != searcher.getCompression().type)
-                    return null;
-
-                // Because we sorted based on size then timestamp, this is the best match
-                return new PqInfo(searcher.getPQ(), searcher.containsUnitVectors(), segment.metadata.numRows);
-            }
-            else
-            {
-                // We have to load from disk here
-                var segmentMetadata = sstableIndex.getSegmentMetadatas().get(segmentPosition);
-                // Returns null if wrong uses wrong compression type.
-                return SSTableIndexWriter.maybeReadPqFromSegment(segmentMetadata, sstableIndex.pq());
-            }
-        }
-
-        @Override
-        public int compareTo(CustomSegmentSorter o)
-        {
-            // Sort by size descending, then timestamp descending for sstables
-            int cmp = Long.compare(numRowsOrMaxPQTrainingSetSize, o.numRowsOrMaxPQTrainingSetSize);
-            if (cmp != 0)
-                return cmp;
-            return Long.compare(timestamp, o.timestamp);
-        }
-
-        private static Stream<CustomSegmentSorter> streamSegments(SSTableIndex index)
-        {
-            var results = new ArrayList<CustomSegmentSorter>();
-
-            var metadatas = index.getSegmentMetadatas();
-            for (int i = 0; i < metadatas.size(); i++)
-                results.add(new CustomSegmentSorter(index, metadatas.get(i).numRows, i));
-
-            return results.stream();
         }
     }
 }
