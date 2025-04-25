@@ -246,7 +246,7 @@ public abstract class SSTableReaderBuilder
             IFilter filter = null;
             try (FileInputStreamPlus stream = file.newInputStream())
             {
-                filter = BloomFilter.serializer.deserialize(stream, oldFormat);
+                filter = BloomFilter.getDeserializer().deserialize(stream, oldFormat);
                 return filter;
             }
             catch (Throwable t)

@@ -33,7 +33,7 @@ import org.apache.cassandra.utils.obs.OffHeapBitSet;
 
 import static org.apache.cassandra.utils.FilterFactory.AlwaysPresent;
 
-public final class BloomFilterSerializer implements IFilterSerializer
+public final class BloomFilterSerializer implements IFilterSerializer, IFilterDeserializer
 {
     private final static Logger logger = LoggerFactory.getLogger(BloomFilterSerializer.class);
 
@@ -54,6 +54,7 @@ public final class BloomFilterSerializer implements IFilterSerializer
     }
 
     @SuppressWarnings("resource")
+    @Override
     public <I extends InputStream & DataInput> IFilter deserialize(I in, boolean oldBfFormat) throws IOException
     {
         int hashes = in.readInt();
