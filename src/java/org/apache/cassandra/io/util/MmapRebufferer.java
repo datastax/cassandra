@@ -53,12 +53,6 @@ class MmapRebufferer extends AbstractReaderFileProxy implements Rebufferer, Rebu
         return -1;
     }
 
-    @Override
-    public void invalidateIfCached(long position)
-    {
-    }
-
-    @Override
     public void close()
     {
         regions.closeQuietly();

@@ -128,10 +128,5 @@ public class ChunkCacheInterceptingTest
         {
             return wrapped.chunkSize();
         }
-
-        @Override
-        public void invalidateIfCached(long position)
-        {
-        }
     }
 }
