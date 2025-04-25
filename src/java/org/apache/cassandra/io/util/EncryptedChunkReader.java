@@ -104,7 +104,6 @@ public abstract class EncryptedChunkReader extends AbstractReaderFileProxy imple
 
     protected ByteBuffer decrypt(ByteBuffer input, int start, ByteBuffer output, long position) throws IOException
     {
-        logger.debug("Decrypting encrypted buffer");
         assert output.capacity() == CHUNK_SIZE;
 
         if (shouldCheckCrc())
