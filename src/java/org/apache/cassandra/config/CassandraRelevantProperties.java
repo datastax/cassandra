@@ -501,7 +501,7 @@ public enum CassandraRelevantProperties
     /**
      * Allows to set custom current trie index format. This node will produce sstables in this format.
      */
-    TRIE_INDEX_FORMAT_VERSION("cassandra.trie_index_format_version", "cd"),
+    TRIE_INDEX_FORMAT_VERSION("cassandra.trie_index_format_version", "cc"),
 
     /**
      * Number of replicas required to store batchlog for atomicity, only accepts values of 1 or 2.
