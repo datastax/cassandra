@@ -465,6 +465,7 @@ public abstract class SegmentBuilder
         metadataBuilder.setKeyRange(minKey, maxKey);
         metadataBuilder.setRowIdRange(minSSTableRowId, maxSSTableRowId);
         metadataBuilder.setTermRange(minTerm, maxTerm);
+        metadataBuilder.setNumRows(getRowCount());
 
         flushInternal(metadataBuilder);
         return metadataBuilder.build();
@@ -502,8 +503,6 @@ public abstract class SegmentBuilder
             minTerm = TypeUtil.min(term, minTerm, termComparator, Version.latest());
             maxTerm = TypeUtil.max(term, maxTerm, termComparator, Version.latest());
         }
-
-        rowCount++;
 
         // segmentRowIdOffset should encode sstableRowId into Integer
         int segmentRowId = Math.toIntExact(sstableRowId - segmentRowIdOffset);
@@ -599,6 +598,11 @@ public abstract class SegmentBuilder
     int getRowCount()
     {
         return rowCount;
+    }
+
+    void incRowCount()
+    {
+        rowCount++;
     }
 
     /**
