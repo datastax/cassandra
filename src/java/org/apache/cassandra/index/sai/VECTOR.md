@@ -35,13 +35,13 @@ The following options can be specified when creating a SAI vector index:
 
 Basic index creation with defaults:
 ```cql
-CREATE CUSTOM INDEX ON mytable (vec_col) 
+CREATE CUSTOM INDEX ON mytable (vec_col)
 USING 'StorageAttachedIndex';
 ```
 
 Setting some options:
 ```cql
-CREATE CUSTOM INDEX ON mytable (vec_col) 
+CREATE CUSTOM INDEX ON mytable (vec_col)
 USING 'StorageAttachedIndex'
 WITH OPTIONS = {
     'maximum_node_connections': '32',
@@ -51,7 +51,7 @@ WITH OPTIONS = {
 
 Setting all options:
 ```cql
-CREATE CUSTOM INDEX ON mytable (vec_col) 
+CREATE CUSTOM INDEX ON mytable (vec_col)
 USING 'StorageAttachedIndex'
 WITH OPTIONS = {
     'maximum_node_connections': '32',
@@ -102,27 +102,30 @@ Vector similarity searches can be fine-tuned at query time using the `WITH ANN_O
 
 ### Example Usage
 
+> **IMPORTANT**: ANN_OPTIONS comes after LIMIT in the query text.
+The following examples show the correct ordering.
+
 Basic vector search with default options:
 ```sql
-SELECT * FROM mytable 
-ORDER BY vec ANN OF [1.0, 2.0, 3.0] 
+SELECT * FROM mytable
+ORDER BY vec ANN OF [1.0, 2.0, 3.0]
 LIMIT 10;
 ```
 
 Setting rerank_k to improve recall:
 ```sql
-SELECT * FROM mytable 
-ORDER BY vec ANN OF [1.0, 2.0, 3.0] 
-WITH ANN_OPTIONS = {'rerank_k': '100'} 
-LIMIT 10;
+SELECT * FROM mytable
+ORDER BY vec ANN OF [1.0, 2.0, 3.0]
+LIMIT 10
+WITH ANN_OPTIONS = {'rerank_k': 100};
 ```
 
 Setting rerank_k to disable reranking:
 ```sql
 SELECT * FROM mytable
 ORDER BY vec ANN OF [1.0, 2.0, 3.0]
-WITH ANN_OPTIONS = {'rerank_k': '0'}
-LIMIT 10;
+LIMIT 10
+WITH ANN_OPTIONS = {'rerank_k': 0};
 ```
 
 
@@ -130,19 +133,19 @@ Enabling pruning to improve latency:
 ```sql
 SELECT * FROM mytable
 ORDER BY vec ANN OF [1.0, 2.0, 3.0]
-WITH ANN_OPTIONS = {'use_pruning': 'true'}
-LIMIT 10;
+LIMIT 10
+WITH ANN_OPTIONS = {'use_pruning': true};
 ```
 
 Setting all options:
 ```sql
 SELECT * FROM mytable
 ORDER BY vec ANN OF [1.0, 2.0, 3.0]
+LIMIT 10
 WITH ANN_OPTIONS = {
-    'rerank_k': '100',
-    'use_pruning': 'true'
-}
-LIMIT 10;
+    'rerank_k': 100,
+    'use_pruning': true
+};
 ```
 
 ## Performance Considerations
