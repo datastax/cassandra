@@ -114,10 +114,11 @@ class StatefulDecryptor
             key = keyProvider.getSecretKey(encryptionConfig.getCipherName(), encryptionConfig.getKeyStrength());
         }
         init(key, input, inputOffset);
+        int ivLength = encryptionConfig.getIvLength();
         return cipher.doFinal(
                 input,
-                inputOffset + encryptionConfig.getIvLength(),
-                inputLength - encryptionConfig.getIvLength(),
+                inputOffset + ivLength,
+                inputLength - ivLength,
                 output,
                 outputOffset);
     }
