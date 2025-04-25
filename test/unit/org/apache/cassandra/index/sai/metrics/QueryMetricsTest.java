@@ -353,9 +353,4 @@ public class QueryMetricsTest extends AbstractMetricsTest
     {
         return (long) getMetricValue(objectNameNoIndex(metricsName, keyspace, table, PER_QUERY_METRIC_TYPE));
     }
-
-    private long getTableQueryMetrics(String keyspace, String table, String metricsName)
-    {
-        return (long) getMetricValue(objectNameNoIndex(metricsName, keyspace, table, TableQueryMetrics.TABLE_QUERY_METRIC_TYPE));
-    }
 }
