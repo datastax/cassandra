@@ -68,9 +68,7 @@ import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
 
-import static org.hamcrest.Matchers.instanceOf;
-import static org.hamcrest.Matchers.is;
-import static org.junit.Assert.assertThat;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -182,6 +180,7 @@ public class KDTreeIndexBuilder
                                          UTF8Type.instance.fromString("d"));
             metadataBuilder.setKeyRange(SAITester.TEST_FACTORY.createTokenOnly(Murmur3Partitioner.instance.decorateKey(UTF8Type.instance.fromString("a")).getToken()),
                                         SAITester.TEST_FACTORY.createTokenOnly(Murmur3Partitioner.instance.decorateKey(UTF8Type.instance.fromString("b")).getToken()));
+            metadataBuilder.setNumRows(size);
             metadata = metadataBuilder.build();
         }
 
@@ -192,7 +191,7 @@ public class KDTreeIndexBuilder
             when(sstableContext.usedPerSSTableComponents()).thenReturn(indexDescriptor.perSSTableComponents());
 
             IndexSearcher searcher = Version.latest().onDiskFormat().newIndexSearcher(sstableContext, indexContext, indexFiles, metadata);
-            assertThat(searcher, is(instanceOf(KDTreeIndexSearcher.class)));
+            assertThat(searcher).isInstanceOf(KDTreeIndexSearcher.class);
             return (KDTreeIndexSearcher) searcher;
         }
     }
@@ -293,7 +292,7 @@ public class KDTreeIndexBuilder
      */
     public static AbstractGuavaIterator<Pair<ByteComparable.Preencoded, IntArrayList>> singleOrd(Iterator<ByteBuffer> terms, AbstractType<?> type, int segmentRowIdOffset, int size)
     {
-        return new AbstractGuavaIterator<Pair<ByteComparable.Preencoded, IntArrayList>>()
+        return new AbstractGuavaIterator<>()
         {
             private long currentTerm = 0;
             private int currentSegmentRowId = segmentRowIdOffset;
@@ -343,11 +342,13 @@ public class KDTreeIndexBuilder
     public static Iterator<ByteBuffer> decimalRange(final BigDecimal startInclusive, final BigDecimal endExclusive)
     {
         int n = endExclusive.subtract(startInclusive).intValueExact() * 10;
-        final Supplier<BigDecimal> generator = new Supplier<BigDecimal>() {
+        final Supplier<BigDecimal> generator = new Supplier<>()
+        {
             BigDecimal current = startInclusive;
 
             @Override
-            public BigDecimal get() {
+            public BigDecimal get()
+            {
                 BigDecimal result = current;
                 current = current.add(ONE_TENTH);
                 return result;
@@ -363,11 +364,13 @@ public class KDTreeIndexBuilder
     public static Iterator<ByteBuffer> bigIntegerRange(final BigInteger startInclusive, final BigInteger endExclusive)
     {
         int n = endExclusive.subtract(startInclusive).intValueExact();
-        final Supplier<BigInteger> generator = new Supplier<BigInteger>() {
+        final Supplier<BigInteger> generator = new Supplier<>()
+        {
             BigInteger current = startInclusive;
 
             @Override
-            public BigInteger get() {
+            public BigInteger get()
+            {
                 BigInteger result = current;
                 current = current.add(BigInteger.ONE);
                 return result;

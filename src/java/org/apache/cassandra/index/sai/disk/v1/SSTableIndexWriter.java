@@ -113,6 +113,7 @@ public class SSTableIndexWriter implements PerIndexWriter
         if (indexContext.getDefinition().isStatic() != row.isStatic())
             return;
 
+        boolean addedRow = false;
         if (indexContext.isNonFrozenCollection())
         {
             Iterator<ByteBuffer> valueIterator = indexContext.getValuesOf(row, nowInSec);
@@ -121,7 +122,7 @@ public class SSTableIndexWriter implements PerIndexWriter
                 while (valueIterator.hasNext())
                 {
                     ByteBuffer value = valueIterator.next();
-                    addTerm(TypeUtil.asIndexBytes(value.duplicate(), indexContext.getValidator()), key, sstableRowId, indexContext.getValidator());
+                    addedRow = addTerm(TypeUtil.asIndexBytes(value.duplicate(), indexContext.getValidator()), key, sstableRowId, indexContext.getValidator());
                 }
             }
         }
@@ -129,8 +130,13 @@ public class SSTableIndexWriter implements PerIndexWriter
         {
             ByteBuffer value = indexContext.getValueOf(key.partitionKey(), row, nowInSec);
             if (value != null)
-                addTerm(TypeUtil.asIndexBytes(value.duplicate(), indexContext.getValidator()), key, sstableRowId, indexContext.getValidator());
+            {
+                addedRow = addTerm(TypeUtil.asIndexBytes(value.duplicate(), indexContext.getValidator()), key, sstableRowId, indexContext.getValidator());
+            }
         }
+        if (addedRow)
+            currentBuilder.incRowCount();
+
     }
 
     @Override
@@ -225,10 +231,10 @@ public class SSTableIndexWriter implements PerIndexWriter
         return true;
     }
 
-    private void addTerm(ByteBuffer term, PrimaryKey key, long sstableRowId, AbstractType<?> type) throws IOException
+    private boolean addTerm(ByteBuffer term, PrimaryKey key, long sstableRowId, AbstractType<?> type) throws IOException
     {
         if (!indexContext.validateMaxTermSize(key.partitionKey(), term))
-            return;
+            return false;
 
         if (currentBuilder == null)
         {
@@ -241,10 +247,11 @@ public class SSTableIndexWriter implements PerIndexWriter
         }
 
         if (term.remaining() == 0 && TypeUtil.skipsEmptyValue(indexContext.getValidator()))
-            return;
+            return false;
 
         long allocated = currentBuilder.analyzeAndAdd(term, type, key, sstableRowId);
         limiter.increment(allocated);
+        return true;
     }
 
     private boolean shouldFlush(long sstableRowId)
