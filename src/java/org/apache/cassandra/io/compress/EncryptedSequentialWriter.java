@@ -128,7 +128,6 @@ public class EncryptedSequentialWriter extends SequentialWriter
     {
         try
         {
-            logger.debug("Flushing encrypted data");
             // compressing data with buffer re-use
             buffer.flip();
             encrypted.clear();
