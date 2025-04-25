@@ -22,11 +22,13 @@ import java.io.IOException;
 
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SSTableContext;
+import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.IndexSearcher;
 import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.v4.V4OnDiskFormat;
+import org.apache.cassandra.index.sai.disk.vector.OnDiskOrdinalsMap;
 
 public class V5OnDiskFormat extends V4OnDiskFormat
 {
@@ -35,6 +37,13 @@ public class V5OnDiskFormat extends V4OnDiskFormat
     public static boolean writeV5VectorPostings()
     {
         return Version.latest().onOrAfter(Version.DC);
+    }
+
+    @Override
+    public OnDiskOrdinalsMap newOnDiskOrdinalsMap(PerIndexFiles indexFiles, SegmentMetadata segmentMetadata)
+    {
+        var postingListsMetadata = segmentMetadata.componentMetadatas.get(IndexComponentType.POSTING_LISTS);
+        return new V5OnDiskOrdinalsMap(indexFiles.postingLists(), postingListsMetadata.offset, postingListsMetadata.length);
     }
 
     @Override

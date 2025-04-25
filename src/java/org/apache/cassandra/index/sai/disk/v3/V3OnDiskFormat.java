@@ -23,7 +23,6 @@ import java.lang.invoke.MethodHandles;
 import java.util.EnumSet;
 import java.util.Set;
 
-import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

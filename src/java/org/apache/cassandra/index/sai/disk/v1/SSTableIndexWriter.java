@@ -393,17 +393,34 @@ public class SSTableIndexWriter implements PerIndexWriter
 
     private static boolean allRowsHaveVectorsInWrittenSegments(IndexContext indexContext)
     {
-        // TODO should we load all of these for this op?
+        // TODO should we load all of these for this op? It seems very unlikely that we want to consider the whole
+        // table when checking if all rows have vectors. A single empty vector will be enough to make this false,
+        // but that should really only impact that table.
         for (SSTableIndex index : indexContext.getView().getIndexes())
         {
-            for (Segment segment : index.getSegments())
+            if (index.areSegmentsLoaded())
             {
-                if (segment.getIndexSearcher() instanceof  V2VectorIndexSearcher)
-                    return true; // V2 doesn't know, so we err on the side of being optimistic.  See comments in CompactionGraph
-                var searcher = (V5VectorIndexSearcher) segment.getIndexSearcher();
-                var structure = searcher.getPostingsStructure();
-                if (structure == V5VectorPostingsWriter.Structure.ZERO_OR_ONE_TO_MANY)
-                    return false;
+                for (Segment segment : index.getSegments())
+                {
+                    if (segment.getIndexSearcher() instanceof V2VectorIndexSearcher)
+                        return true; // V2 doesn't know, so we err on the side of being optimistic.  See comments in CompactionGraph
+                    var searcher = (V5VectorIndexSearcher) segment.getIndexSearcher();
+                    var structure = searcher.getPostingsStructure();
+                    if (structure == V5VectorPostingsWriter.Structure.ZERO_OR_ONE_TO_MANY)
+                        return false;
+                }
+            }
+            else
+            {
+                for (SegmentMetadata sm : index.getSegmentMetadatas())
+                {
+                    // May result in downloading file, but this metadata is valuable
+                    try (var odm = index.getVersion().onDiskFormat().newOnDiskOrdinalsMap(index.indexFiles(), sm))
+                    {
+                        if (odm.getStructure() == V5VectorPostingsWriter.Structure.ZERO_OR_ONE_TO_MANY)
+                            return false;
+                    }
+                }
             }
         }
         return true;

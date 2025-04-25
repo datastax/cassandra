@@ -36,6 +36,8 @@ import org.apache.cassandra.index.sai.disk.SearchableIndex;
 import org.apache.cassandra.index.sai.disk.v1.IndexSearcher;
 import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
+import org.apache.cassandra.index.sai.disk.v5.V5OnDiskOrdinalsMap;
+import org.apache.cassandra.index.sai.disk.vector.OnDiskOrdinalsMap;
 import org.apache.cassandra.index.sai.memory.RowMapping;
 import org.apache.cassandra.index.sai.memory.TrieMemtableIndex;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
@@ -93,6 +95,16 @@ public interface OnDiskFormat
      * @throws IOException
      */
     public PrimaryKeyMap.Factory newPrimaryKeyMapFactory(IndexComponents.ForRead perSSTableComponents, PrimaryKey.Factory primaryKeyFactory, SSTableReader sstable) throws IOException;
+
+    /**
+     * Create a new {@link OnDiskOrdinalsMap} for the provided {@link PerIndexFiles} and {@link SegmentMetadata}.
+     * Only used by vector indexes currently.
+     *
+     * @param indexFiles
+     * @param segmentMetadata
+     * @return
+     */
+    public OnDiskOrdinalsMap newOnDiskOrdinalsMap(PerIndexFiles indexFiles, SegmentMetadata segmentMetadata);
 
     /**
      * Create a new {@link SearchableIndex} for an on-disk index. This is held by the {@SSTableIndex}
