@@ -166,7 +166,7 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
                                 uncompressed.put(compressed);
                                 // Because we may pad the last uncompressed chunk, it may happen that the resulting
                                 // buffer extends past the end of the file. If that's the case, adjust the limit.
-                                adjustIfBeyondFileEnd(position, uncompressed);       //TODO chunkOffset or position?
+                                adjustIfBeyondFileEnd(position, uncompressed);
                             }
                         }
                         catch (IOException e)
