@@ -253,6 +253,12 @@ public class V1SearchableIndex implements SearchableIndex
     }
 
     @Override
+    public List<SegmentMetadata> getSegmentMetadatas()
+    {
+        return metadatas;
+    }
+
+    @Override
     public void populateSystemView(SimpleDataSet dataset, SSTableReader sstable)
     {
         Token.TokenFactory tokenFactory = sstable.metadata().partitioner.getTokenFactory();

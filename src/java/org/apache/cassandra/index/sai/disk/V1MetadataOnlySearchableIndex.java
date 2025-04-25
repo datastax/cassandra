@@ -26,7 +26,12 @@ import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.virtual.SimpleDataSet;
 import org.apache.cassandra.dht.AbstractBounds;
+import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
+import org.apache.cassandra.index.sai.SSTableContext;
+import org.apache.cassandra.index.sai.disk.format.IndexComponents;
+import org.apache.cassandra.index.sai.disk.v1.MetadataSource;
+import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
 import org.apache.cassandra.index.sai.disk.v1.Segment;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
@@ -34,57 +39,106 @@ import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.plan.Orderer;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
+import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.CloseableIterator;
+import org.apache.cassandra.utils.Throwables;
 
-public class EmptyIndex implements SearchableIndex
+/**
+ * An index that eagerly loads segment metadata and nothing else. It is currently only used for vector indexes to
+ * read PQ files during compaction.
+ */
+public class V1MetadataOnlySearchableIndex implements SearchableIndex
 {
+    private final List<SegmentMetadata> metadatas;
+    private final DecoratedKey minKey;
+    private final DecoratedKey maxKey; // in token order
+    private final ByteBuffer minTerm;
+    private final ByteBuffer maxTerm;
+    private final long minSSTableRowId, maxSSTableRowId;
+    private final long numRows;
+    private PerIndexFiles indexFiles;
+
+    public V1MetadataOnlySearchableIndex(SSTableContext sstableContext, IndexComponents.ForRead perIndexComponents)
+    {
+        var indexContext = perIndexComponents.context();
+        try
+        {
+            this.indexFiles = new PerIndexFiles(perIndexComponents);
+
+            final MetadataSource source = MetadataSource.loadMetadata(perIndexComponents);
+
+            // We skip loading the terms distribution becuase this class doesn't use them for now.
+            metadatas = SegmentMetadata.load(source, indexContext, false);
+
+            this.minKey = metadatas.get(0).minKey.partitionKey();
+            this.maxKey = metadatas.get(metadatas.size() - 1).maxKey.partitionKey();
+
+            var version = perIndexComponents.version();
+            this.minTerm = metadatas.stream().map(m -> m.minTerm).min(TypeUtil.comparator(indexContext.getValidator(), version)).orElse(null);
+            this.maxTerm = metadatas.stream().map(m -> m.maxTerm).max(TypeUtil.comparator(indexContext.getValidator(), version)).orElse(null);
+
+            this.numRows = metadatas.stream().mapToLong(m -> m.numRows).sum();
+
+            this.minSSTableRowId = metadatas.get(0).minSSTableRowId;
+            this.maxSSTableRowId = metadatas.get(metadatas.size() - 1).maxSSTableRowId;
+        }
+        catch (Throwable t)
+        {
+            FileUtils.closeQuietly(indexFiles);
+            FileUtils.closeQuietly(sstableContext);
+            throw Throwables.unchecked(t);
+        }
+    }
+
     @Override
     public long indexFileCacheSize()
     {
+        // TODO what is the right value here?
         return 0;
     }
 
     @Override
     public long getRowCount()
     {
-        return 0;
+        return numRows;
     }
 
     @Override
     public long minSSTableRowId()
     {
-        return -1;
+        return minSSTableRowId;
     }
-
     @Override
     public long maxSSTableRowId()
     {
-        return -1;
+        return maxSSTableRowId;
     }
 
     @Override
     public ByteBuffer minTerm()
     {
-        return null;
+        return minTerm;
     }
 
     @Override
     public ByteBuffer maxTerm()
     {
-        return null;
+        return maxTerm;
     }
 
     @Override
     public DecoratedKey minKey()
     {
-        return null;
+        return minKey;
     }
 
     @Override
     public DecoratedKey maxKey()
     {
-        return null;
+        return maxKey;
     }
 
     @Override
@@ -94,7 +148,8 @@ public class EmptyIndex implements SearchableIndex
                                    boolean defer,
                                    int limit) throws IOException
     {
-        return KeyRangeIterator.empty();
+        // This index is not meant for searching, only for accessing metadata and index files
+        throw new UnsupportedOperationException();
     }
 
     @Override
@@ -105,46 +160,49 @@ public class EmptyIndex implements SearchableIndex
                                                                   int limit,
                                                                   long totalRows) throws IOException
     {
-        return List.of();
+        // This index is not meant for searching, only for accessing metadata and index files
+        throw new UnsupportedOperationException();
     }
 
     @Override
     public List<Segment> getSegments()
     {
-        return List.of();
+        throw new UnsupportedOperationException();
     }
 
     @Override
     public List<SegmentMetadata> getSegmentMetadatas()
     {
-        return List.of();
+        return metadatas;
+    }
+
+    public FileHandle pq()
+    {
+        return indexFiles.pq();
     }
 
     @Override
     public void populateSystemView(SimpleDataSet dataSet, SSTableReader sstable)
     {
-        // Empty indexes are not visible in the system view,
-        // as they don't really exist on disk (are not built).
-        // This is to keep backwards compatibility – before introducing
-        // this class, empty indexes weren't even included in the SAI View,
-        // so they did not appear in the system view as well.
+        // TODO what is valid here?
     }
 
     @Override
     public long estimateMatchingRowsCount(Expression predicate, AbstractBounds<PartitionPosition> keyRange)
     {
-        return 0;
+        throw new UnsupportedOperationException();
     }
 
     @Override
     public void close() throws IOException
     {
-        // EmptyIndex does not hold any resources
+        FileUtils.closeQuietly(indexFiles);
     }
 
     @Override
     public List<CloseableIterator<PrimaryKeyWithSortKey>> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Orderer orderer, int limit, long totalRows) throws IOException
     {
-        return List.of();
+        throw new UnsupportedOperationException();
     }
 }
+

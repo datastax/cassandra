@@ -24,15 +24,14 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
-import java.util.Comparator;
 import java.util.Map;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Function;
 import java.util.function.IntUnaryOperator;
 import java.util.function.ToIntFunction;
 import java.util.stream.IntStream;
+import java.util.stream.Stream;
 
 import com.google.common.annotations.VisibleForTesting;
 import org.cliffc.high_scale_lib.NonBlockingHashMap;
@@ -64,7 +63,6 @@ import io.github.jbellis.jvector.vector.VectorizationProvider;
 import io.github.jbellis.jvector.vector.types.VectorFloat;
 import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
 import org.agrona.collections.IntHashSet;
-import org.apache.cassandra.db.compaction.CompactionSSTable;
 import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -74,7 +72,7 @@ import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
-import org.apache.cassandra.index.sai.disk.v1.Segment;
+import org.apache.cassandra.index.sai.disk.v1.SSTableIndexWriter;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher;
 import org.apache.cassandra.index.sai.disk.v2.V2VectorPostingsWriter;
@@ -503,38 +501,29 @@ public class CassandraOnHeapGraph<T> implements Accountable
      * "Best" means the most recent one that hits the row count target of {@link ProductQuantization#MAX_PQ_TRAINING_SET_SIZE},
      * or the one with the most rows if none are larger than that.
      */
-    public static PqInfo getPqIfPresent(IndexContext indexContext, Function<VectorCompression, Boolean> matcher)
+    public static PqInfo getPqIfPresent(IndexContext indexContext) throws IOException
     {
-        // Retrieve the first compressed vectors for a segment with at least MAX_PQ_TRAINING_SET_SIZE rows
-        // or the one with the most rows if none reach that size
-        var indexes = new ArrayList<>(indexContext.getView().getIndexes());
-        indexes.sort(Comparator.comparing(SSTableIndex::getSSTable, CompactionSSTable.maxTimestampDescending));
+        // TODO when compacting, this view is likely the whole table, is it worth only considering the sstables that
+        //  are being compacted?
+        // Flatten all segments, sorted by size then timestamp (size is capped to MAX_PQ_TRAINING_SET_SIZE)
+        var sortedSegments = indexContext.getView().getIndexes().stream()
+                                         .flatMap(CustomSegmentSorter::streamSegments)
+                                         .filter(customSegment -> customSegment.numRowsOrMaxPQTrainingSetSize > MIN_PQ_ROWS)
+                                         .sorted()
+                                         .iterator();
 
-        PqInfo cvi = null;
-        long maxRows = 0;
-        for (SSTableIndex index : indexes)
+        while (sortedSegments.hasNext())
         {
-            for (Segment segment : index.getSegments())
-            {
-                if (segment.metadata.numRows < maxRows)
-                    continue;
-
-                var searcher = (V2VectorIndexSearcher) segment.getIndexSearcher();
-                var cv = searcher.getCompression();
-                if (matcher.apply(cv))
-                {
-                    // We can exit now because we won't find a better candidate
-                    var candidate = new PqInfo(searcher.getPQ(), searcher.containsUnitVectors(), segment.metadata.numRows);
-                    if (segment.metadata.numRows >= ProductQuantization.MAX_PQ_TRAINING_SET_SIZE)
-                        return candidate;
-
-                    cvi = candidate;
-                    maxRows = segment.metadata.numRows;
-                }
-            }
+            var customSegment = sortedSegments.next();
+            // Because we sorted based on size then timestamp, this is the best match (assuming it exists)
+            var pqInfo = customSegment.getPqInfo();
+            if (pqInfo != null)
+                return pqInfo;
         }
-        return cvi;
+
+        return null;  // nothing matched
     }
+
 
     private long writePQ(SequentialWriter writer, V5VectorPostingsWriter.RemappedPostings remapped, IndexContext indexContext) throws IOException
     {
@@ -551,7 +540,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
             // build encoder (expensive for PQ, cheaper for BQ)
             if (preferredCompression.type == CompressionType.PRODUCT_QUANTIZATION)
             {
-                var pqi = getPqIfPresent(indexContext, preferredCompression::equals);
+                var pqi = getPqIfPresent(indexContext);
                 compressor = computeOrRefineFrom(pqi, preferredCompression);
             }
             else
@@ -701,6 +690,67 @@ public class CassandraOnHeapGraph<T> implements Accountable
         public RandomAccessVectorValues copy()
         {
             return new RemappedVectorValues(remapped, maxNewOrdinal, vectorValues.copy());
+        }
+    }
+
+    private static class CustomSegmentSorter implements Comparable<CustomSegmentSorter>
+    {
+        private final SSTableIndex sstableIndex;
+        private final int numRowsOrMaxPQTrainingSetSize;
+        private final long timestamp;
+        private final int segmentPosition;
+
+        private CustomSegmentSorter(SSTableIndex sstableIndex, long numRows, int segmentPosition)
+        {
+            this.sstableIndex = sstableIndex;
+            // TODO give the size cost of larger PQ sets, is it worth trying to get the PQ object closest to this
+            // value? I'm concerned that we'll grab something pretty large for mem.
+            this.numRowsOrMaxPQTrainingSetSize = (int) Math.min(numRows, ProductQuantization.MAX_PQ_TRAINING_SET_SIZE);
+            this.timestamp = sstableIndex.getSSTable().getMaxTimestamp();
+            this.segmentPosition = segmentPosition;
+        }
+
+        private PqInfo getPqInfo() throws IOException
+        {
+            if (sstableIndex.areSegmentsLoaded())
+            {
+                var segment = sstableIndex.getSegments().get(segmentPosition);
+                V2VectorIndexSearcher searcher = (V2VectorIndexSearcher) segment.getIndexSearcher();
+                // Skip segments that don't have PQ
+                if (CompressionType.PRODUCT_QUANTIZATION != searcher.getCompression().type)
+                    return null;
+
+                // Because we sorted based on size then timestamp, this is the best match
+                return new PqInfo(searcher.getPQ(), searcher.containsUnitVectors(), segment.metadata.numRows);
+            }
+            else
+            {
+                // We have to load from disk here
+                var segmentMetadata = sstableIndex.getSegmentMetadatas().get(segmentPosition);
+                // Returns null if wrong uses wrong compression type.
+                return SSTableIndexWriter.maybeReadPqFromSegment(segmentMetadata, sstableIndex.pq());
+            }
+        }
+
+        @Override
+        public int compareTo(CustomSegmentSorter o)
+        {
+            // Sort by size descending, then timestamp descending for sstables
+            int cmp = Long.compare(numRowsOrMaxPQTrainingSetSize, o.numRowsOrMaxPQTrainingSetSize);
+            if (cmp != 0)
+                return cmp;
+            return Long.compare(timestamp, o.timestamp);
+        }
+
+        private static Stream<CustomSegmentSorter> streamSegments(SSTableIndex index)
+        {
+            var results = new ArrayList<CustomSegmentSorter>();
+
+            var metadatas = index.getSegmentMetadatas();
+            for (int i = 0; i < metadatas.size(); i++)
+                results.add(new CustomSegmentSorter(index, metadatas.get(i).numRows, i));
+
+            return results.stream();
         }
     }
 }

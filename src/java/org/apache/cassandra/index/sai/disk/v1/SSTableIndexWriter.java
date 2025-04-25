@@ -24,6 +24,8 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
+import java.util.function.Function;
+import java.util.function.Supplier;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import com.google.common.base.Preconditions;
@@ -40,6 +42,7 @@ import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.disk.PerIndexWriter;
+import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher;
@@ -48,11 +51,13 @@ import org.apache.cassandra.index.sai.disk.v5.V5VectorIndexSearcher;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
 import org.apache.cassandra.index.sai.disk.vector.CassandraDiskAnn;
 import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
+import org.apache.cassandra.index.sai.disk.vector.VectorCompression;
 import org.apache.cassandra.index.sai.disk.vector.VectorCompression.CompressionType;
 import org.apache.cassandra.index.sai.utils.NamedMemoryLimiter;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.storage.StorageProvider;
+import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Throwables;
 
@@ -350,7 +355,7 @@ public class SSTableIndexWriter implements PerIndexWriter
 
             // if we have a PQ instance available, we can use it to build a CompactionGraph;
             // otherwise, build on heap (which will create PQ for next time, if we have enough vectors)
-            var pqi = CassandraOnHeapGraph.getPqIfPresent(indexContext, vc -> vc.type == CompressionType.PRODUCT_QUANTIZATION);
+            var pqi = CassandraOnHeapGraph.getPqIfPresent(indexContext);
             // If no PQ instance available in indexes of completed sstables, check if we just wrote one in the previous segment
             if (pqi == null && !segments.isEmpty())
                 pqi = maybeReadPqFromLastSegment();
@@ -387,6 +392,7 @@ public class SSTableIndexWriter implements PerIndexWriter
 
     private static boolean allRowsHaveVectorsInWrittenSegments(IndexContext indexContext)
     {
+        // TODO should we load all of these for this op?
         for (SSTableIndex index : indexContext.getView().getIndexes())
         {
             for (Segment segment : index.getSegments())
@@ -406,12 +412,16 @@ public class SSTableIndexWriter implements PerIndexWriter
     {
         var pqComponent = perIndexComponents.get(IndexComponentType.PQ);
         assert pqComponent != null; // we always have a PQ component even if it's not actually PQ compression
-
-        try (var fhBuilder = StorageProvider.instance.indexBuildTimeFileHandleBuilderFor(pqComponent);
-             var fh = fhBuilder.complete();
-             var reader = fh.createReader())
+        try (var fhBuilder = StorageProvider.instance.indexBuildTimeFileHandleBuilderFor(pqComponent))
         {
-            var sm = segments.get(segments.size() - 1);
+            return maybeReadPqFromSegment(segments.get(segments.size() - 1), fhBuilder.complete());
+        }
+    }
+
+    public static CassandraOnHeapGraph.PqInfo maybeReadPqFromSegment(SegmentMetadata sm, FileHandle fh) throws IOException
+    {
+        try (fh; var reader = fh.createReader())
+        {
             long offset = sm.componentMetadatas.get(IndexComponentType.PQ).offset;
             // close parallel to code in CassandraDiskANN constructor, but different enough
             // (we only want the PQ codebook) that it's difficult to extract into a common method

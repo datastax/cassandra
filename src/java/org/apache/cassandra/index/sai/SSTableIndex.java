@@ -37,12 +37,15 @@ import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.virtual.SimpleDataSet;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.disk.EmptyIndex;
+import org.apache.cassandra.index.sai.disk.V1MetadataOnlySearchableIndex;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMapIterator;
 import org.apache.cassandra.index.sai.disk.SearchableIndex;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.Segment;
+import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
+import org.apache.cassandra.index.sai.disk.v1.V1SearchableIndex;
 import org.apache.cassandra.index.sai.iterators.KeyRangeAntiJoinIterator;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.plan.Expression;
@@ -53,6 +56,7 @@ import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.sstable.SSTableIdFactory;
 import org.apache.cassandra.io.sstable.SSTableWatcher;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.CloseableIterator;
 
@@ -92,8 +96,19 @@ public class SSTableIndex
     {
         if (CassandraRelevantProperties.SAI_INDEX_READS_DISABLED.getBoolean())
         {
-            logger.info("Creating dummy (empty) index searcher for sstable {} as SAI index reads are disabled", sstableContext.sstable.descriptor);
-            return new EmptyIndex();
+            var context = perIndexComponents.context();
+            if (context != null
+                && context.isVector()
+                && CassandraRelevantProperties.SAI_INDEX_LOAD_SEGMENT_METADATA_ONLY.getBoolean())
+            {
+                logger.info("Creating a lazy index searcher for sstable {} as SAI index reads are disabled, but this is a vector index", sstableContext.sstable.descriptor.id);
+                return new V1MetadataOnlySearchableIndex(sstableContext, perIndexComponents);
+            }
+            else
+            {
+                logger.info("Creating dummy (empty) index searcher for sstable {} as SAI index reads are disabled", sstableContext.sstable.descriptor);
+                return new EmptyIndex();
+            }
         }
 
         return perIndexComponents.onDiskFormat().newSearchableIndex(sstableContext, perIndexComponents);
@@ -120,6 +135,22 @@ public class SSTableIndex
     public List<Segment> getSegments()
     {
         return searchableIndex.getSegments();
+    }
+
+    public List<SegmentMetadata> getSegmentMetadatas()
+    {
+        return searchableIndex.getSegmentMetadatas();
+    }
+
+    public boolean areSegmentsLoaded()
+    {
+        return searchableIndex instanceof V1SearchableIndex;
+    }
+
+    public FileHandle pq()
+    {
+        assert searchableIndex instanceof V1MetadataOnlySearchableIndex;
+        return ((V1MetadataOnlySearchableIndex) searchableIndex).pq();
     }
 
     public long indexFileCacheSize()
