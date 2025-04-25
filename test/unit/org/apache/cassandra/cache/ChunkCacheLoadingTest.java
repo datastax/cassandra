@@ -380,10 +380,5 @@ public class ChunkCacheLoadingTest
         {
             return this;
         }
-
-        public void invalidateIfCached(long position)
-        {
-            // do nothing
-        }
     }
 }

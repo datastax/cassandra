@@ -233,12 +233,6 @@ public abstract class EncryptedChunkReader extends AbstractReaderFileProxy imple
         {
             return BufferType.preferredForCompression();
         }
-
-        @Override
-        public void invalidateIfCached(long position)
-        {
-            //TODO can it be empty?
-        }
     }
 
     static class Mmap extends EncryptedChunkReader
@@ -279,12 +273,6 @@ public abstract class EncryptedChunkReader extends AbstractReaderFileProxy imple
         {
             regions.closeQuietly();
             super.close();
-        }
-
-        @Override
-        public void invalidateIfCached(long position)
-        {
-            //TODO can it be empty?
         }
     }
 }

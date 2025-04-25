@@ -122,10 +122,5 @@ public class ChunkCacheInterceptingTest
             numInstantiations += 1;
             return wrapped.instantiateRebufferer();
         }
-
-        @Override
-        public void invalidateIfCached(long position)
-        {
-        }
     }
 }
