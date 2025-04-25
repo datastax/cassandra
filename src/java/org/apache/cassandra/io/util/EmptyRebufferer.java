@@ -79,9 +79,4 @@ public class EmptyRebufferer implements Rebufferer, RebuffererFactory
     {
         return -1;
     }
-
-    @Override
-    public void invalidateIfCached(long position)
-    {
-    }
 }

@@ -118,11 +118,6 @@ public class CachingRebuffererTest
                 return null;
             }
 
-            public void invalidateIfCached(long position)
-            {
-                // do nothing
-            }
-
             public long adjustPosition(long position)
             {
                 return position;
