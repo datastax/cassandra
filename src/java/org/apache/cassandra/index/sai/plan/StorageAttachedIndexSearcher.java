@@ -19,14 +19,10 @@
 package org.apache.cassandra.index.sai.plan;
 
 import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import com.google.common.collect.Iterators;
 
-import io.netty.util.concurrent.FastThreadLocal;
-import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.DecoratedKey;
