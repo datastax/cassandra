@@ -399,13 +399,23 @@ public class TrieIndexFormat implements SSTableFormat
         @Override
         public boolean indicesAreEncrypted()
         {
+            // DSE generated sstables with pre b do not have encrypted indexes
+            // those with b* do have encrypted indexes
+            // such distinction was needed as the encryption was introduced gradually
+            // in CC the data + index encryption has been added at once, thus there is no need
+            // to distinguish between various c* versions
             return version.compareTo("b") >= 0;
         }
 
         @Override
         public boolean metadataAreEncrypted()
         {
-            return version.compareTo("b") >= 0;
+            // DSE generated sstables with pre ba do not have encrypted metadata
+            // those with b* do have encrypted metadata
+            // such distinction was needed as the encryption was introduced gradually
+            // in CC the data + metadata encryption has been added at once, thus there is no need
+            // to distinguish between various c* versions
+            return version.compareTo("ba") >= 0;
         }
 
         @Override
