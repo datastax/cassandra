@@ -86,6 +86,11 @@ public class SegmentMetadataBuilder
         this.termsDistributionBuilder = new TermsDistribution.Builder(context.getValidator(), byteComparableVersion, histogramSize, mostFrequentTermsCount);
     }
 
+    public void setNumRows(long numRows)
+    {
+        this.numRows = numRows;
+    }
+
     public void setKeyRange(@Nonnull PrimaryKey minKey, @Nonnull PrimaryKey maxKey)
     {
         assert minKey.compareTo(maxKey) <= 0: "minKey (" + minKey + ") must not be greater than (" + maxKey + ')';
@@ -129,7 +134,6 @@ public class SegmentMetadataBuilder
         if (built)
             throw new IllegalStateException("Segment metadata already built, no more additions allowed");
 
-        numRows += rowCount;
         termsDistributionBuilder.add(term, rowCount);
     }
 
@@ -360,7 +364,7 @@ public class SegmentMetadataBuilder
         }
 
         @Override
-        public void close() throws IOException
+        public void close()
         {
             if (lastTerm != null)
             {
@@ -371,5 +375,3 @@ public class SegmentMetadataBuilder
     }
 
 }
-
-
