@@ -120,17 +120,26 @@ public class Encryptor implements ICompressor
     private StatefulEncryptor getEncryptor()
             throws InvalidAlgorithmParameterException, NoSuchAlgorithmException, InvalidKeyException, NoSuchPaddingException, KeyAccessException, KeyGenerationException
     {
-        if (encryptor.get() == null)
-            encryptor.set(new StatefulEncryptor(encryptionConfig, random));
-        return encryptor.get();
+        StatefulEncryptor encryptor = this.encryptor.get();
+        if (encryptor == null)
+        {
+            encryptor = new StatefulEncryptor(encryptionConfig, random);
+            this.encryptor.set(encryptor);
+        }
+
+        return encryptor;
     }
 
     private StatefulDecryptor getDecryptor()
             throws NoSuchAlgorithmException, NoSuchPaddingException
     {
-        if (decryptor.get() == null)
-            decryptor.set(new StatefulDecryptor(encryptionConfig, random));
-        return decryptor.get();
+        StatefulDecryptor decryptor = this.decryptor.get();
+        if (decryptor == null)
+        {
+            decryptor = new StatefulDecryptor(encryptionConfig, random);
+            this.decryptor.set(decryptor);
+        }
+        return decryptor;
     }
 
     /** Returns expected size of data after encryption */
