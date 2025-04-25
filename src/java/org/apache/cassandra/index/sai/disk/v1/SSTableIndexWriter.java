@@ -413,9 +413,10 @@ public class SSTableIndexWriter implements PerIndexWriter
     {
         var pqComponent = perIndexComponents.get(IndexComponentType.PQ);
         assert pqComponent != null; // we always have a PQ component even if it's not actually PQ compression
-        try (var fhBuilder = StorageProvider.instance.indexBuildTimeFileHandleBuilderFor(pqComponent))
+        try (var fhBuilder = StorageProvider.instance.indexBuildTimeFileHandleBuilderFor(pqComponent);
+             var fh = fhBuilder.complete())
         {
-            return ProductQuantizationFetcher.maybeReadPqFromSegment(segments.get(segments.size() - 1), fhBuilder.complete());
+            return ProductQuantizationFetcher.maybeReadPqFromSegment(segments.get(segments.size() - 1), fh);
         }
     }
 }

@@ -93,6 +93,7 @@ public class ProductQuantizationFetcher
             this.segmentPosition = segmentPosition;
         }
 
+        @SuppressWarnings("resource")
         private PqInfo getPqInfo() throws IOException
         {
             if (sstableIndex.areSegmentsLoaded())
@@ -110,8 +111,11 @@ public class ProductQuantizationFetcher
             {
                 // We have to load from disk here
                 var segmentMetadata = sstableIndex.getSegmentMetadatas().get(segmentPosition);
-                // Returns null if wrong uses wrong compression type.
-                return maybeReadPqFromSegment(segmentMetadata, sstableIndex.pq());
+                try (var pq = sstableIndex.indexFiles().pq())
+                {
+                    // Returns null if wrong uses wrong compression type.
+                    return maybeReadPqFromSegment(segmentMetadata, pq);
+                }
             }
         }
 
@@ -142,13 +146,13 @@ public class ProductQuantizationFetcher
      * compression type {@link VectorCompression.CompressionType#PRODUCT_QUANTIZATION}.
      *
      * @param sm segment metadata
-     * @param fh PQ file handle, closed by this method
+     * @param fh PQ file handle
      * @return PqInfo if the segment has PQ, null otherwise
      * @throws IOException if an I/O error occurs
      */
     public static PqInfo maybeReadPqFromSegment(SegmentMetadata sm, FileHandle fh) throws IOException
     {
-        try (fh; var reader = fh.createReader())
+        try (var reader = fh.createReader())
         {
             long offset = sm.componentMetadatas.get(IndexComponentType.PQ).offset;
             // close parallel to code in CassandraDiskANN constructor, but different enough
@@ -168,6 +172,9 @@ public class ProductQuantizationFetcher
             var compressionType = VectorCompression.CompressionType.values()[reader.readByte()];
             if (compressionType == VectorCompression.CompressionType.PRODUCT_QUANTIZATION)
             {
+                // TODO if this is really big, is there any way to either limit what we read or to just leave this
+                // as a disk backed PQ to reduce memory utilization? This is only used to help seed the initial
+                // training, so it seems excessive to load the whole thing into memory for large segments.
                 var pq = ProductQuantization.load(reader);
                 return new PqInfo(pq, unitVectors, sm.numRows);
             }

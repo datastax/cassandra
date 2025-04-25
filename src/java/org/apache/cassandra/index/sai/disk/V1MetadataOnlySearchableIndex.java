@@ -176,9 +176,9 @@ public class V1MetadataOnlySearchableIndex implements SearchableIndex
         return metadatas;
     }
 
-    public FileHandle pq()
+    public PerIndexFiles indexFiles()
     {
-        return indexFiles.pq();
+        return indexFiles;
     }
 
     @Override

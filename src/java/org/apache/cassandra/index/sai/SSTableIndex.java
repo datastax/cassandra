@@ -43,6 +43,7 @@ import org.apache.cassandra.index.sai.disk.SearchableIndex;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
 import org.apache.cassandra.index.sai.disk.format.Version;
+import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
 import org.apache.cassandra.index.sai.disk.v1.Segment;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.v1.V1SearchableIndex;
@@ -56,7 +57,6 @@ import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.sstable.SSTableIdFactory;
 import org.apache.cassandra.io.sstable.SSTableWatcher;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.CloseableIterator;
 
@@ -147,10 +147,10 @@ public class SSTableIndex
         return searchableIndex instanceof V1SearchableIndex;
     }
 
-    public FileHandle pq()
+    public PerIndexFiles indexFiles()
     {
         assert searchableIndex instanceof V1MetadataOnlySearchableIndex;
-        return ((V1MetadataOnlySearchableIndex) searchableIndex).pq();
+        return ((V1MetadataOnlySearchableIndex) searchableIndex).indexFiles();
     }
 
     public long indexFileCacheSize()
