@@ -448,9 +448,9 @@ public class FileHandle extends SharedCloseableImpl
                               ? overrideLength
                               : channelCopy.size();
 
-                ICompressor encryptor = null;
+                ICompressor encryptionOnlyEncryptor = null;
                 if (encryptionOnly)
-                    encryptor = compressionMetadata.compressor().encryptionOnly();
+                    encryptionOnlyEncryptor = compressionMetadata.compressor().encryptionOnly();
 
                 RebuffererFactory rebuffererFactory;
                 if (length == 0)
@@ -459,14 +459,14 @@ public class FileHandle extends SharedCloseableImpl
                 }
                 else if (mmapped)
                 {
-                    if (encryptor != null)
+                    if (encryptionOnlyEncryptor != null)
                     {
                         // we need to be able to read the whole chunk that contains the last valid position, so map
                         // that too (it is necessarily already written).
                         updateRegions(channel, ((length - 1) | (EncryptedSequentialWriter.CHUNK_SIZE - 1)) + 1, sliceDescriptor.sliceStart);
                         rebuffererFactory = maybeCached(EncryptedChunkReader.createMmap(channelCopy,
                                 regions.sharedCopy(),
-                                encryptor,
+                                encryptionOnlyEncryptor,
                                 compressionMetadata.parameters,
                                 length,
                                 overrideLength));
@@ -491,9 +491,9 @@ public class FileHandle extends SharedCloseableImpl
 
 
                     ChunkReader reader = null;
-                    if (encryptor != null)
+                    if (encryptionOnlyEncryptor != null)
                         reader = EncryptedChunkReader.createStandard(channelCopy,
-                                encryptor,
+                                encryptionOnlyEncryptor,
                                 compressionMetadata.parameters,
                                 length,
                                 overrideLength);
