@@ -23,7 +23,7 @@ import org.junit.Test;
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
-import org.apache.cassandra.index.sai.utils.IndexTermType;
+import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.utils.AbstractTypeGenerators;
 
 import static org.apache.cassandra.utils.ByteBufferUtil.EMPTY_BYTE_BUFFER;
@@ -51,8 +51,7 @@ public class EmptyValuesTest extends SAITester
         flush();
         createIndex(String.format(CREATE_INDEX_TEMPLATE, 'v'));
 
-        IndexTermType termType = createIndexTermType(type.getType());
-        boolean indexed = !termType.skipsEmptyValue();
+        boolean indexed = TypeUtil.isLiteral(type.getType());
 
         Assertions.assertThat(execute("SELECT * FROM %s WHERE v = ?", EMPTY_BYTE_BUFFER)).hasSize(indexed ? 1 : 0);
 
