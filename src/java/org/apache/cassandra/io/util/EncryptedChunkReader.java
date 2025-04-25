@@ -204,7 +204,6 @@ public abstract class EncryptedChunkReader extends AbstractReaderFileProxy imple
             }
             else
             {
-                //TODO confirm whether we can use networking pool or use something else
                 input = BufferPools.forNetworking().get(CHUNK_SIZE, BufferType.preferredForCompression());
             }
 
