@@ -20,7 +20,10 @@ package org.apache.cassandra.index.sai.disk.vector;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Objects;
 import java.util.stream.Stream;
+
+import org.slf4j.Logger;
 
 import io.github.jbellis.jvector.quantization.ProductQuantization;
 import org.apache.cassandra.index.sai.IndexContext;
@@ -32,6 +35,7 @@ import org.apache.cassandra.io.util.FileHandle;
 
 public class ProductQuantizationFetcher
 {
+    private static final Logger logger = org.slf4j.LoggerFactory.getLogger(ProductQuantizationFetcher.class);
 
     /**
      * Return the best previous CompressedVectors for this column that matches the `matcher` predicate.
@@ -42,23 +46,15 @@ public class ProductQuantizationFetcher
     {
         // TODO when compacting, this view is likely the whole table, is it worth only considering the sstables that
         //  are being compacted?
-        // Flatten all segments, sorted by size then timestamp (size is capped to MAX_PQ_TRAINING_SET_SIZE)
-        var sortedSegments = indexContext.getView().getIndexes().stream()
-                                         .flatMap(CustomSegmentSorter::streamSegments)
-                                         .filter(customSegment -> customSegment.numRowsOrMaxPQTrainingSetSize > CassandraOnHeapGraph.MIN_PQ_ROWS)
-                                         .sorted()
-                                         .iterator();
-
-        while (sortedSegments.hasNext())
-        {
-            var customSegment = sortedSegments.next();
-            // Because we sorted based on size then timestamp, this is the best match (assuming it exists)
-            var pqInfo = customSegment.getPqInfo();
-            if (pqInfo != null)
-                return pqInfo;
-        }
-
-        return null;  // nothing matched
+        // Flatten all segments, sorted by size (capped to MAX_PQ_TRAINING_SET_SIZE) then timestamp
+        return indexContext.getView().getIndexes().stream()
+                           .flatMap(CustomSegmentSorter::streamSegments)
+                           .filter(customSegment -> customSegment.numRowsOrMaxPQTrainingSetSize > CassandraOnHeapGraph.MIN_PQ_ROWS)
+                           .sorted()
+                           .map(CustomSegmentSorter::getPqInfo)
+                           .filter(Objects::nonNull)
+                           .findFirst()
+                           .orElse(null);
     }
 
     public static class PqInfo
@@ -94,7 +90,7 @@ public class ProductQuantizationFetcher
         }
 
         @SuppressWarnings("resource")
-        private PqInfo getPqInfo() throws IOException
+        private PqInfo getPqInfo()
         {
             if (sstableIndex.areSegmentsLoaded())
             {
@@ -150,7 +146,7 @@ public class ProductQuantizationFetcher
      * @return PqInfo if the segment has PQ, null otherwise
      * @throws IOException if an I/O error occurs
      */
-    public static PqInfo maybeReadPqFromSegment(SegmentMetadata sm, FileHandle fh) throws IOException
+    public static PqInfo maybeReadPqFromSegment(SegmentMetadata sm, FileHandle fh)
     {
         try (var reader = fh.createReader())
         {
@@ -178,6 +174,10 @@ public class ProductQuantizationFetcher
                 var pq = ProductQuantization.load(reader);
                 return new PqInfo(pq, unitVectors, sm.numRows);
             }
+        }
+        catch (IOException e)
+        {
+            logger.warn("Failed to read PQ from segment {}. Skipping", sm, e);
         }
         return null;
     }
