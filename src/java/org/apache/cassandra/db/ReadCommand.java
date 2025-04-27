@@ -23,6 +23,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiFunction;
@@ -35,6 +36,7 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Sets;
+import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -409,8 +411,25 @@ public abstract class ReadCommand extends AbstractReadQuery
         {
             cfs.indexManager.checkQueryability(indexQueryPlan);
             searcher = indexSearcher();
-            Index index = indexQueryPlan.getFirst();
-            Tracing.trace("Executing read on {}.{} using index {}", cfs.metadata.keyspace, cfs.metadata.name, index.getIndexMetadata().name);
+
+            // trace the index(es) used for the query
+            if (Tracing.isTracing())
+            {
+                Set<Index> indexes = indexQueryPlan.getIndexes();
+                if (indexes.size() == 1)
+                {
+                    String indexName = indexes.iterator().next().getIndexMetadata().name;
+                    Tracing.trace("Executing read on {}.{} using index {}", cfs.metadata.keyspace, cfs.metadata.name, indexName);
+                }
+                else
+                {
+                    Set<String> indexNames = new TreeSet<>();
+                    for (Index i : indexes)
+                        indexNames.add(i.getIndexMetadata().name);
+                    String joinedIndexNames = String.join(", ", indexNames);
+                    Tracing.trace("Executing read on {}.{} using indexes {}", cfs.metadata.keyspace, cfs.metadata.name, joinedIndexNames);
+                }
+            }
         }
 
         Context context = Context.from(this);
