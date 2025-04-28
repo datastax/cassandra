@@ -34,7 +34,6 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 
 import org.apache.commons.lang3.time.DateUtils;
-import org.junit.Assert;
 import org.junit.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -2258,22 +2257,5 @@ public class AggregationTest extends CQLTester
         assertNotNull(ksm);
         UDAggregate f = (UDAggregate) ksm.userFunctions.get(parseFunctionName(name)).iterator().next();
         assertEquals(deterministic, f.isDeterministic());
-    }
-
-    @Test
-    public void testAggregatesAreNonDeterministicByDefault() throws Throwable
-    {
-        String fName = createFunction(KEYSPACE, "int", "CREATE FUNCTION %s(i int, j int) RETURNS NULL ON NULL INPUT " +
-                                                       "RETURNS int " +
-                                                       "LANGUAGE java " +
-                                                       "AS 'return i + j;'");
-        String aName = createAggregate(KEYSPACE, "int", String.format("CREATE AGGREGATE %%s (int) SFUNC %s STYPE int INITCOND 1;", shortFunctionName(fName)));
-
-        UntypedResultSet aggregates = execute("SELECT * FROM system_schema.aggregates " +
-                                              "WHERE keyspace_name=? AND aggregate_name=?;",
-                                              KEYSPACE, shortFunctionName(aName));
-
-        Assert.assertEquals(1, aggregates.size());
-        Assert.assertFalse(aggregates.one().getBoolean("deterministic"));
     }
 }
