@@ -400,13 +400,27 @@ public interface Index
 
     /**
      * Called to determine whether this index can provide a searcher to execute a query on the
+     * supplied expression. This forms part of the query validation done before a CQL select
+     * statement is executed.
+     *
+     * @param expression a search query predicate
+     * @return true if this index is capable of supporting such expressions, false otherwise
+     */
+    default boolean supportsExpression(RowFilter.Expression expression)
+    {
+        return supportsExpression(expression.column(), expression.operator());
+    }
+
+    /**
+     * Called to determine whether this index can provide a searcher to execute a query on the
      * supplied column using the specified operator. This forms part of the query validation done
      * before a CQL select statement is executed.
+     *
      * @param column the target column of a search query predicate
      * @param operator the operator of a search query predicate
      * @return true if this index is capable of supporting such expressions, false otherwise
      */
-    public boolean supportsExpression(ColumnMetadata column, Operator operator);
+    boolean supportsExpression(ColumnMetadata column, Operator operator);
 
     /**
      * If the index supports custom search expressions using the

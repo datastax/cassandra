@@ -170,7 +170,7 @@ public class StorageAttachedIndexQueryPlan implements Index.QueryPlan
         boolean hasIndex = false;
         for (StorageAttachedIndex index : allIndexes)
         {
-            if (!hints.excludes(index) && index.supportsExpression(expression.column(), expression.operator()))
+            if (!hints.excludes(index) && index.supportsExpression(expression))
             {
                 selectedIndexes.add(index);
                 hasIndex = true;
