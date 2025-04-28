@@ -66,7 +66,7 @@ public class BloomFilter extends WrappedSharedCloseable implements IFilter
     public static final MemoryLimiter memoryLimiter = new MemoryLimiter(maxMemory != 0 ? maxMemory : Long.MAX_VALUE,
                                                                         "Allocating %s for Bloom filter would reach max of %s (current %s)");
 
-    public final static BloomFilterSerializer serializer = new BloomFilterSerializer(memoryLimiter);
+    private final static BloomFilterSerializer serde = new BloomFilterSerializer(memoryLimiter);
 
     private final static FastThreadLocal<long[]> reusableIndexes = new FastThreadLocal<long[]>()
     {
@@ -130,7 +130,7 @@ public class BloomFilter extends WrappedSharedCloseable implements IFilter
 
     public long serializedSize()
     {
-        return serializer.serializedSize(this);
+        return serde.serializedSize(this);
     }
 
     // Murmur is faster than an SHA-based approach and provides as-good collision
@@ -213,6 +213,27 @@ public class BloomFilter extends WrappedSharedCloseable implements IFilter
     public long offHeapSize()
     {
         return bitset.offHeapSize();
+    }
+
+    @Override
+    public boolean isSerializable()
+    {
+        return true;
+    }
+
+    @Override
+    public IFilterSerializer getSerializer()
+    {
+        return serde;
+    }
+
+    /**
+     * Return the {@link IFilterDeserializer} for this bloom filter implementation. Please note this is static
+     * as currently there is only one implementation and no way to deserialize other implementations.
+     */
+    public static IFilterDeserializer getDeserializer()
+    {
+        return serde;
     }
 
     public String toString()
