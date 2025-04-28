@@ -1270,25 +1270,15 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
     }
 
     @Override
-    public Optional<Index> getBestIndexFor(RowFilter.Expression expression, IndexHints hints) // TODO CNDB-13129: should use preferred?
+    public Optional<Index> getBestIndexFor(RowFilter.Expression expression, IndexHints hints)
     {
-        for (Index index : indexes.values())
-        {
-            if (!hints.excludes(index) && index.supportsExpression(expression.column(), expression.operator()))
-            {
-                return Optional.of(index);
-            }
-        }
-        return Optional.empty();
+        return hints.getBestIndexFor(indexes.values(), i -> i.supportsExpression(expression.column(), expression.operator()));
     }
 
-    public <T extends Index> Optional<T> getBestIndexFor(RowFilter.Expression expression, Class<T> indexType) // TODO CNDB-13129: should use hints?
+    public <T extends Index> Optional<T> getBestIndexFor(RowFilter.Expression expression, IndexHints hints, Class<T> indexType)
     {
-        return indexes.values()
-                      .stream()
-                      .filter(i -> indexType.isInstance(i) && i.supportsExpression(expression.column(), expression.operator()))
-                      .map(indexType::cast)
-                      .findFirst();
+        return hints.getBestIndexFor(indexes.values(), i -> i.supportsExpression(expression.column(), expression.operator()) && indexType.isInstance(i))
+                    .map(indexType::cast);
     }
 
     /**

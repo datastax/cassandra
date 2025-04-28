@@ -797,7 +797,8 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
 
     private StorageAttachedIndex getBestIndexFor(RowFilter.Expression expression)
     {
-        return cfs.indexManager.getBestIndexFor(expression, StorageAttachedIndex.class).orElse(null);
+        return cfs.indexManager.getBestIndexFor(expression, command.rowFilter().indexHints(), StorageAttachedIndex.class)
+                               .orElse(null);
     }
 
     // Note: This method assumes that the selects method has already been called for the

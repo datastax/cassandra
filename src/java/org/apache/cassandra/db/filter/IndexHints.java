@@ -21,9 +21,11 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.SortedSet;
 import java.util.TreeSet;
+import java.util.function.Predicate;
 
 import com.google.common.collect.Sets;
 
@@ -89,15 +91,31 @@ public class IndexHints
         return excluded.stream().anyMatch(i -> i.name.equals(indexName));
     }
 
-    public <T extends Index> Set<T> preferredIndexes(Set<T> indexes)
+    public Optional<Index> getBestIndexFor(Collection<Index> indexes, Predicate<Index> filter)
     {
-        Set<T> preferredIndexes = new HashSet<>();
-        for (T index : indexes)
+        if (indexes.isEmpty())
+            return Optional.empty();
+
+        // filter excluded indexes
+        Set<Index> candidates = new HashSet<>(indexes.size());
+        for (Index index : indexes)
+        {
+            if (!excluded.contains(index.getIndexMetadata()) && filter.test(index))
+                candidates.add(index);
+        }
+
+        // if all indexes are excluded, return empty
+        if (candidates.isEmpty())
+            return Optional.empty();
+
+        // try to find a preferred index
+        for (Index index : candidates)
         {
             if (preferred.contains(index.getIndexMetadata()))
-                preferredIndexes.add(index);
+                return Optional.of(index);
         }
-        return preferredIndexes.isEmpty() ? indexes : preferredIndexes;
+
+        return Optional.of(candidates.iterator().next());
     }
 
     public static IndexHints create(Set<IndexMetadata> preferred, Set<IndexMetadata> excluded)

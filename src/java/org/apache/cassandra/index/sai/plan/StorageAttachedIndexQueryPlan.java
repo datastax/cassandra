@@ -167,19 +167,16 @@ public class StorageAttachedIndexQueryPlan implements Index.QueryPlan
         if (expression.isUserDefined())
             return false;
 
-        Set<StorageAttachedIndex> candidates = new HashSet<>();
+        boolean hasIndex = false;
         for (StorageAttachedIndex index : allIndexes)
         {
             if (!hints.excludes(index) && index.supportsExpression(expression.column(), expression.operator()))
             {
-                candidates.add(index);
+                selectedIndexes.add(index);
+                hasIndex = true;
             }
         }
-
-        Set<StorageAttachedIndex> preferred = hints.preferredIndexes(candidates);
-        selectedIndexes.addAll(preferred);
-
-        return !preferred.isEmpty();
+        return hasIndex;
     }
 
     @Override
