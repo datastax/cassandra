@@ -120,7 +120,7 @@ public class SingletonIndexGroup implements Index.Group
         // so we only consider the top-level AND expressions for index selection.
         for (RowFilter.Expression e : rowFilter.withoutDisjunctions().expressions())
         {
-            if (delegate.supportsExpression(e.column(), e.operator()))
+            if (delegate.supportsExpression(e))
                 return new SingletonIndexQueryPlan(delegate, delegate.getPostIndexQueryFilter(rowFilter));
         }
 

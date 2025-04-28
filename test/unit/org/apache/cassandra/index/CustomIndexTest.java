@@ -1621,7 +1621,7 @@ public class CustomIndexTest extends CQLTester
                 {
                     for (Index index : indexes.values())
                     {
-                        if (index.supportsExpression(e.column(), e.operator()))
+                        if (index.supportsExpression(e))
                             return new SingletonIndexQueryPlan(index, index.getPostIndexQueryFilter(rowFilter));
                     }
                 }
