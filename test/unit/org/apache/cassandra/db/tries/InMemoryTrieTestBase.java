@@ -45,6 +45,7 @@ import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import static org.apache.cassandra.db.tries.TrieUtil.VERSION;
 import static org.apache.cassandra.utils.bytecomparable.ByteComparable.Preencoded;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 @RunWith(Parameterized.class)
 public abstract class InMemoryTrieTestBase
@@ -316,9 +317,9 @@ public abstract class InMemoryTrieTestBase
     }
 
     @Test
-    public void testPrefixUnsafeMulti()
+    public void testPrefixUnsafeChain()
     {
-        // Make sure prefixes on inside a multi aren't overwritten by embedded metadata node.
+        // Make sure prefixes on inside a chain aren't overwritten by embedded metadata node.
 
         testEntries(new String[] { "test89012345678901234567890",
                                    "test8",
@@ -362,6 +363,72 @@ public abstract class InMemoryTrieTestBase
 
         for (String test : tests)
             assertEquals(test, trie.get(mapping.apply(test)));
+
+        testDeletions(tests, mapping, trie);
+
+        randomizedTestEntries(tests, mapping, trie);
+    }
+
+    private void testDeletions(String[] tests, Function<String, Preencoded> mapping, InMemoryTrie<String> trie)
+    {
+        System.out.println("\nDeleting all entries");
+        List<String> toDelete = Arrays.stream(tests).distinct().collect(Collectors.toList());
+        while (!toDelete.isEmpty())
+        {
+            int index = rand.nextInt(toDelete.size());
+            String entry = toDelete.remove(index);
+            Preencoded e = mapping.apply(entry);
+            System.out.println("Deleting " + asString(e) + ": " + entry);
+            delete(trie, e);
+            System.out.println("Trie\n" + trie.dump());
+
+            for (String test : toDelete)
+                assertEquals(test, trie.get(mapping.apply(test)));
+        }
+        assertTrue(trie.isEmpty());
+        if (trie.cellAllocator instanceof MemoryAllocationStrategy.OpOrderReuseStrategy)
+        {
+            assertEquals(0L, trie.usedBufferSpace());
+            assertEquals(0L, trie.usedObjectSpace());
+        }
+    }
+
+    private void randomizedTestEntries(String[] tests, Function<String, Preencoded> mapping, InMemoryTrie<String> trie)
+    {
+        System.out.println("\nRandomized insert and delete");
+        List<String> toInsert = Arrays.stream(tests).distinct().collect(Collectors.toList());
+        List<String> inserted = new ArrayList<>();
+
+        while (!toInsert.isEmpty())
+        {
+            if (rand.nextDouble() > 0.35)
+            {
+                // Insert one value
+                int index = rand.nextInt(toInsert.size());
+                String entry = toInsert.remove(index);
+                Preencoded e = mapping.apply(entry);
+                System.out.println("Adding " + asString(e) + ": " + entry);
+                putSimpleResolve(trie, e, entry, (x, y) -> y);
+                System.out.println("Trie\n" + trie.dump());
+                inserted.add(entry);
+            }
+            else if (!inserted.isEmpty())
+            {
+                // Delete one value
+                int index = rand.nextInt(inserted.size());
+                String entry = inserted.remove(index);
+                Preencoded e = mapping.apply(entry);
+                System.out.println("Deleting " + asString(e) + ": " + entry);
+                delete(trie, e);
+                System.out.println("Trie\n" + trie.dump());
+                toInsert.add(entry);
+            }
+
+            for (String test : inserted)
+                assertEquals(test, trie.get(mapping.apply(test)));
+            for (String test: toInsert)
+                assertEquals(null, trie.get(mapping.apply(test)));
+        }
     }
 
     static InMemoryTrie<ByteBuffer> makeInMemoryTrie(Preencoded[] src,
@@ -589,15 +656,15 @@ public abstract class InMemoryTrieTestBase
         return bc != null ? bc.byteComparableAsString(VERSION) : "null";
     }
 
-    <T, M> void putSimpleResolve(InMemoryTrie<T> trie,
-                                 Preencoded key,
-                                 T value,
-                                 Trie.MergeResolver<T> resolver)
+    <T> void putSimpleResolve(InMemoryTrie<T> trie,
+                              Preencoded key,
+                              T value,
+                              Trie.MergeResolver<T> resolver)
     {
         putSimpleResolve(trie, key, value, resolver, usePut());
     }
 
-    static <T, M> void putSimpleResolve(InMemoryTrie<T> trie,
+    static <T> void putSimpleResolve(InMemoryTrie<T> trie,
                                         Preencoded key,
                                         T value,
                                         Trie.MergeResolver<T> resolver,
@@ -608,6 +675,26 @@ public abstract class InMemoryTrieTestBase
             trie.putSingleton(key,
                               value,
                               (existing, update) -> existing != null ? resolver.resolve(existing, update) : update,
+                              usePut);
+        }
+        catch (TrieSpaceExhaustedException e)
+        {
+            throw Throwables.propagate(e);
+        }
+    }
+
+    <T> void delete(InMemoryTrie<T> trie, ByteComparable key)
+    {
+        delete(trie, key, usePut());
+    }
+
+    static <T> void delete(InMemoryTrie<T> trie, ByteComparable key, boolean usePut)
+    {
+        try
+        {
+            trie.putSingleton(key,
+                              Boolean.TRUE,
+                              (existing, update) -> update ? null : existing,
                               usePut);
         }
         catch (TrieSpaceExhaustedException e)
