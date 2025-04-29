@@ -1225,7 +1225,7 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         {
             var index = findSupportingIndex(indexRegistry);
             var valueBytes = value.bindAndGet(options);
-            var terms = index.getQueryAnalyzer().get().analyze(valueBytes);
+            var terms = index.getAnalyzer(valueBytes).get().queriedTokens();
             if (terms.isEmpty())
                 throw invalidRequest("BM25 query must contain at least one term (perhaps your analyzer is discarding tokens you didn't expect)");
             filter.add(columnDef, Operator.BM25, valueBytes);
