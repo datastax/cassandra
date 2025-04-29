@@ -257,7 +257,7 @@ public abstract class ColumnCondition
                 // the condition value is not null, so only NEQ can return true
                 return operator == Operator.NEQ;
             }
-            return operator.isSatisfiedBy(type, otherValue, value, null, null); // We don't use any analyzers in LWT, see CNDB-11658
+            return operator.isSatisfiedBy(type, otherValue, value); // We don't use any analyzers in LWT, see CNDB-11658
         }
     }
 
