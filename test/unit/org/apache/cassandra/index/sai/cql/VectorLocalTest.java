@@ -464,6 +464,27 @@ public class VectorLocalTest extends VectorTester.VersionedWithChecksums
         }
     }
 
+    @Test
+    public void simpleVectorQueryTest()
+    {
+        createTable("CREATE TABLE %s (id int, name text, embedding vector<float, 3>, PRIMARY KEY(id))");
+        createIndex("CREATE CUSTOM INDEX ON %s(embedding) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function': 'COSINE'};");
+
+        execute("INSERT INTO %s (id, name, embedding) VALUES (?, ?, ?)", 1, "Alice", vector(0.1f, 0.2f, 0.3f));
+        execute("INSERT INTO %s (id, name, embedding) VALUES (?, ?, ?)", 2, "Bob", vector(0.4f, 0.5f, 0.6f));
+        execute("INSERT INTO %s (id, name, embedding) VALUES (?, ?, ?)", 3, "Charlie", vector(0.7f, 0.8f, 0.9f));
+
+        flush();
+
+        Vector<Float> queryVector = vector(0.5f, 0.5f, 0.5f);
+
+        UntypedResultSet result = execute("SELECT id, name FROM %s ORDER BY embedding ANN OF ? LIMIT ?", queryVector, 2);
+
+        assertThat(result).hasSize(2);
+        List<Integer> ids = result.stream().map(row -> row.getInt("id")).collect(Collectors.toList());
+        assertThat(ids).containsExactlyInAnyOrder(2, 3);
+    }
+
     private double bruteForceRecall(float[] q, List<float[]> resultVectors, List<float[]> population, int limit)
     {
         List<float[]> expected = population

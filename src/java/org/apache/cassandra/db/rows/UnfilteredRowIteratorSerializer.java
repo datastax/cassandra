@@ -85,7 +85,6 @@ public class UnfilteredRowIteratorSerializer
 
     public void serialize(UnfilteredRowIterator iterator, ColumnFilter selection, DataOutputPlus out, int version, int rowEstimate) throws IOException
     {
-
         SerializationHeader header = new SerializationHeader(false,
                                                              iterator.metadata(),
                                                              iterator.columns(),

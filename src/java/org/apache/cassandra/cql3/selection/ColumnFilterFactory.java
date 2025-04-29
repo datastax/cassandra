@@ -65,7 +65,7 @@ abstract class ColumnFilterFactory
         builder.addAll(selectedColumns);
         builder.addAll(orderingColumns);
         // we'll also need to fetch any column on which we have a restriction (so we can apply said restriction)
-        builder.addAll(nonPKRestrictedColumns);
+        //builder.addAll(nonPKRestrictedColumns);
         return new PrecomputedColumnFilter(builder.build());
     }
 
@@ -92,7 +92,7 @@ abstract class ColumnFilterFactory
             factories.addFetchedColumns(builder);
             builder.addAll(orderingColumns);
             // we'll also need to fetch any column on which we have a restriction (so we can apply said restriction)
-            builder.addAll(nonPKRestrictedColumns);
+            //builder.addAll(nonPKRestrictedColumns);
             return new PrecomputedColumnFilter(builder.build());
         }
 

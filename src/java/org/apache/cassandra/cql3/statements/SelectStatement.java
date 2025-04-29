@@ -110,7 +110,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
     // and the related code in
     //  - StatementRestrictions.addOrderingRestrictions
     //  - StorageAttachedIndexSearcher.PrimaryKeyIterator constructor
-    public static final boolean ANN_USE_SYNTHETIC_SCORE = Boolean.parseBoolean(System.getProperty("cassandra.sai.ann_use_synthetic_score", "false"));
+    public static final boolean ANN_USE_SYNTHETIC_SCORE = Boolean.parseBoolean(System.getProperty("cassandra.sai.ann_use_synthetic_score", "true"));
 
     private static final Logger logger = LoggerFactory.getLogger(SelectStatement.class);
     private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(SelectStatement.logger, 1, TimeUnit.MINUTES);
@@ -168,6 +168,8 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                            Term offset,
                            SelectOptions selectOptions)
     {
+        logger.info("Creating SelectStatement with selection: {}", selection);
+
         this.rawCQLStatement = queryString;
         this.table = table;
         this.bindVariables = bindVariables;

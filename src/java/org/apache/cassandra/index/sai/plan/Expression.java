@@ -271,12 +271,12 @@ public class Expression
     // VSTODO seems like we could optimize for CompositeType here since we know we have a key match
     public boolean isSatisfiedBy(ByteBuffer columnValue)
     {
-        if (columnValue == null)
-            return false;
-
         // ORDER_BY is not indepently verifiable, so we always return true
         if (operation == Op.ORDER_BY)
             return true;
+
+        if (columnValue == null)
+            return false;
 
         if (!TypeUtil.isValid(columnValue, validator))
         {

@@ -26,6 +26,9 @@ import com.google.common.collect.Iterables;
 import com.google.common.collect.Iterators;
 import com.google.common.collect.Lists;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.db.filter.ColumnFilter;
@@ -37,6 +40,8 @@ import org.apache.cassandra.transport.ProtocolVersion;
 
 public abstract class Selection
 {
+    private static final Logger logger = LoggerFactory.getLogger(Selection.class);
+
     /**
      * A predicate that returns <code>true</code> for static columns.
      */
@@ -463,6 +468,8 @@ public abstract class Selection
              */
             super(table, selectedColumns, orderingColumns, mapping, columnFilterFactory, isJson);
             this.isWildcard = isWildcard;
+
+            logger.info("Creating SimpleSelection: " + this + " for table " + table + ". ColumnFilter = " + columnFilterFactory.newInstance(null));
         }
 
         @Override

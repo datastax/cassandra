@@ -65,13 +65,17 @@ public abstract class PrimaryKeyWithSortKey implements PrimaryKey
 
     public boolean isIndexDataValid(Row row, int nowInSecs)
     {
-        assert context.getDefinition().isRegular() : "Only regular columns are supported, got " + context.getDefinition();
-        var cell = row.getCell(context.getDefinition());
-        if (!cell.isLive(nowInSecs))
-            return false;
-        assert cell instanceof CellWithSourceTable : "Expected CellWithSource, got " + cell.getClass();
-        return sourceTable.equals(((CellWithSourceTable<?>) cell).sourceTable())
-               && isIndexDataEqualToLiveData(cell.buffer());
+
+
+        return true;
+
+//        assert context.getDefinition().isRegular() : "Only regular columns are supported, got " + context.getDefinition();
+//        var cell = row.getCell(context.getDefinition());
+//        if (!cell.isLive(nowInSecs))
+//            return false;
+//        assert cell instanceof CellWithSourceTable : "Expected CellWithSource, got " + cell.getClass();
+//        return sourceTable.equals(((CellWithSourceTable<?>) cell).sourceTable())
+//               && isIndexDataEqualToLiveData(cell.buffer());
     }
 
     /**

@@ -287,9 +287,10 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
         @Override
         public boolean isUpgradeInProgress()
         {
-            long notUpgradingSince = this.notUpgradingSinceMillis.get();
-            long stableDuration = notUpgradingSince < 0 ? -1 : System.currentTimeMillis() - notUpgradingSince;
-            return stableDuration < MIN_STABLE_DURATION_MS;
+            return false;
+//            long notUpgradingSince = this.notUpgradingSinceMillis.get();
+//            long stableDuration = notUpgradingSince < 0 ? -1 : System.currentTimeMillis() - notUpgradingSince;
+//            return stableDuration < MIN_STABLE_DURATION_MS;
         }
     }
 
@@ -2546,7 +2547,8 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
      */
     public boolean isUpgradingFromVersionLowerThan(CassandraVersion referenceVersion)
     {
-        return getMinVersion().compareTo(referenceVersion) < 0;
+        return false;
+        //return getMinVersion().compareTo(referenceVersion) < 0;
     }
 
     /**

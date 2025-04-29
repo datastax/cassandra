@@ -589,14 +589,14 @@ public abstract class ColumnFilter
                     return SelectionColumnFilter.newInstance(FetchingStrategy.ALL_COLUMNS, metadata, queried, s);
                 }
 
-                // pre CASSANDRA-16686 (4.0-RC2-) static columns where not fetched unless queried witch lead to some wrong results
-                // for some queries
-                if (!returnStaticContentOnPartitionWithNoRows || isUpgradingFromVersionLowerThan40RC2())
-                {
-                    return SelectionColumnFilter.newInstance(FetchingStrategy.ALL_REGULARS_AND_QUERIED_STATICS_COLUMNS, metadata, queried, s);
-                }
-
-                return SelectionColumnFilter.newInstance(FetchingStrategy.ALL_COLUMNS, metadata, queried, s);
+//                // pre CASSANDRA-16686 (4.0-RC2-) static columns where not fetched unless queried witch lead to some wrong results
+//                // for some queries
+//                if (!returnStaticContentOnPartitionWithNoRows || isUpgradingFromVersionLowerThan40RC2())
+//                {
+//                    return SelectionColumnFilter.newInstance(FetchingStrategy.ALL_REGULARS_AND_QUERIED_STATICS_COLUMNS, metadata, queried, s);
+//                }
+//
+//                return SelectionColumnFilter.newInstance(FetchingStrategy.ALL_COLUMNS, metadata, queried, s);
             }
 
             return SelectionColumnFilter.newInstance(FetchingStrategy.ONLY_QUERIED_COLUMNS, (TableMetadata) null, queried, s);
