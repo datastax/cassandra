@@ -1053,6 +1053,94 @@ public class LuceneAnalyzerTest extends SAITester
         });
     }
 
+    @Test
+    public void testAnalyzerOnMapValues() throws Throwable
+    {
+        createTable("CREATE TABLE %s (id text PRIMARY KEY, genres map<int, text>)");
+        execute("INSERT INTO %s (id, genres) VALUES ('1', {1: 'Horror', 2: 'comedy'})");
+
+        assertRowsNet(executeNet("SELECT id FROM %s WHERE genres CONTAINS 'Horror' ALLOW FILTERING"), row("1"));
+        assertRowsNet(executeNet("SELECT id FROM %s WHERE genres NOT CONTAINS 'Horror' ALLOW FILTERING"));
+        assertRowsNet(executeNet("SELECT id FROM %s WHERE genres CONTAINS 'horror' ALLOW FILTERING"));
+        assertRowsNet(executeNet("SELECT id FROM %s WHERE genres NOT CONTAINS 'horror' ALLOW FILTERING"), row("1"));
+
+        createIndex("CREATE CUSTOM INDEX ON %s(VALUES(genres)) USING 'StorageAttachedIndex' WITH OPTIONS = { 'index_analyzer':'STANDARD'}");
+
+        beforeAndAfterFlush(() -> {
+            assertRowsNet(executeNet("SELECT id FROM %s WHERE genres CONTAINS 'horror'"), row("1"));
+            assertRowsNet(executeNet("SELECT id FROM %s WHERE genres NOT CONTAINS 'horror'"));
+
+            // map comparisson with analyzer matches operator is not supported with or without filtering
+            Assertions.assertThatThrownBy(() -> execute("SELECT id FROM %s WHERE genres[1] : 'horror'"))
+                    .isInstanceOf(InvalidRequestException.class)
+                    .hasMessageContaining("can't be used with collections");
+            Assertions.assertThatThrownBy(() -> execute("SELECT id FROM %s WHERE genres[1] : 'horror' ALLOW FILTERING"))
+                    .isInstanceOf(InvalidRequestException.class)
+                    .hasMessageContaining("can't be used with collections");
+
+            // map comparison with eq operator is not supported by the index, and it's not analyzing when filtering
+            Assertions.assertThatThrownBy(() -> execute("SELECT id FROM %s WHERE genres[1] = 'horror'"))
+                    .isInstanceOf(InvalidRequestException.class)
+                    .hasMessageContaining("Column 'genres' has an index but does not support the operators specified in the query.");
+            assertRows(execute("SELECT id FROM %s WHERE genres[1] = 'horror' ALLOW FILTERING"));
+            assertRows(execute("SELECT id FROM %s WHERE genres[1] = 'Horror' ALLOW FILTERING"), row("1"));
+        });
+    }
+
+    @Test
+    public void testAnalyzerOnMapValuesWithDistinctQueryAnalyzer() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k int, c int, v map<int, text>, PRIMARY KEY(k, c))");
+        createIndex("CREATE CUSTOM INDEX ON %s(VALUES(v)) USING 'StorageAttachedIndex' WITH OPTIONS = {" +
+                "'index_analyzer': '{" +
+                "  \"tokenizer\" : { \"name\" : \"whitespace\", \"args\" : {} }," +
+                "  \"filters\" : [ { \"name\" : \"lowercase\", \"args\": {} }, " +
+                "                  { \"name\" : \"edgengram\", \"args\": { \"minGramSize\":\"1\", \"maxGramSize\":\"30\" } }]," +
+                "  \"charFilters\" : []}', " +
+                "'query_analyzer': '{" +
+                "  \"tokenizer\" : { \"name\" : \"whitespace\", \"args\" : {} }," +
+                "  \"filters\" : [ {\"name\" : \"lowercase\",\"args\": {}} ]}'}");
+
+        execute("INSERT INTO %s (k, c, v) VALUES (0, 1, {0: 'astra quick fox', 1: 'astra quick foxes', 2: 'astra4', 3: 'astra5 -1@a#', 4: 'lazy dog'})");
+        execute("INSERT INTO %s (k, c, v) VALUES (0, 2, {0: 'astra quick fox'})");
+        execute("INSERT INTO %s (k, c, v) VALUES (0, 3, {0: 'astra quick foxes'})");
+        execute("INSERT INTO %s (k, c, v) VALUES (0, 4, {0: 'astra4'})");
+        execute("INSERT INTO %s (k, c, v) VALUES (0, 5, {0: 'astra5 -1@a#'})");
+        execute("INSERT INTO %s (k, c, v) VALUES (0, 6, {0: 'lazy dog'})");
+
+        beforeAndAfterFlush(() -> {
+
+            // contains
+            assertRowsNet(executeNet("SELECT c FROM %s WHERE v CONTAINS 'ast'"), row(1), row(2), row(3), row(4), row(5));
+            assertRowsNet(executeNet("SELECT c FROM %s WHERE v CONTAINS 'astra'"), row(1), row(2), row(3), row(4), row(5));
+            assertRowsNet(executeNet("SELECT c FROM %s WHERE v CONTAINS 'astra4'"), row(1), row(4));
+            assertRowsNet(executeNet("SELECT c FROM %s WHERE v CONTAINS 'astra5'"), row(1), row(5));
+            assertRowsNet(executeNet("SELECT c FROM %s WHERE v CONTAINS 'astra9'"));
+
+            // not contains
+            assertRowsNet(executeNet("SELECT c FROM %s WHERE v NOT CONTAINS 'ast'"), row(6));
+            assertRowsNet(executeNet("SELECT c FROM %s WHERE v NOT CONTAINS 'astra'"), row(6));
+            assertRowsNet(executeNet("SELECT c FROM %s WHERE v NOT CONTAINS 'astra4'"), row(2), row(3), row(5), row(6));
+            assertRowsNet(executeNet("SELECT c FROM %s WHERE v NOT CONTAINS 'astra5'"), row(2), row(3), row(4), row(6));
+            assertRowsNet(executeNet("SELECT c FROM %s WHERE v NOT CONTAINS 'astra9'"), row(1), row(2), row(3), row(4), row(5), row(6));
+
+            // map comparisson with analyzer matches operator is not supported with or without filtering
+            Assertions.assertThatThrownBy(() -> execute("SELECT c FROM %s WHERE v[0] : 'ast'"))
+                    .isInstanceOf(InvalidRequestException.class)
+                    .hasMessageContaining("can't be used with collections");
+            Assertions.assertThatThrownBy(() -> execute("SELECT c FROM %s WHERE v[0] : 'ast' ALLOW FILTERING"))
+                    .isInstanceOf(InvalidRequestException.class)
+                    .hasMessageContaining("can't be used with collections");
+
+            // map comparison with eq operator is not supported by the index, and it's not analyzing when filtering
+            Assertions.assertThatThrownBy(() -> execute("SELECT c FROM %s WHERE v[0] = 'ast'"))
+                    .isInstanceOf(InvalidRequestException.class)
+                    .hasMessageContaining("Column 'v' has an index but does not support the operators specified in the query.");
+            assertRows(execute("SELECT c FROM %s WHERE v[0] = 'ast' ALLOW FILTERING"));
+            assertRows(execute("SELECT c FROM %s WHERE v[0] = 'astra quick fox' ALLOW FILTERING"), row(1), row(2));
+        });
+    }
+
     private void assertClientWarningOnNGram(String indexOptions)
     {
         createIndexFromOptions(indexOptions);

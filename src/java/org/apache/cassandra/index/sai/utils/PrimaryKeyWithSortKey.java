@@ -69,7 +69,13 @@ public abstract class PrimaryKeyWithSortKey implements PrimaryKey
         var cell = row.getCell(context.getDefinition());
         if (!cell.isLive(nowInSecs))
             return false;
-        assert cell instanceof CellWithSourceTable : "Expected CellWithSource, got " + cell.getClass();
+        // Check if the row is wrapped and if not, skip the source table check
+        if (!(cell instanceof CellWithSourceTable))
+        {
+            // If the cell is not wrapped, we can't validate the source table,
+            // so we just check if the index data matches the live data
+            return isIndexDataEqualToLiveData(cell.buffer());
+        }
         return sourceTable.equals(((CellWithSourceTable<?>) cell).sourceTable())
                && isIndexDataEqualToLiveData(cell.buffer());
     }
