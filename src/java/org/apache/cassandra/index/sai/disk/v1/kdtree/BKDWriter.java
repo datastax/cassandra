@@ -339,15 +339,15 @@ public class BKDWriter implements Closeable
             assert valueInOrder(valueCount + leafCount,
                                 0, lastPackedValue, packedValue, 0, docID, lastDocID);
 
+            if (valueCount + leafCount > totalPointCount)
+            {
+                throw new IllegalStateException("totalPointCount=" + totalPointCount + " was passed when we were created, but we just hit " + (valueCount + leafCount) + " values");
+            }
+
             System.arraycopy(packedValue, 0, leafValues, leafCount * packedBytesLength, packedBytesLength);
             leafDocs[leafCount] = docID;
             docsSeen.set(docID);
             leafCount++;
-
-            if (valueCount > totalPointCount)
-            {
-                throw new IllegalStateException("totalPointCount=" + totalPointCount + " was passed when we were created, but we just hit " + pointCount + " values");
-            }
 
             if (leafCount == maxPointsInLeafNode)
             {
