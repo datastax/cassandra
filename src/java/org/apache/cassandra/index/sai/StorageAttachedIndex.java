@@ -693,23 +693,34 @@ public class StorageAttachedIndex implements Index
     }
 
     @Override
-    public Optional<Analyzer> getIndexAnalyzer()
+    public Optional<Analyzer> getAnalyzer(ByteBuffer queriedValue)
     {
-        return indexContext.isAnalyzed()
-               ? Optional.of(value -> analyze(indexContext.getAnalyzerFactory(), value))
-               : Optional.empty();
-    }
+        if (!indexContext.isAnalyzed())
+            return Optional.empty();
 
-    @Override
-    public Optional<Analyzer> getQueryAnalyzer()
-    {
-        return indexContext.isAnalyzed()
-               ? Optional.of(value -> analyze(indexContext.getQueryAnalyzerFactory(), value))
-               : Optional.empty();
+        // memoize the analyzed queried value, so we don't have to re-analyze it for every evaluated column value
+        List<ByteBuffer> queriedTokens = analyze(indexContext.getQueryAnalyzerFactory(), queriedValue);
+
+        return Optional.of(new Analyzer() {
+            @Override
+            public List<ByteBuffer> indexedTokens(ByteBuffer value)
+            {
+                return analyze(indexContext.getAnalyzerFactory(), value);
+            }
+
+            @Override
+            public List<ByteBuffer> queriedTokens()
+            {
+                return queriedTokens;
+            }
+        });
     }
 
     private static List<ByteBuffer> analyze(AbstractAnalyzer.AnalyzerFactory factory, ByteBuffer value)
     {
+        if (value == null)
+            return null;
+
         List<ByteBuffer> tokens = new ArrayList<>();
         AbstractAnalyzer analyzer = factory.create();
         try
