@@ -486,23 +486,12 @@ public interface Index
     }
 
     /**
-     * Returns the write-time {@link Analyzer} for this index, if any. If the index doesn't transform the column values,
+     * Returns the {@link Analyzer} for this index, if any. If the index doesn't transform the column values,
      * this method will return an empty optional.
      *
-     * @return the write-time transforming column value analyzer for the index, if any
+     * @return the transforming column value analyzer for the index, if any
      */
-    default Optional<Analyzer> getIndexAnalyzer()
-    {
-        return Optional.empty();
-    }
-
-    /**
-     * Returns the query-time {@link Analyzer} for this index, if any. If the index doesn't transform the column values,
-     * this method will return an empty optional.
-     *
-     * @return the query-time transforming column value analyzer for the index, if any
-     */
-    default Optional<Analyzer> getQueryAnalyzer()
+    default Optional<Analyzer> getAnalyzer(ByteBuffer queriedValue)
     {
         return Optional.empty();
     }
@@ -514,10 +503,11 @@ public interface Index
      * index. It can be used to perform the same transformation on values that the index does when indexing. That way,
      * the CQL operator can replicate the index behaviour when filtering results.
      */
-    @FunctionalInterface
     interface Analyzer
     {
-        List<ByteBuffer> analyze(ByteBuffer value);
+        List<ByteBuffer> indexedTokens(ByteBuffer indexedValue);
+
+        List<ByteBuffer> queriedTokens();
     }
 
     /**
