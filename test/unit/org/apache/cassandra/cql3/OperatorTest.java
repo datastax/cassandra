@@ -19,6 +19,8 @@ package org.apache.cassandra.cql3;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.List;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import org.junit.Test;
@@ -36,7 +38,7 @@ public class OperatorTest
     {
         // test with a text-based case-insensitive analyzer
         UTF8Type utf8Type = UTF8Type.instance;
-        Index.Analyzer analyzer = value -> Collections.singletonList(utf8Type.decompose(utf8Type.compose(value).toUpperCase()));
+        Function<ByteBuffer, List<ByteBuffer>> analyzer = value -> Collections.singletonList(utf8Type.decompose(utf8Type.compose(value).toUpperCase()));
         testAnalyzer(utf8Type, utf8Type.decompose("FOO"), utf8Type.decompose("FOO"), analyzer, true);
         testAnalyzer(utf8Type, utf8Type.decompose("FOO"), utf8Type.decompose("foo"), analyzer, true);
         testAnalyzer(utf8Type, utf8Type.decompose("foo"), utf8Type.decompose("foo"), analyzer, true);
@@ -45,6 +47,7 @@ public class OperatorTest
 
         // test with an int-based analyzer that decomposes an integer into its digits
         Int32Type intType = Int32Type.instance;
+
         analyzer = value -> intType.compose(value)
                                    .toString()
                                    .chars()
@@ -63,48 +66,63 @@ public class OperatorTest
         testAnalyzer(utf8Type, intType.decompose(123), intType.decompose(1234), analyzer, false);
     }
 
+    private static Index.Analyzer analyzer(Function<ByteBuffer, List<ByteBuffer>> analyzer, ByteBuffer queriedValue)
+    {
+        return new Index.Analyzer()
+        {
+            @Override
+            public List<ByteBuffer> indexedTokens(ByteBuffer value)
+            {
+                return analyzer.apply(value);
+            }
+
+            @Override
+            public List<ByteBuffer> queriedTokens()
+            {
+                return analyzer.apply(queriedValue);
+            }
+        };
+    }
+
     private static void testAnalyzer(AbstractType<?> type,
-                                     ByteBuffer left,
-                                     ByteBuffer right,
-                                     Index.Analyzer analyzer,
+                                     ByteBuffer leftOperand,
+                                     ByteBuffer rightOperand,
+                                     Function<ByteBuffer, List<ByteBuffer>> analyzingFunction,
                                      boolean shouldBeSatisfied)
     {
+        // analyze the operands
+        Index.Analyzer analyzer = analyzer(analyzingFunction, rightOperand);
+        List<ByteBuffer> indexedTokens = analyzer.indexedTokens(leftOperand);
+        List<ByteBuffer> queriedTokens = analyzer.queriedTokens();
+
         // test that EQ and ANALYZER_MATCHES are satisfied by the same value with an analyzer
         for (Operator operator : Arrays.asList(Operator.EQ, Operator.ANALYZER_MATCHES))
-            Assertions.assertThat(operator.isSatisfiedBy(type, left, right, analyzer, analyzer)).isEqualTo(shouldBeSatisfied);
+            Assertions.assertThat(operator.isSatisfiedByAnalyzed(type, indexedTokens, queriedTokens)).isEqualTo(shouldBeSatisfied);
 
         // test that EQ without an analyzer behaves as type-based identity
-        Assertions.assertThat(Operator.EQ.isSatisfiedBy(type, left, right, null, null))
-                  .isEqualTo(type.compareForCQL(left, right) == 0);
+        Assertions.assertThat(Operator.EQ.isSatisfiedBy(type, leftOperand, rightOperand))
+                  .isEqualTo(type.compareForCQL(leftOperand, rightOperand) == 0);
 
         // test that ANALYZER_MATCHES throws an exception when no analyzer is provided
-        Assertions.assertThatThrownBy(() -> Operator.ANALYZER_MATCHES.isSatisfiedBy(type, left, right, null, null))
-                  .isInstanceOf(AssertionError.class)
+        Assertions.assertThatThrownBy(() -> Operator.ANALYZER_MATCHES.isSatisfiedBy(type, leftOperand, rightOperand))
+                  .isInstanceOf(UnsupportedOperationException.class)
                   .hasMessageContaining(": operation can only be computed by an indexed column with a configured analyzer");
 
-        // test that all other operators ignore the analyzer
+        // test that all other operators don't support the analyzer
         for (Operator operator : Operator.values())
         {
             if (operator == Operator.EQ || operator == Operator.ANALYZER_MATCHES)
                 continue;
 
-            boolean supported = false;
             try
             {
-                shouldBeSatisfied = operator.isSatisfiedBy(type, left, right, null, null);
-                supported = true;
+                operator.isSatisfiedBy(type, leftOperand, rightOperand);
             }
             catch (Exception e)
             {
-                Assertions.assertThatThrownBy(() -> operator.isSatisfiedBy(type, left, right, analyzer, analyzer))
-                          .isInstanceOf(e.getClass())
-                          .hasMessage(e.getMessage());
-            }
-
-            if (supported)
-            {
-                Assertions.assertThat(operator.isSatisfiedBy(type, left, right, analyzer, analyzer))
-                          .isEqualTo(shouldBeSatisfied);
+                Assertions.assertThatThrownBy(() -> operator.isSatisfiedByAnalyzed(type, indexedTokens, queriedTokens))
+                          .isInstanceOf(UnsupportedOperationException.class)
+                          .hasMessageContaining(operator + " operation does not support analyzers");
             }
         }
     }
