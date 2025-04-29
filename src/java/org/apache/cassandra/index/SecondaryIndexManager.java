@@ -661,7 +661,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
                                public void onSuccess(Object o)
                                {
                                    groupedIndexes.forEach(i -> markIndexBuilt(i, isFullRebuild));
-                                   logger.info("Index build of {} completed", getIndexNames(groupedIndexes));
+                                   logger.info("Index build of {} completed", Index.joinNames(groupedIndexes));
                                    builtIndexes.addAll(groupedIndexes);
                                    build.set(o);
                                }
@@ -728,14 +728,6 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
                 throw e;
             }
         }
-    }
-
-    private String getIndexNames(Set<Index> indexes)
-    {
-        List<String> indexNames = indexes.stream()
-                                         .map(i -> i.getIndexMetadata().name)
-                                         .collect(Collectors.toList());
-        return StringUtils.join(indexNames, ',');
     }
 
     /**
@@ -862,9 +854,9 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
     {
         JVMStabilityInspector.inspectThrowable(indexBuildFailure);
         if (indexBuildFailure != null)
-            logger.warn("Index build of {} failed. Please run full index rebuild to fix it.", getIndexNames(indexes), indexBuildFailure);
+            logger.warn("Index build of {} failed. Please run full index rebuild to fix it.", Index.joinNames(indexes), indexBuildFailure);
         else
-            logger.warn("Index build of {} failed. Please run full index rebuild to fix it.", getIndexNames(indexes));
+            logger.warn("Index build of {} failed. Please run full index rebuild to fix it.", Index.joinNames(indexes));
         indexes.forEach(i -> this.markIndexFailed(i, isInitialBuild));
     }
 

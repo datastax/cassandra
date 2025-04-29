@@ -18,6 +18,7 @@
 package org.apache.cassandra.index.sai.plan;
 
 import java.util.HashSet;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
@@ -167,16 +168,21 @@ public class StorageAttachedIndexQueryPlan implements Index.QueryPlan
         if (expression.isUserDefined())
             return false;
 
-        boolean hasIndex = false;
+        // collect the indexes that support the specified expression
+        Set<StorageAttachedIndex> candidates = new HashSet<>();
         for (StorageAttachedIndex index : allIndexes)
         {
-            if (!hints.excludes(index) && index.supportsExpression(expression))
+            if (index.supportsExpression(expression))
             {
-                selectedIndexes.add(index);
-                hasIndex = true;
+                candidates.add(index);
             }
         }
-        return hasIndex;
+
+        // let the hints choose the best index from those supporting the expression
+        Optional<StorageAttachedIndex> preferred = hints.getBestIndexFor(candidates, p -> true);
+        preferred.ifPresent(selectedIndexes::add);
+
+        return preferred.isPresent();
     }
 
     @Override

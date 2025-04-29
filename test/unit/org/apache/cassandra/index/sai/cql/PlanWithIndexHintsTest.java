@@ -196,9 +196,9 @@ public class PlanWithIndexHintsTest extends SAITester
         assertThatPlanFor("SELECT * FROM %s WHERE v:'Lévi-Strauss' WITH preferred_indexes = {idx}", 1).selects("idx");
 
         // eq excluding the index
-        assertThatPlanFor("SELECT * FROM %s WHERE v='Strauss' ALLOW FILTERING WITH excluded_indexes = {idx}", 4).selectsNone(); // TODO CNDB-13129: is this correct?
-        assertThatPlanFor("SELECT * FROM %s WHERE v='Levi' ALLOW FILTERING WITH excluded_indexes = {idx}", 1).selectsNone(); // TODO CNDB-13129: is this correct?
-        assertThatPlanFor("SELECT * FROM %s WHERE v='Lévi-Strauss' ALLOW FILTERING WITH excluded_indexes = {idx}", 1).selectsNone(); // TODO CNDB-13129: is this correct?
+        assertThatPlanFor("SELECT * FROM %s WHERE v='Strauss' ALLOW FILTERING WITH excluded_indexes = {idx}", 0).selectsNone();
+        assertThatPlanFor("SELECT * FROM %s WHERE v='Levi' ALLOW FILTERING WITH excluded_indexes = {idx}", 0).selectsNone();
+        assertThatPlanFor("SELECT * FROM %s WHERE v='Lévi-Strauss' ALLOW FILTERING WITH excluded_indexes = {idx}", 1).selectsNone();
 
         // match excluding the index
         assertMatchNeedsIndex("SELECT * FROM %s WHERE v:'Strauss' ALLOW FILTERING WITH excluded_indexes = {idx}", "v", "Strauss");

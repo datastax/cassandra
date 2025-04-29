@@ -23,8 +23,6 @@ import java.util.HashSet;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import java.util.SortedSet;
-import java.util.TreeSet;
 import java.util.function.Predicate;
 
 import com.google.common.collect.Sets;
@@ -76,9 +74,24 @@ public class IndexHints
         this.excluded = excluded;
     }
 
+    public boolean prefers(Index index)
+    {
+        return preferred.contains(index.getIndexMetadata());
+    }
+
     public boolean prefers(String indexName)
     {
         return preferred.stream().anyMatch(i -> i.name.equals(indexName));
+    }
+
+    public boolean prefersAnyOf(Collection<Index> indexes)
+    {
+        for (Index index : indexes)
+        {
+            if (prefers(index))
+                return true;
+        }
+        return false;
     }
 
     public boolean excludes(Index index)
@@ -91,14 +104,14 @@ public class IndexHints
         return excluded.stream().anyMatch(i -> i.name.equals(indexName));
     }
 
-    public Optional<Index> getBestIndexFor(Collection<Index> indexes, Predicate<Index> filter)
+    public <T extends Index> Optional<T> getBestIndexFor(Collection<T> indexes, Predicate<T> filter)
     {
         if (indexes.isEmpty())
             return Optional.empty();
 
         // filter excluded indexes
-        Set<Index> candidates = new HashSet<>(indexes.size());
-        for (Index index : indexes)
+        Set<T> candidates = new HashSet<>(indexes.size());
+        for (T index : indexes)
         {
             if (!excluded.contains(index.getIndexMetadata()) && filter.test(index))
                 candidates.add(index);
@@ -109,7 +122,7 @@ public class IndexHints
             return Optional.empty();
 
         // try to find a preferred index
-        for (Index index : candidates)
+        for (T index : candidates)
         {
             if (preferred.contains(index.getIndexMetadata()))
                 return Optional.of(index);
@@ -137,12 +150,7 @@ public class IndexHints
         Set<IndexMetadata> conflictingIndexes = Sets.intersection(preferred, excluded);
         if (!conflictingIndexes.isEmpty())
         {
-            // collect the names of the conflicting indexes in order to provide a consistent error message
-            SortedSet<String> names = new TreeSet<>();
-            for (IndexMetadata i : conflictingIndexes)
-                names.add(i.name);
-
-            throw new InvalidRequestException(CONFLICTING_INDEXES_ERROR + String.join(", ", names));
+            throw new InvalidRequestException(CONFLICTING_INDEXES_ERROR + IndexMetadata.joinNames(conflictingIndexes));
         }
 
         // Ensure that all nodes in the cluster are in a version that supports index hints, including this one
@@ -220,6 +228,15 @@ public class IndexHints
     public Comparator<Index.QueryPlan> comparator()
     {
         return Comparator.comparing(plan -> Sets.intersection(preferred, metadatas(plan.getIndexes())).size());
+    }
+
+    @Override
+    public String toString()
+    {
+        return "IndexHints{" +
+               "preferred=" + IndexMetadata.joinNames(preferred) +
+               ", excluded=" + IndexMetadata.joinNames(excluded) +
+               '}';
     }
 
     private static Set<IndexMetadata> metadatas(Collection<Index> indexes)
