@@ -27,6 +27,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.concurrent.Callable;
 import java.util.function.Function;
 import java.util.function.Predicate;
@@ -372,6 +373,18 @@ public interface Index
     default SSTableFlushObserver getFlushObserver(Descriptor descriptor, LifecycleNewTracker tracker)
     {
         return null;
+    }
+
+    /**
+     * @param indexes the indexes to join
+     * @return a comma-separated list of sorted unqulified index names
+     */
+    static String joinNames(Iterable<Index> indexes)
+    {
+        TreeSet<String> sortedNames = new TreeSet<>();
+        for (Index index : indexes)
+            sortedNames.add(index.getIndexMetadata().name);
+        return String.join(",", sortedNames);
     }
 
     /*

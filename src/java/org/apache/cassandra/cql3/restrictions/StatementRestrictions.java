@@ -406,11 +406,11 @@ public class StatementRestrictions
                     if (!forView)
                         throw invalidRequest("Unsupported restriction: %s", relation);
 
-                    notNullColumnsBuilder.addAll(relation.toRestriction(table, boundNames).getColumnDefs());
+                    notNullColumnsBuilder.addAll(relation.toRestriction(table, boundNames, indexHints).getColumnDefs());
                 }
                 else
                 {
-                    Restriction restriction = relation.toRestriction(table, boundNames);
+                    Restriction restriction = relation.toRestriction(table, boundNames, indexHints);
 
                     if (relation.isLIKE() && (!type.allowUseOfSecondaryIndices() || !restriction.hasSupportingIndex(indexRegistry, hints)))
                     {

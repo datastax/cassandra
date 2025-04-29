@@ -163,7 +163,7 @@ public class RowFilter
         FilterElement partitionLevelOperation = root.partitionLevelTree();
         FilterElement rowLevelOperation = root.rowLevelTree();
 
-        final boolean filterNonStaticColumns = rowLevelOperation.size() > 0;
+        final boolean filterNonStaticColumns = !rowLevelOperation.isEmpty();
 
         return new Transformation<>()
         {
@@ -502,7 +502,7 @@ public class RowFilter
         @Nullable
         private Index.Analyzer analyzer(ColumnMetadata def, Operator op, ByteBuffer value)
         {
-            return indexRegistry == null ? null : indexRegistry.getAnalyzerFor(def, op, value).orElse(null);
+            return indexRegistry == null ? null : indexRegistry.getAnalyzerFor(def, op, value, indexHints).orElse(null);
         }
 
         public void addGeoDistanceExpression(ColumnMetadata def, ByteBuffer point, Operator op, ByteBuffer distance)
@@ -782,12 +782,12 @@ public class RowFilter
                     serialize(child, out, version);
             }
 
-            public FilterElement deserialize(DataInputPlus in, int version, TableMetadata metadata) throws IOException
+            public FilterElement deserialize(DataInputPlus in, int version, TableMetadata metadata, IndexHints indexHints) throws IOException
             {
                 int size = (int)in.readUnsignedVInt();
                 List<Expression> expressions = new ArrayList<>(size);
                 for (int i = 0; i < size; i++)
-                    expressions.add(Expression.serializer.deserialize(in, version, metadata));
+                    expressions.add(Expression.serializer.deserialize(in, version, metadata, indexHints));
 
                 if (version < MessagingService.VERSION_DS_10)
                     return new FilterElement(false, expressions, Collections.emptyList());
@@ -796,7 +796,7 @@ public class RowFilter
                 size = (int)in.readUnsignedVInt();
                 List<FilterElement> children = new ArrayList<>(size);
                 for (int i  = 0; i < size; i++)
-                    children.add(deserialize(in, version, metadata));
+                    children.add(deserialize(in, version, metadata, indexHints));
                 return new FilterElement(isDisjunction, expressions, children);
             }
 
@@ -1053,7 +1053,7 @@ public class RowFilter
                 }
             }
 
-            public Expression deserialize(DataInputPlus in, int version, TableMetadata metadata) throws IOException
+            public Expression deserialize(DataInputPlus in, int version, TableMetadata metadata, IndexHints indexHints) throws IOException
             {
                 Kind kind = Kind.fromVal(in.readByte());
 
@@ -1083,7 +1083,7 @@ public class RowFilter
                     case SIMPLE:
                         ByteBuffer value = ByteBufferUtil.readWithShortLength(in);
                         ANNOptions annOptions = operator == Operator.ANN ? ANNOptions.serializer.deserialize(in, version) : null;
-                        Index.Analyzer analyzer = indexRegistry.getAnalyzerFor(column, operator, value).orElse(null);
+                        Index.Analyzer analyzer = indexRegistry.getAnalyzerFor(column, operator, value, indexHints).orElse(null);
                         return new SimpleExpression(column, operator, value, analyzer, annOptions);
                     case MAP_COMPARISON:
                         ByteBuffer key = ByteBufferUtil.readWithShortLength(in);
@@ -1773,7 +1773,7 @@ public class RowFilter
             }
         }
 
-        protected static abstract class Deserializer
+        public static abstract class Deserializer
         {
             protected abstract UserExpression deserialize(DataInputPlus in,
                                                           int version,
@@ -1834,7 +1834,7 @@ public class RowFilter
         {
             in.readBoolean(); // Unused
             IndexHints hints = IndexHints.serializer.deserialize(in, version, metadata);
-            FilterElement operation = FilterElement.serializer.deserialize(in, version, metadata);
+            FilterElement operation = FilterElement.serializer.deserialize(in, version, metadata, hints);
             return new RowFilter(operation, hints);
         }
 

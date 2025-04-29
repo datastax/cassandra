@@ -281,7 +281,7 @@ public abstract class ModificationStatement implements CQLStatement.SingleKeyspa
 
         // Warn but otherwise accept conditions on analyzed columns. The analyzers won't be used (see CNDB-11658).
         IndexRegistry indexRegistry = IndexRegistry.obtain(metadata);
-        Set<ColumnMetadata> analyzedColumns = conditions.getAnalyzedColumns(indexRegistry);
+        Set<ColumnMetadata> analyzedColumns = conditions.getAnalyzedColumns(indexRegistry, IndexHints.NONE);
         if (!analyzedColumns.isEmpty())
         {
             StringJoiner joiner = new StringJoiner(", ");

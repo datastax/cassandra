@@ -155,7 +155,7 @@ public class IndexHintsTest extends CQLTester
         assertInvalidThrowMessage(CONFLICTING_INDEXES_ERROR + "idx1",
                                   InvalidRequestException.class,
                                   query + "WITH preferred_indexes = {idx1} AND excluded_indexes = {idx1, idx2}");
-        assertInvalidThrowMessage(CONFLICTING_INDEXES_ERROR + "idx1, idx2",
+        assertInvalidThrowMessage(CONFLICTING_INDEXES_ERROR + "idx1,idx2",
                                   InvalidRequestException.class,
                                   query + "WITH preferred_indexes = {idx1, idx2} AND excluded_indexes = {idx1, idx2}");
 
@@ -588,87 +588,213 @@ public class IndexHintsTest extends CQLTester
     public void testSAIWithMultipleIndexesPerColumnAndUnsupportedEqOnAnalyzer()
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v text)");
-        createIndex("CREATE CUSTOM INDEX idx1 ON %s(v) USING 'StorageAttachedIndex'");
-        createIndex("CREATE CUSTOM INDEX idx2 ON %s(v) USING 'StorageAttachedIndex' " +
+        createIndex("CREATE INDEX idx1 ON %s(v)");
+        createIndex("CREATE CUSTOM INDEX idx2 ON %s(v) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX idx3 ON %s(v) USING 'StorageAttachedIndex' " +
                     "WITH OPTIONS = { 'equals_behaviour_when_analyzed': 'UNSUPPORTED', 'index_analyzer': 'standard' }");
 
         Index idx1 = getCurrentColumnFamilyStore().indexManager.getIndexByName("idx1");
         Index idx2 = getCurrentColumnFamilyStore().indexManager.getIndexByName("idx2");
+        Index idx3 = getCurrentColumnFamilyStore().indexManager.getIndexByName("idx3");
 
         execute("INSERT INTO %s (k, v) VALUES (1, 'Richard Strauss')");
         execute("INSERT INTO %s (k, v) VALUES (2, 'Johann Strauss')");
 
+        // test index selection with EQ query
         String query = "SELECT k FROM %s WHERE v = 'Strauss' ";
+        assertSelectsAll(query, idx2);
         assertSelectsAll(query + "WITH preferred_indexes = {idx1}", idx1);
-        assertSelectsAll(query + "WITH preferred_indexes = {idx2}", idx1); // preferred index is not mandatory, idx2 is not applicable to =
-        assertIndexDoesNotSupportOperator(query + "WITH excluded_indexes = {idx1}", "v");
+        assertSelectsAll(query + "WITH preferred_indexes = {idx2}", idx2);
+        assertSelectsAll(query + "WITH preferred_indexes = {idx3}", idx2); // preferred index is not mandatory, idx3 is not applicable to =
+        assertSelectsAll(query + "WITH preferred_indexes = {idx1, idx2}", idx2);
+        assertSelectsAll(query + "WITH preferred_indexes = {idx1, idx3}", idx1);
+        assertSelectsAll(query + "WITH preferred_indexes = {idx2, idx3}", idx2);
+        assertSelectsAll(query + "WITH preferred_indexes = {idx1, idx2, idx3}", idx2);
+        assertSelectsAll(query + "WITH excluded_indexes = {idx1}", idx2);
         assertSelectsAll(query + "WITH excluded_indexes = {idx2}", idx1);
+        assertSelectsAll(query + "WITH excluded_indexes = {idx3}", idx2);
+        assertIndexDoesNotSupportOperator(query + "WITH excluded_indexes = {idx1, idx2}", "v");
+        assertSelectsAll(query + "WITH excluded_indexes = {idx1, idx3}", idx2);
+        assertSelectsAll(query + "WITH excluded_indexes = {idx2, idx3}", idx1);
+        assertNeedsAllowFiltering(query + "WITH excluded_indexes = {idx1, idx2, idx3}");
+        assertSelectsAll(query + "ALLOW FILTERING WITH excluded_indexes = {idx1, idx2, idx3}");
+
+        // test correct returned rows with EQ query
         assertRows(execute(query + "WITH preferred_indexes = {idx1}"));
         assertRows(execute(query + "WITH preferred_indexes = {idx2}"));
+        assertRows(execute(query + "WITH preferred_indexes = {idx3}"));
+        assertRows(execute(query + "WITH preferred_indexes = {idx1, idx2}"));
+        assertRows(execute(query + "WITH preferred_indexes = {idx1, idx3}"));
+        assertRows(execute(query + "WITH preferred_indexes = {idx2, idx3}"));
+        assertRows(execute(query + "WITH preferred_indexes = {idx1, idx2, idx3}"));
+        assertRows(execute(query + "WITH excluded_indexes = {idx1}"));
         assertRows(execute(query + "WITH excluded_indexes = {idx2}"));
+        assertRows(execute(query + "WITH excluded_indexes = {idx3}"));
+        assertRows(execute(query + "ALLOW FILTERING WITH excluded_indexes = {idx1, idx2}"));
+        assertRows(execute(query + "WITH excluded_indexes = {idx1, idx3}"));
+        assertRows(execute(query + "WITH excluded_indexes = {idx2, idx3}"));
+        assertRows(execute(query + "ALLOW FILTERING WITH excluded_indexes = {idx1, idx2, idx3}"));
 
+        // test correct returned rows with another EQ query with a different value
         query = "SELECT k FROM %s WHERE v = 'Richard Strauss' ";
-        assertSelectsAll(query + "WITH preferred_indexes = {idx1}", idx1);
-        assertSelectsAll(query + "WITH preferred_indexes = {idx2}", idx1); // preferred index is not mandatory, idx2 is not applicable to =
-        assertIndexDoesNotSupportOperator(query + "WITH excluded_indexes = {idx1}", "v");
-        assertSelectsAll(query + "WITH excluded_indexes = {idx2}", idx1);
         assertRows(execute(query + "WITH preferred_indexes = {idx1}"), row(1));
         assertRows(execute(query + "WITH preferred_indexes = {idx2}"), row(1));
+        assertRows(execute(query + "WITH preferred_indexes = {idx3}"), row(1));
+        assertRows(execute(query + "WITH preferred_indexes = {idx1, idx2}"), row(1));
+        assertRows(execute(query + "WITH preferred_indexes = {idx1, idx3}"), row(1));
+        assertRows(execute(query + "WITH preferred_indexes = {idx2, idx3}"), row(1));
+        assertRows(execute(query + "WITH preferred_indexes = {idx1, idx2, idx3}"), row(1));
+        assertRows(execute(query + "WITH excluded_indexes = {idx1}"), row(1));
         assertRows(execute(query + "WITH excluded_indexes = {idx2}"), row(1));
+        assertRows(execute(query + "WITH excluded_indexes = {idx3}"), row(1));
+        assertRows(execute(query + "ALLOW FILTERING WITH excluded_indexes = {idx1, idx2}"), row(1));
+        assertRows(execute(query + "WITH excluded_indexes = {idx1, idx3}"), row(1));
+        assertRows(execute(query + "WITH excluded_indexes = {idx2, idx3}"), row(1));
+        assertRows(execute(query + "ALLOW FILTERING WITH excluded_indexes = {idx1, idx2, idx3}"), row(1));
 
+        // test index selection with MATCH query
         query = "SELECT k FROM %s WHERE v : 'strauss' ";
-        assertSelectsAll(query + "WITH preferred_indexes = {idx1}", idx2); // preferred index is not mandatory, idx1 is not applicable to :
-        assertSelectsAll(query + "WITH preferred_indexes = {idx2}", idx2);
-        assertSelectsAll(query + "WITH excluded_indexes = {idx1}", idx2);
-        assertIndexDoesNotSupportAnalyzerMatches(query + "WITH excluded_indexes = {idx2}", "v"); // exclussions are mandatory
+        assertSelectsAll(query, idx3);
+        assertSelectsAll(query + "WITH preferred_indexes = {idx1}", idx3); // preferred index is not mandatory, idx1 is not applicable to :
+        assertSelectsAll(query + "WITH preferred_indexes = {idx2}", idx3); // preferred index is not mandatory, idx2 is not applicable to :
+        assertSelectsAll(query + "WITH preferred_indexes = {idx3}", idx3);
+        assertSelectsAll(query + "WITH preferred_indexes = {idx1, idx2}", idx3); // preferred index is not mandatory, idx1 and idx2 are not applicable to :
+        assertSelectsAll(query + "WITH preferred_indexes = {idx1, idx3}", idx3);
+        assertSelectsAll(query + "WITH preferred_indexes = {idx2, idx3}", idx3);
+        assertSelectsAll(query + "WITH preferred_indexes = {idx1, idx2, idx3}", idx3);
+        assertSelectsAll(query + "WITH excluded_indexes = {idx1}", idx3);
+        assertSelectsAll(query + "WITH excluded_indexes = {idx2}", idx3);
+        assertIndexDoesNotSupportAnalyzerMatches(query + "WITH excluded_indexes = {idx3}", "v");
+        assertSelectsAll(query + "WITH excluded_indexes = {idx1, idx2}", idx3);
+        assertIndexDoesNotSupportAnalyzerMatches(query + "WITH excluded_indexes = {idx1, idx3}", "v");
+        assertIndexDoesNotSupportAnalyzerMatches(query + "WITH excluded_indexes = {idx2, idx3}", "v");
+        assertMatchNeedsIndex(query + "WITH excluded_indexes = {idx1, idx2, idx3}", "v", "strauss");
+
+        // test correct returned rows with MATCH query
         assertRows(execute(query + "WITH preferred_indexes = {idx1}"), row(1), row(2));
         assertRows(execute(query + "WITH preferred_indexes = {idx2}"), row(1), row(2));
+        assertRows(execute(query + "WITH preferred_indexes = {idx3}"), row(1), row(2));
+        assertRows(execute(query + "WITH preferred_indexes = {idx1, idx2}"), row(1), row(2));
+        assertRows(execute(query + "WITH preferred_indexes = {idx1, idx3}"), row(1), row(2));
+        assertRows(execute(query + "WITH preferred_indexes = {idx2, idx3}"), row(1), row(2));
+        assertRows(execute(query + "WITH preferred_indexes = {idx1, idx2, idx3}"), row(1), row(2));
         assertRows(execute(query + "WITH excluded_indexes = {idx1}"), row(1), row(2));
+        assertRows(execute(query + "WITH excluded_indexes = {idx2}"), row(1), row(2));
+        assertRows(execute(query + "WITH excluded_indexes = {idx1, idx2}"), row(1), row(2));
 
+        // test correct returned rows with another MATCH query with a different value
         query = "SELECT k FROM %s WHERE v : 'Richard Strauss' ";
-        assertSelectsAll(query + "WITH preferred_indexes = {idx1}", idx2); // preferred index is not mandatory, idx1 is not applicable to :
-        assertSelectsAll(query + "WITH preferred_indexes = {idx2}", idx2);
-        assertSelectsAll(query + "WITH excluded_indexes = {idx1}", idx2);
-        assertIndexDoesNotSupportAnalyzerMatches(query + "WITH excluded_indexes = {idx2}", "v"); // exclussions are mandatory
         assertRows(execute(query + "WITH preferred_indexes = {idx1}"), row(1));
         assertRows(execute(query + "WITH preferred_indexes = {idx2}"), row(1));
+        assertRows(execute(query + "WITH preferred_indexes = {idx3}"), row(1));
+        assertRows(execute(query + "WITH preferred_indexes = {idx1, idx2}"), row(1));
+        assertRows(execute(query + "WITH preferred_indexes = {idx1, idx3}"), row(1));
+        assertRows(execute(query + "WITH preferred_indexes = {idx2, idx3}"), row(1));
+        assertRows(execute(query + "WITH preferred_indexes = {idx1, idx2, idx3}"), row(1));
         assertRows(execute(query + "WITH excluded_indexes = {idx1}"), row(1));
+        assertRows(execute(query + "WITH excluded_indexes = {idx2}"), row(1));
+        assertRows(execute(query + "WITH excluded_indexes = {idx1, idx2}"), row(1));
     }
 
     @Test
     public void testSAIWithMultipleIndexesPerColumnAndMatchEqOnAnalyzer()
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v text)");
-        createIndex("CREATE CUSTOM INDEX idx1 ON %s(v) USING 'StorageAttachedIndex'");
-        createIndex("CREATE CUSTOM INDEX idx2 ON %s(v) USING 'StorageAttachedIndex' " +
+        createIndex("CREATE INDEX idx1 ON %s(v)");
+        createIndex("CREATE CUSTOM INDEX idx2 ON %s(v) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX idx3 ON %s(v) USING 'StorageAttachedIndex' " +
                     "WITH OPTIONS = { 'equals_behaviour_when_analyzed': 'MATCH', 'index_analyzer': 'standard' }");
+
+        Index idx1 = getCurrentColumnFamilyStore().indexManager.getIndexByName("idx1");
+        Index idx2 = getCurrentColumnFamilyStore().indexManager.getIndexByName("idx2");
+        Index idx3 = getCurrentColumnFamilyStore().indexManager.getIndexByName("idx3");
 
         execute("INSERT INTO %s (k, v) VALUES (1, 'Richard Strauss')");
         execute("INSERT INTO %s (k, v) VALUES (2, 'Johann Strauss')");
 
+        // test index selection with EQ query, the hints will desambiguate the query
         String query = "SELECT k FROM %s WHERE v = 'Strauss' ";
-        assertEqualityPredicateIsAmbiguous(query + "WITH preferred_indexes = {idx1}");
-        assertEqualityPredicateIsAmbiguous(query + "WITH preferred_indexes = {idx2}");
+        assertEqualityPredicateIsAmbiguous(query);
+        assertSelectsAll(query + "WITH preferred_indexes = {idx1}", idx1);
+        assertSelectsAll(query + "WITH preferred_indexes = {idx2}", idx2);
+        assertSelectsAll(query + "WITH preferred_indexes = {idx3}", idx3);
+        assertSelectsAll(query + "WITH preferred_indexes = {idx1, idx2}", idx2);
+        assertEqualityPredicateIsAmbiguous(query + "WITH preferred_indexes = {idx1, idx3}");
+        assertEqualityPredicateIsAmbiguous(query + "WITH preferred_indexes = {idx2, idx3}");
+        assertEqualityPredicateIsAmbiguous(query + "WITH preferred_indexes = {idx1, idx2, idx3}");
         assertEqualityPredicateIsAmbiguous(query + "WITH excluded_indexes = {idx1}");
         assertEqualityPredicateIsAmbiguous(query + "WITH excluded_indexes = {idx2}");
+        assertSelectsAll(query + "WITH excluded_indexes = {idx3}", idx2);
+        assertSelectsAll(query + "WITH excluded_indexes = {idx1, idx2}", idx3);
+        assertSelectsAll(query + "WITH excluded_indexes = {idx1, idx3}", idx2);
+        assertSelectsAll(query + "WITH excluded_indexes = {idx2, idx3}", idx1);
+        assertNeedsAllowFiltering(query + "WITH excluded_indexes = {idx1, idx2, idx3}");
+        assertSelectsAll(query + "ALLOW FILTERING WITH excluded_indexes = {idx1, idx2, idx3}");
 
+        // test correct returned rows with EQ query
+        assertRows(execute(query + "WITH preferred_indexes = {idx1}"));
+        assertRows(execute(query + "WITH preferred_indexes = {idx2}"));
+        assertRows(execute(query + "WITH preferred_indexes = {idx3}"), row(1), row(2));
+        assertRows(execute(query + "WITH excluded_indexes = {idx3}"));
+        assertRows(execute(query + "WITH excluded_indexes = {idx1, idx2}"), row(1), row(2));
+        assertRows(execute(query + "WITH excluded_indexes = {idx1, idx3}"));
+        assertRows(execute(query + "WITH excluded_indexes = {idx2, idx3}"));
+        assertRows(execute(query + "ALLOW FILTERING WITH excluded_indexes = {idx1, idx2, idx3}"));
+
+        // test correct returned rows with another EQ query with a different value
         query = "SELECT k FROM %s WHERE v = 'Richard Strauss' ";
-        assertEqualityPredicateIsAmbiguous(query + "WITH preferred_indexes = {idx1}");
-        assertEqualityPredicateIsAmbiguous(query + "WITH preferred_indexes = {idx2}");
-        assertEqualityPredicateIsAmbiguous(query + "WITH excluded_indexes = {idx1}");
-        assertEqualityPredicateIsAmbiguous(query + "WITH excluded_indexes = {idx2}");
-
-        query = "SELECT k FROM %s WHERE v : 'strauss' ";
-        assertRows(execute(query + "WITH preferred_indexes = {idx1}"), row(1), row(2)); // preferred, not mandatory
-        assertRows(execute(query + "WITH preferred_indexes = {idx2}"), row(1), row(2));
-        assertRows(execute(query + "WITH excluded_indexes = {idx1}"), row(1), row(2)); // it wouldn't have been selected anyway
-        assertIndexDoesNotSupportAnalyzerMatches(query + "WITH excluded_indexes = {idx2}", "v"); // exclussions are mandatory
-
-        query = "SELECT k FROM %s WHERE v : 'Richard Strauss' ";
-        assertRows(execute(query + "WITH preferred_indexes = {idx1}"), row(1)); // preferred, not mandatory
+        assertRows(execute(query + "WITH preferred_indexes = {idx1}"), row(1));
         assertRows(execute(query + "WITH preferred_indexes = {idx2}"), row(1));
-        assertRows(execute(query + "WITH excluded_indexes = {idx1}"), row(1)); // it wouldn't have been selected anyway
-        assertIndexDoesNotSupportAnalyzerMatches(query + "WITH excluded_indexes = {idx2}", "v"); // exclussions are mandatory
+        assertRows(execute(query + "WITH preferred_indexes = {idx3}"), row(1));
+        assertRows(execute(query + "WITH preferred_indexes = {idx1, idx2}"), row(1));
+        assertRows(execute(query + "WITH excluded_indexes = {idx3}"), row(1));
+        assertRows(execute(query + "WITH excluded_indexes = {idx1, idx2}"), row(1));
+        assertRows(execute(query + "WITH excluded_indexes = {idx1, idx3}"), row(1));
+        assertRows(execute(query + "WITH excluded_indexes = {idx2, idx3}"), row(1));
+        assertRows(execute(query + "ALLOW FILTERING WITH excluded_indexes = {idx1, idx2, idx3}"), row(1));
+
+        // test index selection with MATCH query
+        query = "SELECT k FROM %s WHERE v : 'strauss' ";
+        assertSelectsAll(query, idx3);
+        assertSelectsAll(query + "WITH preferred_indexes = {idx1}", idx3); // preferred index is not mandatory, idx1 is not applicable to :
+        assertSelectsAll(query + "WITH preferred_indexes = {idx2}", idx3); // preferred index is not mandatory, idx2 is not applicable to :
+        assertSelectsAll(query + "WITH preferred_indexes = {idx3}", idx3);
+        assertSelectsAll(query + "WITH preferred_indexes = {idx1, idx2}", idx3); // preferred index is not mandatory, idx1 and idx2 are not applicable to :
+        assertSelectsAll(query + "WITH preferred_indexes = {idx1, idx3}", idx3);
+        assertSelectsAll(query + "WITH preferred_indexes = {idx2, idx3}", idx3);
+        assertSelectsAll(query + "WITH preferred_indexes = {idx1, idx2, idx3}", idx3);
+        assertSelectsAll(query + "WITH excluded_indexes = {idx1}", idx3);
+        assertSelectsAll(query + "WITH excluded_indexes = {idx2}", idx3);
+        assertIndexDoesNotSupportAnalyzerMatches(query + "WITH excluded_indexes = {idx3}", "v");
+        assertSelectsAll(query + "WITH excluded_indexes = {idx1, idx2}", idx3);
+        assertIndexDoesNotSupportAnalyzerMatches(query + "WITH excluded_indexes = {idx1, idx3}", "v");
+        assertIndexDoesNotSupportAnalyzerMatches(query + "WITH excluded_indexes = {idx2, idx3}", "v");
+        assertMatchNeedsIndex(query + "WITH excluded_indexes = {idx1, idx2, idx3}", "v", "strauss");
+
+        // test correct returned rows with MATCH query
+        assertRows(execute(query + "WITH preferred_indexes = {idx1}"), row(1), row(2));
+        assertRows(execute(query + "WITH preferred_indexes = {idx2}"), row(1), row(2));
+        assertRows(execute(query + "WITH preferred_indexes = {idx3}"), row(1), row(2));
+        assertRows(execute(query + "WITH preferred_indexes = {idx1, idx2}"), row(1), row(2));
+        assertRows(execute(query + "WITH preferred_indexes = {idx1, idx3}"), row(1), row(2));
+        assertRows(execute(query + "WITH preferred_indexes = {idx2, idx3}"), row(1), row(2));
+        assertRows(execute(query + "WITH preferred_indexes = {idx1, idx2, idx3}"), row(1), row(2));
+        assertRows(execute(query + "WITH excluded_indexes = {idx1}"), row(1), row(2));
+        assertRows(execute(query + "WITH excluded_indexes = {idx2}"), row(1), row(2));
+        assertRows(execute(query + "WITH excluded_indexes = {idx1, idx2}"), row(1), row(2));
+
+        // test correct returned rows with another MATCH query with a different value
+        query = "SELECT k FROM %s WHERE v : 'Richard Strauss' ";
+        assertRows(execute(query + "WITH preferred_indexes = {idx1}"), row(1));
+        assertRows(execute(query + "WITH preferred_indexes = {idx2}"), row(1));
+        assertRows(execute(query + "WITH preferred_indexes = {idx3}"), row(1));
+        assertRows(execute(query + "WITH preferred_indexes = {idx1, idx2}"), row(1));
+        assertRows(execute(query + "WITH preferred_indexes = {idx1, idx3}"), row(1));
+        assertRows(execute(query + "WITH preferred_indexes = {idx2, idx3}"), row(1));
+        assertRows(execute(query + "WITH preferred_indexes = {idx1, idx2, idx3}"), row(1));
+        assertRows(execute(query + "WITH excluded_indexes = {idx1}"), row(1));
+        assertRows(execute(query + "WITH excluded_indexes = {idx2}"), row(1));
+        assertRows(execute(query + "WITH excluded_indexes = {idx1, idx2}"), row(1));
     }
 
     @Test
@@ -834,6 +960,15 @@ public class IndexHintsTest extends CQLTester
         Assertions.assertThatThrownBy(() -> execute(query))
                   .isInstanceOf(InvalidRequestException.class)
                   .hasMessageContaining(String.format(StatementRestrictions.INDEX_DOES_NOT_SUPPORT_ANALYZER_MATCHES_MESSAGE, column));
+    }
+
+    private void assertMatchNeedsIndex(String query, String column, String value)
+    {
+        Assertions.assertThatThrownBy(() -> execute(query))
+                  .isInstanceOf(InvalidRequestException.class)
+                  .hasMessageContaining(String.format(StatementRestrictions.RESTRICTION_REQUIRES_INDEX_MESSAGE,
+                                                      ':',
+                                                      String.format("%s : '%s'", column, value)));
     }
 
     private void assertEqualityPredicateIsAmbiguous(String query)
