@@ -325,7 +325,8 @@ public class RowFilter
             ByteBuffer value = keyValidator instanceof CompositeType
                              ? ((CompositeType) keyValidator).split(key.getKey())[e.column.position()]
                              : key.getKey();
-            if (!e.operator().isSatisfiedBy(e.column.type, value, e.value, e.indexAnalyzer(), e.queryAnalyzer()))
+
+            if (!e.isSatisfiedBy(e.column.type, value))
                 return false;
         }
         return true;
@@ -342,7 +343,9 @@ public class RowFilter
             if (!e.column.isClusteringColumn())
                 continue;
 
-            if (!e.operator().isSatisfiedBy(e.column.type, clustering.bufferAt(e.column.position()), e.value, e.indexAnalyzer(), e.queryAnalyzer()))
+            ByteBuffer value = clustering.bufferAt(e.column.position());
+
+            if (!e.isSatisfiedBy(e.column.type, value))
                 return false;
         }
         return true;
@@ -576,7 +579,7 @@ public class RowFilter
         public SimpleExpression add(ColumnMetadata def, Operator op, ByteBuffer value)
         {
             assert op != Operator.ANN : "ANN expressions should be added with the addANNExpression method";
-            SimpleExpression expression = new SimpleExpression(def, op, value, indexAnalyzer(def, op), queryAnalyzer(def, op), null);
+            SimpleExpression expression = new SimpleExpression(def, op, value, analyzer(def, op, value), null);
             add(expression);
             return expression;
         }
@@ -590,24 +593,18 @@ public class RowFilter
          */
         public void addANNExpression(ColumnMetadata def, ByteBuffer value, ANNOptions annOptions)
         {
-            add(new SimpleExpression(def, Operator.ANN, value, null, null, annOptions));
+            add(new SimpleExpression(def, Operator.ANN, value, null, annOptions));
         }
 
         public void addMapComparison(ColumnMetadata def, ByteBuffer key, Operator op, ByteBuffer value)
         {
-            add(new MapComparisonExpression(def, key, op, value, indexAnalyzer(def, op), queryAnalyzer(def, op)));
+            add(new MapComparisonExpression(def, key, op, value));
         }
 
         @Nullable
-        private Index.Analyzer indexAnalyzer(ColumnMetadata def, Operator op)
+        private Index.Analyzer analyzer(ColumnMetadata def, Operator op, ByteBuffer value)
         {
-            return indexRegistry == null ? null : indexRegistry.getIndexAnalyzerFor(def, op).orElse(null);
-        }
-
-        @Nullable
-        private Index.Analyzer queryAnalyzer(ColumnMetadata def, Operator op)
-        {
-            return indexRegistry == null ? null : indexRegistry.getQueryAnalyzerFor(def, op).orElse(null);
+            return indexRegistry == null ? null : indexRegistry.getAnalyzerFor(def, op, value).orElse(null);
         }
 
         public void addGeoDistanceExpression(ColumnMetadata def, ByteBuffer point, Operator op, ByteBuffer distance)
@@ -986,15 +983,22 @@ public class RowFilter
         }
 
         @Nullable
-        public Index.Analyzer indexAnalyzer()
+        public Index.Analyzer analyzer()
         {
             return null;
         }
 
-        @Nullable
-        public Index.Analyzer queryAnalyzer()
+        protected boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer foundValue)
         {
-            return null;
+            if (foundValue == null)
+                return false;
+
+            Index.Analyzer analyzer = analyzer();
+
+            // Note that CQL expression are always of the form 'x < 4', i.e. the tested value is on the left.
+            return analyzer == null
+                   ? operator.isSatisfiedBy(type, foundValue, value)
+                   : operator.isSatisfiedByAnalyzed(type, analyzer.indexedTokens(foundValue), analyzer.queriedTokens());
         }
 
         @Nullable
@@ -1188,8 +1192,6 @@ public class RowFilter
                 Operator operator = Operator.readFrom(in);
                 ColumnMetadata column = metadata.getColumn(name);
                 IndexRegistry indexRegistry = IndexRegistry.obtain(metadata);
-                Index.Analyzer indexAnalyzer = indexRegistry.getIndexAnalyzerFor(column, operator).orElse(null);
-                Index.Analyzer queryAnalyzer = indexRegistry.getQueryAnalyzerFor(column, operator).orElse(null);
 
                 // Compact storage tables, when used with thrift, used to allow falling through this withouot throwing an
                 // exception. However, since thrift was removed in 4.0, this behaviour was not restored in CASSANDRA-16217
@@ -1201,11 +1203,12 @@ public class RowFilter
                     case SIMPLE:
                         ByteBuffer value = ByteBufferUtil.readWithShortLength(in);
                         ANNOptions annOptions = operator == Operator.ANN ? ANNOptions.serializer.deserialize(in, version) : null;
-                        return new SimpleExpression(column, operator, value, indexAnalyzer, queryAnalyzer, annOptions);
+                        Index.Analyzer analyzer = indexRegistry.getAnalyzerFor(column, operator, value).orElse(null);
+                        return new SimpleExpression(column, operator, value, analyzer, annOptions);
                     case MAP_COMPARISON:
                         ByteBuffer key = ByteBufferUtil.readWithShortLength(in);
                         ByteBuffer val = ByteBufferUtil.readWithShortLength(in);
-                        return new MapComparisonExpression(column, key, operator, val, indexAnalyzer, queryAnalyzer);
+                        return new MapComparisonExpression(column, key, operator, val);
                     case VECTOR_RADIUS:
                         Operator boundaryOperator = Operator.readFrom(in);
                         ByteBuffer distance = ByteBufferUtil.readWithShortLength(in);
@@ -1257,65 +1260,40 @@ public class RowFilter
     }
 
     /**
-     * An expression that can be associated with an {@link Index.Analyzer}.
-     */
-    public abstract static class AnalyzableExpression extends Expression
-    {
-        @Nullable
-        protected final Index.Analyzer indexAnalyzer;
-
-        @Nullable
-        protected final Index.Analyzer queryAnalyzer;
-
-        public AnalyzableExpression(ColumnMetadata column,
-                                    Operator operator,
-                                    ByteBuffer value,
-                                    @Nullable Index.Analyzer indexAnalyzer,
-                                    @Nullable Index.Analyzer queryAnalyzer)
-        {
-            super(column, operator, value);
-            this.indexAnalyzer = indexAnalyzer;
-            this.queryAnalyzer = queryAnalyzer;
-        }
-
-        @Nullable
-        public final Index.Analyzer indexAnalyzer()
-        {
-            return indexAnalyzer;
-        }
-
-        @Nullable
-        public final Index.Analyzer queryAnalyzer()
-        {
-            return queryAnalyzer;
-        }
-
-        @Override
-        public int numFilteredValues()
-        {
-            return queryAnalyzer == null
-                   ? super.numFilteredValues()
-                   : queryAnalyzer().analyze(value).size();
-        }
-    }
-
-    /**
      * An expression of the form 'column' 'op' 'value'.
      */
-    public static class SimpleExpression extends AnalyzableExpression
+    public static class SimpleExpression extends Expression
     {
+        @Nullable
+        protected final Index.Analyzer analyzer;
+
         @Nullable
         private final ANNOptions annOptions;
 
         public SimpleExpression(ColumnMetadata column,
                                 Operator operator,
                                 ByteBuffer value,
-                                @Nullable Index.Analyzer indexAnalyzer,
-                                @Nullable Index.Analyzer queryAnalyzer,
+                                @Nullable Index.Analyzer analyzer,
                                 @Nullable ANNOptions annOptions)
         {
-            super(column, operator, value, indexAnalyzer, queryAnalyzer);
+            super(column, operator, value);
+            this.analyzer = analyzer;
             this.annOptions = annOptions;
+        }
+
+        @Override
+        @Nullable
+        public Index.Analyzer analyzer()
+        {
+            return analyzer;
+        }
+
+        @Override
+        public int numFilteredValues()
+        {
+            return analyzer == null
+                    ? super.numFilteredValues()
+                    : analyzer.queriedTokens().size();
         }
 
         @Nullable
@@ -1343,22 +1321,21 @@ public class RowFilter
                     {
                         assert !column.isComplex() : "Only CONTAINS and CONTAINS_KEY are supported for collection types";
 
+                        ByteBuffer foundValue = getValue(metadata, partitionKey, row, nowInSec);
+
+                        if (foundValue == null)
+                            return false;
+
                         // In order to support operators on Counter types, their value has to be extracted from internal
                         // representation. See CASSANDRA-11629
                         if (column.type.isCounter())
                         {
-                            ByteBuffer foundValue = getValue(metadata, partitionKey, row, nowInSec);
-                            if (foundValue == null)
-                                return false;
-
                             ByteBuffer counterValue = LongType.instance.decompose(CounterContext.instance().total(foundValue, ByteBufferAccessor.instance));
-                            return operator.isSatisfiedBy(LongType.instance, counterValue, value, indexAnalyzer, queryAnalyzer);
+                            return isSatisfiedBy(LongType.instance, counterValue);
                         }
                         else
                         {
-                            // Note that CQL expression are always of the form 'x < 4', i.e. the tested value is on the left.
-                            ByteBuffer foundValue = getValue(metadata, partitionKey, row, nowInSec);
-                            return foundValue != null && operator.isSatisfiedBy(column.type, foundValue, value, indexAnalyzer, queryAnalyzer);
+                            return isSatisfiedBy(column.type, foundValue);
                         }
                     }
                 case NEQ:
@@ -1373,7 +1350,7 @@ public class RowFilter
                         assert !column.isComplex() : "Only CONTAINS and CONTAINS_KEY are supported for collection types";
                         ByteBuffer foundValue = getValue(metadata, partitionKey, row, nowInSec);
                         // Note that CQL expression are always of the form 'x < 4', i.e. the tested value is on the left.
-                        return foundValue != null && operator.isSatisfiedBy(column.type, foundValue, value, indexAnalyzer, queryAnalyzer);
+                        return isSatisfiedBy(column.type, foundValue);
                     }
                 case CONTAINS:
                     return contains(metadata, partitionKey, row, nowInSec);
@@ -1390,10 +1367,8 @@ public class RowFilter
         private boolean contains(TableMetadata metadata, DecoratedKey partitionKey, Row row, long nowInSec)
         {
             assert column.type.isCollection();
-            assert (indexAnalyzer == null) == (queryAnalyzer == null);
 
             CollectionType<?> type = (CollectionType<?>) column.type;
-            List<ByteBuffer> analyzedValues = queryAnalyzer == null ? null : queryAnalyzer.analyze(value);
 
             if (column.isComplex())
             {
@@ -1404,14 +1379,16 @@ public class RowFilter
                     for (Cell<?> cell : complexData)
                     {
                         ByteBuffer elementValue = type.kind == CollectionType.Kind.SET ? cell.path().get(0) : cell.buffer();
-                        if (analyzedValues == null)
+                        if (analyzer != null)
                         {
-                            if (elementType.compare(elementValue, value) == 0)
+                            List<ByteBuffer> elementTokens = analyzer.indexedTokens(elementValue);
+                            List<ByteBuffer> queriedTokens = analyzer.queriedTokens();
+                            if (Operator.ANALYZER_MATCHES.isSatisfiedByAnalyzed(elementType, elementTokens, queriedTokens))
                                 return true;
                         }
                         else
                         {
-                            if (Operator.ANALYZER_MATCHES.isSatisfiedBy(elementType, elementValue, analyzedValues, indexAnalyzer))
+                            if (Operator.EQ.isSatisfiedBy(elementType, elementValue, value))
                                 return true;
                         }
                     }
@@ -1420,8 +1397,9 @@ public class RowFilter
             }
             else
             {
+                assert analyzer == null : "Analyzers are not supported on frozen collections";
                 ByteBuffer foundValue = getValue(metadata, partitionKey, row, nowInSec);
-                return foundValue != null && Operator.CONTAINS.isSatisfiedBy(type, foundValue, value, indexAnalyzer, queryAnalyzer);
+                return foundValue != null && Operator.CONTAINS.isSatisfiedBy(type, foundValue, value);
             }
         }
 
@@ -1431,15 +1409,15 @@ public class RowFilter
             MapType<?, ?> mapType = (MapType<?, ?>) column.type;
             if (column.isComplex())
             {
-                if (queryAnalyzer != null)
+                if (analyzer != null)
                 {
-                    assert indexAnalyzer != null;
-                    List<ByteBuffer> values = queryAnalyzer.analyze(value);
                     for (Cell<?> cell : row.getComplexColumnData(column))
                     {
                         AbstractType<?> elementType = mapType.nameComparator();
                         ByteBuffer elementValue = cell.path().get(0);
-                        if (Operator.ANALYZER_MATCHES.isSatisfiedBy(elementType, elementValue, values, indexAnalyzer))
+                        List<ByteBuffer> elementTokens = analyzer.indexedTokens(elementValue);
+                        List<ByteBuffer> queriedTokens = analyzer.queriedTokens();
+                        if (Operator.ANALYZER_MATCHES.isSatisfiedByAnalyzed(elementType, elementTokens, queriedTokens))
                             return true;
                     }
                     return false;
@@ -1448,8 +1426,9 @@ public class RowFilter
             }
             else
             {
+                assert analyzer == null : "Analyzers are not supported on frozen collections";
                 ByteBuffer foundValue = getValue(metadata, partitionKey, row, nowInSec);
-                return foundValue != null && Operator.CONTAINS_KEY.isSatisfiedBy(mapType, foundValue, value, indexAnalyzer, queryAnalyzer);
+                return foundValue != null && Operator.CONTAINS_KEY.isSatisfiedBy(mapType, foundValue, value);
             }
         }
 
@@ -1499,7 +1478,7 @@ public class RowFilter
      * supported when 'column' is a map) and where the operator can be {@link Operator#EQ}, {@link Operator#NEQ},
      * {@link Operator#LT}, {@link Operator#LTE}, {@link Operator#GT}, or {@link Operator#GTE}.
      */
-    public static class MapComparisonExpression extends AnalyzableExpression
+    public static class MapComparisonExpression extends Expression
     {
         private final ByteBuffer key;
         private ByteBuffer indexValue = null;
@@ -1507,11 +1486,9 @@ public class RowFilter
         public MapComparisonExpression(ColumnMetadata column,
                                        ByteBuffer key,
                                        Operator operator,
-                                       ByteBuffer value,
-                                       @Nullable Index.Analyzer indexAnalyzer,
-                                       @Nullable Index.Analyzer queryAnalyzer)
+                                       ByteBuffer value)
         {
-            super(column, operator, value, indexAnalyzer, queryAnalyzer);
+            super(column, operator, value);
             assert column.type instanceof MapType && (operator == Operator.EQ || operator == Operator.NEQ || operator.isSlice());
             this.key = key;
         }
