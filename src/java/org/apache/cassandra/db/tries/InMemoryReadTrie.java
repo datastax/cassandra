@@ -28,7 +28,7 @@ import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 /// In-memory trie built for fast modification and reads executing concurrently with writes from a single mutator thread.
 ///
 /// This class provides the read-only functionality, expanded in [InMemoryTrie] to writes.
-public class InMemoryReadTrie<T> implements Trie<T>
+public abstract class InMemoryReadTrie<T>
 {
     /*
     TRIE FORMAT AND NODE TYPES
@@ -288,17 +288,17 @@ public class InMemoryReadTrie<T> implements Trie<T>
      Reading node content
      */
 
-    boolean isNull(int node)
+    static boolean isNull(int node)
     {
         return node == NONE;
     }
 
-    boolean isLeaf(int node)
+    static boolean isLeaf(int node)
     {
         return node < NONE;
     }
 
-    boolean isNullOrLeaf(int node)
+    static boolean isNullOrLeaf(int node)
     {
         return node <= NONE;
     }
@@ -1057,18 +1057,12 @@ public class InMemoryReadTrie<T> implements Trie<T>
         return !isNullOrLeaf(node) && offset(node) <= CHAIN_MAX_OFFSET;
     }
 
-    public InMemoryCursor makeCursor(Direction direction)
-    {
-        return new InMemoryCursor(direction);
-    }
-
     /*
      Direct read methods
      */
 
     /// Get the content mapped by the specified key.
     /// Fast implementation using integer node addresses.
-    @Override
     public T get(ByteComparable path)
     {
         int n = root;
@@ -1095,9 +1089,10 @@ public class InMemoryReadTrie<T> implements Trie<T>
         return byteComparableVersion;
     }
 
+    abstract InMemoryCursor makeCursor(Direction direction);
+
     /// Override of dump to provide more detailed printout that includes the type of each node in the trie.
     /// We do this via a wrapping cursor that returns a content string for the type of node for every node we return.
-    @Override
     public String dump(Function<T, String> contentToString)
     {
         InMemoryCursor source = makeCursor(Direction.FORWARD);
@@ -1205,7 +1200,7 @@ public class InMemoryReadTrie<T> implements Trie<T>
             {
                 case SPARSE_OFFSET:
                 {
-                    builder.append("Sparse: ");
+                    builder.append("Sparse (Order " + Integer.toString(getUnsignedShortVolatile(node + SPARSE_ORDER_OFFSET), 6) + "): ");
                     for (int i = 0; i < SPARSE_CHILD_COUNT; ++i)
                     {
                         int child = getIntVolatile(node + SPARSE_CHILDREN_OFFSET + i * 4);
