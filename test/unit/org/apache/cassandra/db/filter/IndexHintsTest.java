@@ -20,7 +20,8 @@ import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Set;
 
-import com.google.common.collect.ImmutableSet;
+import javax.annotation.Nullable;
+
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -66,6 +67,7 @@ public class IndexHintsTest extends CQLTester
         // Set the messaging version that adds support for the new index hints before starting the server
         CassandraRelevantProperties.DS_CURRENT_MESSAGING_VERSION.setInt(MessagingService.VERSION_DS_12);
         CQLTester.setUpClass();
+        CQLTester.enableCoordinatorExecution();
     }
 
     /**
@@ -329,57 +331,66 @@ public class IndexHintsTest extends CQLTester
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v1 int, v2 int, v3 int)");
         createIndex("CREATE INDEX idx1 ON %s(v1)");
         createIndex("CREATE INDEX idx2 ON %s(v2)");
+
         Index idx1 = getCurrentColumnFamilyStore().indexManager.getIndexByName("idx1");
         Index idx2 = getCurrentColumnFamilyStore().indexManager.getIndexByName("idx2");
 
+        String insert = "INSERT INTO %s (k, v1, v2, v3) VALUES (?, ?, ?, ?)";
+        Object[] row1 = new Object[]{ 1, 0, 1, 1 };
+        Object[] row2 = new Object[]{ 2, 1, 0, 1 };
+        Object[] row3 = new Object[]{ 3, 1, 1, 0 };
+        execute(insert, row1);
+        execute(insert, row2);
+        execute(insert, row3);
+
         // without any hints
-        assertSelectsAny("SELECT * FROM %s ALLOW FILTERING");
-        assertSelectsAny("SELECT * FROM %s WHERE v1=0 ALLOW FILTERING", idx1);
-        assertSelectsAny("SELECT * FROM %s WHERE v2=0 ALLOW FILTERING", idx2);
-        assertSelectsAny("SELECT * FROM %s WHERE v3=0 ALLOW FILTERING");
-        assertSelectsAny("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING", idx1, idx2);
-        assertSelectsAny("SELECT * FROM %s WHERE v1=0 AND v3=0 ALLOW FILTERING", idx1);
-        assertSelectsAny("SELECT * FROM %s WHERE v2=0 AND v3=0 ALLOW FILTERING", idx2);
+        assertThatPlan("SELECT * FROM %s ALLOW FILTERING", row1, row2, row3).selectsNone();
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 ALLOW FILTERING", row1).selects(idx1);
+        assertThatPlan("SELECT * FROM %s WHERE v2=0 ALLOW FILTERING", row2).selects(idx2);
+        assertThatPlan("SELECT * FROM %s WHERE v3=0 ALLOW FILTERING", row3);
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING").selectsAnyOf(idx1, idx2);
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 AND v3=0 ALLOW FILTERING").selects(idx1);
+        assertThatPlan("SELECT * FROM %s WHERE v2=0 AND v3=0 ALLOW FILTERING").selects(idx2);
 
         // with a single restriction and preferred indexes
-        assertSelectsAny("SELECT * FROM %s WHERE v1=0 ALLOW FILTERING WITH preferred_indexes = {idx1}", idx1);
-        assertSelectsAny("SELECT * FROM %s WHERE v1=0 ALLOW FILTERING WITH preferred_indexes = {idx2}", idx1);
-        assertSelectsAny("SELECT * FROM %s WHERE v2=0 ALLOW FILTERING WITH preferred_indexes = {idx1}", idx2);
-        assertSelectsAny("SELECT * FROM %s WHERE v2=0 ALLOW FILTERING WITH preferred_indexes = {idx2}", idx2);
-        assertSelectsAny("SELECT * FROM %s WHERE v3=0 ALLOW FILTERING WITH preferred_indexes = {idx1}");
-        assertSelectsAny("SELECT * FROM %s WHERE v3=0 ALLOW FILTERING WITH preferred_indexes = {idx2}");
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 ALLOW FILTERING WITH preferred_indexes = {idx1}", row1).selects(idx1);
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 ALLOW FILTERING WITH preferred_indexes = {idx2}", row1).selects(idx1);
+        assertThatPlan("SELECT * FROM %s WHERE v2=0 ALLOW FILTERING WITH preferred_indexes = {idx1}", row2).selects(idx2);
+        assertThatPlan("SELECT * FROM %s WHERE v2=0 ALLOW FILTERING WITH preferred_indexes = {idx2}", row2).selects(idx2);
+        assertThatPlan("SELECT * FROM %s WHERE v3=0 ALLOW FILTERING WITH preferred_indexes = {idx1}", row3).selectsNone();
+        assertThatPlan("SELECT * FROM %s WHERE v3=0 ALLOW FILTERING WITH preferred_indexes = {idx2}", row3).selectsNone();
 
         // with a single restriction and excluded indexes
-        assertSelectsAny("SELECT * FROM %s WHERE v1=0 ALLOW FILTERING WITH excluded_indexes = {idx1}");
-        assertSelectsAny("SELECT * FROM %s WHERE v1=0 ALLOW FILTERING WITH excluded_indexes = {idx2}", idx1);
-        assertSelectsAny("SELECT * FROM %s WHERE v2=0 ALLOW FILTERING WITH excluded_indexes = {idx1}", idx2);
-        assertSelectsAny("SELECT * FROM %s WHERE v2=0 ALLOW FILTERING WITH excluded_indexes = {idx2}");
-        assertSelectsAny("SELECT * FROM %s WHERE v3=0 ALLOW FILTERING WITH excluded_indexes = {idx1}");
-        assertSelectsAny("SELECT * FROM %s WHERE v3=0 ALLOW FILTERING WITH excluded_indexes = {idx2}");
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 ALLOW FILTERING WITH excluded_indexes = {idx1}", row1).selectsNone();
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 ALLOW FILTERING WITH excluded_indexes = {idx2}", row1).selects(idx1);
+        assertThatPlan("SELECT * FROM %s WHERE v2=0 ALLOW FILTERING WITH excluded_indexes = {idx1}", row2).selects(idx2);
+        assertThatPlan("SELECT * FROM %s WHERE v2=0 ALLOW FILTERING WITH excluded_indexes = {idx2}", row2).selectsNone();
+        assertThatPlan("SELECT * FROM %s WHERE v3=0 ALLOW FILTERING WITH excluded_indexes = {idx1}", row3).selectsNone();
+        assertThatPlan("SELECT * FROM %s WHERE v3=0 ALLOW FILTERING WITH excluded_indexes = {idx2}", row3).selectsNone();
 
         // with restrictions in two columns (v1 and v2) and preferred indexes
-        assertSelectsAny("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING WITH preferred_indexes = {idx1}", idx1);
-        assertSelectsAny("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING WITH preferred_indexes = {idx2}", idx2);
-        assertSelectsAny("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING WITH preferred_indexes = {idx1, idx2}", idx1, idx2);
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING WITH preferred_indexes = {idx1}").selects(idx1);
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING WITH preferred_indexes = {idx2}").selects(idx2);
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING WITH preferred_indexes = {idx1, idx2}").selectsAnyOf(idx1, idx2);
 
         // with restrictions in two columns (v1 and v2) and excluded indexes
-        assertSelectsAny("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING WITH excluded_indexes = {idx1}", idx2);
-        assertSelectsAny("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING WITH excluded_indexes = {idx2}", idx1);
-        assertSelectsAny("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING WITH excluded_indexes = {idx1, idx2}");
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING WITH excluded_indexes = {idx1}").selects(idx2);
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING WITH excluded_indexes = {idx2}").selects(idx1);
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING WITH excluded_indexes = {idx1, idx2}").selectsNone();
 
         // with restrictions in two columns (v1 and v3) and preferred indexes
-        assertSelectsAny("SELECT * FROM %s WHERE v1=0 AND v3=0 ALLOW FILTERING WITH preferred_indexes = {idx1}", idx1);
-        assertSelectsAny("SELECT * FROM %s WHERE v1=0 AND v3=0 ALLOW FILTERING WITH preferred_indexes = {idx2}", idx1);
-        assertSelectsAny("SELECT * FROM %s WHERE v1=0 AND v3=0 ALLOW FILTERING WITH preferred_indexes = {idx1, idx2}", idx1);
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 AND v3=0 ALLOW FILTERING WITH preferred_indexes = {idx1}").selects(idx1);
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 AND v3=0 ALLOW FILTERING WITH preferred_indexes = {idx2}").selects(idx1);
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 AND v3=0 ALLOW FILTERING WITH preferred_indexes = {idx1, idx2}").selects(idx1);
 
         // with restrictions in two columns (v1 and v3) and excluded indexes
-        assertSelectsAny("SELECT * FROM %s WHERE v1=0 AND v3=0 ALLOW FILTERING WITH excluded_indexes = {idx1}");
-        assertSelectsAny("SELECT * FROM %s WHERE v1=0 AND v3=0 ALLOW FILTERING WITH excluded_indexes = {idx2}", idx1);
-        assertSelectsAny("SELECT * FROM %s WHERE v1=0 AND v3=0 ALLOW FILTERING WITH excluded_indexes = {idx1, idx2}");
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 AND v3=0 ALLOW FILTERING WITH excluded_indexes = {idx1}").selectsNone();
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 AND v3=0 ALLOW FILTERING WITH excluded_indexes = {idx2}").selects(idx1);
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 AND v3=0 ALLOW FILTERING WITH excluded_indexes = {idx1, idx2}").selectsNone();
 
         // without restrictions
-        assertSelectsAny("SELECT * FROM %s ALLOW FILTERING WITH preferred_indexes = {idx1}");
-        assertSelectsAny("SELECT * FROM %s ALLOW FILTERING WITH excluded_indexes = {idx1}");
+        assertThatPlan("SELECT * FROM %s ALLOW FILTERING WITH preferred_indexes = {idx1}", row1, row2, row3).selectsNone();
+        assertThatPlan("SELECT * FROM %s ALLOW FILTERING WITH excluded_indexes = {idx1}", row1, row2, row3).selectsNone();
 
         // prepared statements
         prepare("SELECT * FROM %s WHERE v1=? ALLOW FILTERING WITH preferred_indexes = {idx1}");
@@ -392,30 +403,39 @@ public class IndexHintsTest extends CQLTester
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v1 int, v2 int, v3 int)");
         createIndex("CREATE INDEX idx1 ON %s(v1)");
         createIndex("CREATE INDEX idx2 ON %s(v2)");
+
         Index idx1 = getCurrentColumnFamilyStore().indexManager.getIndexByName("idx1");
         Index idx2 = getCurrentColumnFamilyStore().indexManager.getIndexByName("idx2");
 
+        String insert = "INSERT INTO %s (k, v1, v2, v3) VALUES (?, ?, ?, ?)";
+        Object[] row1 = new Object[]{ 1, 0, 1, 1 };
+        Object[] row2 = new Object[]{ 2, 1, 0, 1 };
+        Object[] row3 = new Object[]{ 3, 1, 1, 0 };
+        execute(insert, row1);
+        execute(insert, row2);
+        execute(insert, row3);
+
         // without any hints
-        assertSelectsAny("SELECT * FROM %s");
-        assertSelectsAny("SELECT * FROM %s WHERE v1=0", idx1);
-        assertSelectsAny("SELECT * FROM %s WHERE v2=0", idx2);
+        assertThatPlan("SELECT * FROM %s", row1, row2, row3).selectsNone();
+        assertThatPlan("SELECT * FROM %s WHERE v1=0", row1).selects(idx1);
+        assertThatPlan("SELECT * FROM %s WHERE v2=0", row2).selects(idx2);
         assertNeedsAllowFiltering("SELECT * FROM %s WHERE v3=0");
         assertNeedsAllowFiltering("SELECT * FROM %s WHERE v1=0 AND v2=0");
         assertNeedsAllowFiltering("SELECT * FROM %s WHERE v1=0 AND v3=0");
         assertNeedsAllowFiltering("SELECT * FROM %s WHERE v2=0 AND v3=0");
 
         // with a single restriction and preferred indexes
-        assertSelectsAny("SELECT * FROM %s WHERE v1=0 WITH preferred_indexes = {idx1}", idx1);
-        assertSelectsAny("SELECT * FROM %s WHERE v1=0 WITH preferred_indexes = {idx2}", idx1);
-        assertSelectsAny("SELECT * FROM %s WHERE v2=0 WITH preferred_indexes = {idx1}", idx2);
-        assertSelectsAny("SELECT * FROM %s WHERE v2=0 WITH preferred_indexes = {idx2}", idx2);
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 WITH preferred_indexes = {idx1}", row1).selects(idx1);
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 WITH preferred_indexes = {idx2}", row1).selects(idx1);
+        assertThatPlan("SELECT * FROM %s WHERE v2=0 WITH preferred_indexes = {idx1}", row2).selects(idx2);
+        assertThatPlan("SELECT * FROM %s WHERE v2=0 WITH preferred_indexes = {idx2}", row2).selects(idx2);
         assertNeedsAllowFiltering("SELECT * FROM %s WHERE v3=0 WITH preferred_indexes = {idx1}");
         assertNeedsAllowFiltering("SELECT * FROM %s WHERE v3=0 WITH preferred_indexes = {idx2}");
 
         // with a single restriction and excluded indexes
         assertNeedsAllowFiltering("SELECT * FROM %s WHERE v1=0 WITH excluded_indexes = {idx1}");
-        assertSelectsAny("SELECT * FROM %s WHERE v1=0 WITH excluded_indexes = {idx2}", idx1);
-        assertSelectsAny("SELECT * FROM %s WHERE v2=0 WITH excluded_indexes = {idx1}", idx2);
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 WITH excluded_indexes = {idx2}", row1).selects(idx1);
+        assertThatPlan("SELECT * FROM %s WHERE v2=0 WITH excluded_indexes = {idx1}", row2).selects(idx2);
         assertNeedsAllowFiltering("SELECT * FROM %s WHERE v2=0 WITH excluded_indexes = {idx2}");
         assertNeedsAllowFiltering("SELECT * FROM %s WHERE v3=0 WITH excluded_indexes = {idx1}");
         assertNeedsAllowFiltering("SELECT * FROM %s WHERE v3=0 WITH excluded_indexes = {idx2}");
@@ -441,8 +461,8 @@ public class IndexHintsTest extends CQLTester
         assertNeedsAllowFiltering("SELECT * FROM %s WHERE v1=0 AND v3=0 WITH excluded_indexes = {idx1, idx2}");
 
         // without restrictions
-        assertSelectsAny("SELECT * FROM %s WITH preferred_indexes = {idx1}");
-        assertSelectsAny("SELECT * FROM %s WITH excluded_indexes = {idx1}");
+        assertThatPlan("SELECT * FROM %s WITH preferred_indexes = {idx1}", row1, row2, row3).selectsNone();
+        assertThatPlan("SELECT * FROM %s WITH excluded_indexes = {idx1}", row1, row2, row3).selectsNone();
 
         // prepared statements
         prepare("SELECT * FROM %s WHERE v1=?");
@@ -456,61 +476,70 @@ public class IndexHintsTest extends CQLTester
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v1 int, v2 int, v3 int)");
         createIndex("CREATE CUSTOM INDEX idx1 ON %s(v1) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX idx2 ON %s(v2) USING 'StorageAttachedIndex'");
+
         Index idx1 = getCurrentColumnFamilyStore().indexManager.getIndexByName("idx1");
         Index idx2 = getCurrentColumnFamilyStore().indexManager.getIndexByName("idx2");
 
+        String insert = "INSERT INTO %s (k, v1, v2, v3) VALUES (?, ?, ?, ?)";
+        Object[] row1 = new Object[]{ 1, 0, 1, 1 };
+        Object[] row2 = new Object[]{ 2, 1, 0, 1 };
+        Object[] row3 = new Object[]{ 3, 1, 1, 0 };
+        execute(insert, row1);
+        execute(insert, row2);
+        execute(insert, row3);
+
         // without any hints
-        assertSelectsAll("SELECT * FROM %s ALLOW FILTERING");
-        assertSelectsAll("SELECT * FROM %s WHERE v1=0 ALLOW FILTERING", idx1);
-        assertSelectsAll("SELECT * FROM %s WHERE v2=0 ALLOW FILTERING", idx2);
-        assertSelectsAll("SELECT * FROM %s WHERE v3=0 ALLOW FILTERING");
-        assertSelectsAll("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING", idx1, idx2);
-        assertSelectsAll("SELECT * FROM %s WHERE v1=0 AND v3=0 ALLOW FILTERING", idx1);
-        assertSelectsAll("SELECT * FROM %s WHERE v2=0 AND v3=0 ALLOW FILTERING", idx2);
+        assertThatPlan("SELECT * FROM %s ALLOW FILTERING", row1, row2, row3).selectsNone();
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 ALLOW FILTERING", row1).selects(idx1);
+        assertThatPlan("SELECT * FROM %s WHERE v2=0 ALLOW FILTERING", row2).selects(idx2);
+        assertThatPlan("SELECT * FROM %s WHERE v3=0 ALLOW FILTERING", row3).selectsNone();
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING").selects(idx1, idx2);
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 AND v3=0 ALLOW FILTERING").selects(idx1);
+        assertThatPlan("SELECT * FROM %s WHERE v2=0 AND v3=0 ALLOW FILTERING").selects(idx2);
 
         // with a single restriction and preferred indexes
-        assertSelectsAll("SELECT * FROM %s WHERE v1=0 ALLOW FILTERING WITH preferred_indexes = {idx1}", idx1);
-        assertSelectsAll("SELECT * FROM %s WHERE v1=0 ALLOW FILTERING WITH preferred_indexes = {idx2}", idx1);
-        assertSelectsAll("SELECT * FROM %s WHERE v2=0 ALLOW FILTERING WITH preferred_indexes = {idx1}", idx2);
-        assertSelectsAll("SELECT * FROM %s WHERE v2=0 ALLOW FILTERING WITH preferred_indexes = {idx2}", idx2);
-        assertSelectsAll("SELECT * FROM %s WHERE v3=0 ALLOW FILTERING WITH preferred_indexes = {idx1}");
-        assertSelectsAll("SELECT * FROM %s WHERE v3=0 ALLOW FILTERING WITH preferred_indexes = {idx2}");
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 ALLOW FILTERING WITH preferred_indexes = {idx1}", row1).selects(idx1);
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 ALLOW FILTERING WITH preferred_indexes = {idx2}", row1).selects(idx1);
+        assertThatPlan("SELECT * FROM %s WHERE v2=0 ALLOW FILTERING WITH preferred_indexes = {idx1}", row2).selects(idx2);
+        assertThatPlan("SELECT * FROM %s WHERE v2=0 ALLOW FILTERING WITH preferred_indexes = {idx2}", row2).selects(idx2);
+        assertThatPlan("SELECT * FROM %s WHERE v3=0 ALLOW FILTERING WITH preferred_indexes = {idx1}", row3).selectsNone();
+        assertThatPlan("SELECT * FROM %s WHERE v3=0 ALLOW FILTERING WITH preferred_indexes = {idx2}", row3).selectsNone();
 
         // with a single restriction and excluded indexes
-        assertSelectsAll("SELECT * FROM %s WHERE v1=0 ALLOW FILTERING WITH excluded_indexes = {idx1}");
-        assertSelectsAll("SELECT * FROM %s WHERE v1=0 ALLOW FILTERING WITH excluded_indexes = {idx2}", idx1);
-        assertSelectsAll("SELECT * FROM %s WHERE v2=0 ALLOW FILTERING WITH excluded_indexes = {idx1}", idx2);
-        assertSelectsAll("SELECT * FROM %s WHERE v2=0 ALLOW FILTERING WITH excluded_indexes = {idx2}");
-        assertSelectsAll("SELECT * FROM %s WHERE v3=0 ALLOW FILTERING WITH excluded_indexes = {idx1}");
-        assertSelectsAll("SELECT * FROM %s WHERE v3=0 ALLOW FILTERING WITH excluded_indexes = {idx2}");
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 ALLOW FILTERING WITH excluded_indexes = {idx1}", row1).selectsNone();
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 ALLOW FILTERING WITH excluded_indexes = {idx2}", row1).selects(idx1);
+        assertThatPlan("SELECT * FROM %s WHERE v2=0 ALLOW FILTERING WITH excluded_indexes = {idx1}", row2).selects(idx2);
+        assertThatPlan("SELECT * FROM %s WHERE v2=0 ALLOW FILTERING WITH excluded_indexes = {idx2}", row2).selectsNone();
+        assertThatPlan("SELECT * FROM %s WHERE v3=0 ALLOW FILTERING WITH excluded_indexes = {idx1}", row3).selectsNone();
+        assertThatPlan("SELECT * FROM %s WHERE v3=0 ALLOW FILTERING WITH excluded_indexes = {idx2}", row3).selectsNone();
 
         // with restrictions in two columns (v1 and v2) and preferred indexes
-        assertSelectsAll("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING WITH preferred_indexes = {idx1}", idx1, idx2);
-        assertSelectsAll("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING WITH preferred_indexes = {idx2}", idx1, idx2);
-        assertSelectsAll("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING WITH preferred_indexes = {idx1, idx2}", idx1, idx2);
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING WITH preferred_indexes = {idx1}").selects(idx1, idx2);
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING WITH preferred_indexes = {idx2}").selects(idx1, idx2);
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING WITH preferred_indexes = {idx1, idx2}").selects(idx1, idx2);
 
         // with restrictions in two columns (v1 and v2) and excluded indexes
-        assertSelectsAll("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING WITH excluded_indexes = {idx1}", idx2);
-        assertSelectsAll("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING WITH excluded_indexes = {idx2}", idx1);
-        assertSelectsAll("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING WITH excluded_indexes = {idx1, idx2}");
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING WITH excluded_indexes = {idx1}").selects(idx2);
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING WITH excluded_indexes = {idx2}").selects(idx1);
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING WITH excluded_indexes = {idx1, idx2}").selectsNone();
 
         // with restrictions in two columns (v1 and v3) and preferred indexes
-        assertSelectsAll("SELECT * FROM %s WHERE v1=0 AND v3=0 ALLOW FILTERING WITH preferred_indexes = {idx1}", idx1);
-        assertSelectsAll("SELECT * FROM %s WHERE v1=0 AND v3=0 ALLOW FILTERING WITH preferred_indexes = {idx2}", idx1);
-        assertSelectsAll("SELECT * FROM %s WHERE v1=0 AND v3=0 ALLOW FILTERING WITH preferred_indexes = {idx1, idx2}", idx1);
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 AND v3=0 ALLOW FILTERING WITH preferred_indexes = {idx1}").selects(idx1);
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 AND v3=0 ALLOW FILTERING WITH preferred_indexes = {idx2}").selects(idx1);
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 AND v3=0 ALLOW FILTERING WITH preferred_indexes = {idx1, idx2}").selects(idx1);
 
         // with restrictions in two columns (v1 and v3) and excluded indexes
-        assertSelectsAll("SELECT * FROM %s WHERE v1=0 AND v3=0 ALLOW FILTERING WITH excluded_indexes = {idx1}");
-        assertSelectsAll("SELECT * FROM %s WHERE v1=0 AND v3=0 ALLOW FILTERING WITH excluded_indexes = {idx2}", idx1);
-        assertSelectsAll("SELECT * FROM %s WHERE v1=0 AND v3=0 ALLOW FILTERING WITH excluded_indexes = {idx1, idx2}");
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 AND v3=0 ALLOW FILTERING WITH excluded_indexes = {idx1}").selectsNone();
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 AND v3=0 ALLOW FILTERING WITH excluded_indexes = {idx2}").selects(idx1);
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 AND v3=0 ALLOW FILTERING WITH excluded_indexes = {idx1, idx2}").selectsNone();
 
         // with mixed preferred and excluded indexes
-        assertSelectsAll("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING WITH preferred_indexes = {idx1} AND excluded_indexes = {idx2}", idx1);
-        assertSelectsAll("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING WITH preferred_indexes = {idx2} AND excluded_indexes = {idx1}", idx2);
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING WITH preferred_indexes = {idx1} AND excluded_indexes = {idx2}").selects(idx1);
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING WITH preferred_indexes = {idx2} AND excluded_indexes = {idx1}").selects(idx2);
 
         // without restrictions
-        assertSelectsAll("SELECT * FROM %s ALLOW FILTERING WITH preferred_indexes = {idx1}");
-        assertSelectsAll("SELECT * FROM %s ALLOW FILTERING WITH excluded_indexes = {idx1}");
+        assertThatPlan("SELECT * FROM %s ALLOW FILTERING WITH preferred_indexes = {idx1}", row1, row2, row3).selectsNone();
+        assertThatPlan("SELECT * FROM %s ALLOW FILTERING WITH excluded_indexes = {idx1}", row1, row2, row3).selectsNone();
 
         // prepared statements
         prepare("SELECT * FROM %s WHERE v1=? ALLOW FILTERING WITH preferred_indexes = {idx1}");
@@ -523,38 +552,47 @@ public class IndexHintsTest extends CQLTester
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v1 int, v2 int, v3 int)");
         createIndex("CREATE CUSTOM INDEX idx1 ON %s(v1) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX idx2 ON %s(v2) USING 'StorageAttachedIndex'");
+
         Index idx1 = getCurrentColumnFamilyStore().indexManager.getIndexByName("idx1");
         Index idx2 = getCurrentColumnFamilyStore().indexManager.getIndexByName("idx2");
 
+        String insert = "INSERT INTO %s (k, v1, v2, v3) VALUES (?, ?, ?, ?)";
+        Object[] row1 = new Object[]{ 1, 0, 1, 1 };
+        Object[] row2 = new Object[]{ 2, 1, 0, 1 };
+        Object[] row3 = new Object[]{ 3, 1, 1, 0 };
+        execute(insert, row1);
+        execute(insert, row2);
+        execute(insert, row3);
+
         // without any hints
-        assertSelectsAll("SELECT * FROM %s");
-        assertSelectsAll("SELECT * FROM %s WHERE v1=0", idx1);
-        assertSelectsAll("SELECT * FROM %s WHERE v2=0", idx2);
+        assertThatPlan("SELECT * FROM %s", row1, row2, row3).selectsNone();
+        assertThatPlan("SELECT * FROM %s WHERE v1=0", row1).selects(idx1);
+        assertThatPlan("SELECT * FROM %s WHERE v2=0", row2).selects(idx2);
         assertNeedsAllowFiltering("SELECT * FROM %s WHERE v3=0");
-        assertSelectsAll("SELECT * FROM %s WHERE v1=0 AND v2=0", idx1, idx2);
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 AND v2=0").selectsAnyOf(idx1, idx2);
         assertNeedsAllowFiltering("SELECT * FROM %s WHERE v1=0 AND v3=0");
         assertNeedsAllowFiltering("SELECT * FROM %s WHERE v2=0 AND v3=0");
 
         // with a single restriction and preferred indexes
-        assertSelectsAll("SELECT * FROM %s WHERE v1=0 WITH preferred_indexes = {idx1}", idx1);
-        assertSelectsAll("SELECT * FROM %s WHERE v1=0 WITH preferred_indexes = {idx2}", idx1);
-        assertSelectsAll("SELECT * FROM %s WHERE v2=0 WITH preferred_indexes = {idx1}", idx2);
-        assertSelectsAll("SELECT * FROM %s WHERE v2=0 WITH preferred_indexes = {idx2}", idx2);
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 WITH preferred_indexes = {idx1}", row1).selects(idx1);
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 WITH preferred_indexes = {idx2}", row1).selects(idx1);
+        assertThatPlan("SELECT * FROM %s WHERE v2=0 WITH preferred_indexes = {idx1}", row2).selects(idx2);
+        assertThatPlan("SELECT * FROM %s WHERE v2=0 WITH preferred_indexes = {idx2}", row2).selects(idx2);
         assertNeedsAllowFiltering("SELECT * FROM %s WHERE v3=0 WITH preferred_indexes = {idx1}");
         assertNeedsAllowFiltering("SELECT * FROM %s WHERE v3=0 WITH preferred_indexes = {idx2}");
 
         // with a single restriction and excluded indexes
         assertNeedsAllowFiltering("SELECT * FROM %s WHERE v1=0 WITH excluded_indexes = {idx1}");
-        assertSelectsAll("SELECT * FROM %s WHERE v1=0 WITH excluded_indexes = {idx2}", idx1);
-        assertSelectsAll("SELECT * FROM %s WHERE v2=0 WITH excluded_indexes = {idx1}", idx2);
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 WITH excluded_indexes = {idx2}", row1).selects(idx1);
+        assertThatPlan("SELECT * FROM %s WHERE v2=0 WITH excluded_indexes = {idx1}", row2).selects(idx2);
         assertNeedsAllowFiltering("SELECT * FROM %s WHERE v2=0 WITH excluded_indexes = {idx2}");
         assertNeedsAllowFiltering("SELECT * FROM %s WHERE v3=0 WITH excluded_indexes = {idx1}");
         assertNeedsAllowFiltering("SELECT * FROM %s WHERE v3=0 WITH excluded_indexes = {idx2}");
 
         // with restrictions in two columns (v1 and v2) and preferred indexes
-        assertSelectsAll("SELECT * FROM %s WHERE v1=0 AND v2=0 WITH preferred_indexes = {idx1}", idx1, idx2);
-        assertSelectsAll("SELECT * FROM %s WHERE v1=0 AND v2=0 WITH preferred_indexes = {idx2}", idx1, idx2);
-        assertSelectsAll("SELECT * FROM %s WHERE v1=0 AND v2=0 WITH preferred_indexes = {idx1, idx2}", idx1, idx2);
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 AND v2=0 WITH preferred_indexes = {idx1}").selects(idx1, idx2);
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 AND v2=0 WITH preferred_indexes = {idx2}").selects(idx1, idx2);
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 AND v2=0 WITH preferred_indexes = {idx1, idx2}").selects(idx1, idx2);
 
         // with restrictions in two columns (v1 and v2) and excluded indexes
         assertNeedsAllowFiltering("SELECT * FROM %s WHERE v1=0 AND v2=0 WITH excluded_indexes = {idx1}");
@@ -576,12 +614,163 @@ public class IndexHintsTest extends CQLTester
         assertNeedsAllowFiltering("SELECT * FROM %s WHERE v1=0 AND v2=0 WITH preferred_indexes = {idx2} AND excluded_indexes = {idx1}");
 
         // without restrictions
-        assertSelectsAll("SELECT * FROM %s WITH preferred_indexes = {idx1}");
-        assertSelectsAll("SELECT * FROM %s WITH excluded_indexes = {idx1}");
+        assertThatPlan("SELECT * FROM %s WITH preferred_indexes = {idx1}", row1, row2, row3).selectsNone();
+        assertThatPlan("SELECT * FROM %s WITH excluded_indexes = {idx1}", row1, row2, row3).selectsNone();
 
         // prepared statements
         prepare("SELECT * FROM %s WHERE v1=? WITH preferred_indexes = {idx1}");
         assertNeedsAllowFiltering(() -> prepare("SELECT * FROM %s WHERE v1=? WITH excluded_indexes = {idx1}"));
+    }
+
+    @Test
+    public void testMixedIndexImplementations()
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v1 int, v2 int, v3 int)");
+        createIndex("CREATE CUSTOM INDEX idx1 ON %s(v1) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX idx2 ON %s(v2) USING 'StorageAttachedIndex'");
+        createIndex("CREATE INDEX idx3 ON %s(v3)");
+
+        String insert = "INSERT INTO %s (k, v1, v2, v3) VALUES (?, ?, ?, ?)";
+        Object[] row1 = new Object[]{ 1, 0, 1, 1 };
+        Object[] row2 = new Object[]{ 2, 1, 0, 1 };
+        Object[] row3 = new Object[]{ 3, 1, 1, 0 };
+        execute(insert, row1);
+        execute(insert, row2);
+        execute(insert, row3);
+
+        Index idx1 = getCurrentColumnFamilyStore().indexManager.getIndexByName("idx1");
+        Index idx2 = getCurrentColumnFamilyStore().indexManager.getIndexByName("idx2");
+        Index idx3 = getCurrentColumnFamilyStore().indexManager.getIndexByName("idx3");
+
+        // without any hints
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 ALLOW FILTERING", row1).selects(idx1);
+        assertThatPlan("SELECT * FROM %s WHERE v2=0 ALLOW FILTERING", row2).selects(idx2);
+        assertThatPlan("SELECT * FROM %s WHERE v3=0 ALLOW FILTERING", row3).selects(idx3);
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING").selects(idx1, idx2);
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 AND v3=0 ALLOW FILTERING").selects(idx1);
+        assertThatPlan("SELECT * FROM %s WHERE v2=0 AND v3=0 ALLOW FILTERING").selects(idx2);
+
+        // preferring idx1 (SAI)
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 ALLOW FILTERING WITH preferred_indexes={idx1}", row1).selects(idx1);
+        assertThatPlan("SELECT * FROM %s WHERE v2=0 ALLOW FILTERING WITH preferred_indexes={idx1}", row2).selects(idx2);
+        assertThatPlan("SELECT * FROM %s WHERE v3=0 ALLOW FILTERING WITH preferred_indexes={idx1}", row3).selects(idx3);
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING WITH preferred_indexes={idx1}").selects(idx1, idx2);
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 AND v3=0 ALLOW FILTERING WITH preferred_indexes={idx1}").selects(idx1);
+        assertThatPlan("SELECT * FROM %s WHERE v2=0 AND v3=0 ALLOW FILTERING WITH preferred_indexes={idx1}").selects(idx2);
+
+        // preferring idx2 (SAI)
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 ALLOW FILTERING WITH preferred_indexes={idx2}", row1).selects(idx1);
+        assertThatPlan("SELECT * FROM %s WHERE v2=0 ALLOW FILTERING WITH preferred_indexes={idx2}", row2).selects(idx2);
+        assertThatPlan("SELECT * FROM %s WHERE v3=0 ALLOW FILTERING WITH preferred_indexes={idx2}", row3).selects(idx3);
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING WITH preferred_indexes={idx2}").selects(idx1, idx2);
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 AND v3=0 ALLOW FILTERING WITH preferred_indexes={idx2}").selects(idx1);
+        assertThatPlan("SELECT * FROM %s WHERE v2=0 AND v3=0 ALLOW FILTERING WITH preferred_indexes={idx2}").selects(idx2);
+
+        // preferring idx3 (legacy)
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 ALLOW FILTERING WITH preferred_indexes={idx3}", row1).selects(idx1);
+        assertThatPlan("SELECT * FROM %s WHERE v2=0 ALLOW FILTERING WITH preferred_indexes={idx3}", row2).selects(idx2);
+        assertThatPlan("SELECT * FROM %s WHERE v3=0 ALLOW FILTERING WITH preferred_indexes={idx3}", row3).selects(idx3);
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING WITH preferred_indexes={idx3}").selects(idx1, idx2);
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 AND v3=0 ALLOW FILTERING WITH preferred_indexes={idx3}").selects(idx3); // prefers legacy over SAI
+        assertThatPlan("SELECT * FROM %s WHERE v2=0 AND v3=0 ALLOW FILTERING WITH preferred_indexes={idx3}").selects(idx3); // prefers legacy over SAI
+
+        // preferring idx1 and idx2 (both SAI)
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 ALLOW FILTERING WITH preferred_indexes={idx1, idx2}", row1).selects(idx1);
+        assertThatPlan("SELECT * FROM %s WHERE v2=0 ALLOW FILTERING WITH preferred_indexes={idx1, idx2}", row2).selects(idx2);
+        assertThatPlan("SELECT * FROM %s WHERE v3=0 ALLOW FILTERING WITH preferred_indexes={idx1, idx2}", row3).selects(idx3);
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING WITH preferred_indexes={idx1, idx2}").selects(idx1, idx2);
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 AND v3=0 ALLOW FILTERING WITH preferred_indexes={idx1, idx2}").selects(idx1);
+        assertThatPlan("SELECT * FROM %s WHERE v2=0 AND v3=0 ALLOW FILTERING WITH preferred_indexes={idx1, idx2}").selects(idx2);
+
+        // preferring idx1 and idx3 (SAI and legacy)
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 ALLOW FILTERING WITH preferred_indexes={idx1, idx3}", row1).selects(idx1);
+        assertThatPlan("SELECT * FROM %s WHERE v2=0 ALLOW FILTERING WITH preferred_indexes={idx1, idx3}", row2).selects(idx2);
+        assertThatPlan("SELECT * FROM %s WHERE v3=0 ALLOW FILTERING WITH preferred_indexes={idx1, idx3}", row3).selects(idx3);
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING WITH preferred_indexes={idx1, idx3}").selects(idx1, idx2);
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 AND v3=0 ALLOW FILTERING WITH preferred_indexes={idx1, idx3}").selects(idx1);
+        assertThatPlan("SELECT * FROM %s WHERE v2=0 AND v3=0 ALLOW FILTERING WITH preferred_indexes={idx1, idx3}").selects(idx3); // prefers legacy over SAI
+
+        // preferring idx2 and idx3 (SAI and legacy)
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 ALLOW FILTERING WITH preferred_indexes={idx2, idx3}", row1).selects(idx1);
+        assertThatPlan("SELECT * FROM %s WHERE v2=0 ALLOW FILTERING WITH preferred_indexes={idx2, idx3}", row2).selects(idx2);
+        assertThatPlan("SELECT * FROM %s WHERE v3=0 ALLOW FILTERING WITH preferred_indexes={idx2, idx3}", row3).selects(idx3);
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING WITH preferred_indexes={idx1, idx3}").selects(idx1, idx2);
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 AND v3=0 ALLOW FILTERING WITH preferred_indexes={idx2, idx3}").selects(idx3); // prefers legacy over SAI
+        assertThatPlan("SELECT * FROM %s WHERE v2=0 AND v3=0 ALLOW FILTERING WITH preferred_indexes={idx2, idx3}").selects(idx2);
+
+        // excluding idx1 (SAI)
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 ALLOW FILTERING WITH excluded_indexes={idx1}", row1).selectsNone();
+        assertThatPlan("SELECT * FROM %s WHERE v2=0 ALLOW FILTERING WITH excluded_indexes={idx1}", row2).selects(idx2);
+        assertThatPlan("SELECT * FROM %s WHERE v3=0 ALLOW FILTERING WITH excluded_indexes={idx1}", row3).selects(idx3);
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING WITH excluded_indexes={idx1}").selects(idx2);
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 AND v3=0 ALLOW FILTERING WITH excluded_indexes={idx1}").selects(idx3);
+        assertThatPlan("SELECT * FROM %s WHERE v2=0 AND v3=0 ALLOW FILTERING WITH excluded_indexes={idx1}").selects(idx2);
+
+        // excluding idx2 (SAI)
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 ALLOW FILTERING WITH excluded_indexes={idx2}", row1).selects(idx1);
+        assertThatPlan("SELECT * FROM %s WHERE v2=0 ALLOW FILTERING WITH excluded_indexes={idx2}", row2).selectsNone();
+        assertThatPlan("SELECT * FROM %s WHERE v3=0 ALLOW FILTERING WITH excluded_indexes={idx2}", row3).selects(idx3);
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING WITH excluded_indexes={idx2}").selects(idx1);
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 AND v3=0 ALLOW FILTERING WITH excluded_indexes={idx2}").selects(idx1);
+        assertThatPlan("SELECT * FROM %s WHERE v2=0 AND v3=0 ALLOW FILTERING WITH excluded_indexes={idx2}").selects(idx3);
+
+        // excluding idx3 (legacy)
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 ALLOW FILTERING WITH excluded_indexes={idx3}", row1).selects(idx1);
+        assertThatPlan("SELECT * FROM %s WHERE v2=0 ALLOW FILTERING WITH excluded_indexes={idx3}", row2).selects(idx2);
+        assertThatPlan("SELECT * FROM %s WHERE v3=0 ALLOW FILTERING WITH excluded_indexes={idx3}", row3).selectsNone();
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING WITH excluded_indexes={idx3}").selects(idx1, idx2);
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 AND v3=0 ALLOW FILTERING WITH excluded_indexes={idx3}").selects(idx1);
+        assertThatPlan("SELECT * FROM %s WHERE v2=0 AND v3=0 ALLOW FILTERING WITH excluded_indexes={idx3}").selects(idx2);
+
+        // excluding idx1 and idx2 (both SAI)
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 ALLOW FILTERING WITH excluded_indexes={idx1, idx2}", row1).selectsNone();
+        assertThatPlan("SELECT * FROM %s WHERE v2=0 ALLOW FILTERING WITH excluded_indexes={idx1, idx2}", row2).selectsNone();
+        assertThatPlan("SELECT * FROM %s WHERE v3=0 ALLOW FILTERING WITH excluded_indexes={idx1, idx2}", row3).selects(idx3);
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING WITH excluded_indexes={idx1, idx2}").selectsNone();
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 AND v3=0 ALLOW FILTERING WITH excluded_indexes={idx1, idx2}").selects(idx3);
+        assertThatPlan("SELECT * FROM %s WHERE v2=0 AND v3=0 ALLOW FILTERING WITH excluded_indexes={idx1, idx2}").selects(idx3);
+
+        // excluding idx1 and idx3 (SAI and legacy)
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 ALLOW FILTERING WITH excluded_indexes={idx1, idx3}", row1).selectsNone();
+        assertThatPlan("SELECT * FROM %s WHERE v2=0 ALLOW FILTERING WITH excluded_indexes={idx1, idx3}", row2).selects(idx2);
+        assertThatPlan("SELECT * FROM %s WHERE v3=0 ALLOW FILTERING WITH excluded_indexes={idx1, idx3}", row3).selectsNone();
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING WITH excluded_indexes={idx1, idx3}").selects(idx2);
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 AND v3=0 ALLOW FILTERING WITH excluded_indexes={idx1, idx3}").selectsNone();
+        assertThatPlan("SELECT * FROM %s WHERE v2=0 AND v3=0 ALLOW FILTERING WITH excluded_indexes={idx1, idx3}").selects(idx2);
+
+        // excluding idx2 and idx3 (SAI and legacy)
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 ALLOW FILTERING WITH excluded_indexes={idx2, idx3}", row1).selects(idx1);
+        assertThatPlan("SELECT * FROM %s WHERE v2=0 ALLOW FILTERING WITH excluded_indexes={idx2, idx3}", row2).selectsNone();
+        assertThatPlan("SELECT * FROM %s WHERE v3=0 ALLOW FILTERING WITH excluded_indexes={idx2, idx3}", row3).selectsNone();
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING WITH excluded_indexes={idx2, idx3}").selects(idx1);
+        assertThatPlan("SELECT * FROM %s WHERE v1=0 AND v3=0 ALLOW FILTERING WITH excluded_indexes={idx2, idx3}").selects(idx1);
+        assertThatPlan("SELECT * FROM %s WHERE v2=0 AND v3=0 ALLOW FILTERING WITH excluded_indexes={idx2, idx3}").selectsNone();
+    }
+
+    @Test
+    public void testMultipleIndexesOnSameColumn()
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v int)");
+        createIndex("CREATE CUSTOM INDEX idx1 ON %s(v) USING 'StorageAttachedIndex'");
+        createIndex("CREATE INDEX idx2 ON %s(v)");
+
+        String insert = "INSERT INTO %s (k, v) VALUES (?, ?)";
+        Object[] row1 = new Object[]{ 1, 0 };
+        Object[] row2 = new Object[]{ 2, 1 };
+        execute(insert, row1);
+        execute(insert, row2);
+
+        Index idx1 = getCurrentColumnFamilyStore().indexManager.getIndexByName("idx1");
+        Index idx2 = getCurrentColumnFamilyStore().indexManager.getIndexByName("idx2");
+
+        assertThatPlan("SELECT * FROM %s WHERE v=0", row1).selects(idx1);
+        assertThatPlan("SELECT * FROM %s WHERE v=0 WITH preferred_indexes={idx1}", row1).selects(idx1);
+        assertThatPlan("SELECT * FROM %s WHERE v=0 WITH preferred_indexes={idx2}", row1).selects(idx2);
+        assertThatPlan("SELECT * FROM %s WHERE v=0 WITH preferred_indexes={idx1,idx2}", row1).selects(idx1);
+        assertThatPlan("SELECT * FROM %s WHERE v=0 WITH excluded_indexes={idx1}", row1).selects(idx2);
+        assertThatPlan("SELECT * FROM %s WHERE v=0 WITH excluded_indexes={idx2}", row1).selects(idx1);
+        assertNeedsAllowFiltering("SELECT * FROM %s WHERE v=0 WITH excluded_indexes={idx1,idx2}");
+        assertThatPlan("SELECT * FROM %s WHERE v=0 ALLOW FILTERING WITH excluded_indexes={idx1,idx2}", row1).selectsNone();
     }
 
     @Test
@@ -597,103 +786,85 @@ public class IndexHintsTest extends CQLTester
         Index idx2 = getCurrentColumnFamilyStore().indexManager.getIndexByName("idx2");
         Index idx3 = getCurrentColumnFamilyStore().indexManager.getIndexByName("idx3");
 
-        execute("INSERT INTO %s (k, v) VALUES (1, 'Richard Strauss')");
-        execute("INSERT INTO %s (k, v) VALUES (2, 'Johann Strauss')");
+        String insert = "INSERT INTO %s (k, v) VALUES (?, ?)";
+        Object[] row1 = new Object[]{ 1, "Richard Strauss" };
+        Object[] row2 = new Object[]{ 2, "Johann Strauss" };
+        execute(insert, row1);
+        execute(insert, row2);
 
         // test index selection with EQ query
-        String query = "SELECT k FROM %s WHERE v = 'Strauss' ";
-        assertSelectsAll(query, idx2);
-        assertSelectsAll(query + "WITH preferred_indexes = {idx1}", idx1);
-        assertSelectsAll(query + "WITH preferred_indexes = {idx2}", idx2);
-        assertSelectsAll(query + "WITH preferred_indexes = {idx3}", idx2); // preferred index is not mandatory, idx3 is not applicable to =
-        assertSelectsAll(query + "WITH preferred_indexes = {idx1, idx2}", idx2);
-        assertSelectsAll(query + "WITH preferred_indexes = {idx1, idx3}", idx1);
-        assertSelectsAll(query + "WITH preferred_indexes = {idx2, idx3}", idx2);
-        assertSelectsAll(query + "WITH preferred_indexes = {idx1, idx2, idx3}", idx2);
-        assertSelectsAll(query + "WITH excluded_indexes = {idx1}", idx2);
-        assertSelectsAll(query + "WITH excluded_indexes = {idx2}", idx1);
-        assertSelectsAll(query + "WITH excluded_indexes = {idx3}", idx2);
+        String query = "SELECT * FROM %s WHERE v = 'Strauss' ";
+        assertThatPlan(query).selects(idx2);
+        assertThatPlan(query + "WITH preferred_indexes = {idx1}").selects(idx1);
+        assertThatPlan(query + "WITH preferred_indexes = {idx2}").selects(idx2);
+        assertThatPlan(query + "WITH preferred_indexes = {idx3}").selects(idx2); // preferred index is not mandatory, idx3 is not applicable to =
+        assertThatPlan(query + "WITH preferred_indexes = {idx1, idx2}").selects(idx2);
+        assertThatPlan(query + "WITH preferred_indexes = {idx1, idx3}").selects(idx1);
+        assertThatPlan(query + "WITH preferred_indexes = {idx2, idx3}").selects(idx2);
+        assertThatPlan(query + "WITH preferred_indexes = {idx1, idx2, idx3}").selects(idx2);
+        assertThatPlan(query + "WITH excluded_indexes = {idx1}").selects(idx2);
+        assertThatPlan(query + "WITH excluded_indexes = {idx2}").selects(idx1);
+        assertThatPlan(query + "WITH excluded_indexes = {idx3}").selects(idx2);
         assertIndexDoesNotSupportOperator(query + "WITH excluded_indexes = {idx1, idx2}", "v");
-        assertSelectsAll(query + "WITH excluded_indexes = {idx1, idx3}", idx2);
-        assertSelectsAll(query + "WITH excluded_indexes = {idx2, idx3}", idx1);
+        assertThatPlan(query + "WITH excluded_indexes = {idx1, idx3}").selects(idx2);
+        assertThatPlan(query + "WITH excluded_indexes = {idx2, idx3}").selects(idx1);
         assertNeedsAllowFiltering(query + "WITH excluded_indexes = {idx1, idx2, idx3}");
-        assertSelectsAll(query + "ALLOW FILTERING WITH excluded_indexes = {idx1, idx2, idx3}");
+        assertThatPlan(query + "ALLOW FILTERING WITH excluded_indexes = {idx1, idx2, idx3}").selectsNone();
 
-        // test correct returned rows with EQ query
-        assertRows(execute(query + "WITH preferred_indexes = {idx1}"));
-        assertRows(execute(query + "WITH preferred_indexes = {idx2}"));
-        assertRows(execute(query + "WITH preferred_indexes = {idx3}"));
-        assertRows(execute(query + "WITH preferred_indexes = {idx1, idx2}"));
-        assertRows(execute(query + "WITH preferred_indexes = {idx1, idx3}"));
-        assertRows(execute(query + "WITH preferred_indexes = {idx2, idx3}"));
-        assertRows(execute(query + "WITH preferred_indexes = {idx1, idx2, idx3}"));
-        assertRows(execute(query + "WITH excluded_indexes = {idx1}"));
-        assertRows(execute(query + "WITH excluded_indexes = {idx2}"));
-        assertRows(execute(query + "WITH excluded_indexes = {idx3}"));
-        assertRows(execute(query + "ALLOW FILTERING WITH excluded_indexes = {idx1, idx2}"));
-        assertRows(execute(query + "WITH excluded_indexes = {idx1, idx3}"));
-        assertRows(execute(query + "WITH excluded_indexes = {idx2, idx3}"));
-        assertRows(execute(query + "ALLOW FILTERING WITH excluded_indexes = {idx1, idx2, idx3}"));
-
-        // test correct returned rows with another EQ query with a different value
-        query = "SELECT k FROM %s WHERE v = 'Richard Strauss' ";
-        assertRows(execute(query + "WITH preferred_indexes = {idx1}"), row(1));
-        assertRows(execute(query + "WITH preferred_indexes = {idx2}"), row(1));
-        assertRows(execute(query + "WITH preferred_indexes = {idx3}"), row(1));
-        assertRows(execute(query + "WITH preferred_indexes = {idx1, idx2}"), row(1));
-        assertRows(execute(query + "WITH preferred_indexes = {idx1, idx3}"), row(1));
-        assertRows(execute(query + "WITH preferred_indexes = {idx2, idx3}"), row(1));
-        assertRows(execute(query + "WITH preferred_indexes = {idx1, idx2, idx3}"), row(1));
-        assertRows(execute(query + "WITH excluded_indexes = {idx1}"), row(1));
-        assertRows(execute(query + "WITH excluded_indexes = {idx2}"), row(1));
-        assertRows(execute(query + "WITH excluded_indexes = {idx3}"), row(1));
-        assertRows(execute(query + "ALLOW FILTERING WITH excluded_indexes = {idx1, idx2}"), row(1));
-        assertRows(execute(query + "WITH excluded_indexes = {idx1, idx3}"), row(1));
-        assertRows(execute(query + "WITH excluded_indexes = {idx2, idx3}"), row(1));
-        assertRows(execute(query + "ALLOW FILTERING WITH excluded_indexes = {idx1, idx2, idx3}"), row(1));
+        // test the same EQ query with a different value
+        query = "SELECT * FROM %s WHERE v = 'Richard Strauss' ";
+        assertThatPlan(query, row1).selects(idx2);
+        assertThatPlan(query + "WITH preferred_indexes = {idx1}", row1).selects(idx1);
+        assertThatPlan(query + "WITH preferred_indexes = {idx2}", row1).selects(idx2);
+        assertThatPlan(query + "WITH preferred_indexes = {idx3}", row1).selects(idx2); // preferred index is not mandatory, idx3 is not applicable to =
+        assertThatPlan(query + "WITH preferred_indexes = {idx1, idx2}", row1).selects(idx2);
+        assertThatPlan(query + "WITH preferred_indexes = {idx1, idx3}", row1).selects(idx1);
+        assertThatPlan(query + "WITH preferred_indexes = {idx2, idx3}", row1).selects(idx2);
+        assertThatPlan(query + "WITH preferred_indexes = {idx1, idx2, idx3}", row1).selects(idx2);
+        assertThatPlan(query + "WITH excluded_indexes = {idx1}", row1).selects(idx2);
+        assertThatPlan(query + "WITH excluded_indexes = {idx2}", row1).selects(idx1);
+        assertThatPlan(query + "WITH excluded_indexes = {idx3}", row1).selects(idx2);
+        assertIndexDoesNotSupportOperator(query + "WITH excluded_indexes = {idx1, idx2}", "v");
+        assertThatPlan(query + "WITH excluded_indexes = {idx1, idx3}", row1).selects(idx2);
+        assertThatPlan(query + "WITH excluded_indexes = {idx2, idx3}", row1).selects(idx1);
+        assertNeedsAllowFiltering(query + "WITH excluded_indexes = {idx1, idx2, idx3}");
+        assertThatPlan(query + "ALLOW FILTERING WITH excluded_indexes = {idx1, idx2, idx3}", row1).selectsNone();
 
         // test index selection with MATCH query
-        query = "SELECT k FROM %s WHERE v : 'strauss' ";
-        assertSelectsAll(query, idx3);
-        assertSelectsAll(query + "WITH preferred_indexes = {idx1}", idx3); // preferred index is not mandatory, idx1 is not applicable to :
-        assertSelectsAll(query + "WITH preferred_indexes = {idx2}", idx3); // preferred index is not mandatory, idx2 is not applicable to :
-        assertSelectsAll(query + "WITH preferred_indexes = {idx3}", idx3);
-        assertSelectsAll(query + "WITH preferred_indexes = {idx1, idx2}", idx3); // preferred index is not mandatory, idx1 and idx2 are not applicable to :
-        assertSelectsAll(query + "WITH preferred_indexes = {idx1, idx3}", idx3);
-        assertSelectsAll(query + "WITH preferred_indexes = {idx2, idx3}", idx3);
-        assertSelectsAll(query + "WITH preferred_indexes = {idx1, idx2, idx3}", idx3);
-        assertSelectsAll(query + "WITH excluded_indexes = {idx1}", idx3);
-        assertSelectsAll(query + "WITH excluded_indexes = {idx2}", idx3);
+        query = "SELECT * FROM %s WHERE v : 'strauss' ";
+        assertThatPlan(query, row1, row2).selects(idx3);
+        assertThatPlan(query + "WITH preferred_indexes = {idx1}", row1, row2).selects(idx3); // idx1 is not applicable to :
+        assertThatPlan(query + "WITH preferred_indexes = {idx2}", row1, row2).selects(idx3); // idx2 is not applicable to :
+        assertThatPlan(query + "WITH preferred_indexes = {idx3}", row1, row2).selects(idx3);
+        assertThatPlan(query + "WITH preferred_indexes = {idx1, idx2}", row1, row2).selects(idx3); // idx1 and idx2 are not applicable to :
+        assertThatPlan(query + "WITH preferred_indexes = {idx1, idx3}", row1, row2).selects(idx3);
+        assertThatPlan(query + "WITH preferred_indexes = {idx2, idx3}", row1, row2).selects(idx3);
+        assertThatPlan(query + "WITH preferred_indexes = {idx1, idx2, idx3}", row1, row2).selects(idx3);
+        assertThatPlan(query + "WITH excluded_indexes = {idx1}", row1, row2).selects(idx3);
+        assertThatPlan(query + "WITH excluded_indexes = {idx2}", row1, row2).selects(idx3);
         assertIndexDoesNotSupportAnalyzerMatches(query + "WITH excluded_indexes = {idx3}", "v");
-        assertSelectsAll(query + "WITH excluded_indexes = {idx1, idx2}", idx3);
+        assertThatPlan(query + "WITH excluded_indexes = {idx1, idx2}", row1, row2).selects(idx3);
         assertIndexDoesNotSupportAnalyzerMatches(query + "WITH excluded_indexes = {idx1, idx3}", "v");
         assertIndexDoesNotSupportAnalyzerMatches(query + "WITH excluded_indexes = {idx2, idx3}", "v");
         assertMatchNeedsIndex(query + "WITH excluded_indexes = {idx1, idx2, idx3}", "v", "strauss");
 
-        // test correct returned rows with MATCH query
-        assertRows(execute(query + "WITH preferred_indexes = {idx1}"), row(1), row(2));
-        assertRows(execute(query + "WITH preferred_indexes = {idx2}"), row(1), row(2));
-        assertRows(execute(query + "WITH preferred_indexes = {idx3}"), row(1), row(2));
-        assertRows(execute(query + "WITH preferred_indexes = {idx1, idx2}"), row(1), row(2));
-        assertRows(execute(query + "WITH preferred_indexes = {idx1, idx3}"), row(1), row(2));
-        assertRows(execute(query + "WITH preferred_indexes = {idx2, idx3}"), row(1), row(2));
-        assertRows(execute(query + "WITH preferred_indexes = {idx1, idx2, idx3}"), row(1), row(2));
-        assertRows(execute(query + "WITH excluded_indexes = {idx1}"), row(1), row(2));
-        assertRows(execute(query + "WITH excluded_indexes = {idx2}"), row(1), row(2));
-        assertRows(execute(query + "WITH excluded_indexes = {idx1, idx2}"), row(1), row(2));
-
-        // test correct returned rows with another MATCH query with a different value
-        query = "SELECT k FROM %s WHERE v : 'Richard Strauss' ";
-        assertRows(execute(query + "WITH preferred_indexes = {idx1}"), row(1));
-        assertRows(execute(query + "WITH preferred_indexes = {idx2}"), row(1));
-        assertRows(execute(query + "WITH preferred_indexes = {idx3}"), row(1));
-        assertRows(execute(query + "WITH preferred_indexes = {idx1, idx2}"), row(1));
-        assertRows(execute(query + "WITH preferred_indexes = {idx1, idx3}"), row(1));
-        assertRows(execute(query + "WITH preferred_indexes = {idx2, idx3}"), row(1));
-        assertRows(execute(query + "WITH preferred_indexes = {idx1, idx2, idx3}"), row(1));
-        assertRows(execute(query + "WITH excluded_indexes = {idx1}"), row(1));
-        assertRows(execute(query + "WITH excluded_indexes = {idx2}"), row(1));
-        assertRows(execute(query + "WITH excluded_indexes = {idx1, idx2}"), row(1));
+        // test the same MATCH query with a different value
+        query = "SELECT * FROM %s WHERE v : 'Richard Strauss' ";
+        assertThatPlan(query, row1).selects(idx3);
+        assertThatPlan(query + "WITH preferred_indexes = {idx1}", row1).selects(idx3); // idx1 is not applicable to :
+        assertThatPlan(query + "WITH preferred_indexes = {idx2}", row1).selects(idx3); // idx2 is not applicable to :
+        assertThatPlan(query + "WITH preferred_indexes = {idx3}", row1).selects(idx3);
+        assertThatPlan(query + "WITH preferred_indexes = {idx1, idx2}", row1).selects(idx3); // idx1 and idx2 are not applicable to :
+        assertThatPlan(query + "WITH preferred_indexes = {idx1, idx3}", row1).selects(idx3);
+        assertThatPlan(query + "WITH preferred_indexes = {idx2, idx3}", row1).selects(idx3);
+        assertThatPlan(query + "WITH preferred_indexes = {idx1, idx2, idx3}", row1).selects(idx3);
+        assertThatPlan(query + "WITH excluded_indexes = {idx1}", row1).selects(idx3);
+        assertThatPlan(query + "WITH excluded_indexes = {idx2}", row1).selects(idx3);
+        assertIndexDoesNotSupportAnalyzerMatches(query + "WITH excluded_indexes = {idx3}", "v");
+        assertThatPlan(query + "WITH excluded_indexes = {idx1, idx2}", row1).selects(idx3);
+        assertIndexDoesNotSupportAnalyzerMatches(query + "WITH excluded_indexes = {idx1, idx3}", "v");
+        assertIndexDoesNotSupportAnalyzerMatches(query + "WITH excluded_indexes = {idx2, idx3}", "v");
+        assertMatchNeedsIndex(query + "WITH excluded_indexes = {idx1, idx2, idx3}", "v", "Richard Strauss");
     }
 
     @Test
@@ -709,231 +880,86 @@ public class IndexHintsTest extends CQLTester
         Index idx2 = getCurrentColumnFamilyStore().indexManager.getIndexByName("idx2");
         Index idx3 = getCurrentColumnFamilyStore().indexManager.getIndexByName("idx3");
 
-        execute("INSERT INTO %s (k, v) VALUES (1, 'Richard Strauss')");
-        execute("INSERT INTO %s (k, v) VALUES (2, 'Johann Strauss')");
+        String insert = "INSERT INTO %s (k, v) VALUES (?, ?)";
+        Object[] row1 = new Object[]{ 1, "Richard Strauss" };
+        Object[] row2 = new Object[]{ 2, "Johann Strauss" };
+        execute(insert, row1);
+        execute(insert, row2);
 
-        // test index selection with EQ query, the hints will desambiguate the query
-        String query = "SELECT k FROM %s WHERE v = 'Strauss' ";
+        // test index selection with EQ query, the hints will desambiguate the query and will produce different results
+        // depending on the selected index
+        String query = "SELECT * FROM %s WHERE v = 'Strauss' ";
         assertEqualityPredicateIsAmbiguous(query);
-        assertSelectsAll(query + "WITH preferred_indexes = {idx1}", idx1);
-        assertSelectsAll(query + "WITH preferred_indexes = {idx2}", idx2);
-        assertSelectsAll(query + "WITH preferred_indexes = {idx3}", idx3);
-        assertSelectsAll(query + "WITH preferred_indexes = {idx1, idx2}", idx2);
+        assertThatPlan(query + "WITH preferred_indexes = {idx1}").selects(idx1);
+        assertThatPlan(query + "WITH preferred_indexes = {idx2}").selects(idx2);
+        assertThatPlan(query + "WITH preferred_indexes = {idx3}", row1, row2).selects(idx3);
+        assertThatPlan(query + "WITH preferred_indexes = {idx1, idx2}").selects(idx2);
         assertEqualityPredicateIsAmbiguous(query + "WITH preferred_indexes = {idx1, idx3}");
         assertEqualityPredicateIsAmbiguous(query + "WITH preferred_indexes = {idx2, idx3}");
         assertEqualityPredicateIsAmbiguous(query + "WITH preferred_indexes = {idx1, idx2, idx3}");
         assertEqualityPredicateIsAmbiguous(query + "WITH excluded_indexes = {idx1}");
         assertEqualityPredicateIsAmbiguous(query + "WITH excluded_indexes = {idx2}");
-        assertSelectsAll(query + "WITH excluded_indexes = {idx3}", idx2);
-        assertSelectsAll(query + "WITH excluded_indexes = {idx1, idx2}", idx3);
-        assertSelectsAll(query + "WITH excluded_indexes = {idx1, idx3}", idx2);
-        assertSelectsAll(query + "WITH excluded_indexes = {idx2, idx3}", idx1);
+        assertThatPlan(query + "WITH excluded_indexes = {idx3}").selects(idx2);
+        assertThatPlan(query + "WITH excluded_indexes = {idx1, idx2}", row1, row2).selects(idx3);
+        assertThatPlan(query + "WITH excluded_indexes = {idx1, idx3}").selects(idx2);
+        assertThatPlan(query + "WITH excluded_indexes = {idx2, idx3}").selects(idx1);
         assertNeedsAllowFiltering(query + "WITH excluded_indexes = {idx1, idx2, idx3}");
-        assertSelectsAll(query + "ALLOW FILTERING WITH excluded_indexes = {idx1, idx2, idx3}");
+        assertThatPlan(query + "ALLOW FILTERING WITH excluded_indexes = {idx1, idx2, idx3}").selectsNone();
 
-        // test correct returned rows with EQ query
-        assertRows(execute(query + "WITH preferred_indexes = {idx1}"));
-        assertRows(execute(query + "WITH preferred_indexes = {idx2}"));
-        assertRows(execute(query + "WITH preferred_indexes = {idx3}"), row(1), row(2));
-        assertRows(execute(query + "WITH excluded_indexes = {idx3}"));
-        assertRows(execute(query + "WITH excluded_indexes = {idx1, idx2}"), row(1), row(2));
-        assertRows(execute(query + "WITH excluded_indexes = {idx1, idx3}"));
-        assertRows(execute(query + "WITH excluded_indexes = {idx2, idx3}"));
-        assertRows(execute(query + "ALLOW FILTERING WITH excluded_indexes = {idx1, idx2, idx3}"));
-
-        // test correct returned rows with another EQ query with a different value
-        query = "SELECT k FROM %s WHERE v = 'Richard Strauss' ";
-        assertRows(execute(query + "WITH preferred_indexes = {idx1}"), row(1));
-        assertRows(execute(query + "WITH preferred_indexes = {idx2}"), row(1));
-        assertRows(execute(query + "WITH preferred_indexes = {idx3}"), row(1));
-        assertRows(execute(query + "WITH preferred_indexes = {idx1, idx2}"), row(1));
-        assertRows(execute(query + "WITH excluded_indexes = {idx3}"), row(1));
-        assertRows(execute(query + "WITH excluded_indexes = {idx1, idx2}"), row(1));
-        assertRows(execute(query + "WITH excluded_indexes = {idx1, idx3}"), row(1));
-        assertRows(execute(query + "WITH excluded_indexes = {idx2, idx3}"), row(1));
-        assertRows(execute(query + "ALLOW FILTERING WITH excluded_indexes = {idx1, idx2, idx3}"), row(1));
+        // test the same EQ query with a different value
+        query = "SELECT * FROM %s WHERE v = 'Richard Strauss' ";
+        assertEqualityPredicateIsAmbiguous(query);
+        assertThatPlan(query + "WITH preferred_indexes = {idx1}", row1).selects(idx1);
+        assertThatPlan(query + "WITH preferred_indexes = {idx2}", row1).selects(idx2);
+        assertThatPlan(query + "WITH preferred_indexes = {idx3}", row1).selects(idx3);
+        assertThatPlan(query + "WITH preferred_indexes = {idx1, idx2}", row1).selects(idx2);
+        assertEqualityPredicateIsAmbiguous(query + "WITH preferred_indexes = {idx1, idx3}");
+        assertEqualityPredicateIsAmbiguous(query + "WITH preferred_indexes = {idx2, idx3}");
+        assertEqualityPredicateIsAmbiguous(query + "WITH preferred_indexes = {idx1, idx2, idx3}");
+        assertEqualityPredicateIsAmbiguous(query + "WITH excluded_indexes = {idx1}");
+        assertEqualityPredicateIsAmbiguous(query + "WITH excluded_indexes = {idx2}");
+        assertThatPlan(query + "WITH excluded_indexes = {idx3}", row1).selects(idx2);
+        assertThatPlan(query + "WITH excluded_indexes = {idx1, idx2}", row1).selects(idx3);
+        assertThatPlan(query + "WITH excluded_indexes = {idx1, idx3}", row1).selects(idx2);
+        assertThatPlan(query + "WITH excluded_indexes = {idx2, idx3}", row1).selects(idx1);
+        assertNeedsAllowFiltering(query + "WITH excluded_indexes = {idx1, idx2, idx3}");
+        assertThatPlan(query + "ALLOW FILTERING WITH excluded_indexes = {idx1, idx2, idx3}", row1).selectsNone();
 
         // test index selection with MATCH query
-        query = "SELECT k FROM %s WHERE v : 'strauss' ";
-        assertSelectsAll(query, idx3);
-        assertSelectsAll(query + "WITH preferred_indexes = {idx1}", idx3); // preferred index is not mandatory, idx1 is not applicable to :
-        assertSelectsAll(query + "WITH preferred_indexes = {idx2}", idx3); // preferred index is not mandatory, idx2 is not applicable to :
-        assertSelectsAll(query + "WITH preferred_indexes = {idx3}", idx3);
-        assertSelectsAll(query + "WITH preferred_indexes = {idx1, idx2}", idx3); // preferred index is not mandatory, idx1 and idx2 are not applicable to :
-        assertSelectsAll(query + "WITH preferred_indexes = {idx1, idx3}", idx3);
-        assertSelectsAll(query + "WITH preferred_indexes = {idx2, idx3}", idx3);
-        assertSelectsAll(query + "WITH preferred_indexes = {idx1, idx2, idx3}", idx3);
-        assertSelectsAll(query + "WITH excluded_indexes = {idx1}", idx3);
-        assertSelectsAll(query + "WITH excluded_indexes = {idx2}", idx3);
+        query = "SELECT * FROM %s WHERE v : 'strauss' ";
+        assertThatPlan(query, row1, row2).selects(idx3);
+        assertThatPlan(query + "WITH preferred_indexes = {idx1}", row1, row2).selects(idx3); // idx1 is not applicable to :
+        assertThatPlan(query + "WITH preferred_indexes = {idx2}", row1, row2).selects(idx3); // idx2 is not applicable to :
+        assertThatPlan(query + "WITH preferred_indexes = {idx3}", row1, row2).selects(idx3);
+        assertThatPlan(query + "WITH preferred_indexes = {idx1, idx2}", row1, row2).selects(idx3); // idx1 and idx2 are not applicable to :
+        assertThatPlan(query + "WITH preferred_indexes = {idx1, idx3}", row1, row2).selects(idx3);
+        assertThatPlan(query + "WITH preferred_indexes = {idx2, idx3}", row1, row2).selects(idx3);
+        assertThatPlan(query + "WITH preferred_indexes = {idx1, idx2, idx3}", row1, row2).selects(idx3);
+        assertThatPlan(query + "WITH excluded_indexes = {idx1}", row1, row2).selects(idx3);
+        assertThatPlan(query + "WITH excluded_indexes = {idx2}", row1, row2).selects(idx3);
         assertIndexDoesNotSupportAnalyzerMatches(query + "WITH excluded_indexes = {idx3}", "v");
-        assertSelectsAll(query + "WITH excluded_indexes = {idx1, idx2}", idx3);
+        assertThatPlan(query + "WITH excluded_indexes = {idx1, idx2}", row1, row2).selects(idx3);
         assertIndexDoesNotSupportAnalyzerMatches(query + "WITH excluded_indexes = {idx1, idx3}", "v");
         assertIndexDoesNotSupportAnalyzerMatches(query + "WITH excluded_indexes = {idx2, idx3}", "v");
         assertMatchNeedsIndex(query + "WITH excluded_indexes = {idx1, idx2, idx3}", "v", "strauss");
 
-        // test correct returned rows with MATCH query
-        assertRows(execute(query + "WITH preferred_indexes = {idx1}"), row(1), row(2));
-        assertRows(execute(query + "WITH preferred_indexes = {idx2}"), row(1), row(2));
-        assertRows(execute(query + "WITH preferred_indexes = {idx3}"), row(1), row(2));
-        assertRows(execute(query + "WITH preferred_indexes = {idx1, idx2}"), row(1), row(2));
-        assertRows(execute(query + "WITH preferred_indexes = {idx1, idx3}"), row(1), row(2));
-        assertRows(execute(query + "WITH preferred_indexes = {idx2, idx3}"), row(1), row(2));
-        assertRows(execute(query + "WITH preferred_indexes = {idx1, idx2, idx3}"), row(1), row(2));
-        assertRows(execute(query + "WITH excluded_indexes = {idx1}"), row(1), row(2));
-        assertRows(execute(query + "WITH excluded_indexes = {idx2}"), row(1), row(2));
-        assertRows(execute(query + "WITH excluded_indexes = {idx1, idx2}"), row(1), row(2));
-
-        // test correct returned rows with another MATCH query with a different value
-        query = "SELECT k FROM %s WHERE v : 'Richard Strauss' ";
-        assertRows(execute(query + "WITH preferred_indexes = {idx1}"), row(1));
-        assertRows(execute(query + "WITH preferred_indexes = {idx2}"), row(1));
-        assertRows(execute(query + "WITH preferred_indexes = {idx3}"), row(1));
-        assertRows(execute(query + "WITH preferred_indexes = {idx1, idx2}"), row(1));
-        assertRows(execute(query + "WITH preferred_indexes = {idx1, idx3}"), row(1));
-        assertRows(execute(query + "WITH preferred_indexes = {idx2, idx3}"), row(1));
-        assertRows(execute(query + "WITH preferred_indexes = {idx1, idx2, idx3}"), row(1));
-        assertRows(execute(query + "WITH excluded_indexes = {idx1}"), row(1));
-        assertRows(execute(query + "WITH excluded_indexes = {idx2}"), row(1));
-        assertRows(execute(query + "WITH excluded_indexes = {idx1, idx2}"), row(1));
-    }
-
-    @Test
-    public void testMixedIndexImplementations()
-    {
-        createTable("CREATE TABLE %s (k int PRIMARY KEY, v1 int, v2 int, v3 int)");
-        createIndex("CREATE CUSTOM INDEX idx1 ON %s(v1) USING 'StorageAttachedIndex'");
-        createIndex("CREATE CUSTOM INDEX idx2 ON %s(v2) USING 'StorageAttachedIndex'");
-        createIndex("CREATE INDEX idx3 ON %s(v3)");
-        execute("INSERT INTO %s (k, v1, v2, v3) VALUES (0, 1, 2, 3)");
-
-        Index idx1 = getCurrentColumnFamilyStore().indexManager.getIndexByName("idx1");
-        Index idx2 = getCurrentColumnFamilyStore().indexManager.getIndexByName("idx2");
-        Index idx3 = getCurrentColumnFamilyStore().indexManager.getIndexByName("idx3");
-
-        // without any hints
-        assertSelectsAll("SELECT * FROM %s WHERE v1=0 ALLOW FILTERING", idx1);
-        assertSelectsAll("SELECT * FROM %s WHERE v2=0 ALLOW FILTERING", idx2);
-        assertSelectsAll("SELECT * FROM %s WHERE v3=0 ALLOW FILTERING", idx3);
-        assertSelectsAll("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING", idx1, idx2);
-        assertSelectsAll("SELECT * FROM %s WHERE v1=0 AND v3=0 ALLOW FILTERING", idx1);
-        assertSelectsAll("SELECT * FROM %s WHERE v2=0 AND v3=0 ALLOW FILTERING", idx2);
-
-        // preferring idx1 (SAI)
-        assertSelectsAll("SELECT * FROM %s WHERE v1=0 ALLOW FILTERING WITH preferred_indexes={idx1}", idx1);
-        assertSelectsAll("SELECT * FROM %s WHERE v2=0 ALLOW FILTERING WITH preferred_indexes={idx1}", idx2);
-        assertSelectsAll("SELECT * FROM %s WHERE v3=0 ALLOW FILTERING WITH preferred_indexes={idx1}", idx3);
-        assertSelectsAll("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING WITH preferred_indexes={idx1}", idx1, idx2);
-        assertSelectsAll("SELECT * FROM %s WHERE v1=0 AND v3=0 ALLOW FILTERING WITH preferred_indexes={idx1}", idx1);
-        assertSelectsAll("SELECT * FROM %s WHERE v2=0 AND v3=0 ALLOW FILTERING WITH preferred_indexes={idx1}", idx2);
-
-        // preferring idx2 (SAI)
-        assertSelectsAll("SELECT * FROM %s WHERE v1=0 ALLOW FILTERING WITH preferred_indexes={idx2}", idx1);
-        assertSelectsAll("SELECT * FROM %s WHERE v2=0 ALLOW FILTERING WITH preferred_indexes={idx2}", idx2);
-        assertSelectsAll("SELECT * FROM %s WHERE v3=0 ALLOW FILTERING WITH preferred_indexes={idx2}", idx3);
-        assertSelectsAll("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING WITH preferred_indexes={idx2}", idx1, idx2);
-        assertSelectsAll("SELECT * FROM %s WHERE v1=0 AND v3=0 ALLOW FILTERING WITH preferred_indexes={idx2}", idx1);
-        assertSelectsAll("SELECT * FROM %s WHERE v2=0 AND v3=0 ALLOW FILTERING WITH preferred_indexes={idx2}", idx2);
-
-        // preferring idx3 (legacy)
-        assertSelectsAll("SELECT * FROM %s WHERE v1=0 ALLOW FILTERING WITH preferred_indexes={idx3}", idx1);
-        assertSelectsAll("SELECT * FROM %s WHERE v2=0 ALLOW FILTERING WITH preferred_indexes={idx3}", idx2);
-        assertSelectsAll("SELECT * FROM %s WHERE v3=0 ALLOW FILTERING WITH preferred_indexes={idx3}", idx3);
-        assertSelectsAll("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING WITH preferred_indexes={idx3}", idx1, idx2);
-        assertSelectsAll("SELECT * FROM %s WHERE v1=0 AND v3=0 ALLOW FILTERING WITH preferred_indexes={idx3}", idx3); // prefers legacy over SAI
-        assertSelectsAll("SELECT * FROM %s WHERE v2=0 AND v3=0 ALLOW FILTERING WITH preferred_indexes={idx3}", idx3); // prefers legacy over SAI
-
-        // preferring idx1 and idx2 (both SAI)
-        assertSelectsAll("SELECT * FROM %s WHERE v1=0 ALLOW FILTERING WITH preferred_indexes={idx1, idx2}", idx1);
-        assertSelectsAll("SELECT * FROM %s WHERE v2=0 ALLOW FILTERING WITH preferred_indexes={idx1, idx2}", idx2);
-        assertSelectsAll("SELECT * FROM %s WHERE v3=0 ALLOW FILTERING WITH preferred_indexes={idx1, idx2}", idx3);
-        assertSelectsAll("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING WITH preferred_indexes={idx1, idx2}", idx1, idx2);
-        assertSelectsAll("SELECT * FROM %s WHERE v1=0 AND v3=0 ALLOW FILTERING WITH preferred_indexes={idx1, idx2}", idx1);
-        assertSelectsAll("SELECT * FROM %s WHERE v2=0 AND v3=0 ALLOW FILTERING WITH preferred_indexes={idx1, idx2}", idx2);
-
-        // preferring idx1 and idx3 (SAI and legacy)
-        assertSelectsAll("SELECT * FROM %s WHERE v1=0 ALLOW FILTERING WITH preferred_indexes={idx1, idx3}", idx1);
-        assertSelectsAll("SELECT * FROM %s WHERE v2=0 ALLOW FILTERING WITH preferred_indexes={idx1, idx3}", idx2);
-        assertSelectsAll("SELECT * FROM %s WHERE v3=0 ALLOW FILTERING WITH preferred_indexes={idx1, idx3}", idx3);
-        assertSelectsAll("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING WITH preferred_indexes={idx1, idx3}", idx1, idx2);
-        assertSelectsAll("SELECT * FROM %s WHERE v1=0 AND v3=0 ALLOW FILTERING WITH preferred_indexes={idx1, idx3}", idx1);
-        assertSelectsAll("SELECT * FROM %s WHERE v2=0 AND v3=0 ALLOW FILTERING WITH preferred_indexes={idx1, idx3}", idx3); // prefers legacy over SAI
-
-        // preferring idx2 and idx3 (SAI and legacy)
-        assertSelectsAll("SELECT * FROM %s WHERE v1=0 ALLOW FILTERING WITH preferred_indexes={idx2, idx3}", idx1);
-        assertSelectsAll("SELECT * FROM %s WHERE v2=0 ALLOW FILTERING WITH preferred_indexes={idx2, idx3}", idx2);
-        assertSelectsAll("SELECT * FROM %s WHERE v3=0 ALLOW FILTERING WITH preferred_indexes={idx2, idx3}", idx3);
-        assertSelectsAll("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING WITH preferred_indexes={idx1, idx3}", idx1, idx2);
-        assertSelectsAll("SELECT * FROM %s WHERE v1=0 AND v3=0 ALLOW FILTERING WITH preferred_indexes={idx2, idx3}", idx3); // prefers legacy over SAI
-        assertSelectsAll("SELECT * FROM %s WHERE v2=0 AND v3=0 ALLOW FILTERING WITH preferred_indexes={idx2, idx3}", idx2);
-
-        // excluding idx1 (SAI)
-        assertSelectsAll("SELECT * FROM %s WHERE v1=0 ALLOW FILTERING WITH excluded_indexes={idx1}");
-        assertSelectsAll("SELECT * FROM %s WHERE v2=0 ALLOW FILTERING WITH excluded_indexes={idx1}", idx2);
-        assertSelectsAll("SELECT * FROM %s WHERE v3=0 ALLOW FILTERING WITH excluded_indexes={idx1}", idx3);
-        assertSelectsAll("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING WITH excluded_indexes={idx1}", idx2);
-        assertSelectsAll("SELECT * FROM %s WHERE v1=0 AND v3=0 ALLOW FILTERING WITH excluded_indexes={idx1}", idx3);
-        assertSelectsAll("SELECT * FROM %s WHERE v2=0 AND v3=0 ALLOW FILTERING WITH excluded_indexes={idx1}", idx2);
-
-        // excluding idx2 (SAI)
-        assertSelectsAll("SELECT * FROM %s WHERE v1=0 ALLOW FILTERING WITH excluded_indexes={idx2}", idx1);
-        assertSelectsAll("SELECT * FROM %s WHERE v2=0 ALLOW FILTERING WITH excluded_indexes={idx2}");
-        assertSelectsAll("SELECT * FROM %s WHERE v3=0 ALLOW FILTERING WITH excluded_indexes={idx2}", idx3);
-        assertSelectsAll("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING WITH excluded_indexes={idx2}", idx1);
-        assertSelectsAll("SELECT * FROM %s WHERE v1=0 AND v3=0 ALLOW FILTERING WITH excluded_indexes={idx2}", idx1);
-        assertSelectsAll("SELECT * FROM %s WHERE v2=0 AND v3=0 ALLOW FILTERING WITH excluded_indexes={idx2}", idx3);
-
-        // excluding idx3 (legacy)
-        assertSelectsAll("SELECT * FROM %s WHERE v1=0 ALLOW FILTERING WITH excluded_indexes={idx3}", idx1);
-        assertSelectsAll("SELECT * FROM %s WHERE v2=0 ALLOW FILTERING WITH excluded_indexes={idx3}", idx2);
-        assertSelectsAll("SELECT * FROM %s WHERE v3=0 ALLOW FILTERING WITH excluded_indexes={idx3}");
-        assertSelectsAll("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING WITH excluded_indexes={idx3}", idx1, idx2);
-        assertSelectsAll("SELECT * FROM %s WHERE v1=0 AND v3=0 ALLOW FILTERING WITH excluded_indexes={idx3}", idx1);
-        assertSelectsAll("SELECT * FROM %s WHERE v2=0 AND v3=0 ALLOW FILTERING WITH excluded_indexes={idx3}", idx2);
-
-        // excluding idx1 and idx2 (both SAI)
-        assertSelectsAll("SELECT * FROM %s WHERE v1=0 ALLOW FILTERING WITH excluded_indexes={idx1, idx2}");
-        assertSelectsAll("SELECT * FROM %s WHERE v2=0 ALLOW FILTERING WITH excluded_indexes={idx1, idx2}");
-        assertSelectsAll("SELECT * FROM %s WHERE v3=0 ALLOW FILTERING WITH excluded_indexes={idx1, idx2}", idx3);
-        assertSelectsAll("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING WITH excluded_indexes={idx1, idx2}");
-        assertSelectsAll("SELECT * FROM %s WHERE v1=0 AND v3=0 ALLOW FILTERING WITH excluded_indexes={idx1, idx2}", idx3);
-        assertSelectsAll("SELECT * FROM %s WHERE v2=0 AND v3=0 ALLOW FILTERING WITH excluded_indexes={idx1, idx2}", idx3);
-
-        // excluding idx1 and idx3 (SAI and legacy)
-        assertSelectsAll("SELECT * FROM %s WHERE v1=0 ALLOW FILTERING WITH excluded_indexes={idx1, idx3}");
-        assertSelectsAll("SELECT * FROM %s WHERE v2=0 ALLOW FILTERING WITH excluded_indexes={idx1, idx3}", idx2);
-        assertSelectsAll("SELECT * FROM %s WHERE v3=0 ALLOW FILTERING WITH excluded_indexes={idx1, idx3}");
-        assertSelectsAll("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING WITH excluded_indexes={idx1, idx3}", idx2);
-        assertSelectsAll("SELECT * FROM %s WHERE v1=0 AND v3=0 ALLOW FILTERING WITH excluded_indexes={idx1, idx3}");
-        assertSelectsAll("SELECT * FROM %s WHERE v2=0 AND v3=0 ALLOW FILTERING WITH excluded_indexes={idx1, idx3}", idx2);
-
-        // excluding idx2 and idx3 (SAI and legacy)
-        assertSelectsAll("SELECT * FROM %s WHERE v1=0 ALLOW FILTERING WITH excluded_indexes={idx2, idx3}", idx1);
-        assertSelectsAll("SELECT * FROM %s WHERE v2=0 ALLOW FILTERING WITH excluded_indexes={idx2, idx3}");
-        assertSelectsAll("SELECT * FROM %s WHERE v3=0 ALLOW FILTERING WITH excluded_indexes={idx2, idx3}");
-        assertSelectsAll("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING WITH excluded_indexes={idx2, idx3}", idx1);
-        assertSelectsAll("SELECT * FROM %s WHERE v1=0 AND v3=0 ALLOW FILTERING WITH excluded_indexes={idx2, idx3}", idx1);
-        assertSelectsAll("SELECT * FROM %s WHERE v2=0 AND v3=0 ALLOW FILTERING WITH excluded_indexes={idx2, idx3}");
-    }
-
-    @Test
-    public void testMultipleIndexesOnSameColumn()
-    {
-        createTable("CREATE TABLE %s (k int PRIMARY KEY, v int)");
-        createIndex("CREATE CUSTOM INDEX idx1 ON %s(v) USING 'StorageAttachedIndex'");
-        createIndex("CREATE INDEX idx2 ON %s(v)");
-        execute("INSERT INTO %s (k, v) VALUES (0, 0)");
-
-        Index idx1 = getCurrentColumnFamilyStore().indexManager.getIndexByName("idx1");
-        Index idx2 = getCurrentColumnFamilyStore().indexManager.getIndexByName("idx2");
-
-        assertSelectsAll("SELECT * FROM %s WHERE v=0", idx1);
-        assertSelectsAll("SELECT * FROM %s WHERE v=0 WITH preferred_indexes={idx1}", idx1);
-        assertSelectsAll("SELECT * FROM %s WHERE v=0 WITH preferred_indexes={idx2}", idx2);
-        assertSelectsAll("SELECT * FROM %s WHERE v=0 WITH preferred_indexes={idx1,idx2}", idx1);
-        assertSelectsAll("SELECT * FROM %s WHERE v=0 WITH excluded_indexes={idx1}", idx2);
-        assertSelectsAll("SELECT * FROM %s WHERE v=0 WITH excluded_indexes={idx2}", idx1);
-        assertNeedsAllowFiltering("SELECT * FROM %s WHERE v=0 WITH excluded_indexes={idx1,idx2}");
-        assertSelectsAll("SELECT * FROM %s WHERE v=0 ALLOW FILTERING WITH excluded_indexes={idx1,idx2}");
+        // test the same MATCH query with a different value
+        query = "SELECT * FROM %s WHERE v : 'Richard Strauss' ";
+        assertThatPlan(query, row1).selects(idx3);
+        assertThatPlan(query + "WITH preferred_indexes = {idx1}", row1).selects(idx3); // idx1 is not applicable to :
+        assertThatPlan(query + "WITH preferred_indexes = {idx2}", row1).selects(idx3); // idx2 is not applicable to :
+        assertThatPlan(query + "WITH preferred_indexes = {idx3}", row1).selects(idx3);
+        assertThatPlan(query + "WITH preferred_indexes = {idx1, idx2}", row1).selects(idx3); // idx1 and idx2 are not applicable to :
+        assertThatPlan(query + "WITH preferred_indexes = {idx1, idx3}", row1).selects(idx3);
+        assertThatPlan(query + "WITH preferred_indexes = {idx2, idx3}", row1).selects(idx3);
+        assertThatPlan(query + "WITH preferred_indexes = {idx1, idx2, idx3}", row1).selects(idx3);
+        assertThatPlan(query + "WITH excluded_indexes = {idx1}", row1).selects(idx3);
+        assertThatPlan(query + "WITH excluded_indexes = {idx2}", row1).selects(idx3);
+        assertIndexDoesNotSupportAnalyzerMatches(query + "WITH excluded_indexes = {idx3}", "v");
+        assertThatPlan(query + "WITH excluded_indexes = {idx1, idx2}", row1).selects(idx3);
+        assertIndexDoesNotSupportAnalyzerMatches(query + "WITH excluded_indexes = {idx1, idx3}", "v");
+        assertIndexDoesNotSupportAnalyzerMatches(query + "WITH excluded_indexes = {idx2, idx3}", "v");
+        assertMatchNeedsIndex(query + "WITH excluded_indexes = {idx1, idx2, idx3}", "v", "Richard Strauss");
     }
 
     private void assertNeedsAllowFiltering(String query)
@@ -978,39 +1004,53 @@ public class IndexHintsTest extends CQLTester
                   .hasMessageContaining("equality predicate is ambiguous");
     }
 
-    private void assertSelectsAny(String query, Index... indexes)
+    private PlanSelectionAssertion assertThatPlan(String query, Object[]... expectedRows)
     {
-        Index.QueryPlan plan = parseReadCommand(query).indexQueryPlan();
-        if (indexes.length == 0)
-        {
-            Assertions.assertThat(plan).isNull();
-        }
-        else
-        {
-            Assertions.assertThat(plan).isNotNull();
-            Set<Index> selectedIndexes = plan.getIndexes();
-            Assertions.assertThat(selectedIndexes).hasSize(1);
-            Index selectedIndex = selectedIndexes.iterator().next();
-            Set<Index> expectedIndexes = ImmutableSet.copyOf(indexes);
-            Assertions.assertThat(expectedIndexes).contains(selectedIndex);
-        }
-    }
+        // First execute the query and check returned rows
+        assertRowsIgnoringOrder(execute(query), expectedRows);
 
-    private void assertSelectsAll(String query, Index... indexes)
-    {
         ReadCommand command = parseReadCommand(query);
         Index.QueryPlan queryPlan = command.indexQueryPlan();
-        if (indexes.length == 0)
+        if (queryPlan == null)
+            return new PlanSelectionAssertion(null);
+
+        Set<Index> indexes = queryPlan.getIndexes();
+        return new PlanSelectionAssertion(indexes);
+    }
+
+    private static class PlanSelectionAssertion
+    {
+        private final Set<Index> selectedIndexes;
+
+        public PlanSelectionAssertion(@Nullable Set<Index> selectedIndexes)
         {
-            Assertions.assertThat(queryPlan).isNull();
+            this.selectedIndexes = selectedIndexes;
         }
-        else
+
+        public void selects(Index... indexes)
         {
-            Assertions.assertThat(queryPlan).isNotNull();
-            Set<Index> selectedIndexes = queryPlan.getIndexes();
-            Assertions.assertThat(selectedIndexes).hasSize(indexes.length);
-            Set<Index> expectedIndexes = ImmutableSet.copyOf(indexes);
-            Assertions.assertThat(selectedIndexes).containsAll(expectedIndexes);
+            Assertions.assertThat(selectedIndexes)
+                      .isNotNull()
+                      .as("Expected to select only %s, but got: %s", indexes, selectedIndexes)
+                      .isEqualTo(Set.of(indexes));
+        }
+
+        public void selectsAnyOf(Index index1, Index index2, Index... otherIndexes)
+        {
+            Set<Index> expectedIndexes = new HashSet<>(otherIndexes.length + 1);
+            expectedIndexes.add(index1);
+            expectedIndexes.add(index2);
+            expectedIndexes.addAll(Arrays.asList(otherIndexes));
+
+            Assertions.assertThat(selectedIndexes)
+                      .isNotNull()
+                      .as("Expected to select any of %s, but got: %s", otherIndexes, selectedIndexes)
+                      .containsAnyElementsOf(expectedIndexes);
+        }
+
+        public void selectsNone()
+        {
+            Assertions.assertThat(selectedIndexes).isNull();
         }
     }
 
