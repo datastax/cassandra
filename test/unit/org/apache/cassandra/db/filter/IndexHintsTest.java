@@ -774,7 +774,7 @@ public class IndexHintsTest extends CQLTester
     }
 
     @Test
-    public void testSAIWithMultipleIndexesPerColumnAndUnsupportedEqOnAnalyzer()
+    public void testMultipleIndexesPerColumnAndUnsupportedEqOnAnalyzer()
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v text)");
         createIndex("CREATE INDEX idx1 ON %s(v)");
@@ -868,7 +868,7 @@ public class IndexHintsTest extends CQLTester
     }
 
     @Test
-    public void testSAIWithMultipleIndexesPerColumnAndMatchEqOnAnalyzer()
+    public void testMultipleIndexesPerColumnAndMatchEqOnAnalyzer()
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v text)");
         createIndex("CREATE INDEX idx1 ON %s(v)");
@@ -960,6 +960,107 @@ public class IndexHintsTest extends CQLTester
         assertIndexDoesNotSupportAnalyzerMatches(query + "WITH excluded_indexes = {idx1, idx3}", "v");
         assertIndexDoesNotSupportAnalyzerMatches(query + "WITH excluded_indexes = {idx2, idx3}", "v");
         assertMatchNeedsIndex(query + "WITH excluded_indexes = {idx1, idx2, idx3}", "v", "Richard Strauss");
+    }
+
+    @Test
+    public void testMultipleIndexesPerColumnAndContains()
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v list<text>)");
+        createIndex("CREATE INDEX idx1 ON %s(v)");
+        createIndex("CREATE CUSTOM INDEX idx2 ON %s(v) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX idx3 ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = { 'index_analyzer': 'standard' }");
+
+        Index idx1 = getCurrentColumnFamilyStore().indexManager.getIndexByName("idx1");
+        Index idx2 = getCurrentColumnFamilyStore().indexManager.getIndexByName("idx2");
+        Index idx3 = getCurrentColumnFamilyStore().indexManager.getIndexByName("idx3");
+
+        String insert = "INSERT INTO %s (k, v) VALUES (?, ?)";
+        Object[] row1 = new Object[]{ 1, list("Johann Strauss") };
+        Object[] row2 = new Object[]{ 2, list("Richard Strauss", "Johann Sebastian Bach") };
+        execute(insert, row1);
+        execute(insert, row2);
+
+        // CONTAINS and NOT CONTAINS with hints preferring the legacy index.
+        assertThatPlan("SELECT * FROM %s WHERE v CONTAINS 'Richard Strauss' WITH preferred_indexes = {idx1}", row2).selects(idx1);
+        assertThatPlan("SELECT * FROM %s WHERE v CONTAINS 'Strauss' WITH preferred_indexes = {idx1}").selects(idx1);
+        assertThatPlan("SELECT * FROM %s WHERE v CONTAINS 'Johann' WITH preferred_indexes = {idx1}").selects(idx1);
+        assertThatPlan("SELECT * FROM %s WHERE v CONTAINS 'Richard' WITH preferred_indexes = {idx1}").selects(idx1);
+        assertThatPlan("SELECT * FROM %s WHERE v CONTAINS 'Debussy' WITH preferred_indexes = {idx1}").selects(idx1);
+        // TODO CNDB-13925: NOT CONTAINS isn't supported by the legacy index, so the hint will be ignored and the query
+        //  will be executed by either of the SAI indexes. The query will return different results depending on what
+        //  index gets selected by the query planner, which is based on estimated about selectivity rather than semantics.
+        //  This is the same that happens when there are no hints. This is a bug introduced when BM25 added support for
+        //  multiple indexes in the same column, and it's independent of index hints.
+        // assertNotContainsPredicateIsAmbiguous("SELECT * FROM %s WHERE v NOT CONTAINS 'Richard Strauss' WITH preferred_indexes = {idx1}");
+        // assertNotContainsPredicateIsAmbiguous("SELECT * FROM %s WHERE v NOT CONTAINS 'Strauss' WITH preferred_indexes = {idx1}");
+        // assertNotContainsPredicateIsAmbiguous("SELECT * FROM %s WHERE v NOT CONTAINS 'Johann' WITH preferred_indexes = {idx1}");
+        // assertNotContainsPredicateIsAmbiguous("SELECT * FROM %s WHERE v NOT CONTAINS 'Richard' WITH preferred_indexes = {idx1}");
+        // assertNotContainsPredicateIsAmbiguous("SELECT * FROM %s WHERE v NOT CONTAINS 'Debussy' WITH preferred_indexes = {idx1}");
+
+        // CONTAINS and NOT CONTAINS with hints preferring the non-analyzed index.
+        assertThatPlan("SELECT * FROM %s WHERE v CONTAINS 'Richard Strauss' WITH preferred_indexes = {idx2}", row2).selects(idx2);
+        assertThatPlan("SELECT * FROM %s WHERE v CONTAINS 'Strauss' WITH preferred_indexes = {idx2}").selects(idx2);
+        assertThatPlan("SELECT * FROM %s WHERE v CONTAINS 'Johann' WITH preferred_indexes = {idx2}").selects(idx2);
+        assertThatPlan("SELECT * FROM %s WHERE v CONTAINS 'Richard' WITH preferred_indexes = {idx2}").selects(idx2);
+        assertThatPlan("SELECT * FROM %s WHERE v CONTAINS 'Debussy' WITH preferred_indexes = {idx2}").selects(idx2);
+        assertThatPlan("SELECT * FROM %s WHERE v NOT CONTAINS 'Richard Strauss' WITH preferred_indexes = {idx2}", row1).selects(idx2);
+        assertThatPlan("SELECT * FROM %s WHERE v NOT CONTAINS 'Strauss' WITH preferred_indexes = {idx2}").selects(idx2);
+        assertThatPlan("SELECT * FROM %s WHERE v NOT CONTAINS 'Johann' WITH preferred_indexes = {idx2}").selects(idx2);
+        assertThatPlan("SELECT * FROM %s WHERE v NOT CONTAINS 'Richard' WITH preferred_indexes = {idx2}", row1).selects(idx2);
+        assertThatPlan("SELECT * FROM %s WHERE v NOT CONTAINS 'Debussy' WITH preferred_indexes = {idx2}", row1, row2).selects(idx2);
+
+        // CONTAINS and NOT CONTAINS with hints preferring the analyzed index.
+        assertThatPlan("SELECT * FROM %s WHERE v CONTAINS 'Richard Strauss' WITH preferred_indexes = {idx3}", row2).selects(idx3);
+        assertThatPlan("SELECT * FROM %s WHERE v CONTAINS 'Strauss' WITH preferred_indexes = {idx3}", row1, row2).selects(idx3);
+        assertThatPlan("SELECT * FROM %s WHERE v CONTAINS 'Johann' WITH preferred_indexes = {idx3}", row1, row2).selects(idx3);
+        assertThatPlan("SELECT * FROM %s WHERE v CONTAINS 'Richard' WITH preferred_indexes = {idx3}", row2).selects(idx3);
+        assertThatPlan("SELECT * FROM %s WHERE v CONTAINS 'Debussy' WITH preferred_indexes = {idx3}").selects(idx3);
+        assertThatPlan("SELECT * FROM %s WHERE v NOT CONTAINS 'Richard Strauss' WITH preferred_indexes = {idx3}").selects(idx3);
+        assertThatPlan("SELECT * FROM %s WHERE v NOT CONTAINS 'Strauss' WITH preferred_indexes = {idx3}").selects(idx3);
+        assertThatPlan("SELECT * FROM %s WHERE v NOT CONTAINS 'Johann' WITH preferred_indexes = {idx3}").selects(idx3);
+        assertThatPlan("SELECT * FROM %s WHERE v NOT CONTAINS 'Richard' WITH preferred_indexes = {idx3}", row1).selects(idx3);
+        assertThatPlan("SELECT * FROM %s WHERE v NOT CONTAINS 'Debussy' WITH preferred_indexes = {idx3}", row1, row2).selects(idx3);
+
+        // CONTAINS and NOT CONTAINS with hints excluding the legacy index.
+        // TODO CNDB-13925: We are not specifying what SAI index should be used, so the query will return different
+        //  results depending on what index gets selected by the query planner, which is based on estimated about
+        //  selectivity rather than semantics. This is the same that happens when there are no hints. This is a bug
+        //  introduced when BM25 added support for multiple indexes in the same column, and it's independent of index
+        //  hints.
+        // assertNotContainsPredicateIsAmbiguous("SELECT * FROM %s WHERE v CONTAINS 'Richard Strauss' WITH excluded_indexes = {idx1}");
+        // assertNotContainsPredicateIsAmbiguous("SELECT * FROM %s WHERE v CONTAINS 'Strauss' WITH excluded_indexes = {idx1}");
+        // assertNotContainsPredicateIsAmbiguous("SELECT * FROM %s WHERE v CONTAINS 'Johann' WITH excluded_indexes = {idx1}");
+        // assertNotContainsPredicateIsAmbiguous("SELECT * FROM %s WHERE v CONTAINS 'Richard' WITH excluded_indexes = {idx1}");
+        // assertNotContainsPredicateIsAmbiguous("SELECT * FROM %s WHERE v CONTAINS 'Debussy' WITH excluded_indexes = {idx1}");
+        // assertNotContainsPredicateIsAmbiguous("SELECT * FROM %s WHERE v NOT CONTAINS 'Richard Strauss' WITH excluded_indexes = {idx1}");
+        // assertNotContainsPredicateIsAmbiguous("SELECT * FROM %s WHERE v NOT CONTAINS 'Strauss' WITH excluded_indexes = {idx1}");
+        // assertNotContainsPredicateIsAmbiguous("SELECT * FROM %s WHERE v NOT CONTAINS 'Johann' WITH excluded_indexes = {idx1}");
+        // assertNotContainsPredicateIsAmbiguous("SELECT * FROM %s WHERE v NOT CONTAINS 'Richard' WITH excluded_indexes = {idx1}");
+        // assertNotContainsPredicateIsAmbiguous("SELECT * FROM %s WHERE v NOT CONTAINS 'Debussy' WITH excluded_indexes = {idx1}");
+
+        // CONTAINS and NOT CONTAINS with hints excluding the non-analyzed index.
+        assertThatPlan("SELECT * FROM %s WHERE v CONTAINS 'Richard Strauss' WITH excluded_indexes = {idx2}", row2).selects(idx3);
+        assertThatPlan("SELECT * FROM %s WHERE v CONTAINS 'Strauss' WITH excluded_indexes = {idx2}", row1, row2).selects(idx3);
+        assertThatPlan("SELECT * FROM %s WHERE v CONTAINS 'Johann' WITH excluded_indexes = {idx2}", row1, row2).selects(idx3);
+        assertThatPlan("SELECT * FROM %s WHERE v CONTAINS 'Richard' WITH excluded_indexes = {idx2}", row2).selects(idx3);
+        assertThatPlan("SELECT * FROM %s WHERE v CONTAINS 'Debussy' WITH excluded_indexes = {idx2}").selects(idx3);
+        assertThatPlan("SELECT * FROM %s WHERE v NOT CONTAINS 'Richard Strauss' WITH excluded_indexes = {idx2}").selects(idx3);
+        assertThatPlan("SELECT * FROM %s WHERE v NOT CONTAINS 'Strauss' WITH excluded_indexes = {idx2}").selects(idx3);
+        assertThatPlan("SELECT * FROM %s WHERE v NOT CONTAINS 'Johann' WITH excluded_indexes = {idx2}").selects(idx3);
+        assertThatPlan("SELECT * FROM %s WHERE v NOT CONTAINS 'Richard' WITH excluded_indexes = {idx2}", row1).selects(idx3);
+        assertThatPlan("SELECT * FROM %s WHERE v NOT CONTAINS 'Debussy' WITH excluded_indexes = {idx2}", row1, row2).selects(idx3);
+
+        // CONTAINS and NOT CONTAINS with hints excluding the analyzed index.
+        assertThatPlan("SELECT * FROM %s WHERE v CONTAINS 'Richard Strauss' WITH excluded_indexes = {idx3}", row2).selects(idx2);
+        assertThatPlan("SELECT * FROM %s WHERE v CONTAINS 'Strauss' WITH excluded_indexes = {idx3}").selects(idx2);
+        assertThatPlan("SELECT * FROM %s WHERE v CONTAINS 'Johann' WITH excluded_indexes = {idx3}").selects(idx2);
+        assertThatPlan("SELECT * FROM %s WHERE v CONTAINS 'Richard' WITH excluded_indexes = {idx3}").selects(idx2);
+        assertThatPlan("SELECT * FROM %s WHERE v CONTAINS 'Debussy' WITH excluded_indexes = {idx3}").selects(idx2);
+        assertThatPlan("SELECT * FROM %s WHERE v NOT CONTAINS 'Richard Strauss' WITH excluded_indexes = {idx3}", row1).selects(idx2);
+        assertThatPlan("SELECT * FROM %s WHERE v NOT CONTAINS 'Strauss' WITH excluded_indexes = {idx3}", row1, row2).selects(idx2);
+        assertThatPlan("SELECT * FROM %s WHERE v NOT CONTAINS 'Johann' WITH excluded_indexes = {idx3}", row1, row2).selects(idx2);
+        assertThatPlan("SELECT * FROM %s WHERE v NOT CONTAINS 'Richard' WITH excluded_indexes = {idx3}", row1, row2).selects(idx2);
+        assertThatPlan("SELECT * FROM %s WHERE v NOT CONTAINS 'Debussy' WITH excluded_indexes = {idx3}", row1, row2).selects(idx2);
     }
 
     private void assertNeedsAllowFiltering(String query)
