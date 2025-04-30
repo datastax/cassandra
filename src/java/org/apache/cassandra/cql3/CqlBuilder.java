@@ -21,6 +21,7 @@ import java.util.Iterator;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.TreeMap;
+import java.util.function.Consumer;
 
 import com.google.common.annotations.VisibleForTesting;
 
@@ -237,5 +238,37 @@ public final class CqlBuilder
     public String toString()
     {
         return builder.toString();
+    }
+
+    /**
+     * Builds a `WITH option1 = ... AND option2 = ... AND option3 = ... clause
+     * @param builder a receiver to receive a builder allowing to add each option
+     */
+    public CqlBuilder appendOptions(Consumer<OptionsBuilder> builder)
+    {
+        builder.accept(new OptionsBuilder(this));
+        return this;
+    }
+
+    public static class OptionsBuilder
+    {
+        private final CqlBuilder builder;
+        private boolean empty = true;
+
+        OptionsBuilder(CqlBuilder builder)
+        {
+            this.builder = builder;
+        }
+
+        public OptionsBuilder append(String name, Map<String, String> options)
+        {
+            if (options.isEmpty())
+                return this;
+
+            builder.append((empty ? " WITH " : " AND ") + name + " = ");
+            empty = false;
+            builder.append(options);
+            return this;
+        }
     }
 }
