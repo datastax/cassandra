@@ -49,8 +49,9 @@ import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
-import org.assertj.core.api.Assertions;
 
+import static org.hamcrest.Matchers.instanceOf;
+import static org.hamcrest.Matchers.is;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -193,7 +194,6 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
             MemtableTermsIterator termsIterator = new MemtableTermsIterator(null, null, iter);
             SegmentMetadata.ComponentMetadataMap indexMetas = writer.writeAll(metadataBuilder.intercept(termsIterator), docLengths);
             metadataBuilder.setComponentsMetadata(indexMetas);
-            metadataBuilder.setNumRows(docLengths.values().stream().mapToInt(i -> i).sum());
         }
 
         final SegmentMetadata segmentMetadata = metadataBuilder.build();
@@ -207,7 +207,7 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
                                                                                    indexContext,
                                                                                    indexFiles,
                                                                                    segmentMetadata);
-            Assertions.assertThat(searcher).isInstanceOf(InvertedIndexSearcher.class);
+            assertThat(searcher, is(instanceOf(InvertedIndexSearcher.class)));
             return searcher;
         }
     }

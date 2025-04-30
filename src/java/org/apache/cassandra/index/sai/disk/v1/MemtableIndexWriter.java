@@ -146,7 +146,6 @@ public class MemtableIndexWriter implements PerIndexWriter
 
     private long flush(DecoratedKey minKey, DecoratedKey maxKey, AbstractType<?> termComparator, MemtableTermsIterator terms, int maxSegmentRowId) throws IOException
     {
-        long numPostings;
         long numRows;
         SegmentMetadataBuilder metadataBuilder = new SegmentMetadataBuilder(0, perIndexComponents);
         SegmentMetadata.ComponentMetadataMap indexMetas;
@@ -167,8 +166,7 @@ public class MemtableIndexWriter implements PerIndexWriter
                       );
 
                 indexMetas = writer.writeAll(metadataBuilder.intercept(terms), docLengths);
-                numPostings = writer.getPostingsCount();
-                numRows = docLengths.size();
+                numRows = writer.getPostingsCount();
             }
         }
         else
@@ -182,20 +180,18 @@ public class MemtableIndexWriter implements PerIndexWriter
             {
                 ImmutableOneDimPointValues values = ImmutableOneDimPointValues.fromTermEnum(terms, termComparator);
                 indexMetas = writer.writeAll(metadataBuilder.intercept(values));
-                numPostings = writer.getPointCount();
-                numRows = numPostings;
+                numRows = writer.getPointCount();
             }
         }
 
         // If no rows were written we need to delete any created column index components
         // so that the index is correctly identified as being empty (only having a completion marker)
-        if (numPostings == 0)
+        if (numRows == 0)
         {
             perIndexComponents.forceDeleteAllComponents();
             return 0;
         }
 
-        metadataBuilder.setNumRows(numRows);
         metadataBuilder.setKeyRange(pkFactory.createPartitionKeyOnly(minKey), pkFactory.createPartitionKeyOnly(maxKey));
         metadataBuilder.setRowIdRange(terms.getMinSSTableRowId(), terms.getMaxSSTableRowId());
         metadataBuilder.setTermRange(terms.getMinTerm(), terms.getMaxTerm());
@@ -207,7 +203,7 @@ public class MemtableIndexWriter implements PerIndexWriter
             SegmentMetadata.write(writer, Collections.singletonList(metadata));
         }
 
-        return numPostings;
+        return numRows;
     }
 
     private boolean writeFrequencies()
