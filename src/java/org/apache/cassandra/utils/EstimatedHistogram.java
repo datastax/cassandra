@@ -91,10 +91,7 @@ public class EstimatedHistogram
 
     public static long[] newOffsets(int size, boolean considerZeroes)
     {
-        if (USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES)
-            return DecayingEstimatedHistogramReservoir.newDseOffsets(size, considerZeroes);
-        else
-            return newCassandraOffsets(size, considerZeroes);
+        return newCassandraOffsets(size, considerZeroes);
     }
 
     public static long[] newCassandraOffsets(int size, boolean considerZeroes)
