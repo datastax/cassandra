@@ -111,9 +111,9 @@ public class SingletonIndexGroup implements Index.Group
     {
         Preconditions.checkNotNull(delegate);
 
-        IndexHints hints = rowFilter.indexHints();
+        IndexHints indexHints = rowFilter.indexHints();
 
-        if (hints.excludes(delegate))
+        if (indexHints.excludes(delegate))
             return null;
 
         // Indexes using a singleton group don't support disjunctions,

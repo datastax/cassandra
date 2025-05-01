@@ -1262,14 +1262,14 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
     }
 
     @Override
-    public Optional<Index> getBestIndexFor(RowFilter.Expression expression, IndexHints hints)
+    public Optional<Index> getBestIndexFor(RowFilter.Expression expression, IndexHints indexHints)
     {
-        return hints.getBestIndexFor(indexes.values(), i -> i.supportsExpression(expression));
+        return indexHints.getBestIndexFor(indexes.values(), i -> i.supportsExpression(expression));
     }
 
-    public <T extends Index> Optional<T> getBestIndexFor(RowFilter.Expression expression, IndexHints hints, Class<T> indexType)
+    public <T extends Index> Optional<T> getBestIndexFor(RowFilter.Expression expression, IndexHints indexHints, Class<T> indexType)
     {
-        return hints.getBestIndexFor(indexes.values(), i -> i.supportsExpression(expression) && indexType.isInstance(i))
+        return indexHints.getBestIndexFor(indexes.values(), i -> i.supportsExpression(expression) && indexType.isInstance(i))
                     .map(indexType::cast);
     }
 

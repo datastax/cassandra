@@ -1763,7 +1763,10 @@ abstract public class Plan
 
         /**
          * Creates a factory that produces Plan nodes.
+         *
          * @param tableMetrics allows the planner to adapt the cost estimates to the actual amount of data stored in the table
+         * @param costEstimator a cost estimator
+         * @param hints the user-provided index hints, the plan should try to respect them
          */
         public Factory(TableMetrics tableMetrics, CostEstimator costEstimator, IndexHints hints)
         {

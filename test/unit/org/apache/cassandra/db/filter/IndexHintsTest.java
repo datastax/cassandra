@@ -221,21 +221,21 @@ public class IndexHintsTest extends CQLTester
         formattedQuery = formatQuery("SELECT * FROM %%s WHERE a = 0 AND b = 0 WITH preferred_indexes={idx1,idx2}");
         command = parseReadCommand(formattedQuery);
         Assertions.assertThat(command.toCQLString())
-                  .contains(" WITH preferred_indexes={idx1,idx2}")
+                  .contains(" WITH preferred_indexes = {idx1, idx2}")
                   .doesNotContain("excluded_indexes");
 
         // with excluded indexes only
         formattedQuery = formatQuery("SELECT * FROM %%s WHERE a = 0 AND b = 0 ALLOW FILTERING WITH excluded_indexes={idx1,idx2}");
         command = parseReadCommand(formattedQuery);
         Assertions.assertThat(command.toCQLString())
-                  .contains(" WITH excluded_indexes={idx1,idx2}")
+                  .contains(" WITH excluded_indexes = {idx1, idx2}")
                   .doesNotContain("preferred_indexes");
 
         // with both preferred and excluded indexes
         formattedQuery = formatQuery("SELECT * FROM %%s WHERE a = 0 AND b = 0 ALLOW FILTERING WITH preferred_indexes={idx1} AND excluded_indexes={idx2}");
         command = parseReadCommand(formattedQuery);
         Assertions.assertThat(command.toCQLString())
-                  .contains(" WITH preferred_indexes={idx1} AND excluded_indexes={idx2}");
+                  .contains(" WITH preferred_indexes = {idx1} AND excluded_indexes = {idx2}");
     }
 
     /**

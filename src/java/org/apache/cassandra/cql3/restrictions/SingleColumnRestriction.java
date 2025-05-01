@@ -85,10 +85,10 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         return findSupportingIndex(indexRegistry, indexHints) != null;
     }
 
-    public Index findSupportingIndex(IndexRegistry indexRegistry, IndexHints hints)
+    public Index findSupportingIndex(IndexRegistry indexRegistry, IndexHints indexHints)
     {
         for (Index index : indexRegistry.listIndexes())
-            if (!hints.excludes(index) && isSupportedBy(index))
+            if (!indexHints.excludes(index) && isSupportedBy(index))
                 return index;
 
         return null;

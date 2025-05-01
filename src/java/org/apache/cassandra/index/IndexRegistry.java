@@ -319,11 +319,11 @@ public interface IndexRegistry
     Index getIndexByName(String indexName);
     Collection<Index> listIndexes();
 
-    default Optional<Index.Analyzer> getAnalyzerFor(ColumnMetadata column, Operator operator, ByteBuffer value, IndexHints indexHints)
+    default Optional<Index.Analyzer> getAnalyzerFor(ColumnMetadata column, Operator operator, ByteBuffer value, IndexHints hints)
     {
         for (Index index : listIndexes())
         {
-            if (!indexHints.excludes(index) && index.supportsExpression(column, operator))
+            if (!hints.excludes(index) && index.supportsExpression(column, operator))
             {
                 Optional<Index.Analyzer> analyzer = index.getAnalyzer(value);
                 if (analyzer.isPresent())
@@ -402,14 +402,14 @@ public interface IndexRegistry
      * - MATCHES if an index supports both EQ and ANALYZER_MATCHES
      * - otherwise EQ
      */
-    default EqBehaviorIndexes getEqBehavior(ColumnMetadata cm, IndexHints indexHints)
+    default EqBehaviorIndexes getEqBehavior(ColumnMetadata cm, IndexHints hints)
     {
         Set<Index> eqOnlyIndexes = new HashSet<>();
         Set<Index> bothIndexes = new HashSet<>();
 
         for (Index index : listIndexes())
         {
-            if (indexHints.excludes(index))
+            if (hints.excludes(index))
                 continue;
 
             boolean supportsEq = index.supportsExpression(cm, Operator.EQ);
@@ -425,8 +425,8 @@ public interface IndexRegistry
         }
 
         // we should consider the user-provided index hints, which can be used to disambiguate EQ queries
-        boolean prefersEq = !eqOnlyIndexes.isEmpty() && indexHints.prefersAnyOf(eqOnlyIndexes);
-        boolean prefersBoth = !bothIndexes.isEmpty() && indexHints.prefersAnyOf(bothIndexes);
+        boolean prefersEq = !eqOnlyIndexes.isEmpty() && hints.prefersAnyOf(eqOnlyIndexes);
+        boolean prefersBoth = !bothIndexes.isEmpty() && hints.prefersAnyOf(bothIndexes);
 
         // If we have indexes supporting only EQ and indexes supporting both, return AMBIGUOUS,
         // unless the index hints prefer one index over the other.
