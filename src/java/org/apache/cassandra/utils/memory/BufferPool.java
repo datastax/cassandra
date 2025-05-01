@@ -20,13 +20,21 @@ package org.apache.cassandra.utils.memory;
 
 import java.lang.ref.PhantomReference;
 import java.lang.ref.ReferenceQueue;
+import java.lang.reflect.Field;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
 import java.util.Queue;
 import java.util.Set;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicLongFieldUpdater;
 import java.util.concurrent.atomic.LongAdder;
@@ -34,11 +42,15 @@ import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
 import java.util.function.BiPredicate;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
 
+import io.netty.util.concurrent.FastThreadLocalThread;
+import io.netty.util.internal.InternalThreadLocalMap;
 import jdk.internal.ref.Cleaner;
 import net.nicoulaj.compilecommand.annotations.Inline;
+import org.apache.cassandra.cache.ChunkCache;
 import org.apache.cassandra.concurrent.InfiniteLoopExecutor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -56,6 +68,7 @@ import sun.nio.ch.DirectBuffer;
 import static com.google.common.collect.ImmutableList.of;
 import static org.apache.cassandra.utils.ExecutorUtils.*;
 import static org.apache.cassandra.utils.FBUtilities.prettyPrintMemory;
+import static org.apache.cassandra.utils.memory.MemoryUtil.free;
 import static org.apache.cassandra.utils.memory.MemoryUtil.isExactlyDirect;
 
 /**
@@ -120,6 +133,21 @@ import static org.apache.cassandra.utils.memory.MemoryUtil.isExactlyDirect;
  */
 public class BufferPool
 {
+    private static Map<Integer, AtomicInteger> allAllocs = new ConcurrentHashMap<>();
+    private static Map<Integer, AtomicInteger> overflowAllocs = new ConcurrentHashMap<>();
+    private static Map<Integer, AtomicInteger> allPuts = new ConcurrentHashMap<>();
+    private static Map<Integer, AtomicInteger> partialPuts = new ConcurrentHashMap<>();
+    private static Map<Integer, AtomicInteger> partialPoolPuts = new ConcurrentHashMap<>();
+    private static Map<Integer, AtomicInteger> partialOverflowPuts = new ConcurrentHashMap<>();
+    private static Map<Integer, AtomicInteger> overflowPuts = new ConcurrentHashMap<>();
+    private static AtomicInteger iteration = new AtomicInteger();
+    private static ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+
+    static
+    {
+        scheduler.scheduleAtFixedRate(BufferPool::dumpStats, 1, 1, TimeUnit.SECONDS);
+    }
+
     /** The size of a page aligned buffer, 128KiB */
     public static final int NORMAL_CHUNK_SIZE = 128 << 10;
     public static final int NORMAL_ALLOCATION_UNIT = NORMAL_CHUNK_SIZE / 64;
@@ -179,6 +207,34 @@ public class BufferPool
     private final ReferenceQueue<Object> localPoolRefQueue = new ReferenceQueue<>();
     private final InfiniteLoopExecutor localPoolCleaner;
 
+    public static void dumpStats()
+    {
+        StringBuilder sb = new StringBuilder();
+        sb.append("BufferPool dump stats:\n");
+        sb.append("iteration ").append(iteration.incrementAndGet()).append('\n');
+        sb.append("time ").append(System.currentTimeMillis()).append('\n');
+        appendMap("all allocs", allAllocs, sb);
+        appendMap("overflow allocs", overflowAllocs, sb);
+        sb.append('\n');
+        appendMap("all puts", allPuts, sb);
+        appendMap("overflow puts", overflowPuts, sb);
+        sb.append('\n');
+        appendMap("partial puts", partialPuts, sb);
+        appendMap("partial pool puts", partialPoolPuts, sb);
+        appendMap("partial overflow puts", partialOverflowPuts, sb);
+        logger.info("-------------- BUFFER POOL STATS --------------\n" + sb);
+    }
+
+    private static void appendMap(String description, Map<Integer, AtomicInteger> map, StringBuilder sb)
+    {
+        sb.append(description).append('\n');
+        map.entrySet()
+                 .stream()
+                 .forEach(e -> {
+                     sb.append(e.getKey()).append(" ").append(e.getValue().get()).append('\n');
+                 });
+    }
+
     public BufferPool(String name, long memoryUsageThreshold, boolean recyclePartially)
     {
         this.name = name;
@@ -228,9 +284,24 @@ public class BufferPool
     private ByteBuffer allocate(int size, BufferType bufferType)
     {
         updateOverflowMemoryUsage(size);
-        return bufferType == BufferType.ON_HEAP
-               ? ByteBuffer.allocate(size)
-               : ByteBuffer.allocateDirect(size);
+        if (bufferType == BufferType.ON_HEAP)
+        {
+            return ByteBuffer.allocate(size);
+        }
+        else
+        {
+            if (size > NORMAL_CHUNK_SIZE)
+                metrics.markOversizedOverflow();
+            else
+                metrics.markNormalOverflow();
+            ByteBuffer ret = ByteBuffer.allocateDirect(size);
+            if (isChunkCache())
+            {
+                overflowAllocs.computeIfAbsent(ret.capacity(), k -> new AtomicInteger(0))
+                              .incrementAndGet();
+            }
+            return ret;
+        }
     }
 
     public void put(ByteBuffer buffer)
@@ -799,10 +870,18 @@ public class BufferPool
             Chunk chunk = Chunk.getParentChunk(buffer);
             int size = buffer.capacity();
 
+            if (isChunkCache())
+            {
+                allPuts.computeIfAbsent(size, k -> new AtomicInteger(0)).incrementAndGet();
+            }
             if (chunk == null)
             {
                 FileUtils.clean(buffer);
                 updateOverflowMemoryUsage(-size);
+                if (isChunkCache())
+                {
+                    overflowPuts.computeIfAbsent(size, k -> new AtomicInteger(0)).incrementAndGet();
+                }
             }
             else
             {
@@ -868,12 +947,33 @@ public class BufferPool
 
             if (chunk == null)
             {
+                if (isChunkCache())
+                {
+                    allPuts.computeIfAbsent(size, k -> new AtomicInteger(0))
+                           .incrementAndGet();
+                    overflowPuts.computeIfAbsent(size, k -> new AtomicInteger(0))
+                                .incrementAndGet();
+                    partialOverflowPuts.computeIfAbsent(size, k -> new AtomicInteger(0))
+                               .incrementAndGet();
+                    partialPuts.computeIfAbsent(size, k -> new AtomicInteger(0))
+                               .incrementAndGet();
+                }
                 updateOverflowMemoryUsage(-size);
                 return;
             }
 
             chunk.freeUnusedPortion(buffer);
             // Calculate the actual freed bytes which may be different from `size` when pooling is involved
+            if (isChunkCache())
+            {
+                int freed = originalCapacity - buffer.capacity();
+                allPuts.computeIfAbsent(freed, k -> new AtomicInteger(0))
+                       .incrementAndGet();
+                partialPoolPuts.computeIfAbsent(freed, k -> new AtomicInteger(0))
+                           .incrementAndGet();
+                partialPuts.computeIfAbsent(freed, k -> new AtomicInteger(0))
+                           .incrementAndGet();
+            }
             memoryInUse.add(buffer.capacity() - originalCapacity);
         }
 
@@ -888,6 +988,16 @@ public class BufferPool
         }
 
         private ByteBuffer get(int size, boolean sizeIsLowerBound)
+        {
+            ByteBuffer ret = doGet(size, sizeIsLowerBound);
+            if (isChunkCache())
+            {
+                allAllocs.computeIfAbsent(ret.capacity(), k -> new AtomicInteger(0)).incrementAndGet();
+            }
+            return ret;
+        }
+
+        private ByteBuffer doGet(int size, boolean sizeIsLowerBound)
         {
             ByteBuffer ret = tryGet(size, sizeIsLowerBound);
             if (ret != null)
@@ -1050,6 +1160,11 @@ public class BufferPool
                 tinyPool.recycleWhenFree = recycleWhenFree;
             return this;
         }
+    }
+
+    private boolean isChunkCache()
+    {
+        return name.equals("chunk-cache");
     }
 
     private static final class LocalPoolRef extends PhantomReference<LocalPool>
@@ -1640,5 +1755,86 @@ public class BufferPool
         return   (pool.chunks.chunk0 != null ? 1 : 0)
                  + (pool.chunks.chunk1 != null ? 1 : 0)
                  + (pool.chunks.chunk2 != null ? 1 : 0);
+    }
+
+    public void dumpDetailedChunkInfo() throws Exception
+    {
+        long totalPool = 0;
+        for(Chunk macroChunk: globalPool.macroChunks)
+        {
+            totalPool += macroChunk.capacity();
+        }
+        logger.info("Detailed chunks info:");
+        logger.info("Total allocated memory in pool: {}/{}", totalPool, memoryAllocated.get());
+        logger.info("Currently allocated overflow memory: {}", overflowMemoryUsage.longValue());
+        logger.info("Max allocation threshold: {}", memoryUsageThreshold);
+        logger.info("Total currently allocated memory: {} / {}", totalPool + overflowMemoryUsage.longValue(), ((double) totalPool + overflowMemoryUsage.longValue()) / memoryUsageThreshold);
+        logger.info("Chunk usage:");
+        logger.info("Number of macro chunks: {}", globalPool.macroChunks.size());
+        for(Chunk macroChunk: globalPool.macroChunks)
+        {
+//            logger.info("Macro chunk: {}", macroChunk);
+        }
+        // that's fine because our test has 1 thread only that uses the chunk cache
+        logger.info("Thread: {}", Thread.currentThread());
+        //logger.info("Number of local pool chunks: {}", localPool.get().chunks.size());
+        logger.info("Partially freed chunks: {}", globalPool.partiallyFreedChunks.size());
+        logger.info("Partially freed chunks head:");
+        int count = 0;
+        for (Chunk chunk: globalPool.partiallyFreedChunks)
+        {
+            logger.info("{}", String.format("%64s", Long.toBinaryString(chunk.freeSlots)).replace(' ', '0'));
+            count++;
+            if (count >= 10)
+                break;
+        }
+        Set<Object> seen = new HashSet<>();
+        for (Chunk chunk: globalPool.partiallyFreedChunks)
+        {
+            if (!seen.add(chunk))
+            {
+                logger.info("Duplicate chunk found: {}", chunk);
+            }
+        }
+        logger.info("Seen chunks: {}", seen.size());
+        List <Chunk> partiallyFreedChunks = new ArrayList<>(new HashSet<>(globalPool.partiallyFreedChunks));
+        logger.info("Unique partially freed chunks: {}", partiallyFreedChunks.size());
+        partiallyFreedChunks.sort(Comparator.comparing(Chunk::freeSlotCount).reversed());
+        Map<Integer, AtomicInteger> freeMap = new HashMap<>();
+        int totalFree = 0;
+        for (Chunk chunk: partiallyFreedChunks)
+        {
+            //logger.info("{}", String.format("%64s", Long.toBinaryString(chunk.freeSlots)).replace(' ', '0'));
+            totalFree += chunk.free();
+            freeMap.computeIfAbsent(chunk.freeSlotCount(), k -> new AtomicInteger(0)).incrementAndGet();
+        }
+        logger.info("Total free space in partially freed chunks: {}", totalFree);
+        logger.info("Free space map: {}", freeMap.entrySet()
+                                                 .stream()
+                                                 .sorted(Map.Entry.comparingByKey(Comparator.reverseOrder()))
+                                                 .map(e -> e.getKey() + " -> " + e.getValue().get())
+                                                 .collect(Collectors.joining("\n")));
+
+        StringBuilder sb = new StringBuilder();
+        int freeInMostlyFreeChunks = 0;
+        for (Chunk chunk: partiallyFreedChunks)
+        {
+            if (chunk.freeSlotCount() >= 32)
+                freeInMostlyFreeChunks += chunk.free();
+        }
+        logger.info("Total free space in mostly free chunks: {}", freeInMostlyFreeChunks);
+
+        for (Chunk chunk: partiallyFreedChunks)
+        {
+            sb.append(String.format("%64s", Long.toBinaryString(chunk.freeSlots)).replace(' ', '0'));
+            sb.append(", free slots: ").append(chunk.freeSlotCount());
+            sb.append('\n');
+        }
+        logger.info("Free space map:\n{}", sb);
+
+        for (Chunk chunk: partiallyFreedChunks)
+        {
+            logger.info("{}", chunk);
+        }
     }
 }
