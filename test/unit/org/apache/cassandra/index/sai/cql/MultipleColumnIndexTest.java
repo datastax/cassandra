@@ -19,6 +19,7 @@ package org.apache.cassandra.index.sai.cql;
 
 import org.junit.Test;
 
+import org.apache.cassandra.cql3.restrictions.SingleColumnRestriction;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.SAITester;
 
@@ -31,7 +32,7 @@ public class MultipleColumnIndexTest extends SAITester
     // types/collections/maps/MultiMap*Test tests
     // This is just testing that the indexes can be created
     @Test
-    public void canCreateMultipleMapIndexesOnSameColumn() throws Throwable
+    public void canCreateMultipleMapIndexesOnSameColumn()
     {
         createTable("CREATE TABLE %s (pk int, ck int, value map<int,int>, PRIMARY KEY(pk, ck))");
         createIndex("CREATE CUSTOM INDEX ON %s(KEYS(value)) USING 'StorageAttachedIndex'");
@@ -58,7 +59,7 @@ public class MultipleColumnIndexTest extends SAITester
     }
 
     @Test
-    public void cannotHaveMultipleAnalyzingIndexesOnSameColumn() throws Throwable
+    public void cannotHaveMultipleAnalyzingIndexesOnSameColumn()
     {
         createTable("CREATE TABLE %s (pk int, ck int, value text, PRIMARY KEY(pk, ck))");
         createIndex("CREATE CUSTOM INDEX ON %s(value) USING 'StorageAttachedIndex' WITH OPTIONS = { 'case_sensitive' : false }");
@@ -111,5 +112,237 @@ public class MultipleColumnIndexTest extends SAITester
             assertEquals(2, execute("SELECT * FROM %s WHERE text_map['k1'] != 'v2' AND text_map NOT CONTAINS KEY 'k3'").size());
             assertEquals(1, execute("SELECT * FROM %s WHERE text_map['k1'] != 'v2' AND text_map NOT CONTAINS KEY 'k3' AND text_map NOT CONTAINS KEY 'k5'").size());
         });
+    }
+    
+    @Test
+    public void testContainsWithAnalyzedAndNotAnalyzedOnList()
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v list<text>)");
+
+        String insert = "INSERT INTO %s (k, v) VALUES (?, ?)";
+        Object[] row1 = new Object[]{ 1, list("Johann Strauss") };
+        Object[] row2 = new Object[]{ 2, list("Richard Strauss", "Johann Sebastian Bach") };
+        execute(insert, row1);
+        execute(insert, row2);
+
+        // Test with not analyzed index only
+        String notAnalyzedIndex = createIndex("CREATE CUSTOM INDEX not_analyzed ON %s(v) USING 'StorageAttachedIndex'");
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS 'Johann Strauss'", row1).uses(notAnalyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS 'Richard Strauss'", row2).uses(notAnalyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS 'Strauss'").uses(notAnalyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS 'Johann'").uses(notAnalyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS 'Richard'").uses(notAnalyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS 'Debussy'").uses(notAnalyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS 'Johann Strauss'", row2).uses(notAnalyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS 'Richard Strauss'", row1).uses(notAnalyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS 'Strauss'", row1, row2).uses(notAnalyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS 'Johann'", row1, row2).uses(notAnalyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS 'Richard'", row1, row2).uses(notAnalyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS 'Debussy'", row1, row2).uses(notAnalyzedIndex).doesntWarn();
+
+        // Test with both analyzed and not analyzed indexes, it should prefer the not analyzed index
+        String analyzedIndex = createIndex("CREATE CUSTOM INDEX analyzed ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = { 'index_analyzer': 'standard' }");
+        String warning = String.format(SingleColumnRestriction.ContainsRestriction.MULTIPLE_INDEXES_WARNING, 'v', notAnalyzedIndex);
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS 'Johann Strauss'", row1).uses(notAnalyzedIndex).warns(warning);
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS 'Richard Strauss'", row2).uses(notAnalyzedIndex).warns(warning);
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS 'Strauss'").uses(notAnalyzedIndex).warns(warning);
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS 'Johann'").uses(notAnalyzedIndex).warns(warning);
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS 'Richard'").uses(notAnalyzedIndex).warns(warning);
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS 'Debussy'").uses(notAnalyzedIndex).warns(warning);
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS 'Johann Strauss'", row2).uses(notAnalyzedIndex).warns(warning);
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS 'Richard Strauss'", row1).uses(notAnalyzedIndex).warns(warning);
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS 'Strauss'", row1, row2).uses(notAnalyzedIndex).warns(warning);
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS 'Johann'", row1, row2).uses(notAnalyzedIndex).warns(warning);
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS 'Richard'", row1, row2).uses(notAnalyzedIndex).warns(warning);
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS 'Debussy'", row1, row2).uses(notAnalyzedIndex).warns(warning);
+
+        // Test with analyzed index only
+        dropIndex("DROP INDEX %s." + notAnalyzedIndex);
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS 'Johann Strauss'", row1).uses(analyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS 'Richard Strauss'", row2).uses(analyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS 'Strauss'", row1, row2).uses(analyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS 'Johann'", row1, row2).uses(analyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS 'Richard'", row2).uses(analyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS 'Debussy'").uses(analyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS 'Johann Strauss'").uses(analyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS 'Richard Strauss'").uses(analyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS 'Strauss'").uses(analyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS 'Johann'").uses(analyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS 'Richard'", row1).uses(analyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS 'Debussy'", row1, row2).uses(analyzedIndex).doesntWarn();
+    }
+
+    @Test
+    public void testContainsWithAnalyzedAndNotAnalyzedOnSet()
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v set<text>)");
+
+        String insert = "INSERT INTO %s (k, v) VALUES (?, ?)";
+        Object[] row1 = new Object[]{ 1, set("Johann Strauss") };
+        Object[] row2 = new Object[]{ 2, set("Richard Strauss", "Johann Sebastian Bach") };
+        execute(insert, row1);
+        execute(insert, row2);
+
+        // Test with not analyzed index only
+        String notAnalyzedIndex = createIndex("CREATE CUSTOM INDEX not_analyzed ON %s(v) USING 'StorageAttachedIndex'");
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS 'Johann Strauss'", row1).uses(notAnalyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS 'Richard Strauss'", row2).uses(notAnalyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS 'Strauss'").uses(notAnalyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS 'Johann'").uses(notAnalyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS 'Richard'").uses(notAnalyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS 'Debussy'").uses(notAnalyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS 'Johann Strauss'", row2).uses(notAnalyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS 'Richard Strauss'", row1).uses(notAnalyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS 'Strauss'", row1, row2).uses(notAnalyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS 'Johann'", row1, row2).uses(notAnalyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS 'Richard'", row1, row2).uses(notAnalyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS 'Debussy'", row1, row2).uses(notAnalyzedIndex).doesntWarn();
+
+        // Test with both analyzed and not analyzed indexes, it should prefer the not analyzed index
+        String analyzedIndex = createIndex("CREATE CUSTOM INDEX analyzed ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = { 'index_analyzer': 'standard' }");
+        String warning = String.format(SingleColumnRestriction.ContainsRestriction.MULTIPLE_INDEXES_WARNING, 'v', notAnalyzedIndex);
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS 'Johann Strauss'", row1).uses(notAnalyzedIndex).warns(warning);
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS 'Richard Strauss'", row2).uses(notAnalyzedIndex).warns(warning);
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS 'Strauss'").uses(notAnalyzedIndex).warns(warning);
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS 'Johann'").uses(notAnalyzedIndex).warns(warning);
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS 'Richard'").uses(notAnalyzedIndex).warns(warning);
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS 'Debussy'").uses(notAnalyzedIndex).warns(warning);
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS 'Johann Strauss'", row2).uses(notAnalyzedIndex).warns(warning);
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS 'Richard Strauss'", row1).uses(notAnalyzedIndex).warns(warning);
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS 'Strauss'", row1, row2).uses(notAnalyzedIndex).warns(warning);
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS 'Johann'", row1, row2).uses(notAnalyzedIndex).warns(warning);
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS 'Richard'", row1, row2).uses(notAnalyzedIndex).warns(warning);
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS 'Debussy'", row1, row2).uses(notAnalyzedIndex).warns(warning);
+
+        // Test with analyzed index only
+        dropIndex("DROP INDEX %s." + notAnalyzedIndex);
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS 'Johann Strauss'", row1).uses(analyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS 'Richard Strauss'", row2).uses(analyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS 'Strauss'", row1, row2).uses(analyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS 'Johann'", row1, row2).uses(analyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS 'Richard'", row2).uses(analyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS 'Debussy'").uses(analyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS 'Johann Strauss'").uses(analyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS 'Richard Strauss'").uses(analyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS 'Strauss'").uses(analyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS 'Johann'").uses(analyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS 'Richard'", row1).uses(analyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS 'Debussy'", row1, row2).uses(analyzedIndex).doesntWarn();
+    }
+
+    @Test
+    public void testContainsWithAnalyzedAndNotAnalyzedOnMap()
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v map<int, text>)");
+
+        String insert = "INSERT INTO %s (k, v) VALUES (?, ?)";
+        Object[] row1 = new Object[]{ 1, map(0, "Johann Strauss") };
+        Object[] row2 = new Object[]{ 2, map(0, "Richard Strauss", 1, "Johann Sebastian Bach") };
+        execute(insert, row1);
+        execute(insert, row2);
+
+        // Test with not analyzed index only
+        String notAnalyzedIndex = createIndex("CREATE CUSTOM INDEX not_analyzed ON %s(v) USING 'StorageAttachedIndex'");
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS 'Johann Strauss'", row1).uses(notAnalyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS 'Richard Strauss'", row2).uses(notAnalyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS 'Strauss'").uses(notAnalyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS 'Johann'").uses(notAnalyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS 'Richard'").uses(notAnalyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS 'Debussy'").uses(notAnalyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS 'Johann Strauss'", row2).uses(notAnalyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS 'Richard Strauss'", row1).uses(notAnalyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS 'Strauss'", row1, row2).uses(notAnalyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS 'Johann'", row1, row2).uses(notAnalyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS 'Richard'", row1, row2).uses(notAnalyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS 'Debussy'", row1, row2).uses(notAnalyzedIndex).doesntWarn();
+
+        // Test with both analyzed and not analyzed indexes, it should prefer the not analyzed index
+        String analyzedIndex = createIndex("CREATE CUSTOM INDEX analyzed ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = { 'index_analyzer': 'standard' }");
+        String warning = String.format(SingleColumnRestriction.ContainsRestriction.MULTIPLE_INDEXES_WARNING, 'v', notAnalyzedIndex);
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS 'Johann Strauss'", row1).uses(notAnalyzedIndex).warns(warning);
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS 'Richard Strauss'", row2).uses(notAnalyzedIndex).warns(warning);
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS 'Strauss'").uses(notAnalyzedIndex).warns(warning);
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS 'Johann'").uses(notAnalyzedIndex).warns(warning);
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS 'Richard'").uses(notAnalyzedIndex).warns(warning);
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS 'Debussy'").uses(notAnalyzedIndex).warns(warning);
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS 'Johann Strauss'", row2).uses(notAnalyzedIndex).warns(warning);
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS 'Richard Strauss'", row1).uses(notAnalyzedIndex).warns(warning);
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS 'Strauss'", row1, row2).uses(notAnalyzedIndex).warns(warning);
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS 'Johann'", row1, row2).uses(notAnalyzedIndex).warns(warning);
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS 'Richard'", row1, row2).uses(notAnalyzedIndex).warns(warning);
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS 'Debussy'", row1, row2).uses(notAnalyzedIndex).warns(warning);
+
+        // Test with analyzed index only
+        dropIndex("DROP INDEX %s." + notAnalyzedIndex);
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS 'Johann Strauss'", row1).uses(analyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS 'Richard Strauss'", row2).uses(analyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS 'Strauss'", row1, row2).uses(analyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS 'Johann'", row1, row2).uses(analyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS 'Richard'", row2).uses(analyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS 'Debussy'").uses(analyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS 'Johann Strauss'").uses(analyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS 'Richard Strauss'").uses(analyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS 'Strauss'").uses(analyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS 'Johann'").uses(analyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS 'Richard'", row1).uses(analyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS 'Debussy'", row1, row2).uses(analyzedIndex).doesntWarn();
+    }
+
+    @Test
+    public void testContainsKeyWithAnalyzedAndNotAnalyzedOnMap()
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v map<text, int>)");
+
+        String insert = "INSERT INTO %s (k, v) VALUES (?, ?)";
+        Object[] row1 = new Object[]{ 1, map("Johann Strauss", 0) };
+        Object[] row2 = new Object[]{ 2, map("Richard Strauss", 0, "Johann Sebastian Bach", 1) };
+        execute(insert, row1);
+        execute(insert, row2);
+
+        // Test with not analyzed index only
+        String notAnalyzedIndex = createIndex("CREATE CUSTOM INDEX not_analyzed ON %s(keys(v)) USING 'StorageAttachedIndex'");
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS KEY 'Johann Strauss'", row1).uses(notAnalyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS KEY 'Richard Strauss'", row2).uses(notAnalyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS KEY 'Strauss'").uses(notAnalyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS KEY 'Johann'").uses(notAnalyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS KEY 'Richard'").uses(notAnalyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS KEY 'Debussy'").uses(notAnalyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS KEY 'Johann Strauss'", row2).uses(notAnalyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS KEY 'Richard Strauss'", row1).uses(notAnalyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS KEY 'Strauss'", row1, row2).uses(notAnalyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS KEY 'Johann'", row1, row2).uses(notAnalyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS KEY 'Richard'", row1, row2).uses(notAnalyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS KEY 'Debussy'", row1, row2).uses(notAnalyzedIndex).doesntWarn();
+
+        // Test with both analyzed and not analyzed indexes, it should prefer the not analyzed index
+        String analyzedIndex = createIndex("CREATE CUSTOM INDEX analyzed ON %s(keys(v)) USING 'StorageAttachedIndex' WITH OPTIONS = { 'index_analyzer': 'standard' }");
+        String warning = String.format(SingleColumnRestriction.ContainsRestriction.MULTIPLE_INDEXES_WARNING, 'v', notAnalyzedIndex);
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS KEY 'Johann Strauss'", row1).uses(notAnalyzedIndex).warns(warning);
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS KEY 'Richard Strauss'", row2).uses(notAnalyzedIndex).warns(warning);
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS KEY 'Strauss'").uses(notAnalyzedIndex).warns(warning);
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS KEY 'Johann'").uses(notAnalyzedIndex).warns(warning);
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS KEY 'Richard'").uses(notAnalyzedIndex).warns(warning);
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS KEY 'Debussy'").uses(notAnalyzedIndex).warns(warning);
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS KEY 'Johann Strauss'", row2).uses(notAnalyzedIndex).warns(warning);
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS KEY 'Richard Strauss'", row1).uses(notAnalyzedIndex).warns(warning);
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS KEY 'Strauss'", row1, row2).uses(notAnalyzedIndex).warns(warning);
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS KEY 'Johann'", row1, row2).uses(notAnalyzedIndex).warns(warning);
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS KEY 'Richard'", row1, row2).uses(notAnalyzedIndex).warns(warning);
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS KEY 'Debussy'", row1, row2).uses(notAnalyzedIndex).warns(warning);
+
+        // Test with analyzed index only
+        dropIndex("DROP INDEX %s." + notAnalyzedIndex);
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS KEY 'Johann Strauss'", row1).uses(analyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS KEY 'Richard Strauss'", row2).uses(analyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS KEY 'Strauss'", row1, row2).uses(analyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS KEY 'Johann'", row1, row2).uses(analyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS KEY 'Richard'", row2).uses(analyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v CONTAINS KEY 'Debussy'").uses(analyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS KEY 'Johann Strauss'").uses(analyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS KEY 'Richard Strauss'").uses(analyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS KEY 'Strauss'").uses(analyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS KEY 'Johann'").uses(analyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS KEY 'Richard'", row1).uses(analyzedIndex).doesntWarn();
+        assertThatPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS KEY 'Debussy'", row1, row2).uses(analyzedIndex).doesntWarn();
     }
 }
