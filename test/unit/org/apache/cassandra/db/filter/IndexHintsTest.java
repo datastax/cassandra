@@ -327,11 +327,8 @@ public class IndexHintsTest extends CQLTester
     public void testLegacyIndexWithAllowFiltering() throws Throwable
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v1 int, v2 int, v3 int)");
-        createIndex("CREATE INDEX idx1 ON %s(v1)");
-        createIndex("CREATE INDEX idx2 ON %s(v2)");
-
-        Index idx1 = getCurrentColumnFamilyStore().indexManager.getIndexByName("idx1");
-        Index idx2 = getCurrentColumnFamilyStore().indexManager.getIndexByName("idx2");
+        String idx1 = createIndex("CREATE INDEX idx1 ON %s(v1)");
+        String idx2 = createIndex("CREATE INDEX idx2 ON %s(v2)");
 
         String insert = "INSERT INTO %s (k, v1, v2, v3) VALUES (?, ?, ?, ?)";
         Object[] row1 = new Object[]{ 1, 0, 1, 1 };
@@ -399,11 +396,8 @@ public class IndexHintsTest extends CQLTester
     public void testLegacyIndexWithoutAllowFiltering() throws Throwable
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v1 int, v2 int, v3 int)");
-        createIndex("CREATE INDEX idx1 ON %s(v1)");
-        createIndex("CREATE INDEX idx2 ON %s(v2)");
-
-        Index idx1 = getCurrentColumnFamilyStore().indexManager.getIndexByName("idx1");
-        Index idx2 = getCurrentColumnFamilyStore().indexManager.getIndexByName("idx2");
+        String idx1 = createIndex("CREATE INDEX idx1 ON %s(v1)");
+        String idx2 = createIndex("CREATE INDEX idx2 ON %s(v2)");
 
         String insert = "INSERT INTO %s (k, v1, v2, v3) VALUES (?, ?, ?, ?)";
         Object[] row1 = new Object[]{ 1, 0, 1, 1 };
@@ -472,11 +466,8 @@ public class IndexHintsTest extends CQLTester
     public void testSAIWithAllowFiltering() throws Throwable
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v1 int, v2 int, v3 int)");
-        createIndex("CREATE CUSTOM INDEX idx1 ON %s(v1) USING 'StorageAttachedIndex'");
-        createIndex("CREATE CUSTOM INDEX idx2 ON %s(v2) USING 'StorageAttachedIndex'");
-
-        Index idx1 = getCurrentColumnFamilyStore().indexManager.getIndexByName("idx1");
-        Index idx2 = getCurrentColumnFamilyStore().indexManager.getIndexByName("idx2");
+        String idx1 = createIndex("CREATE CUSTOM INDEX idx1 ON %s(v1) USING 'StorageAttachedIndex'");
+        String idx2 = createIndex("CREATE CUSTOM INDEX idx2 ON %s(v2) USING 'StorageAttachedIndex'");
 
         String insert = "INSERT INTO %s (k, v1, v2, v3) VALUES (?, ?, ?, ?)";
         Object[] row1 = new Object[]{ 1, 0, 1, 1 };
@@ -548,11 +539,8 @@ public class IndexHintsTest extends CQLTester
     public void testSAIWithoutAllowFiltering() throws Throwable
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v1 int, v2 int, v3 int)");
-        createIndex("CREATE CUSTOM INDEX idx1 ON %s(v1) USING 'StorageAttachedIndex'");
-        createIndex("CREATE CUSTOM INDEX idx2 ON %s(v2) USING 'StorageAttachedIndex'");
-
-        Index idx1 = getCurrentColumnFamilyStore().indexManager.getIndexByName("idx1");
-        Index idx2 = getCurrentColumnFamilyStore().indexManager.getIndexByName("idx2");
+        String idx1 = createIndex("CREATE CUSTOM INDEX idx1 ON %s(v1) USING 'StorageAttachedIndex'");
+        String idx2 = createIndex("CREATE CUSTOM INDEX idx2 ON %s(v2) USING 'StorageAttachedIndex'");
 
         String insert = "INSERT INTO %s (k, v1, v2, v3) VALUES (?, ?, ?, ?)";
         Object[] row1 = new Object[]{ 1, 0, 1, 1 };
@@ -624,9 +612,9 @@ public class IndexHintsTest extends CQLTester
     public void testMixedIndexImplementations()
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v1 int, v2 int, v3 int)");
-        createIndex("CREATE CUSTOM INDEX idx1 ON %s(v1) USING 'StorageAttachedIndex'");
-        createIndex("CREATE CUSTOM INDEX idx2 ON %s(v2) USING 'StorageAttachedIndex'");
-        createIndex("CREATE INDEX idx3 ON %s(v3)");
+        String idx1 = createIndex("CREATE CUSTOM INDEX idx1 ON %s(v1) USING 'StorageAttachedIndex'");
+        String idx2 = createIndex("CREATE CUSTOM INDEX idx2 ON %s(v2) USING 'StorageAttachedIndex'");
+        String idx3 = createIndex("CREATE INDEX idx3 ON %s(v3)");
 
         String insert = "INSERT INTO %s (k, v1, v2, v3) VALUES (?, ?, ?, ?)";
         Object[] row1 = new Object[]{ 1, 0, 1, 1 };
@@ -635,10 +623,6 @@ public class IndexHintsTest extends CQLTester
         execute(insert, row1);
         execute(insert, row2);
         execute(insert, row3);
-
-        Index idx1 = getCurrentColumnFamilyStore().indexManager.getIndexByName("idx1");
-        Index idx2 = getCurrentColumnFamilyStore().indexManager.getIndexByName("idx2");
-        Index idx3 = getCurrentColumnFamilyStore().indexManager.getIndexByName("idx3");
 
         // without any hints
         assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v1=0 ALLOW FILTERING", row1).selects(idx1);
@@ -749,17 +733,14 @@ public class IndexHintsTest extends CQLTester
     public void testMultipleIndexesOnSameColumn()
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v int)");
-        createIndex("CREATE CUSTOM INDEX idx1 ON %s(v) USING 'StorageAttachedIndex'");
-        createIndex("CREATE INDEX idx2 ON %s(v)");
+        String idx1 = createIndex("CREATE CUSTOM INDEX idx1 ON %s(v) USING 'StorageAttachedIndex'");
+        String idx2 = createIndex("CREATE INDEX idx2 ON %s(v)");
 
         String insert = "INSERT INTO %s (k, v) VALUES (?, ?)";
         Object[] row1 = new Object[]{ 1, 0 };
         Object[] row2 = new Object[]{ 2, 1 };
         execute(insert, row1);
         execute(insert, row2);
-
-        Index idx1 = getCurrentColumnFamilyStore().indexManager.getIndexByName("idx1");
-        Index idx2 = getCurrentColumnFamilyStore().indexManager.getIndexByName("idx2");
 
         assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v=0", row1).selects(idx1);
         assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v=0 WITH preferred_indexes={idx1}", row1).selects(idx1);
@@ -775,14 +756,10 @@ public class IndexHintsTest extends CQLTester
     public void testMultipleIndexesPerColumnAndUnsupportedEqOnAnalyzer()
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v text)");
-        createIndex("CREATE INDEX idx1 ON %s(v)");
-        createIndex("CREATE CUSTOM INDEX idx2 ON %s(v) USING 'StorageAttachedIndex'");
-        createIndex("CREATE CUSTOM INDEX idx3 ON %s(v) USING 'StorageAttachedIndex' " +
-                    "WITH OPTIONS = { 'equals_behaviour_when_analyzed': 'UNSUPPORTED', 'index_analyzer': 'standard' }");
-
-        Index idx1 = getCurrentColumnFamilyStore().indexManager.getIndexByName("idx1");
-        Index idx2 = getCurrentColumnFamilyStore().indexManager.getIndexByName("idx2");
-        Index idx3 = getCurrentColumnFamilyStore().indexManager.getIndexByName("idx3");
+        String idx1 = createIndex("CREATE INDEX idx1 ON %s(v)");
+        String idx2 = createIndex("CREATE CUSTOM INDEX idx2 ON %s(v) USING 'StorageAttachedIndex'");
+        String idx3 = createIndex("CREATE CUSTOM INDEX idx3 ON %s(v) USING 'StorageAttachedIndex' " +
+                                  "WITH OPTIONS = { 'equals_behaviour_when_analyzed': 'UNSUPPORTED', 'index_analyzer': 'standard' }");
 
         String insert = "INSERT INTO %s (k, v) VALUES (?, ?)";
         Object[] row1 = new Object[]{ 1, "Richard Strauss" };
@@ -869,14 +846,10 @@ public class IndexHintsTest extends CQLTester
     public void testMultipleIndexesPerColumnAndMatchEqOnAnalyzer()
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v text)");
-        createIndex("CREATE INDEX idx1 ON %s(v)");
-        createIndex("CREATE CUSTOM INDEX idx2 ON %s(v) USING 'StorageAttachedIndex'");
-        createIndex("CREATE CUSTOM INDEX idx3 ON %s(v) USING 'StorageAttachedIndex' " +
-                    "WITH OPTIONS = { 'equals_behaviour_when_analyzed': 'MATCH', 'index_analyzer': 'standard' }");
-
-        Index idx1 = getCurrentColumnFamilyStore().indexManager.getIndexByName("idx1");
-        Index idx2 = getCurrentColumnFamilyStore().indexManager.getIndexByName("idx2");
-        Index idx3 = getCurrentColumnFamilyStore().indexManager.getIndexByName("idx3");
+        String idx1 = createIndex("CREATE INDEX idx1 ON %s(v)");
+        String idx2 = createIndex("CREATE CUSTOM INDEX idx2 ON %s(v) USING 'StorageAttachedIndex'");
+        String idx3 = createIndex("CREATE CUSTOM INDEX idx3 ON %s(v) USING 'StorageAttachedIndex' " +
+                                  "WITH OPTIONS = { 'equals_behaviour_when_analyzed': 'MATCH', 'index_analyzer': 'standard' }");
 
         String insert = "INSERT INTO %s (k, v) VALUES (?, ?)";
         Object[] row1 = new Object[]{ 1, "Richard Strauss" };
@@ -964,13 +937,9 @@ public class IndexHintsTest extends CQLTester
     public void testMultipleIndexesPerColumnAndContains()
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v list<text>)");
-        createIndex("CREATE INDEX idx1 ON %s(v)");
-        createIndex("CREATE CUSTOM INDEX idx2 ON %s(v) USING 'StorageAttachedIndex'");
-        createIndex("CREATE CUSTOM INDEX idx3 ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = { 'index_analyzer': 'standard' }");
-
-        Index idx1 = getCurrentColumnFamilyStore().indexManager.getIndexByName("idx1");
-        Index idx2 = getCurrentColumnFamilyStore().indexManager.getIndexByName("idx2");
-        Index idx3 = getCurrentColumnFamilyStore().indexManager.getIndexByName("idx3");
+        String idx1 = createIndex("CREATE INDEX idx1 ON %s(v)");
+        String idx2 = createIndex("CREATE CUSTOM INDEX idx2 ON %s(v) USING 'StorageAttachedIndex'");
+        String idx3 = createIndex("CREATE CUSTOM INDEX idx3 ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = { 'index_analyzer': 'standard' }");
 
         String insert = "INSERT INTO %s (k, v) VALUES (?, ?)";
         Object[] row1 = new Object[]{ 1, list("Johann Strauss") };
