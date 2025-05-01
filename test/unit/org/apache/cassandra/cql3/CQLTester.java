@@ -2947,20 +2947,20 @@ public abstract class CQLTester
         if (queryPlan == null)
             return new PlanSelectionAssertion(null);
 
-        Set<Index> indexes = queryPlan.getIndexes();
+        Set<String> indexes = queryPlan.getIndexes().stream().map(i -> i.getIndexMetadata().name).collect(Collectors.toSet());
         return new PlanSelectionAssertion(indexes);
     }
 
     protected static class PlanSelectionAssertion
     {
-        private final Set<Index> selectedIndexes;
+        private final Set<String> selectedIndexes;
 
-        protected PlanSelectionAssertion(@Nullable Set<Index> selectedIndexes)
+        protected PlanSelectionAssertion(@Nullable Set<String> selectedIndexes)
         {
             this.selectedIndexes = selectedIndexes;
         }
 
-        public void selects(Index... indexes)
+        public void selects(String... indexes)
         {
             Assertions.assertThat(selectedIndexes)
                       .isNotNull()
@@ -2968,9 +2968,9 @@ public abstract class CQLTester
                       .isEqualTo(Set.of(indexes));
         }
 
-        public void selectsAnyOf(Index index1, Index index2, Index... otherIndexes)
+        public void selectsAnyOf(String index1, String index2, String... otherIndexes)
         {
-            Set<Index> expectedIndexes = new HashSet<>(otherIndexes.length + 1);
+            Set<String> expectedIndexes = new HashSet<>(otherIndexes.length + 1);
             expectedIndexes.add(index1);
             expectedIndexes.add(index2);
             expectedIndexes.addAll(Arrays.asList(otherIndexes));
