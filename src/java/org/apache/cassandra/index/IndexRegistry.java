@@ -319,11 +319,28 @@ public interface IndexRegistry
     Index getIndexByName(String indexName);
     Collection<Index> listIndexes();
 
-    default Optional<Index.Analyzer> getAnalyzerFor(ColumnMetadata column, Operator operator, ByteBuffer value, IndexHints hints)
+    /**
+     * Lists the indexes in this registry, minus the ones excluded by the specified {@link IndexHints}.
+     *
+     * @param hints the index hints with the indexes to exclude.
+     * @return the indexes in this registry that are not excluded by the hints.
+     */
+    default Collection<Index> listIndexes(IndexHints hints)
     {
+        Set<Index> indexes = new HashSet<>();
         for (Index index : listIndexes())
         {
-            if (!hints.excludes(index) && index.supportsExpression(column, operator))
+            if (!hints.excludes(index))
+                indexes.add(index);
+        }
+        return indexes;
+    }
+
+    default Optional<Index.Analyzer> getAnalyzerFor(ColumnMetadata column, Operator operator, ByteBuffer value, IndexHints hints)
+    {
+        for (Index index : listIndexes(hints))
+        {
+            if (index.supportsExpression(column, operator))
             {
                 Optional<Index.Analyzer> analyzer = index.getAnalyzer(value);
                 if (analyzer.isPresent())
@@ -405,46 +422,42 @@ public interface IndexRegistry
     default EqBehaviorIndexes getEqBehavior(ColumnMetadata cm, IndexHints hints)
     {
         Set<Index> eqOnlyIndexes = new HashSet<>();
-        Set<Index> bothIndexes = new HashSet<>();
+        Set<Index> eqAndMatchIndexes = new HashSet<>();
 
-        for (Index index : listIndexes())
+        for (Index index : listIndexes(hints))
         {
-            if (hints.excludes(index))
-                continue;
-
             boolean supportsEq = index.supportsExpression(cm, Operator.EQ);
             boolean supportsMatches = index.supportsExpression(cm, Operator.ANALYZER_MATCHES);
             // This is an edge case due to the NON_DAEMON IndexRegistry, which doesn't have index metadata and
             // which uses regular equality by convention.
             boolean hasIndexMetadata = index.getIndexMetadata() != null;
 
+            // Categorize indexes based on their capabilities
             if (supportsEq && supportsMatches && hasIndexMetadata)
-                bothIndexes.add(index);
+                eqAndMatchIndexes.add(index);
             else if (supportsEq)
                 eqOnlyIndexes.add(index);
         }
 
         // we should consider the user-provided index hints, which can be used to disambiguate EQ queries
-        boolean prefersEq = !eqOnlyIndexes.isEmpty() && hints.prefersAnyOf(eqOnlyIndexes);
-        boolean prefersBoth = !bothIndexes.isEmpty() && hints.prefersAnyOf(bothIndexes);
+        boolean prefersEq = hints.prefersAnyOf(eqOnlyIndexes);
+        boolean prefersBoth = hints.prefersAnyOf(eqAndMatchIndexes);
 
         // If we have indexes supporting only EQ and indexes supporting both, return AMBIGUOUS,
         // unless the index hints prefer one index over the other.
-        if (!eqOnlyIndexes.isEmpty() && !bothIndexes.isEmpty())
+        if (!eqOnlyIndexes.isEmpty() && !eqAndMatchIndexes.isEmpty())
         {
             if (prefersBoth == prefersEq)
-                return EqBehaviorIndexes.ambiguous(eqOnlyIndexes, bothIndexes);
-            else if (prefersBoth)
-                return EqBehaviorIndexes.match(bothIndexes);
-            else
-                return EqBehaviorIndexes.eq(eqOnlyIndexes);
+                return EqBehaviorIndexes.ambiguous(eqOnlyIndexes, eqAndMatchIndexes);
+
+            return prefersBoth ? EqBehaviorIndexes.match(eqAndMatchIndexes) : EqBehaviorIndexes.eq(eqOnlyIndexes);
         }
 
         // If we have indexes supporting both EQ and MATCHES, return MATCHES
-        if (!bothIndexes.isEmpty())
-            return EqBehaviorIndexes.match(bothIndexes);
+        if (!eqAndMatchIndexes.isEmpty())
+            return EqBehaviorIndexes.match(eqAndMatchIndexes);
 
         // Otherwise return EQ
-        return EqBehaviorIndexes.eq(eqOnlyIndexes.isEmpty() ? bothIndexes : eqOnlyIndexes);
+        return EqBehaviorIndexes.eq(eqOnlyIndexes);
     }
 }

@@ -31,11 +31,9 @@ import com.google.common.collect.Sets;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.WriteContext;
-import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.db.memtable.Memtable;
-import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.transactions.IndexTransaction;
 import org.apache.cassandra.io.sstable.Component;
@@ -111,9 +109,7 @@ public class SingletonIndexGroup implements Index.Group
     {
         Preconditions.checkNotNull(delegate);
 
-        IndexHints indexHints = rowFilter.indexHints();
-
-        if (indexHints.excludes(delegate))
+        if (rowFilter.indexHints().excludes(delegate))
             return null;
 
         // Indexes using a singleton group don't support disjunctions,

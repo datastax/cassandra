@@ -369,7 +369,7 @@ public class StatementRestrictions
          *                     are not allowed to be nested (e.g. partition key restrictions)
          */
         StatementRestrictions doBuild(WhereClause.ExpressionElement element,
-                                      IndexRegistry indexRegistry, 
+                                      IndexRegistry indexRegistry,
                                       IndexHints indexHints,
                                       int nestingLevel)
         {
@@ -1288,11 +1288,8 @@ public class StatementRestrictions
         {
             if (!restriction.hasSupportingIndex(indexRegistry, indexHints))
             {
-                for (Index index : indexRegistry.listIndexes())
+                for (Index index : indexRegistry.listIndexes(indexHints))
                 {
-                    if (indexHints.excludes(index))
-                        continue;
-
                     // If a column restriction has an index which was not picked up by hasSupportingIndex, it means it's an unsupported restriction
                     for (ColumnMetadata column : restriction.getColumnDefs())
                     {

@@ -87,8 +87,8 @@ public abstract class SingleColumnRestriction implements SingleRestriction
 
     public Index findSupportingIndex(IndexRegistry indexRegistry, IndexHints indexHints)
     {
-        for (Index index : indexRegistry.listIndexes())
-            if (!indexHints.excludes(index) && isSupportedBy(index))
+        for (Index index : indexRegistry.listIndexes(indexHints))
+            if (isSupportedBy(index))
                 return index;
 
         return null;
@@ -97,8 +97,8 @@ public abstract class SingleColumnRestriction implements SingleRestriction
     @Override
     public boolean needsFiltering(Index.Group indexGroup, IndexHints indexHints)
     {
-        for (Index index : indexGroup.getIndexes())
-            if (!indexHints.excludes(index) && isSupportedBy(index))
+        for (Index index : indexGroup.getIndexes(indexHints))
+            if (isSupportedBy(index))
                 return false;
 
         return true;
