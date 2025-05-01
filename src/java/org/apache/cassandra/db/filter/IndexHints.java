@@ -74,16 +74,28 @@ public class IndexHints
         this.excluded = excluded;
     }
 
+    /**
+     * @param index an index
+     * @return {@code true} if the index is preferred, {@code false} otherwise
+     */
     public boolean prefers(Index index)
     {
         return preferred.contains(index.getIndexMetadata());
     }
 
+    /**
+     * @param indexName the name of an index
+     * @return {@code true} if the index is preferred, {@code false} otherwise
+     */
     public boolean prefers(String indexName)
     {
         return preferred.stream().anyMatch(i -> i.name.equals(indexName));
     }
 
+    /**
+     * @param indexes a collection of indexes
+     * @return {@code true} if any of the indexes is preferred, {@code false} otherwise
+     */
     public boolean prefersAnyOf(Collection<Index> indexes)
     {
         for (Index index : indexes)
@@ -94,16 +106,31 @@ public class IndexHints
         return false;
     }
 
+    /**
+     * @param index an index
+     * @return {@code true} if the index is excluded, {@code false} otherwise
+     */
     public boolean excludes(Index index)
     {
         return excluded.contains(index.getIndexMetadata());
     }
 
+    /**
+     * @param indexName the name of an index
+     * @return {@code true} if the index is excluded, {@code false} otherwise
+     */
     public boolean excludes(String indexName)
     {
         return excluded.stream().anyMatch(i -> i.name.equals(indexName));
     }
 
+    /**
+     * Returns the best of the specified indexes that satisfies the specified filter, according to these hints.
+     *
+     * @param indexes a collection of indexes
+     * @param filter a filter to apply to the indexes
+     * @return the best of the specified indexes that satisfies the specified filter
+     */
     public <T extends Index> Optional<T> getBestIndexFor(Collection<T> indexes, Predicate<T> filter)
     {
         if (indexes.isEmpty())
@@ -131,6 +158,13 @@ public class IndexHints
         return Optional.of(candidates.iterator().next());
     }
 
+    /**
+     * Creates a new instance of {@link IndexHints} with the specified preferred and excluded indexes.
+     *
+     * @param preferred the indexes to prefer when executing the query
+     * @param excluded the indexes to exclude when executing the query
+     * @return a new instance of {@link IndexHints}
+     */
     public static IndexHints create(Set<IndexMetadata> preferred, Set<IndexMetadata> excluded)
     {
         assert preferred != null && excluded != null;
@@ -141,6 +175,11 @@ public class IndexHints
         return new IndexHints(preferred, excluded);
     }
 
+    /**
+     * Validates these hints.
+     *
+     * @param keyspace the keyspace being queried
+     */
     public void validate(String keyspace)
     {
         if (preferred.isEmpty() && excluded.isEmpty())
@@ -225,6 +264,9 @@ public class IndexHints
         return index.getIndexMetadata();
     }
 
+    /**
+     * @return a comparator of index query plans based on which one has the most preferred indexes
+     */
     public Comparator<Index.QueryPlan> comparator()
     {
         return Comparator.comparing(plan -> Sets.intersection(preferred, metadatas(plan.getIndexes())).size());

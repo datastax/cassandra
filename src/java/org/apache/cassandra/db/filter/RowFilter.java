@@ -1833,9 +1833,9 @@ public class RowFilter
         public RowFilter deserialize(DataInputPlus in, int version, TableMetadata metadata) throws IOException
         {
             in.readBoolean(); // Unused
-            IndexHints hints = IndexHints.serializer.deserialize(in, version, metadata);
-            FilterElement operation = FilterElement.serializer.deserialize(in, version, metadata, hints);
-            return new RowFilter(operation, hints);
+            IndexHints indexHints = IndexHints.serializer.deserialize(in, version, metadata);
+            FilterElement operation = FilterElement.serializer.deserialize(in, version, metadata, indexHints);
+            return new RowFilter(operation, indexHints);
         }
 
         public long serializedSize(RowFilter filter, int version)

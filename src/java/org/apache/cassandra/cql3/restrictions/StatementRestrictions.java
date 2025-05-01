@@ -363,16 +363,21 @@ public class StatementRestrictions
          * based on the columns they are applied to.
          *
          * @param element root of the tree
+         * @param indexRegistry the index registry for the queried table
+         * @param indexHints the query index hints
          * @param nestingLevel recursion depth needed to reject the restrictions that
          *                     are not allowed to be nested (e.g. partition key restrictions)
          */
-        StatementRestrictions doBuild(WhereClause.ExpressionElement element, IndexRegistry indexRegistry, IndexHints hints, int nestingLevel)
+        StatementRestrictions doBuild(WhereClause.ExpressionElement element,
+                                      IndexRegistry indexRegistry, 
+                                      IndexHints indexHints,
+                                      int nestingLevel)
         {
             assert element instanceof WhereClause.AndElement || nestingLevel > 0:
                     "Root of the WHERE clause expression tree must be a conjunction";
 
             PartitionKeySingleRestrictionSet.Builder partitionKeyRestrictionSet = PartitionKeySingleRestrictionSet.builder(table.partitionKeyAsClusteringComparator());
-            ClusteringColumnRestrictions.Builder clusteringColumnsRestrictionSet = ClusteringColumnRestrictions.builder(table, allowFiltering, indexRegistry, hints);
+            ClusteringColumnRestrictions.Builder clusteringColumnsRestrictionSet = ClusteringColumnRestrictions.builder(table, allowFiltering, indexRegistry, indexHints);
             RestrictionSet.Builder nonPrimaryKeyRestrictionSet = RestrictionSet.builder();
             ImmutableSet.Builder<ColumnMetadata> notNullColumnsBuilder = ImmutableSet.builder();
 
@@ -406,15 +411,15 @@ public class StatementRestrictions
                     if (!forView)
                         throw invalidRequest("Unsupported restriction: %s", relation);
 
-                    notNullColumnsBuilder.addAll(relation.toRestriction(table, boundNames, indexHints).getColumnDefs());
+                    notNullColumnsBuilder.addAll(relation.toRestriction(table, boundNames, this.indexHints).getColumnDefs());
                 }
                 else
                 {
-                    Restriction restriction = relation.toRestriction(table, boundNames, indexHints);
+                    Restriction restriction = relation.toRestriction(table, boundNames, this.indexHints);
 
-                    if (relation.isLIKE() && (!type.allowUseOfSecondaryIndices() || !restriction.hasSupportingIndex(indexRegistry, hints)))
+                    if (relation.isLIKE() && (!type.allowUseOfSecondaryIndices() || !restriction.hasSupportingIndex(indexRegistry, indexHints)))
                     {
-                        if (getColumnsWithUnsupportedIndexRestrictions(table, indexHints, ImmutableList.of(restriction)).isEmpty())
+                        if (getColumnsWithUnsupportedIndexRestrictions(table, this.indexHints, ImmutableList.of(restriction)).isEmpty())
                         {
                             throw invalidRequest(RESTRICTION_REQUIRES_INDEX_MESSAGE, relation.operator(), relation.toString());
                         }
@@ -429,9 +434,9 @@ public class StatementRestrictions
                         {
                             throw invalidRequest("Invalid query. %s does not support use of secondary indices, but %s restriction requires a secondary index.", type.name(), relation.toString());
                         }
-                        if (!restriction.hasSupportingIndex(indexRegistry, hints))
+                        if (!restriction.hasSupportingIndex(indexRegistry, indexHints))
                         {
-                            if (getColumnsWithUnsupportedIndexRestrictions(table, indexHints, ImmutableList.of(restriction)).isEmpty())
+                            if (getColumnsWithUnsupportedIndexRestrictions(table, this.indexHints, ImmutableList.of(restriction)).isEmpty())
                             {
                                 throw invalidRequest(RESTRICTION_REQUIRES_INDEX_MESSAGE, relation.operator(), relation.toString());
                             }
@@ -493,11 +498,11 @@ public class StatementRestrictions
                     filterRestrictionsBuilder.add(customExpression);
                 }
 
-                hasQueryableClusteringColumnIndex = clusteringColumnsRestrictions.hasSupportingIndex(indexRegistry, indexHints);
+                hasQueryableClusteringColumnIndex = clusteringColumnsRestrictions.hasSupportingIndex(indexRegistry, this.indexHints);
                 hasQueryableIndex = element.containsCustomExpressions()
                                     || hasQueryableClusteringColumnIndex
-                                    || partitionKeyRestrictions.hasSupportingIndex(indexRegistry, indexHints)
-                                    || nonPrimaryKeyRestrictions.hasSupportingIndex(indexRegistry, indexHints);
+                                    || partitionKeyRestrictions.hasSupportingIndex(indexRegistry, this.indexHints)
+                                    || nonPrimaryKeyRestrictions.hasSupportingIndex(indexRegistry, this.indexHints);
             }
 
             // At this point, the select statement if fully constructed, but we still have a few things to validate
@@ -657,7 +662,7 @@ public class StatementRestrictions
                     }
 
                     if (!allowFiltering)
-                        throwRequiresAllowFilteringError(table, indexHints, columnRestrictions);
+                        throwRequiresAllowFilteringError(table, this.indexHints, columnRestrictions);
                 }
 
                 filterRestrictionsBuilder.add(nonPrimaryKeyRestrictions);
@@ -670,10 +675,10 @@ public class StatementRestrictions
             ImmutableList.Builder<StatementRestrictions> children = ImmutableList.builder();
 
             for (WhereClause.ContainerElement container : element.operations())
-                children.add(doBuild(container, indexRegistry, hints, nestingLevel + 1));
+                children.add(doBuild(container, indexRegistry, indexHints, nestingLevel + 1));
 
             return new StatementRestrictions(table,
-                                             indexHints,
+                                             this.indexHints,
                                              partitionKeyRestrictions,
                                              clusteringColumnsRestrictions,
                                              nonPrimaryKeyRestrictions,

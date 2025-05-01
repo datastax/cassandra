@@ -158,9 +158,12 @@ final class ClusteringColumnRestrictions extends RestrictionSetWrapper
         return new Builder(table, allowFiltering, null, IndexHints.NONE);
     }
 
-    public static ClusteringColumnRestrictions.Builder builder(TableMetadata table, boolean allowFiltering, IndexRegistry indexRegistry, IndexHints hints)
+    public static ClusteringColumnRestrictions.Builder builder(TableMetadata table,
+                                                               boolean allowFiltering,
+                                                               IndexRegistry indexRegistry,
+                                                               IndexHints indexHints)
     {
-        return new Builder(table, allowFiltering, indexRegistry, hints);
+        return new Builder(table, allowFiltering, indexRegistry, indexHints);
     }
 
     public static class Builder
@@ -168,16 +171,16 @@ final class ClusteringColumnRestrictions extends RestrictionSetWrapper
         private final TableMetadata table;
         private final boolean allowFiltering;
         private final IndexRegistry indexRegistry;
-        private final IndexHints hints;
+        private final IndexHints indexHints;
 
         private final RestrictionSet.Builder restrictions = RestrictionSet.builder();
 
-        private Builder(TableMetadata table, boolean allowFiltering, IndexRegistry indexRegistry, IndexHints hints)
+        private Builder(TableMetadata table, boolean allowFiltering, IndexRegistry indexRegistry, IndexHints indexHints)
         {
             this.table = table;
             this.allowFiltering = allowFiltering;
             this.indexRegistry = indexRegistry;
-            this.hints = hints;
+            this.indexHints = indexHints;
         }
 
         public ClusteringColumnRestrictions.Builder addRestriction(Restriction restriction)
@@ -190,7 +193,7 @@ final class ClusteringColumnRestrictions extends RestrictionSetWrapper
             SingleRestriction newRestriction = (SingleRestriction) restriction;
             boolean isEmpty = restrictions.isEmpty();
 
-            if (!isEmpty && !allowFiltering && (indexRegistry == null || !newRestriction.hasSupportingIndex(indexRegistry, hints)))
+            if (!isEmpty && !allowFiltering && (indexRegistry == null || !newRestriction.hasSupportingIndex(indexRegistry, indexHints)))
             {
                 SingleRestriction lastRestriction = restrictions.lastRestriction();
                 ColumnMetadata lastRestrictionStart = lastRestriction.getFirstColumn();

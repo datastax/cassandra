@@ -175,7 +175,7 @@ public abstract class Relation
      *
      * @param table the Column Family meta data
      * @param boundNames the variables specification where to collect the bind variables
-     * @param indexHints the query index hints, used to disambiguate relations that might be supported by indexes
+     * @param indexHints the query index hints, used to disambiguate relations that might be supported by multiple indexes
      * @return the <code>Restriction</code> corresponding to this <code>Relation</code>
      * @throws InvalidRequestException if this <code>Relation</code> is not valid
      */
