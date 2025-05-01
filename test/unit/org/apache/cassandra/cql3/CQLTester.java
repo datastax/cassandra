@@ -2936,4 +2936,54 @@ public abstract class CQLTester
             return username;
         }
     }
+
+    protected PlanSelectionAssertion assertThatIndexQueryPlanFor(String query, Object[]... expectedRows)
+    {
+        // First execute the query and check returned rows
+        assertRowsIgnoringOrder(execute(query), expectedRows);
+
+        ReadCommand command = parseReadCommand(query);
+        Index.QueryPlan queryPlan = command.indexQueryPlan();
+        if (queryPlan == null)
+            return new PlanSelectionAssertion(null);
+
+        Set<Index> indexes = queryPlan.getIndexes();
+        return new PlanSelectionAssertion(indexes);
+    }
+
+    protected static class PlanSelectionAssertion
+    {
+        private final Set<Index> selectedIndexes;
+
+        protected PlanSelectionAssertion(@Nullable Set<Index> selectedIndexes)
+        {
+            this.selectedIndexes = selectedIndexes;
+        }
+
+        public void selects(Index... indexes)
+        {
+            Assertions.assertThat(selectedIndexes)
+                      .isNotNull()
+                      .as("Expected to select only %s, but got: %s", indexes, selectedIndexes)
+                      .isEqualTo(Set.of(indexes));
+        }
+
+        public void selectsAnyOf(Index index1, Index index2, Index... otherIndexes)
+        {
+            Set<Index> expectedIndexes = new HashSet<>(otherIndexes.length + 1);
+            expectedIndexes.add(index1);
+            expectedIndexes.add(index2);
+            expectedIndexes.addAll(Arrays.asList(otherIndexes));
+
+            Assertions.assertThat(selectedIndexes)
+                      .isNotNull()
+                      .as("Expected to select any of %s, but got: %s", otherIndexes, selectedIndexes)
+                      .containsAnyElementsOf(expectedIndexes);
+        }
+
+        public void selectsNone()
+        {
+            Assertions.assertThat(selectedIndexes).isNull();
+        }
+    }
 }
