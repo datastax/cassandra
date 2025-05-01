@@ -730,6 +730,48 @@ public class IndexHintsTest extends CQLTester
     }
 
     @Test
+    public void testSASI()
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v int)");
+        String sasi = createIndex("CREATE CUSTOM INDEX sasi ON %s(v) USING 'org.apache.cassandra.index.sasi.SASIIndex'");
+        String legacy = createIndex("CREATE INDEX legacy ON %s(v)");
+
+        String insert = "INSERT INTO %s (k, v) VALUES (?, ?)";
+        Object[] row1 = new Object[]{ 1, 1 };
+        Object[] row2 = new Object[]{ 2, 2 };
+        Object[] row3 = new Object[]{ 3, 3 };
+        execute(insert, row1);
+        execute(insert, row2);
+        execute(insert, row3);
+
+        // without any hints
+        assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v=0").selectsAnyOf(legacy, sasi);
+        assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v=1", row1).selectsAnyOf(legacy, sasi);
+        assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v>1", row2, row3).selects(sasi); // legacy doesn't support >
+
+        // preferring SASI
+        assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v=0 WITH preferred_indexes={sasi}").selects(sasi);
+        assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v=1 WITH preferred_indexes={sasi}", row1).selects(sasi);
+        assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v>1 WITH preferred_indexes={sasi}", row2, row3).selects(sasi);
+
+        // preferring legacy
+        assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v=0 WITH preferred_indexes={legacy}").selects(legacy);
+        assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v=1 WITH preferred_indexes={legacy}", row1).selects(legacy);
+        assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v>1 WITH preferred_indexes={legacy}", row2, row3).selects(sasi); // legacy doesn't support >
+
+        // excluding SASI
+        assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v=0 WITH excluded_indexes={sasi}").selects(legacy);
+        assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v=1 WITH excluded_indexes={sasi}", row1).selects(legacy);
+        assertIndexDoesNotSupportOperator("SELECT * FROM %s WHERE v>1 WITH excluded_indexes={sasi}", "v"); // legacy doesn't support >
+        assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v>1 ALLOW FILTERING WITH excluded_indexes={sasi}", row2, row3).selectsNone();
+
+        // excluding legacy
+        assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v=0 WITH excluded_indexes={legacy}").selects(sasi);
+        assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v=1 WITH excluded_indexes={legacy}", row1).selects(sasi);
+        assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v>1 WITH excluded_indexes={legacy}", row2, row3).selects(sasi);
+    }
+
+    @Test
     public void testMultipleIndexesOnSameColumn()
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v int)");

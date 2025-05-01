@@ -33,7 +33,6 @@ import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
-import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.sasi.SASIIndex;
 import org.apache.cassandra.index.sasi.SSTableIndex;
 import org.apache.cassandra.index.sasi.TermIterator;
@@ -93,8 +92,8 @@ public class QueryController
     public ColumnIndex getIndex(RowFilter.Expression expression)
     {
         IndexHints hints = command.rowFilter().indexHints();
-        Optional<Index> index = cfs.indexManager.getBestIndexFor(expression, hints);
-        return index.isPresent() ? ((SASIIndex) index.get()).getIndex() : null;
+        Optional<SASIIndex> index = cfs.indexManager.getBestIndexFor(expression, hints, SASIIndex.class);
+        return index.map(SASIIndex::getIndex).orElse(null);
     }
 
 
