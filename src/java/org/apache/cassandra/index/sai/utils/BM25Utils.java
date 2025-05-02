@@ -52,13 +52,13 @@ public class BM25Utils
         private final Map<ByteBuffer, Long> frequencies;
         // total number of docs in the index
         private final long docCount;
-        private final long totalTermCount;
+        private double avgDocLength;
 
         public DocStats(Map<ByteBuffer, Long> frequencies, long docCount, long totalTermCount)
         {
             this.frequencies = frequencies;
             this.docCount = docCount;
-            this.totalTermCount = totalTermCount;
+            this.avgDocLength = (double) totalTermCount / docCount;
         }
     }
 
@@ -156,19 +156,25 @@ public class BM25Utils
 
         // data structures for document stats and frequencies
         ArrayList<DocTF> documents = new ArrayList<>();
+        double totalTermCount = 0;
 
         // Compute TF within each document
         while (docIterator.hasNext())
         {
             var tf = docIterator.next();
             documents.add(tf);
+            if (docStats.avgDocLength == 0)
+                totalTermCount += tf.termCount();
         }
+
+        // This is likely the case due to an index format before {@link Version#ED},
+        // which doesn't store the total term count on disk to read it back.
+        // In such a case the old way of computing avgDocLength is used.
+        if (docStats.avgDocLength == 0)
+            docStats.avgDocLength = totalTermCount / documents.size();
 
         if (documents.isEmpty())
             return CloseableIterator.emptyIterator();
-
-        // Calculate average document length
-        double avgDocLength = (double) docStats.totalTermCount / docStats.docCount;
 
         // Calculate BM25 scores.
         // Uses a NodeQueue that avoids allocating an object for each document.
@@ -190,7 +196,7 @@ public class BM25Utils
             @Override
             public float topScore() {
                 // Compute BM25 for the current document
-                return scoreDoc(documents.get(current), docStats, queryTerms, avgDocLength);
+                return scoreDoc(documents.get(current), docStats, queryTerms);
             }
         };
         // pushMany is an O(n) operation where n is the final size of the queue. Iterative calls to push is O(n log n).
@@ -199,7 +205,7 @@ public class BM25Utils
         return new NodeQueueDocTFIterator(nodeQueue, documents, indexContext, source, docIterator);
     }
 
-    private static float scoreDoc(DocTF doc, DocStats docStats, List<ByteBuffer> queryTerms, double avgDocLength)
+    private static float scoreDoc(DocTF doc, DocStats docStats, List<ByteBuffer> queryTerms)
     {
         double score = 0.0;
         for (var queryTerm : queryTerms)
@@ -209,7 +215,7 @@ public class BM25Utils
             // we shouldn't have more hits for a term than we counted total documents
             assert df <= docStats.docCount : String.format("df=%d, totalDocs=%d", df, docStats.docCount);
 
-            double normalizedTf = tf / (tf + K1 * (1 - B + B * doc.termCount() / avgDocLength));
+            double normalizedTf = tf / (tf + K1 * (1 - B + B * doc.termCount() / docStats.avgDocLength));
             double idf = Math.log(1 + (docStats.docCount - df + 0.5) / (df + 0.5));
             double deltaScore = normalizedTf * idf;
             assert deltaScore >= 0 : String.format("BM25 score for tf=%d, df=%d, tc=%d, totalDocs=%d is %f",
