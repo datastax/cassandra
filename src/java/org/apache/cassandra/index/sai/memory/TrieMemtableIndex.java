@@ -353,7 +353,6 @@ public class TrieMemtableIndex implements MemtableIndex
         if (orderer.isBM25())
             return orderByBM25(keys.stream(), orderer);
         else
-        {
             return SortingIterator.createCloseable(
                 orderer.getComparator(),
                 keys,
@@ -376,7 +375,6 @@ public class TrieMemtableIndex implements MemtableIndex
                 },
                 Runnables.doNothing()
             );
-        }
     }
 
     private CloseableIterator<PrimaryKeyWithSortKey> orderByBM25(Stream<PrimaryKey> stream, Orderer orderer)
