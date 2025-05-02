@@ -67,7 +67,6 @@ public class BM25Test extends SAITester
         return Arrays.asList(new Object[]{ Version.BM25_EARLIEST, Version.ED });
     }
 
-
     // Pattern that treats apostrophes within words as part of the word
     private static final Pattern PATTERN = Pattern.compile("[^\\w']+|'(?=\\s)|(?<=\\s)'");
     public static final int DATASET_BODY_COLUMN = 3;
