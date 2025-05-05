@@ -56,9 +56,9 @@ import org.apache.cassandra.io.util.PageAware;
 import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.io.util.RebuffererFactory;
 import org.apache.cassandra.metrics.ChunkCacheMetrics;
+import org.apache.cassandra.utils.FastByteOperations;
 import org.apache.cassandra.utils.memory.BufferPool;
 import org.apache.cassandra.utils.memory.BufferPools;
-import org.apache.cassandra.utils.memory.MemoryUtil;
 import org.github.jamm.Unmetered;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.CHUNKCACHE_ASYNC_CLEANUP;
@@ -156,7 +156,7 @@ public class ChunkCache
             chunk = newChunk(file.chunkSize(), position);  // Note: we need `chunk` to be assigned before we call read to release on error
             chunk.read(file);
         }
-        catch (RuntimeException t)
+        catch (RuntimeException | Error t)
         {
             if (chunk != null)
                 chunk.release();
@@ -437,27 +437,18 @@ public class ChunkCache
      */
     public class MultiRegionChunk extends Chunk
     {
-        /** A list of memory addresses, each page has capacity of PageAware.PAGE_SIZE */
-        private final long[] pages;
-        /** List of attachments, necessary to be able to release pool buffers properly */
-        private final Object[] attachments;
+        private final ByteBuffer[] buffers;
 
         public MultiRegionChunk(long offset, ByteBuffer[] buffers)
         {
             super(offset);
-            this.pages = new long[buffers.length];
-            this.attachments = new Object[buffers.length];
-            for (int i = 0; i < buffers.length; ++i)
-            {
-                pages[i] = MemoryUtil.getAddress(buffers[i]);
-                attachments[i] = MemoryUtil.getAttachment(buffers[i]);
-            }
+            this.buffers = buffers;
         }
 
         void releaseBuffers()
         {
-            for (int i = 0; i < pages.length; ++i)
-                bufferPool.put(MemoryUtil.allocateByteBuffer(pages[i], PageAware.PAGE_SIZE, PageAware.PAGE_SIZE, ByteOrder.BIG_ENDIAN, attachments[i]));
+            for (int i = 0; i < buffers.length; ++i)
+                bufferPool.put(buffers[i]);
         }
 
         void read(ChunkReader file)
@@ -472,18 +463,12 @@ public class ChunkCache
                 file.readChunk(offset, scratchBuffer);
                 int limit = scratchBuffer.limit();
                 int idx = 0;
-                int pageEnd;
-                for (pageEnd = PageAware.PAGE_SIZE; pageEnd <= limit; pageEnd += PageAware.PAGE_SIZE)
-                {
-                    scratchBuffer.limit(pageEnd);
-                    MemoryUtil.setBytes(pages[idx++], scratchBuffer);
-                    scratchBuffer.position(pageEnd);
-                }
-                if (scratchBuffer.position() < limit)   // if the limit is not a multiple of the page size
-                {
-                    scratchBuffer.limit(limit);
-                    MemoryUtil.setBytes(pages[idx], scratchBuffer);
-                }
+                int pageStart;
+                for (pageStart = 0; pageStart + PageAware.PAGE_SIZE <= limit; pageStart += PageAware.PAGE_SIZE)
+                    FastByteOperations.copy(scratchBuffer, pageStart, buffers[idx++], 0, PageAware.PAGE_SIZE);
+
+                if (pageStart < limit)   // if the limit is not a multiple of the page size
+                    FastByteOperations.copy(scratchBuffer, pageStart, buffers[idx++], 0, limit - pageStart);
                 bytesRead = limit;
             }
             finally
@@ -496,39 +481,36 @@ public class ChunkCache
         Buffer getBuffer(long position)
         {
             int index = PageAware.pageNum(position - offset);
-            Preconditions.checkArgument(index >= 0 && index < pages.length, "Invalid position: %s, index: %s", position, index);
+            Preconditions.checkArgument(index >= 0 && index < buffers.length, "Invalid position: %s, index: %s", position, index);
 
             long pageAlignedPosition = PageAware.pageStart(position);
-            int bufferSize = Math.min(PageAware.PAGE_SIZE, Math.toIntExact(bytesRead - (index * PageAware.PAGE_SIZE)));
-            assert bufferSize > 0 && bufferSize <= PageAware.PAGE_SIZE : "Wrong buffer size: " + bufferSize + " at position " + position;
 
-            return new Buffer(pages[index], pageAlignedPosition, bufferSize);
+            return new Buffer(buffers[index], pageAlignedPosition);
         }
 
         public int capacity()
         {
-            return pages.length * PageAware.PAGE_SIZE;
+            return buffers.length * PageAware.PAGE_SIZE;
         }
 
         class Buffer implements Rebufferer.BufferHolder
         {
-            private final long address;
+            private final ByteBuffer buffer;
             private final long offset;
-            private final int limit;
 
 
-            public Buffer(long address, long offset, int limit)
+            public Buffer(ByteBuffer buffer, long offset)
             {
-                this.address = address;
+                this.buffer = buffer;
                 this.offset = offset;
-                this.limit = limit;
+                buffer.order(ByteOrder.BIG_ENDIAN);
             }
 
             @Override
             public ByteBuffer buffer()
             {
                 assert isReferenced() : "Already unreferenced";
-                return MemoryUtil.allocateByteBuffer(address, limit, PageAware.PAGE_SIZE, ByteOrder.BIG_ENDIAN, null);
+                return buffer.duplicate();
             }
 
             @Override
@@ -556,22 +538,19 @@ public class ChunkCache
      */
     class SingleRegionChunk extends Chunk implements Rebufferer.BufferHolder
     {
-        private final long address;
-        private final int capacity;
-        private final Object attachment;
+        private final ByteBuffer buffer;
 
         public SingleRegionChunk(long offset, ByteBuffer buffer)
         {
             super(offset);
-            this.address = MemoryUtil.getAddress(buffer);
-            this.capacity = buffer.capacity();
-            this.attachment = MemoryUtil.getAttachment(buffer);
+            this.buffer = buffer;
+            buffer.order(ByteOrder.BIG_ENDIAN);
         }
 
         public ByteBuffer buffer()
         {
             assert isReferenced() : "Already unreferenced";
-            return MemoryUtil.allocateByteBuffer(address, bytesRead, capacity, ByteOrder.BIG_ENDIAN, null);
+            return buffer.duplicate();
         }
 
         public long offset()
@@ -581,7 +560,7 @@ public class ChunkCache
 
         void releaseBuffers()
         {
-            bufferPool.put(MemoryUtil.allocateByteBuffer(address, capacity, capacity, ByteOrder.BIG_ENDIAN, attachment));
+            bufferPool.put(buffer);
         }
 
         void read(ChunkReader file)
@@ -599,7 +578,7 @@ public class ChunkCache
 
         int capacity()
         {
-            return capacity;
+            return buffer.capacity();
         }
     }
 

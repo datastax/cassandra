@@ -33,11 +33,11 @@ import java.util.concurrent.Future;
 import com.google.common.base.Throwables;
 import org.junit.BeforeClass;
 import org.junit.Test;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.io.FSReadError;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.util.ChannelProxy;
 import org.apache.cassandra.io.util.File;
@@ -49,6 +49,7 @@ import org.apache.cassandra.metrics.ChunkCacheMetrics;
 import org.apache.cassandra.utils.memory.BufferPool;
 import org.awaitility.Awaitility;
 
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertSame;
@@ -411,7 +412,7 @@ public class ChunkCacheTest
             // file 1 has an error during read, we shouldn't cache the handle
             mockFileControl1.waitOnRead.completeExceptionally(new RuntimeException("some weird runtime error"));
             RandomAccessReader r1 = mockFileControl1.openReader();
-            assertThrows(CompletionException.class, r1::reBuffer);
+            assertThrows(FSReadError.class, r1::reBuffer);
             assertEquals(0, chunkCache.sizeOfFile(mockFileControl1.file));
             assertEquals(0, chunkCache.size());
             assertEquals(0, allocated.size());
@@ -545,7 +546,7 @@ public class ChunkCacheTest
             // in this case thread1 errors before thread2 starts to read
             RuntimeException error = new RuntimeException("some weird runtime error");
             mockFileControl1.waitOnRead.completeExceptionally(error);
-            assertSame(error, assertThrows(CompletionException.class, thread1::join).getCause());
+            assertThatThrownBy(thread1::join).hasCauseInstanceOf(FSReadError.class);
 
             // assert that we didn't leak the buffer
             assertEquals(0, allocated.size());
