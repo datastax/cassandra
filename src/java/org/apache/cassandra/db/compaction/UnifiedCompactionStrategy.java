@@ -259,12 +259,13 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
             permittedParallelism = Integer.MAX_VALUE;
 
         List<AbstractCompactionTask> tasks = new ArrayList<>();
+        LifecycleTransaction txn = null;
         try
         {
             // Split the space into independently compactable groups.
             for (var aggregate : getMaximalAggregates())
             {
-                LifecycleTransaction txn = realm.tryModify(aggregate.getSelected().sstables(),
+                txn = realm.tryModify(aggregate.getSelected().sstables(),
                                                            OperationType.COMPACTION,
                                                            aggregate.getSelected().id());
 
@@ -284,6 +285,8 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         }
         catch (Throwable t)
         {
+            if (txn != null)
+                txn.close();
             throw rejectTasks(tasks, t);
         }
     }
@@ -414,9 +417,17 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                                                            selected.id());
         if (transaction != null)
         {
-            // This will ignore the range of the operation, which is fine.
-            backgroundCompactions.setSubmitted(this, transaction.opId(), aggregate);
-            createAndAddTasks(gcBefore, transaction, aggregate.operationRange(), aggregate.keepOriginals(), getShardingStats(aggregate), parallelism, tasks);
+            try
+            {
+                // This will ignore the range of the operation, which is fine.
+                backgroundCompactions.setSubmitted(this, transaction.opId(), aggregate);
+                createAndAddTasks(gcBefore, transaction, aggregate.operationRange(), aggregate.keepOriginals(), getShardingStats(aggregate), parallelism, tasks);
+            }
+            catch (Throwable e)
+            {
+                transaction.close();
+                throw e;
+            }
         }
         else
         {
@@ -687,8 +698,8 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                                                                 sharedObserver)
         );
         compositeTransaction.completeInitialization();
-        assert tasks.size() <= parallelism;
-        assert tasks.size() <= coveredShardCount;
+        assert tasks.size() <= parallelism : "Task size: " + tasks.size() + " vs parallelism of: " + parallelism;
+        assert tasks.size() <= coveredShardCount : "Task size: " + tasks.size() + " vs covered shard count: " + coveredShardCount;
 
         if (tasks.isEmpty())
             transaction.close(); // this should not be reachable normally, close the transaction for safety
