@@ -81,7 +81,18 @@ public class RangedAggregatesTest extends ShardingTestBase
         testRangedAggregates(6, 1, PARTITIONS, 6, false, true);
     }
 
+    @Test
+    public void testMaxEdgeParallelismLimit() throws Throwable
+    {
+        testRangedAggregates(32, 4, 2, PARTITIONS, 4, true, false);
+    }
+
     private void testRangedAggregates(int numShards, int aggregateParallelism, int rowCount, int numOutputSSTables, boolean compact, boolean useCursors) throws Throwable
+    {
+        testRangedAggregates(numShards, numShards, aggregateParallelism, rowCount, numOutputSSTables, compact, useCursors);
+    }
+
+    private void testRangedAggregates(int numShardsForDensity, int numShards, int aggregateParallelism, int rowCount, int numOutputSSTables, boolean compact, boolean useCursors) throws Throwable
     {
         CassandraRelevantProperties.CURSORS_ENABLED.setBoolean(useCursors);
         ColumnFamilyStore cfs = getColumnFamilyStore();
@@ -103,7 +114,7 @@ public class RangedAggregatesTest extends ShardingTestBase
                                (
                                    agg.getSelected().sstables(),
                                    null,
-                                   numShards,
+                                   numShardsForDensity,
                                    numShards,
                                    aggregateParallelism,
                                    (rangeSSTables, range) ->
@@ -133,7 +144,6 @@ public class RangedAggregatesTest extends ShardingTestBase
             FBUtilities.waitOnFutures(futures);
         }
         assertEquals(numOutputSSTables, totalTaskCount);
-
 
         // make sure the partial aggregates are not deleting sstables
         Assert.assertTrue(cfs.getLiveSSTables().containsAll(originals));

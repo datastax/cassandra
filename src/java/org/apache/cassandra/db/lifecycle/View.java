@@ -27,6 +27,7 @@ import com.google.common.base.Functions;
 import com.google.common.base.Predicate;
 import com.google.common.collect.*;
 
+import org.apache.commons.lang3.exception.ExceptionUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -37,6 +38,7 @@ import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.utils.Interval;
+import org.apache.cassandra.utils.Throwables;
 
 import static com.google.common.base.Predicates.equalTo;
 import static com.google.common.base.Predicates.not;
@@ -280,6 +282,7 @@ public class View
     {
         if (unmark.isEmpty() && Iterables.isEmpty(mark))
             return Functions.identity();
+        logger.debug("updateCompacting mark: {} unmark: {} \n {}", mark, unmark, ExceptionUtils.getStackTrace(new Exception()));
         return new Function<View, View>()
         {
             public View apply(View view)

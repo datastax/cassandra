@@ -2421,6 +2421,13 @@ public class CompactionManager implements CompactionManagerMBean
 
         while (System.nanoTime() - start < delay)
         {
+            for (ColumnFamilyStore cfs : cfss)
+            {
+                if (((System.nanoTime() - start)/1000/1000/1000 % 10) == 0)
+                {
+                    logger.debug("waitForCessation waiting on: " + Arrays.toString(cfs.getTracker().getCompacting().toArray()));
+                }
+            }
             if (CompactionManager.instance.isCompacting(cfss, sstablePredicate))
                 Uninterruptibles.sleepUninterruptibly(1, TimeUnit.MILLISECONDS);
             else
