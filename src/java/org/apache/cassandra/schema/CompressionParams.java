@@ -49,6 +49,7 @@ import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.utils.PageAware;
 
 import static java.lang.String.format;
+import static org.apache.cassandra.io.compress.EncryptionConfig.CIPHER_ALGORITHM;
 
 @SuppressWarnings("deprecation")
 public final class CompressionParams
@@ -492,12 +493,25 @@ public final class CompressionParams
      */
     private static double removeMinCompressRatio(Map<String, String> options)
     {
-        String ratio = options.remove(MIN_COMPRESS_RATIO);
-        if (ratio != null)
+        String ratioString = options.remove(MIN_COMPRESS_RATIO);
+        double ratio = DEFAULT_MIN_COMPRESS_RATIO;
+
+        if (ratioString != null)
+            ratio = Double.parseDouble(ratioString);
+
+        // Make sure we never skip compression if it includes encryption
+        if (options.containsKey(CIPHER_ALGORITHM))
         {
-            return Double.parseDouble(ratio);
+            if (ratioString != null && ratio != 0.0)
+            {
+                logger.warn("Option {} is not compatible with encryption. Ignoring given value {} and using 0 to always encrypt.",
+                            MIN_COMPRESS_RATIO,
+                            ratioString);
+            }
+            ratio = 0.0;
         }
-        return DEFAULT_MIN_COMPRESS_RATIO;
+
+        return ratio;
     }
 
     /**
