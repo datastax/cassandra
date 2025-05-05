@@ -71,7 +71,7 @@ public class SAIUtil
     }
 
     /**
-     * Checks if index is known to be queryable, by pulling index state from {{@link SecondaryIndexManager}}.
+     * Checks if index is known to be queryable, by pulling index state from {@link SecondaryIndexManager}.
      * Requires gossip.
      */
     public static void assertIndexQueryable(Cluster cluster, String keyspace, String index)
@@ -80,7 +80,7 @@ public class SAIUtil
     }
 
     /**
-     * Checks if all indexes are known to be queryable, by pulling index state from local {{@link SecondaryIndexManager}}.
+     * Checks if all indexes are known to be queryable, by pulling index state from local {@link SecondaryIndexManager}.
      * Requires gossip.
      */
     private static void assertIndexesQueryable(Cluster cluster, String keyspace, final Iterable<String> indexes)
@@ -137,5 +137,20 @@ public class SAIUtil
                                     .map(IInstance::schemaVersion)
                                     .collect(Collectors.toSet());
         return versions.size() == 1;
+    }
+
+    /**
+     * Checks if an index is known to have failed its build, by pulling index state from {@link SecondaryIndexManager}.
+     * Requires gossip.
+     */
+    public static void assertIndexBuildFailed(IInvokableInstance coordinator, IInvokableInstance replica, String keyspace, String index)
+    {
+        InetAddressAndPort nodeAddress = nodeAddress(replica.broadcastAddress());
+
+        coordinator.runsOnInstance(() -> {
+            Index.Status status = SecondaryIndexManager.getIndexStatus(nodeAddress, keyspace, index);
+            assert status == Index.Status.BUILD_FAILED
+                : "Index " + index + " not failed on node " + nodeAddress + " (status = " + status + ')';
+        });
     }
 }

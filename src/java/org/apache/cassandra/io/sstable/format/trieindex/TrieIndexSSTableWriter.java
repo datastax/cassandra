@@ -369,9 +369,9 @@ public class TrieIndexSSTableWriter extends SortedTableWriter
         {
             if (components().contains(Component.FILTER))
             {
-                if (!(bf instanceof BloomFilter))
+                if (!bf.isSerializable())
                 {
-                    logger.info("Skipped flushing bloom filter {} for {} to disk", bf, descriptor);
+                    logger.info("Skipped flushing non-serializable bloom filter {} for {} to disk", bf, descriptor);
                     return;
                 }
 
@@ -379,8 +379,7 @@ public class TrieIndexSSTableWriter extends SortedTableWriter
                 try (SeekableByteChannel fos = Files.newByteChannel(path.toPath(), StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
                      DataOutputStreamPlus stream = new BufferedDataOutputStreamPlus(fos))
                 {
-                    // bloom filter
-                    BloomFilter.serializer.serialize((BloomFilter) bf, stream);
+                    bf.getSerializer().serialize(bf, stream);
                     stream.flush();
                     SyncUtil.sync((FileChannel) fos);
                 }

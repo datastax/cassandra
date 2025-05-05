@@ -78,12 +78,12 @@ public class BloomFilterSerializerBench
             if (oldBfFormat)
                 SerializationsTest.serializeOldBfFormat(filter, out);
             else
-                BloomFilter.serializer.serialize(filter, out);
+                filter.getSerializer().serialize(filter, out);
             out.close();
             filter.close();
 
             FileInputStreamPlus in = new FileInputStreamPlus(file);
-            IFilter filter2 = BloomFilter.serializer.deserialize(in, oldBfFormat);
+            IFilter filter2 = BloomFilter.getDeserializer().deserialize(in, oldBfFormat);
             FileUtils.closeQuietly(in);
             filter2.close();
         }

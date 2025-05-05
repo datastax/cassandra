@@ -894,7 +894,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
 
     public static void saveBloomFilter(Descriptor descriptor, IFilter filter)
     {
-        if (!(filter instanceof BloomFilter))
+        if (!filter.isSerializable())
         {
             logger.info("Skipped saving bloom filter {} for {} to disk", filter, descriptor);
             return;
@@ -903,7 +903,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         File filterFile = descriptor.fileFor(Component.FILTER);
         try (DataOutputStreamPlus stream = new FileOutputStreamPlus(filterFile))
         {
-            BloomFilter.serializer.serialize((BloomFilter) filter, stream);
+            filter.getSerializer().serialize(filter, stream);
             stream.flush();
         }
         catch (IOException e)
