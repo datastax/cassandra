@@ -25,8 +25,12 @@ import java.nio.channels.FileChannel;
 import java.nio.channels.WritableByteChannel;
 import java.nio.file.StandardOpenOption;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.io.FSReadError;
 import org.apache.cassandra.utils.INativeLibrary;
+import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.concurrent.RefCounted;
 import org.apache.cassandra.utils.concurrent.SharedCloseableImpl;
 
@@ -41,6 +45,7 @@ import org.apache.cassandra.utils.concurrent.SharedCloseableImpl;
  */
 public final class ChannelProxy extends SharedCloseableImpl
 {
+    private static final Logger log = LoggerFactory.getLogger(ChannelProxy.class);
     private final File file;
     private final String filePath;
     private final FileChannel channel;
@@ -146,8 +151,9 @@ public final class ChannelProxy extends SharedCloseableImpl
             // FIXME: consider wrapping in a while loop
             return channel.read(buffer, position);
         }
-        catch (IOException e)
+        catch (Throwable e)
         {
+            JVMStabilityInspector.inspectThrowable(e);
             throw new FSReadError(e, filePath());
         }
     }
@@ -158,8 +164,9 @@ public final class ChannelProxy extends SharedCloseableImpl
         {
             return channel.transferTo(position, count, target);
         }
-        catch (IOException e)
+        catch (Throwable e)
         {
+            JVMStabilityInspector.inspectThrowable(e);
             throw new FSReadError(e, filePath());
         }
     }
@@ -170,8 +177,9 @@ public final class ChannelProxy extends SharedCloseableImpl
         {
             return channel.map(mode, position, size);
         }
-        catch (IOException e)
+        catch (Throwable e)
         {
+            JVMStabilityInspector.inspectThrowable(e);
             throw new FSReadError(e, filePath());
         }
     }
