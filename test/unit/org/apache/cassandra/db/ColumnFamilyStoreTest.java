@@ -24,6 +24,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.ExecutionException;
 import java.util.stream.Collectors;
@@ -32,6 +34,7 @@ import java.util.stream.IntStream;
 import com.google.common.collect.Iterators;
 import com.googlecode.concurrenttrees.common.Iterables;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
+import org.apache.cassandra.db.compaction.TableOperation;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.memtable.AbstractAllocatorMemtable;
 import org.apache.cassandra.db.memtable.AbstractMemtable;
@@ -111,6 +114,49 @@ public class ColumnFamilyStoreTest
         Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD1).truncateBlocking();
         Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD2).truncateBlocking();
         Keyspace.open(KEYSPACE2).getColumnFamilyStore(CF_STANDARD1).truncateBlocking();
+    }
+
+    @Test
+    public void testRWCDLocking() throws InterruptedException
+    {
+        ColumnFamilyStore cfs = Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD1);
+        CountDownLatch task1StaredtLatch = new CountDownLatch(1);
+        CountDownLatch task1FinishLatch = new CountDownLatch(1);
+        CountDownLatch task2StaredtLatch = new CountDownLatch(1);
+
+        Thread task1 = new Thread(() -> {
+            cfs.runWithCompactionsDisabled(() -> {
+                                               task1StaredtLatch.countDown();
+                                               task1FinishLatch.await();
+                                               return null;
+                                           },
+                                           true,
+                                           true,
+                                           TableOperation.StopTrigger.UNIT_TESTS);
+        });
+        task1.start();
+
+        Thread task2 = new Thread(() -> {
+            cfs.runWithCompactionsDisabled(() -> {
+                                               task2StaredtLatch.countDown();
+                                               return null;
+                                           },
+                                           true,
+                                           true,
+                                           TableOperation.StopTrigger.UNIT_TESTS);
+        });
+        task2.start();
+
+        // Check that task1 started but task2 is waiting
+        assertTrue(task1StaredtLatch.await(30, TimeUnit.SECONDS));
+        assertEquals(1, task2StaredtLatch.getCount());
+
+        // Allow task1 to complete and check task2 completed next
+        task1FinishLatch.countDown();
+        assertTrue(task2StaredtLatch.await(30, TimeUnit.SECONDS));
+
+        task1.join();
+        task2.join();
     }
 
     @Test
