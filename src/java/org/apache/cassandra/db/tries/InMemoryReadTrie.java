@@ -1288,6 +1288,26 @@ public abstract class InMemoryReadTrie<T>
         return new TypedNodesCursor().process(new TrieDumper<>(Function.identity()));
     }
 
+    private void dumpSplitNode(int node, int level, StringBuilder builder)
+    {
+        int limit = level == 0 ? SPLIT_START_LEVEL_LIMIT : SPLIT_OTHER_LEVEL_LIMIT;
+        for (int i = 0; i < limit; ++i)
+        {
+            int child = getIntVolatile(node - (limit - 1 - i) * 4);
+            if (child != NONE)
+            {
+                builder.append('\n');
+                for (int ind = 0; ind < level; ++ind)
+                    builder.append("       ");
+                builder.append(Integer.toBinaryString(i | 8).substring(1)) // or and substring implement %03b
+                       .append(" -> ");
+                builder.append(child);
+                if (level < 2)
+                    dumpSplitNode(child, level + 1, builder);
+            }
+        }
+    }
+
     /// For use in debugging, dump info about the given node.
     @SuppressWarnings("unused")
     String dumpNode(int node)
@@ -1304,7 +1324,7 @@ public abstract class InMemoryReadTrie<T>
             {
                 case SPARSE_OFFSET:
                 {
-                    builder.append("Sparse (Order " + Integer.toString(getUnsignedShortVolatile(node + SPARSE_ORDER_OFFSET), 6) + "): ");
+                    builder.append("Sparse (Order " + Integer.toString(getUnsignedShortVolatile(node + SPARSE_ORDER_OFFSET), 6) + "):\n");
                     for (int i = 0; i < SPARSE_CHILD_COUNT; ++i)
                     {
                         int child = getIntVolatile(node + SPARSE_CHILDREN_OFFSET + i * 4);
@@ -1318,16 +1338,8 @@ public abstract class InMemoryReadTrie<T>
                 }
                 case SPLIT_OFFSET:
                 {
-                    builder.append("Split: ");
-                    for (int i = 0; i < SPLIT_START_LEVEL_LIMIT; ++i)
-                    {
-                        int child = getIntVolatile(node - (SPLIT_START_LEVEL_LIMIT - 1 - i) * 4);
-                        if (child != NONE)
-                            builder.append(Integer.toBinaryString(i))
-                                   .append(" -> ")
-                                   .append(child)
-                                   .append('\n');
-                    }
+                    builder.append("Split:");
+                    dumpSplitNode(node, 0, builder);
                     break;
                 }
                 case PREFIX_OFFSET:
@@ -1343,7 +1355,7 @@ public abstract class InMemoryReadTrie<T>
                 }
                 default:
                 {
-                    builder.append("Chain: ");
+                    builder.append("Chain:\n");
                     for (int i = 0; i < chainCellLength(node); ++i)
                         builder.append(String.format("%02x", getUnsignedByte(node + i)));
                     builder.append(" -> ")

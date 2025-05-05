@@ -19,6 +19,7 @@
 package org.apache.cassandra.db.tries;
 
 import java.util.ArrayList;
+import java.util.BitSet;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
@@ -27,6 +28,8 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.LongUnaryOperator;
 import java.util.function.Predicate;
 
 import org.junit.Assert;
@@ -45,7 +48,7 @@ public abstract class ConsistencyTestBase<C, T extends BaseTrie<C, ?, T>, R exte
     // Note: This should not be run by default with verification to have the higher concurrency of faster writes and reads.
 
     private static final int COUNT = 30000;
-    private static final int PROGRESS_UPDATE = COUNT / 15;
+    private static final int PROGRESS_UPDATE = Math.max(1, COUNT / 15);
     private static final int READERS = 8;
     private static final int WALKERS = 2;
     private static final Random rand = new Random();
@@ -56,38 +59,72 @@ public abstract class ConsistencyTestBase<C, T extends BaseTrie<C, ?, T>, R exte
      */
     public final Predicate<InMemoryTrie.NodeFeatures<C>> FORCE_COPY_PARTITION = features -> isPartition(features.content());
     /**
+     * Force copy every modified cell below the partition/enumeration level. Provides atomicity of mutations within the
+     * partition level as well as consistency.
+     */
+    public final Predicate<InMemoryTrie.NodeFeatures<TestRangeState>> FORCE_COPY_PARTITION_RANGE_STATE = features -> isPartition(features.content());
+    /**
      * Force copy every modified cell below the earliest branching point. Provides atomicity of mutations at any level,
      * but readers/walkers may see inconsistent views of the data, in the sense that older mutations may be missed
      * while newer ones are returned.
      */
-    public final Predicate<InMemoryTrie.NodeFeatures<C>> FORCE_ATOMIC = features -> features.isBranching();
+    public final static Predicate<InMemoryTrie.NodeFeatures<?>> FORCE_ATOMIC = features -> features.isBranching();
+    public final static <Q> Predicate<InMemoryTrie.NodeFeatures<Q>> forceAtomic()
+    {
+        return (Predicate<InMemoryTrie.NodeFeatures<Q>>) (Predicate<?>) FORCE_ATOMIC;
+    }
     /**
      * Do not do any additional copying beyond what is required to build the tries safely for concurrent readers.
      * Mutations may be partially seen by readers, and older mutations may be missed while newer ones are returned.
      */
-    public final Predicate<InMemoryTrie.NodeFeatures<C>> NO_ATOMICITY = features -> false;
+    public final static Predicate<InMemoryTrie.NodeFeatures<?>> NO_ATOMICITY = features -> false;
+    public final static <Q> Predicate<InMemoryTrie.NodeFeatures<Q>> noAtomicity()
+    {
+        return (Predicate<InMemoryTrie.NodeFeatures<Q>>) (Predicate<?>) NO_ATOMICITY;
+    }
 
     abstract R makeTrie(OpOrder readOrder);
 
     abstract C value(ByteComparable b, ByteComparable cprefix, ByteComparable c, int add, int seqId);
+
     abstract C metadata(ByteComparable b);
+
     abstract String pk(C c);
+
     abstract String ck(C c);
+
     abstract int seq(C c);
+
     abstract int value(C c);
+
     abstract int updateCount(C c);
 
     abstract T makeSingleton(ByteComparable b, C content);
+
     abstract T withRootMetadata(T wrapped, C metadata);
 
     abstract T merge(Collection<T> tries, Trie.CollectionMergeResolver<C> mergeResolver);
+
     abstract void apply(R trie,
                         T mutation,
                         InMemoryBaseTrie.UpsertTransformer<C, C> mergeResolver,
                         Predicate<InMemoryTrie.NodeFeatures<C>> forcedCopyChecker) throws TrieSpaceExhaustedException;
 
+    abstract void delete(R trie,
+                         RangeTrie<TestRangeState> deletion,
+                         InMemoryBaseTrie.UpsertTransformer<C, TestRangeState> mergeResolver,
+                         Predicate<InMemoryBaseTrie.NodeFeatures<TestRangeState>> forcedCopyChecker) throws TrieSpaceExhaustedException;
+
     abstract boolean isPartition(C c);
+    boolean isPartition(TestRangeState c)
+    {
+        if (!(c instanceof TestStateMetadata))
+            return false;
+        return isPartition(((TestStateMetadata<C>) c).metadata);
+    }
+
     abstract C mergeMetadata(C c1, C c2);
+    abstract C deleteMetadata(C existing, int entriesCount);
 
     abstract void printStats(R trie, Predicate<InMemoryBaseTrie.NodeFeatures<C>> forcedCopyChecker);
 
@@ -99,7 +136,7 @@ public abstract class ConsistencyTestBase<C, T extends BaseTrie<C, ?, T>, R exte
         // and consistent, i.e. that it is not possible to receive some newer updates while missing
         // older ones. (For example, if the sequence of additions is 3, 1, 5, without this requirement a reader
         // could see an enumeration which lists 3 and 5 but not 1.)
-        testAtomicUpdates(3, FORCE_COPY_PARTITION, true, true);
+        testAtomicUpdates(3, FORCE_COPY_PARTITION, FORCE_COPY_PARTITION_RANGE_STATE, true, true);
         // Note: using 3 per mutation, so that the first and second update fit in a sparse in-memory trie block.
     }
 
@@ -108,14 +145,14 @@ public abstract class ConsistencyTestBase<C, T extends BaseTrie<C, ?, T>, R exte
     {
         // Check that multi-path updates with below-branching-point copying are safe for concurrent readers,
         // and that content is atomically applied, i.e. that reader see either nothing from the update or all of it.
-        testAtomicUpdates(3, FORCE_ATOMIC, true, false);
+        testAtomicUpdates(3, forceAtomic(), forceAtomic(), true, false);
     }
 
     @Test
     public void testSafeUpdates() throws Exception
     {
         // Check that multi path updates without additional copying are safe for concurrent readers.
-        testAtomicUpdates(3, NO_ATOMICITY, false, false);
+        testAtomicUpdates(3, noAtomicity(), noAtomicity(), false, false);
     }
 
     @Test
@@ -125,7 +162,7 @@ public abstract class ConsistencyTestBase<C, T extends BaseTrie<C, ?, T>, R exte
         // and that content is consistent, i.e. that it is not possible to receive some newer updates while missing
         // older ones. (For example, if the sequence of additions is 3, 1, 5, without this requirement a reader
         // could see an enumeration which lists 3 and 5 but not 1.)
-        testAtomicUpdates(1, FORCE_COPY_PARTITION, true, true);
+        testAtomicUpdates(1, FORCE_COPY_PARTITION, FORCE_COPY_PARTITION_RANGE_STATE, true, true);
     }
 
 
@@ -134,14 +171,14 @@ public abstract class ConsistencyTestBase<C, T extends BaseTrie<C, ?, T>, R exte
     {
         // When doing single path updates atomicity comes for free. This only checks that the branching checker is
         // not doing anything funny.
-        testAtomicUpdates(1, FORCE_ATOMIC, true, false);
+        testAtomicUpdates(1, forceAtomic(), forceAtomic(), true, false);
     }
 
     @Test
     public void testSafeSinglePathUpdates() throws Exception
     {
         // Check that single path updates without additional copying are safe for concurrent readers.
-        testAtomicUpdates(1, NO_ATOMICITY, true, false);
+        testAtomicUpdates(1, noAtomicity(), noAtomicity(), true, false);
     }
 
     // The generated keys all start with NEXT_COMPONENT, which makes it impossible to test the precise behavior of the
@@ -164,8 +201,16 @@ public abstract class ConsistencyTestBase<C, T extends BaseTrie<C, ?, T>, R exte
         };
     }
 
+    private static ByteComparable swapTerminator(ByteComparable key, int newTerminator)
+    {
+        byte[] bytes = key.asByteComparableArray(VERSION);
+        bytes[bytes.length - 1] = (byte) newTerminator;
+        return ByteComparable.preencoded(VERSION, bytes);
+    }
+
     public void testAtomicUpdates(int PER_MUTATION,
                                   Predicate<InMemoryTrie.NodeFeatures<C>> forcedCopyChecker,
+                                  Predicate<InMemoryTrie.NodeFeatures<TestRangeState>> forcedCopyCheckerRanges,
                                   boolean checkAtomicity,
                                   boolean checkSequence)
     throws Exception
@@ -185,17 +230,22 @@ public abstract class ConsistencyTestBase<C, T extends BaseTrie<C, ?, T>, R exte
         List<Thread> threads = new ArrayList<Thread>();
         AtomicBoolean writeCompleted = new AtomicBoolean(false);
         AtomicInteger writeProgress = new AtomicInteger(0);
+        AtomicLong writeProgressAck = new AtomicLong(0);
+        AtomicInteger threadIdx = new AtomicInteger(0);
 
         for (int i = 0; i < WALKERS; ++i)
             threads.add(new Thread()
             {
+                int threadId = threadIdx.getAndIncrement();
+                LongUnaryOperator ackWriteProgress = x -> x | (1<<threadId);
                 public void run()
                 {
-                    try
+                    Random r = ThreadLocalRandom.current();
+                    while (!writeCompleted.get())
                     {
-                        Random r = ThreadLocalRandom.current();
-                        while (!writeCompleted.get())
+                        try
                         {
+                            writeProgressAck.getAndUpdate(ackWriteProgress);
                             int min = writeProgress.get();
                             try (OpOrder.Group group = readOrder.start())
                             {
@@ -203,11 +253,11 @@ public abstract class ConsistencyTestBase<C, T extends BaseTrie<C, ?, T>, R exte
                                 checkEntries("", min, true, checkAtomicity, false, PER_MUTATION, entries);
                             }
                         }
-                    }
-                    catch (Throwable t)
-                    {
-                        t.printStackTrace();
-                        errors.add(t);
+                        catch (Throwable t)
+                        {
+                            t.printStackTrace();
+                            errors.add(t);
+                        }
                     }
                 }
             });
@@ -219,35 +269,44 @@ public abstract class ConsistencyTestBase<C, T extends BaseTrie<C, ?, T>, R exte
             {
                 public void run()
                 {
-                    try
+                    int threadId = threadIdx.getAndIncrement();
+                    LongUnaryOperator ackWriteProgress = x -> x | (1 << threadId);
+
+                    Random r = ThreadLocalRandom.current();
+                    while (!writeCompleted.get())
                     {
-                        // await at least one ready partition
-                        while (writeProgress.get() == 0) {}
-
-                        Random r = ThreadLocalRandom.current();
-                        while (!writeCompleted.get())
+                        try
                         {
-                            ByteComparable key = srcLocal[r.nextInt(srcLocal.length)];
-                            int min = writeProgress.get() / (pkeys.length * PER_MUTATION) * PER_MUTATION;
-                            Iterable<Map.Entry<Preencoded, C>> entries;
-
-                            try (OpOrder.Group group = readOrder.start())
                             {
-                                entries = trie.tailTrie(key).entrySet();
-                                checkEntries(" in tail " + key.byteComparableAsString(VERSION), min, false, checkAtomicity, checkSequence, PER_MUTATION, entries);
-                            }
+                                writeProgressAck.getAndUpdate(ackWriteProgress);
+                                ByteComparable key = srcLocal[r.nextInt(srcLocal.length)];
+                                int min = writeProgress.get() / (pkeys.length * PER_MUTATION) * PER_MUTATION;
+                                Iterable<Map.Entry<Preencoded, C>> entries;
 
-                            try (OpOrder.Group group = readOrder.start())
-                            {
-                                entries = trie.subtrie(key, nextBranch(key)).entrySet();
-                                checkEntries(" in branch " + key.byteComparableAsString(VERSION), min, true, checkAtomicity, checkSequence, PER_MUTATION, entries);
+                                try (OpOrder.Group group = readOrder.start())
+                                {
+                                    var tail = trie.tailTrie(key);
+                                    if (tail != null)
+                                    {
+                                        entries = tail.entrySet();
+                                        checkEntries(" in tail " + key.byteComparableAsString(VERSION), min, false, checkAtomicity, checkSequence, PER_MUTATION, entries);
+                                    }
+                                    else
+                                        Assert.assertEquals("Trie key not found when there should be data for it", 0, min);
+                                }
+
+                                try (OpOrder.Group group = readOrder.start())
+                                {
+                                    entries = trie.subtrie(key, key).entrySet();
+                                    checkEntries(" in branch " + key.byteComparableAsString(VERSION), min, true, checkAtomicity, checkSequence, PER_MUTATION, entries);
+                                }
                             }
                         }
-                    }
-                    catch (Throwable t)
-                    {
-                        t.printStackTrace();
-                        errors.add(t);
+                        catch (Throwable t)
+                        {
+                            t.printStackTrace();
+                            errors.add(t);
+                        }
                     }
                 }
             });
@@ -273,9 +332,11 @@ public abstract class ConsistencyTestBase<C, T extends BaseTrie<C, ?, T>, R exte
                         return contents.stream().reduce(this::resolve).get();
                     }
                 };
+                BitSet choices = new BitSet(COUNT / PER_MUTATION);
 
                 try
                 {
+                    // Insert the data.
                     int lastUpdate = 0;
                     for (int i = 0; i < COUNT; i += PER_MUTATION)
                     {
@@ -283,7 +344,10 @@ public abstract class ConsistencyTestBase<C, T extends BaseTrie<C, ?, T>, R exte
                         C partitionMarker = metadata(b);
                         ByteComparable cprefix = null;
                         if (r.nextBoolean())
+                        {
                             cprefix = ckeys[i]; // Also test branching point below the partition level
+                            choices.set(i / PER_MUTATION);
+                        }
 
                         List<T> sources = new ArrayList<>();
                         for (int j = 0; j < PER_MUTATION; ++j)
@@ -306,14 +370,68 @@ public abstract class ConsistencyTestBase<C, T extends BaseTrie<C, ?, T>, R exte
                         final T mutation = merge(sources, mergeResolver);
 
                         apply(trie, mutation,
-                                   (existing, update) -> existing == null ? update : mergeResolver.resolve(existing, update),
-                                   forcedCopyChecker);
+                              (existing, update) -> existing == null ? update : mergeResolver.resolve(existing, update),
+                              forcedCopyChecker);
 
                         if (i >= pkeys.length * PER_MUTATION && i - lastUpdate >= PROGRESS_UPDATE)
                         {
                             writeProgress.set(i);
                             lastUpdate = i;
                         }
+                    }
+
+                    writeProgress.set(COUNT);
+                    printStats(trie, forcedCopyChecker);
+                    Thread.sleep(100); // Let the threads check the completed state too.
+
+                    InMemoryTrie.UpsertTransformer<C, TestRangeState> deleteResolver = (existing, update) ->
+                    {
+                        if (update instanceof TestStateMetadata)
+                        {
+                            assert isPartition(existing);
+                            return deleteMetadata(existing, PER_MUTATION);
+                        }
+                        return null;
+                    };
+
+                    // Now delete the data in the reverse order of the insertion to satisfy the same constraints.
+                    for (int i = COUNT - PER_MUTATION; i >= 0; i -= PER_MUTATION)
+                    {
+                        if (i < writeProgress.get())
+                        {
+                            // Reduce the writeProgress so that we can start deleting a batch.
+                            writeProgress.set(writeProgress.get() - PROGRESS_UPDATE);
+                            // Wait until all reader threads have completed the current pass.
+                            writeProgressAck.set(0);
+                            while (writeProgressAck.get() + 1 < 1 << threadIdx.get())
+                                Thread.yield();
+                        }
+
+                        ByteComparable b = pkeys[(i / PER_MUTATION) % pkeys.length];
+                        TestRangeState partitionMarker = new TestStateMetadata<>(metadata(b));
+                        List<RangeTrie<TestRangeState>> ranges = new ArrayList<>();
+                        ByteComparable cprefix = null;
+                        if (choices.get(i / PER_MUTATION) && r.nextBoolean())
+                        {
+                            // Delete the whole branch in one range
+                            ranges.add(makeRangeCovering(ckeys[i]));
+                        }
+                        else
+                        {
+                            // A range for each entry
+                            if (choices.get(i / PER_MUTATION))
+                                cprefix = ckeys[i];
+                            for (int j = 0; j < PER_MUTATION; ++j)
+                                ranges.add(makeRangeCovering(ckeys[i + j]));
+                        }
+
+                        RangeTrie<TestRangeState> deletion = RangeTrie.merge(ranges, Trie.throwingResolver());
+                        if (cprefix != null)
+                            deletion = deletion.prefixedBy(cprefix);
+                        deletion = TrieUtil.withRootMetadata(deletion, partitionMarker);
+                        deletion = deletion.prefixedBy(b);
+
+                        delete(trie, deletion, deleteResolver, forcedCopyCheckerRanges);
                     }
                 }
                 catch (Throwable t)
@@ -338,6 +456,14 @@ public abstract class ConsistencyTestBase<C, T extends BaseTrie<C, ?, T>, R exte
 
         if (!errors.isEmpty())
             Assert.fail("Got errors:\n" + errors);
+    }
+
+    private static RangeTrie<TestRangeState> makeRangeCovering(ByteComparable cprefix)
+    {
+        return RangeTrie.range(swapTerminator(cprefix, ByteSource.LT_NEXT_COMPONENT),
+                               swapTerminator(cprefix, ByteSource.GT_NEXT_COMPONENT),
+                               VERSION,
+                               TestRangeState.COVERED);
     }
 
     static ByteComparable nextBranch(ByteComparable key)
@@ -405,6 +531,128 @@ public abstract class ConsistencyTestBase<C, T extends BaseTrie<C, ?, T>, R exte
             // were applied before that. In other words, the id sum should be the sum of the integers from 1 to the
             // highest id seen in the partition.
             Assert.assertEquals("Id sum" + location, idMax * (idMax + 1) / 2, idSum);
+        }
+    }
+
+    static abstract class TestRangeState implements RangeState<TestRangeState>
+    {
+        static final TestRangeState COVERED = new TestRangeCoveringState();
+        static final TestRangeState RANGE_START = new TestRangeBoundary(Direction.FORWARD);
+        static final TestRangeState RANGE_END = new TestRangeBoundary(Direction.REVERSE);
+    }
+
+    static class TestRangeCoveringState extends TestRangeState
+    {
+        @Override
+        public boolean isBoundary()
+        {
+            return false;
+        }
+
+        @Override
+        public TestRangeCoveringState precedingState(Direction direction)
+        {
+            return this;
+        }
+
+        @Override
+        public TestRangeState restrict(boolean applicableBefore, boolean applicableAfter)
+        {
+            throw new AssertionError();
+        }
+
+        @Override
+        public TestRangeState asBoundary(Direction direction)
+        {
+            return direction.isForward() ? RANGE_START : RANGE_END;
+        }
+
+        @Override
+        public String toString()
+        {
+            return "COVERING";
+        }
+    }
+
+    static class TestRangeBoundary extends TestRangeState
+    {
+        final Direction direction;
+
+        TestRangeBoundary(Direction direction)
+        {
+            this.direction = direction;
+        }
+
+        @Override
+        public boolean isBoundary()
+        {
+            return true;
+        }
+
+        @Override
+        public TestRangeState precedingState(Direction direction)
+        {
+            return direction == this.direction ? null : COVERED;
+        }
+
+        @Override
+        public TestRangeState restrict(boolean applicableBefore, boolean applicableAfter)
+        {
+            if (direction.isForward() && !applicableBefore || !direction.isForward() && !applicableAfter)
+                return null;
+            return this;
+        }
+
+        @Override
+        public TestRangeState asBoundary(Direction direction)
+        {
+            throw new AssertionError();
+        }
+
+        @Override
+        public String toString()
+        {
+            return direction.isForward() ? "START" : "END";
+        }
+    }
+
+    static class TestStateMetadata<C> extends TestRangeState
+    {
+        final C metadata;
+
+        TestStateMetadata(C metadata)
+        {
+            this.metadata = metadata;
+        }
+
+        @Override
+        public boolean isBoundary()
+        {
+            return true;
+        }
+
+        @Override
+        public TestRangeState precedingState(Direction direction)
+        {
+            return null;
+        }
+
+        @Override
+        public TestRangeState restrict(boolean applicableBefore, boolean applicableAfter)
+        {
+            return this; // metadata should survive ranges
+        }
+
+        @Override
+        public TestRangeState asBoundary(Direction direction)
+        {
+            throw new AssertionError();
+        }
+
+        @Override
+        public String toString()
+        {
+            return metadata.toString();
         }
     }
 }

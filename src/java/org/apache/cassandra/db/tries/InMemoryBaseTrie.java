@@ -1099,6 +1099,27 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
             }
         }
 
+        /// Advance to the next existing position in the trie.
+        boolean advanceToNextExisting(int forcedCopyDepth) throws TrieSpaceExhaustedException
+        {
+            setTransition(-1); // we have newly descended to a node, start with its first child
+            while (true)
+            {
+                int currentTransition = transition();
+                int nextTransition = getNextTransition(existingPostContentNode(), currentTransition + 1);
+                if (nextTransition <= 0xFF)
+                {
+                    descend(nextTransition);
+                    return true;
+                }
+
+                if (currentDepth <= ascendLimit)
+                    return false;
+
+                attachAndMoveToParentState(forcedCopyDepth);
+            }
+        }
+
         /// Descend to a child node. Prepares a new entry in the stack for the node.
         void descend(int transition)
         {

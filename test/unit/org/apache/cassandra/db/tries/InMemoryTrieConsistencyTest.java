@@ -102,6 +102,12 @@ public class InMemoryTrieConsistencyTest extends ConsistencyTestBase<InMemoryTri
     }
 
     @Override
+    void delete(InMemoryTrie<Content> trie, RangeTrie<TestRangeState> deletion, InMemoryBaseTrie.UpsertTransformer<Content, TestRangeState> mergeResolver, Predicate<InMemoryBaseTrie.NodeFeatures<TestRangeState>> forcedCopyChecker) throws TrieSpaceExhaustedException
+    {
+        trie.apply(deletion, mergeResolver, forcedCopyChecker);
+    }
+
+    @Override
     boolean isPartition(Content c)
     {
         return c != null && c.isPartition();
@@ -114,13 +120,19 @@ public class InMemoryTrieConsistencyTest extends ConsistencyTestBase<InMemoryTri
     }
 
     @Override
+    Content deleteMetadata(Content c1, int entriesToRemove)
+    {
+        return ((Metadata) c1).delete(entriesToRemove);
+    }
+
+    @Override
     void printStats(InMemoryTrie<Content> trie, Predicate<InMemoryBaseTrie.NodeFeatures<Content>> forcedCopyChecker)
     {
         System.out.format("Reuse %s %s atomicity %s on-heap %,d (+%,d) off-heap %,d\n",
                           trie.cellAllocator.getClass().getSimpleName(),
                           trie.bufferType,
-                          forcedCopyChecker == NO_ATOMICITY ? "none" :
-                          forcedCopyChecker == FORCE_ATOMIC ? "atomic" : "consistent partition",
+                          forcedCopyChecker == this.<Content>noAtomicity() ? "none" :
+                          forcedCopyChecker == this.<Content>forceAtomic() ? "atomic" : "consistent partition",
                           trie.usedSizeOnHeap(),
                           trie.unusedReservedOnHeapMemory(),
                           trie.usedSizeOffHeap());
@@ -190,6 +202,16 @@ public class InMemoryTrieConsistencyTest extends ConsistencyTestBase<InMemoryTri
         {
             Metadata m = new Metadata(pk);
             m.updateCount = updateCount + other.updateCount;
+            return m;
+        }
+
+        Metadata delete(int entriesToRemove)
+        {
+            assert updateCount >= entriesToRemove;
+            if (updateCount == entriesToRemove)
+                return null;
+            Metadata m = new Metadata(pk);
+            m.updateCount = updateCount - entriesToRemove;
             return m;
         }
 

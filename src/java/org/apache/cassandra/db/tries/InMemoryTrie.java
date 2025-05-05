@@ -179,4 +179,163 @@ public class InMemoryTrie<T> extends InMemoryBaseTrie<T> implements Trie<T>
         else
             putSingleton(key, value, transformer);
     }
+
+    /// Delete all entries covered under the specified TrieSet
+    public void delete(TrieSet set) throws TrieSpaceExhaustedException
+    {
+        apply(set.cursor(Direction.FORWARD), (UpsertTransformer<T, TrieSetCursor.RangeState>) DeleteMutation::deleteEntry, NodeFeatures::isBranching);
+    }
+
+    /// Apply the given range trie to this in-memory trie. Any existing content that falls under the ranges of the given
+    /// trie will be modified by applying the transformer. This is usually used to delete covered content (by returning
+    /// null from the transformer).
+    /// @param rangeTrie the ranges to be applied, given in the form of a range trie.
+    /// @param transformer a function applied to the potentially pre-existing value for the given key, and the new
+    /// value. Applied even if there's no pre-existing value in the memtable trie.
+    /// @param needsForcedCopy a predicate which decides when to fully copy a branch to provide atomicity guarantees to
+    /// concurrent readers. See NodeFeatures for details.
+    public <S extends RangeState<S>>
+    void apply(RangeTrie<S> rangeTrie,
+               final UpsertTransformerWithKeyProducer<T, S> transformer,
+               final Predicate<NodeFeatures<S>> needsForcedCopy)
+    throws TrieSpaceExhaustedException
+    {
+        apply(rangeTrie.cursor(Direction.FORWARD), transformer, needsForcedCopy);
+    }
+
+    private <S extends RangeState<S>> void apply(RangeCursor<S> cursor,
+                                                 UpsertTransformerWithKeyProducer<T, S> transformer,
+                                                 Predicate<NodeFeatures<S>> needsForcedCopy) throws TrieSpaceExhaustedException
+    {
+        try
+        {
+            DeleteMutation<T, S, RangeCursor<S>> m = new DeleteMutation<>(transformer,
+                                                                          needsForcedCopy,
+                                                                          cursor,
+                                                                          applyState.start());
+            m.apply();
+            m.complete();
+            completeMutation();
+        }
+        catch (Throwable t)
+        {
+            abortMutation();
+            throw t;
+        }
+    }
+
+    static class DeleteMutation<T, S extends RangeState<S>, C extends RangeCursor<S>> extends Mutation<T, S, C>
+    {
+        DeleteMutation(UpsertTransformerWithKeyProducer<T, S> transformer,
+                       Predicate<NodeFeatures<S>> needsForcedCopy,
+                       C mutationCursor,
+                       InMemoryBaseTrie<T>.ApplyState state)
+        {
+            super(transformer, needsForcedCopy, mutationCursor, state);
+        }
+
+        @Override
+        void apply() throws TrieSpaceExhaustedException
+        {
+            // A TrieSet may start already in a deleted range. If so, pretend there's a START at the initial position.
+            S content = mutationCursor.precedingState();
+            if (coveringStateApplies(content))
+                content = content.asBoundary(Direction.FORWARD);
+            else
+                content = mutationCursor.content();
+
+            int depth = state.currentDepth;
+            int prevAscendDepth = state.setAscendLimit(depth);
+            while (true)
+            {
+                if (depth < forcedCopyDepth)
+                    forcedCopyDepth = needsForcedCopy.test(this) ? depth : Integer.MAX_VALUE;
+
+                if (content != null)
+                {
+                    applyCoveringContent(content);
+                    S mutationCoveringState = content.precedingState(Direction.REVERSE); // Use the right side of the deletion
+                    if (coveringStateApplies(mutationCoveringState))
+                    {
+                        boolean done = !applyDeletionRange(mutationCoveringState);
+                        if (done)
+                            break;
+                    }
+                }
+
+                depth = mutationCursor.advance();
+                // Descend but do not modify anything yet.
+                if (!state.advanceTo(depth, mutationCursor.incomingTransition(), forcedCopyDepth))
+                    break;
+
+                assert state.currentDepth == depth : "Unexpected change to applyState. Concurrent trie modification?";
+                content = mutationCursor.content();
+            }
+            state.setAscendLimit(prevAscendDepth);
+        }
+
+        /// Walk all existing content covered under a deletion. Returns true if the caller needs to continue processing
+        /// the mutation cursor, and false if the mutation has been exhausted (i.e. the range was open on the right
+        /// and we have consumed all existing content).
+        boolean applyDeletionRange(S mutationCoveringState) throws TrieSpaceExhaustedException
+        {
+            boolean atMutation = true;
+            int depth = mutationCursor.depth();
+            int transition = mutationCursor.incomingTransition();
+            // We are walking both tries in parallel.
+            while (true)
+            {
+                if (atMutation)
+                {
+                    depth = mutationCursor.advance();
+                    transition = mutationCursor.incomingTransition();
+                    atMutation = false;
+                }
+
+                // Mutation can be open on the right (i.e. not have a closing marker).
+                if (depth > 0)
+                {
+                    if (depth < forcedCopyDepth)
+                        forcedCopyDepth = needsForcedCopy.test(this) ? depth : Integer.MAX_VALUE;
+                    atMutation = !state.advanceToNextExistingOr(depth, transition, forcedCopyDepth);
+                }
+                else if (!state.advanceToNextExisting(forcedCopyDepth))
+                    return false;
+
+                T existingContent = state.getContent();
+                S mutationContent = atMutation ? mutationCursor.content() : null;
+                if (mutationContent != null)
+                {
+                    applyCoveringContent(mutationContent);
+                    mutationCoveringState = mutationContent.precedingState(Direction.REVERSE);
+                    if (!coveringStateApplies(mutationCoveringState))
+                        return true; // mutation deletion range was closed, we can continue normal mutation cursor iteration
+                }
+                else if (existingContent != null)
+                    applyCoveringContent(mutationCoveringState);
+            }
+        }
+
+        private static <S extends RangeState<S>> boolean coveringStateApplies(S state)
+        {
+            // Sets return non-null state (START_END_PREFIX) for regions that they do not cover. Check that too.
+            return state != null && state != TrieSetCursor.RangeState.START_END_PREFIX;
+        }
+
+        void applyCoveringContent(S content) throws TrieSpaceExhaustedException
+        {
+            if (content != null)
+            {
+                T existingContent = state.getContent();
+                T combinedContent = transformer.apply(existingContent, content, state);
+                state.setContent(combinedContent, // can be null
+                                 state.currentDepth >= forcedCopyDepth); // this is called at the start of processing
+            }
+        }
+
+        private static <T> T deleteEntry(T entry, TrieSetCursor.RangeState state)
+        {
+            return state.applicableBefore ? null : entry;
+        }
+    }
 }

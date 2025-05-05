@@ -444,6 +444,8 @@ public class IntersectionTrieTest
     {
         testIntersectionTries(message, expected, trie, sets);
         testIntersectionSets(message + " setix", expected, trie, TrieSet.range(VERSION, null, null), sets);
+        testIntersectionTriesByRangeApplyTo(message + " applyTo", expected, trie, sets);
+        testIntersectionInMemoryTrieDelete(message + " delete", expected, trie, sets);
     }
 
     public void checkEqual(String message, List<Integer> expected, Trie<Integer> trie)
@@ -502,6 +504,52 @@ public class IntersectionTrieTest
         }
     }
 
+    public void testIntersectionTriesByRangeApplyTo(String message, List<Integer> expected, Trie<Integer> trie, TrieSet[] sets)
+    {
+        // Test that intersecting the given trie with the given sets, in any order, results in the expected list.
+        // Checks both forward and reverse iteration direction.
+        if (sets.length == 0)
+        {
+            checkEqual(message + " b" + bits, expected, trie);
+        }
+        else
+        {
+            for (int toRemove = 0; toRemove < sets.length; ++toRemove)
+            {
+                TrieSet set = sets[toRemove];
+                testIntersectionTriesByRangeApplyTo(message + " " + toRemove, expected,
+                                                    applySet(set, trie),
+                                                    Arrays.stream(sets)
+                                                          .filter(x -> x != set)
+                                                          .toArray(TrieSet[]::new)
+                );
+            }
+        }
+    }
+
+    private <T> Trie<T> applySet(TrieSet set, Trie<T> trie)
+    {
+        // Convert the set to a range trie. Do this by reinterpreting the cursor and avoiding verification
+        // (instead of e.g. RangeTrie.fromSet(set, TrieSetCursor.RangeState.END_START_PREFIX)),
+        // because some of the sets we use here are open and thus not valid range tries.
+        RangeTrie<TrieSetCursor.RangeState> setAsRangeTrie = new RangeTrie<>()
+        {
+            @Override
+            public RangeCursor<TrieSetCursor.RangeState> makeCursor(Direction direction)
+            {
+                throw new AssertionError();
+            }
+
+            @Override
+            public RangeCursor<TrieSetCursor.RangeState> cursor(Direction direction)
+            {
+                // disable debug verification (cursor is already checked by TrieSet.cursor())
+                return set.cursor(direction);
+            }
+        };
+        return setAsRangeTrie.applyTo(trie, (range, value) -> range.applicableBefore ? value : null);
+    }
+
     private static InMemoryTrie<Integer> duplicateTrie(Trie<Integer> trie)
     {
         try
@@ -515,6 +563,39 @@ public class IntersectionTrieTest
             throw new AssertionError(e);
         }
     }
+
+    public void testIntersectionInMemoryTrieDelete(String message, List<Integer> expected, Trie<Integer> trie, TrieSet[] sets)
+    {
+        // Test that intersecting the given trie with the given sets, in any order, results in the expected list.
+        // Checks both forward and reverse iteration direction.
+        if (sets.length == 0)
+        {
+            checkEqual(message + " b" + bits, expected, trie);
+        }
+        else
+        {
+            try
+            {
+                for (int toRemove = 0; toRemove < sets.length; ++toRemove)
+                {
+                    TrieSet set = sets[toRemove];
+                    InMemoryTrie<Integer> ix = duplicateTrie(trie);
+                    ix.delete(set.weakNegation());
+                    testIntersectionInMemoryTrieDelete(message + " " + toRemove, expected,
+                                                       ix,
+                                                       Arrays.stream(sets)
+                                                             .filter(x -> x != set)
+                                                             .toArray(TrieSet[]::new)
+                    );
+                }
+            }
+            catch (TrieSpaceExhaustedException e)
+            {
+                throw new AssertionError(e);
+            }
+        }
+    }
+
 
     @Test
     public void testReturnsContentOnPrefix() throws TrieSpaceExhaustedException
