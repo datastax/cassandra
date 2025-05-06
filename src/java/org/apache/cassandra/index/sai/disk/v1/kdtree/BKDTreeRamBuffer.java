@@ -84,6 +84,11 @@ public class BKDTreeRamBuffer implements Accountable
         return numRows;
     }
 
+    public long numPoints()
+    {
+        return numPoints;
+    }
+
     public long addPackedValue(int segmentRowId, BytesRef value)
     {
         ensureOpen();
