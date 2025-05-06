@@ -20,6 +20,7 @@ package org.apache.cassandra.distributed.test;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.NoSuchAlgorithmException;
@@ -27,6 +28,7 @@ import java.util.List;
 import java.util.stream.Collectors;
 import javax.crypto.NoSuchPaddingException;
 
+import com.google.common.primitives.Bytes;
 import org.apache.commons.lang3.RandomStringUtils;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
@@ -39,8 +41,6 @@ import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.distributed.api.ConsistencyLevel;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.tools.SSTableExport;
-import org.apache.cassandra.tools.ToolRunner;
 import org.apache.cassandra.utils.ChecksumType;
 
 import static org.apache.cassandra.distributed.api.ConsistencyLevel.ALL;
@@ -57,6 +57,8 @@ public class SSTableEncryptionTest extends TestBaseImpl
 {
     private static final String KEYSPACE_PREFIX = "ks";
     private static final String TABLE_PREFIX = "tbl";
+    private static final String SENSITIVE_KEY = "Key with sensitive information";
+    private static final int ROWS_COUNT = 10000;
 
     private static String defaultSystemKeyDirectory;
 
@@ -128,7 +130,7 @@ public class SSTableEncryptionTest extends TestBaseImpl
     }
 
     @Test
-    public void shouldVerifyPartitionAndRowIndexesAreEncrypted() throws Exception
+    public void shouldEncryptSensitiveData() throws Exception
     {
         try (Cluster cluster = builder().withNodes(1)
                                         .withConfig(config -> config.with(GOSSIP).with(NETWORK))
@@ -141,34 +143,21 @@ public class SSTableEncryptionTest extends TestBaseImpl
             TestTable encryptedTable = createTableWithSampleData(cluster, keyspace, localSystemKeyEncryptionCompressionSuffix("Encryptor", secretKey.toAbsolutePath().toString()));
 
             // then
+            // sensitive key should not be present in encrypted data
+            byte[] sensitiveBytes = SENSITIVE_KEY.getBytes(StandardCharsets.UTF_8);
+            assertThat(Bytes.indexOf(nonEncryptedTable.sstableBytes, sensitiveBytes)).isNotEqualTo(-1);
+            assertThat(Bytes.indexOf(encryptedTable.sstableBytes, sensitiveBytes)).isEqualTo(-1);
+            // sensitive key should not be present in encrypted partition index
+            assertThat(Bytes.indexOf(nonEncryptedTable.partitionIndexBytes, sensitiveBytes)).isNotEqualTo(-1);
+            assertThat(Bytes.indexOf(encryptedTable.partitionIndexBytes, sensitiveBytes)).isEqualTo(-1);
+
+
             // indexes with encryption should pass the checksum check
             assertThat(checkEncryptionCrc(encryptedTable.partitionIndexBytes)).isTrue();
             assertThat(checkEncryptionCrc(encryptedTable.rowIndexBytes)).isTrue();
             // indexes without encryption should fail the checksum check
             assertThat(checkEncryptionCrc(nonEncryptedTable.partitionIndexBytes)).isFalse();
             assertThat(checkEncryptionCrc(nonEncryptedTable.rowIndexBytes)).isFalse();
-        }
-    }
-
-
-    @Test
-    public void shouldFail() throws Exception
-    {
-        try (Cluster cluster = builder().withNodes(1)
-                                        .withConfig(config -> config.with(GOSSIP).with(NETWORK))
-                                        .start())
-        {
-            // given tables with and without encryption
-            String keyspace = createKeyspace(cluster);
-
-            String tableName = randomTableName();
-            String createTableCql = "CREATE TABLE %s.%s (id text, cc text, value text, PRIMARY KEY ((id), cc))";
-            cluster.schemaChange(String.format(createTableCql, keyspace, tableName));
-
-            Path secretKey = createLocalSecretKey();
-            TestTable encryptedTable = createTableWithSampleData(cluster, keyspace, localSystemKeyEncryptionCompressionSuffix("Encryptor", secretKey.toAbsolutePath().toString()));
-
-
         }
     }
 
@@ -275,14 +264,16 @@ public class SSTableEncryptionTest extends TestBaseImpl
         cluster.schemaChange(String.format(createTableCql, keyspace, tableName));
 
         int k = 0;
-        for (int i = 0; i < 3; i++)
+        for (int i = 0; i < 10; i++)
         {
-            for (int j = 0; j < 10000; j++)
+            for (int j = 0; j < ROWS_COUNT; j++)
             {
                 cluster.coordinator(1).execute(String.format("INSERT INTO %s.%s (id, cc, value) VALUES ('%s', '%s', '%s')", keyspace, tableName, i, j, k), ALL);
                 k++;
             }
         }
+
+        cluster.coordinator(1).execute(String.format("INSERT INTO %s.%s (id, cc, value) VALUES ('%s', '%s', '%s')", keyspace, tableName, SENSITIVE_KEY, SENSITIVE_KEY, SENSITIVE_KEY), ALL);
 
         // flush to make sure we have sstable
         cluster.get(1).flush(keyspace);
