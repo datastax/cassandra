@@ -61,7 +61,7 @@ export TESTSUITE_NAME="cqlshlib.python${python_version}.jdk${java_version}"
 pushd ${CASSANDRA_DIR} >/dev/null
 
 # check project is already built. no cleaning is done, so jenkins unstash works, beware.
-[[ -f "${BUILD_DIR}/dse-db-${version}.jar" ]] || [[ -f "${BUILD_DIR}/dse-db-${version}-SNAPSHOT.jar" ]] || { echo "Project must be built first. Use \`ant jar\`. Build directory is ${BUILD_DIR} with: $(ls ${BUILD_DIR})"; exit 1; }
+[[ -f "${BUILD_DIR}/ds-db-${version}.jar" ]] || [[ -f "${BUILD_DIR}/ds-db-${version}-SNAPSHOT.jar" ]] || { echo "Project must be built first. Use \`ant jar\`. Build directory is ${BUILD_DIR} with: $(ls ${BUILD_DIR})"; exit 1; }
 
 # Set up venv with dtest dependencies
 set -e # enable immediate exit if venv setup fails
