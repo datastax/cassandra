@@ -170,7 +170,7 @@ public abstract class SegmentBuilder
             try (NumericIndexWriter writer = new NumericIndexWriter(components,
                                                                     TypeUtil.fixedSizeOf(termComparator),
                                                                     maxSegmentRowId,
-                                                                    rowCount,
+                                                                    kdTreeRamBuffer.numPoints(),
                                                                     indexWriterConfig))
             {
 
