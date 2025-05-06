@@ -40,8 +40,11 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.DeletionTime;
+import org.apache.cassandra.db.RangeTombstone;
 import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.WriteContext;
+import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.db.lifecycle.Tracker;
@@ -227,6 +230,18 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
                 forEach(indexer -> indexer.removeRow(row));
             }
 
+            @Override
+            public void partitionDelete(DeletionTime deletionTime)
+            {
+                forEach(indexer -> indexer.partitionDelete(deletionTime));
+            }
+
+            @Override
+            public void rangeTombstone(RangeTombstone tombstone)
+            {
+                forEach(indexer -> indexer.rangeTombstone(tombstone));
+            }
+
             private void forEach(Consumer<Index.Indexer> action)
             {
                 indexers.forEach(action::accept);
@@ -302,9 +317,12 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
         {
             SSTableAddedNotification notice = (SSTableAddedNotification) notification;
 
-            // Avoid validation for index files just written following Memtable flush. Otherwise, the new SSTables have
-            // come either from import, streaming, or a standalone tool, where they have also already been validated.
-            onSSTableChanged(Collections.emptySet(), Lists.newArrayList(notice.added), indices, false);
+            // Avoid validation for index files just written following Memtable flush. ZCS streaming should
+            // validate index checksum. Also avoid validation for UNKNOWN operations (imports) as they
+            // are already validated in SSTableImporter.
+            boolean validate = notice.fromStreaming() || 
+                              (!notice.memtable().isPresent() && notice.operationType != OperationType.UNKNOWN);
+            onSSTableChanged(Collections.emptySet(), Lists.newArrayList(notice.added), indices, validate);
         }
         else if (notification instanceof SSTableListChangedNotification)
         {
@@ -344,7 +362,7 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
      * @return the set of column indexes that were marked as non-queryable as a result of their per-SSTable index
      * files being corrupt or being unable to successfully update their views
      */
-    public synchronized Set<StorageAttachedIndex> onSSTableChanged(Collection<SSTableReader> removed, Collection<SSTableReader> added,
+    public synchronized Set<StorageAttachedIndex> onSSTableChanged(Collection<SSTableReader> removed, Iterable<SSTableReader> added,
                                                             Set<StorageAttachedIndex> indexes, boolean validate)
     {
         Optional<Set<SSTableContext>> optValid = contextManager.update(removed, added, validate, indices);
@@ -359,7 +377,7 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
 
         for (StorageAttachedIndex index : indexes)
         {
-            Set<SSTableContext> invalid = index.getIndexContext().onSSTableChanged(removed, added, optValid.get(), validate);
+            Set<SSTableContext> invalid = index.getIndexContext().onSSTableChanged(removed, optValid.get(), validate);
 
             if (!invalid.isEmpty())
             {
