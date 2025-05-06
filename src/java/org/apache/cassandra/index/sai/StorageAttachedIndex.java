@@ -840,6 +840,27 @@ public class StorageAttachedIndex implements Index
         {
             indexContext.update(key, oldRow, newRow, mt, CassandraWriteContext.fromContext(writeContext).getGroup());
         }
+
+        @Override
+        public void partitionDelete(DeletionTime deletionTime)
+        {
+            // Initialize the memtable index to ensure proper SAI views of the data
+            indexContext.initializeMemtableIndex(mt);
+        }
+
+        @Override
+        public void rangeTombstone(RangeTombstone tombstone)
+        {
+            // Initialize the memtable index to ensure proper SAI views of the data
+            indexContext.initializeMemtableIndex(mt);
+        }
+
+        @Override
+        public void removeRow(Row row)
+        {
+            // Initialize the memtable index to ensure proper SAI views of the data
+            indexContext.initializeMemtableIndex(mt);
+        }
     }
 
     protected static abstract class IndexerAdapter implements Indexer
@@ -849,21 +870,6 @@ public class StorageAttachedIndex implements Index
 
         @Override
         public void finish() { }
-
-        @Override
-        public void partitionDelete(DeletionTime dt)
-        {
-        }
-
-        @Override
-        public void rangeTombstone(RangeTombstone rt)
-        {
-        }
-
-        @Override
-        public void removeRow(Row row)
-        {
-        }
     }
 
     @Override

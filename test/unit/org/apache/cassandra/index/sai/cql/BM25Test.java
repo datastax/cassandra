@@ -862,7 +862,7 @@ public class BM25Test extends SAITester
 
         for (var memtable : getCurrentColumnFamilyStore().getAllMemtables())
         {
-            MemtableIndex memIndex = getIndexContext(indexName).getMemtableIndex(memtable);
+            MemtableIndex memIndex = getIndexContext(indexName).getLiveMemtables().get(memtable);
             assert memIndex instanceof TrieMemtableIndex;
             rowCount = Arrays.stream(((TrieMemtableIndex) memIndex).getRangeIndexes())
                              .map(index -> ((TrieMemoryIndex) index).getDocLengths().size())
