@@ -129,7 +129,8 @@ public class IndexViewManager
             }
 
             newView = new View(context, referencedSSTableIndexes);
-        } while (newView == null || !viewRef.compareAndSet(currentView, newView));
+        }
+        while (newView == null || !viewRef.compareAndSet(currentView, newView));
 
         // These were referenced when created and then the ones we are keeping were re-referenced if they made it into
         // the newViewIndexes.

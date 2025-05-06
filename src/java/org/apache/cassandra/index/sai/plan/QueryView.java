@@ -123,7 +123,7 @@ public class QueryView implements AutoCloseable
          * Acquire references to all the memtables, memtable indexes, sstables, and sstable indexes required for the
          * given expression.
          */
-        protected QueryView build() throws IllegalStateException
+        protected QueryView build() throws MissingIndexException
         {
             var sstableIndexes = new HashSet<SSTableIndex>();
             View saiView = null;
