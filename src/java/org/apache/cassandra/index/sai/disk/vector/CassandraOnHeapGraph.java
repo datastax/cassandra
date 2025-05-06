@@ -28,6 +28,7 @@ import java.util.Comparator;
 import java.util.Map;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ConcurrentSkipListMap;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.function.IntUnaryOperator;
@@ -508,33 +509,47 @@ public class CassandraOnHeapGraph<T> implements Accountable
     {
         // Retrieve the first compressed vectors for a segment with at least MAX_PQ_TRAINING_SET_SIZE rows
         // or the one with the most rows if none reach that size
-        var indexes = new ArrayList<>(indexContext.getView().getIndexes());
-        indexes.sort(Comparator.comparing(SSTableIndex::getSSTable, CompactionSSTable.maxTimestampDescending));
-
-        PqInfo cvi = null;
-        long maxRows = 0;
-        for (SSTableIndex index : indexes)
+        var view = indexContext.getReferencedView(TimeUnit.SECONDS.toNanos(5));
+        if (view == null)
         {
-            for (Segment segment : index.getSegments())
+            logger.warn("Unable to get view of already built indexes for {}", indexContext);
+            return null;
+        }
+
+        try
+        {
+            var indexes = new ArrayList<>(view.getIndexes());
+            indexes.sort(Comparator.comparing(SSTableIndex::getSSTable, CompactionSSTable.maxTimestampDescending));
+
+            PqInfo cvi = null;
+            long maxRows = 0;
+            for (SSTableIndex index : indexes)
             {
-                if (segment.metadata.numRows < maxRows)
-                    continue;
-
-                var searcher = (V2VectorIndexSearcher) segment.getIndexSearcher();
-                var cv = searcher.getCompression();
-                if (matcher.apply(cv))
+                for (Segment segment : index.getSegments())
                 {
-                    // We can exit now because we won't find a better candidate
-                    var candidate = new PqInfo(searcher.getPQ(), searcher.containsUnitVectors(), segment.metadata.numRows);
-                    if (segment.metadata.numRows >= ProductQuantization.MAX_PQ_TRAINING_SET_SIZE)
-                        return candidate;
+                    if (segment.metadata.numRows < maxRows)
+                        continue;
 
-                    cvi = candidate;
-                    maxRows = segment.metadata.numRows;
+                    var searcher = (V2VectorIndexSearcher) segment.getIndexSearcher();
+                    var cv = searcher.getCompression();
+                    if (matcher.apply(cv))
+                    {
+                        // We can exit now because we won't find a better candidate
+                        var candidate = new PqInfo(searcher.getPQ(), searcher.containsUnitVectors(), segment.metadata.numRows);
+                        if (segment.metadata.numRows >= ProductQuantization.MAX_PQ_TRAINING_SET_SIZE)
+                            return candidate;
+
+                        cvi = candidate;
+                        maxRows = segment.metadata.numRows;
+                    }
                 }
             }
+            return cvi;
         }
-        return cvi;
+        finally
+        {
+            view.release();
+        }
     }
 
     private long writePQ(SequentialWriter writer, V5VectorPostingsWriter.RemappedPostings remapped, IndexContext indexContext) throws IOException
