@@ -183,7 +183,7 @@ public class VectorUpdateDeleteTest extends VectorTester.VersionedWithChecksums
     }
 
     @Test
-    public void deletedInOtherSSTablesTest()
+    public void deletedInOtherSSTablesTest() throws Throwable
     {
         createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
@@ -199,9 +199,11 @@ public class VectorUpdateDeleteTest extends VectorTester.VersionedWithChecksums
 
         execute("DELETE from %s WHERE pk = 0");
         execute("DELETE from %s WHERE pk = 1");
-        result = execute("SELECT * FROM %s ORDER BY val ann of [0.5, 1.5, 2.5] LIMIT 1");
-        assertThat(result).hasSize(1);
-        assertContainsInt(result, "pk", 2);
+        beforeAndAfterFlush(() -> {
+            var r = execute("SELECT * FROM %s ORDER BY val ann of [0.5, 1.5, 2.5] LIMIT 1");
+            assertThat(r).hasSize(1);
+            assertContainsInt(r, "pk", 2);
+        });
     }
 
     @Test
