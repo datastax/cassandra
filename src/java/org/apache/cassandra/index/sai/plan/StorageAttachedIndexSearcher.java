@@ -133,9 +133,9 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                 // and creating the result retriever, we can retry without that index,
                 // because there may be other indexes that could be used to run the query.
                 // And if there are no good indexes left, we'd get a good contextual request error message.
-                if (e.context.isDropped() && retries < 8)
+                if (e.isDropped && retries < 8)
                 {
-                    logger.debug("Index " + e.context.getIndexName() + " dropped while preparing the query plan. Retrying.");
+                    logger.debug("Index " + e.indexName + " dropped while preparing the query plan. Retrying.");
                     retries++;
                     continue;
                 }
@@ -467,7 +467,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
      */
     public static class ScoreOrderedResultRetriever extends AbstractIterator<UnfilteredRowIterator> implements UnfilteredPartitionIterator
     {
-        private final ColumnFamilyStore.RefViewFragment view;
+        private final ColumnFamilyStore.ViewFragment view;
         private final List<AbstractBounds<PartitionPosition>> keyRanges;
         private final boolean coversFullRing;
         private final CloseableIterator<PrimaryKeyWithSortKey> scoredPrimaryKeyIterator;
@@ -499,7 +499,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                                             ColumnMetadata orderedColumn)
         {
             IndexContext context = controller.getOrderer().context;
-            this.view = controller.getQueryView(context).view;
+            this.view = controller.getQueryView(context).viewFragment;
             this.keyRanges = controller.dataRanges().stream().map(DataRange::keyRange).collect(Collectors.toList());
             this.coversFullRing = keyRanges.size() == 1 && RangeUtil.coversFullRing(keyRanges.get(0));
 
