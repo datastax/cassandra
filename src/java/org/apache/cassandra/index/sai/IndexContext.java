@@ -33,7 +33,6 @@ import java.util.concurrent.TimeUnit;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
-import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.MoreObjects;
 import com.google.common.collect.ImmutableSet;
 
@@ -277,12 +276,6 @@ public class IndexContext
     public MemtableIndex initializeMemtableIndex(Memtable memtable)
     {
         return liveMemtables.computeIfAbsent(memtable, mt -> MemtableIndex.createIndex(this, mt));
-    }
-
-    @VisibleForTesting
-    public @Nullable MemtableIndex getMemtableIndex(Memtable memtable)
-    {
-        return liveMemtables.get(memtable);
     }
 
     public void index(DecoratedKey key, Row row, Memtable memtable, OpOrder.Group opGroup)
