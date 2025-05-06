@@ -43,7 +43,7 @@ public class ProductQuantizationFetcher
      * "Best" means the most recent one that hits the row count target of {@link ProductQuantization#MAX_PQ_TRAINING_SET_SIZE},
      * or the one with the most rows if none are larger than that.
      */
-    public static PqInfo getPqIfPresent(IndexContext indexContext) throws IOException
+    public static PqInfo getPqIfPresent(IndexContext indexContext)
     {
         // We get a referenced view becuase we might actually read a segment from disk, which requires that we
         // hold a lock on the index to prevent it from getting deleted concurrently. The PqInfo object is all in
