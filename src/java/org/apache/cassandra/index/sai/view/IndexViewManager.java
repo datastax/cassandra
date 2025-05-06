@@ -26,7 +26,6 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
@@ -92,6 +91,7 @@ public class IndexViewManager
         Collection<SSTableIndex> referencedSSTableIndexes = new ArrayList<>();
         Collection<SSTableReader> toRemove = new HashSet<>(oldSSTables);
 
+        int iterations = 0;
         outer:
         do
         {
@@ -99,6 +99,10 @@ public class IndexViewManager
             referencedSSTableIndexes.forEach(SSTableIndex::release);
             referencedSSTableIndexes.clear();
             newViewIndexes.clear();
+
+            // Throw after releasing already referenced indexes
+            if (iterations++ > 1000)
+                throw new IllegalStateException("Failed to update index view after 1000 iterations");
 
             for (SSTableIndex sstableIndex : currentView)
             {
@@ -159,23 +163,30 @@ public class IndexViewManager
     {
         Set<SSTableReader> toRemove = new HashSet<>(sstablesToRebuild);
         View oldView, newView = null;
-        Set<SSTableIndex> indexesToRemove;
+        Collection<SSTableIndex> newIndexes = new ArrayList<>();
+
+        int iterations = 0;
+        outer:
         do
         {
             oldView = viewRef.get();
-            if (!oldView.reference())
-                continue;
-            if (newView != null)
-                newView.release();
+            newIndexes.forEach(SSTableIndex::release);
+            newIndexes.clear();
 
-            indexesToRemove = oldView.getIndexes()
-                                     .stream()
-                                     .filter(index -> toRemove.contains(index.getSSTable()))
-                                     .collect(Collectors.toSet());
-            var newIndexes = new HashSet<>(oldView.getIndexes());
-            newIndexes.removeAll(indexesToRemove);
+            if (iterations++ > 1000)
+                throw new IllegalStateException("Failed to prepare index view after 1000 iterations");
+
+            for (var index : oldView.getIndexes())
+            {
+                if (!toRemove.contains(index.getSSTable()))
+                {
+                    if (!index.reference())
+                        continue outer;
+                    newIndexes.add(index);
+                }
+            }
+
             newView = new View(context, newIndexes);
-            oldView.release();
         }
         while (newView == null || !viewRef.compareAndSet(oldView, newView));
         oldView.release();
@@ -190,16 +201,8 @@ public class IndexViewManager
      */
     public void invalidate(boolean indexWasDropped)
     {
-        View oldView, newView = null;
-        do
-        {
-            // We skip referencing because we do not use its indexes.
-            oldView = viewRef.get();
-            if (newView != null)
-                newView.release();
-            newView = new View(context, Collections.emptySet());
-        } while (!viewRef.compareAndSet(oldView, newView));
-
+        // No need to loop here because we don't use the old view when building the new view.
+        var oldView = viewRef.getAndSet(new View(context, Collections.emptySet()));
         if (indexWasDropped)
             oldView.markIndexWasDropped();
         else
