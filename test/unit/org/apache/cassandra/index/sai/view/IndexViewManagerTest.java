@@ -50,8 +50,14 @@ import org.apache.cassandra.utils.FBUtilities;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 public class IndexViewManagerTest extends SAITester
 {
@@ -177,7 +183,7 @@ public class IndexViewManagerTest extends SAITester
                 initialIndexes.add(mockSSTableIndex);
             }
 
-            IndexViewManager tracker = new IndexViewManager(columnContext, descriptors, initialIndexes);
+            IndexViewManager tracker = new IndexViewManager(columnContext, initialIndexes);
             View initialView = tracker.getView();
             assertEquals(2, initialView.size());
 
@@ -188,8 +194,8 @@ public class IndexViewManagerTest extends SAITester
             List<SSTableContext> flushedContexts = flushed.stream().map(s -> SSTableContext.create(s, loadDescriptor(s, store).perSSTableComponents())).collect(Collectors.toList());
 
             // concurrently update from both flush and compaction
-            Future<?> compaction = executor.submit(() -> tracker.update(initial, compacted, compactedContexts, true));
-            Future<?> flush = executor.submit(() -> tracker.update(none, flushed, flushedContexts, true));
+            Future<?> compaction = executor.submit(() -> tracker.update(initial, compactedContexts, true));
+            Future<?> flush = executor.submit(() -> tracker.update(none, flushedContexts, true));
 
             FBUtilities.waitOnFutures(Arrays.asList(compaction, flush));
 
@@ -199,7 +205,12 @@ public class IndexViewManagerTest extends SAITester
 
             for (SSTableIndex index : initialIndexes)
             {
-                assertEquals(1, ((MockSSTableIndex) index).releaseCount);
+                // Because of the race condition, it is released either once or twice. It won't be more
+                // because there are only two updates. The only real requirement is that it is released.
+                var releaseCount = ((MockSSTableIndex) index).releaseCount;
+                assertTrue("releaseCount should be 1 or 2 but it is " + releaseCount,
+                           releaseCount == 1 || releaseCount == 2);
+                assertTrue(index.isReleased());
             }
 
             // release original SSTableContext objects.
@@ -217,6 +228,32 @@ public class IndexViewManagerTest extends SAITester
         sstables.forEach(sstable -> sstable.selfRef().release());
         executor.shutdown();
         executor.awaitTermination(1, TimeUnit.MINUTES);
+    }
+
+
+    @Test
+    public void testMarkIndexWasDropped()
+    {
+        IndexContext mockContext = mock(IndexContext.class);
+        when(mockContext.isVector()).thenReturn(true);
+        SSTableReader sstable = mock(SSTableReader.class);
+        SSTableIndex index = mock(SSTableIndex.class);
+        when(index.reference()).thenReturn(true);
+        when(index.getSSTable()).thenReturn(sstable);
+        when(index.getIndexContext()).thenReturn(mockContext);
+
+        IndexViewManager tracker = new IndexViewManager(mockContext, Collections.singleton(index));
+        var view = tracker.getView();
+        // Now we have 2 references to the view.
+        assertTrue(view.reference());
+        // Invalidate and trigger markIndexWasDropped in the view, but not in the index since we have an extra ref.
+        tracker.invalidate(true);
+        // Assert index hasn't had markIndexDropped called yet.
+        verify(index, never()).markIndexDropped();
+        // Release and trigger/validate markIndexDropped in the index.
+        view.release();
+        verify(index, times(1)).markIndexDropped();
+        assertFalse(view.reference());
     }
 
     private IndexContext columnIndex(ColumnFamilyStore store, String indexName)

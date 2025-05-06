@@ -20,10 +20,13 @@ package org.apache.cassandra.index.sai.plan;
 
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
-import java.util.stream.Collectors;
+
+import com.google.common.base.Function;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -51,19 +54,19 @@ import org.apache.cassandra.utils.NoSpamLogger;
 
 public class QueryView implements AutoCloseable
 {
-    final ColumnFamilyStore.RefViewFragment view;
-    final Set<SSTableIndex> referencedIndexes;
+    final ColumnFamilyStore.RefViewFragment viewFragment;
+    final Set<SSTableIndex> sstableIndexes;
     final Set<MemtableIndex> memtableIndexes;
     final IndexContext indexContext;
 
-    public QueryView(ColumnFamilyStore.RefViewFragment view,
-                     Set<SSTableIndex> referencedIndexes,
+    public QueryView(ColumnFamilyStore.RefViewFragment viewFragment,
+                     Set<SSTableIndex> sstableIndexes,
                      Set<MemtableIndex> memtableIndexes,
                      IndexContext indexContext)
     {
 
-        this.view = view;
-        this.referencedIndexes = referencedIndexes;
+        this.viewFragment = viewFragment;
+        this.sstableIndexes = sstableIndexes;
         this.memtableIndexes = memtableIndexes;
         this.indexContext = indexContext;
     }
@@ -71,8 +74,11 @@ public class QueryView implements AutoCloseable
     @Override
     public void close()
     {
-        view.release();
-        referencedIndexes.forEach(SSTableIndex::release);
+        viewFragment.release();
+        for (SSTableIndex index : sstableIndexes)
+        {
+            index.release();
+        }
     }
 
     /**
@@ -80,7 +86,12 @@ public class QueryView implements AutoCloseable
      */
     public long getTotalSStableRows()
     {
-        return view.sstables.stream().mapToLong(SSTableReader::getTotalRows).sum();
+        long total = 0;
+        for (SSTableReader sstable : viewFragment.sstables)
+        {
+            total += sstable.getTotalRows();
+        }
+        return total;
     }
 
     /**
@@ -144,12 +155,12 @@ public class QueryView implements AutoCloseable
          */
         protected QueryView build() throws MissingIndexException
         {
-            var referencedIndexes = new HashSet<SSTableIndex>();
+            var sstableIndexes = new HashSet<SSTableIndex>();
             ColumnFamilyStore.RefViewFragment refViewFragment = null;
 
             // We must use the canonical view in order for the equality check for source sstable/memtable
             // to work correctly.
-            var filter = RangeUtil.coversFullRing(range)
+            Function<View, Iterable<SSTableReader>> filter = RangeUtil.coversFullRing(range)
                          ? View.selectFunction(SSTableSet.CANONICAL)
                          : View.select(SSTableSet.CANONICAL, s -> RangeUtil.intersects(s, range));
 
@@ -163,7 +174,7 @@ public class QueryView implements AutoCloseable
                 // If we get the same memtable in the view again, and there is no index,
                 // then the missing index is not due to a concurrent modification, but it doesn't contain indexed
                 // data, so we can ignore it.
-                var processedMemtables = new HashSet<Memtable>();
+                Set<Memtable> processedMemtables = new HashSet<Memtable>();
 
 
                 var start = MonotonicClock.Global.approxTime.now();
@@ -180,7 +191,7 @@ public class QueryView implements AutoCloseable
                 while (!MonotonicClock.Global.approxTime.isAfter(start + TimeUnit.MILLISECONDS.toNanos(2000)))
                 {
                     // cleanup after the previous iteration if we're retrying
-                    release(referencedIndexes);
+                    release(sstableIndexes);
                     release(refViewFragment);
 
                     // Prevent exceeding the query timeout
@@ -192,14 +203,14 @@ public class QueryView implements AutoCloseable
                     var indexView = indexContext.getView();
 
                     // Lookup the indexes corresponding to memtables:
-                    var memtableIndexes = new HashSet<MemtableIndex>();
+                    Set<MemtableIndex> memtableIndexes = new HashSet<MemtableIndex>();
                     for (Memtable memtable : refViewFragment.memtables)
                     {
                         // Empty memtables have no index but that's not a problem, we can ignore them.
                         if (memtable.getLiveDataSize() == 0)
                             continue;
 
-                        MemtableIndex index = indexContext.getMemtableIndex(memtable);
+                        MemtableIndex index = indexContext.getLiveMemtables().get(memtable);
                         if (index != null)
                         {
                             memtableIndexes.add(index);
@@ -275,14 +286,14 @@ public class QueryView implements AutoCloseable
                             continue outer;
                         }
 
-                        referencedIndexes.add(index);
+                        sstableIndexes.add(index);
                     }
 
-                    // freeze referencedIndexes and memtableIndexes, so we can safely give access to them
+                    // freeze sstableIndexes and memtableIndexes, so we can safely give access to them
                     // without risking something messes them up
                     // (this was added after KeyRangeTermIterator messed them up which led to a bug)
                     return new QueryView(refViewFragment,
-                                         Collections.unmodifiableSet(referencedIndexes),
+                                         Collections.unmodifiableSet(sstableIndexes),
                                          Collections.unmodifiableSet(memtableIndexes),
                                          indexContext);
                 }
@@ -298,7 +309,7 @@ public class QueryView implements AutoCloseable
             }
             catch (MissingIndexException e)
             {
-                release(referencedIndexes);
+                release(sstableIndexes);
                 release(refViewFragment);
                 throw e;
             }
@@ -306,12 +317,23 @@ public class QueryView implements AutoCloseable
             {
                 if (Tracing.isTracing())
                 {
-                    var groupedIndexes = referencedIndexes.stream().collect(
-                    Collectors.groupingBy(i -> i.getIndexContext().getIndexName(), Collectors.counting()));
-                    var summary = groupedIndexes.entrySet().stream()
-                                                .map(e -> String.format("%s (%s sstables)", e.getKey(), e.getValue()))
-                                                .collect(Collectors.joining(", "));
-                    Tracing.trace("Querying storage-attached indexes {}", summary);
+                    Map<String, Long> groupedIndexes = new HashMap<>();
+                    for (SSTableIndex index : sstableIndexes)
+                    {
+                        String indexName = index.getIndexContext().getIndexName();
+                        groupedIndexes.put(indexName, groupedIndexes.getOrDefault(indexName, 0L) + 1);
+                    }
+                    
+                    StringBuilder summaryBuilder = new StringBuilder();
+                    boolean first = true;
+                    for (Map.Entry<String, Long> entry : groupedIndexes.entrySet())
+                    {
+                        if (!first)
+                            summaryBuilder.append(", ");
+                        summaryBuilder.append(String.format("%s (%s sstables)", entry.getKey(), entry.getValue()));
+                        first = false;
+                    }
+                    Tracing.trace("Querying storage-attached indexes {}", summaryBuilder.toString());
                 }
             }
         }
