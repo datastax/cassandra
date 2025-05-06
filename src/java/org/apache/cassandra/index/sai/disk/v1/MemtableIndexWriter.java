@@ -176,7 +176,7 @@ public class MemtableIndexWriter implements PerIndexWriter
             try (NumericIndexWriter writer = new NumericIndexWriter(perIndexComponents,
                                                                     TypeUtil.fixedSizeOf(termComparator),
                                                                     maxSegmentRowId,
-                                                                    // Due to stale entries in IndexMemtable, we may have more indexed rows than num of rowIds.
+                                                                    // The number of postings is unknown. Also, there are stale entries in IndexMemtable.
                                                                     Integer.MAX_VALUE,
                                                                     indexContext().getIndexWriterConfig()))
             {

@@ -85,14 +85,13 @@ public class NumericIndexWriterTest extends SaiRandomizedTest
 
         final MutableOneDimPointValues pointValues = ramBuffer.asPointValues();
 
-        int docCount = pointValues.getDocCount();
-
         SegmentMetadata.ComponentMetadataMap indexMetas;
 
         IndexComponents.ForWrite components = indexDescriptor.newPerIndexComponentsForWrite(indexContext);
         try (NumericIndexWriter writer = new NumericIndexWriter(components,
                                                                 Integer.BYTES,
-                                                                docCount, docCount,
+                                                                pointValues.getDocCount(),
+                                                                pointValues.size(),
                                                                 IndexWriterConfig.defaultConfig("test")))
         {
             indexMetas = writer.writeAll(pointValues);
