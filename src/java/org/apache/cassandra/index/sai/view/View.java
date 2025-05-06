@@ -26,8 +26,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-
-import javax.annotation.Nullable;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.marshal.AbstractType;
@@ -40,17 +39,24 @@ import org.apache.cassandra.utils.IntervalTree;
 
 public class View implements Iterable<SSTableIndex>
 {
-    private final Set<Descriptor> sstables;
     private final Map<Descriptor, SSTableIndex> view;
+    private final AtomicInteger references = new AtomicInteger(1);
+    private volatile boolean indexWasDropped;
 
     private final TermTree termTree;
     private final AbstractType<?> keyValidator;
     private final IntervalTree<Key, SSTableIndex, Interval<Key, SSTableIndex>> keyIntervalTree;
 
-    public View(IndexContext context, Collection<Descriptor> sstables, Collection<SSTableIndex> indexes)
+    /**
+     * Construct a threadsafe view.
+     * @param context the index context
+     * @param indexes the indexes. Note that the referencing logic for these indexes is handled
+     *                outside of this constructor and all indexes are assumed to have been referenced already.
+     *                The view will release the indexes when it is finally released.
+     */
+    public View(IndexContext context, Collection<SSTableIndex> indexes)
     {
         this.view = new HashMap<>();
-        this.sstables = new HashSet<>(sstables);
         this.keyValidator = context.keyValidator();
 
         AbstractType<?> validator = context.getValidator();
@@ -97,14 +103,40 @@ public class View implements Iterable<SSTableIndex>
         return view.values().iterator();
     }
 
-    public Collection<Descriptor> getSSTables()
-    {
-        return sstables;
-    }
-
     public Collection<SSTableIndex> getIndexes()
     {
         return view.values();
+    }
+
+    public boolean reference()
+    {
+        while (true)
+        {
+            int n = references.get();
+            if (n <= 0)
+                return false;
+            if (references.compareAndSet(n, n + 1))
+            {
+                return true;
+            }
+        }
+    }
+
+    public void release()
+    {
+        int n = references.decrementAndGet();
+        if (n == 0)
+            if (indexWasDropped)
+                view.values().forEach(SSTableIndex::markIndexDropped);
+            else
+                view.values().forEach(SSTableIndex::release);
+    }
+
+    public void markIndexWasDropped()
+    {
+        // This ordering allows us to guarantee that in flight queries will not be interrupted in problematic ways.
+        indexWasDropped = true;
+        release();
     }
 
     public int size()
@@ -112,11 +144,6 @@ public class View implements Iterable<SSTableIndex>
         return view.size();
     }
 
-    public @Nullable SSTableIndex getSSTableIndex(Descriptor descriptor)
-    {
-        return view.get(descriptor);
-    }
-    
     /**
      * Tells if an index for the given sstable exists.
      * It's equivalent to {@code getSSTableIndex(descriptor) != null }.
@@ -128,18 +155,22 @@ public class View implements Iterable<SSTableIndex>
     }
 
     /**
-     * Returns true if this view has been based on the Cassandra view containing given sstable.
-     * In other words, it tells if SAI was given a chance to load the index for the given sstable.
-     * It does not determine if the index exists and was actually loaded.
-     * To check the existence of the index, use {@link #containsSSTableIndex(Descriptor)}.
-     * <p>
-     * This method allows to distinguish a situation when the sstable has no index, the index is
-     * invalid, or was not loaded for whatever reason,
-     * from a situation where the view hasn't been updated yet to reflect the newly added sstable.
+     * Tells if the view is aware of the given sstable.
+     * @param descriptor identifies the sstable
      */
     public boolean isAwareOfSSTable(Descriptor descriptor)
     {
-        return sstables.contains(descriptor);
+        return view.containsKey(descriptor);
+    }
+
+    /**
+     * Get the SSTableIndex for the given sstable descriptor
+     * @param descriptor identifies the sstable
+     * @return the SSTableIndex or null if not found
+     */
+    public SSTableIndex getSSTableIndex(Descriptor descriptor)
+    {
+        return view.get(descriptor);
     }
 
     /**
