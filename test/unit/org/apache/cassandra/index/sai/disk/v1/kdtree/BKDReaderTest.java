@@ -43,8 +43,6 @@ import static org.apache.cassandra.index.sai.metrics.QueryEventListeners.NO_OP_B
 import static org.apache.lucene.index.PointValues.Relation.CELL_CROSSES_QUERY;
 import static org.apache.lucene.index.PointValues.Relation.CELL_INSIDE_QUERY;
 import static org.apache.lucene.index.PointValues.Relation.CELL_OUTSIDE_QUERY;
-import static org.hamcrest.Matchers.greaterThan;
-import static org.hamcrest.Matchers.is;
 
 public class BKDReaderTest extends SaiRandomizedTest
 {
@@ -407,9 +405,9 @@ public class BKDReaderTest extends SaiRandomizedTest
 
         final SegmentMetadata.ComponentMetadataMap metadata = writer.writeAll(buffer.asPointValues());
         final long bkdPosition = metadata.get(IndexComponentType.KD_TREE).root;
-        assertThat(bkdPosition, is(greaterThan(0L)));
+        assertTrue(bkdPosition > 0L);
         final long postingsPosition = metadata.get(IndexComponentType.KD_TREE_POSTING_LISTS).root;
-        assertThat(postingsPosition, is(greaterThan(0L)));
+        assertTrue(postingsPosition > 0L);
 
         FileHandle kdtreeHandle = components.get(IndexComponentType.KD_TREE).createFileHandle();
         FileHandle kdtreePostingsHandle = components.get(IndexComponentType.KD_TREE_POSTING_LISTS).createFileHandle();
