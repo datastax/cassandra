@@ -132,7 +132,6 @@ public class PartitionAwarePrimaryKeyMap implements PrimaryKeyMap
     private final RandomAccessReader reader;
     private final PrimaryKey.Factory primaryKeyFactory;
     private final SSTableId<?> sstableId;
-    private final ByteBuffer tokenBuffer = ByteBuffer.allocate(Long.BYTES);
 
     private PartitionAwarePrimaryKeyMap(LongArray rowIdToToken,
                                         LongArray rowIdToOffset,
@@ -159,9 +158,8 @@ public class PartitionAwarePrimaryKeyMap implements PrimaryKeyMap
     @Override
     public PrimaryKey primaryKeyFromRowId(long sstableRowId)
     {
-        tokenBuffer.putLong(rowIdToToken.get(sstableRowId));
-        tokenBuffer.rewind();
-        return primaryKeyFactory.createDeferred(partitioner.getTokenFactory().fromByteArray(tokenBuffer), () -> supplier(sstableRowId));
+        long token = rowIdToToken.get(sstableRowId);
+        return primaryKeyFactory.createDeferred(partitioner.getTokenFactory().fromLongValue(token), () -> supplier(sstableRowId));
     }
 
     @Override

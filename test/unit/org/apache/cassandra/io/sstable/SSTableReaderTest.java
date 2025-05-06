@@ -87,6 +87,7 @@ import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.MmappedRegions;
+import org.apache.cassandra.io.util.PathUtils;
 import org.apache.cassandra.schema.CachingParams;
 import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.schema.KeyspaceParams;
@@ -1259,6 +1260,29 @@ public class SSTableReaderTest
             sstable.descriptor.fileFor(Component.PARTITION_INDEX).delete();
 
         checkSSTableOpenedWithGivenFPChance(sstable, 0.05, false, numKeys, false);
+    }
+
+    @Test
+    public void testSSTableFlushBloomFilterReachedLimit() throws Exception
+    {
+        final int numKeys = 100; // will use about 128 bytes
+        final Keyspace keyspace = Keyspace.open(KEYSPACE1);
+        final ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF_STANDARD);
+
+        SSTableReader sstable;
+        long bfSpace = BloomFilter.memoryLimiter.maxMemory -  BloomFilter.memoryLimiter.memoryAllocated() - 100;
+        try
+        {
+            BloomFilter.memoryLimiter.increment(bfSpace);
+            sstable = getNewSSTable(cfs, numKeys, 1);
+            Assert.assertFalse(PathUtils.exists(sstable.descriptor.pathFor(Component.FILTER)));
+            Assert.assertSame(FilterFactory.AlwaysPresent, sstable.getBloomFilter());
+        }
+        finally
+        {
+            // reset
+            BloomFilter.memoryLimiter.decrement(bfSpace);
+        }
     }
 
     private void checkSSTableOpenedWithGivenFPChance(SSTableReader sstable, double fpChance, boolean bfShouldExist, int numKeys, boolean expectRecreated) throws IOException

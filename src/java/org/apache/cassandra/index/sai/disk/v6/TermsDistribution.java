@@ -508,7 +508,7 @@ public class TermsDistribution
                 mft.put(point.term, point.rowCount);
             }
 
-            return new TermsDistribution(termType, buckets, mft, Version.latest(), byteComparableVersion);
+            return new TermsDistribution(termType, buckets, mft, Version.current(), byteComparableVersion);
         }
 
         /**

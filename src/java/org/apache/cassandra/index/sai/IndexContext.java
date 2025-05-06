@@ -91,6 +91,7 @@ import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.MonotonicClock;
 import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.concurrent.OpOrder;
@@ -176,7 +177,7 @@ public class IndexContext
         this.viewManager = new IndexViewManager(this);
         this.validator = TypeUtil.cellValueType(column, indexType);
         this.cfs = cfs;
-        this.primaryKeyFactory = Version.latest().onDiskFormat().newPrimaryKeyFactory(clusteringComparator);
+        this.primaryKeyFactory = Version.current().onDiskFormat().newPrimaryKeyFactory(clusteringComparator);
 
         String columnName = column.name.toString();
 
@@ -272,9 +273,14 @@ public class IndexContext
         return cfs.getPartitioner();
     }
 
+    public MemtableIndex initializeMemtableIndex(Memtable memtable)
+    {
+        return liveMemtables.computeIfAbsent(memtable, mt -> MemtableIndex.createIndex(this, mt));
+    }
+
     public void index(DecoratedKey key, Row row, Memtable memtable, OpOrder.Group opGroup)
     {
-        MemtableIndex target = liveMemtables.computeIfAbsent(memtable, mt -> MemtableIndex.createIndex(this, mt));
+        MemtableIndex target = initializeMemtableIndex(memtable);
 
         long start = System.nanoTime();
 
@@ -574,11 +580,10 @@ public class IndexContext
      * @return A set of SSTables which have attached to them invalid index components.
      */
     public Set<SSTableContext> onSSTableChanged(Collection<SSTableReader> oldSSTables,
-                                                Collection<SSTableReader> newSSTables,
                                                 Collection<SSTableContext> newContexts,
                                                 boolean validate)
     {
-        return viewManager.update(oldSSTables, newSSTables, newContexts, validate);
+        return viewManager.update(oldSSTables, newContexts, validate);
     }
 
     public ColumnMetadata getDefinition()
@@ -653,12 +658,25 @@ public class IndexContext
         return viewManager.getView();
     }
 
+    public View getReferencedView(long timeoutNanos)
+    {
+        var deadline = MonotonicClock.approxTime.now() + timeoutNanos;
+        do
+        {
+            View view = viewManager.getView();
+            if (view.reference())
+                return view;
+        } while (MonotonicClock.approxTime.isAfter(deadline));
+
+        return null;
+    }
+
     /**
      * @return total number of per-index open files
      */
     public int openPerIndexFiles()
     {
-        return viewManager.getView().size() * Version.latest().onDiskFormat().openFilesPerIndex(this);
+        return viewManager.getView().size() * Version.current().onDiskFormat().openFilesPerIndex(this);
     }
 
     public void prepareSSTablesForRebuild(Collection<SSTableReader> sstablesToRebuild)
@@ -708,16 +726,6 @@ public class IndexContext
     public ConcurrentMap<Memtable, MemtableIndex> getLiveMemtables()
     {
         return liveMemtables;
-    }
-
-    public @Nullable MemtableIndex getMemtableIndex(Memtable memtable)
-    {
-        return liveMemtables.get(memtable);
-    }
-
-    public @Nullable SSTableIndex getSSTableIndex(Descriptor descriptor)
-    {
-        return getView().getSSTableIndex(descriptor);
     }
 
     public boolean supports(Operator op)

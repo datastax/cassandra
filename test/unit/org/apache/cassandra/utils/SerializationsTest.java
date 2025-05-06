@@ -64,7 +64,7 @@ public class SerializationsTest extends AbstractSerializationsTester
                 if (oldBfFormat)
                     serializeOldBfFormat((BloomFilter) bf, out);
                 else
-                    BloomFilter.serializer.serialize((BloomFilter) bf, out);
+                    bf.getSerializer().serialize((BloomFilter) bf, out);
             }
         }
     }
@@ -79,7 +79,7 @@ public class SerializationsTest extends AbstractSerializationsTester
         }
 
         try (FileInputStreamPlus in = getInput("4.0", "utils.BloomFilter1000.bin");
-             IFilter filter = BloomFilter.serializer.deserialize(in, false))
+             IFilter filter = BloomFilter.getDeserializer().deserialize(in, false))
         {
             boolean present;
             for (int i = 0 ; i < 1000 ; i++)
@@ -95,7 +95,7 @@ public class SerializationsTest extends AbstractSerializationsTester
         }
 
         try (FileInputStreamPlus in = getInput("3.0", "utils.BloomFilter1000.bin");
-             IFilter filter = BloomFilter.serializer.deserialize(in, true))
+             IFilter filter = BloomFilter.getDeserializer().deserialize(in, true))
         {
             boolean present;
             for (int i = 0 ; i < 1000 ; i++)
@@ -122,7 +122,7 @@ public class SerializationsTest extends AbstractSerializationsTester
         Murmur3Partitioner partitioner = new Murmur3Partitioner();
 
         try (DataInputStream in = new DataInputStream(new FileInputStreamPlus(new File(file)));
-             IFilter filter = BloomFilter.serializer.deserialize(in, oldBfFormat))
+             IFilter filter = BloomFilter.getDeserializer().deserialize(in, oldBfFormat))
         {
             for (int i = 1; i <= 10; i++)
             {

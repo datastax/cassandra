@@ -17,7 +17,6 @@
  */
 package org.apache.cassandra.io.sstable.format.trieindex;
 
-import java.io.Closeable;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
@@ -49,7 +48,6 @@ import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.Slices;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.rows.Rows;
-import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.rows.UnfilteredRowIterators;
 import org.apache.cassandra.dht.AbstractBounds;
@@ -82,7 +80,6 @@ import org.apache.cassandra.io.util.DataOutputStreamPlus;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileHandle;
-import org.apache.cassandra.io.util.FileInputStreamPlus;
 import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.io.util.ReadPattern;
 import org.apache.cassandra.schema.Schema;
@@ -90,7 +87,6 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.AbstractIterator;
-import org.apache.cassandra.utils.BloomFilter;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.FilterFactory;
@@ -851,20 +847,6 @@ public class TrieIndexSSTableReader extends SSTableReader
         throw new UnsupportedOperationException("tries do not have primary index");
     }
 
-    private static IFilter deserializeBloomFilter(Descriptor descriptor, boolean oldBfFormat)
-    {
-        try (FileInputStreamPlus stream = descriptor.fileFor(Component.FILTER).newInputStream())
-        {
-            return BloomFilter.serializer.deserialize(stream, oldBfFormat);
-        }
-        catch (Throwable t)
-        {
-            JVMStabilityInspector.inspectThrowable(t);
-            logger.error("Failed to deserialize bloom filter: {}", t.getMessage());
-            return null;
-        }
-    }
-
     private static IFilter recreateBloomFilter(Descriptor descriptor, TableMetadata metadata, long estimatedKeysCount, double fpChance)
     {
         logger.debug("Recreating bloom filter for {} with fpChance={}", descriptor, fpChance);
@@ -879,6 +861,11 @@ public class TrieIndexSSTableReader extends SSTableReader
         try
         {
             bf = FilterFactory.getFilter(estimatedKeysCount, fpChance);
+            if (!bf.isSerializable())
+            {
+                logger.info("Skipped saving recreated non-serializable bloom filter {} for {} to disk", bf, descriptor);
+                return bf;
+            }
 
             Factory readerFactory = descriptor.getFormat().getReaderFactory();
             try (PartitionIterator iter = (PartitionIterator) readerFactory.indexIterator(descriptor, metadata))
@@ -897,7 +884,7 @@ public class TrieIndexSSTableReader extends SSTableReader
             try (SeekableByteChannel fos = Files.newByteChannel(path.toPath(), StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
                  DataOutputStreamPlus stream = new BufferedDataOutputStreamPlus(fos))
             {
-                BloomFilter.serializer.serialize((BloomFilter) bf, stream);
+                bf.getSerializer().serialize(bf, stream);
                 stream.flush();
                 SyncUtil.sync((FileChannel) fos);
             }

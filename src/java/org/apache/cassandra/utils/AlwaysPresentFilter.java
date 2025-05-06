@@ -53,4 +53,22 @@ public class AlwaysPresentFilter implements IFilter
     {
         return 0;
     }
+
+    @Override
+    public IFilterSerializer getSerializer()
+    {
+        throw new UnsupportedOperationException("AlwaysPresentFilter doesn't support serialization");
+    }
+
+    @Override
+    public boolean isSerializable()
+    {
+        return false;
+    }
+
+    @Override
+    public String toString()
+    {
+        return "AlwaysPresentFilter";
+    }
 }

@@ -21,6 +21,7 @@ package org.apache.cassandra.index.sai.disk.vector;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Objects;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
 import org.slf4j.Logger;
@@ -44,17 +45,36 @@ public class ProductQuantizationFetcher
      */
     public static PqInfo getPqIfPresent(IndexContext indexContext) throws IOException
     {
+        // We get a referenced view becuase we might actually read a segment from disk, which requires that we
+        // hold a lock on the index to prevent it from getting deleted concurrently. The PqInfo object is all in
+        // memory, though, so we don't need the view when we return.
+        var view = indexContext.getReferencedView(TimeUnit.SECONDS.toNanos(5));
+        if (view == null)
+        {
+            logger.warn("Unable to get view of already built indexes for {}", indexContext);
+            return null;
+        }
+
         // TODO when compacting, this view is likely the whole table, is it worth only considering the sstables that
         //  are being compacted?
-        // Flatten all segments, sorted by size (capped to MAX_PQ_TRAINING_SET_SIZE) then timestamp
-        return indexContext.getView().getIndexes().stream()
-                           .flatMap(CustomSegmentSorter::streamSegments)
-                           .filter(customSegment -> customSegment.numRowsOrMaxPQTrainingSetSize > CassandraOnHeapGraph.MIN_PQ_ROWS)
-                           .sorted()
-                           .map(CustomSegmentSorter::getPqInfo)
-                           .filter(Objects::nonNull)
-                           .findFirst()
-                           .orElse(null);
+        try
+        {
+            // Retrieve the first compressed vectors for a segment with at least MAX_PQ_TRAINING_SET_SIZE rows
+            // or the one with the most rows if none reach that size.
+            // Flatten all segments, sorted by size (capped to MAX_PQ_TRAINING_SET_SIZE) then timestamp
+            return view.getIndexes().stream()
+                       .flatMap(CustomSegmentSorter::streamSegments)
+                       .filter(customSegment -> customSegment.numRowsOrMaxPQTrainingSetSize > CassandraOnHeapGraph.MIN_PQ_ROWS)
+                       .sorted()
+                       .map(CustomSegmentSorter::getPqInfo)
+                       .filter(Objects::nonNull)
+                       .findFirst()
+                       .orElse(null);
+        }
+        finally
+        {
+            view.release();
+        }
     }
 
     public static class PqInfo

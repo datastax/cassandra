@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.utils;
 
+
 import org.apache.cassandra.utils.concurrent.SharedCloseable;
 
 public interface IFilter extends SharedCloseable
@@ -50,4 +51,16 @@ public interface IFilter extends SharedCloseable
      * @return the amount of memory in bytes used off heap
      */
     long offHeapSize();
+
+    /**
+     * This is used to avoid creating empty file for filters that do not support serialization
+     *
+     * @return true if current filter supports serialization to disk
+     */
+    boolean isSerializable();
+
+    /**
+     * @return serializer for current filter; or throw {@link UnsupportedOperationException} if filter is not serializable
+     */
+    IFilterSerializer getSerializer();
 }
