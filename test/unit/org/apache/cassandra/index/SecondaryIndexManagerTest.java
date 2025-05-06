@@ -18,7 +18,6 @@
 package org.apache.cassandra.index;
 
 import java.io.FileNotFoundException;
-import java.io.IOError;
 import java.net.SocketException;
 import java.util.Collection;
 import java.util.Collections;
@@ -57,7 +56,6 @@ import org.mockito.Mockito;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -208,16 +206,50 @@ public class SecondaryIndexManagerTest extends CQLTester
         assertEmpty(execute("SELECT * FROM %s WHERE a=1"));
         assertEmpty(execute("SELECT * FROM %s WHERE c=1"));
 
-        // track sstable again: expect the query that needs the index cannot execute
+        // TODO why? This change reverts back to behavior from before https://github.com/datastax/cassandra/pull/1491,
+        // but it seems invalid.
+        // track sstable again: expect no rows to be read by index
         cfs.getTracker().addInitialSSTables(sstables);
         assertRows(execute("SELECT * FROM %s WHERE a=1"), row(1, 1, 1));
-        assertThrows(IOError.class, () -> execute("SELECT * FROM %s WHERE c=1"));
+        assertEmpty(execute("SELECT * FROM %s WHERE c=1"));
 
         // remote reload should trigger index rebuild
         cfs.getTracker().notifySSTablesChanged(Collections.emptySet(), sstables, OperationType.REMOTE_RELOAD, Optional.empty(), null);
         waitForIndexBuilds(KEYSPACE, indexName); // this is needed because index build on remote reload is async
         assertRows(execute("SELECT * FROM %s WHERE a=1"), row(1, 1, 1));
         assertRows(execute("SELECT * FROM %s WHERE c=1"), row(1, 1, 1));
+    }
+
+    @Test
+    public void testPartialIndexRebuild()
+    {
+        String tableName = createTable("CREATE TABLE %s (a int, b int, c int, PRIMARY KEY (a, b))");
+        String indexName = createIndex("CREATE CUSTOM INDEX ON %s(c) USING 'StorageAttachedIndex'");
+
+        assertMarkedAsBuilt(indexName);
+
+        execute("Insert into %s(a,b,c) VALUES(1,1,1)");
+        assertRows(execute("SELECT * FROM %s WHERE c=1"), row(1, 1, 1));
+        flush(KEYSPACE);
+
+        execute("Insert into %s(a,b,c) VALUES(2,2,2)");
+        flush(KEYSPACE);
+
+        ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
+        var sstables = cfs.getLiveSSTables().iterator();
+        SSTableReader sstableToRebuild = sstables.next();
+        assertTrue("Test needs two sstables to be valid", sstables.hasNext());
+
+        // This test only partially covers building an index. The bug it covers was only reproducible when sstables
+        // are not locally present due to logic in the StorageAttachedIndexGroup::prepareSSTablesToBuild method.
+        // In order to simplify things, we just assert that the indexes still present in the view are not released.
+        var indexMetadata = cfs.metadata().indexes.iterator().next();
+        var indexContext = ((StorageAttachedIndex) cfs.getIndexManager().getIndex(indexMetadata)).getIndexContext();
+        indexContext.prepareSSTablesForRebuild(Set.of(sstableToRebuild));
+
+        // The indexes in the view must not be released
+        for (var index : indexContext.getView().getIndexes())
+            assertFalse(index.isReleased());
     }
 
     @Test
