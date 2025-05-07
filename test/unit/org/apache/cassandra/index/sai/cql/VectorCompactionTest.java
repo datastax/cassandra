@@ -221,6 +221,7 @@ public class VectorCompactionTest extends VectorTester.Versioned
         // We only test like this to confirm that it worked, not because this is a strictly required behavior.
         // Further, it's unlikely we'll have so few rows.
         assertEquals(VectorCompression.CompressionType.PRODUCT_QUANTIZATION, searcher.getCompression().type);
+        assertEquals(V5VectorPostingsWriter.Structure.ONE_TO_ONE, searcher.getPostingsStructure());
 
         // Confirm we can query the data
         var result = execute( "SELECT * FROM %s ORDER BY v ANN OF ? LIMIT 5", randomVectorBoxed(2));
