@@ -55,8 +55,6 @@ public class ProductQuantizationFetcher
             return null;
         }
 
-        // TODO when compacting, this view is likely the whole table, is it worth only considering the sstables that
-        //  are being compacted?
         try
         {
             // Retrieve the first compressed vectors for a segment with at least MAX_PQ_TRAINING_SET_SIZE rows
@@ -64,7 +62,7 @@ public class ProductQuantizationFetcher
             // Flatten all segments, sorted by size (capped to MAX_PQ_TRAINING_SET_SIZE) then timestamp
             return view.getIndexes().stream()
                        .flatMap(CustomSegmentSorter::streamSegments)
-                       .filter(customSegment -> customSegment.numRowsOrMaxPQTrainingSetSize > CassandraOnHeapGraph.MIN_PQ_ROWS)
+                       .filter(customSegment -> customSegment.numRowsOrMaxPQTrainingSetSize >= CassandraOnHeapGraph.MIN_PQ_ROWS)
                        .sorted()
                        .map(CustomSegmentSorter::getPqInfo)
                        .filter(Objects::nonNull)
@@ -104,6 +102,8 @@ public class ProductQuantizationFetcher
             this.sstableIndex = sstableIndex;
             // TODO give the size cost of larger PQ sets, is it worth trying to get the PQ object closest to this
             // value? I'm concerned that we'll grab something pretty large for mem.
+            // Note to reviewers, it looks like we use the PQ in the BuildScoreProvider, so we might actually use more
+            // of the PQ vector space than I initially though.
             this.numRowsOrMaxPQTrainingSetSize = (int) Math.min(numRows, ProductQuantization.MAX_PQ_TRAINING_SET_SIZE);
             this.timestamp = sstableIndex.getSSTable().getMaxTimestamp();
             this.segmentPosition = segmentPosition;

@@ -97,7 +97,8 @@ public class SSTableIndex
         if (CassandraRelevantProperties.SAI_INDEX_READS_DISABLED.getBoolean())
         {
             var context = perIndexComponents.context();
-            if (context != null
+            if (!perIndexComponents.isEmpty()
+                && context != null
                 && context.isVector()
                 && CassandraRelevantProperties.SAI_INDEX_LOAD_SEGMENT_METADATA_ONLY.getBoolean())
             {

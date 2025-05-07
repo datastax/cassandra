@@ -21,13 +21,16 @@ package org.apache.cassandra.index.sai.cql;
 import java.util.ArrayList;
 import java.util.stream.Collectors;
 
+import org.junit.Before;
 import org.junit.Test;
 
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.marshal.FloatType;
-import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
+import org.apache.cassandra.index.sai.StorageAttachedIndex;
+import org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
-import org.apache.cassandra.index.sai.disk.vector.CompactionGraph;
+import org.apache.cassandra.index.sai.disk.vector.VectorCompression;
 
 import static org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph.MIN_PQ_ROWS;
 import static org.junit.Assert.assertEquals;
@@ -35,6 +38,12 @@ import static org.junit.Assert.assertTrue;
 
 public class VectorCompactionTest extends VectorTester.Versioned
 {
+    @Before
+    public void resetDisabledReads()
+    {
+        CassandraRelevantProperties.SAI_INDEX_READS_DISABLED.setBoolean(false);
+    }
+
     @Test
     public void testCompactionWithEnoughRowsForPQAndDeleteARow()
     {
@@ -140,6 +149,82 @@ public class VectorCompactionTest extends VectorTester.Versioned
             testZeroOrOneToManyCompactionInternal(10, sstables);
             testZeroOrOneToManyCompactionInternal(MIN_PQ_ROWS, sstables);
         }
+    }
+
+    @Test
+    public void testSaiIndexReadsDisabledWithEmptyVectorIndex()
+    {
+        createTable();
+
+        CassandraRelevantProperties.SAI_INDEX_READS_DISABLED.setBoolean(true);
+
+        // Insert then delete a row, trigger compaction to produce the empty index
+        execute("INSERT INTO %s (pk, v) VALUES (?, ?)", 0, vector(0, 1));
+        flush();
+        execute("DELETE FROM %s WHERE pk = 0");
+        flush();
+        compact();
+
+        // Now make index queryable
+        CassandraRelevantProperties.SAI_INDEX_READS_DISABLED.setBoolean(false);
+        reloadSSTableIndex();
+
+        // Confirm we can query the data (in an early implementation of the feature in this PR, this assertion failed)
+        assertRowCount(execute("SELECT * FROM %s ORDER BY v ANN OF [1,2] LIMIT 1"), 0);
+    }
+
+    @SuppressWarnings("resource")
+    @Test
+    public void testSaiIndexReadsDisabled()
+    {
+        createTable("CREATE TABLE %s (pk int, v vector<float, 2>, PRIMARY KEY(pk))");
+        var indexName = createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
+
+        // We'll manage compaction manually for better control
+        disableCompaction();
+
+        for (int i = 0; i < MIN_PQ_ROWS; i++)
+            execute("INSERT INTO %s (pk, v) VALUES (?, ?)", i, randomVectorBoxed(2));
+
+        flush();
+
+        // Only add a handful of rows to the second sstable so we have to iterate to the older sstable in the
+        // pq selection logic
+        for (int i = MIN_PQ_ROWS; i < MIN_PQ_ROWS + 10; i++)
+            execute("INSERT INTO %s (pk, v) VALUES (?, ?)", i, randomVectorBoxed(2));
+
+        flush();
+
+        // Delete 100 rows so that we could only create a PQ if we use the original data.
+        for (int i = 0; i < 100; i++)
+            execute("DELETE FROM %s WHERE pk = ?",  i);
+
+        flush();
+
+        // Mimic setting of disabling reads, only takes effect on sstable index load, so reload
+        CassandraRelevantProperties.SAI_INDEX_READS_DISABLED.setBoolean(true);
+        reloadSSTableIndex();
+
+        // Now compact (this exercises the code, but doesn't actually prove that we used the past segment's PQ)
+        compact();
+
+        // Reload and make queryable
+        CassandraRelevantProperties.SAI_INDEX_READS_DISABLED.setBoolean(false);
+        reloadSSTableIndex();
+
+        // Assert that we have a product quantization
+        var index = (StorageAttachedIndex) getIndexManager(keyspace(), indexName).listIndexes().iterator().next();
+        var sstableIndexes = index.getIndexContext().getView().getIndexes();
+        assertEquals(1, sstableIndexes.size());
+        var searcher = (V2VectorIndexSearcher) sstableIndexes.iterator().next().getSegments().iterator().next().getIndexSearcher();
+        // We have a PQ even though we have fewer than MIN_PQ_ROWS because we used the original seed.
+        // We only test like this to confirm that it worked, not because this is a strictly required behavior.
+        // Further, it's unlikely we'll have so few rows.
+        assertEquals(VectorCompression.CompressionType.PRODUCT_QUANTIZATION, searcher.getCompression().type);
+
+        // Confirm we can query the data
+        var result = execute( "SELECT * FROM %s ORDER BY v ANN OF ? LIMIT 5", randomVectorBoxed(2));
+        assertEquals(5, result.size());
     }
 
     public void testZeroOrOneToManyCompactionInternal(int vectorsPerSstable, int sstables)
