@@ -479,30 +479,6 @@ public class TokenMetadata
     }
 
     /**
-     * Used by CNDB to update endpoint address for bootstrap tokens
-     */
-    public void updateAddressForBootstrapTokens(InetAddressAndPort existing, InetAddressAndPort current)
-    {
-        assert existing != null;
-        assert current != null;
-        assert !existing.equals(current);
-
-        lock.writeLock().lock();
-        try
-        {
-            Collection<Token> existingTokens = bootstrapTokens.removeValue(existing);
-            for (Token token : existingTokens)
-            {
-                bootstrapTokens.put(token, current);
-            }
-        }
-        finally
-        {
-            lock.writeLock().unlock();
-        }
-    }
-
-    /**
      * Used by C* node replacement to add replacement tokens as bootstrapping tokens
      */
     public void addReplaceTokens(Collection<Token> replacingTokens, InetAddressAndPort newNode, InetAddressAndPort oldNode)
@@ -582,27 +558,6 @@ public class TokenMetadata
         try
         {
             leavingEndpoints.add(endpoint);
-        }
-        finally
-        {
-            lock.writeLock().unlock();
-        }
-    }
-
-    /**
-     * Used by CNDB to update endpoint address for leaving endpoints
-     */
-    public void updateAddressForLeavingEndpoint(InetAddressAndPort existing, InetAddressAndPort current)
-    {
-        assert existing != null;
-        assert current != null;
-        assert !existing.equals(current);
-
-        lock.writeLock().lock();
-        try
-        {
-            leavingEndpoints.add(current);
-            leavingEndpoints.remove(existing);
         }
         finally
         {

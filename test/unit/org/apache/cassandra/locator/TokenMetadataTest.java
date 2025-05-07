@@ -351,49 +351,6 @@ public class TokenMetadataTest
     }
 
     @Test
-    public void testUpdateAddressForBootstrapTokens() throws UnknownHostException
-    {
-        final InetAddressAndPort first = InetAddressAndPort.getByName("127.0.0.1");
-        final InetAddressAndPort second = InetAddressAndPort.getByName("127.0.0.6");
-
-        tmd.updateNormalToken(token(ONE), first);
-        tmd.updateNormalToken(token(SIX), second);
-
-        final InetAddressAndPort bootstrappingNode = InetAddressAndPort.getByName("127.0.0.8");
-        tmd.addBootstrapTokens(Collections.singleton(token(8)), bootstrappingNode);
-
-        assertEquals(tmd.getBootstrapTokens().size(), 1);
-        assertEquals(tmd.getBootstrapTokens().get(token(8)), bootstrappingNode);
-
-        InetAddressAndPort updatedBootstrappingNode = InetAddressAndPort.getByName("127.0.0.10");
-        tmd.updateAddressForBootstrapTokens(bootstrappingNode, updatedBootstrappingNode);
-
-        assertEquals(tmd.getBootstrapTokens().size(), 1);
-        assertEquals(tmd.getBootstrapTokens().get(token(8)), updatedBootstrappingNode);
-    }
-
-    @Test
-    public void testUpdateAddressForLeavingEndpoint() throws UnknownHostException
-    {
-        final InetAddressAndPort first = InetAddressAndPort.getByName("127.0.0.1");
-        final InetAddressAndPort second = InetAddressAndPort.getByName("127.0.0.6");
-
-        tmd.updateNormalToken(token(ONE), first);
-        tmd.updateNormalToken(token(SIX), second);
-
-        final InetAddressAndPort leavingNode = InetAddressAndPort.getByName("127.0.0.8");
-        tmd.addLeavingEndpoint(leavingNode);
-        assertEquals(tmd.getLeavingEndpoints().size(), 1);
-        assertEquals(tmd.getLeavingEndpoints().iterator().next(), leavingNode);
-
-        InetAddressAndPort updatedLeavingNode = InetAddressAndPort.getByName("127.0.0.10");
-        tmd.updateAddressForLeavingEndpoint(leavingNode, updatedLeavingNode);
-
-        assertEquals(tmd.getLeavingEndpoints().size(), 1);
-        assertEquals(tmd.getLeavingEndpoints().iterator().next(), updatedLeavingNode);
-    }
-
-    @Test
     public void testUpdateAddressForNormalTokens() throws UnknownHostException
     {
         final InetAddressAndPort first = InetAddressAndPort.getByName("127.0.0.1");
