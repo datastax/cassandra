@@ -233,8 +233,7 @@ public abstract class AbstractAllocatorMemtable extends AbstractMemtableWithComm
             else
             {
                 // we'll be rescheduled by the constructor of the Memtable.
-                owner.signalFlushRequired(AbstractAllocatorMemtable.this,
-                                          ColumnFamilyStore.FlushReason.MEMTABLE_PERIOD_EXPIRED);
+                signalFlushRequired(ColumnFamilyStore.FlushReason.MEMTABLE_PERIOD_EXPIRED);
             }
         }
     }

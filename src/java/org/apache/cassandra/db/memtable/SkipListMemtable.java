@@ -136,6 +136,12 @@ public class SkipListMemtable extends AbstractAllocatorMemtable
         super.addMemoryUsageTo(stats);
     }
 
+    @Override
+    public void signalFlushRequired(ColumnFamilyStore.FlushReason flushReason)
+    {
+        owner.signalFlushRequired(this, flushReason);
+    }
+
     public boolean isClean()
     {
         return partitions.isEmpty();

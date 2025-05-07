@@ -130,6 +130,8 @@ extends SkipListMemtable        // to test framework
 
         case MEMTABLE_LIMIT: // The memtable size limit is reached, and this table was selected for flushing.
                              // Also passed if we call owner.signalLimitReached()
+        case TRIE_LIMIT:     // Trie size limt is reached
+        case VECTOR_MEMTABLE_LIMIT: // Index memtable size limit is reached
         case COMMITLOG_DIRTY: // Commitlog thinks it needs to keep data from this table.
             // Neither of the above should happen as we specify writesAreDurable and don't use an allocator/cleaner.
             throw new AssertionError();

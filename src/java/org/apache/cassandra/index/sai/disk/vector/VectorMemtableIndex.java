@@ -45,6 +45,7 @@ import io.github.jbellis.jvector.vector.types.VectorFloat;
 import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
 import org.agrona.collections.IntHashSet;
 import org.apache.cassandra.db.Clustering;
+import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.memtable.Memtable;
@@ -119,6 +120,10 @@ public class VectorMemtableIndex implements MemtableIndex
         var primaryKey = indexContext.keyFactory().create(key, clustering);
         long allocatedBytes = index(primaryKey, value);
         memtable.markExtraOnHeapUsed(allocatedBytes, opGroup);
+
+        if (indexContext.getIndexWriterConfig().hasVectorFlushThreshold()
+            && graph.size() >= indexContext.getIndexWriterConfig().getVectorFlushThreshold())
+            memtable.signalFlushRequired(ColumnFamilyStore.FlushReason.VECTOR_MEMTABLE_LIMIT);
     }
 
     private long index(PrimaryKey primaryKey, ByteBuffer value)
@@ -174,6 +179,10 @@ public class VectorMemtableIndex implements MemtableIndex
                 primaryKeys.remove(primaryKey);
                 removedCount.increment();
             }
+
+            if (indexContext.getIndexWriterConfig().hasVectorFlushThreshold()
+                && graph.size() >= indexContext.getIndexWriterConfig().getVectorFlushThreshold())
+                memtable.signalFlushRequired(ColumnFamilyStore.FlushReason.VECTOR_MEMTABLE_LIMIT);
         }
     }
 

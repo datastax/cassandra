@@ -258,7 +258,9 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         UNIT_TESTS, // explicitly requested flush needed for a test
         /** Flush performed to a remote storage. Used by remote commit log replay */
         REMOTE_REPLAY,
-        BATCHLOG_REPLAY
+        BATCHLOG_REPLAY,
+        TRIE_LIMIT,
+        VECTOR_MEMTABLE_LIMIT,
     }
 
     private static final String[] COUNTER_NAMES = new String[]{"table", "count", "error", "value"};
