@@ -26,7 +26,6 @@ import java.util.Collections;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.Callable;
-import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 
@@ -95,7 +94,7 @@ public interface IndexRegistry
         }
 
         @Override
-        public Optional<Index> getBestIndexFor(RowFilter.Expression expression)
+        public Optional<Index> getBestIndexFor(ColumnMetadata column, Operator operator)
         {
             return Optional.empty();
         }
@@ -283,7 +282,8 @@ public interface IndexRegistry
             return Collections.singletonList(group);
         }
 
-        public Optional<Index> getBestIndexFor(RowFilter.Expression expression)
+        @Override
+        public Optional<Index> getBestIndexFor(ColumnMetadata column, Operator operator)
         {
             return Optional.empty();
         }
@@ -306,19 +306,15 @@ public interface IndexRegistry
 
     default Optional<Index.Analyzer> getAnalyzerFor(ColumnMetadata column, Operator operator, ByteBuffer value)
     {
-        for (Index index : listIndexes())
-        {
-            if (index.supportsExpression(column, operator))
-            {
-                Optional<Index.Analyzer> analyzer = index.getAnalyzer(value);
-                if (analyzer.isPresent())
-                    return analyzer;
-            }
-        }
-        return Optional.empty();
+        return getBestIndexFor(column, operator).flatMap(i -> i.getAnalyzer(value));
     }
 
-    Optional<Index> getBestIndexFor(RowFilter.Expression expression);
+    default Optional<Index> getBestIndexFor(RowFilter.Expression expression)
+    {
+        return getBestIndexFor(expression.column(), expression.operator());
+    }
+
+    Optional<Index> getBestIndexFor(ColumnMetadata column, Operator operator);
 
     /**
      * Called at write time to ensure that values present in the update
