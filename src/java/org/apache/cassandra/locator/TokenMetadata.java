@@ -281,14 +281,6 @@ public class TokenMetadata
         lock.writeLock().lock();
         try
         {
-            Collection<Token> oldNodeTokens = tokenToEndpointMap.inverse().get(existing);
-            if (!tokens.containsAll(oldNodeTokens) || !oldNodeTokens.containsAll(tokens))
-            {
-                throw new RuntimeException(String.format("Node %s is trying to replace node %s with tokens %s with a " +
-                                                         "different set of tokens %s.", current, existing, oldNodeTokens,
-                                                         tokens));
-            }
-
             Topology.Builder topologyBuilder = topology.unbuild();
             bootstrapTokens.removeValue(current);
             tokenToEndpointMap.removeValue(existing);
