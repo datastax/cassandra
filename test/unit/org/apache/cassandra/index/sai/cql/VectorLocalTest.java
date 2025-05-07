@@ -136,6 +136,24 @@ public class VectorLocalTest extends VectorTester.VersionedWithChecksums
         assertThat(getCurrentColumnFamilyStore().getLiveSSTables()).hasSize(3);
     }
 
+    @Test
+    public void testVectorFlushPeriod()
+    {
+        int dimension = 2048;
+        createTable(String.format("CREATE TABLE %%s (pk int, str_val text, val vector<float, %d>, PRIMARY KEY(pk))", dimension));
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'vector_flush_period_in_ms': '10000'};"); // 10s
+
+        int vectorCount = 10;
+        List<Vector<Float>> vectors = IntStream.range(0, vectorCount).mapToObj(s -> randomVectorBoxed(dimension)).collect(Collectors.toList());
+
+        int pk = 0;
+        for (Vector<Float> vector : vectors)
+            execute("INSERT INTO %s (pk, str_val, val) VALUES (?, 'A', ?)", pk++, vector);
+
+        Awaitility.await("Memtable flushed")
+                  .atMost(30, TimeUnit.SECONDS)
+                  .untilAsserted(() -> assertThat(getCurrentColumnFamilyStore().getLiveSSTables()).hasSize(1));
+    }
 
     @Test
     public void randomizedTest()

@@ -29,6 +29,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.NavigableSet;
 import java.util.concurrent.ConcurrentSkipListSet;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.function.ToIntFunction;
 import javax.annotation.Nullable;
@@ -44,6 +45,7 @@ import io.github.jbellis.jvector.vector.VectorizationProvider;
 import io.github.jbellis.jvector.vector.types.VectorFloat;
 import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
 import org.agrona.collections.IntHashSet;
+import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
@@ -70,6 +72,7 @@ import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.SortingIterator;
+import org.apache.cassandra.utils.WrappedRunnable;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 
@@ -103,6 +106,38 @@ public class VectorMemtableIndex implements MemtableIndex
         this.columnQueryMetrics = (ColumnQueryMetrics.VectorIndexMetrics) indexContext.getColumnQueryMetrics();
         this.graph = new CassandraOnHeapGraph<>(indexContext, true, mt);
         this.mt = mt;
+        scheduleFlush();
+    }
+
+    private void scheduleFlush()
+    {
+        int periodInMs = indexContext.getIndexWriterConfig().getVectorFlushPeriodInMs();
+        if (periodInMs <= 0)
+            return;
+
+        logger.trace("scheduling vector memtable index flush in {} ms for index {}", periodInMs, indexContext.getIndexName());
+        scheduleFlush(periodInMs);
+    }
+
+    private void scheduleFlush(int periodInMs)
+    {
+        WrappedRunnable runnable = new WrappedRunnable()
+        {
+            protected void runMayThrow()
+            {
+                // if it's clean, reschedule
+                if (size() == 0)
+                {
+                    scheduleFlush(periodInMs);
+                }
+                // signal flush
+                else
+                {
+                    mt.signalFlushRequired(ColumnFamilyStore.FlushReason.VECTOR_MEMTABLE_PERIOD_EXPIRED);
+                }
+            }
+        };
+        ScheduledExecutors.scheduledTasks.schedule(runnable, periodInMs, TimeUnit.MILLISECONDS);
     }
 
     @Override

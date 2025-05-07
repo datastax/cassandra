@@ -51,6 +51,7 @@ public class IndexWriterConfig
     public static final String SIMILARITY_FUNCTION = "similarity_function";
     // num of vector in vector memtable index to trigger memtable flush
     public static final String VECTOR_FLUSH_THRESHOLD = "vector_flush_threshold";
+    public static final String VECTOR_FLUSH_PERIOD_IN_MS = "vector_flush_period_in_ms";
     public static final String SOURCE_MODEL = "source_model";
     public static final String OPTIMIZE_FOR = "optimize_for"; // unused, retained for compatibility w/ old schemas
 
@@ -61,6 +62,8 @@ public class IndexWriterConfig
     public static final int DEFAULT_CONSTRUCTION_BEAM_WIDTH = 100;
     // Use non-positive value to disable it. When num of vectors in vector memtable index reaches the threshold, it triggers flush
     public static final int DEFAULT_VECTOR_FLUSH_TRESHOLD = Integer.getInteger("dse.default_vector_flush_threshold", -1);
+    // Use non-positive value to disable it. Period in ms to schedule a flush for vector memtable index.
+    public static final int DEFAULT_VECTOR_FLUSH_PERIOD_IN_MS = Integer.getInteger("dse.default_vector_flush_period_in_ms", -1);
     public static final boolean DEFAULT_ENABLE_HIERARCHY = false;
 
     public static final int MAX_TOP_K = SAI_VECTOR_SEARCH_MAX_TOP_K.getInt();
@@ -100,6 +103,7 @@ public class IndexWriterConfig
     private final boolean enableHierarchy; // defaults to false
 
     private final int vectorFlushThreshold;
+    private final int vectorFlushPeriodInMs;
 
     public IndexWriterConfig(String indexName,
                              int bkdPostingsSkip,
@@ -124,7 +128,7 @@ public class IndexWriterConfig
                              VectorSourceModel sourceModel)
     {
         this(indexName, bkdPostingsSkip, bkdPostingsMinLeaves, maximumNodeConnections, constructionBeamWidth,
-             similarityFunction, sourceModel, null, null, false, DEFAULT_VECTOR_FLUSH_TRESHOLD);
+             similarityFunction, sourceModel, null, null, false, DEFAULT_VECTOR_FLUSH_TRESHOLD, DEFAULT_VECTOR_FLUSH_PERIOD_IN_MS);
     }
 
     public IndexWriterConfig(String indexName,
@@ -137,7 +141,8 @@ public class IndexWriterConfig
                              Float neighborhoodOverflow,
                              Float alpha,
                              boolean enableHierarchy,
-                             int vectorFlushThreshold)
+                             int vectorFlushThreshold,
+                             int vectorFlushPeriodInMs)
     {
         this.indexName = indexName;
         this.bkdPostingsSkip = bkdPostingsSkip;
@@ -150,6 +155,7 @@ public class IndexWriterConfig
         this.alpha = alpha;
         this.enableHierarchy = enableHierarchy;
         this.vectorFlushThreshold = vectorFlushThreshold;
+        this.vectorFlushPeriodInMs = vectorFlushPeriodInMs;
     }
 
     public String getIndexName()
@@ -185,6 +191,11 @@ public class IndexWriterConfig
     public int getConstructionBeamWidth()
     {
         return constructionBeamWidth;
+    }
+
+    public int getVectorFlushPeriodInMs()
+    {
+        return vectorFlushPeriodInMs;
     }
 
     public int getVectorFlushThreshold()
@@ -229,6 +240,7 @@ public class IndexWriterConfig
         int maximumNodeConnections = DEFAULT_MAXIMUM_NODE_CONNECTIONS;
         int queueSize = DEFAULT_CONSTRUCTION_BEAM_WIDTH;
         int vectorFlushThreshold = DEFAULT_VECTOR_FLUSH_TRESHOLD;
+        int vectorFlushPeriodInMs = DEFAULT_VECTOR_FLUSH_PERIOD_IN_MS;
         VectorSourceModel sourceModel = DEFAULT_SOURCE_MODEL;
         VectorSimilarityFunction similarityFunction = sourceModel.defaultSimilarityFunction; // don't leave null in case no options at all are given
 
@@ -278,6 +290,7 @@ public class IndexWriterConfig
                  options.get(OPTIMIZE_FOR) != null ||
                  options.get(SIMILARITY_FUNCTION) != null ||
                  options.get(VECTOR_FLUSH_THRESHOLD) != null ||
+                 options.get(VECTOR_FLUSH_PERIOD_IN_MS) != null ||
                  options.get(SOURCE_MODEL) != null ||
                  options.get(NEIGHBORHOOD_OVERFLOW) != null ||
                  options.get(ALPHA) != null ||
@@ -361,6 +374,19 @@ public class IndexWriterConfig
                 }
             }
 
+            if (options.containsKey(VECTOR_FLUSH_PERIOD_IN_MS))
+            {
+                try
+                {
+                    vectorFlushPeriodInMs = Integer.parseInt(options.get(VECTOR_FLUSH_PERIOD_IN_MS));
+                }
+                catch (IllegalArgumentException e)
+                {
+                    throw new InvalidRequestException(String.format("Vector flush period in ms %s is not a valid integer for index %s",
+                                                                    options.get(VECTOR_FLUSH_PERIOD_IN_MS), indexName));
+                }
+            }
+
             if (options.containsKey(NEIGHBORHOOD_OVERFLOW))
             {
                 try
@@ -404,7 +430,7 @@ public class IndexWriterConfig
         }
 
         return new IndexWriterConfig(indexName, skip, minLeaves, maximumNodeConnections, queueSize,
-                                   similarityFunction, sourceModel, neighborhoodOverflow, alpha, enableHierarchy, vectorFlushThreshold);
+                                   similarityFunction, sourceModel, neighborhoodOverflow, alpha, enableHierarchy, vectorFlushThreshold, vectorFlushPeriodInMs);
     }
 
     public static IndexWriterConfig defaultConfig(String indexName)

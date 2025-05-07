@@ -91,6 +91,7 @@ extends SkipListMemtable        // to test framework
         case SHUTDOWN: // Called to flush data before shutdown.
         case INTERNALLY_FORCED: // Called to ensure ordering and persistence of system table events.
         case MEMTABLE_PERIOD_EXPIRED: // The specified memtable expiration time elapsed.
+        case VECTOR_MEMTABLE_PERIOD_EXPIRED: // The specified memtable expiration time elapsed.
         case INDEX_TABLE_FLUSH: // Flush requested on index table because main table is flushing.
         case STREAMS_RECEIVED: // Flush to save streamed data that was written to memtable.
             return false;   // do not do anything
