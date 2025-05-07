@@ -19,8 +19,11 @@
 package org.apache.cassandra.db.memtable;
 
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+
+import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.util.concurrent.ListenableFuture;
@@ -200,7 +203,7 @@ public abstract class AbstractAllocatorMemtable extends AbstractMemtableWithComm
 
     void scheduleFlush()
     {
-        int period = metadata().params.memtableFlushPeriodInMs;
+        int period = owner.getMemtableFlushPeriodInMs();
         if (period > 0)
             scheduleFlush(owner, period);
     }
@@ -222,7 +225,7 @@ public abstract class AbstractAllocatorMemtable extends AbstractMemtableWithComm
 
     private void flushIfPeriodExpired()
     {
-        int period = metadata().params.memtableFlushPeriodInMs;
+        int period = owner.getMemtableFlushPeriodInMs();
         if (period > 0 && (System.nanoTime() - creationNano >= TimeUnit.MILLISECONDS.toNanos(period)))
         {
             if (isClean())
