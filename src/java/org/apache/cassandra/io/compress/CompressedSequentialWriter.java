@@ -221,11 +221,17 @@ public class CompressedSequentialWriter extends SequentialWriter
             runPostFlush.run();
     }
 
+    //TODO: without that method usage in BIG format writer the tests fail
     public CompressionMetadata open(long overrideLength)
     {
         if (overrideLength <= 0)
             overrideLength = lastFlushOffset;
         return metadataWriter.open(overrideLength, chunkOffset);
+    }
+
+    public void updateFileHandle(FileHandle.Builder fhBuilder)
+    {
+        fhBuilder.withCompressionMetadata(metadataWriter.open(lastFlushOffset, chunkOffset));
     }
 
     @Override
