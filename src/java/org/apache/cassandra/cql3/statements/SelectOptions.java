@@ -37,10 +37,10 @@ public class SelectOptions extends PropertyDefinitions
 {
     public static final SelectOptions EMPTY = new SelectOptions();
     public static final String ANN_OPTIONS = "ann_options";
-    public static final String PREFERRED_INDEXES = "preferred_indexes";
+    public static final String INCLUDED_INDEXES = "included_indexes";
     public static final String EXCLUDED_INDEXES = "excluded_indexes";
 
-    private static final Set<String> keywords = ImmutableSet.of(ANN_OPTIONS, PREFERRED_INDEXES, EXCLUDED_INDEXES);
+    private static final Set<String> keywords = ImmutableSet.of(ANN_OPTIONS, INCLUDED_INDEXES, EXCLUDED_INDEXES);
 
     /**
      * Validates all the {@code SELECT} options.
@@ -82,8 +82,8 @@ public class SelectOptions extends PropertyDefinitions
 
     public IndexHints parseIndexHints(TableMetadata table, IndexRegistry indexRegistry) throws RequestValidationException
     {
-        Set<QualifiedName> preferred = getQualifiedNames(PREFERRED_INDEXES);
+        Set<QualifiedName> included = getQualifiedNames(INCLUDED_INDEXES);
         Set<QualifiedName> excluded = getQualifiedNames(EXCLUDED_INDEXES);
-        return IndexHints.fromCQLNames(preferred, excluded, table, indexRegistry);
+        return IndexHints.fromCQLNames(included, excluded, table, indexRegistry);
     }
 }

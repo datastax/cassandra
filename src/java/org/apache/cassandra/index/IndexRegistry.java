@@ -440,8 +440,8 @@ public interface IndexRegistry
         }
 
         // we should consider the user-provided index hints, which can be used to disambiguate EQ queries
-        boolean prefersEq = hints.prefersAnyOf(eqOnlyIndexes);
-        boolean prefersBoth = hints.prefersAnyOf(eqAndMatchIndexes);
+        boolean prefersEq = hints.includesAnyOf(eqOnlyIndexes);
+        boolean prefersBoth = hints.includesAnyOf(eqAndMatchIndexes);
 
         // If we have indexes supporting only EQ and indexes supporting both, return AMBIGUOUS,
         // unless the index hints prefer one index over the other.
