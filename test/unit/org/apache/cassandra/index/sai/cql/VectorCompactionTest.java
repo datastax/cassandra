@@ -31,9 +31,14 @@ import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
 import org.apache.cassandra.index.sai.disk.vector.VectorCompression;
+import org.apache.cassandra.utils.ByteBufferUtil;
 
 import static org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph.MIN_PQ_ROWS;
+import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
 public class VectorCompactionTest extends VectorTester.Versioned
@@ -61,6 +66,28 @@ public class VectorCompactionTest extends VectorTester.Versioned
 
         // Run compaction, it fails if compaction is not successful
         compact();
+
+        // Confirm we can query the data
+        assertRowCount(execute("SELECT * FROM %s ORDER BY v ANN OF [1,2] LIMIT 1"), 1);
+    }
+
+    @Test
+    public void testDelayedIndexCreation()
+    {
+        createTable("CREATE TABLE %s (pk int, v vector<float, 2>, PRIMARY KEY(pk))");
+        disableCompaction();
+
+        for (int i = 0; i <= MIN_PQ_ROWS; i++)
+            execute("INSERT INTO %s (pk, v) VALUES (?, ?)", i, vector(i, i + 1));
+        flush();
+
+        // Disable reads, then create index asynchronously since it won't become queryable until reads are enabled
+        CassandraRelevantProperties.SAI_INDEX_READS_DISABLED.setBoolean(true);
+        createIndexAsync("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
+        CassandraRelevantProperties.SAI_INDEX_READS_DISABLED.setBoolean(false);
+        reloadSSTableIndex();
+        // Because it was async, we wait here to ensure it worked.
+        waitForTableIndexesQueryable();
 
         // Confirm we can query the data
         assertRowCount(execute("SELECT * FROM %s ORDER BY v ANN OF [1,2] LIMIT 1"), 1);
@@ -204,6 +231,36 @@ public class VectorCompactionTest extends VectorTester.Versioned
         // Mimic setting of disabling reads, only takes effect on sstable index load, so reload
         CassandraRelevantProperties.SAI_INDEX_READS_DISABLED.setBoolean(true);
         reloadSSTableIndex();
+
+        // Confirm that V1MetadataOnlySearchableIndex has valid metadata.
+        var metadataOnlyIndex = (StorageAttachedIndex) getIndexManager(keyspace(), indexName).listIndexes().iterator().next();
+        var metadataOnlySSTableIndexes = metadataOnlyIndex.getIndexContext().getView().getIndexes();
+        assertEquals(3, metadataOnlySSTableIndexes.size());
+        metadataOnlySSTableIndexes.forEach(i -> {
+            // Skip the empty index
+            if (i.isEmpty())
+                return;
+
+            assertFalse(i.areSegmentsLoaded());
+            assertEquals(0, i.indexFileCacheSize());
+            assertThrows(UnsupportedOperationException.class, i::getSegments);
+            // This is vector specific, so if we broaden the functionality of V1MetadataOnlySearchableIndex, we might
+            // need to update this.
+            assertArrayEquals(new byte[] { 0, 0, 0, 0 }, ByteBufferUtil.getArray(i.minTerm()));
+            assertArrayEquals(new byte[] { 0, 0, 0, 0 }, ByteBufferUtil.getArray(i.maxTerm()));
+            // Confirm count matches sstable row id range (the range is inclusive)
+            var sstableDiff = i.maxSSTableRowId() - i.minSSTableRowId() + 1;
+            assertEquals(i.getRowCount(), sstableDiff);
+
+            assertEquals(1, i.getSegmentMetadatas().size());
+            for (var segmentMetadata : i.getSegmentMetadatas())
+            {
+                try (var odm = i.getVersion().onDiskFormat().newOnDiskOrdinalsMap(i.indexFiles(), segmentMetadata))
+                {
+                    assertEquals(V5VectorPostingsWriter.Structure.ONE_TO_ONE, odm.getStructure());
+                }
+            }
+        });
 
         // Now compact (this exercises the code, but doesn't actually prove that we used the past segment's PQ)
         compact();

@@ -26,6 +26,7 @@ import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.virtual.SimpleDataSet;
 import org.apache.cassandra.dht.AbstractBounds;
+import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SSTableContext;
@@ -41,10 +42,20 @@ import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.Throwables;
+
+import static org.apache.cassandra.index.sai.virtual.SegmentsSystemView.CELL_COUNT;
+import static org.apache.cassandra.index.sai.virtual.SegmentsSystemView.COLUMN_NAME;
+import static org.apache.cassandra.index.sai.virtual.SegmentsSystemView.COMPONENT_METADATA;
+import static org.apache.cassandra.index.sai.virtual.SegmentsSystemView.END_TOKEN;
+import static org.apache.cassandra.index.sai.virtual.SegmentsSystemView.MAX_SSTABLE_ROW_ID;
+import static org.apache.cassandra.index.sai.virtual.SegmentsSystemView.MAX_TERM;
+import static org.apache.cassandra.index.sai.virtual.SegmentsSystemView.MIN_SSTABLE_ROW_ID;
+import static org.apache.cassandra.index.sai.virtual.SegmentsSystemView.MIN_TERM;
+import static org.apache.cassandra.index.sai.virtual.SegmentsSystemView.START_TOKEN;
+import static org.apache.cassandra.index.sai.virtual.SegmentsSystemView.TABLE_NAME;
 
 /**
  * An index that eagerly loads segment metadata and nothing else. It is currently only used for vector indexes to
@@ -59,13 +70,14 @@ public class V1MetadataOnlySearchableIndex implements SearchableIndex
     private final ByteBuffer maxTerm;
     private final long minSSTableRowId, maxSSTableRowId;
     private final long numRows;
+    private final IndexContext indexContext;
     private PerIndexFiles indexFiles;
 
     public V1MetadataOnlySearchableIndex(SSTableContext sstableContext, IndexComponents.ForRead perIndexComponents)
     {
-        var indexContext = perIndexComponents.context();
         try
         {
+            this.indexContext = perIndexComponents.context();
             this.indexFiles = new PerIndexFiles(perIndexComponents);
 
             final MetadataSource source = MetadataSource.loadMetadata(perIndexComponents);
@@ -96,7 +108,7 @@ public class V1MetadataOnlySearchableIndex implements SearchableIndex
     @Override
     public long indexFileCacheSize()
     {
-        // TODO what is the right value here?
+        // In V1IndexSearcher we accumulate the index file cache size from the segments, so this is 0.
         return 0;
     }
 
@@ -184,7 +196,22 @@ public class V1MetadataOnlySearchableIndex implements SearchableIndex
     @Override
     public void populateSystemView(SimpleDataSet dataSet, SSTableReader sstable)
     {
-        // TODO what is valid here?
+        Token.TokenFactory tokenFactory = sstable.metadata().partitioner.getTokenFactory();
+
+        for (SegmentMetadata metadata : metadatas)
+        {
+            dataSet.row(sstable.metadata().keyspace, indexContext.getIndexName(), sstable.getFilename(), metadata.segmentRowIdOffset)
+                   .column(TABLE_NAME, sstable.descriptor.cfname)
+                   .column(COLUMN_NAME, indexContext.getColumnName())
+                   .column(CELL_COUNT, metadata.numRows)
+                   .column(MIN_SSTABLE_ROW_ID, metadata.minSSTableRowId)
+                   .column(MAX_SSTABLE_ROW_ID, metadata.maxSSTableRowId)
+                   .column(START_TOKEN, tokenFactory.toString(metadata.minKey.partitionKey().getToken()))
+                   .column(END_TOKEN, tokenFactory.toString(metadata.maxKey.partitionKey().getToken()))
+                   .column(MIN_TERM, "N/A")
+                   .column(MAX_TERM, "N/A")
+                   .column(COMPONENT_METADATA, metadata.componentMetadatas.asMap());
+        }
     }
 
     @Override
