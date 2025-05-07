@@ -626,7 +626,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
 
         logger.info("Submitting index {} of {} for data in {}",
                     isFullRebuild ? "recovery" : "build",
-                    commaSeparated(indexes),
+                    Index.joinNames(indexes),
                     sstables.stream().map(SSTableReader::toString).collect(Collectors.joining(",")));
 
         // Group all building tasks
@@ -1249,16 +1249,11 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         {
             Tracing.trace("Index mean cardinalities are {}. Scanning with {}.",
                           queryPlans.stream()
-                                    .map(p -> commaSeparated(p.getIndexes()) + ':' + p.getEstimatedResultRows())
+                                    .map(p -> Index.joinNames(p.getIndexes()) + ':' + p.getEstimatedResultRows())
                                     .collect(Collectors.joining(",")),
-                          commaSeparated(selected.getIndexes()));
+                          Index.joinNames(selected.getIndexes()));
         }
         return selected;
-    }
-
-    private static String commaSeparated(Collection<Index> indexes)
-    {
-        return indexes.stream().map(i -> i.getIndexMetadata().name).collect(Collectors.joining(","));
     }
 
     @Override

@@ -25,6 +25,7 @@ import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
+import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.plan.Plan;
@@ -95,7 +96,7 @@ public class PlanWithIndexHintsTest extends SAITester
         assertThatPlanFor("SELECT * FROM %s WHERE v1='common' OR v2='rare' WITH preferred_indexes = {idx1}", numRows - 1).uses(idx1, idx2);
         assertThatPlanFor("SELECT * FROM %s WHERE v1='common' OR v2='common' WITH preferred_indexes = {idx1}", numRows - 1).uses(idx1, idx2);
         assertThatPlanFor("SELECT * FROM %s ORDER BY v1 LIMIT 10 WITH preferred_indexes = {idx1}", 10).uses(idx1);
-        assertThatPlanFor("SELECT * FROM %s ORDER BY v2 LIMIT 10 WITH preferred_indexes = {idx1}", 10).uses(idx2);
+        assertUnselectedIndexError("SELECT * FROM %s ORDER BY v2 LIMIT 10 WITH preferred_indexes = {idx1}", idx1);
 
         // preferring idx2
         assertThatPlanFor("SELECT * FROM %s WHERE v1='rare' AND v2='rare' WITH preferred_indexes = {idx2}", 1).usesAtLeast(idx2);
@@ -106,7 +107,7 @@ public class PlanWithIndexHintsTest extends SAITester
         assertThatPlanFor("SELECT * FROM %s WHERE v1='rare' OR v2='common' WITH preferred_indexes = {idx2}", numRows - 1).uses(idx1, idx2);
         assertThatPlanFor("SELECT * FROM %s WHERE v1='common' OR v2='rare' WITH preferred_indexes = {idx2}", numRows - 1).uses(idx1, idx2);
         assertThatPlanFor("SELECT * FROM %s WHERE v1='common' OR v2='common' WITH preferred_indexes = {idx2}", numRows - 1).uses(idx1, idx2);
-        assertThatPlanFor("SELECT * FROM %s ORDER BY v1 LIMIT 10 WITH preferred_indexes = {idx2}", 10).uses(idx1);
+        assertUnselectedIndexError("SELECT * FROM %s ORDER BY v1 LIMIT 10 WITH preferred_indexes = {idx2}", idx2);
         assertThatPlanFor("SELECT * FROM %s ORDER BY v2 LIMIT 10 WITH preferred_indexes = {idx2}", 10).uses(idx2);
 
         // preferring both idx1 and idx2
@@ -118,8 +119,8 @@ public class PlanWithIndexHintsTest extends SAITester
         assertThatPlanFor("SELECT * FROM %s WHERE v1='rare' OR v2='common' WITH preferred_indexes = {idx1,idx2}", numRows - 1).uses(idx1, idx2);
         assertThatPlanFor("SELECT * FROM %s WHERE v1='common' OR v2='rare' WITH preferred_indexes = {idx1,idx2}", numRows - 1).uses(idx1, idx2);
         assertThatPlanFor("SELECT * FROM %s WHERE v1='common' OR v2='common' WITH preferred_indexes = {idx1,idx2}", numRows - 1).uses(idx1, idx2);
-        assertThatPlanFor("SELECT * FROM %s ORDER BY v1 LIMIT 10 WITH preferred_indexes = {idx1,idx2}", 10).uses(idx1);
-        assertThatPlanFor("SELECT * FROM %s ORDER BY v2 LIMIT 10 WITH preferred_indexes = {idx1,idx2}", 10).uses(idx2);
+        assertUnselectedIndexError("SELECT * FROM %s ORDER BY v1 LIMIT 10 WITH preferred_indexes = {idx1,idx2}", idx2);
+        assertUnselectedIndexError("SELECT * FROM %s ORDER BY v2 LIMIT 10 WITH preferred_indexes = {idx1,idx2}", idx1);
 
         // excluding idx1
         assertThatPlanFor("SELECT * FROM %s WHERE v1='rare' AND v2='rare' ALLOW FILTERING WITH excluded_indexes={idx1}", 1).uses(idx2);
@@ -206,6 +207,44 @@ public class PlanWithIndexHintsTest extends SAITester
         assertMatchNeedsIndex("SELECT * FROM %s WHERE v:'Strauss' ALLOW FILTERING WITH excluded_indexes={idx}", "v", "Strauss");
         assertMatchNeedsIndex("SELECT * FROM %s WHERE v:'Levi' ALLOW FILTERING WITH excluded_indexes={idx}", "v", "Levi");
         assertMatchNeedsIndex("SELECT * FROM %s WHERE v:'Lévi-Strauss' ALLOW FILTERING WITH excluded_indexes={idx}", "v", "Lévi-Strauss");
+    }
+
+    @Test
+    public void testQueryPlanningWithRestrictedButUnselectedIndex()
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v1 int, v2 int, v3 int)");
+        String idx1 = createIndex("CREATE CUSTOM INDEX idx1 ON %s(v1) USING 'StorageAttachedIndex'");
+        String idx3 = createIndex("CREATE CUSTOM INDEX idx3 ON %s(v3) USING 'StorageAttachedIndex'");
+
+        String insert = "INSERT INTO %s (k, v1, v2, v3) VALUES (?, ?, ?, ?)";
+        Object[] row1 = row(1, 0, 0, 9);
+        Object[] row2 = row(2, 0, 1, 9);
+        Object[] row3 = row(3, 1, 0, 9);
+        Object[] row4 = row(4, 1, 1, 9);
+        execute(insert, row1);
+        execute(insert, row2);
+        execute(insert, row3);
+        execute(insert, row4);
+
+        if (flush)
+            flush();
+
+        String query = "SELECT * FROM %s WHERE v1=0 OR v2=0 ALLOW FILTERING";
+        assertThatPlanFor(query, row1, row2, row3).usesNone();
+        assertUnselectedIndexError(query + " WITH preferred_indexes={idx1}");
+        assertThatPlanFor(query + " WITH excluded_indexes={idx1}", row1, row2, row3).usesNone();
+
+        query = "SELECT * FROM %s WHERE (v1=0 OR v2=0) AND v3=9 ALLOW FILTERING";
+        assertThatPlanFor(query, row1, row2, row3).uses(idx3);
+        assertUnselectedIndexError(query + " WITH preferred_indexes={idx1}");
+        assertThatPlanFor(query + " WITH excluded_indexes={idx1}", row1, row2, row3).uses(idx3);
+    }
+
+    public void assertUnselectedIndexError(String query, String... indexes)
+    {
+        Assertions.assertThatThrownBy(() -> execute(query))
+                  .isInstanceOf(InvalidRequestException.class)
+                  .hasMessageContaining(String.format(IndexHints.UNSELECTED_INDEX_ERROR, String.join(",", indexes)));
     }
 
     private void assertOrderingNeedsIndex(String query, String column)

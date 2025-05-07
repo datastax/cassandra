@@ -1622,7 +1622,7 @@ public class CustomIndexTest extends CQLTester
                     for (Index index : indexes.values())
                     {
                         if (index.supportsExpression(e))
-                            return new SingletonIndexQueryPlan(index, index.getPostIndexQueryFilter(rowFilter));
+                            return new QueryPlan(index, index.getPostIndexQueryFilter(rowFilter), indexes.values());
                     }
                 }
 
@@ -1695,6 +1695,23 @@ public class CustomIndexTest extends CQLTester
             public Set<Component> activeComponents(SSTableReader sstable)
             {
                 return Collections.emptySet();
+            }
+        }
+
+        private static class QueryPlan extends SingletonIndexQueryPlan
+        {
+            private final Set<Index> indexes;
+
+            public <T extends Index> QueryPlan(Index index, RowFilter postIndexFilter, Collection<T> indexes)
+            {
+                super(index, postIndexFilter);
+                this.indexes = ImmutableSet.copyOf(indexes);
+            }
+
+            @Override
+            public Set<Index> getIndexes()
+            {
+                return indexes;
             }
         }
     }

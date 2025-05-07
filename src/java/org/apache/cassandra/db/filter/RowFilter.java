@@ -109,6 +109,22 @@ public class RowFilter
     }
 
     /**
+     * Checks if any of the expressions in this filter are supported by the given index.
+     *
+     * @param index an index
+     * @return {@code true} if any of the expressions in this filter are supported by the index, {@code false} otherwise
+     */
+    public boolean uses(Index index)
+    {
+        for (Expression expression : expressions())
+        {
+            if (index.supportsExpression(expression))
+                return true;
+        }
+        return false;
+    }
+
+    /**
      * @return {@code true} if this filter contains any expression with an ANN operator, {@code false} otherwise.
      */
     public boolean hasANN()
