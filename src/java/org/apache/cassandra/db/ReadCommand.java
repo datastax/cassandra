@@ -36,7 +36,6 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Sets;
-import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -805,10 +804,10 @@ public abstract class ReadCommand extends AbstractReadQuery
         builder.appendOptions(b -> {
 
             IndexHints indexHints = rowFilter().indexHints();
-            Set<String> included = indexHints.preferred.stream().map(i -> i.name).collect(Collectors.toSet());
+            Set<String> included = indexHints.included.stream().map(i -> i.name).collect(Collectors.toSet());
             Set<String> excluded = indexHints.excluded.stream().map(i -> i.name).collect(Collectors.toSet());
 
-            b.append(SelectOptions.PREFERRED_INDEXES, included)
+            b.append(SelectOptions.INCLUDED_INDEXES, included)
              .append(SelectOptions.EXCLUDED_INDEXES, excluded)
              .append(SelectOptions.ANN_OPTIONS, rowFilter().annOptions().toCQLString());
         });

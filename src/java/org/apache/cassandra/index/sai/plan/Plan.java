@@ -867,7 +867,7 @@ abstract public class Plan
         @Override
         protected boolean usesPreferredIndex()
         {
-            return factory.hints.prefers(getIndexName());
+            return factory.hints.includes(getIndexName());
         }
 
         private double estimateCostPerSkip(double step)
