@@ -25,6 +25,8 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.function.Predicate;
 
+import javax.annotation.Nullable;
+
 import com.google.common.collect.Sets;
 
 import org.apache.cassandra.cql3.QualifiedName;
@@ -50,9 +52,10 @@ import static java.lang.String.format;
  */
 public class IndexHints
 {
-    static final String CONFLICTING_INDEXES_ERROR = "Indexes cannot be both preferred and excluded: ";
-    static final String WRONG_KEYSPACE_ERROR = "Index %s is not in the same keyspace as the queried table.";
-    static final String MISSING_INDEX_ERROR = "Table %s doesn't have an index named %s";
+    public static final String CONFLICTING_INDEXES_ERROR = "Indexes cannot be both preferred and excluded: ";
+    public static final String WRONG_KEYSPACE_ERROR = "Index %s is not in the same keyspace as the queried table.";
+    public static final String MISSING_INDEX_ERROR = "Table %s doesn't have an index named %s";
+    public static final String UNSELECTED_INDEX_ERROR = "It wasn't possible to select the indexes %s";
 
     public static final IndexHints NONE = new IndexHints(Collections.emptySet(), Collections.emptySet());
 
@@ -199,6 +202,35 @@ public class IndexHints
             badNodes.add(FBUtilities.getBroadcastAddressAndPort());
         if (!badNodes.isEmpty())
             throw new InvalidRequestException("Index hints are not supported in clusters below DS 12.");
+    }
+
+    /**
+     * Validates these index hints for the specified index query plan, to verify that all the requested indexes can be
+     * selected. This might happen if the query doesn't have any expressions for the included indexes, or if it has them
+     * but the index implementation hasn't been able to use them for whatever reason.
+     *
+     * @param queryPlan the index query plan, which should have been built accordingly to these hints
+     */
+    public void validate(@Nullable Index.QueryPlan queryPlan)
+    {
+        if (queryPlan == null)
+        {
+            if (preferred.isEmpty())
+                return;
+            else
+                throw new InvalidRequestException(String.format(UNSELECTED_INDEX_ERROR, IndexMetadata.joinNames(preferred)));
+        }
+
+        Set<IndexMetadata> missing = new HashSet<>();
+        for (IndexMetadata indexMetadata : preferred)
+        {
+            if (queryPlan.getIndexes().stream().noneMatch(i -> i.getIndexMetadata().equals(indexMetadata)))
+                missing.add(indexMetadata);
+        }
+        if (!missing.isEmpty())
+            throw new InvalidRequestException(String.format(UNSELECTED_INDEX_ERROR, IndexMetadata.joinNames(missing)));
+
+        // excluded indexes should never be included because the query plans are built from a filtered list
     }
 
     @Override

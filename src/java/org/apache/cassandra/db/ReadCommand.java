@@ -240,6 +240,7 @@ public abstract class ReadCommand extends AbstractReadQuery
      *
      * @return index query plan chosen for this query
      */
+    @Override
     @Nullable
     public Index.QueryPlan indexQueryPlan()
     {

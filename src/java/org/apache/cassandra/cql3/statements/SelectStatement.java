@@ -42,6 +42,7 @@ import org.apache.cassandra.cql3.restrictions.Restrictions;
 import org.apache.cassandra.cql3.selection.SortedRowsBuilder;
 import org.apache.cassandra.db.marshal.FloatType;
 import org.apache.cassandra.guardrails.Guardrails;
+import org.apache.cassandra.index.Index;
 import org.apache.cassandra.sensors.SensorsCustomParams;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.Schema;
@@ -437,6 +438,10 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             // We don't support aggregation for top-k queries because we don't support paging.
             checkFalse(aggregationSpec != null, TOPK_AGGREGATION_ERROR);
         }
+
+        // Handle additional validation for index hints
+        Index.QueryPlan queryPlan = query.indexQueryPlan();
+        query.rowFilter().indexHints().validate(queryPlan);
 
         selectOptions.validate(queryState, indexRegistry, table, userLimit);
 
