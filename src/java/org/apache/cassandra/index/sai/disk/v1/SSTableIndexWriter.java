@@ -406,38 +406,19 @@ public class SSTableIndexWriter implements PerIndexWriter
         var view = indexContext.getReferencedView(TimeUnit.SECONDS.toNanos(5));
         try
         {
-            for (SSTableIndex index : indexContext.getView().getIndexes())
-            {
-                if (index.areSegmentsLoaded())
-                {
-                    for (Segment segment : index.getSegments())
-                    {
-                        if (segment.getIndexSearcher() instanceof V2VectorIndexSearcher)
-                            return true; // V2 doesn't know, so we err on the side of being optimistic.  See comments in CompactionGraph
-                        var searcher = (V5VectorIndexSearcher) segment.getIndexSearcher();
-                        var structure = searcher.getPostingsStructure();
-                        if (structure == V5VectorPostingsWriter.Structure.ZERO_OR_ONE_TO_MANY)
-                            return false;
-                    }
-                }
-                else
-                {
-                    for (SegmentMetadata sm : index.getSegmentMetadatas())
-                    {
-                        // May result in downloading file, but this metadata is valuable
-                        try (var odm = index.getVersion().onDiskFormat().newOnDiskOrdinalsMap(index.indexFiles(), sm))
-                        {
-                            if (odm.getStructure() == V5VectorPostingsWriter.Structure.ZERO_OR_ONE_TO_MANY)
-                                return false;
-                        }
-                    }
-                }
-            }
-            return true;
+            // If we couldn't get the view, assume best case scenario.
+            if (view == null)
+                return true;
+
+            return view.getIndexes()
+                       .stream()
+                       .flatMap(SSTableIndex::getPostingsStructures)
+                       .noneMatch(structure -> structure == V5VectorPostingsWriter.Structure.ZERO_OR_ONE_TO_MANY);
         }
         finally
         {
-            view.release();
+            if (view != null)
+                view.release();
         }
     }
 

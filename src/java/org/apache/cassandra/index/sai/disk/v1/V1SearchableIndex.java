@@ -23,6 +23,7 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.stream.Stream;
 
 import com.google.common.collect.ImmutableList;
 
@@ -36,6 +37,8 @@ import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SSTableContext;
 import org.apache.cassandra.index.sai.disk.SearchableIndex;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
+import org.apache.cassandra.index.sai.disk.v5.V5VectorIndexSearcher;
+import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
 import org.apache.cassandra.index.sai.iterators.KeyRangeConcatIterator;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.plan.Expression;
@@ -256,6 +259,16 @@ public class V1SearchableIndex implements SearchableIndex
     public List<SegmentMetadata> getSegmentMetadatas()
     {
         return metadatas;
+    }
+
+    @Override
+    public Stream<V5VectorPostingsWriter.Structure> getPostingsStructures()
+    {
+        return segments.stream()
+                       // V2 doesn't know, so we skip it and err on the side of being optimistic.  See comments in CompactionGraph
+                       .filter(s -> s.getIndexSearcher() instanceof V5VectorIndexSearcher)
+                       .map(s -> (V5VectorIndexSearcher) s.getIndexSearcher())
+                       .map(V5VectorIndexSearcher::getPostingsStructure);
     }
 
     @Override

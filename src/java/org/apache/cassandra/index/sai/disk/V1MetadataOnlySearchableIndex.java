@@ -21,6 +21,7 @@ package org.apache.cassandra.index.sai.disk;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.List;
+import java.util.stream.Stream;
 
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
@@ -35,6 +36,7 @@ import org.apache.cassandra.index.sai.disk.v1.MetadataSource;
 import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
 import org.apache.cassandra.index.sai.disk.v1.Segment;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
+import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.plan.Orderer;
@@ -186,6 +188,20 @@ public class V1MetadataOnlySearchableIndex implements SearchableIndex
     public List<SegmentMetadata> getSegmentMetadatas()
     {
         return metadatas;
+    }
+
+    @Override
+    public Stream<V5VectorPostingsWriter.Structure> getPostingsStructures()
+    {
+        // May result in downloading file, but this metadata is valuable. We use a stream to avoid loading all the
+        // structures at once.
+        return metadatas.stream()
+                        .map(m -> {
+                            try (var odm = m.version.onDiskFormat().newOnDiskOrdinalsMap(indexFiles, m))
+                            {
+                                return odm.getStructure();
+                            }
+                        });
     }
 
     public PerIndexFiles indexFiles()

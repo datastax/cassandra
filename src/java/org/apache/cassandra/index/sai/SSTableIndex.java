@@ -24,6 +24,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Stream;
 
 import com.google.common.base.MoreObjects;
 import com.google.common.base.Objects;
@@ -47,6 +48,7 @@ import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
 import org.apache.cassandra.index.sai.disk.v1.Segment;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.v1.V1SearchableIndex;
+import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
 import org.apache.cassandra.index.sai.iterators.KeyRangeAntiJoinIterator;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.plan.Expression;
@@ -287,6 +289,11 @@ public class SSTableIndex
     public Version getVersion()
     {
         return perIndexComponents.version();
+    }
+
+    public Stream<V5VectorPostingsWriter.Structure> getPostingsStructures()
+    {
+        return searchableIndex.getPostingsStructures();
     }
 
     public IndexFeatureSet indexFeatureSet()

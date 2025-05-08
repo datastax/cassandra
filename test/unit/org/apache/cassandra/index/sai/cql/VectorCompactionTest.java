@@ -19,6 +19,7 @@
 package org.apache.cassandra.index.sai.cql;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.stream.Collectors;
 
 import org.junit.Before;
@@ -28,6 +29,7 @@ import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.marshal.FloatType;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
 import org.apache.cassandra.index.sai.disk.vector.VectorCompression;
@@ -37,7 +39,6 @@ import static org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph.MI
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
@@ -252,14 +253,9 @@ public class VectorCompactionTest extends VectorTester.Versioned
             var sstableDiff = i.maxSSTableRowId() - i.minSSTableRowId() + 1;
             assertEquals(i.getRowCount(), sstableDiff);
 
-            assertEquals(1, i.getSegmentMetadatas().size());
-            for (var segmentMetadata : i.getSegmentMetadatas())
-            {
-                try (var odm = i.getVersion().onDiskFormat().newOnDiskOrdinalsMap(i.indexFiles(), segmentMetadata))
-                {
-                    assertEquals(V5VectorPostingsWriter.Structure.ONE_TO_ONE, odm.getStructure());
-                }
-            }
+            var postingsStructures = i.getPostingsStructures().collect(Collectors.toList());
+            assertEquals(1, postingsStructures.size());
+            assertEquals(V5VectorPostingsWriter.Structure.ONE_TO_ONE, postingsStructures.get(0));
         });
 
         // Now compact (this exercises the code, but doesn't actually prove that we used the past segment's PQ)
@@ -279,6 +275,88 @@ public class VectorCompactionTest extends VectorTester.Versioned
         // Further, it's unlikely we'll have so few rows.
         assertEquals(VectorCompression.CompressionType.PRODUCT_QUANTIZATION, searcher.getCompression().type);
         assertEquals(V5VectorPostingsWriter.Structure.ONE_TO_ONE, searcher.getPostingsStructure());
+
+        // Confirm we can query the data
+        var result = execute( "SELECT * FROM %s ORDER BY v ANN OF ? LIMIT 5", randomVectorBoxed(2));
+        assertEquals(5, result.size());
+    }
+
+    @SuppressWarnings("resource")
+    @Test
+    public void testSaiVectorIndexPostingStructure()
+    {
+        createTable("CREATE TABLE %s (pk int, v vector<float, 2>, PRIMARY KEY(pk))");
+        var indexName = createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
+
+        // We'll manage compaction manually for better control
+        disableCompaction();
+
+        // first sstable has one-to-one
+        for (int i = 0; i < MIN_PQ_ROWS; i++)
+            execute("INSERT INTO %s (pk, v) VALUES (?, ?)", i, randomVectorBoxed(2));
+
+        flush();
+
+        // second sstable has one-to-many
+        for (int i = MIN_PQ_ROWS; i < MIN_PQ_ROWS * 3; i += 2)
+        {
+            var dupedVector = randomVectorBoxed(2);
+            execute("INSERT INTO %s (pk, v) VALUES (?, ?)", i, dupedVector);
+            execute("INSERT INTO %s (pk, v) VALUES (?, ?)", i + 1, dupedVector);
+        }
+
+        flush();
+
+        // third sstable has zero or one-to-many
+        for (int i = MIN_PQ_ROWS * 3; i < MIN_PQ_ROWS * 4; i += 2)
+            execute("INSERT INTO %s (pk, v) VALUES (?, ?)", i, randomVectorBoxed(2));
+        // this row doesn't get a vector, to force it to the zero or one to many case
+        execute("INSERT INTO %s (pk) VALUES (?)", MIN_PQ_ROWS * 4);
+        flush();
+
+        // Confirm that V1MetadataOnlySearchableIndex has valid metadata.
+        var metadataOnlyIndex = (StorageAttachedIndex) getIndexManager(keyspace(), indexName).listIndexes().iterator().next();
+        var metadataOnlySSTableIndexes = metadataOnlyIndex.getIndexContext().getView().getIndexes();
+        assertEquals(3, metadataOnlySSTableIndexes.size());
+
+        var structures = new HashSet<V5VectorPostingsWriter.Structure>();
+        metadataOnlySSTableIndexes.forEach(i -> {
+            assertTrue(i.areSegmentsLoaded());
+            structures.addAll(i.getPostingsStructures().collect(Collectors.toList()));
+        });
+
+        if (version.onOrAfter(Version.DC))
+        {
+            assertEquals(3, structures.size());
+            assertTrue(structures.contains(V5VectorPostingsWriter.Structure.ONE_TO_ONE));
+            assertTrue(structures.contains(V5VectorPostingsWriter.Structure.ONE_TO_MANY));
+            assertTrue(structures.contains(V5VectorPostingsWriter.Structure.ZERO_OR_ONE_TO_MANY));
+        }
+        else
+        {
+            assertTrue(structures.isEmpty());
+        }
+
+        // Run compaction without disabling reads to test that path too
+        compact();
+
+        // Confirm what is happening now.
+        var compactedSSTableIndexes = metadataOnlyIndex.getIndexContext().getView().getIndexes();
+        assertEquals(1, compactedSSTableIndexes.size());
+        compactedSSTableIndexes.forEach(i -> {
+            assertTrue(i.areSegmentsLoaded());
+            assertEquals(1, i.getSegmentMetadatas().size());
+            var postingsStructures = i.getPostingsStructures().collect(Collectors.toList());
+            if (version.onOrAfter(Version.DC))
+            {
+                assertEquals(1, postingsStructures.size());
+                assertEquals(V5VectorPostingsWriter.Structure.ZERO_OR_ONE_TO_MANY, postingsStructures.get(0));
+            }
+            else
+            {
+                assertEquals(0, postingsStructures.size());
+            }
+        });
 
         // Confirm we can query the data
         var result = execute( "SELECT * FROM %s ORDER BY v ANN OF ? LIMIT 5", randomVectorBoxed(2));

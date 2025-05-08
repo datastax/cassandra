@@ -21,6 +21,7 @@ package org.apache.cassandra.index.sai.disk;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.List;
+import java.util.stream.Stream;
 
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
@@ -29,6 +30,7 @@ import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.disk.v1.Segment;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
+import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.plan.Orderer;
@@ -118,6 +120,12 @@ public class EmptyIndex implements SearchableIndex
     public List<SegmentMetadata> getSegmentMetadatas()
     {
         return List.of();
+    }
+
+    @Override
+    public Stream<V5VectorPostingsWriter.Structure> getPostingsStructures()
+    {
+        return Stream.empty();
     }
 
     @Override
