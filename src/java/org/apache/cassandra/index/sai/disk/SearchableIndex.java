@@ -22,6 +22,7 @@ import java.io.Closeable;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.List;
+import java.util.stream.Stream;
 
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
@@ -29,6 +30,8 @@ import org.apache.cassandra.db.virtual.SimpleDataSet;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.disk.v1.Segment;
+import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
+import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.plan.Orderer;
@@ -83,6 +86,10 @@ public interface SearchableIndex extends Closeable
                                                                          long totalRows) throws IOException;
 
     List<Segment> getSegments();
+
+    List<SegmentMetadata> getSegmentMetadatas();
+
+    Stream<V5VectorPostingsWriter.Structure> getPostingsStructures();
 
     public void populateSystemView(SimpleDataSet dataSet, SSTableReader sstable);
 

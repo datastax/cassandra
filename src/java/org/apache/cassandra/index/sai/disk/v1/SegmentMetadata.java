@@ -134,7 +134,7 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
     private static final Logger logger = LoggerFactory.getLogger(SegmentMetadata.class);
 
     @SuppressWarnings("resource")
-    private SegmentMetadata(IndexInput input, IndexContext context, Version version) throws IOException
+    private SegmentMetadata(IndexInput input, IndexContext context, Version version, boolean loadTermsDistribution) throws IOException
     {
         PrimaryKey.Factory primaryKeyFactory = context.keyFactory();
         AbstractType<?> termsType = context.getValidator();
@@ -155,7 +155,8 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
             long fp = input.getFilePointer();
             if (len > 0)
             {
-                td = TermsDistribution.read(input, termsType);
+                if (loadTermsDistribution)
+                    td = TermsDistribution.read(input, termsType);
                 input.seek(fp + len);
             }
         }
@@ -163,8 +164,15 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
         this.componentMetadatas = new SegmentMetadata.ComponentMetadataMap(input);
     }
 
+
     @SuppressWarnings("resource")
     public static List<SegmentMetadata> load(MetadataSource source, IndexContext context) throws IOException
+    {
+        return load(source, context, true);
+    }
+
+    @SuppressWarnings("resource")
+    public static List<SegmentMetadata> load(MetadataSource source, IndexContext context, boolean loadTermsDistribution) throws IOException
     {
 
         IndexInput input = source.get(NAME);
@@ -175,7 +183,7 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
 
         for (int i = 0; i < segmentCount; i++)
         {
-            segmentMetadata.add(new SegmentMetadata(input, context, source.getVersion()));
+            segmentMetadata.add(new SegmentMetadata(input, context, source.getVersion(), loadTermsDistribution));
         }
 
         return segmentMetadata;
