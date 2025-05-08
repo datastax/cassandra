@@ -37,6 +37,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.service.StorageService;
 
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertFalse;
@@ -366,6 +367,8 @@ public class TokenMetadataTest
         assertEquals(tmd.getTokens(second).iterator().next(), token(SIX));
 
         InetAddressAndPort updatedNode = InetAddressAndPort.getByName("127.0.0.10");
+        assertThatThrownBy(() -> tmd.updateAddressForNormalTokens(Collections.singleton(token(SIX)), first, updatedNode))
+                          .hasMessageContaining("different set of tokens");
         tmd.updateAddressForNormalTokens(Collections.singleton(token(ONE)), first, updatedNode);
 
         assertEquals(tmd.getTokens(updatedNode).size(), 1);

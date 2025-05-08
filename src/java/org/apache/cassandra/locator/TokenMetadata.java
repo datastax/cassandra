@@ -281,14 +281,55 @@ public class TokenMetadata
         lock.writeLock().lock();
         try
         {
+            // make sure token matches and current endpoint is not in the ring.
+            Multimap<InetAddressAndPort, Token> endpointToTokensMap = tokenToEndpointMap.inverse();
+            Collection<Token> oldNodeTokens = endpointToTokensMap.get(existing);
+            if (!tokens.containsAll(oldNodeTokens) || !oldNodeTokens.containsAll(tokens))
+            {
+                throw new RuntimeException(String.format("Node %s is trying to replace node %s with tokens %s with a " +
+                                                         "different set of tokens %s.", current, existing, oldNodeTokens,
+                                                         tokens));
+            }
+            if (endpointToTokensMap.containsKey(current))
+            {
+                throw new RuntimeException(String.format("Node %s already has normal tokens, can't replace %s", current, existing));
+            }
+
+            // make sure they are not bootstrap.
+            Multimap<InetAddressAndPort, Token> endpointToBootstrapTokensMap = bootstrapTokens.inverse();
+            if (endpointToBootstrapTokensMap.containsKey(existing))
+            {
+                throw new RuntimeException(String.format("Node %s is trying to replace node %s with bootstrapping tokens.", current, existing));
+            }
+            if (endpointToBootstrapTokensMap.containsKey(current))
+            {
+                throw new RuntimeException(String.format("Node %s already has bootstrap tokens, can't replace %s", current, existing));
+            }
+
+            // make sure they are not leaving
+            if (leavingEndpoints.contains(existing))
+            {
+                throw new RuntimeException(String.format("Node %s is trying to replace node %s in leaving state.", current, existing));
+            }
+            if (leavingEndpoints.contains(current))
+            {
+                throw new RuntimeException(String.format("Node %s is already in leaving, can't replace %s", current, existing));
+            }
+
+            // make sure they are not moving
+            if (movingEndpoints.stream().anyMatch(p -> p.right.equals(existing)))
+            {
+                throw new RuntimeException(String.format("Node %s is trying to replace node %s in moving state.", current, existing));
+            }
+            if (movingEndpoints.stream().anyMatch(p -> p.right.equals(current)))
+            {
+                throw new RuntimeException(String.format("Node %s is already in moving, can't replace %s", current, existing));
+            }
+
+            // Note that there is no need to validate replacementToOriginal which is updated together with bootstrapTokens
             Topology.Builder topologyBuilder = topology.unbuild();
-            bootstrapTokens.removeValue(current);
-            tokenToEndpointMap.removeValue(existing);
-            tokenToEndpointMap.removeValue(current);
+            topologyBuilder.removeEndpoint(existing);
             topologyBuilder.addEndpoint(current);
-            leavingEndpoints.remove(current);
-            replacementToOriginal.remove(current);
-            removeFromMoving(current); // also removing this endpoint from moving
 
             for (Token token : tokens)
                 tokenToEndpointMap.put(token, current);
