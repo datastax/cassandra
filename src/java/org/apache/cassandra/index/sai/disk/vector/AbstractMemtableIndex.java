@@ -24,6 +24,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.ScheduledExecutors;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.index.sai.IndexContext;
@@ -37,10 +38,17 @@ public abstract class AbstractMemtableIndex implements MemtableIndex
     protected final IndexContext indexContext;
     protected final Memtable memtable;
 
+    private final int flushPeriodicInSeconds;
+    private final int flushThresholdMaxRows;
+
     public AbstractMemtableIndex(IndexContext indexContext, Memtable memtable)
     {
         this.indexContext = indexContext;
         this.memtable = memtable;
+        this.flushPeriodicInSeconds = indexContext.isVector() ? CassandraRelevantProperties.SAI_VECTOR_FLUSH_PERIOD_IN_SECONDS.getInt()
+                                                              : CassandraRelevantProperties.SAI_NON_VECTOR_FLUSH_PERIOD_IN_SECONDS.getInt();
+        this.flushThresholdMaxRows = indexContext.isVector() ? CassandraRelevantProperties.SAI_VECTOR_FLUSH_THRESHOLD_MAX_ROWS.getInt()
+                                                             : CassandraRelevantProperties.SAI_NON_VECTOR_FLUSH_THRESHOLD_MAX_ROWS.getInt();
     }
 
     protected abstract int size();
@@ -50,18 +58,16 @@ public abstract class AbstractMemtableIndex implements MemtableIndex
      */
     protected void onIndexUpdated()
     {
-        if (indexContext.getIndexWriterConfig().hasFlushThreshold()
-            && size() >= indexContext.getIndexWriterConfig().getFlushThresholdMaxRows())
+        if (flushThresholdMaxRows > 0 && size() >= flushThresholdMaxRows)
             memtable.signalFlushRequired(ColumnFamilyStore.FlushReason.INDEX_MEMTABLE_LIMIT, true);
     }
 
     protected void maybeScheduleFlush()
     {
-        if (indexContext.getIndexWriterConfig().hasFlushPeriod())
+        if (flushPeriodicInSeconds > 0)
         {
-            int periodInSeconds = indexContext.getIndexWriterConfig().getFlushPeriodInSeconds();
-            logger.trace("scheduling memtable index flush in {} seconds for index {}", periodInSeconds, indexContext.getIndexName());
-            scheduleFlush(periodInSeconds);
+            logger.trace("scheduling memtable index flush in {} seconds for index {}", flushPeriodicInSeconds, indexContext.getIndexName());
+            scheduleFlush(flushPeriodicInSeconds);
         }
     }
 

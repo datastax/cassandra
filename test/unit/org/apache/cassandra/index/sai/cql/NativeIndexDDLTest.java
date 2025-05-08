@@ -30,7 +30,6 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.stream.Collectors;
-import java.util.stream.IntStream;
 import java.util.stream.LongStream;
 
 import org.junit.After;
@@ -149,8 +148,8 @@ public class NativeIndexDDLTest extends SAITester
         NDI_CREATION_COUNTER.reset();
         INDEX_BUILD_COUNTER.reset();
 
-        CassandraRelevantProperties.SAI_FLUSH_PERIOD_IN_SECONDS.reset();
-        CassandraRelevantProperties.SAI_FLUSH_THRESHOLD_MAX_ROWS.reset();
+        CassandraRelevantProperties.SAI_NON_VECTOR_FLUSH_PERIOD_IN_SECONDS.reset();
+        CassandraRelevantProperties.SAI_NON_VECTOR_FLUSH_THRESHOLD_MAX_ROWS.reset();
     }
 
     @After
@@ -1540,7 +1539,7 @@ public class NativeIndexDDLTest extends SAITester
     public void testTrieIndexFlushThreshold()
     {
         int maxRows = 10;
-        CassandraRelevantProperties.SAI_FLUSH_THRESHOLD_MAX_ROWS.setInt(maxRows);
+        CassandraRelevantProperties.SAI_NON_VECTOR_FLUSH_THRESHOLD_MAX_ROWS.setInt(maxRows);
 
         createTable("CREATE TABLE %s (pk int, v1 int, v2 text, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(v1) USING 'StorageAttachedIndex'");
@@ -1572,7 +1571,7 @@ public class NativeIndexDDLTest extends SAITester
     @Test
     public void testTrieIndexFlushPeriod()
     {
-        CassandraRelevantProperties.SAI_FLUSH_PERIOD_IN_SECONDS.setInt(10);
+        CassandraRelevantProperties.SAI_NON_VECTOR_FLUSH_PERIOD_IN_SECONDS.setInt(5);
         createTable("CREATE TABLE %s (pk int, v1 int, v2 text, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(v1) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(v2) USING 'StorageAttachedIndex'");

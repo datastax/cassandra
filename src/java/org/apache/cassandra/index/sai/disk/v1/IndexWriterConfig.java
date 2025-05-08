@@ -24,7 +24,6 @@ import java.util.stream.Collectors;
 import com.google.common.annotations.VisibleForTesting;
 
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
-import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.disk.vector.VectorSourceModel;
@@ -95,9 +94,6 @@ public class IndexWriterConfig
     private final Float alpha; // default varies for in memory/compaction build
     private final boolean enableHierarchy; // defaults to false
 
-    private final int flushThresholdMaxRows;
-    private final int flushPeriodInSeconds;
-
     public IndexWriterConfig(String indexName,
                              int bkdPostingsSkip,
                              int bkdPostingsMinLeaves)
@@ -121,9 +117,7 @@ public class IndexWriterConfig
                              VectorSourceModel sourceModel)
     {
         this(indexName, bkdPostingsSkip, bkdPostingsMinLeaves, maximumNodeConnections, constructionBeamWidth,
-             similarityFunction, sourceModel, null, null, false,
-             CassandraRelevantProperties.SAI_FLUSH_THRESHOLD_MAX_ROWS.getInt(),
-             CassandraRelevantProperties.SAI_FLUSH_PERIOD_IN_SECONDS.getInt());
+             similarityFunction, sourceModel, null, null, false);
     }
 
     public IndexWriterConfig(String indexName,
@@ -135,9 +129,7 @@ public class IndexWriterConfig
                              VectorSourceModel sourceModel,
                              Float neighborhoodOverflow,
                              Float alpha,
-                             boolean enableHierarchy,
-                             int flushThresholdMaxRows,
-                             int flushPeriodInSeconds)
+                             boolean enableHierarchy)
     {
         this.indexName = indexName;
         this.bkdPostingsSkip = bkdPostingsSkip;
@@ -149,8 +141,6 @@ public class IndexWriterConfig
         this.neighborhoodOverflow = neighborhoodOverflow;
         this.alpha = alpha;
         this.enableHierarchy = enableHierarchy;
-        this.flushThresholdMaxRows = flushThresholdMaxRows;
-        this.flushPeriodInSeconds = flushPeriodInSeconds;
     }
 
     public String getIndexName()
@@ -186,26 +176,6 @@ public class IndexWriterConfig
     public int getConstructionBeamWidth()
     {
         return constructionBeamWidth;
-    }
-
-    public int getFlushPeriodInSeconds()
-    {
-        return flushPeriodInSeconds;
-    }
-
-    public boolean hasFlushPeriod()
-    {
-        return flushPeriodInSeconds > 0;
-    }
-
-    public int getFlushThresholdMaxRows()
-    {
-        return flushThresholdMaxRows;
-    }
-
-    public boolean hasFlushThreshold()
-    {
-        return flushThresholdMaxRows > 0;
     }
 
     public VectorSimilarityFunction getSimilarityFunction()
@@ -399,10 +369,7 @@ public class IndexWriterConfig
             }
         }
 
-        int flushThresholdMaxRows = CassandraRelevantProperties.SAI_FLUSH_THRESHOLD_MAX_ROWS.getInt();
-        int flushPeriodInSeconds = CassandraRelevantProperties.SAI_FLUSH_PERIOD_IN_SECONDS.getInt();
-        return new IndexWriterConfig(indexName, skip, minLeaves, maximumNodeConnections, queueSize,
-                                   similarityFunction, sourceModel, neighborhoodOverflow, alpha, enableHierarchy, flushThresholdMaxRows, flushPeriodInSeconds);
+        return new IndexWriterConfig(indexName, skip, minLeaves, maximumNodeConnections, queueSize, similarityFunction, sourceModel, neighborhoodOverflow, alpha, enableHierarchy);
     }
 
     public static IndexWriterConfig defaultConfig(String indexName)

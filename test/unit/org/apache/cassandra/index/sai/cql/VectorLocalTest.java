@@ -65,8 +65,8 @@ public class VectorLocalTest extends VectorTester.VersionedWithChecksums
     @After
     public void cleanupConfigs()
     {
-        CassandraRelevantProperties.SAI_FLUSH_PERIOD_IN_SECONDS.reset();
-        CassandraRelevantProperties.SAI_FLUSH_THRESHOLD_MAX_ROWS.reset();
+        CassandraRelevantProperties.SAI_VECTOR_FLUSH_PERIOD_IN_SECONDS.reset();
+        CassandraRelevantProperties.SAI_VECTOR_FLUSH_THRESHOLD_MAX_ROWS.reset();
     }
 
     @Test
@@ -126,7 +126,7 @@ public class VectorLocalTest extends VectorTester.VersionedWithChecksums
     public void testVectorFlushThreshold()
     {
         int maxRows = 10;
-        CassandraRelevantProperties.SAI_FLUSH_THRESHOLD_MAX_ROWS.setInt(maxRows);
+        CassandraRelevantProperties.SAI_VECTOR_FLUSH_THRESHOLD_MAX_ROWS.setInt(maxRows);
 
         int dimension = 2048;
         createTable(String.format("CREATE TABLE %%s (pk int, str_val text, val vector<float, %d>, PRIMARY KEY(pk))", dimension));
@@ -160,7 +160,7 @@ public class VectorLocalTest extends VectorTester.VersionedWithChecksums
     @Test
     public void testVectorFlushPeriod()
     {
-        CassandraRelevantProperties.SAI_FLUSH_PERIOD_IN_SECONDS.setInt(10);
+        CassandraRelevantProperties.SAI_VECTOR_FLUSH_PERIOD_IN_SECONDS.setInt(5);
         int dimension = 2048;
         createTable(String.format("CREATE TABLE %%s (pk int, str_val text, val vector<float, %d>, PRIMARY KEY(pk))", dimension));
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
