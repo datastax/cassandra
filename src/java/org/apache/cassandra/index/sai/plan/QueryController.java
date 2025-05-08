@@ -659,7 +659,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
      */
     private List<PrimaryKey> materializeKeys(KeyRangeIterator source)
     {
-        // Skip to the first key in the range if it is not the minimum token
+        // Skip to the first key (which is really just a token) in the range if it is not the minimum token
         if (!mergeRange.left.isMinimum())
             source.skipTo(firstPrimaryKey);
 
