@@ -29,12 +29,14 @@ import java.util.stream.IntStream;
 
 import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.Multimap;
+import org.junit.After;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import io.github.jbellis.jvector.vector.VectorizationProvider;
 import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.marshal.FloatType;
@@ -58,6 +60,13 @@ public class VectorLocalTest extends VectorTester.VersionedWithChecksums
     public static void loadModel() throws Throwable
     {
         word2vec = Glove.parse(VectorLocalTest.class.getClassLoader().getResourceAsStream("glove.3K.50d.txt"));
+    }
+
+    @After
+    public void cleanupConfigs()
+    {
+        CassandraRelevantProperties.SAI_FLUSH_PERIOD_IN_SECONDS.reset();
+        CassandraRelevantProperties.SAI_FLUSH_THRESHOLD_MAX_ROWS.reset();
     }
 
     @Test
@@ -116,21 +125,33 @@ public class VectorLocalTest extends VectorTester.VersionedWithChecksums
     @Test
     public void testVectorFlushThreshold()
     {
+        int maxRows = 10;
+        CassandraRelevantProperties.SAI_FLUSH_THRESHOLD_MAX_ROWS.setInt(maxRows);
+
         int dimension = 2048;
         createTable(String.format("CREATE TABLE %%s (pk int, str_val text, val vector<float, %d>, PRIMARY KEY(pk))", dimension));
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'vector_flush_threshold': '10'};");
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
 
         int vectorCount = 25;
         List<Vector<Float>> vectors = IntStream.range(0, vectorCount).mapToObj(s -> randomVectorBoxed(dimension)).collect(Collectors.toList());
 
         int pk = 0;
-        for (Vector<Float> vector : vectors)
-            execute("INSERT INTO %s (pk, str_val, val) VALUES (?, 'A', ?)", pk++, vector);
+        for (int i = 0; i < vectorCount; i++)
+        {
+            execute("INSERT INTO %s (pk, str_val, val) VALUES (?, 'A', ?)", pk++, vectors.get(i));
 
-        Awaitility.await("Memtable flushed")
-                  .atMost(30, TimeUnit.SECONDS)
-                  .untilAsserted(() -> assertThat(getCurrentColumnFamilyStore().getLiveSSTables()).hasSize(2));
-
+            int sstables = pk / maxRows;
+            if (pk % maxRows == 0)
+            {
+                Awaitility.await("Memtable flushed")
+                          .atMost(30, TimeUnit.SECONDS)
+                          .untilAsserted(() -> assertThat(getCurrentColumnFamilyStore().getLiveSSTables()).hasSize(sstables));
+            }
+            else
+            {
+                assertThat(getCurrentColumnFamilyStore().getLiveSSTables()).hasSize(sstables);
+            }
+        }
         // flush remaining memtable
         getCurrentColumnFamilyStore().forceBlockingFlush(ColumnFamilyStore.FlushReason.USER_FORCED);
         assertThat(getCurrentColumnFamilyStore().getLiveSSTables()).hasSize(3);
@@ -139,11 +160,12 @@ public class VectorLocalTest extends VectorTester.VersionedWithChecksums
     @Test
     public void testVectorFlushPeriod()
     {
+        CassandraRelevantProperties.SAI_FLUSH_PERIOD_IN_SECONDS.setInt(10);
         int dimension = 2048;
         createTable(String.format("CREATE TABLE %%s (pk int, str_val text, val vector<float, %d>, PRIMARY KEY(pk))", dimension));
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'vector_flush_period_in_ms': '10000'};"); // 10s
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
 
-        int vectorCount = 10;
+        int vectorCount = 15;
         List<Vector<Float>> vectors = IntStream.range(0, vectorCount).mapToObj(s -> randomVectorBoxed(dimension)).collect(Collectors.toList());
 
         int pk = 0;

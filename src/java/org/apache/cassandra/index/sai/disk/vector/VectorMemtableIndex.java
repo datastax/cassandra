@@ -29,7 +29,6 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.NavigableSet;
 import java.util.concurrent.ConcurrentSkipListSet;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.function.ToIntFunction;
 import javax.annotation.Nullable;
@@ -45,9 +44,7 @@ import io.github.jbellis.jvector.vector.VectorizationProvider;
 import io.github.jbellis.jvector.vector.types.VectorFloat;
 import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
 import org.agrona.collections.IntHashSet;
-import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.db.Clustering;
-import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.memtable.Memtable;
@@ -58,7 +55,6 @@ import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.memory.MemoryIndex;
-import org.apache.cassandra.index.sai.memory.MemtableIndex;
 import org.apache.cassandra.index.sai.metrics.ColumnQueryMetrics;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.plan.Orderer;
@@ -72,7 +68,6 @@ import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.SortingIterator;
-import org.apache.cassandra.utils.WrappedRunnable;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 
@@ -81,13 +76,12 @@ import static java.lang.Math.max;
 import static java.lang.Math.min;
 import static java.lang.Math.pow;
 
-public class VectorMemtableIndex implements MemtableIndex
+public class VectorMemtableIndex extends AbstractMemtableIndex
 {
     private static final Logger logger = LoggerFactory.getLogger(VectorMemtableIndex.class);
     private static final VectorTypeSupport vts = VectorizationProvider.getInstance().getVectorTypeSupport();
     public static int GLOBAL_BRUTE_FORCE_ROWS = Integer.MAX_VALUE; // not final so test can inject its own setting
 
-    private final IndexContext indexContext;
     private final ColumnQueryMetrics.VectorIndexMetrics columnQueryMetrics;
     private final CassandraOnHeapGraph<PrimaryKey> graph;
     private final LongAdder writeCount = new LongAdder();
@@ -98,52 +92,19 @@ public class VectorMemtableIndex implements MemtableIndex
     private PrimaryKey maximumKey;
 
     private final NavigableSet<PrimaryKey> primaryKeys = new ConcurrentSkipListSet<>();
-    private final Memtable mt;
 
     public VectorMemtableIndex(IndexContext indexContext, Memtable mt)
     {
-        this.indexContext = indexContext;
+        super(indexContext, mt);
         this.columnQueryMetrics = (ColumnQueryMetrics.VectorIndexMetrics) indexContext.getColumnQueryMetrics();
         this.graph = new CassandraOnHeapGraph<>(indexContext, true, mt);
-        this.mt = mt;
-        scheduleFlush();
-    }
-
-    private void scheduleFlush()
-    {
-        int periodInMs = indexContext.getIndexWriterConfig().getVectorFlushPeriodInMs();
-        if (periodInMs <= 0)
-            return;
-
-        logger.trace("scheduling vector memtable index flush in {} ms for index {}", periodInMs, indexContext.getIndexName());
-        scheduleFlush(periodInMs);
-    }
-
-    private void scheduleFlush(int periodInMs)
-    {
-        WrappedRunnable runnable = new WrappedRunnable()
-        {
-            protected void runMayThrow()
-            {
-                // if it's clean, reschedule
-                if (size() == 0)
-                {
-                    scheduleFlush(periodInMs);
-                }
-                // signal flush
-                else
-                {
-                    mt.signalFlushRequired(ColumnFamilyStore.FlushReason.VECTOR_MEMTABLE_PERIOD_EXPIRED);
-                }
-            }
-        };
-        ScheduledExecutors.scheduledTasks.schedule(runnable, periodInMs, TimeUnit.MILLISECONDS);
+        maybeScheduleFlush();
     }
 
     @Override
     public Memtable getMemtable()
     {
-        return mt;
+        return memtable;
     }
 
     @Override
@@ -155,10 +116,7 @@ public class VectorMemtableIndex implements MemtableIndex
         var primaryKey = indexContext.keyFactory().create(key, clustering);
         long allocatedBytes = index(primaryKey, value);
         memtable.markExtraOnHeapUsed(allocatedBytes, opGroup);
-
-        if (indexContext.getIndexWriterConfig().hasVectorFlushThreshold()
-            && graph.size() >= indexContext.getIndexWriterConfig().getVectorFlushThreshold())
-            memtable.signalFlushRequired(ColumnFamilyStore.FlushReason.VECTOR_MEMTABLE_LIMIT);
+        onIndexUpdated();
     }
 
     private long index(PrimaryKey primaryKey, ByteBuffer value)
@@ -215,9 +173,7 @@ public class VectorMemtableIndex implements MemtableIndex
                 removedCount.increment();
             }
 
-            if (indexContext.getIndexWriterConfig().hasVectorFlushThreshold()
-                && graph.size() >= indexContext.getIndexWriterConfig().getVectorFlushThreshold())
-                memtable.signalFlushRequired(ColumnFamilyStore.FlushReason.VECTOR_MEMTABLE_LIMIT);
+            onIndexUpdated();
         }
     }
 
@@ -437,7 +393,7 @@ public class VectorMemtableIndex implements MemtableIndex
         var score = similarityFunction.compare(queryVector, vector);
         if (score < threshold)
             return null;
-        return new PrimaryKeyWithScore(indexContext, mt, key, score);
+        return new PrimaryKeyWithScore(indexContext, memtable, key, score);
     }
 
     private int maxBruteForceRows(int rerankK, int nPermittedOrdinals, int graphSize)
@@ -500,6 +456,7 @@ public class VectorMemtableIndex implements MemtableIndex
         return graph.preFlush(ordinalMapper);
     }
 
+    @Override
     public int size()
     {
         return graph.size();
@@ -626,7 +583,7 @@ public class VectorMemtableIndex implements MemtableIndex
                 SearchResult.NodeScore nodeScore = nodeScores.next();
                 primaryKeysForNode = graph.keysFromOrdinal(nodeScore.node)
                                           .stream()
-                                          .map(pk -> new PrimaryKeyWithScore(indexContext, mt, pk, nodeScore.score))
+                                          .map(pk -> new PrimaryKeyWithScore(indexContext, memtable, pk, nodeScore.score))
                                           .iterator();
                 if (primaryKeysForNode.hasNext())
                     return primaryKeysForNode.next();

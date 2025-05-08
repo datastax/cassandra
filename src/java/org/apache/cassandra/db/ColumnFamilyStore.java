@@ -260,8 +260,8 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         REMOTE_REPLAY,
         BATCHLOG_REPLAY,
         TRIE_LIMIT,
-        VECTOR_MEMTABLE_LIMIT,
-        VECTOR_MEMTABLE_PERIOD_EXPIRED,
+        INDEX_MEMTABLE_LIMIT,
+        INDEX_MEMTABLE_PERIOD_EXPIRED,
     }
 
     private static final String[] COUNTER_NAMES = new String[]{"table", "count", "error", "value"};

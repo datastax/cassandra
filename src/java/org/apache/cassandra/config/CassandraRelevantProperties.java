@@ -373,7 +373,10 @@ public enum CassandraRelevantProperties
     VECTOR_FLOAT_ONLY("cassandra.float_only_vectors", "true"),
     /** Enables use of vector type. True by default. **/
     VECTOR_TYPE_ALLOWED("cassandra.vector_type_allowed", "true"),
-
+    // Use non-positive value to disable it. When num of rows in SAI memtable index reaches the threshold, it triggers flush
+    SAI_FLUSH_THRESHOLD_MAX_ROWS("cassandra.sai.flush_threshold_max_rows", "-1"),
+    // Use non-positive value to disable it. Period in seconds to trigger a flush for SAI memtable index.
+    SAI_FLUSH_PERIOD_IN_SECONDS("cassandra.sai.flush_period_in_seconds", "-1"),
     /**
      * Whether to disable auto-compaction
      */

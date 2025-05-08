@@ -212,8 +212,6 @@ public class StorageAttachedIndex implements Index
                                                                      IndexWriterConfig.SIMILARITY_FUNCTION,
                                                                      IndexWriterConfig.SOURCE_MODEL,
                                                                      IndexWriterConfig.OPTIMIZE_FOR,
-                                                                     IndexWriterConfig.VECTOR_FLUSH_THRESHOLD,
-                                                                     IndexWriterConfig.VECTOR_FLUSH_PERIOD_IN_MS,
                                                                      LuceneAnalyzer.INDEX_ANALYZER,
                                                                      LuceneAnalyzer.QUERY_ANALYZER,
                                                                      AnalyzerEqOperatorSupport.OPTION);
