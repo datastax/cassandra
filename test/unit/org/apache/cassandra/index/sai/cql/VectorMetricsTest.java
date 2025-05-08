@@ -61,7 +61,7 @@ public class VectorMetricsTest extends VectorTester
     public void setup() throws Throwable
     {
         super.setup();
-        SAIUtil.setLatestVersion(version);
+        SAIUtil.setCurrentVersion(version);
     }
 
     @Test

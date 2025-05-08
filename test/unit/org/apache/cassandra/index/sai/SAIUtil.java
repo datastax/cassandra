@@ -19,23 +19,22 @@
 package org.apache.cassandra.index.sai;
 
 import java.lang.reflect.Field;
-import java.lang.reflect.Modifier;
 
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.utils.ReflectionUtils;
 
 public class SAIUtil
 {
-    public static void setLatestVersion(Version version)
+    public static void setCurrentVersion(Version version)
     {
-        Field latest = null;
+        Field current = null;
         try
         {
-            latest = Version.class.getDeclaredField("LATEST");
-            latest.setAccessible(true);
+            current = Version.class.getDeclaredField("CURRENT");
+            current.setAccessible(true);
             Field modifiersField = ReflectionUtils.getField(Field.class, "modifiers");
             modifiersField.setAccessible(true);
-            latest.set(null, version);
+            current.set(null, version);
         }
         catch (Exception e)
         {

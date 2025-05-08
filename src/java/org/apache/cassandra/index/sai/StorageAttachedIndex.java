@@ -29,7 +29,6 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.NavigableMap;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.SortedMap;
@@ -78,10 +77,10 @@ import org.apache.cassandra.dht.LocalPartitioner;
 import org.apache.cassandra.dht.OrderPreservingPartitioner;
 import org.apache.cassandra.dht.RandomPartitioner;
 import org.apache.cassandra.exceptions.InvalidRequestException;
-import org.apache.cassandra.db.filter.ANNOptions;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.IndexBuildDecider;
 import org.apache.cassandra.index.IndexRegistry;
+import org.apache.cassandra.index.FeatureNeedsIndexRebuildException;
 import org.apache.cassandra.index.SecondaryIndexBuilder;
 import org.apache.cassandra.index.SecondaryIndexManager;
 import org.apache.cassandra.index.TargetParser;
@@ -91,6 +90,7 @@ import org.apache.cassandra.index.sai.analyzer.LuceneAnalyzer;
 import org.apache.cassandra.index.sai.analyzer.NonTokenizingOptions;
 import org.apache.cassandra.index.sai.disk.StorageAttachedIndexWriter;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.index.sai.view.View;
@@ -448,7 +448,17 @@ public class StorageAttachedIndex implements Index
             return CompletableFuture.completedFuture(null);
         }
 
-        // stop in-progress compaction tasks to prevent compacted sstable not being index.
+        if (indexContext.isVector() && Version.current().compareTo(Version.JVECTOR_EARLIEST) < 0)
+        {
+            throw new FeatureNeedsIndexRebuildException(String.format("The current configured on-disk format version %s does not support vector indexes. " +
+                                                                      "The minimum version that supports vectors is %s. " +
+                                                                      "The on-disk format version can be set via the -D%s system property.",
+                                                                      Version.current(),
+                                                                      Version.JVECTOR_EARLIEST,
+                                                                      CassandraRelevantProperties.SAI_CURRENT_VERSION.name()));
+        }
+
+        // stop in-progress compaction tasks to prevent compacted sstables not being indexed.
         logger.debug(indexContext.logMessage("Stopping active compactions to make sure all sstables are indexed after initial build."));
         CompactionManager.instance.interruptCompactionFor(Collections.singleton(baseCfs.metadata()),
                                                           OperationType.REWRITES_SSTABLES,
@@ -669,23 +679,34 @@ public class StorageAttachedIndex implements Index
     }
 
     @Override
-    public Optional<Analyzer> getIndexAnalyzer()
+    public Optional<Analyzer> getAnalyzer(ByteBuffer queriedValue)
     {
-        return indexContext.isAnalyzed()
-               ? Optional.of(value -> analyze(indexContext.getAnalyzerFactory(), value))
-               : Optional.empty();
-    }
+        if (!indexContext.isAnalyzed())
+            return Optional.empty();
 
-    @Override
-    public Optional<Analyzer> getQueryAnalyzer()
-    {
-        return indexContext.isAnalyzed()
-               ? Optional.of(value -> analyze(indexContext.getQueryAnalyzerFactory(), value))
-               : Optional.empty();
+        // memoize the analyzed queried value, so we don't have to re-analyze it for every evaluated column value
+        List<ByteBuffer> queriedTokens = analyze(indexContext.getQueryAnalyzerFactory(), queriedValue);
+
+        return Optional.of(new Analyzer() {
+            @Override
+            public List<ByteBuffer> indexedTokens(ByteBuffer value)
+            {
+                return analyze(indexContext.getAnalyzerFactory(), value);
+            }
+
+            @Override
+            public List<ByteBuffer> queriedTokens()
+            {
+                return queriedTokens;
+            }
+        });
     }
 
     private static List<ByteBuffer> analyze(AbstractAnalyzer.AnalyzerFactory factory, ByteBuffer value)
     {
+        if (value == null)
+            return null;
+
         List<ByteBuffer> tokens = new ArrayList<>();
         AbstractAnalyzer analyzer = factory.create();
         try
@@ -806,6 +827,27 @@ public class StorageAttachedIndex implements Index
         {
             indexContext.update(key, oldRow, newRow, mt, CassandraWriteContext.fromContext(writeContext).getGroup());
         }
+
+        @Override
+        public void partitionDelete(DeletionTime deletionTime)
+        {
+            // Initialize the memtable index to ensure proper SAI views of the data
+            indexContext.initializeMemtableIndex(mt);
+        }
+
+        @Override
+        public void rangeTombstone(RangeTombstone tombstone)
+        {
+            // Initialize the memtable index to ensure proper SAI views of the data
+            indexContext.initializeMemtableIndex(mt);
+        }
+
+        @Override
+        public void removeRow(Row row)
+        {
+            // Initialize the memtable index to ensure proper SAI views of the data
+            indexContext.initializeMemtableIndex(mt);
+        }
     }
 
     protected static abstract class IndexerAdapter implements Indexer
@@ -815,21 +857,6 @@ public class StorageAttachedIndex implements Index
 
         @Override
         public void finish() { }
-
-        @Override
-        public void partitionDelete(DeletionTime dt)
-        {
-        }
-
-        @Override
-        public void rangeTombstone(RangeTombstone rt)
-        {
-        }
-
-        @Override
-        public void removeRow(Row row)
-        {
-        }
     }
 
     @Override
