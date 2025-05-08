@@ -247,15 +247,15 @@ public class TrieMemtable extends AbstractAllocatorMemtable
         long colUpdateTimeDelta = shard.put(update, indexer, opGroup);
 
         if (shard.data.reachedAllocatedSizeThreshold())
-            signalFlushRequired(ColumnFamilyStore.FlushReason.TRIE_LIMIT);
+            signalFlushRequired(ColumnFamilyStore.FlushReason.TRIE_LIMIT, true);
 
         return colUpdateTimeDelta;
     }
 
     @Override
-    public void signalFlushRequired(ColumnFamilyStore.FlushReason flushReason)
+    public void signalFlushRequired(ColumnFamilyStore.FlushReason flushReason, boolean skipIfSignaled)
     {
-        if (!switchRequested.getAndSet(true))
+        if (!switchRequested.getAndSet(true) || !skipIfSignaled)
         {
             logger.info("Scheduling flush for table {} due to {}", this.metadata.get(), flushReason);
             owner.signalFlushRequired(this, flushReason);

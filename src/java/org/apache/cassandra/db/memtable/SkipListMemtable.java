@@ -137,7 +137,7 @@ public class SkipListMemtable extends AbstractAllocatorMemtable
     }
 
     @Override
-    public void signalFlushRequired(ColumnFamilyStore.FlushReason flushReason)
+    public void signalFlushRequired(ColumnFamilyStore.FlushReason flushReason, boolean skipIfSignaled)
     {
         owner.signalFlushRequired(this, flushReason);
     }

@@ -52,7 +52,7 @@ public abstract class AbstractMemtableIndex implements MemtableIndex
     {
         if (indexContext.getIndexWriterConfig().hasFlushThreshold()
             && size() >= indexContext.getIndexWriterConfig().getFlushThresholdMaxRows())
-            memtable.signalFlushRequired(ColumnFamilyStore.FlushReason.INDEX_MEMTABLE_LIMIT);
+            memtable.signalFlushRequired(ColumnFamilyStore.FlushReason.INDEX_MEMTABLE_LIMIT, true);
     }
 
     protected void maybeScheduleFlush()
@@ -79,7 +79,7 @@ public abstract class AbstractMemtableIndex implements MemtableIndex
                 // signal flush
                 else
                 {
-                    memtable.signalFlushRequired(ColumnFamilyStore.FlushReason.INDEX_MEMTABLE_PERIOD_EXPIRED);
+                    memtable.signalFlushRequired(ColumnFamilyStore.FlushReason.INDEX_MEMTABLE_PERIOD_EXPIRED, true);
                 }
             }
         };

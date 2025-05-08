@@ -720,7 +720,7 @@ public class ColumnFamilyStoreTest
             }
 
             @Override
-            public void signalFlushRequired(ColumnFamilyStore.FlushReason flushReason)
+            public void signalFlushRequired(ColumnFamilyStore.FlushReason flushReason, boolean skipIfSignaled)
             {
             }
 

@@ -344,8 +344,9 @@ public interface Memtable extends Comparable<Memtable>
      * Signal underlying memtable that flush is required for given reason
      *
      * @param flushReason reason to flush
+     * @param skipIfSignaled skip signaling if memtable is already requested to switch
      */
-    void signalFlushRequired(ColumnFamilyStore.FlushReason flushReason);
+    void signalFlushRequired(ColumnFamilyStore.FlushReason flushReason, boolean skipIfSignaled);
 
     /**
      * Adjust the used on-heap space by the given size (e.g. to reflect memory used by a non-table-based index).
