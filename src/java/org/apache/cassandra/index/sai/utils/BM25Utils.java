@@ -33,6 +33,7 @@ import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.io.sstable.SSTableId;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.AbstractIterator;
@@ -163,15 +164,18 @@ public class BM25Utils
         {
             var tf = docIterator.next();
             documents.add(tf);
-            if (docStats.avgDocLength == 0)
+            if (docStats.avgDocLength < 0)
                 totalTermCount += tf.termCount();
         }
 
-        // This is likely the case due to an index format before {@link Version#ED},
+        // avgDocLength is unknown since an index format is before {@link Version#ED},
         // which doesn't store the total term count on disk to read it back.
         // In such a case the old way of computing avgDocLength is used.
-        if (docStats.avgDocLength == 0)
+        if (docStats.avgDocLength < 0)
+        {
+            assert !Version.current().onOrAfter(Version.ED) : "on Version.ED avgDocLength must be known";
             docStats.avgDocLength = totalTermCount / documents.size();
+        }
 
         if (documents.isEmpty())
             return CloseableIterator.emptyIterator();
