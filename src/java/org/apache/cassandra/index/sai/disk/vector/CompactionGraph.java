@@ -127,6 +127,7 @@ public class CompactionGraph implements Closeable, Accountable
     // if `useSyntheticOrdinals` is true then we use `nextOrdinal` to avoid holes, otherwise use rowId as source of ordinals
     private final boolean useSyntheticOrdinals;
     private int nextOrdinal = 0;
+    private int postingsCount = 0;
 
     // Used to force flush on next add
     private boolean requiresFlush = false;
@@ -248,7 +249,8 @@ public class CompactionGraph implements Closeable, Accountable
 
     public boolean isEmpty()
     {
-        return postingsMap.values().stream().allMatch(VectorPostings::isEmpty);
+        // This relies on the fact that compaction never has vectors pointing to empty postings lists.
+        return postingsMap.isEmpty();
     }
 
     /**
@@ -272,6 +274,9 @@ public class CompactionGraph implements Closeable, Accountable
                 logger.trace("Ignoring invalid vector during commitlog replay: {}", (Object) e);
             return new InsertionResult(0);
         }
+
+        // At this point, we'll add the posting, so it's safe to count it.
+        postingsCount++;
 
         // if we don't see sequential rowids, it means the skipped row(s) have null vectors
         if (segmentRowId != lastRowId + 1)
@@ -384,8 +389,7 @@ public class CompactionGraph implements Closeable, Accountable
                                                                                         postingsMap.keySet().size(), builder.getGraph().size());
         if (logger.isDebugEnabled())
         {
-            logger.debug("Writing graph with {} rows and {} distinct vectors",
-                         postingsMap.values().stream().mapToInt(VectorPostings::size).sum(), builder.getGraph().size());
+            logger.debug("Writing graph with {} rows and {} distinct vectors", postingsCount, builder.getGraph().size());
             logger.debug("Estimated size is {} + {}", compressedVectors.ramBytesUsed(), builder.getGraph().ramBytesUsed());
         }
 
