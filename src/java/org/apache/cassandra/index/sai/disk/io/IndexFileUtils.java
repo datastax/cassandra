@@ -341,8 +341,18 @@ public class IndexFileUtils
         @Override
         public void writeMostSignificantBytes(long register, int bytes) throws IOException
         {
+            assert buffer != null : "Attempt to use a closed data output";
+            boolean shouldUpdateChecksum = true;
+            if (buffer.remaining() < Long.BYTES)
+            {
+                // Avoid double-counting bytes in the checksum - in this path, super.writeMostSignificantBytes will call
+                // it's super, DataOutputPlus.writeMostSignificantBytes, and that laeds to the writeXXX methods which
+                // are overridden in this class will update the checksum.
+                shouldUpdateChecksum = false;
+            }
             super.writeMostSignificantBytes(register, bytes);
-            addMsbToChecksum(register, bytes);
+            if (shouldUpdateChecksum)
+                addMsbToChecksum(register, bytes);
         }
 
         /**
