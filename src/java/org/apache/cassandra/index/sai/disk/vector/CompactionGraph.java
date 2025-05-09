@@ -128,6 +128,9 @@ public class CompactionGraph implements Closeable, Accountable
     private final boolean useSyntheticOrdinals;
     private int nextOrdinal = 0;
 
+    // Used to force flush on next add
+    private boolean requiresFlush = false;
+
     // protects the fine-tuning changes (done in maybeAddVector) from addGraphNode threads
     // (and creates happens-before events so we don't need to mark the other fields volatile)
     private final ReadWriteLock trainingLock = new ReentrantReadWriteLock();
@@ -347,7 +350,7 @@ public class CompactionGraph implements Closeable, Accountable
         var newPosting = postings.add(segmentRowId);
         assert newPosting;
         bytesUsed += postings.bytesPerPosting();
-        postingsMap.put(vector, postings); // re-serialize to disk
+        requiresFlush = safePut(postingsMap, vector, postings); // re-serialize to disk
 
         return new InsertionResult(bytesUsed);
     }
@@ -476,7 +479,26 @@ public class CompactionGraph implements Closeable, Accountable
 
     public boolean requiresFlush()
     {
-        return builder.getGraph().size() >= postingsEntriesAllocated;
+        return builder.getGraph().size() >= postingsEntriesAllocated || requiresFlush;
+    }
+
+    static <T> boolean safePut(ChronicleMap<T, CompactionVectorPostings> map, T key, CompactionVectorPostings value)
+    {
+        try
+        {
+            map.put(key, value);
+            return false;
+        }
+        catch (IllegalArgumentException e)
+        {
+            logger.error("Error serializing postings to disk, will reattempt with compression", e);
+            // This is an extreme edge case where there are many duplicate vectors. This naive approach
+            // means that we might have a smaller vector graph than desired, but at least we will not
+            // fail to build the index.
+            value.setShouldCompress(true);
+            map.put(key, value);
+            return true;
+        }
     }
 
     private static class VectorFloatMarshaller implements BytesReader<VectorFloat<?>>, BytesWriter<VectorFloat<?>> {
