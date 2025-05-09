@@ -46,6 +46,7 @@ import com.google.common.base.Predicates;
 import com.google.common.collect.Sets;
 import org.junit.After;
 import org.junit.Assert;
+import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Rule;
 import org.junit.rules.TestRule;
@@ -72,6 +73,7 @@ import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.format.Version;
+import org.apache.cassandra.index.sai.plan.QueryController;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.ResourceLeakDetector;
 import org.apache.cassandra.inject.ActionBuilder;
@@ -220,6 +222,13 @@ public class SAITester extends CQLTester
 
     @Rule
     public TestRule testRules = new ResourceLeakDetector();
+
+    @Before
+    public void resetQueryOptimizationLevel() throws Throwable
+    {
+        // Enable the optimizer by default. If there are any tests that need to disable it, they can do so explicitly.
+        QueryController.QUERY_OPT_LEVEL = 1;
+    }
 
     @After
     public void removeAllInjections()
@@ -372,8 +381,17 @@ public class SAITester extends CQLTester
                 IndexDescriptor indexDescriptor = loadDescriptor(sstable, cfs);
                 if (indexDescriptor.isIndexEmpty(context))
                     continue;
-                if (!indexDescriptor.perSSTableComponents().validateComponents(sstable, cfs.getTracker(), true, false)
-                    || !indexDescriptor.perIndexComponents(context).validateComponents(sstable, cfs.getTracker(), true, false))
+                
+                // For vector indexes, only validate checksums if the version supports it
+                boolean validateChecksum = true;
+                if (context.isVector() && !indexDescriptor.perSSTableComponents().onDiskFormat().indexFeatureSet().hasVectorIndexChecksum())
+                {
+                    // Vector components don't have checksums in versions prior to v7, so we skip checksum validation
+                    validateChecksum = false;
+                }
+                
+                if (!indexDescriptor.perSSTableComponents().validateComponents(sstable, cfs.getTracker(), validateChecksum, false)
+                    || !indexDescriptor.perIndexComponents(context).validateComponents(sstable, cfs.getTracker(), validateChecksum, false))
                     return false;
             }
         }
