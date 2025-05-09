@@ -19,7 +19,9 @@
 package org.apache.cassandra.db.compaction;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.PriorityQueue;
@@ -279,7 +281,68 @@ public interface ShardManager
         return applyMaxParallelism(maxParallelism, maker, shards);
     }
 
-    private static <T, R extends CompactionSSTable> List<T> applyMaxParallelism(int maxParallelism, BiFunction<Collection<R>, Range<Token>, T> maker, List<Pair<Set<R>, Range<Token>>> shards)
+    private static <T, R extends CompactionSSTable> List<T> applyMaxParallelism(int maxParallelism,
+                                                                                BiFunction<Collection<R>, Range<Token>, T> maker,
+                                                                                List<Pair<Set<R>, Range<Token>>> shards)
+    {
+        if (maxParallelism >= shards.size())
+        {
+            // We can fit within the parallelism limit without grouping, because some ranges are empty.
+            // This is not expected to happen often, but if it does, take advantage.
+            List<T> tasks = new ArrayList<>();
+            for (Pair<Set<R>, Range<Token>> pair : shards)
+                tasks.add(maker.apply(pair.left, pair.right));
+            return tasks;
+        }
+
+        double totalSpan = shards.stream().map(Pair::right).mapToDouble(r -> r.left.size(r.right)).sum();
+        double spanPerTask = totalSpan / maxParallelism;
+
+        List<T> tasks = new ArrayList<>();
+        Set<R> currentSSTables = new HashSet<>();
+        Token rangeStart = null;
+        double currentSpan = 0;
+        int shardsRemaining = shards.size();
+        int tasksRemaining = maxParallelism;
+
+        for (Pair<Set<R>, Range<Token>> pair : shards)
+        {
+            Token currentStart = pair.right.left;
+            Token currentEnd = pair.right.right;
+            double span = currentStart.size(currentEnd);
+
+            if (rangeStart == null)
+                rangeStart = currentStart;
+
+            currentSSTables.addAll(pair.left);
+            currentSpan += span;
+            shardsRemaining--;
+
+            boolean isLastTask = tasksRemaining == 1;
+            boolean shouldEmit = !isLastTask &&
+                                 (currentSpan >= spanPerTask || shardsRemaining + tasks.size() + 1 == maxParallelism);
+
+            if (shouldEmit)
+            {
+                tasks.add(maker.apply(currentSSTables, new Range<>(rangeStart, currentEnd)));
+                currentSSTables = new HashSet<>();
+                rangeStart = null;
+                currentSpan = 0;
+                tasksRemaining--;
+            }
+        }
+
+        if (!currentSSTables.isEmpty())
+        {
+            Token finalEnd = shards.get(shards.size() - 1).right.right;
+            tasks.add(maker.apply(currentSSTables, new Range<>(rangeStart, finalEnd)));
+        }
+
+        assert tasks.size() == maxParallelism : tasks.size() + " != " + maxParallelism;
+        return tasks;
+    }
+
+    private static <T, R extends CompactionSSTable> List<T> applyMaxParallelismOriginal(int maxParallelism, BiFunction<Collection<R>, Range<Token>, T> maker, List<Pair<Set<R>, Range<Token>>> shards)
     {
         int actualParallelism = shards.size();
         if (maxParallelism >= actualParallelism)
