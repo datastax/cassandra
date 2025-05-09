@@ -281,7 +281,7 @@ public abstract class ModificationStatement implements CQLStatement.SingleKeyspa
 
         // Warn but otherwise accept conditions on analyzed columns. The analyzers won't be used (see CNDB-11658).
         IndexRegistry indexRegistry = IndexRegistry.obtain(metadata);
-        Set<ColumnMetadata> analyzedColumns = conditions.getAnalyzedColumns(indexRegistry);
+        Set<ColumnMetadata> analyzedColumns = conditions.getAnalyzedColumns(indexRegistry, IndexHints.NONE);
         if (!analyzedColumns.isEmpty())
         {
             StringJoiner joiner = new StringJoiner(", ");
@@ -1013,14 +1013,13 @@ public abstract class ModificationStatement implements CQLStatement.SingleKeyspa
                                                         VariableSpecifications boundNames,
                                                         Operations operations,
                                                         WhereClause where,
-                                                        Conditions conditions,
-                                                        List<Ordering> orderings)
+                                                        Conditions conditions)
         {
             if (where.containsCustomExpressions())
                 throw new InvalidRequestException(CUSTOM_EXPRESSIONS_NOT_ALLOWED);
 
             boolean applyOnlyToStaticColumns = appliesOnlyToStaticColumns(operations, conditions);
-            return StatementRestrictions.create(type, metadata, where, boundNames, orderings, applyOnlyToStaticColumns, false, false);
+            return StatementRestrictions.create(type, metadata, where, boundNames, Collections.emptyList(), IndexHints.NONE, applyOnlyToStaticColumns, false, false);
         }
 
         public List<Pair<ColumnIdentifier, ColumnCondition.Raw>> getConditions()

@@ -109,6 +109,8 @@ import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.ReadCommand;
+import org.apache.cassandra.db.ReadQuery;
+import org.apache.cassandra.db.SinglePartitionReadCommand;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.BooleanType;
 import org.apache.cassandra.db.marshal.ByteType;
@@ -1549,7 +1551,18 @@ public abstract class CQLTester
     protected ReadCommand parseReadCommand(String query)
     {
         SelectStatement select = (SelectStatement) parseStatement(query);
-        return  (ReadCommand) select.getQuery(QueryState.forInternalCalls(), QueryOptions.DEFAULT, FBUtilities.nowInSeconds());
+        ReadQuery readQuery = select.getQuery(QueryState.forInternalCalls(), QueryOptions.DEFAULT, FBUtilities.nowInSeconds());
+        Assertions.assertThat(readQuery).isInstanceOf(ReadCommand.class);
+        return  (ReadCommand) readQuery;
+    }
+
+    protected List<SinglePartitionReadCommand> parseReadCommandGroup(String query)
+    {
+        SelectStatement select = (SelectStatement) parseStatement(query);
+        ReadQuery readQuery = select.getQuery(QueryState.forInternalCalls(), QueryOptions.DEFAULT, FBUtilities.nowInSeconds());
+        Assertions.assertThat(readQuery).isInstanceOf(SinglePartitionReadCommand.Group.class);
+        SinglePartitionReadCommand.Group commands = (SinglePartitionReadCommand.Group) readQuery;
+        return commands.queries;
     }
 
     protected ResultMessage.Prepared prepare(String query) throws Throwable
@@ -2921,6 +2934,56 @@ public abstract class CQLTester
         public String toString()
         {
             return username;
+        }
+    }
+
+    protected PlanSelectionAssertion assertThatIndexQueryPlanFor(String query, Object[]... expectedRows)
+    {
+        // First execute the query and check returned rows
+        assertRowsIgnoringOrder(execute(query), expectedRows);
+
+        ReadCommand command = parseReadCommand(query);
+        Index.QueryPlan queryPlan = command.indexQueryPlan();
+        if (queryPlan == null)
+            return new PlanSelectionAssertion(null);
+
+        Set<String> indexes = queryPlan.getIndexes().stream().map(i -> i.getIndexMetadata().name).collect(Collectors.toSet());
+        return new PlanSelectionAssertion(indexes);
+    }
+
+    protected static class PlanSelectionAssertion
+    {
+        private final Set<String> selectedIndexes;
+
+        protected PlanSelectionAssertion(@Nullable Set<String> selectedIndexes)
+        {
+            this.selectedIndexes = selectedIndexes;
+        }
+
+        public void selects(String... indexes)
+        {
+            Assertions.assertThat(selectedIndexes)
+                      .isNotNull()
+                      .as("Expected to select only %s, but got: %s", indexes, selectedIndexes)
+                      .isEqualTo(Set.of(indexes));
+        }
+
+        public void selectsAnyOf(String index1, String index2, String... otherIndexes)
+        {
+            Set<String> expectedIndexes = new HashSet<>(otherIndexes.length + 1);
+            expectedIndexes.add(index1);
+            expectedIndexes.add(index2);
+            expectedIndexes.addAll(Arrays.asList(otherIndexes));
+
+            Assertions.assertThat(selectedIndexes)
+                      .isNotNull()
+                      .as("Expected to select any of %s, but got: %s", otherIndexes, selectedIndexes)
+                      .containsAnyElementsOf(expectedIndexes);
+        }
+
+        public void selectsNone()
+        {
+            Assertions.assertThat(selectedIndexes).isNull();
         }
     }
 }

@@ -19,20 +19,13 @@
 package org.apache.cassandra.index.sai.plan;
 
 import java.io.IOError;
-import java.util.ArrayDeque;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
-import java.util.PriorityQueue;
-import java.util.Queue;
+import java.util.*;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -155,7 +148,6 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         }
     }
 
-
     /**
      * Converts expressions into filter tree (which is currently just a single AND).
      *
@@ -168,6 +160,30 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
     private FilterTree analyzeFilter()
     {
         return controller.buildFilter();
+    }
+
+    @VisibleForTesting
+    public final Set<String> plannedIndexes()
+    {
+        try
+        {
+            Plan plan = controller.buildPlan().optimize();
+            Set<String> indexes = new HashSet<>();
+            plan.forEach(node -> {
+                if (node instanceof Plan.IndexScan)
+                {
+                    Plan.IndexScan indexScan = (Plan.IndexScan) node;
+                    indexes.add(indexScan.getIndexName());
+                }
+                return Plan.ControlFlow.Continue;
+            });
+            return indexes;
+        }
+        finally
+        {
+            // we need to call this to clean up the resources opened by the plan
+            controller.abort();
+        }
     }
 
     private static class ResultRetriever extends AbstractIterator<UnfilteredRowIterator> implements UnfilteredPartitionIterator

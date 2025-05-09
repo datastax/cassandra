@@ -20,6 +20,7 @@ package org.apache.cassandra.cql3;
 import java.util.ArrayList;
 import java.util.List;
 
+import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.cql3.restrictions.Restriction;
 import org.apache.cassandra.cql3.statements.Bound;
@@ -174,14 +175,15 @@ public abstract class Relation
      *
      * @param table the Column Family meta data
      * @param boundNames the variables specification where to collect the bind variables
+     * @param indexHints the query index hints, used to disambiguate relations that might be supported by multiple indexes
      * @return the <code>Restriction</code> corresponding to this <code>Relation</code>
      * @throws InvalidRequestException if this <code>Relation</code> is not valid
      */
-    public final Restriction toRestriction(TableMetadata table, VariableSpecifications boundNames)
+    public final Restriction toRestriction(TableMetadata table, VariableSpecifications boundNames, IndexHints indexHints)
     {
         switch (relationType)
         {
-            case EQ: return newEQRestriction(table, boundNames);
+            case EQ: return newEQRestriction(table, boundNames, indexHints);
             case NEQ: return newNEQRestriction(table, boundNames);
             case LT: return newSliceRestriction(table, boundNames, Bound.END, false);
             case LTE: return newSliceRestriction(table, boundNames, Bound.END, true);
@@ -218,7 +220,7 @@ public abstract class Relation
      * @return a new EQ restriction instance.
      * @throws InvalidRequestException if the relation cannot be converted into an EQ restriction.
      */
-    protected abstract Restriction newEQRestriction(TableMetadata table, VariableSpecifications boundNames);
+    protected abstract Restriction newEQRestriction(TableMetadata table, VariableSpecifications boundNames, IndexHints indexHints);
 
     /**
      * Creates a new NEQ restriction instance.

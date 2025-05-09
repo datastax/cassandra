@@ -33,6 +33,7 @@ import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.cql3.statements.Bound;
 import org.apache.cassandra.db.MultiClusteringBuilder;
 import org.apache.cassandra.db.filter.ANNOptions;
+import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.IndexRegistry;
@@ -79,14 +80,14 @@ public abstract class SingleColumnRestriction implements SingleRestriction
     }
 
     @Override
-    public boolean hasSupportingIndex(IndexRegistry indexRegistry)
+    public boolean hasSupportingIndex(IndexRegistry indexRegistry, IndexHints indexHints)
     {
-        return findSupportingIndex(indexRegistry) != null;
+        return findSupportingIndex(indexRegistry, indexHints) != null;
     }
 
-    public Index findSupportingIndex(IndexRegistry indexRegistry)
+    public Index findSupportingIndex(IndexRegistry indexRegistry, IndexHints indexHints)
     {
-        for (Index index : indexRegistry.listIndexes())
+        for (Index index : indexRegistry.listIndexes(indexHints))
             if (isSupportedBy(index))
                 return index;
 
@@ -94,9 +95,9 @@ public abstract class SingleColumnRestriction implements SingleRestriction
     }
 
     @Override
-    public boolean needsFiltering(Index.Group indexGroup)
+    public boolean needsFiltering(Index.Group indexGroup, IndexHints indexHints)
     {
-        for (Index index : indexGroup.getIndexes())
+        for (Index index : indexGroup.getIndexes(indexHints))
             if (isSupportedBy(index))
                 return false;
 
@@ -178,7 +179,8 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         public void addToRowFilter(RowFilter.Builder filter,
                                    IndexRegistry indexRegistry,
                                    QueryOptions options,
-                                   ANNOptions annOptions)
+                                   ANNOptions annOptions,
+                                   IndexHints indexHints)
         {
             filter.add(columnDef, Operator.EQ, term.bindAndGet(options));
         }
@@ -257,7 +259,8 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         public void addToRowFilter(RowFilter.Builder filter,
                                    IndexRegistry indexRegistry,
                                    QueryOptions options,
-                                   ANNOptions annOptions)
+                                   ANNOptions annOptions,
+                                   IndexHints indexHints)
         {
             List<ByteBuffer> values = this.terms.bindAndGet(options, columnDef.name);
             for (ByteBuffer v : values)
@@ -399,7 +402,11 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         }
 
         @Override
-        public void addToRowFilter(RowFilter.Builder filter, IndexRegistry indexRegistry, QueryOptions options, ANNOptions annOptions)
+        public void addToRowFilter(RowFilter.Builder filter,
+                                   IndexRegistry indexRegistry,
+                                   QueryOptions options,
+                                   ANNOptions annOptions,
+                                   IndexHints indexHints)
         {
             for (Bound b : Bound.values())
                 if (hasBound(b))
@@ -504,7 +511,11 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         }
 
         @Override
-        public void addToRowFilter(RowFilter.Builder filter, IndexRegistry indexRegistry, QueryOptions options, ANNOptions annOptions)
+        public void addToRowFilter(RowFilter.Builder filter,
+                                   IndexRegistry indexRegistry,
+                                   QueryOptions options,
+                                   ANNOptions annOptions,
+                                   IndexHints indexHints)
         {
             var map = new HashMap<ByteBuffer, TermSlice>();
             // First, we iterate through to verify that none of the slices create invalid ranges.
@@ -651,7 +662,11 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         }
 
         @Override
-        public void addToRowFilter(RowFilter.Builder filter, IndexRegistry indexRegistry, QueryOptions options, ANNOptions annOptions)
+        public void addToRowFilter(RowFilter.Builder filter,
+                                   IndexRegistry indexRegistry,
+                                   QueryOptions options,
+                                   ANNOptions annOptions,
+                                   IndexHints indexHints)
         {
             for (ByteBuffer value : bindAndGet(values, options))
                 filter.add(columnDef, Operator.CONTAINS, value);
@@ -835,7 +850,8 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         public void addToRowFilter(RowFilter.Builder filter,
                                    IndexRegistry indexRegistry,
                                    QueryOptions options,
-                                   ANNOptions annOptions)
+                                   ANNOptions annOptions,
+                                   IndexHints indexHints)
         {
             throw new UnsupportedOperationException("Secondary indexes do not support IS NOT NULL restrictions");
         }
@@ -906,13 +922,14 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         public void addToRowFilter(RowFilter.Builder filter,
                                    IndexRegistry indexRegistry,
                                    QueryOptions options,
-                                   ANNOptions annOptions)
+                                   ANNOptions annOptions,
+                                   IndexHints indexHints)
         {
             Pair<Operator, ByteBuffer> operation = makeSpecific(value.bindAndGet(options));
 
             // there must be a suitable INDEX for LIKE_XXX expressions
             RowFilter.SimpleExpression expression = filter.add(columnDef, operation.left, operation.right);
-            indexRegistry.getBestIndexFor(expression)
+            indexRegistry.getBestIndexFor(expression, indexHints)
                          .orElseThrow(() -> invalidRequest("%s is only supported on properly indexed columns",
                                                            expression));
         }
@@ -1036,11 +1053,12 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         public void addToRowFilter(RowFilter.Builder filter,
                                    IndexRegistry indexRegistry,
                                    QueryOptions options,
-                                   ANNOptions annOptions)
+                                   ANNOptions annOptions,
+                                   IndexHints indexHints)
         {
             filter.add(columnDef, direction, ByteBufferUtil.EMPTY_BYTE_BUFFER);
             if (otherRestriction != null)
-                otherRestriction.addToRowFilter(filter, indexRegistry, options, annOptions);
+                otherRestriction.addToRowFilter(filter, indexRegistry, options, annOptions, indexHints);
         }
 
         @Override
@@ -1125,11 +1143,12 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         public void addToRowFilter(RowFilter.Builder filter,
                                    IndexRegistry indexRegistry,
                                    QueryOptions options,
-                                   ANNOptions annOptions)
+                                   ANNOptions annOptions,
+                                   IndexHints indexHints)
         {
             filter.addANNExpression(columnDef, value.bindAndGet(options), annOptions);
             if (boundedAnnRestriction != null)
-                boundedAnnRestriction.addToRowFilter(filter, indexRegistry, options, annOptions);
+                boundedAnnRestriction.addToRowFilter(filter, indexRegistry, options, annOptions, indexHints);
         }
 
         @Override
@@ -1207,9 +1226,13 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         }
 
         @Override
-        public void addToRowFilter(RowFilter.Builder filter, IndexRegistry indexRegistry, QueryOptions options, ANNOptions annOptions)
+        public void addToRowFilter(RowFilter.Builder filter,
+                                   IndexRegistry indexRegistry,
+                                   QueryOptions options,
+                                   ANNOptions annOptions,
+                                   IndexHints indexHints)
         {
-            var index = findSupportingIndex(indexRegistry);
+            var index = findSupportingIndex(indexRegistry, indexHints);
             var valueBytes = value.bindAndGet(options);
             var terms = index.getAnalyzer(valueBytes).get().queriedTokens();
             if (terms.isEmpty())
@@ -1295,7 +1318,8 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         public void addToRowFilter(RowFilter.Builder filter,
                                    IndexRegistry indexRegistry,
                                    QueryOptions options,
-                                   ANNOptions annOptions)
+                                   ANNOptions annOptions,
+                                   IndexHints indexHints)
         {
             filter.addGeoDistanceExpression(columnDef, value.bindAndGet(options), isInclusive ? Operator.LTE : Operator.LT, distance.bindAndGet(options));
         }
@@ -1380,7 +1404,8 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         public void addToRowFilter(RowFilter.Builder filter,
                                    IndexRegistry indexRegistry,
                                    QueryOptions options,
-                                   ANNOptions annOptions)
+                                   ANNOptions annOptions,
+                                   IndexHints indexHints)
         {
             for (Term value : values)
             {
