@@ -64,6 +64,7 @@ import org.apache.cassandra.db.WriteContext;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.compaction.TableOperation;
+import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.db.marshal.AbstractType;
@@ -117,6 +118,10 @@ public class StorageAttachedIndex implements Index
     "Applying ngram analysis to the queried values usually produces too many search tokens to be useful. " +
     "The large number of tokens can also have a negative impact in performance. " +
     "In most cases it's better to use a simpler query_analyzer such as the standard one.";
+
+    public static final String HINTS_EXCEED_INTERSECTION_CLAUSE_LIMIT_ERROR =
+    "The included indexes make the query exceed the intersection clause limit of %d clauses defined by %s. " +
+    "It's not possible to satisfy both.";
 
     private static final Logger logger = LoggerFactory.getLogger(StorageAttachedIndex.class);
 
@@ -733,7 +738,14 @@ public class StorageAttachedIndex implements Index
     public void validate(ReadCommand command) throws InvalidRequestException
     {
         var indexQueryPlan = command.indexQueryPlan();
-        if (indexQueryPlan == null || !indexQueryPlan.isTopK())
+        if (indexQueryPlan == null)
+            return;
+
+        checkHintsDoesntExceedIntersectionClauseLimit(command.rowFilter().root(),
+                                                      command.rowFilter().indexHints(),
+                                                      indexQueryPlan.getIndexes());
+
+        if (!indexQueryPlan.isTopK())
             return;
 
         // to avoid overflow HNSW internal data structure and avoid OOM when filtering top-k
@@ -742,6 +754,43 @@ public class StorageAttachedIndex implements Index
                                                             MAX_TOP_K, command.limits().isUnlimited() ? "NO LIMIT" : command.limits().count()));
 
         indexContext.validate(command.rowFilter());
+    }
+
+    /**
+     * Rejects queries with index hints including indexes enough to exceed the intersection clause limit.
+     */
+    private static void checkHintsDoesntExceedIntersectionClauseLimit(RowFilter.FilterElement element,
+                                                                      IndexHints hints,
+                                                                      Set<Index> selectedIndexes)
+    {
+        if (hints.included.isEmpty())
+            return;
+
+        if (!element.isDisjunction())
+        {
+            int numClausesInIntersection = 0;
+            for (RowFilter.Expression expression : element.expressions())
+            {
+                for (Index index : selectedIndexes)
+                {
+                    if (hints.includes(index) && index.supportsExpression(expression))
+                    {
+                        numClausesInIntersection++;
+                    }
+                }
+            }
+            if (numClausesInIntersection > CassandraRelevantProperties.SAI_INTERSECTION_CLAUSE_LIMIT.getInt())
+            {
+                throw new InvalidRequestException(String.format(HINTS_EXCEED_INTERSECTION_CLAUSE_LIMIT_ERROR,
+                                                                CassandraRelevantProperties.SAI_INTERSECTION_CLAUSE_LIMIT.getInt(),
+                                                                CassandraRelevantProperties.SAI_INTERSECTION_CLAUSE_LIMIT.name()));
+            }
+        }
+
+        for (RowFilter.FilterElement child : element.children())
+        {
+            checkHintsDoesntExceedIntersectionClauseLimit(child, hints, selectedIndexes);
+        }
     }
 
     @Override
