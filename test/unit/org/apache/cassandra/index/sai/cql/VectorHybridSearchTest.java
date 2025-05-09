@@ -109,6 +109,7 @@ public class VectorHybridSearchTest extends VectorTester.VersionedWithChecksums
     public void testHybridSearchHoleInClusteringColumnOrdering() throws Throwable
     {
         setMaxBruteForceRows(0);
+        QueryController.QUERY_OPT_LEVEL = 0;
         createTable(KEYSPACE, "CREATE TABLE %s (pk int, a int, val text, vec vector<float, 2>, PRIMARY KEY(pk, a))");
         createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");

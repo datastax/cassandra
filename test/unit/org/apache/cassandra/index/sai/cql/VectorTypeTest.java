@@ -931,27 +931,20 @@ public class VectorTypeTest extends VectorTester.VersionedWithChecksums
 
         // start a filter-then-sort query asynchronously that will get blocked in the injected barrier
         QueryController.QUERY_OPT_LEVEL = 0;
-        try
-        {
-            ExecutorService executor = Executors.newFixedThreadPool(1);
-            String select = "SELECT k FROM %s WHERE c=1 ORDER BY v ANN OF [1, 1] LIMIT 100";
-            Future<UntypedResultSet> future = executor.submit(() -> execute(select));
+        ExecutorService executor = Executors.newFixedThreadPool(1);
+        String select = "SELECT k FROM %s WHERE c=1 ORDER BY v ANN OF [1, 1] LIMIT 100";
+        Future<UntypedResultSet> future = executor.submit(() -> execute(select));
 
-            // once the query is blocked, delete one of the vectors and flush, so the postings for the vector are removed
-            waitForAssert(() -> Assert.assertEquals(1, barrier.getCount()));
-            execute("DELETE v FROM %s WHERE k = 1");
-            flush();
+        // once the query is blocked, delete one of the vectors and flush, so the postings for the vector are removed
+        waitForAssert(() -> Assert.assertEquals(1, barrier.getCount()));
+        execute("DELETE v FROM %s WHERE k = 1");
+        flush();
 
-            // release the barrier to resume the query, which should succeed
-            barrier.countDown();
-            assertRows(future.get(), row(2));
+        // release the barrier to resume the query, which should succeed
+        barrier.countDown();
+        assertRows(future.get(), row(2));
 
-            assertEquals(0, executor.shutdownNow().size());
-        }
-        finally
-        {
-            QueryController.QUERY_OPT_LEVEL = 1;
-        }
+        assertEquals(0, executor.shutdownNow().size());
     }
 
     @Test

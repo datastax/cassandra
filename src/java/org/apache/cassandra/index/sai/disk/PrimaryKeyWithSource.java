@@ -29,16 +29,38 @@ import org.apache.cassandra.utils.bytecomparable.ByteSource;
 
 public class PrimaryKeyWithSource implements PrimaryKey
 {
-    private final PrimaryKey primaryKey;
+    private final PrimaryKeyMap primaryKeyMap;
     private final SSTableId<?> sourceSstableId;
     private final long sourceRowId;
+    private PrimaryKey delegatePrimaryKey;
+    private final PrimaryKey sourceSstableMinKey;
+    private final PrimaryKey sourceSstableMaxKey;
 
-    public PrimaryKeyWithSource(PrimaryKey primaryKey, SSTableId<?> sstableId, long sstableRowId)
+    public PrimaryKeyWithSource(PrimaryKeyMap primaryKeyMap, long sstableRowId, PrimaryKey sourceSstableMinKey, PrimaryKey sourceSstableMaxKey)
     {
-        assert primaryKey != null : "Cannot construct a PrimaryKeyWithSource with a null primaryKey";
-        this.primaryKey = primaryKey;
-        this.sourceSstableId = sstableId;
+        this.primaryKeyMap = primaryKeyMap;
+        this.sourceSstableId = primaryKeyMap.getSSTableId();
         this.sourceRowId = sstableRowId;
+        this.sourceSstableMinKey = sourceSstableMinKey;
+        this.sourceSstableMaxKey = sourceSstableMaxKey;
+    }
+
+    public PrimaryKeyWithSource(PrimaryKey primaryKey, SSTableId<?> sourceSstableId, long sourceRowId, PrimaryKey sourceSstableMinKey, PrimaryKey sourceSstableMaxKey)
+    {
+        this.delegatePrimaryKey = primaryKey;
+        this.primaryKeyMap = null;
+        this.sourceSstableId = sourceSstableId;
+        this.sourceRowId = sourceRowId;
+        this.sourceSstableMinKey = sourceSstableMinKey;
+        this.sourceSstableMaxKey = sourceSstableMaxKey;
+    }
+
+    private PrimaryKey primaryKey()
+    {
+        if (delegatePrimaryKey == null)
+            delegatePrimaryKey = primaryKeyMap.primaryKeyFromRowId(sourceRowId);
+
+        return delegatePrimaryKey;
     }
 
     public long getSourceRowId()
@@ -54,43 +76,43 @@ public class PrimaryKeyWithSource implements PrimaryKey
     @Override
     public Token token()
     {
-        return primaryKey.token();
+        return primaryKey().token();
     }
 
     @Override
     public DecoratedKey partitionKey()
     {
-        return primaryKey.partitionKey();
+        return primaryKey().partitionKey();
     }
 
     @Override
     public Clustering clustering()
     {
-        return primaryKey.clustering();
+        return primaryKey().clustering();
     }
 
     @Override
     public PrimaryKey loadDeferred()
     {
-        return primaryKey.loadDeferred();
+        return primaryKey().loadDeferred();
     }
 
     @Override
     public ByteSource asComparableBytes(ByteComparable.Version version)
     {
-        return primaryKey.asComparableBytes(version);
+        return primaryKey().asComparableBytes(version);
     }
 
     @Override
     public ByteSource asComparableBytesMinPrefix(ByteComparable.Version version)
     {
-        return primaryKey.asComparableBytesMinPrefix(version);
+        return primaryKey().asComparableBytesMinPrefix(version);
     }
 
     @Override
     public ByteSource asComparableBytesMaxPrefix(ByteComparable.Version version)
     {
-        return primaryKey.asComparableBytesMaxPrefix(version);
+        return primaryKey().asComparableBytesMaxPrefix(version);
     }
 
     @Override
@@ -101,8 +123,23 @@ public class PrimaryKeyWithSource implements PrimaryKey
             PrimaryKeyWithSource other = (PrimaryKeyWithSource) o;
             if (sourceSstableId.equals(other.sourceSstableId))
                 return Long.compare(sourceRowId, other.sourceRowId);
+            // Compare to the other source sstable's min and max keys to determine if the keys are comparable.
+            // Note that these are already loaded into memory as part of the segment's metadata, so the comparison
+            // is cheaper than loading the actual keys.
+            if (sourceSstableMinKey.compareTo(other.sourceSstableMaxKey) > 0)
+                return 1;
+            if (sourceSstableMaxKey.compareTo(other.sourceSstableMinKey) < 0)
+                return -1;
         }
-        return primaryKey.compareTo(o);
+        else
+        {
+            if (sourceSstableMinKey.compareTo(o) > 0)
+                return 1;
+            if (sourceSstableMaxKey.compareTo(o) < 0)
+                return -1;
+        }
+
+        return primaryKey().compareTo(o);
     }
 
     @Override
@@ -111,22 +148,29 @@ public class PrimaryKeyWithSource implements PrimaryKey
         if (o instanceof PrimaryKeyWithSource)
         {
             var other = (PrimaryKeyWithSource) o;
+            // If they are from the same source sstable, we can compare the row ids directly.
             if (sourceSstableId.equals(other.sourceSstableId))
                 return sourceRowId == other.sourceRowId;
+
+            // If the source sstable primary key ranges do not intersect, the keys cannot be equal.
+            if (sourceSstableMinKey.compareTo(other.sourceSstableMaxKey) > 0
+                || sourceSstableMaxKey.compareTo(other.sourceSstableMinKey) < 0)
+                return false;
         }
-        return primaryKey.equals(o);
+
+        return primaryKey().equals(o);
     }
 
     @Override
     public int hashCode()
     {
-        return primaryKey.hashCode();
+        return primaryKey().hashCode();
     }
 
     @Override
     public String toString()
     {
-        return String.format("%s (source sstable: %s, %s)", primaryKey, sourceSstableId, sourceRowId);
+        return String.format("%s (source sstable: %s, %s)", delegatePrimaryKey, sourceSstableId, sourceRowId);
     }
 
     @Override
@@ -136,6 +180,6 @@ public class PrimaryKeyWithSource implements PrimaryKey
         return RamUsageEstimator.NUM_BYTES_OBJECT_HEADER +
                2L * RamUsageEstimator.NUM_BYTES_OBJECT_REF +
                Long.BYTES +
-               primaryKey.ramBytesUsed();
+               primaryKey().ramBytesUsed();
     }
 }
