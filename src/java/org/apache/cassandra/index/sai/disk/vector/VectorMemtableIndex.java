@@ -60,6 +60,7 @@ import org.apache.cassandra.index.sai.metrics.ColumnQueryMetrics;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.plan.Orderer;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.index.sai.utils.PrimaryKeyListUtil;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithScore;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
@@ -306,10 +307,10 @@ public class VectorMemtableIndex implements MemtableIndex
         // Compute the keys that exist in the current memtable and their corresponding graph ordinals
         var keysInGraph = new HashSet<PrimaryKey>();
         var relevantOrdinals = new IntHashSet();
-        keys.stream()
-            .dropWhile(k -> k.compareTo(minimumKey) < 0)
-            .takeWhile(k -> k.compareTo(maximumKey) <= 0)
-            .forEach(k ->
+
+        var keysInRange = PrimaryKeyListUtil.getKeysInRange(keys, minimumKey, maximumKey);
+
+        keysInRange.forEach(k ->
         {
             var v = graph.vectorForKey(k);
             if (v == null)
