@@ -326,6 +326,7 @@ public final class AggregationQueryPager implements QueryPager
          */
         private final PartitionIterator fetchSubPage(PageSize subPageSize)
         {
+            logger.debug("DUPA fetching sub-page with queryStartNanoTime={}; elapsed={}", queryStartNanoTime, System.nanoTime() - queryStartNanoTime);
             return consistency != null ? subPager.fetchPage(subPageSize, consistency, queryState, queryStartNanoTime)
                                        : subPager.fetchPageInternal(subPageSize, executionController);
         }
