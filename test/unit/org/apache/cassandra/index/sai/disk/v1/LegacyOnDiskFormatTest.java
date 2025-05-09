@@ -36,6 +36,7 @@ import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SAITester;
+import org.apache.cassandra.index.sai.SSTableContext;
 import org.apache.cassandra.index.sai.disk.FileUtils;
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
@@ -134,10 +135,13 @@ public class LegacyOnDiskFormatTest
         IndexComponents.ForRead components = indexDescriptor.perIndexComponents(intContext);
         final MetadataSource source = MetadataSource.loadMetadata(components);
 
-        List<SegmentMetadata> metadatas = SegmentMetadata.load(source, intContext);
+        try (var sstableContext = SSTableContext.create(sstable, indexDescriptor.perSSTableComponents()))
+        {
+            List<SegmentMetadata> metadatas = SegmentMetadata.load(source, intContext, sstableContext);
 
-        assertEquals(1, metadatas.size());
-        assertEquals(100, metadatas.get(0).numRows);
+            assertEquals(1, metadatas.size());
+            assertEquals(100, metadatas.get(0).numRows);
+        }
     }
 
     @Test
@@ -167,7 +171,8 @@ public class LegacyOnDiskFormatTest
 
         final MetadataSource source = MetadataSource.loadMetadata(components);
 
-        List<SegmentMetadata> metadatas = SegmentMetadata.load(source, intContext);
+        var sstableContext = SSTableContext.create(sstable, indexDescriptor.perSSTableComponents());
+        List<SegmentMetadata> metadatas = SegmentMetadata.load(source, intContext, sstableContext);
 
         BKDReader bkdReader = new BKDReader(intContext,
                                             components.get(IndexComponentType.KD_TREE).createFileHandle(),
@@ -188,7 +193,8 @@ public class LegacyOnDiskFormatTest
 
         final MetadataSource source = MetadataSource.loadMetadata(components);
 
-        SegmentMetadata metadata = SegmentMetadata.load(source, textContext).get(0);
+        var sstableContext = SSTableContext.create(sstable, indexDescriptor.perSSTableComponents());
+        SegmentMetadata metadata = SegmentMetadata.load(source, textContext, sstableContext).get(0);
 
         long root = metadata.getIndexRoot(IndexComponentType.TERMS_DATA);
         Map<String,String> map = metadata.componentMetadatas.get(IndexComponentType.TERMS_DATA).attributes;

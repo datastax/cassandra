@@ -27,6 +27,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.stream.Stream;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -34,8 +35,10 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.index.sai.IndexContext;
+import org.apache.cassandra.index.sai.SSTableContext;
 import org.apache.cassandra.index.sai.disk.ModernResettableByteBuffersIndexOutput;
 import org.apache.cassandra.index.sai.disk.PostingList;
+import org.apache.cassandra.index.sai.disk.PrimaryKeyWithSource;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.io.IndexInput;
@@ -134,9 +137,12 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
     private static final Logger logger = LoggerFactory.getLogger(SegmentMetadata.class);
 
     @SuppressWarnings("resource")
-    private SegmentMetadata(IndexInput input, IndexContext context, Version version) throws IOException
+    private SegmentMetadata(IndexInput input, IndexContext context, Version version, SSTableContext sstableContext, boolean loadFullResolutionBounds) throws IOException
     {
-        PrimaryKey.Factory primaryKeyFactory = context.keyFactory();
+        if (!loadFullResolutionBounds)
+            logger.warn("Loading segment metadata without full primary key boundary resolution. Some ORDER BY queries" +
+                        " may not work correctly.");
+
         AbstractType<?> termsType = context.getValidator();
 
         this.version = version;
@@ -144,8 +150,39 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
         this.numRows = input.readLong();
         this.minSSTableRowId = input.readLong();
         this.maxSSTableRowId = input.readLong();
-        this.minKey = primaryKeyFactory.createPartitionKeyOnly(DatabaseDescriptor.getPartitioner().decorateKey(readBytes(input)));
-        this.maxKey = primaryKeyFactory.createPartitionKeyOnly(DatabaseDescriptor.getPartitioner().decorateKey(readBytes(input)));
+
+        if (loadFullResolutionBounds)
+        {
+            // Skip the min/max partition keys since we want the fully resolved PrimaryKey for better semantics.
+            // Also, these values are not always correct for flushed sstables, but the min/max row ids are, which
+            // provides further justification for skipping them.
+            skipBytes(input);
+            skipBytes(input);
+
+            // Get the fully qualified PrimaryKey min and max objects to ensure that we skip several edge cases related
+            // to possibly confusing equality semantics. The main issue is how we handl PrimaryKey objects that
+            // are not fully qualified when doing a binary search on a collection of PrimaryKeyWithSource objects.
+            // By materializing the fully qualified PrimaryKey objects, we get the right binary search result.
+            final PrimaryKey min, max;
+            try (var pkm = sstableContext.primaryKeyMapFactory().newPerSSTablePrimaryKeyMap())
+            {
+                // We need to load eagerly to allow us to close the partition key map.
+                min = pkm.primaryKeyFromRowId(minSSTableRowId).loadDeferred();
+                max = pkm.primaryKeyFromRowId(maxSSTableRowId).loadDeferred();
+            }
+
+            this.minKey = new PrimaryKeyWithSource(min, sstableContext.sstable.getId(), minSSTableRowId, min, max);
+            this.maxKey = new PrimaryKeyWithSource(max, sstableContext.sstable.getId(), maxSSTableRowId, min, max);
+        }
+        else
+        {
+            assert sstableContext == null;
+            // Only valid in some very specific tests.
+            PrimaryKey.Factory primaryKeyFactory = context.keyFactory();
+            this.minKey = primaryKeyFactory.createPartitionKeyOnly(DatabaseDescriptor.getPartitioner().decorateKey(readBytes(input)));
+            this.maxKey = primaryKeyFactory.createPartitionKeyOnly(DatabaseDescriptor.getPartitioner().decorateKey(readBytes(input)));
+        }
+
         this.minTerm = readBytes(input);
         this.maxTerm = readBytes(input);
         TermsDistribution td = null;
@@ -164,7 +201,27 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
     }
 
     @SuppressWarnings("resource")
-    public static List<SegmentMetadata> load(MetadataSource source, IndexContext context) throws IOException
+    public static List<SegmentMetadata> load(MetadataSource source, IndexContext context, SSTableContext sstableContext) throws IOException
+    {
+        return load(source, context, sstableContext, true);
+    }
+
+    /**
+     * This is only visible for testing because the SegmentFlushTest creates fake boundary scenarios that break
+     * normal assumptions about the min/max row ids mapping to specific positions in the per-sstable index components.
+     * Only set loadFullResolutionBounds to false in tests when you are sure that is the only possible solution.
+     */
+    @VisibleForTesting
+    @SuppressWarnings("resource")
+    public static List<SegmentMetadata> loadForTesting(MetadataSource source, IndexContext context) throws IOException
+    {
+        return load(source, context, null, false);
+    }
+
+    /**
+     * Only set loadFullResolutionBounds to false in tests when you are sure that is exactly what you want.
+     */
+    private static List<SegmentMetadata> load(MetadataSource source, IndexContext context, SSTableContext sstableContext, boolean loadFullResolutionBounds) throws IOException
     {
 
         IndexInput input = source.get(NAME);
@@ -175,7 +232,7 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
 
         for (int i = 0; i < segmentCount; i++)
         {
-            segmentMetadata.add(new SegmentMetadata(input, context, source.getVersion()));
+            segmentMetadata.add(new SegmentMetadata(input, context, source.getVersion(), sstableContext, loadFullResolutionBounds));
         }
 
         return segmentMetadata;
@@ -298,6 +355,12 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
         byte[] bytes = new byte[len];
         input.readBytes(bytes, 0, len);
         return ByteBuffer.wrap(bytes);
+    }
+
+    private static void skipBytes(IndexInput input) throws IOException
+    {
+        int len = input.readVInt();
+        input.skipBytes(len);
     }
 
     static void writeBytes(ByteBuffer buf, IndexOutput out)
