@@ -20,20 +20,27 @@ package org.apache.cassandra.service.pager;
 import java.nio.ByteBuffer;
 import java.util.NoSuchElementException;
 import java.util.StringJoiner;
+import java.util.concurrent.TimeUnit;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.PageSize;
-import org.apache.cassandra.exceptions.InvalidRequestException;
-import org.apache.cassandra.exceptions.OperationExecutionException;
-import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.db.*;
+import org.apache.cassandra.db.Clustering;
+import org.apache.cassandra.db.ConsistencyLevel;
+import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.ReadExecutionController;
+import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.aggregation.GroupingState;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.RowIterator;
+import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.exceptions.OperationExecutionException;
+import org.apache.cassandra.exceptions.ReadTimeoutException;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.QueryState;
 
 /**
@@ -55,11 +62,20 @@ public final class AggregationQueryPager implements QueryPager
     // The sub-pager, used to retrieve the next sub-page.
     private QueryPager subPager;
 
+    // the timeout in nanoseconds, if more time has elapsed, a ReadTimeoutException will be raised
+    private final long timeoutNanos;
+
     public AggregationQueryPager(QueryPager subPager, PageSize subPageSize, DataLimits limits)
+    {
+        this(subPager, subPageSize, limits, DatabaseDescriptor.getAggregationRpcTimeout(TimeUnit.NANOSECONDS));
+    }
+
+    public AggregationQueryPager(QueryPager subPager, PageSize subPageSize, DataLimits limits, long timeoutNanos)
     {
         this.subPager = subPager;
         this.limits = limits;
         this.subPageSize = subPageSize;
+        this.timeoutNanos = timeoutNanos;
     }
 
     /**
@@ -260,6 +276,18 @@ public final class AggregationQueryPager implements QueryPager
             return next != null;
         }
 
+        private void checkTimeout()
+        {
+            // internal queries are not guarded by a timeout because cont. paging queries can be aborted
+            // and system queries should not be aborted
+            if (consistency == null)
+                return;
+
+            long elapsed = System.nanoTime() - queryStartNanoTime;
+            if (elapsed > timeoutNanos)
+                throw new ReadTimeoutException(consistency);
+        }
+
         /**
          * Loads the next <code>RowIterator</code> to be returned. The iteration finishes when we reach either the
          * user groups limit or the groups page size. The user provided limit is initially set in subPager.maxRemaining().
@@ -326,7 +354,7 @@ public final class AggregationQueryPager implements QueryPager
          */
         private final PartitionIterator fetchSubPage(PageSize subPageSize)
         {
-            return consistency != null ? subPager.fetchPage(subPageSize, consistency, queryState, queryStartNanoTime)
+            return consistency != null ? subPager.fetchPage(subPageSize, consistency, queryState, System.nanoTime())
                                        : subPager.fetchPageInternal(subPageSize, executionController);
         }
 
@@ -334,6 +362,8 @@ public final class AggregationQueryPager implements QueryPager
         {
             if (!hasNext())
                 throw new NoSuchElementException();
+
+            checkTimeout();
 
             RowIterator iterator = new GroupByRowIterator(next);
             lastPartitionKey = iterator.partitionKey().getKey();
