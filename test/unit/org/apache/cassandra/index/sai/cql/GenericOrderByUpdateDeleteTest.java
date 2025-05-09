@@ -18,22 +18,12 @@
 
 package org.apache.cassandra.index.sai.cql;
 
-import org.junit.Before;
 import org.junit.Test;
 
 import org.apache.cassandra.index.sai.SAITester;
-import org.apache.cassandra.index.sai.plan.QueryController;
 
 public class GenericOrderByUpdateDeleteTest extends SAITester
 {
-
-    @Before
-    public void setup() throws Throwable
-    {
-        // Enable the optimizer by default. If there are any tests that need to disable it, they can do so explicitly.
-        QueryController.QUERY_OPT_LEVEL = 1;
-    }
-
     @Test
     public void testPreparedQueries() throws Throwable
     {
