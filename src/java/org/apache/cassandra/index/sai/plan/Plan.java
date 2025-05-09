@@ -370,7 +370,7 @@ abstract public class Plan
         for (Leaf leaf : leaves)
         {
             // We won't try to skip leaves with a preferred index
-            if (leaf.usesPreferredIndex())
+            if (leaf.usesIncludedIndex())
                 continue;
 
             Plan candidate = bestPlanSoFar.removeRestriction(leaf.id);
@@ -645,6 +645,7 @@ abstract public class Plan
             return cost().costPerKey();
         }
 
+        protected abstract boolean usesIncludedIndex();
     }
 
     /**
@@ -670,8 +671,6 @@ abstract public class Plan
             // There are no subplans so it is a noop
             return this;
         }
-
-        protected abstract boolean usesPreferredIndex();
     }
 
     /**
@@ -692,7 +691,7 @@ abstract public class Plan
         }
 
         @Override
-        protected boolean usesPreferredIndex()
+        protected boolean usesIncludedIndex()
         {
             return false;
         }
@@ -750,7 +749,7 @@ abstract public class Plan
         }
 
         @Override
-        protected boolean usesPreferredIndex()
+        protected boolean usesIncludedIndex()
         {
             return false;
         }
@@ -865,7 +864,7 @@ abstract public class Plan
         }
 
         @Override
-        protected boolean usesPreferredIndex()
+        protected boolean usesIncludedIndex()
         {
             return factory.hints.includes(getIndexName());
         }
@@ -1109,6 +1108,12 @@ abstract public class Plan
                 throw t;
             }
         }
+
+        @Override
+        protected boolean usesIncludedIndex()
+        {
+            return subplansSupplier.get().stream().anyMatch(KeysIteration::usesIncludedIndex);
+        }
     }
 
     /**
@@ -1247,6 +1252,12 @@ abstract public class Plan
             }
         }
 
+        @Override
+        protected boolean usesIncludedIndex()
+        {
+            return subplansSupplier.get().stream().anyMatch(KeysIteration::usesIncludedIndex);
+        }
+
         /**
          * Limits the number of intersected subplans
          */
@@ -1254,7 +1265,31 @@ abstract public class Plan
         {
             if (subplansSupplier.orig.size() <= clauseLimit)
                 return this;
-            List<Plan.KeysIteration> newSubplans = new ArrayList<>(subplansSupplier.orig.subList(0, clauseLimit));
+
+            if (factory.hints.included.isEmpty())
+                return withNewSubplans(new ArrayList<>(subplansSupplier.orig.subList(0, clauseLimit)));
+
+            List<Plan.KeysIteration> newSubplans = new ArrayList<>(clauseLimit);
+            List<Plan.KeysIteration> optionalSubplans = new ArrayList<>(clauseLimit);
+            for (KeysIteration keysIteration : subplansSupplier.orig)
+            {
+                if (keysIteration.usesIncludedIndex())
+                    newSubplans.add(keysIteration);
+                else
+                    optionalSubplans.add(keysIteration);
+            }
+            for (KeysIteration keysIteration : optionalSubplans)
+            {
+                if (newSubplans.size() >= clauseLimit)
+                    break;
+                optionalSubplans.add(keysIteration);
+            }
+
+            return withNewSubplans(newSubplans);
+        }
+
+        private Plan withNewSubplans(List<Plan.KeysIteration> newSubplans)
+        {
             return factory.intersection(newSubplans, id).withAccess(access);
         }
     }
@@ -1363,6 +1398,12 @@ abstract public class Plan
                    ? this
                    : new KeysSort(factory, id, source, access, ordering);
         }
+
+        @Override
+        protected boolean usesIncludedIndex()
+        {
+            return source.usesIncludedIndex();
+        }
     }
 
     /**
@@ -1393,7 +1434,7 @@ abstract public class Plan
         }
 
         @Override
-        protected boolean usesPreferredIndex()
+        protected boolean usesIncludedIndex()
         {
             return true;
         }

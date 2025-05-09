@@ -24,6 +24,7 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -34,7 +35,7 @@ import org.assertj.core.api.Assertions;
 /**
  * Tests the effects of {@link org.apache.cassandra.db.filter.IndexHints} in SAI's internal query planning:
  * <ul>
- *    <li>included indexes shouldn't be pruned in the optimized the query {@link Plan}.</li>
+ *    <li>Included indexes shouldn't be pruned in the optimized the query {@link Plan}.</li>
  *    <li>Excluded indexes shouldn't be included in the query {@link Plan}.</li>
  * </ul>
  */
@@ -238,6 +239,49 @@ public class PlanWithIndexHintsTest extends SAITester
         assertThatPlanFor(query, row1, row2, row3).uses(idx3);
         assertUnselectedIndexError(query + " WITH included_indexes={idx1}");
         assertThatPlanFor(query + " WITH excluded_indexes={idx1}", row1, row2, row3).uses(idx3);
+    }
+
+    @Test
+    public void testIntersectionClauseLimit()
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v1 int, v2 int, v3 int)");
+        String idx1 = createIndex("CREATE CUSTOM INDEX idx1 ON %s(v1) USING 'StorageAttachedIndex'");
+        String idx2 = createIndex("CREATE CUSTOM INDEX idx2 ON %s(v2) USING 'StorageAttachedIndex'");
+        String idx3 = createIndex("CREATE CUSTOM INDEX idx3 ON %s(v3) USING 'StorageAttachedIndex'");
+
+        String insert = "INSERT INTO %s (k, v1, v2, v3) VALUES (?, ?, ?, ?)";
+        Object[] row1 = row(1, 0, 0, 0);
+        Object[] row2 = row(2, 0, 1, 0);
+        Object[] row3 = row(3, 1, 0, 0);
+        Object[] row4 = row(4, 1, 1, 0);
+        execute(insert, row1);
+        execute(insert, row2);
+        execute(insert, row3);
+        execute(insert, row4);
+
+        if (flush)
+            flush();
+
+        CassandraRelevantProperties.SAI_INTERSECTION_CLAUSE_LIMIT.setInt(1);
+
+        String query = "SELECT * FROM %s WHERE v1=0 AND v2=0 AND v3 = 0";
+        assertThatPlanFor(query, row1).usesAnyOf(idx1, idx2, idx3);
+        assertThatPlanFor(query + " WITH included_indexes={idx1}", row1).uses(idx1);
+        assertThatPlanFor(query + " WITH included_indexes={idx1, idx2}", row1).uses(idx1, idx2);
+        assertThatPlanFor(query + " WITH included_indexes={idx1, idx2, idx3}", row1).uses(idx1, idx2, idx3);
+        assertNeedsAllowFiltering(query + " WITH excluded_indexes={idx1}");
+        assertNeedsAllowFiltering(query + " WITH excluded_indexes={idx1, idx2}");
+        assertNeedsAllowFiltering(query + " WITH excluded_indexes={idx1, idx2, idx3}");
+        assertThatPlanFor(query + " ALLOW FILTERING WITH excluded_indexes={idx1}", row1).usesAnyOf(idx2, idx3);
+        assertThatPlanFor(query + " ALLOW FILTERING WITH excluded_indexes={idx1, idx2}", row1).uses(idx3);
+        assertThatPlanFor(query + " ALLOW FILTERING WITH excluded_indexes={idx1, idx2, idx3}", row1).usesNone();
+    }
+
+    private void assertNeedsAllowFiltering(String query)
+    {
+        Assertions.assertThatThrownBy(() -> execute(query))
+                  .isInstanceOf(InvalidRequestException.class)
+                  .hasMessageContaining(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE);
     }
 
     public void assertUnselectedIndexError(String query, String... indexes)
