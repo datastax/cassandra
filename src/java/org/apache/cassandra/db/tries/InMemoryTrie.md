@@ -804,6 +804,18 @@ Ascending back to add the child `~3`, we add a child to `NONE` and get `updatedP
 the existing content, we create the embedded prefix node `updatedPreContentNode = 0x0BF` with `contentIndex = 1` and
 pass that on to the recursion.
 
+### Deletion
+
+Deletion of data in `InMemoryTrie`s is achieved by returning `null` for the value that needs to be put in a position
+with existing content (both `apply` and `putSingleton` take an `UpsertTransformer` that is applied to the combination
+of existing and update value; this transformer can choose to return `null`).
+
+This automatically results in `NONE` value for the content id. On the way up the recursive application chain, we
+recognize `NONE` for the child pointer and apply this as removal of the child. Depending on the type of node, this may
+be achieved by dropping the node (`Chain`), by putting the `NONE` value as the child pointer, or by duplicating a node
+to switch its type or remove a child. This may in turn result in an empty node, which returns `NONE` as the child
+pointer, continuing the removal upwards in the recursive chain.
+
 ### Memory management and cell reuse
 
 As mentioned in the beginning, in order to avoid long garbage collection pauses due to large long-lasting content in
