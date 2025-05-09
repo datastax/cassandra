@@ -24,7 +24,6 @@ import java.util.List;
 import org.junit.Before;
 import org.junit.Test;
 
-import com.carrotsearch.hppc.IntArrayList;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
@@ -47,7 +46,6 @@ import org.apache.cassandra.utils.AbstractGuavaIterator;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
-import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
 import org.apache.lucene.index.PointValues;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.Counter;
@@ -87,14 +85,13 @@ public class NumericIndexWriterTest extends SaiRandomizedTest
 
         final MutableOneDimPointValues pointValues = ramBuffer.asPointValues();
 
-        int docCount = pointValues.getDocCount();
-
         SegmentMetadata.ComponentMetadataMap indexMetas;
 
         IndexComponents.ForWrite components = indexDescriptor.newPerIndexComponentsForWrite(indexContext);
         try (NumericIndexWriter writer = new NumericIndexWriter(components,
                                                                 Integer.BYTES,
-                                                                docCount, docCount,
+                                                                pointValues.getDocCount(),
+                                                                pointValues.size(),
                                                                 IndexWriterConfig.defaultConfig("test")))
         {
             indexMetas = writer.writeAll(pointValues);
