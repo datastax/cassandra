@@ -13,10 +13,12 @@ Merged from 5.0:
  * Remove Scripted UDFs internals; hooks to be added later in CASSANDRA-17281 (CASSANDRA-18252)
  * Add guardrail for vector dimensions (CASSANDRA-18730)
  * Add support for CQL functions on collections, tuples and UDTs (CASSANDRA-17811)
+
 Merged from 4.0:
  * Add new concurrent_merkle_tree_requests config property to prevent OOM during multi-range and/or multi-table repairs (CASSANDRA-19336)
 
 4.1
+ * Add plugin support for CQLSH (CASSANDRA-16456)
  * Request-Based Native Transport Rate-Limiting (CASSANDRA-16663)
  * Add information whether sstables are dropped to SchemaChangeListener (CASSANDRA-17582)
  * Save sstable id as string in activity table (CASSANDRA-17585)

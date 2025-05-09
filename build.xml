@@ -456,7 +456,7 @@
 
     <target name="realclean" depends="clean" description="Remove the entire build directory and all downloaded artifacts">
         <delete>
-          <fileset dir="${build.lib}" excludes="cassandra-driver-internal-only-*"/>
+          <fileset dir="${build.lib}" excludes="cassandra-driver-internal-only-*,puresasl-internal-only-*"/>
         </delete>
         <delete includeemptydirs="false" dir="${build.dir}" failonerror="false"/>
         <delete dir="${doc.dir}/build" />
