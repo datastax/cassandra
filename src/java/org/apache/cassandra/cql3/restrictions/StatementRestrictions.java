@@ -648,7 +648,7 @@ public class StatementRestrictions
                     if (vectorColumn.isPresent())
                     {
                         var vc = vectorColumn.get();
-                        var hasIndex = indexRegistry.listIndexes().stream().anyMatch(i -> i.dependsOn(vc)); // TODO CNDB-13129: check excluded hints
+                        var hasIndex = indexRegistry.listIndexes(indexHints).stream().anyMatch(i -> i.dependsOn(vc));
                         var isBoundedANN = nonPrimaryKeyRestrictions.restrictions().stream().anyMatch(SingleRestriction::isBoundedAnn);
                         if (hasIndex)
                             if (isBoundedANN)

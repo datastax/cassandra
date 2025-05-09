@@ -317,6 +317,39 @@ public class PlanWithIndexHintsTest extends SAITester
         }
     }
 
+    @Test
+    public void testVector()
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v vector<float, 2>)");
+        String idx = createIndex("CREATE CUSTOM INDEX idx ON %s(v) USING 'StorageAttachedIndex'");
+
+        String insert = "INSERT INTO %s (k, v) VALUES (?, ?)";
+        execute(insert, row(1, vector(0.1f, 0.2f)));
+
+        if (flush)
+            flush();
+
+        // with ANN queries
+        String query = "SELECT k FROM %s ORDER BY v ANN OF [0.1, 0.2] LIMIT 10";
+        assertThatPlanFor(query, row(1)).uses(idx);
+        assertThatPlanFor(query + " WITH included_indexes={idx}", row(1)).uses(idx);
+        assertOrderingNeedsIndex(query + " WITH excluded_indexes={idx}", "v");
+
+        // with an unsupported eq query, that can be unshaded with excluded_indexes and ALLOW FILTERING
+        query = "SELECT k FROM %s WHERE v = [0.1, 0.2] LIMIT 10";
+        assertUnsupportVectorOperator(query);
+        assertUnsupportVectorOperator(query + " WITH included_indexes={idx}");
+        assertNeedsAllowFiltering(query + " WITH excluded_indexes={idx}");
+        assertThatPlanFor(query + " ALLOW FILTERING WITH excluded_indexes={idx}", row(1)).usesNone();
+    }
+
+    private void assertNeedsAllowFiltering(String query)
+    {
+        Assertions.assertThatThrownBy(() -> execute(query))
+                  .isInstanceOf(InvalidRequestException.class)
+                  .hasMessageContaining(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE);
+    }
+
     private void assertHintsExceedIntersectionClauseLimit(String query)
     {
         Assertions.assertThatThrownBy(() -> execute(query))
@@ -338,6 +371,13 @@ public class PlanWithIndexHintsTest extends SAITester
         Assertions.assertThatThrownBy(() -> execute(query))
                   .isInstanceOf(InvalidRequestException.class)
                   .hasMessageContaining(String.format(StatementRestrictions.NON_CLUSTER_ORDERING_REQUIRES_INDEX_MESSAGE, column));
+    }
+
+    private void assertUnsupportVectorOperator(String query)
+    {
+        Assertions.assertThatThrownBy(() -> execute(query))
+                  .isInstanceOf(InvalidRequestException.class)
+                  .hasMessageContaining(StatementRestrictions.VECTOR_INDEXES_UNSUPPORTED_OP_MESSAGE);
     }
 
     private void assertMatchNeedsIndex(String query, String column, String value)
