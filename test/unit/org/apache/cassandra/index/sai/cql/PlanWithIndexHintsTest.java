@@ -29,6 +29,7 @@ import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.SAITester;
+import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.plan.Plan;
 import org.assertj.core.api.Assertions;
 
@@ -241,19 +242,23 @@ public class PlanWithIndexHintsTest extends SAITester
         assertThatPlanFor(query + " WITH excluded_indexes={idx1}", row1, row2, row3).uses(idx3);
     }
 
+    /**
+     * Tests that there will be an error when the included indexes exceed the intersection clause limit.
+     */
     @Test
     public void testIntersectionClauseLimit()
     {
-        createTable("CREATE TABLE %s (k int PRIMARY KEY, v1 int, v2 int, v3 int)");
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v1 int, v2 int, v3 int, v4 int)");
         String idx1 = createIndex("CREATE CUSTOM INDEX idx1 ON %s(v1) USING 'StorageAttachedIndex'");
         String idx2 = createIndex("CREATE CUSTOM INDEX idx2 ON %s(v2) USING 'StorageAttachedIndex'");
         String idx3 = createIndex("CREATE CUSTOM INDEX idx3 ON %s(v3) USING 'StorageAttachedIndex'");
+        String idx4 = createIndex("CREATE CUSTOM INDEX idx4 ON %s(v4) USING 'StorageAttachedIndex'");
 
-        String insert = "INSERT INTO %s (k, v1, v2, v3) VALUES (?, ?, ?, ?)";
-        Object[] row1 = row(1, 0, 0, 0);
-        Object[] row2 = row(2, 0, 1, 0);
-        Object[] row3 = row(3, 1, 0, 0);
-        Object[] row4 = row(4, 1, 1, 0);
+        String insert = "INSERT INTO %s (k, v1, v2, v3, v4) VALUES (?, ?, ?, ?, ?)";
+        Object[] row1 = row(1, 0, 0, 0, 1);
+        Object[] row2 = row(2, 0, 1, 0, 2);
+        Object[] row3 = row(3, 1, 0, 0, 3);
+        Object[] row4 = row(4, 1, 1, 0, 4);
         execute(insert, row1);
         execute(insert, row2);
         execute(insert, row3);
@@ -262,26 +267,63 @@ public class PlanWithIndexHintsTest extends SAITester
         if (flush)
             flush();
 
-        CassandraRelevantProperties.SAI_INTERSECTION_CLAUSE_LIMIT.setInt(1);
+        int defaultIntersectionClauseLimit = CassandraRelevantProperties.SAI_INTERSECTION_CLAUSE_LIMIT.getInt();
+        try
+        {
+            String query = "SELECT * FROM %s WHERE v1=0 AND v2=0 AND v3 = 0";
 
-        String query = "SELECT * FROM %s WHERE v1=0 AND v2=0 AND v3 = 0";
-        assertThatPlanFor(query, row1).usesAnyOf(idx1, idx2, idx3);
-        assertThatPlanFor(query + " WITH included_indexes={idx1}", row1).uses(idx1);
-        assertThatPlanFor(query + " WITH included_indexes={idx1, idx2}", row1).uses(idx1, idx2);
-        assertThatPlanFor(query + " WITH included_indexes={idx1, idx2, idx3}", row1).uses(idx1, idx2, idx3);
-        assertNeedsAllowFiltering(query + " WITH excluded_indexes={idx1}");
-        assertNeedsAllowFiltering(query + " WITH excluded_indexes={idx1, idx2}");
-        assertNeedsAllowFiltering(query + " WITH excluded_indexes={idx1, idx2, idx3}");
-        assertThatPlanFor(query + " ALLOW FILTERING WITH excluded_indexes={idx1}", row1).usesAnyOf(idx2, idx3);
-        assertThatPlanFor(query + " ALLOW FILTERING WITH excluded_indexes={idx1, idx2}", row1).uses(idx3);
-        assertThatPlanFor(query + " ALLOW FILTERING WITH excluded_indexes={idx1, idx2, idx3}", row1).usesNone();
+            CassandraRelevantProperties.SAI_INTERSECTION_CLAUSE_LIMIT.setInt(3);
+            assertThatPlanFor(query, row1).usesAnyOf(idx1, idx2, idx3);
+            assertThatPlanFor(query + " WITH included_indexes={idx1}", row1).uses(idx1);
+            assertThatPlanFor(query + " WITH included_indexes={idx1, idx2}", row1).uses(idx1, idx2);
+            assertThatPlanFor(query + " WITH included_indexes={idx1, idx2, idx3}", row1).uses(idx1, idx2, idx3);
+
+            CassandraRelevantProperties.SAI_INTERSECTION_CLAUSE_LIMIT.setInt(2);
+            assertThatPlanFor(query, row1).usesAnyOf(idx1, idx2, idx3);
+            assertThatPlanFor(query + " WITH included_indexes={idx1}", row1).uses(idx1);
+            assertThatPlanFor(query + " WITH included_indexes={idx1, idx2}", row1).uses(idx1, idx2);
+            assertHintsExceedIntersectionClauseLimit(query + " WITH included_indexes={idx1, idx2, idx3}");
+
+            CassandraRelevantProperties.SAI_INTERSECTION_CLAUSE_LIMIT.setInt(1);
+            assertThatPlanFor(query, row1).usesAnyOf(idx1, idx2, idx3);
+            assertThatPlanFor(query + " WITH included_indexes={idx1}", row1).uses(idx1);
+            assertHintsExceedIntersectionClauseLimit(query + " WITH included_indexes={idx1, idx2}");
+            assertHintsExceedIntersectionClauseLimit(query + " WITH included_indexes={idx1, idx2, idx3}");
+
+            // test with an OR clause, so the intersection is nested
+            query = "SELECT * FROM %s WHERE (v1=0 AND v2=0 AND v3 = 0) OR v4 = 0";
+
+            CassandraRelevantProperties.SAI_INTERSECTION_CLAUSE_LIMIT.setInt(3);
+            assertThatPlanFor(query, row1).usesAnyOf(idx1, idx2, idx3, idx4);
+            assertThatPlanFor(query + " WITH included_indexes={idx1}", row1).uses(idx1, idx4);
+            assertThatPlanFor(query + " WITH included_indexes={idx1, idx2}", row1).uses(idx1, idx2, idx4);
+            assertThatPlanFor(query + " WITH included_indexes={idx1, idx2, idx3}", row1).uses(idx1, idx2, idx3, idx4);
+
+            CassandraRelevantProperties.SAI_INTERSECTION_CLAUSE_LIMIT.setInt(2);
+            assertThatPlanFor(query, row1).usesAnyOf(idx1, idx2, idx3, idx4);
+            assertThatPlanFor(query + " WITH included_indexes={idx1}", row1).uses(idx1, idx4);
+            assertThatPlanFor(query + " WITH included_indexes={idx1, idx2}", row1).uses(idx1, idx2, idx4);
+            assertHintsExceedIntersectionClauseLimit(query + " WITH included_indexes={idx1, idx2, idx3}");
+
+            CassandraRelevantProperties.SAI_INTERSECTION_CLAUSE_LIMIT.setInt(1);
+            assertThatPlanFor(query, row1).usesAnyOf(idx1, idx2, idx3, idx4);
+            assertThatPlanFor(query + " WITH included_indexes={idx1}", row1).uses(idx1, idx4);
+            assertHintsExceedIntersectionClauseLimit(query + " WITH included_indexes={idx1, idx2}");
+            assertHintsExceedIntersectionClauseLimit(query + " WITH included_indexes={idx1, idx2, idx3}");
+        }
+        finally
+        {
+            CassandraRelevantProperties.SAI_INTERSECTION_CLAUSE_LIMIT.setInt(defaultIntersectionClauseLimit);
+        }
     }
 
-    private void assertNeedsAllowFiltering(String query)
+    private void assertHintsExceedIntersectionClauseLimit(String query)
     {
         Assertions.assertThatThrownBy(() -> execute(query))
                   .isInstanceOf(InvalidRequestException.class)
-                  .hasMessageContaining(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE);
+                  .hasMessageContaining(String.format(StorageAttachedIndex.HINTS_EXCEED_INTERSECTION_CLAUSE_LIMIT_ERROR,
+                                                      CassandraRelevantProperties.SAI_INTERSECTION_CLAUSE_LIMIT.getInt(),
+                                                      CassandraRelevantProperties.SAI_INTERSECTION_CLAUSE_LIMIT.name()));
     }
 
     public void assertUnselectedIndexError(String query, String... indexes)
