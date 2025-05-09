@@ -176,7 +176,9 @@ public class SegmentFlushTest
         MetadataSource source = MetadataSource.loadMetadata(components);
 
         // verify segment count
-        List<SegmentMetadata> segmentMetadatas = SegmentMetadata.load(source, indexContext);
+        // We use a custome loader that skips resolving the full primary key bounds because we don't actually have
+        // a complete segment where the min/max row ids map to token positions in the per sstable index file.
+        List<SegmentMetadata> segmentMetadatas = SegmentMetadata.loadForTesting(source, indexContext);
         assertEquals(segments, segmentMetadatas.size());
 
         // verify segment metadata
