@@ -20,19 +20,18 @@ package org.apache.cassandra.db.tries;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.concurrent.atomic.AtomicReferenceArray;
-
-import com.google.common.annotations.VisibleForTesting;
 import java.util.function.Predicate;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Predicates;
 
 import org.agrona.concurrent.UnsafeBuffer;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.util.FileUtils;
-import org.apache.cassandra.utils.bytecomparable.ByteSource;
-import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.ObjectSizes;
+import org.apache.cassandra.utils.bytecomparable.ByteComparable;
+import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 
 import static org.github.jamm.MemoryMeterStrategy.MEMORY_LAYOUT;
@@ -300,6 +299,9 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
      */
     private int addContent(T value) throws TrieSpaceExhaustedException
     {
+        if (value == null)
+            return NONE;
+
         int index = objectAllocator.allocate();
         int leadBit = getBufferIdx(index, CONTENTS_START_SHIFT, CONTENTS_START_SIZE);
         int ofs = inBufferOffset(index, leadBit, CONTENTS_START_SIZE);
@@ -465,6 +467,8 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
         int mid = getIntVolatile(midPos);
         if (isNull(mid))
         {
+            if (isNull(newChild))
+                return node;
             mid = createEmptySplitNode();
             int tailPos = splitCellPointerAddress(mid, splitNodeTailIndex(trans), SPLIT_OTHER_LEVEL_LIMIT);
             int tail = createEmptySplitNode();
@@ -479,6 +483,8 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
         int tail = getIntVolatile(tailPos);
         if (isNull(tail))
         {
+            if (isNull(newChild))
+                return node;
             tail = createEmptySplitNode();
             int childPos = splitCellPointerAddress(tail, splitNodeChildIndex(trans), SPLIT_OTHER_LEVEL_LIMIT);
             putInt(childPos, newChild);
@@ -487,8 +493,57 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
         }
 
         int childPos = splitCellPointerAddress(tail, splitNodeChildIndex(trans), SPLIT_OTHER_LEVEL_LIMIT);
-        putIntVolatile(childPos, newChild);
-        return node;
+        if (isNull(newChild))
+            return removePathVolatile(node, midPos, mid, tailPos, tail, childPos);
+        else
+        {
+            putIntVolatile(childPos, newChild);
+            return node;    // normal path, adding data
+        }
+    }
+
+    private int removePathVolatile(int node, int midPos, int mid, int tailPos, int tail, int childPos) throws TrieSpaceExhaustedException
+    {
+        if (isNull(getIntVolatile(childPos)))
+            return node;
+
+        // Because there may be concurrent accesses to this node that have saved the path we are removing as the next
+        // transition and expect it to be valid, we need to copy any cell where we set the value to NONE.
+        if (!isSplitBlockEmptyExcept(tail, SPLIT_OTHER_LEVEL_LIMIT, childPos))
+        {
+            int newTail = copyCell(tail);
+            putInt(newTail + childPos - tail, NONE);
+            putIntVolatile(tailPos, newTail);
+            return node;
+        }
+        recycleCell(tail);
+        if (!isSplitBlockEmptyExcept(mid, SPLIT_OTHER_LEVEL_LIMIT, tailPos))
+        {
+            int newMid = copyCell(mid);
+            putInt(newMid + tailPos - mid, NONE);
+            putIntVolatile(midPos, newMid);
+            return node;
+        }
+        recycleCell(mid);
+        if (!isSplitBlockEmptyExcept(node, SPLIT_START_LEVEL_LIMIT, midPos))
+        {
+            int newNode = copyCell(node);
+            putInt(newNode + midPos - node, NONE);
+            return newNode;
+        }
+        recycleCell(node);
+        return NONE;
+    }
+
+    boolean isSplitBlockEmptyExcept(int node, int limit, int deletedPos)
+    {
+        for (int i = 0; i < limit; ++i)
+        {
+            int pos = splitCellPointerAddress(node, i, limit);
+            if (pos != deletedPos && !isNull(getIntVolatile(pos)))
+                return false;
+        }
+        return true;
     }
 
     /**
@@ -506,7 +561,10 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
         assert offset(tail) == SPLIT_OFFSET : "Invalid split node in trie";
         int childPos = splitCellPointerAddress(tail, splitNodeChildIndex(trans), SPLIT_OTHER_LEVEL_LIMIT);
         putInt(childPos, newChild);
-        return node;
+        if (isNull(newChild))
+            return removePath(node, midPos, mid, tailPos, tail);
+        else
+            return node;    // normal path, adding data
     }
 
     /**
@@ -534,7 +592,35 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
 
         int childPos = splitCellPointerAddress(tail, splitNodeChildIndex(trans), SPLIT_OTHER_LEVEL_LIMIT);
         putInt(childPos, newChild);
-        return node;
+        if (isNull(newChild))
+            return removePath(node, midPos, mid, tailPos, tail);
+        else
+            return node;    // normal path, adding data
+    }
+
+    private int removePath(int node, int midPos, int mid, int tailPos, int tail)
+    {
+        // Removing a transition
+        if (!isSplitBlockEmpty(tail, SPLIT_OTHER_LEVEL_LIMIT))
+            return node;
+        recycleCell(tail);
+        putInt(mid + tailPos, NONE);
+        if (!isSplitBlockEmpty(mid, SPLIT_OTHER_LEVEL_LIMIT))
+            return node;
+        recycleCell(mid);
+        putInt(node + midPos, NONE);
+        if (!isSplitBlockEmpty(node, SPLIT_START_LEVEL_LIMIT))
+            return node;
+        recycleCell(node);
+        return NONE;
+    }
+
+    boolean isSplitBlockEmpty(int node, int limit)
+    {
+        for (int i = 0; i < limit; ++i)
+            if (!isNull(getSplitCellPointer(node, i, limit)))
+                return false;
+        return true;
     }
 
     /**
@@ -552,6 +638,8 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
             final int existing = getUnsignedByte(node + SPARSE_BYTES_OFFSET + index);
             if (existing == trans)
             {
+                if (isNull(newChild))
+                    return removeSparseChild(node, index);
                 putIntVolatile(node + SPARSE_CHILDREN_OFFSET + index * 4, newChild);
                 return node;
             }
@@ -559,6 +647,8 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
                 ++smallerCount;
         }
         int childCount = index;
+        if (isNull(newChild))
+            return node;
 
         if (childCount == SPARSE_CHILD_COUNT)
         {
@@ -594,6 +684,43 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
      * Attach a child to the given sparse node. This may be an update for an existing branch, or a new child for the node.
      * Resulting node is not reachable, no volatile set needed.
      */
+    private int removeSparseChild(int node, int index) throws TrieSpaceExhaustedException
+    {
+        recycleCell(node);
+        int order = getUnsignedShortVolatile(node + SPARSE_ORDER_OFFSET);
+        if (index <= 1 && order == 6)
+        {
+            int survivingIndex = index ^ 1;
+            return expandOrCreateChainNode(getUnsignedByte(node + SPARSE_BYTES_OFFSET + survivingIndex),
+                                           getIntVolatile(node + SPARSE_CHILDREN_OFFSET + survivingIndex * 4));
+        }
+
+        // Because we need the smallest child to not be the last (which can happen if we just remove entries), we will
+        // put the remaining data in order.
+        int newNode = allocateCell() | SPARSE_OFFSET;
+        int i = 0;
+        int newOrder = 0;
+        int mul = 1;
+        while (order > 0)
+        {
+            int next = order % SPARSE_CHILD_COUNT;
+            order /= SPARSE_CHILD_COUNT;
+            if (next == index)
+                continue;
+            putInt(newNode + SPARSE_CHILDREN_OFFSET + i * 4, getIntVolatile(node + SPARSE_CHILDREN_OFFSET + next * 4));
+            putInt(newNode + SPARSE_BYTES_OFFSET + i, getUnsignedByte(node + SPARSE_BYTES_OFFSET + next));
+            newOrder += i * mul;
+            mul *= SPARSE_CHILD_COUNT;
+            ++i;
+        }
+        putShort(newNode + SPARSE_ORDER_OFFSET, (short) newOrder);
+        return newNode;
+    }
+
+    /**
+     * Attach a child to the given sparse node. This may be an update for an existing branch, or a new child for the node.
+     * Resulting node is not reachable, no volatile set needed.
+     */
     private int attachChildToSparseCopying(int node, int originalNode, int trans, int newChild) throws TrieSpaceExhaustedException
     {
         int index;
@@ -606,6 +733,8 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
             final int existing = getUnsignedByte(node + SPARSE_BYTES_OFFSET + index);
             if (existing == trans)
             {
+                if (isNull(newChild))
+                    return removeSparseChild(node, index);
                 node = copyIfOriginal(node, originalNode);
                 putInt(node + SPARSE_CHILDREN_OFFSET + index * 4, newChild);
                 return node;
@@ -614,6 +743,9 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
                 ++smallerCount;
         }
         int childCount = index;
+
+        if (isNull(newChild))
+            return node;
 
         if (childCount == SPARSE_CHILD_COUNT)
         {
@@ -689,11 +821,20 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
             // This is still a single path. Update child if possible (only if this is the last character in the chain).
             if (offset(node) == LAST_POINTER_OFFSET - 1)
             {
+                if (isNull(newChild))
+                {
+                    recycleCell(node);
+                    return NONE;
+                }
+
                 putIntVolatile(node + 1, newChild);
                 return node;
             }
             else
             {
+                if (isNull(newChild))
+                    return NONE;
+
                 // This will only be called if new child is different from old, and the update is not on the final child
                 // where we can change it in place (see attachChild). We must always create something new.
                 // Note that since this is not the last character, we either still need this cell or we have already
@@ -703,6 +844,8 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
                 return expandOrCreateChainNode(transitionByte, newChild);
             }
         }
+        if (isNull(newChild))
+            return node;
 
         // The new transition is different, so we no longer have only one transition. Change type.
         return convertChainToSparse(node, existingByte, newChild, transitionByte);
@@ -721,17 +864,18 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
             // Make sure we release the cell if it will no longer be referenced (if we update last reference, the whole
             // path has to move as the other nodes in this chain can't be remapped).
             if (offset(node) == LAST_POINTER_OFFSET - 1)
-            {
-                assert node == originalNode;    // if we have already created a node, the character can't match what
-                                                // it was created with
-
                 recycleCell(node);
-            }
+
+            if (isNull(newChild))
+                return NONE;
 
             return expandOrCreateChainNode(transitionByte, newChild);
         }
         else
         {
+            if (isNull(newChild))
+                return node;
+
             // The new transition is different, so we no longer have only one transition. Change type.
             return convertChainToSparse(node, existingByte, newChild, transitionByte);
         }
@@ -920,7 +1064,15 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
         }
 
         assert offset(existingPreContentNode) == PREFIX_OFFSET : "Unexpected content in non-prefix and non-leaf node.";
-        return updatePrefixNodeChild(existingPreContentNode, updatedPostContentNode, forcedCopy);
+        if (updatedPostContentNode != NONE)
+            return updatePrefixNodeChild(existingPreContentNode, updatedPostContentNode, forcedCopy);
+        else
+        {
+            if (!isEmbeddedPrefixNode(existingPreContentNode))
+                recycleCell(existingPreContentNode);
+            // otherwise cell is recycled with the post-prefix node
+            return getIntVolatile(existingPreContentNode + PREFIX_CONTENT_OFFSET);
+        }
     }
 
     private final ApplyState applyState = new ApplyState();
@@ -1097,8 +1249,6 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
             {
                 releaseContent(contentId);
                 setContentId(NONE);
-                // At this point we are not deleting branches on the way up, just making sure we don't hold on to
-                // references to content.
             }
             else if (content == InMemoryTrie.this.getContent(contentId))
             {
@@ -1294,6 +1444,19 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
         public ByteComparable.Version byteComparableVersion()
         {
             return byteComparableVersion;
+        }
+
+        public String toString()
+        {
+            StringBuilder sb = new StringBuilder();
+            sb.append('@');
+            for (int i = 0; i < currentDepth; ++i)
+                sb.append(String.format("%02x", transitionAtDepth(i)));
+
+            sb.append(" existingPostContentNode=").append(existingPostContentNode());
+            sb.append(" updatedPostContentNode=").append(updatedPostContentNode());
+            sb.append(" contentId=").append(contentId());
+            return sb.toString();
         }
     }
 
@@ -1612,16 +1775,50 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
         if (isLeaf(node))
         {
             int contentId = node;
-            setContent(contentId, transformer.apply(getContent(contentId), value));
-            return node;
+            T newContent = transformer.apply(getContent(contentId), value);
+            if (newContent != null)
+            {
+                setContent(contentId, newContent);
+                return node;
+            }
+            else
+            {
+                releaseContent(contentId);
+                return NONE;
+            }
         }
 
         if (offset(node) == PREFIX_OFFSET)
         {
             int contentId = getIntVolatile(node + PREFIX_CONTENT_OFFSET);
-            setContent(contentId, transformer.apply(getContent(contentId), value));
-            return node;
+            T newContent = transformer.apply(getContent(contentId), value);
+            if (newContent != null)
+            {
+                setContent(contentId, newContent);
+                return node;
+            }
+            else
+            {
+                releaseContent(contentId);
+
+                int b = getUnsignedByte(node + PREFIX_FLAGS_OFFSET);
+                if (b < CELL_SIZE)
+                {
+                    // embedded prefix node
+                    return node - PREFIX_OFFSET + b;
+                }
+                else
+                {
+                    // separate prefix node. recycle it as it's no longer needed
+                    recycleCell(node);
+                    return getIntVolatile(node + PREFIX_POINTER_OFFSET);
+                }
+            }
         }
+
+        T newContent = transformer.apply(null, value);
+        if (newContent == null)
+            return node;
         else
             return createPrefixNode(addContent(transformer.apply(null, value)), node, false);
     }
@@ -1700,12 +1897,14 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
                REFERENCE_ARRAY_ON_HEAP_SIZE * getBufferIdx(allocatedPos, BUF_START_SHIFT, BUF_START_SIZE);
     }
 
-    private long usedBufferSpace()
+    @VisibleForTesting
+    long usedBufferSpace()
     {
         return allocatedPos - cellAllocator.indexCountInPipeline() * CELL_SIZE;
     }
 
-    private long usedObjectSpace()
+    @VisibleForTesting
+    long usedObjectSpace()
     {
         return (contentCount - objectAllocator.indexCountInPipeline()) * MEMORY_LAYOUT.getReferenceSize();
     }
