@@ -44,7 +44,6 @@ import com.google.common.base.Preconditions;
 import com.google.common.cache.CacheLoader;
 import com.google.common.collect.Iterables;
 import com.google.common.primitives.Ints;
-import com.google.common.util.concurrent.Uninterruptibles;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -2877,6 +2876,66 @@ public class StorageProxy implements StorageProxyMBean
         ConsistencyLevel newCL = ConsistencyLevel.valueOf(cl.trim().toUpperCase());
         DatabaseDescriptor.setIdealConsistencyLevel(newCL);
         return String.format("Updating ideal consistency level new value: %s old value %s", newCL, original.toString());
+    }
+
+    @Override
+    public int getNonIndexMemtableFlushPeriodInSeconds()
+    {
+        return CassandraRelevantProperties.FLUSH_PERIOD_IN_MILLIS.getInt();
+    }
+
+    @Override
+    public void setNonIndexMemtableFlushPeriodInSeconds(int flushPeriodInSeconds)
+    {
+        CassandraRelevantProperties.FLUSH_PERIOD_IN_MILLIS.setInt(flushPeriodInSeconds);
+    }
+
+    @Override
+    public int getVectorIndexMemtableFlushPeriodInSecond()
+    {
+        return CassandraRelevantProperties.SAI_VECTOR_FLUSH_PERIOD_IN_MILLIS.getInt();
+    }
+
+    @Override
+    public void setVectorMemtableFlushPeriodInSecond(int flushPeriodInSecond)
+    {
+        CassandraRelevantProperties.SAI_VECTOR_FLUSH_PERIOD_IN_MILLIS.setInt(flushPeriodInSecond);
+    }
+
+    @Override
+    public int getNonVectorIndexMemtableFlushPeriodInSecond()
+    {
+        return CassandraRelevantProperties.SAI_NON_VECTOR_FLUSH_PERIOD_IN_MILLIS.getInt();
+    }
+
+    @Override
+    public void setNonVectorMemtableFlushPeriodInSecond(int flushPeriodInSecond)
+    {
+        CassandraRelevantProperties.SAI_NON_VECTOR_FLUSH_PERIOD_IN_MILLIS.setInt(flushPeriodInSecond);
+    }
+
+    @Override
+    public int getVectorIndexMemtableFlushMaxRows()
+    {
+        return CassandraRelevantProperties.SAI_VECTOR_FLUSH_THRESHOLD_MAX_ROWS.getInt();
+    }
+
+    @Override
+    public void setVectorMemtableFlushMaxRows(int threshold)
+    {
+        CassandraRelevantProperties.SAI_VECTOR_FLUSH_THRESHOLD_MAX_ROWS.setInt(threshold);
+    }
+
+    @Override
+    public int getNonVectorIndexMemtableFlushMaxRows()
+    {
+        return CassandraRelevantProperties.SAI_NON_VECTOR_FLUSH_THRESHOLD_MAX_ROWS.getInt();
+    }
+
+    @Override
+    public void setNonVectorMemtableFlushPeriodMaxRows(int threshold)
+    {
+        CassandraRelevantProperties.SAI_NON_VECTOR_FLUSH_THRESHOLD_MAX_ROWS.setInt(threshold);
     }
 
     @Deprecated

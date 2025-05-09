@@ -180,6 +180,11 @@ public interface Memtable extends Comparable<Memtable>
          * Get the op-order primitive that protects data for the duration of reads.
          */
         public OpOrder readOrdering();
+
+        /**
+         * Get the memtable flush period in millis based on schema config or system configs
+         */
+        int getMemtableFlushPeriodInMs();
     }
 
     // Main write and read operations

@@ -122,6 +122,12 @@ public class SkipListMemtable extends AbstractAllocatorMemtable
             {
                 return null;
             }
+
+            @Override
+            public int getMemtableFlushPeriodInMs()
+            {
+                return -1;
+            }
         });
     }
 

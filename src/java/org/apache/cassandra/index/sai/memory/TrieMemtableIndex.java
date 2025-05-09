@@ -109,7 +109,6 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
         }
         this.sensorContext = Context.from(indexContext);
         this.requestTracker = RequestTracker.instance;
-        maybeScheduleFlush();
     }
 
     @Override

@@ -86,6 +86,7 @@ import org.apache.cassandra.cache.RowCacheSentinel;
 import org.apache.cassandra.concurrent.JMXEnabledThreadPoolExecutor;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.concurrent.Stage;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
@@ -128,8 +129,10 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.StartupException;
+import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.SecondaryIndexManager;
 import org.apache.cassandra.index.internal.CassandraIndex;
+import org.apache.cassandra.index.sai.StorageAttachedIndexGroup;
 import org.apache.cassandra.index.transactions.UpdateTransaction;
 import org.apache.cassandra.io.FSReadError;
 import org.apache.cassandra.io.FSWriteError;
@@ -563,9 +566,10 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         logger.debug("Initializing {}.{}", keyspace.getName(), name);
 
         // Create Memtable only on online
+        Memtable initialMemtable = null;
         if (DatabaseDescriptor.enableMemtableAndCommitLog())
         {
-            Memtable initialMemtable  = createMemtable(new AtomicReference<>(CommitLog.instance.getCurrentPosition()));
+            initialMemtable  = createMemtable(new AtomicReference<>(CommitLog.instance.getCurrentPosition()));
             data = new Tracker(this, initialMemtable, loadSSTables);
         }
         else
@@ -1966,6 +1970,38 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     public OpOrder readOrdering()
     {
         return readOrdering;
+    }
+
+    @Override
+    public int getMemtableFlushPeriodInMs()
+    {
+        int flushPeriodInMs = metadata().params.memtableFlushPeriodInMs;
+        flushPeriodInMs = pickSmallerFlushPeriod(flushPeriodInMs, CassandraRelevantProperties.FLUSH_PERIOD_IN_MILLIS.getInt());
+
+        // When creating CFS, indexManager is initialized after memtable, we need to handle null here; Later when SAI
+        // is initialized, SAI will force flush to create new memtable with proper flush period.
+        if (indexManager == null)
+            return flushPeriodInMs;
+
+        CassandraIndex.Group saiGroup = indexManager.getIndexGroup(StorageAttachedIndexGroup.GROUP_KEY);
+        if (saiGroup != null)
+        {
+            // if table has vector index
+            if (saiGroup.getIndexes().stream().anyMatch(Index::isVector))
+                flushPeriodInMs = pickSmallerFlushPeriod(flushPeriodInMs, CassandraRelevantProperties.SAI_VECTOR_FLUSH_PERIOD_IN_MILLIS.getInt());
+
+            // if table has non-vector index
+            if (saiGroup.getIndexes().stream().anyMatch(i -> !i.isVector()))
+                flushPeriodInMs = pickSmallerFlushPeriod(flushPeriodInMs, CassandraRelevantProperties.SAI_NON_VECTOR_FLUSH_PERIOD_IN_MILLIS.getInt());
+        }
+        return flushPeriodInMs;
+    }
+
+    private int pickSmallerFlushPeriod(int period1, int period2)
+    {
+        if (period1 > 0 && period2 > 0)
+            return Math.min(period1, period2);
+        return period1 > 0 ? period1 : period2;
     }
 
     public Map<UUID, PendingStat> getPendingRepairStats()

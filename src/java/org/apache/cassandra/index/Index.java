@@ -488,6 +488,16 @@ public interface Index
         return true;
     }
 
+    /**
+     * Check if current index is vector index
+
+     * @return true if index is vector index; otherwise false
+     */
+    default boolean isVector()
+    {
+        return true;
+    }
+
     /*
      * Input validation
      */

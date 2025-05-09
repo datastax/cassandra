@@ -98,7 +98,6 @@ public class VectorMemtableIndex extends AbstractMemtableIndex
         super(indexContext, mt);
         this.columnQueryMetrics = (ColumnQueryMetrics.VectorIndexMetrics) indexContext.getColumnQueryMetrics();
         this.graph = new CassandraOnHeapGraph<>(indexContext, true, mt);
-        maybeScheduleFlush();
     }
 
     @Override

@@ -41,7 +41,6 @@ import com.datastax.driver.core.ResultSet;
 import com.datastax.driver.core.exceptions.InvalidConfigurationInQueryException;
 import com.datastax.driver.core.exceptions.InvalidQueryException;
 import com.datastax.driver.core.exceptions.ReadFailureException;
-import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.restrictions.IndexRestrictions;
@@ -79,7 +78,6 @@ import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Throwables;
-import org.awaitility.Awaitility;
 import org.mockito.Mockito;
 
 import static java.util.Collections.singletonList;
@@ -88,7 +86,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.Mockito.when;
 
@@ -147,9 +144,6 @@ public class NativeIndexDDLTest extends SAITester
 
         NDI_CREATION_COUNTER.reset();
         INDEX_BUILD_COUNTER.reset();
-
-        CassandraRelevantProperties.SAI_NON_VECTOR_FLUSH_PERIOD_IN_SECONDS.reset();
-        CassandraRelevantProperties.SAI_NON_VECTOR_FLUSH_THRESHOLD_MAX_ROWS.reset();
     }
 
     @After
@@ -1535,55 +1529,6 @@ public class NativeIndexDDLTest extends SAITester
         assertEquals(Arrays.asList(2L, 1L), toSize.apply(iterator.next()));
     }
 
-    @Test
-    public void testTrieIndexFlushThreshold()
-    {
-        int maxRows = 10;
-        CassandraRelevantProperties.SAI_NON_VECTOR_FLUSH_THRESHOLD_MAX_ROWS.setInt(maxRows);
-
-        createTable("CREATE TABLE %s (pk int, v1 int, v2 text, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(v1) USING 'StorageAttachedIndex'");
-        createIndex("CREATE CUSTOM INDEX ON %s(v2) USING 'StorageAttachedIndex'");
-
-        int rowCount = 25;
-        for (int i = 1; i <= rowCount; i++)
-        {
-            execute("INSERT INTO %s (pk, v1, v2) VALUES (?, ?, ?)", i, i, String.valueOf(i));
-
-            int sstables = (i / maxRows);
-            if (i % maxRows == 0)
-            {
-                Awaitility.await("Memtable flushed")
-                          .atMost(30, TimeUnit.SECONDS)
-                          .untilAsserted(() -> assertThat(getCurrentColumnFamilyStore().getLiveSSTables()).hasSize(sstables));
-            }
-            else
-            {
-                assertThat(getCurrentColumnFamilyStore().getLiveSSTables()).hasSize(sstables);
-            }
-        }
-
-        // flush remaining memtable
-        getCurrentColumnFamilyStore().forceBlockingFlush(ColumnFamilyStore.FlushReason.USER_FORCED);
-        assertThat(getCurrentColumnFamilyStore().getLiveSSTables()).hasSize(3);
-    }
-
-    @Test
-    public void testTrieIndexFlushPeriod()
-    {
-        CassandraRelevantProperties.SAI_NON_VECTOR_FLUSH_PERIOD_IN_SECONDS.setInt(5);
-        createTable("CREATE TABLE %s (pk int, v1 int, v2 text, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(v1) USING 'StorageAttachedIndex'");
-        createIndex("CREATE CUSTOM INDEX ON %s(v2) USING 'StorageAttachedIndex'");
-
-        int rowCount = 15;
-        for (int i = 1; i <= rowCount; i++)
-            execute("INSERT INTO %s (pk, v1, v2) VALUES (?, ?, ?)", i, i, String.valueOf(i));
-
-        Awaitility.await("Memtable flushed")
-                  .atMost(30, TimeUnit.SECONDS)
-                  .untilAsserted(() -> assertThat(getCurrentColumnFamilyStore().getLiveSSTables()).hasSize(1));
-    }
 
     @Test
     public void shouldRejectLargeStringTerms()

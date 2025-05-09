@@ -758,6 +758,12 @@ public class StorageAttachedIndex implements Index
     }
 
     @Override
+    public boolean isVector()
+    {
+        return indexContext.isVector();
+    }
+
+    @Override
     public void validate(PartitionUpdate update) throws InvalidRequestException
     {
         if (!VALIDATE_TERMS_AT_COORDINATOR)
