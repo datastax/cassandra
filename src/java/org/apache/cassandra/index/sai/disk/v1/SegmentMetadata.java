@@ -87,7 +87,7 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
      * A constant representing an invalid total term count when it cannot be read
      * from disk, since the SAI format version doesn't support serializing it.
      */
-    public final static long INVALID_TOTAL_TERM_COUNT = -1;
+    public static final long INVALID_TOTAL_TERM_COUNT = -1;
 
     /**
      * Ordered by their token position in current segment
