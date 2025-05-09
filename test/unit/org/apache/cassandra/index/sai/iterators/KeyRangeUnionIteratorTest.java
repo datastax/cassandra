@@ -377,7 +377,8 @@ public class KeyRangeUnionIteratorTest extends AbstractKeyRangeIteratorTest
 
         union = buildUnion(intersectionA, intersectionB);
         assertEquals(convert(2L, 3L, 7L, 8L), convert(union));
-        assertEquals(KeyRangeUnionIterator.class, union.getClass());
+        // Because the iterators are disjoint, the constructor optimizes the union and returns a concat iterator
+        assertEquals(KeyRangeConcatIterator.class, union.getClass());
 
         // union of one intersected intersection and one non-intersected intersection
         intersectionA = buildIntersection(arr(1L, 2L, 3L), arr(2L, 3L, 4L ));

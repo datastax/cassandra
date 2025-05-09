@@ -21,7 +21,6 @@ package org.apache.cassandra.index.sai.disk.v1;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 
 import com.google.common.collect.ImmutableList;
@@ -41,6 +40,7 @@ import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.plan.Orderer;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.index.sai.utils.PrimaryKeyListUtil;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
@@ -87,7 +87,7 @@ public class V1SearchableIndex implements SearchableIndex
 
             final MetadataSource source = MetadataSource.loadMetadata(perIndexComponents);
 
-            metadatas = SegmentMetadata.load(source, indexContext);
+            metadatas = SegmentMetadata.load(source, indexContext, sstableContext);
 
             for (SegmentMetadata metadata : metadatas)
             {
@@ -232,7 +232,7 @@ public class V1SearchableIndex implements SearchableIndex
             for (Segment segment : segments)
             {
                 // Only pass the primary keys in a segment's range to the segment index.
-                var segmentKeys = getKeysInRange(keys, segment);
+                var segmentKeys = PrimaryKeyListUtil.getKeysInRange(keys, segment.metadata.minKey, segment.metadata.maxKey);
                 var segmentLimit = segment.proportionalAnnLimit(limit, totalRows);
                 results.add(segment.orderResultsBy(context, segmentKeys, orderer, segmentLimit));
             }
@@ -287,37 +287,6 @@ public class V1SearchableIndex implements SearchableIndex
             rowCount += c;
         }
         return rowCount;
-    }
-
-    /** Create a sublist of the keys within (inclusive) the segment's bounds */
-    protected List<PrimaryKey> getKeysInRange(List<PrimaryKey> keys, Segment segment)
-    {
-        int minIndex = findBoundaryIndex(keys, segment, true);
-        int maxIndex = findBoundaryIndex(keys, segment, false);
-        return keys.subList(minIndex, maxIndex);
-    }
-
-    private int findBoundaryIndex(List<PrimaryKey> keys, Segment segment, boolean findMin)
-    {
-        // The minKey and maxKey are sometimes just partition keys (not primary keys), so binarySearch
-        // may not return the index of the least/greatest match.
-        var key = findMin ? segment.metadata.minKey : segment.metadata.maxKey;
-        int index = Collections.binarySearch(keys, key);
-        if (index < 0)
-            return -index - 1;
-        if (findMin)
-        {
-            while (index > 0 && keys.get(index - 1).equals(key))
-                index--;
-        }
-        else
-        {
-            while (index < keys.size() - 1 && keys.get(index + 1).equals(key))
-                index++;
-            // We must include the PrimaryKey at the boundary
-            index++;
-        }
-        return index;
     }
 
     @Override
