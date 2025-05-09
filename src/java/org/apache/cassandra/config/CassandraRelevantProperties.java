@@ -24,7 +24,6 @@ import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.compress.AdaptiveCompressor;
 import org.apache.cassandra.io.compress.LZ4Compressor;
-import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.sensors.SensorsFactory;
@@ -373,7 +372,16 @@ public enum CassandraRelevantProperties
     VECTOR_FLOAT_ONLY("cassandra.float_only_vectors", "true"),
     /** Enables use of vector type. True by default. **/
     VECTOR_TYPE_ALLOWED("cassandra.vector_type_allowed", "true"),
-
+    // Use non-positive value to disable it. Period in millis to trigger a flush for memtable
+    FLUSH_PERIOD_IN_MILLIS("cassandra.flush_period_in_millis", "-1"),
+    // Use non-positive value to disable it. When num of rows in SAI non-vector memtable index reaches the threshold, it triggers flush
+    SAI_NON_VECTOR_FLUSH_THRESHOLD_MAX_ROWS("cassandra.sai.non_vector_flush_threshold_max_rows", "-1"),
+    // Use non-positive value to disable it. Period in millis to trigger a flush for SAI non-vector memtable index.
+    SAI_NON_VECTOR_FLUSH_PERIOD_IN_MILLIS("cassandra.sai.non_vector_flush_period_in_millis", "-1"),
+    // Use non-positive value to disable it. When num of rows in SAI vector memtable index reaches the threshold, it triggers flush
+    SAI_VECTOR_FLUSH_THRESHOLD_MAX_ROWS("cassandra.sai.vector_flush_threshold_max_rows", "-1"),
+    // Use non-positive value to disable it. Period in millis to trigger a flush for SAI vector memtable index.
+    SAI_VECTOR_FLUSH_PERIOD_IN_MILLIS("cassandra.sai.vector_flush_period_in_millis", "-1"),
     /**
      * Whether to disable auto-compaction
      */

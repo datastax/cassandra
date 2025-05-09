@@ -36,6 +36,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.SortedSet;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.function.LongConsumer;
 import javax.annotation.Nullable;
@@ -90,6 +91,7 @@ public class TrieMemoryIndex extends MemoryIndex
     private final PrimaryKeysRemover primaryKeysRemover;
     private final boolean analyzerTransformsValue;
     private final Map<PrimaryKey, Integer> docLengths = new HashMap<>();
+    private final AtomicInteger docCount = new AtomicInteger(0);
 
     private final Memtable memtable;
     private AbstractBounds<PartitionPosition> keyBounds;
@@ -126,6 +128,12 @@ public class TrieMemoryIndex extends MemoryIndex
     public synchronized Map<PrimaryKey, Integer> getDocLengths()
     {
         return docLengths;
+    }
+
+    @Override
+    public int size()
+    {
+        return docCount.get();
     }
 
     public synchronized void add(DecoratedKey key,
@@ -259,6 +267,10 @@ public class TrieMemoryIndex extends MemoryIndex
                                 + primaryKey.ramBytesUsed() // TODO do we count these bytes?
                                 + Integer.BYTES;
                 onHeapAllocationsTracker.accept(heapUsed);
+            }
+            else
+            {
+                docCount.incrementAndGet();
             }
 
             // memory used by the trie

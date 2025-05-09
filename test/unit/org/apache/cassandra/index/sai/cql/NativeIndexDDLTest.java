@@ -86,7 +86,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.Mockito.when;
 
@@ -1529,6 +1528,7 @@ public class NativeIndexDDLTest extends SAITester
         assertEquals(singletonList(3L), toSize.apply(iterator.next()));
         assertEquals(Arrays.asList(2L, 1L), toSize.apply(iterator.next()));
     }
+
 
     @Test
     public void shouldRejectLargeStringTerms()
