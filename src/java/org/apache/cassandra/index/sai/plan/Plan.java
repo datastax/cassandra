@@ -1445,6 +1445,11 @@ abstract public class Plan
             int softLimit = max(1, round((float) access.expectedAccessCount(factory.tableMetrics.rows)));
             return executor.getTopKRows((Expression) null, softLimit);
         }
+
+        public String getIndexName()
+        {
+            return ordering.getIndexName();
+        }
     }
 
     /**
