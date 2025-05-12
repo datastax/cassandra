@@ -30,6 +30,9 @@ import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
 import java.util.function.ObjIntConsumer;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.db.DiskBoundaries;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.SortedLocalRanges;
@@ -42,6 +45,8 @@ import org.apache.cassandra.utils.SortingIterator;
 
 public interface ShardManager
 {
+    static final Logger shardManagerLogger = LoggerFactory.getLogger(ShardManager.class);
+
     /// Single-partition, and generally sstables with very few partitions, can cover very small sections of the token
     /// space, resulting in very high densities.
     ///
@@ -267,23 +272,31 @@ public interface ShardManager
                                                                                   int maxParallelism,
                                                                                   BiFunction<Collection<R>, Range<Token>, T> maker)
     {
+        shardManagerLogger.debug("splitSSTablesInShardsLimited: numShardsForDensity {} coveredShards: {} maxParallelism: {} sstables {} operationRange {}", numShardsForDensity, coveredShards, maxParallelism, sstables, operationRange);
         if (coveredShards <= maxParallelism)
+        {
+            shardManagerLogger.debug("coveredShards <= maxParallelism");
             return splitSSTablesInShards(sstables, operationRange, numShardsForDensity, maker);
+        }
         // We may be in a simple case where we can reduce the number of shards by some power of 2.
         int multiple = Integer.highestOneBit(coveredShards / maxParallelism);
         if (maxParallelism * multiple == coveredShards)
+        {
+            shardManagerLogger.debug("maxParallelism * multiple == coveredShards");
             return splitSSTablesInShards(sstables, operationRange, numShardsForDensity / multiple, maker);
+        }
 
         var shards = splitSSTablesInShards(sstables,
                                            operationRange,
                                            numShardsForDensity,
                                            (rangeSSTables, range) -> Pair.create(Set.copyOf(rangeSSTables), range));
+        shardManagerLogger.debug("applyMaxParallelism: {} {}", maxParallelism, shards);
         return applyMaxParallelism(maxParallelism, maker, shards);
     }
 
-    private static <T, R extends CompactionSSTable> List<T> applyMaxParallelism(int maxParallelism,
-                                                                                BiFunction<Collection<R>, Range<Token>, T> maker,
-                                                                                List<Pair<Set<R>, Range<Token>>> shards)
+    private static <T, R extends CompactionSSTable> List<T> applyMaxParallelismNew(int maxParallelism,
+                                                                                   BiFunction<Collection<R>, Range<Token>, T> maker,
+                                                                                   List<Pair<Set<R>, Range<Token>>> shards)
     {
         if (maxParallelism >= shards.size())
         {
@@ -342,7 +355,7 @@ public interface ShardManager
         return tasks;
     }
 
-    private static <T, R extends CompactionSSTable> List<T> applyMaxParallelismOriginal(int maxParallelism, BiFunction<Collection<R>, Range<Token>, T> maker, List<Pair<Set<R>, Range<Token>>> shards)
+    private static <T, R extends CompactionSSTable> List<T> applyMaxParallelism(int maxParallelism, BiFunction<Collection<R>, Range<Token>, T> maker, List<Pair<Set<R>, Range<Token>>> shards)
     {
         int actualParallelism = shards.size();
         if (maxParallelism >= actualParallelism)
@@ -358,6 +371,7 @@ public interface ShardManager
         // Otherwise we have to group shards together. Define a target token span per task and greedily group
         // to be as close to it as possible.
         double spanPerTask = shards.stream().map(Pair::right).mapToDouble(t -> t.left.size(t.right)).sum() / maxParallelism;
+        shardManagerLogger.debug("Applying max parallelism {}, span per task: {} to {} shards: {}", maxParallelism,  spanPerTask, shards.size(), shards);
         double currentSpan = 0;
         Set<R> currentSSTables = new HashSet<>();
         Token rangeStart = null;
@@ -365,9 +379,11 @@ public interface ShardManager
         List<T> tasks = new ArrayList<>(maxParallelism);
         for (var pair : shards)
         {
+            shardManagerLogger.debug("Start of loop for Pair: {}", pair);
             final Token currentEnd = pair.right.right;
             final Token currentStart = pair.right.left;
             double span = currentStart.size(currentEnd);
+            shardManagerLogger.debug("span: {}", span);
             if (rangeStart == null)
                 rangeStart = currentStart;
             if (currentSpan + span >= spanPerTask - 0.001) // rounding error safety
@@ -375,8 +391,10 @@ public interface ShardManager
                 boolean includeCurrent = currentSpan + span - spanPerTask <= spanPerTask - currentSpan;
                 if (includeCurrent)
                     currentSSTables.addAll(pair.left);
+                shardManagerLogger.debug("Emit task for sstables: {}", currentSSTables);
                 tasks.add(maker.apply(currentSSTables, new Range<>(rangeStart, includeCurrent ? currentEnd : prevEnd)));
                 currentSpan -= spanPerTask;
+                shardManagerLogger.debug("currentSpan: {}", currentSpan);
                 rangeStart = null;
                 currentSSTables.clear();
                 if (!includeCurrent)
@@ -390,6 +408,8 @@ public interface ShardManager
 
             currentSpan += span;
             prevEnd = currentEnd;
+
+            shardManagerLogger.debug("End of loop currentSpan: {} sstables: {}", currentSpan, currentSSTables);
         }
         assert currentSSTables.isEmpty();
         return tasks;
