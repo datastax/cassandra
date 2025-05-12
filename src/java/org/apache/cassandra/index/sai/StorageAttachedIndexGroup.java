@@ -491,6 +491,12 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
         return baseCfs.metadata();
     }
 
+    // Needed by CNDB
+    public TableQueryMetrics queryMetrics()
+    {
+        return queryMetrics;
+    }
+
     public ColumnFamilyStore table()
     {
         return baseCfs;
