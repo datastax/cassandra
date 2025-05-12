@@ -354,6 +354,8 @@ public final class AggregationQueryPager implements QueryPager
          */
         private final PartitionIterator fetchSubPage(PageSize subPageSize)
         {
+            checkTimeout();
+
             return consistency != null ? subPager.fetchPage(subPageSize, consistency, queryState, System.nanoTime())
                                        : subPager.fetchPageInternal(subPageSize, executionController);
         }
@@ -362,8 +364,6 @@ public final class AggregationQueryPager implements QueryPager
         {
             if (!hasNext())
                 throw new NoSuchElementException();
-
-            checkTimeout();
 
             RowIterator iterator = new GroupByRowIterator(next);
             lastPartitionKey = iterator.partitionKey().getKey();
