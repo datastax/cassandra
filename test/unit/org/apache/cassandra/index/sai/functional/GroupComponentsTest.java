@@ -31,6 +31,7 @@ import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.StorageAttachedIndexGroup;
 import org.apache.cassandra.index.sai.disk.format.Version;
+import org.apache.cassandra.index.sai.metrics.TableQueryMetrics;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 
@@ -103,5 +104,30 @@ public class GroupComponentsTest extends SAITester
         assertEquals(Version.current().onDiskFormat().perSSTableComponentTypes().size() +
                      Version.current().onDiskFormat().perIndexComponentTypes(indexContext).size(),
                      components.size());
+    }
+
+    @Test
+    public void testQueryMetricsAccessor()
+    {
+        createTable("CREATE TABLE %s (pk int primary key, value int)");
+        createIndex("CREATE CUSTOM INDEX ON %s(value) USING 'StorageAttachedIndex'");
+        
+        ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
+        StorageAttachedIndexGroup group = StorageAttachedIndexGroup.getIndexGroup(cfs);
+        assertNotNull("StorageAttachedIndexGroup should not be null", group);
+        
+        TableQueryMetrics queryMetrics = group.queryMetrics();
+        assertNotNull("queryMetrics() should return a non-null TableQueryMetrics instance", queryMetrics);
+        
+        execute("INSERT INTO %s (pk, value) VALUES (1, 1)");
+        flush();
+        
+        execute("SELECT * FROM %s WHERE value = 1");
+        
+        long queriesCompleted = queryMetrics.totalQueriesCompleted.getCount();
+        assertEquals("TableQueryMetrics should track completed queries", 1L, queriesCompleted);
+        
+        TableQueryMetrics queryMetrics2 = group.queryMetrics();
+        assertEquals("queryMetrics() should return the same instance", queryMetrics, queryMetrics2);
     }
 }
