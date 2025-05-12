@@ -32,15 +32,15 @@ public class TableQueryMetrics extends AbstractMetrics
 {
     public static final String TABLE_QUERY_METRIC_TYPE = "TableQueryMetrics";
 
-    private final PerQueryMetrics perQueryMetrics;
+    public final PerQueryMetrics perQueryMetrics;
 
-    private final Counter totalQueryTimeouts;
-    private final Counter totalPartitionReads;
-    private final Counter totalRowsFiltered;
-    private final Counter totalQueriesCompleted;
+    public final Counter totalQueryTimeouts;
+    public final Counter totalPartitionReads;
+    public final Counter totalRowsFiltered;
+    public final Counter totalQueriesCompleted;
 
-    private final Counter sortThenFilterQueriesCompleted;
-    private final Counter filterThenSortQueriesCompleted;
+    public final Counter sortThenFilterQueriesCompleted;
+    public final Counter filterThenSortQueriesCompleted;
 
     public TableQueryMetrics(TableMetadata table)
     {
@@ -77,39 +77,39 @@ public class TableQueryMetrics extends AbstractMetrics
 
     public class PerQueryMetrics extends AbstractMetrics
     {
-        private final Timer queryLatency;
+        public final Timer queryLatency;
 
         /**
          * Global metrics for all indices hit during the query.
          */
-        private final Histogram sstablesHit;
-        private final Histogram segmentsHit;
-        private final Histogram partitionReads;
-        private final Histogram rowsFiltered;
+        public final Histogram sstablesHit;
+        public final Histogram segmentsHit;
+        public final Histogram partitionReads;
+        public final Histogram rowsFiltered;
 
         /**
          * BKD index metrics.
          */
-        private final Histogram kdTreePostingsNumPostings;
+        public final Histogram kdTreePostingsNumPostings;
         /**
          * BKD index posting lists metrics.
          */
-        private final Histogram kdTreePostingsSkips;
-        private final Histogram kdTreePostingsDecodes;
+        public final Histogram kdTreePostingsSkips;
+        public final Histogram kdTreePostingsDecodes;
 
         /** Shadowed keys scan metrics **/
-        private final Histogram shadowedKeysScannedHistogram;
+        public final Histogram shadowedKeysScannedHistogram;
 
         /**
          * Trie index posting lists metrics.
          */
-        private final Histogram postingsSkips;
-        private final Histogram postingsDecodes;
+        public final Histogram postingsSkips;
+        public final Histogram postingsDecodes;
 
         /**
          * Cumulative time spent searching ANN graph.
          */
-        private final Timer annGraphSearchLatency;
+        public final Timer annGraphSearchLatency;
 
         public PerQueryMetrics(TableMetadata table)
         {
