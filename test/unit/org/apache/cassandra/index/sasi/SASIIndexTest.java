@@ -1469,7 +1469,8 @@ public class SASIIndexTest
                                              ColumnFilter.all(store.metadata()),
                                              filter.build(),
                                              DataLimits.NONE,
-                                             DataRange.allData(store.metadata().partitioner));
+                                             DataRange.allData(store.metadata().partitioner),
+                                             false);
         try
         {
             new SASIIndexSearcher(store, command, 0).search(ReadExecutionController.empty());
@@ -2434,7 +2435,8 @@ public class SASIIndexTest
                                              ColumnFilter.all(store.metadata()),
                                              RowFilter.NONE,
                                              DataLimits.NONE,
-                                             DataRange.allData(store.getPartitioner()));
+                                             DataRange.allData(store.getPartitioner()),
+                                             false);
 
         QueryController controller = new QueryController(store, command, Integer.MAX_VALUE);
         org.apache.cassandra.index.sasi.plan.Expression expression =
@@ -2703,7 +2705,8 @@ public class SASIIndexTest
                                              columnFilter,
                                              filter.build(),
                                              DataLimits.cqlLimits(maxResults),
-                                             range);
+                                             range,
+                                             false);
         return command;
     }
 

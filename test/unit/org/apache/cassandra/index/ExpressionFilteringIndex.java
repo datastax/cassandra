@@ -116,7 +116,8 @@ public final class ExpressionFilteringIndex extends StubIndex
                                                            ColumnFilter.all(table),
                                                            RowFilter.NONE,
                                                            DataLimits.NONE,
-                                                           cmd.dataRange());
+                                                           cmd.dataRange(),
+                                                           false);
                 }
                 else
                 {

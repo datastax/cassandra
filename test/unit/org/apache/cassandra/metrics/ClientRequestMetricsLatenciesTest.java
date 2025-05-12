@@ -151,6 +151,26 @@ public class ClientRequestMetricsLatenciesTest
     }
 
     @Test
+    public void testAggregateMetrics()
+    {
+        List.of(ONE, QUORUM, LOCAL_QUORUM, ALL).forEach(cl -> {
+            processQueryAndCheckMetricsWereBumped("SELECT COUNT(*) FROM %1$s.%2$s;",
+                                                  cl,
+                                                  clientMetrics.aggregationMetrics);
+        });
+        List.of(ONE, QUORUM, LOCAL_QUORUM, ALL).forEach(cl -> {
+            processQueryAndCheckMetricsWereBumped("SELECT AVG(v2) FROM %1$s.%2$s;",
+                                                  cl,
+                                                  clientMetrics.aggregationMetrics);
+        });
+        List.of(ONE, QUORUM, LOCAL_QUORUM, ALL).forEach(cl -> {
+            processQueryAndCheckMetricsWereBumped("SELECT AVG(v2) FROM %1$s.%2$s GROUP BY k;",
+                                                  cl,
+                                                  clientMetrics.aggregationMetrics);
+        });
+    }
+
+    @Test
     public void testCASWriteMetrics()
     {
         List.of(ONE, QUORUM, LOCAL_QUORUM, ALL, ANY).forEach(cl -> {

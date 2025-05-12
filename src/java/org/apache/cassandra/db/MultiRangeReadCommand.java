@@ -285,7 +285,7 @@ public class MultiRangeReadCommand extends ReadCommand
 
     private PartitionRangeReadCommand toPartitionRangeReadCommand(DataRange dataRange)
     {
-        return PartitionRangeReadCommand.create(metadata(), nowInSec(), columnFilter(), rowFilter(), limits(), dataRange, indexQueryPlan());
+        return PartitionRangeReadCommand.createNonAggregateQuery(metadata(), nowInSec(), columnFilter(), rowFilter(), limits(), dataRange, indexQueryPlan());
     }
 
     @Override

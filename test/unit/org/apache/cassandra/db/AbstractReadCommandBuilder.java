@@ -323,7 +323,7 @@ public abstract class AbstractReadCommandBuilder
             else
                 bounds = new ExcludingBounds<>(start, end);
 
-            return PartitionRangeReadCommand.create(cfs.metadata(), nowInSeconds, makeColumnFilter(), filter.build(), makeLimits(), new DataRange(bounds, makeFilter()));
+            return PartitionRangeReadCommand.create(cfs.metadata(), nowInSeconds, makeColumnFilter(), filter.build(), makeLimits(), new DataRange(bounds, makeFilter()), false);
         }
 
         static DecoratedKey makeKey(TableMetadata metadata, Object... partitionKey)

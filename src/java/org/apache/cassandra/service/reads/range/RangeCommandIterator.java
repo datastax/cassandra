@@ -36,6 +36,7 @@ import org.apache.cassandra.exceptions.UnavailableException;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.locator.ReplicaPlan;
 import org.apache.cassandra.metrics.ClientRangeRequestMetrics;
+import org.apache.cassandra.metrics.ClientRequestsMetrics;
 import org.apache.cassandra.metrics.ClientRequestsMetricsProvider;
 import org.apache.cassandra.service.QueryInfoTracker;
 import org.apache.cassandra.tracing.Tracing;
@@ -105,7 +106,11 @@ public abstract class RangeCommandIterator extends AbstractIterator<RowIterator>
                          long queryStartNanoTime,
                          QueryInfoTracker.ReadTracker readTracker)
     {
-        this.rangeMetrics = ClientRequestsMetricsProvider.instance.metrics(command.metadata().keyspace).rangeMetrics;
+        ClientRequestsMetrics clientMetrics = ClientRequestsMetricsProvider.instance.metrics(command.metadata().keyspace);
+        if (command.isAggregateQuery())
+            this.rangeMetrics = clientMetrics.aggregationMetrics;
+        else
+            this.rangeMetrics = clientMetrics.rangeMetrics;
         this.replicaPlans = replicaPlans;
         this.command = command;
         this.concurrencyFactor = concurrencyFactor;

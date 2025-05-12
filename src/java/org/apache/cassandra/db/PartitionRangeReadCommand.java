@@ -53,6 +53,7 @@ public class PartitionRangeReadCommand extends ReadCommand implements PartitionR
     protected static final SelectionDeserializer selectionDeserializer = new Deserializer();
 
     private final DataRange dataRange;
+    private final boolean isAggregate;
 
     private PartitionRangeReadCommand(boolean isDigest,
                                      int digestVersion,
@@ -63,10 +64,33 @@ public class PartitionRangeReadCommand extends ReadCommand implements PartitionR
                                      RowFilter rowFilter,
                                      DataLimits limits,
                                      DataRange dataRange,
-                                     Index.QueryPlan indexQueryPlan)
+                                     Index.QueryPlan indexQueryPlan,
+                                     boolean isAggregate)
     {
         super(Kind.PARTITION_RANGE, isDigest, digestVersion, acceptsTransient, metadata, nowInSec, columnFilter, rowFilter, limits, indexQueryPlan);
         this.dataRange = dataRange;
+        this.isAggregate = isAggregate;
+    }
+
+    public static PartitionRangeReadCommand createNonAggregateQuery(TableMetadata metadata,
+                                                                    int nowInSec,
+                                                                    ColumnFilter columnFilter,
+                                                                    RowFilter rowFilter,
+                                                                    DataLimits limits,
+                                                                    DataRange dataRange,
+                                                                    Index.QueryPlan indexQueryPlan)
+    {
+        return new PartitionRangeReadCommand(false,
+                                             0,
+                                             false,
+                                             metadata,
+                                             nowInSec,
+                                             columnFilter,
+                                             rowFilter,
+                                             limits,
+                                             dataRange,
+                                             indexQueryPlan,
+                                             false);
     }
 
     public static PartitionRangeReadCommand create(TableMetadata metadata,
@@ -75,7 +99,7 @@ public class PartitionRangeReadCommand extends ReadCommand implements PartitionR
                                                    RowFilter rowFilter,
                                                    DataLimits limits,
                                                    DataRange dataRange,
-                                                   Index.QueryPlan indexQueryPlan)
+                                                   boolean isAggregate)
     {
         return new PartitionRangeReadCommand(false,
                                              0,
@@ -86,26 +110,8 @@ public class PartitionRangeReadCommand extends ReadCommand implements PartitionR
                                              rowFilter,
                                              limits,
                                              dataRange,
-                                             indexQueryPlan);
-    }
-
-    public static PartitionRangeReadCommand create(TableMetadata metadata,
-                                                   int nowInSec,
-                                                   ColumnFilter columnFilter,
-                                                   RowFilter rowFilter,
-                                                   DataLimits limits,
-                                                   DataRange dataRange)
-    {
-        return new PartitionRangeReadCommand(false,
-                                             0,
-                                             false,
-                                             metadata,
-                                             nowInSec,
-                                             columnFilter,
-                                             rowFilter,
-                                             limits,
-                                             dataRange,
-                                             findIndexQueryPlan(metadata, rowFilter));
+                                             findIndexQueryPlan(metadata, rowFilter),
+                                             isAggregate);
     }
 
     /**
@@ -127,12 +133,18 @@ public class PartitionRangeReadCommand extends ReadCommand implements PartitionR
                                              RowFilter.NONE,
                                              DataLimits.NONE,
                                              DataRange.allData(metadata.partitioner),
-                                             null);
+                                             null,
+                                             false);
     }
 
     public DataRange dataRange()
     {
         return dataRange;
+    }
+
+    public boolean isAggregateQuery()
+    {
+        return isAggregate;
     }
 
     public ClusteringIndexFilter clusteringIndexFilter(DecoratedKey key)
@@ -176,7 +188,8 @@ public class PartitionRangeReadCommand extends ReadCommand implements PartitionR
                                              rowFilter(),
                                              isRangeContinuation ? limits() : limits().withoutState(),
                                              dataRange().forSubRange(range),
-                                             indexQueryPlan());
+                                             indexQueryPlan(),
+                                             isAggregateQuery());
     }
 
     public PartitionRangeReadCommand copy()
@@ -190,7 +203,8 @@ public class PartitionRangeReadCommand extends ReadCommand implements PartitionR
                                              rowFilter(),
                                              limits(),
                                              dataRange(),
-                                             indexQueryPlan());
+                                             indexQueryPlan(),
+                                             isAggregateQuery());
     }
 
     @Override
@@ -205,7 +219,8 @@ public class PartitionRangeReadCommand extends ReadCommand implements PartitionR
                                              rowFilter(),
                                              limits(),
                                              dataRange(),
-                                             indexQueryPlan());
+                                             indexQueryPlan(),
+                                             isAggregateQuery());
     }
 
     @Override
@@ -220,7 +235,8 @@ public class PartitionRangeReadCommand extends ReadCommand implements PartitionR
                                              rowFilter(),
                                              limits(),
                                              dataRange(),
-                                             indexQueryPlan());
+                                             indexQueryPlan(),
+                                             isAggregateQuery());
     }
 
     @Override
@@ -235,7 +251,8 @@ public class PartitionRangeReadCommand extends ReadCommand implements PartitionR
                                              rowFilter(),
                                              newLimits,
                                              dataRange(),
-                                             indexQueryPlan());
+                                             indexQueryPlan(),
+                                             isAggregateQuery());
     }
 
     @Override
@@ -250,7 +267,8 @@ public class PartitionRangeReadCommand extends ReadCommand implements PartitionR
                                              rowFilter(),
                                              newLimits,
                                              newDataRange,
-                                             indexQueryPlan());
+                                             indexQueryPlan(),
+                                             isAggregateQuery());
     }
 
     public long getTimeout(TimeUnit unit)
@@ -458,7 +476,7 @@ public class PartitionRangeReadCommand extends ReadCommand implements PartitionR
         throws IOException
         {
             DataRange range = DataRange.serializer.deserialize(in, version, metadata);
-            return new PartitionRangeReadCommand(isDigest, digestVersion, acceptsTransient, metadata, nowInSec, columnFilter, rowFilter, limits, range, indexQueryPlan);
+            return new PartitionRangeReadCommand(isDigest, digestVersion, acceptsTransient, metadata, nowInSec, columnFilter, rowFilter, limits, range, indexQueryPlan, false);
         }
     }
 }

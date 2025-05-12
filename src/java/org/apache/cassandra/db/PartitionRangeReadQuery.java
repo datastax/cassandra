@@ -36,12 +36,13 @@ public interface PartitionRangeReadQuery extends ReadQuery
                             ColumnFilter columnFilter,
                             RowFilter rowFilter,
                             DataLimits limits,
-                            DataRange dataRange)
+                            DataRange dataRange,
+                            boolean isAggregateQuery)
     {
         if (table.isVirtual())
             return VirtualTablePartitionRangeReadQuery.create(table, nowInSec, columnFilter, rowFilter, limits, dataRange);
 
-        return PartitionRangeReadCommand.create(table, nowInSec, columnFilter, rowFilter, limits, dataRange);
+        return PartitionRangeReadCommand.create(table, nowInSec, columnFilter, rowFilter, limits, dataRange, isAggregateQuery);
     }
 
     DataRange dataRange();
