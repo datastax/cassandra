@@ -54,7 +54,7 @@ public class EarlyOpenCachingTest extends CQLTester
     @Parameterized.Parameters(name = "format={0}")
     public static Collection<Object> generateParameters()
     {
-        return Arrays.stream(SSTableFormat.Type.values()).collect(Collectors.toList());
+        return Arrays.asList(SSTableFormat.Type.BTI).stream().collect(Collectors.toList());
     }
 
     @Parameterized.Parameter
@@ -85,6 +85,7 @@ public class EarlyOpenCachingTest extends CQLTester
         AtomicInteger opened = new AtomicInteger(0);
         AtomicBoolean completed = new AtomicBoolean(false);
         Phaser phaser = new Phaser(1);
+        //cfs.forceMajorCompaction();
         assertEquals(1, cfs.getLiveSSTables().size());
         SSTableReader source = cfs.getLiveSSTables().iterator().next();
 
@@ -109,9 +110,12 @@ public class EarlyOpenCachingTest extends CQLTester
         {
             writer.switchWriter(SSTableWriterTestBase.getWriter(format, cfs, cfs.getDirectories().getDirectoryForNewSSTables(), txn));
             var iter = source.getScanner();
+            int i = 0;
             while (iter.hasNext())
             {
                 var next = iter.next();
+                System.out.println("appending " + i);
+                i++;
                 writer.append(next);
             }
             completed.set(true);

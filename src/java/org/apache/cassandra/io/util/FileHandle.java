@@ -341,6 +341,7 @@ public class FileHandle extends SharedCloseableImpl
             return this;
         }
 
+
         /**
          * Provide {@link CompressionMetadata} to use when reading compressed file.
          *
@@ -353,7 +354,9 @@ public class FileHandle extends SharedCloseableImpl
             this.compressed = Objects.nonNull(metadata);
             this.encryptionOnly = this.compressed && !metadata.hasOffsets();
             if (compressed && !encryptionOnly)
-                this.overrideLength = metadata.compressedFileLength;        //TODO revisit lenght overriding
+                this.overrideLength = metadata.compressedFileLength;
+            else if (!compressed && !encryptionOnly)
+                this.overrideLength = -1;
             return this;
         }
 

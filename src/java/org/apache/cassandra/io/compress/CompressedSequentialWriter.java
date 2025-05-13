@@ -231,7 +231,8 @@ public class CompressedSequentialWriter extends SequentialWriter
 
     public void updateFileHandle(FileHandle.Builder fhBuilder)
     {
-        fhBuilder.withCompressionMetadata(metadataWriter.open(lastFlushOffset, chunkOffset));
+        if (lastFlushOffset > 0)
+            fhBuilder.withCompressionMetadata(metadataWriter.open(lastFlushOffset, chunkOffset));
     }
 
     @Override
