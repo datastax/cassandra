@@ -251,12 +251,12 @@ public class InvertedIndexSearcher extends IndexSearcher
                                                                   List<ByteBuffer> queryTerms,
                                                                   Map<ByteBuffer, Long> documentFrequencies)
     {
-        var totalRows = sstable.getTotalRows();
+        long totalRows = sstable.getTotalRows();
         // since doc frequencies can be an estimate from the index histogram, which does not have bounded error,
         // cap frequencies to total rows so that the IDF term doesn't turn negative
-        var cappedFrequencies = documentFrequencies.entrySet().stream()
-                                                    .collect(Collectors.toMap(Map.Entry::getKey, e -> Math.min(e.getValue(), totalRows)));
-        var docStats = new BM25Utils.DocStats(cappedFrequencies, totalRows);
+        Map<ByteBuffer, Long> cappedFrequencies = documentFrequencies.entrySet().stream()
+                                                                     .collect(Collectors.toMap(Map.Entry::getKey, e -> Math.min(e.getValue(), totalRows)));
+        BM25Utils.DocStats docStats = new BM25Utils.DocStats(cappedFrequencies, totalRows, metadata.totalTermCount);
         return BM25Utils.computeScores(keyIterator,
                                        queryTerms,
                                        docStats,
