@@ -44,7 +44,6 @@ import com.google.common.base.Preconditions;
 import com.google.common.cache.CacheLoader;
 import com.google.common.collect.Iterables;
 import com.google.common.primitives.Ints;
-import com.google.common.util.concurrent.Uninterruptibles;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -94,12 +93,12 @@ import org.apache.cassandra.exceptions.TruncateException;
 import org.apache.cassandra.exceptions.UnavailableException;
 import org.apache.cassandra.exceptions.WriteFailureException;
 import org.apache.cassandra.exceptions.WriteTimeoutException;
-import org.apache.cassandra.gms.FailureDetector;
 import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.gms.IFailureDetector;
 import org.apache.cassandra.hints.Hint;
 import org.apache.cassandra.hints.HintsService;
 import org.apache.cassandra.locator.AbstractReplicationStrategy;
+import org.apache.cassandra.locator.DynamicEndpointSnitch;
 import org.apache.cassandra.locator.EndpointsForToken;
 import org.apache.cassandra.locator.IEndpointSnitch;
 import org.apache.cassandra.locator.InetAddressAndPort;
@@ -170,6 +169,8 @@ public class StorageProxy implements StorageProxyMBean
     public static final StorageProxy instance = new StorageProxy();
 
     private static final Mutator mutator = MutatorProvider.instance;
+
+    private static final boolean useDynamicSnitchForCounterLeader = CassandraRelevantProperties.USE_DYNAMIC_SNITCH_FOR_COUNTER_LEADER.getBoolean();
 
     public static class DefaultMutator implements Mutator
     {
@@ -1816,9 +1817,16 @@ public class StorageProxy implements StorageProxyMBean
     {
         Replica replica = findSuitableReplica(cm.getKeyspaceName(), cm.key(), localDataCenter, cm.consistency());
 
+        // Counter leader involves local read and write forwarding. Include both into dynamic snitch if configured.
+        // Note that we can't customize `RequestCallback#trackLatencyForSnitch` to track latency because when coordinator
+        // is the counter leader, coordinator won't send counter leader request.
+        Runnable callback = null;
+        if (DatabaseDescriptor.isDynamicEndpointSnitch() && useDynamicSnitchForCounterLeader)
+            callback = () -> MessagingService.instance().latencySubscribers.add(replica.endpoint(), System.nanoTime() - queryStartNanoTime, NANOSECONDS);
+
         if (replica.isSelf())
         {
-            return applyCounterMutationOnCoordinator(cm, localDataCenter, queryStartNanoTime);
+            return applyCounterMutationOnCoordinator(cm, localDataCenter, callback, queryStartNanoTime);
         }
         else
         {
@@ -1832,7 +1840,7 @@ public class StorageProxy implements StorageProxyMBean
 
             // Forward the actual update to the chosen leader replica
             AbstractWriteResponseHandler<IMutation> responseHandler = new WriteResponseHandler<>(ReplicaPlans.forForwardingCounterWrite(keyspace, tk, replica),
-                                                                                                 WriteType.COUNTER, queryStartNanoTime);
+                                                                                                 callback, WriteType.COUNTER, queryStartNanoTime);
 
             Tracing.trace("Enqueuing counter update to {}", replica);
             Message message = Message.outWithFlag(Verb.COUNTER_MUTATION_REQ, cm, MessageFlag.CALL_BACK_ON_FAILURE);
@@ -1845,11 +1853,6 @@ public class StorageProxy implements StorageProxyMBean
      * Find a suitable replica as leader for counter update.
      * For now, we pick a random replica in the local DC (or ask the snitch if
      * there is no replica alive in the local DC).
-     * TODO: if we track the latency of the counter writes (which makes sense
-     * contrarily to standard writes since there is a read involved), we could
-     * trust the dynamic snitch entirely, which may be a better solution. It
-     * is unclear we want to mix those latencies with read latencies, so this
-     * may be a bit involved.
      */
     private static Replica findSuitableReplica(String keyspaceName, DecoratedKey key, String localDataCenter, ConsistencyLevel cl) throws UnavailableException
     {
@@ -1858,13 +1861,18 @@ public class StorageProxy implements StorageProxyMBean
         AbstractReplicationStrategy replicationStrategy = keyspace.getReplicationStrategy();
         EndpointsForToken replicas = replicationStrategy.getNaturalReplicasForToken(key);
 
-        // CASSANDRA-13043: filter out those endpoints not accepting clients yet, maybe because still bootstrapping
+        // CASSANDRA-13043: filter out those endpoints not live yet, maybe because still bootstrapping
         // We have a keyspace, so filter by affinity too
         replicas = replicas.filter(IFailureDetector.isReplicaAlive)
                            .filter(snitch.filterByAffinity(keyspace.getName()));
 
-        // CASSANDRA-17411: filter out endpoints that are not alive
-        replicas = replicas.filter(replica -> FailureDetector.instance.isAlive(replica.endpoint()));
+        // Counter leader involves local read, coordinator will prioritize faster replica if configured
+        boolean endpointsSorted = false;
+        if (DatabaseDescriptor.isDynamicEndpointSnitch() && useDynamicSnitchForCounterLeader)
+        {
+            replicas = snitch.sortedByProximity(FBUtilities.getBroadcastAddressAndPort(), replicas);
+            endpointsSorted = true;
+        }
 
         // TODO have a way to compute the consistency level
         if (replicas.isEmpty())
@@ -1883,11 +1891,16 @@ public class StorageProxy implements StorageProxyMBean
                 throw UnavailableException.create(cl, cl.blockFor(replicationStrategy), 0);
 
             // No endpoint in local DC, pick the closest endpoint according to the snitch
-            replicas = snitch.sortedByProximity(FBUtilities.getBroadcastAddressAndPort(), replicas);
+            if (!endpointsSorted)
+                replicas = snitch.sortedByProximity(FBUtilities.getBroadcastAddressAndPort(), replicas);
             return replicas.get(0);
         }
 
-        return localReplicas.get(ThreadLocalRandom.current().nextInt(localReplicas.size()));
+        // if it's ordered, exclude the slowest one and pick randomly from the rest to avoid overloading single replica
+        int replicasToPick = localReplicas.size();
+        if (endpointsSorted && localReplicas.size() > 1)
+            replicasToPick--;
+        return localReplicas.get(ThreadLocalRandom.current().nextInt(replicasToPick));
     }
 
     // Must be called on a replica of the mutation. This replica becomes the
@@ -1900,10 +1913,10 @@ public class StorageProxy implements StorageProxyMBean
 
     // Same as applyCounterMutationOnLeader but must with the difference that it use the MUTATION stage to execute the write (while
     // applyCounterMutationOnLeader assumes it is on the MUTATION stage already)
-    public static AbstractWriteResponseHandler<IMutation> applyCounterMutationOnCoordinator(CounterMutation cm, String localDataCenter, long queryStartNanoTime)
+    public static AbstractWriteResponseHandler<IMutation> applyCounterMutationOnCoordinator(CounterMutation cm, String localDataCenter, Runnable callback, long queryStartNanoTime)
     throws UnavailableException, OverloadedException
     {
-        return mutator.mutateCounterOnLeader(cm, localDataCenter, counterWriteOnCoordinatorPerformer, null, queryStartNanoTime);
+        return mutator.mutateCounterOnLeader(cm, localDataCenter, counterWriteOnCoordinatorPerformer, callback, queryStartNanoTime);
     }
 
     private static Runnable counterWriteTask(final IMutation mutation,
