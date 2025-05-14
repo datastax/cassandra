@@ -369,7 +369,7 @@ public enum CassandraRelevantProperties
     /** Whether to validate terms that will be SAI indexed at the coordinator */
     SAI_VALIDATE_TERMS_AT_COORDINATOR("cassandra.sai.validate_terms_at_coordinator", "true"),
 
-    /** Controls the maximum number of range iterators that will be used in the final intersection of a query operation */
+    /** Controls the maximum number of index range iterators that will be used in a SAI intersection operation. */
     SAI_INTERSECTION_CLAUSE_LIMIT("cassandra.sai.intersection.clause.limit", "2"),
 
     /** Whether vector type only allows float vectors. True by default. **/

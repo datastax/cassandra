@@ -419,15 +419,13 @@ public abstract class ReadCommand extends AbstractReadQuery
                 if (indexes.size() == 1)
                 {
                     String indexName = indexes.iterator().next().getIndexMetadata().name;
-                    Tracing.trace("Executing read on {}.{} using index {}", cfs.metadata.keyspace, cfs.metadata.name, indexName);
+                    Tracing.trace("Executing read on {}.{} using index {}",
+                                  cfs.metadata.keyspace, cfs.metadata.name, indexName);
                 }
                 else
                 {
-                    Set<String> indexNames = new TreeSet<>();
-                    for (Index i : indexes)
-                        indexNames.add(i.getIndexMetadata().name);
-                    String joinedIndexNames = String.join(", ", indexNames);
-                    Tracing.trace("Executing read on {}.{} using indexes {}", cfs.metadata.keyspace, cfs.metadata.name, joinedIndexNames);
+                    Tracing.trace("Executing read on {}.{} using indexes {}",
+                                  cfs.metadata.keyspace, cfs.metadata.name, Index.joinNames(indexes));
                 }
             }
         }
