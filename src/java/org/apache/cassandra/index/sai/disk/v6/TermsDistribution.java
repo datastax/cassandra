@@ -79,7 +79,7 @@ public class TermsDistribution
     final List<Bucket> histogram;
     final NavigableMap<ByteComparable, Long> mostFrequentTerms;
 
-    final long numPoints;
+    public final long numPoints;
     final long numRows;
 
     private TermsDistribution(AbstractType<?> termType,
@@ -581,5 +581,3 @@ public class TermsDistribution
     }
 
 }
-
-
