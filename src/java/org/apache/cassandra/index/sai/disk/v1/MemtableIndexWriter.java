@@ -148,6 +148,7 @@ public class MemtableIndexWriter implements PerIndexWriter
     {
         long numPostings;
         long numRows;
+        long totalTermCount;
         SegmentMetadataBuilder metadataBuilder = new SegmentMetadataBuilder(0, perIndexComponents);
         SegmentMetadata.ComponentMetadataMap indexMetas;
         if (TypeUtil.isLiteral(termComparator))
@@ -168,6 +169,7 @@ public class MemtableIndexWriter implements PerIndexWriter
 
                 indexMetas = writer.writeAll(metadataBuilder.intercept(terms), docLengths);
                 numPostings = writer.getPostingsCount();
+                totalTermCount = docLengths.values().stream().mapToInt(i -> i).sum();
                 numRows = docLengths.size();
             }
         }
@@ -184,6 +186,7 @@ public class MemtableIndexWriter implements PerIndexWriter
                 indexMetas = writer.writeAll(metadataBuilder.intercept(values));
                 numPostings = writer.getPointCount();
                 numRows = numPostings;
+                totalTermCount = numPostings;
             }
         }
 
@@ -196,6 +199,7 @@ public class MemtableIndexWriter implements PerIndexWriter
         }
 
         metadataBuilder.setNumRows(numRows);
+        metadataBuilder.setTotalTermCount(totalTermCount);
         metadataBuilder.setKeyRange(pkFactory.createPartitionKeyOnly(minKey), pkFactory.createPartitionKeyOnly(maxKey));
         metadataBuilder.setRowIdRange(terms.getMinSSTableRowId(), terms.getMaxSSTableRowId());
         metadataBuilder.setTermRange(terms.getMinTerm(), terms.getMaxTerm());
@@ -237,7 +241,8 @@ public class MemtableIndexWriter implements PerIndexWriter
                                                        ByteBufferUtil.bytes(0), // VSTODO by pass min max terms for vectors
                                                        ByteBufferUtil.bytes(0), // VSTODO by pass min max terms for vectors
                                                        null,
-                                                       metadataMap);
+                                                       metadataMap,
+                                                       rowMapping.size());
 
         try (MetadataWriter writer = new MetadataWriter(perIndexComponents))
         {
