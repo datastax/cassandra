@@ -241,7 +241,7 @@ parser.add_argument("--serial-consistency-level", dest='serial_consistency_level
 parser.add_argument("-t", "--tty", action='store_true', dest='tty',
                     help='Force tty mode (command prompt).')
 # This is a hidden option to suppress the warning when the -p/--password command line option is used.
-# Power users may use this option if they know no other people has access to the system where cqlsh is run or don't care about security.
+# Power users may use this option if they know no other people have access to the system where cqlsh is run or don't care about security.
 # Use of this option in scripting is discouraged. Please use a (temporary) credentials file where possible.
 # The Cassandra distributed tests (dtests) also use this option in some tests when a well-known password is supplied via the command line.
 parser.add_argument("--insecure-password-without-warning", action='store_true', dest='insecure_password_without_warning',

@@ -139,31 +139,31 @@ def load_auth_provider(config_file=None, cred_file=None, username=None, password
     class_name = provider_settings.pop('classname', None)
 
     if module_name is None and class_name is None:
-        # not specified, default to plaintext auth provider
+        # Not specified, default to plaintext auth provider
         module_name = 'cassandra.auth'
         class_name = 'PlainTextAuthProvider'
     elif module_name is None or class_name is None:
-        # then this was PARTIALLY specified.
+        # Then this was PARTIALLY specified.
         return None
 
     credential_settings = get_cred_file_settings(class_name, cred_file)
 
     if module_name == 'cassandra.auth' and class_name == 'PlainTextAuthProvider':
-        # merge credential settings as overrides on top of provider settings.
+        # Merge credential settings as overrides on top of provider settings.
 
-        # we need to ensure that password property gets "set" in all cases.
-        # this is to support the ability to give the user a prompt in other parts
+        # We need to ensure that password property gets "set" in all cases.
+        # This is to support the ability to give the user a prompt in other parts
         # of the code.
         _warn_for_plain_text_security(config_file, provider_settings)
         ctor_args = {'password': None,
                      **provider_settings,
                      **credential_settings,
                      **get_legacy_settings(username, password)}
-        # if no username, we can't create PlainTextAuthProvider
+        # If no username, we can't create PlainTextAuthProvider
         if 'username' not in ctor_args:
             return None
     else:
-        # merge credential settings as overrides on top of provider settings.
+        # Merge credential settings as overrides on top of provider settings.
         ctor_args = {**provider_settings,
                      **credential_settings,
                      **get_legacy_settings(username, password)}
@@ -172,5 +172,5 @@ def load_auth_provider(config_file=None, cred_file=None, username=None, password
     module = import_module(module_name)
     auth_provider_klass = getattr(module, class_name)
 
-    # instantiate the class
+    # Instantiate the class
     return auth_provider_klass(**ctor_args)
