@@ -63,16 +63,18 @@ public class Version implements Comparable<Version>
     public static final Version EB = new Version("eb", V6OnDiskFormat.instance, (c, i, g) -> stargazerFileNameFormat(c, i, g, "eb"));
     // term frequencies index component (support for BM25)
     public static final Version EC = new Version("ec", V7OnDiskFormat.instance, (c, i, g) -> stargazerFileNameFormat(c, i, g, "ec"));
+    // total terms count serialization in index metadata
+    public static final Version ED = new Version("ed", V7OnDiskFormat.instance, (c, i, g) -> stargazerFileNameFormat(c, i, g, "ed"));
 
     // These are in reverse-chronological order so that the latest version is first. Version matching tests
     // are more likely to match the latest version, so we want to test that one first.
-    public static final List<Version> ALL = Lists.newArrayList(EC, EB, DC, DB, CA, BA, AA);
+    public static final List<Version> ALL = Lists.newArrayList(ED, EC, EB, DC, DB, CA, BA, AA);
 
     public static final Version EARLIEST = AA;
     public static final Version VECTOR_EARLIEST = BA;
     public static final Version JVECTOR_EARLIEST = CA;
     public static final Version BM25_EARLIEST = EC;
-    public static final Version LATEST = EC;
+    public static final Version LATEST = ALL.get(0);
     // The current version can be configured to be an earlier version to support partial upgrades that don't
     // write newer versions of the on-disk formats. This is volatile rather than final so that tests may
     // use reflection to change it and safely publish across threads.
@@ -230,7 +232,7 @@ public class Version implements Comparable<Version>
      * Try to parse the provided file name as a SAI component file name.
      *
      * @param filename the file name to try to parse.
-     * @return the information parsed from the provided file name if it can be sucessfully parsed, or an empty optional
+     * @return the information parsed from the provided file name if it can be successfully parsed, or an empty optional
      * if the file name is not recognized as a SAI component file name for a supported version.
      */
     public static Optional<ParsedFileName> tryParseFileName(String filename)
@@ -240,8 +242,8 @@ public class Version implements Comparable<Version>
 
         // For flexibility, we handle both "full" filename, of the form "<descriptor>-SAI+....db", or just the component
         // part, that is "SAI+....db". In the former, the following `lastIndexOf` will match, and we'll set
-        // `startOfComponent` at the begining of "SAI", and in the later it will not match and return -1, which, with
-        // the +1 will also be set at the begining of "SAI".
+        // `startOfComponent` at the beginning of "SAI", and in the later it will not match and return -1, which, with
+        // the +1 will also be set at the beginning of "SAI".
         int startOfComponent = filename.lastIndexOf('-') + 1;
 
         String componentStr = filename.substring(startOfComponent);
@@ -278,12 +280,9 @@ public class Version implements Comparable<Version>
     private static String aaFileNameFormat(IndexComponentType indexComponentType, @Nullable String indexName, int generation)
     {
         Preconditions.checkArgument(generation == 0, "Generation is not supported for AA version");
-        StringBuilder stringBuilder = new StringBuilder();
 
-        stringBuilder.append(indexName == null ? String.format(VERSION_AA_PER_SSTABLE_FORMAT, indexComponentType.representation)
-                                               : String.format(VERSION_AA_PER_INDEX_FORMAT, indexName, indexComponentType.representation));
-
-        return stringBuilder.toString();
+        return (indexName == null ? String.format(VERSION_AA_PER_SSTABLE_FORMAT, indexComponentType.representation)
+                                  : String.format(VERSION_AA_PER_INDEX_FORMAT, indexName, indexComponentType.representation));
     }
 
     private static Optional<ParsedFileName> tryParseAAFileName(String componentStr)
@@ -350,7 +349,7 @@ public class Version implements Comparable<Version>
         if (splits.length > 2)
         {
             // If we have 4 parts, then we know we have both the generation and index name. If we have 3
-            // however, it means we have either one, but we don't know which, so we chekc if the additional
+            // however, it means we have either one, but we don't know which, so we check if the additional
             // part is a number or not to distinguish.
             boolean hasGeneration = splits.length == 4 || GENERATION_PATTERN.matcher(splits[1]).matches();
             boolean hasIndexName = splits.length == 4 || !hasGeneration;
