@@ -175,7 +175,8 @@ public abstract class Relation
      *
      * @param table the Column Family meta data
      * @param boundNames the variables specification where to collect the bind variables
-     * @param indexHints the query index hints, used to disambiguate relations that might be supported by multiple indexes
+     * @param indexHints the query index hints, that should be considered for relations producing different restrictions
+     *                   depending on the supporting indexes, such as EQ on analyzed columns.
      * @return the <code>Restriction</code> corresponding to this <code>Relation</code>
      * @throws InvalidRequestException if this <code>Relation</code> is not valid
      */
@@ -183,7 +184,7 @@ public abstract class Relation
     {
         switch (relationType)
         {
-            case EQ: return newEQRestriction(table, boundNames, indexHints);
+            case EQ: return newEQRestriction(table, boundNames, indexHints); // EQ can behave like ANALYZER_MATCHES depending on indexes
             case NEQ: return newNEQRestriction(table, boundNames);
             case LT: return newSliceRestriction(table, boundNames, Bound.END, false);
             case LTE: return newSliceRestriction(table, boundNames, Bound.END, true);
