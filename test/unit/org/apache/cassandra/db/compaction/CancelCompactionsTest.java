@@ -385,7 +385,7 @@ public class CancelCompactionsTest extends CQLTester
         {
             long first = i * 10;
             long last  = (i + 1) * 10 - 1;
-            sstables.add(MockSchema.sstable(startGeneration + i, 0, true, first, last, cfs));
+            sstables.add(MockSchema.sstable(startGeneration + i, -1, true, first, last, cfs));
         }
         cfs.disableAutoCompaction();
         cfs.addSSTables(sstables);
