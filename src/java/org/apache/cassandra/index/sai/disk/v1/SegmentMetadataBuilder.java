@@ -70,6 +70,7 @@ public class SegmentMetadataBuilder
     private ByteBuffer maxTerm;
 
     private long numRows;
+    private long totalTermCount;
 
     private final TermsDistribution.Builder termsDistributionBuilder;
 
@@ -89,6 +90,11 @@ public class SegmentMetadataBuilder
     public void setNumRows(long numRows)
     {
         this.numRows = numRows;
+    }
+
+    public void setTotalTermCount(long totalTermCount)
+    {
+        this.totalTermCount = totalTermCount;
     }
 
     public void setKeyRange(@Nonnull PrimaryKey minKey, @Nonnull PrimaryKey maxKey)
@@ -158,7 +164,8 @@ public class SegmentMetadataBuilder
                                    minTerm,
                                    maxTerm,
                                    termsDistributionBuilder.build(),
-                                   metadataMap);
+                                   metadataMap,
+                                   totalTermCount);
     }
 
     /**
