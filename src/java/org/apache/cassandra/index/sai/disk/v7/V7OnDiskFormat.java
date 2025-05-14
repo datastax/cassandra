@@ -23,8 +23,6 @@ import java.util.Set;
 
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
-import org.apache.cassandra.index.sai.disk.v1.V1OnDiskFormat;
-import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.v6.V6OnDiskFormat;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 
@@ -41,10 +39,8 @@ public class V7OnDiskFormat extends V6OnDiskFormat
     @Override
     public Set<IndexComponentType> perIndexComponentTypes(AbstractType<?> validator)
     {
-        if (validator.isVector())
-            return V3OnDiskFormat.VECTOR_COMPONENTS_V3;
         if (TypeUtil.isLiteral(validator))
             return LITERAL_COMPONENTS;
-        return V1OnDiskFormat.NUMERIC_COMPONENTS;
+        return super.perIndexComponentTypes(validator);
     }
 }

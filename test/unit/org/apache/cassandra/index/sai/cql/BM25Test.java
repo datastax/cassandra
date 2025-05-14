@@ -21,18 +21,20 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.memory.MemtableIndex;
 import org.apache.cassandra.index.sai.memory.TrieMemoryIndex;
 import org.apache.cassandra.index.sai.memory.TrieMemtableIndex;
 import org.assertj.core.api.Assertions;
+
+import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -45,17 +47,34 @@ import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.SegmentBuilder;
 import org.apache.cassandra.index.sai.plan.QueryController;
 
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
+
 import static org.apache.cassandra.index.sai.analyzer.AnalyzerEqOperatorSupport.EQ_AMBIGUOUS_ERROR;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.AssertionsForInterfaceTypes.assertThat;
 import static org.junit.Assert.assertEquals;
 
+@RunWith(Parameterized.class)
 public class BM25Test extends SAITester
 {
+    @Parameterized.Parameter
+    public Version testVersion;
+
+    @Parameterized.Parameters(name = "version={0}")
+    public static List<Object> data()
+    {
+        return Arrays.asList(new Object[]{ Version.BM25_EARLIEST, Version.ED });
+    }
+
+    // Pattern that treats apostrophes within words as part of the word
+    private static final Pattern PATTERN = Pattern.compile("[^\\w']+|'(?=\\s)|(?<=\\s)'");
+    public static final int DATASET_BODY_COLUMN = 3;
+
     @Before
     public void setup() throws Throwable
     {
-        SAIUtil.setCurrentVersion(Version.BM25_EARLIEST);
+        SAIUtil.setCurrentVersion(testVersion);
     }
 
     @Test
@@ -379,7 +398,7 @@ public class BM25Test extends SAITester
                    row(4), // Highest frequency of both terms
                    row(2), // High frequency of 'crispy', one 'crust'
                    row(1)); // One mention of each term
-        // Rows 4 and 5 do not contain all terms
+        // Rows 3 and 5 do not contain all terms
     }
 
     @Test
@@ -404,9 +423,11 @@ public class BM25Test extends SAITester
         assertIrrelevantRowsCorrect();
 
         // Force segmentation and requery
-        SegmentBuilder.updateLastValidSegmentRowId(2);
+        long original = SegmentBuilder.updateLastValidSegmentRowId(2);
         compact();
         assertIrrelevantRowsCorrect();
+
+        SegmentBuilder.updateLastValidSegmentRowId(original);
     }
 
     private void createSimpleTable()
@@ -663,6 +684,37 @@ public class BM25Test extends SAITester
     }
 
     @Test
+    public void testOrderingSeveralSSTablesWithMapPredicate() throws Throwable
+    {
+        // Force search-then-sort
+        QueryController.QUERY_OPT_LEVEL = 0;
+        createTable("CREATE TABLE %s (id int PRIMARY KEY, category text, map_category map<int, int>)");
+        createAnalyzedIndex("category", true);
+        createIndex("CREATE CUSTOM INDEX ON %s (entries(map_category)) USING 'StorageAttachedIndex'");
+        // We don't want compaction to merge the two sstables since they are key to testing this code path.
+        disableCompaction();
+
+        // Insert documents so that they all have the same bm25 score and are easy to query across sstables
+        for (int i = 0; i < 10; i++)
+        {
+            execute("INSERT INTO %s (id, category, map_category) VALUES (?, ?, ?)",
+                    i, "Health", map(0, i));
+            if (i == 4)
+                flush();
+        }
+
+        // Confirm that the memtable/sstable and sstable/sstable pairings work as expected.
+        beforeAndAfterFlush(() -> {
+            // Submit a query that will fetch keys from 2 overlapping sstables. The key is that they are overlapping
+            // because we have optimizations that will skip keys that are out of the sstable's range. In this case,
+            // the actual bm25 data doesn't matter because we are covering the edge case of mapping PrK back to
+            // its value here.
+            assertRowsIgnoringOrder(execute("SELECT id FROM %s WHERE map_category[0] >= 4 AND map_category[0] <= 6 ORDER BY category BM25 OF 'health' LIMIT 10"),
+                                    row(4), row(5), row(6));
+        });
+    }
+
+    @Test
     public void testErrorMessages()
     {
         createTable("CREATE TABLE %s (id int PRIMARY KEY, category text, score int, " +
@@ -755,37 +807,6 @@ public class BM25Test extends SAITester
     }
 
     @Test
-    public void testOrderingSeveralSSTablesWithMapPredicate() throws Throwable
-    {
-        // Force search-then-sort
-        QueryController.QUERY_OPT_LEVEL = 0;
-        createTable("CREATE TABLE %s (id int PRIMARY KEY, category text, map_category map<int, int>)");
-        createAnalyzedIndex("category", true);
-        createIndex("CREATE CUSTOM INDEX ON %s (entries(map_category)) USING 'StorageAttachedIndex'");
-        // We don't want compaction to merge the two sstables since they are key to testing this code path.
-        disableCompaction();
-
-        // Insert documents so that they all have the same bm25 score and are easy to query across sstables
-        for (int i = 0; i < 10; i++)
-        {
-            execute("INSERT INTO %s (id, category, map_category) VALUES (?, ?, ?)",
-                    i, "Health", map(0, i));
-            if (i == 4)
-                flush();
-        }
-
-        // Confirm that the memtable/sstable and sstable/sstable pairings work as expected.
-        beforeAndAfterFlush(() -> {
-            // Submit a query that will fetch keys from 2 overlapping sstables. The key is that they are overlapping
-            // because we have optimizations that will skip keys that are out of the sstable's range. In this case,
-            // the actual bm25 data doesn't matter because we are covering the edge case of mapping PrK back to
-            // its value here.
-            assertRowsIgnoringOrder(execute("SELECT id FROM %s WHERE map_category[0] >= 4 AND map_category[0] <= 6 ORDER BY category BM25 OF 'health' LIMIT 10"),
-                                   row(4), row(5), row(6));
-        });
-    }
-
-    @Test
     public void testOrderingSeveralSegments() throws Throwable
     {
         createTable("CREATE TABLE %s (id int PRIMARY KEY, category text, score int," +
@@ -829,6 +850,8 @@ public class BM25Test extends SAITester
     @Test
     public void testIndexMetaForNumRows()
     {
+        SAIUtil.setCurrentVersion(Version.ED);
+
         createTable("CREATE TABLE %s (id int PRIMARY KEY, category text, score int, " +
                     "title text, body text, bodyset set<text>, " +
                     "map_category map<int, text>, map_body map<text, text>)");
@@ -836,23 +859,28 @@ public class BM25Test extends SAITester
         String scoreIndexName = createIndex("CREATE CUSTOM INDEX ON %s (score) USING 'StorageAttachedIndex'");
         String mapIndexName = createIndex("CREATE CUSTOM INDEX ON %s (map_category) USING 'StorageAttachedIndex'");
         insertCollectionData();
+        int totalTermsCount = IntStream.range(0, DATASET.length)
+                                       .map(this::calculateTotalTermsForRow)
+                                       .sum();
 
         assertNumRowsMemtable(scoreIndexName, DATASET.length);
         assertNumRowsMemtable(bodyIndexName, DATASET.length);
         assertNumRowsMemtable(mapIndexName, DATASET.length);
         execute("DELETE FROM %s WHERE id = ?", 5);
+        totalTermsCount -= calculateTotalTermsForRow(4);
         flush();
-        assertNumRowsSSTable(scoreIndexName, DATASET.length - 1);
-        assertNumRowsSSTable(bodyIndexName, DATASET.length - 1);
+        assertNumRowsAndTotalTermsSSTable(scoreIndexName, DATASET.length - 1, DATASET.length - 1);
+        assertNumRowsAndTotalTermsSSTable(bodyIndexName, DATASET.length - 1, totalTermsCount);
         assertNumRowsSSTable(mapIndexName, DATASET.length - 1);
         execute("DELETE FROM %s WHERE id = ?", 10);
         flush();
-        assertNumRowsSSTable(scoreIndexName, DATASET.length - 1);
-        assertNumRowsSSTable(bodyIndexName, DATASET.length - 1);
+        assertNumRowsAndTotalTermsSSTable(scoreIndexName, DATASET.length - 1, DATASET.length - 1);
+        assertNumRowsAndTotalTermsSSTable(bodyIndexName, DATASET.length - 1, totalTermsCount);
         assertNumRowsSSTable(mapIndexName, DATASET.length - 1);
         compact();
-        assertNumRowsSSTable(scoreIndexName, DATASET.length - 2);
-        assertNumRowsSSTable(bodyIndexName, DATASET.length - 2);
+        totalTermsCount -= calculateTotalTermsForRow(9);
+        assertNumRowsAndTotalTermsSSTable(scoreIndexName, DATASET.length - 2, DATASET.length - 2);
+        assertNumRowsAndTotalTermsSSTable(bodyIndexName, DATASET.length - 2, totalTermsCount);
         assertNumRowsSSTable(mapIndexName, DATASET.length - 2);
     }
 
@@ -873,17 +901,30 @@ public class BM25Test extends SAITester
 
     private void assertNumRowsSSTable(String indexName, int expectedNumRows)
     {
+        assertNumRowsAndTotalTermsSSTable(indexName, expectedNumRows, -1);
+    }
+
+    private void assertNumRowsAndTotalTermsSSTable(String indexName, int expectedNumRows, int expectedTotalTermsCount
+    )
+    {
         long indexRowCount = 0;
         long segmentRowCount = 0;
+        long totalTermCount = 0;
         for (SSTableIndex sstableIndex : getIndexContext(indexName).getView())
         {
             indexRowCount += sstableIndex.getRowCount();
-            segmentRowCount += sstableIndex.getSegments().stream()
-                                           .map(s -> Objects.requireNonNull(s.metadata).numRows)
-                                           .mapToLong(Long::longValue).sum();
+            for (var segment : sstableIndex.getSegments())
+            {
+                var metadata = segment.metadata;
+                Assert.assertNotNull(metadata);
+                segmentRowCount += metadata.numRows;
+                totalTermCount += metadata.totalTermCount;
+            }
         }
         assertEquals(indexRowCount, segmentRowCount);
         assertEquals(expectedNumRows, indexRowCount);
+        if (expectedTotalTermsCount > 0)
+            assertEquals(expectedTotalTermsCount, totalTermCount);
     }
 
     private final static Object[][] DATASET =
@@ -909,13 +950,12 @@ public class BM25Test extends SAITester
     { 19, "Climate", 5, "Climate change, climate policies, climate research—climate is the buzzword of our time.", 2 },
     { 20, "Mixed", 3, "Investments in education and technology will shape the future of the global economy.", 1 }
     };
-    
+
     private void analyzeDataset(String term)
     {
-        final Pattern PATTERN = Pattern.compile("\\W+");
         for (Object[] row : DATASET)
         {
-            String body = (String) row[3];
+            String body = (String) row[DATASET_BODY_COLUMN];
             String[] words = PATTERN.split(body.toLowerCase());
 
             long totalWords = words.length;
@@ -927,6 +967,12 @@ public class BM25Test extends SAITester
                 System.out.printf("            // ID %d: total words = %d, %s occurrences = %d%n",
                                   (Integer) row[0], totalWords, term, termCount);
         }
+    }
+
+    private int calculateTotalTermsForRow(int row)
+    {
+        String body = (String) DATASET[row][DATASET_BODY_COLUMN];
+        return PATTERN.split(body.toLowerCase()).length;
     }
 
     private void insertPrimitiveData()
