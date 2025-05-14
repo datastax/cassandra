@@ -23,10 +23,13 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.atomic.LongAdder;
+import java.util.stream.Stream;
 import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -45,12 +48,11 @@ import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.memtable.AbstractShardedMemtable;
 import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.memtable.ShardBoundaries;
-import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.dht.AbstractBounds;
-import org.apache.cassandra.dht.Bounds;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
+import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.vector.AbstractMemtableIndex;
 import org.apache.cassandra.index.sai.iterators.KeyRangeConcatIterator;
@@ -313,7 +315,16 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
         int startShard = boundaries.getShardForToken(keyRange.left.getToken());
         int endShard = keyRange.right.isMinimum() ? boundaries.shardCount() - 1 : boundaries.getShardForToken(keyRange.right.getToken());
 
-        if (!orderer.isBM25())
+        if (orderer.isBM25())
+        {
+            // Intersect iterators to find documents containing all terms
+            List<ByteBuffer> queryTerms = orderer.getQueryTerms();
+            List<KeyRangeIterator> termIterators = keyIteratorsPerTerm(queryContext, keyRange, queryTerms);
+            KeyRangeIterator intersectedIterator = KeyRangeIntersectionIterator.builder(termIterators).build();
+
+            return List.of(orderByBM25(Streams.stream(intersectedIterator), orderer));
+        }
+        else
         {
             var iterators = new ArrayList<CloseableIterator<PrimaryKeyWithSortKey>>(endShard - startShard + 1);
             for (int shard = startShard; shard <= endShard; ++shard)
@@ -323,27 +334,6 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
             }
             return iterators;
         }
-
-        // BM25
-        var queryTerms = orderer.getQueryTerms();
-
-        // Intersect iterators to find documents containing all terms
-        var termIterators = keyIteratorsPerTerm(queryContext, keyRange, queryTerms);
-        var intersectedIterator = KeyRangeIntersectionIterator.builder(termIterators).build();
-
-        // Compute BM25 scores
-        var docStats = computeDocumentFrequencies(queryContext, queryTerms);
-        var analyzer = indexContext.getAnalyzerFactory().create();
-        var it = Streams.stream(intersectedIterator)
-                 .map(pk -> BM25Utils.EagerDocTF.createFromDocument(pk, getCellForKey(pk), analyzer, queryTerms))
-                 .filter(Objects::nonNull)
-                 .iterator();
-
-        return List.of(BM25Utils.computeScores(CloseableIterator.wrap(it),
-                                               queryTerms,
-                                               docStats,
-                                               indexContext,
-                                               memtable));
     }
 
     private List<KeyRangeIterator> keyIteratorsPerTerm(QueryContext queryContext, AbstractBounds<PartitionPosition> keyRange, List<ByteBuffer> queryTerms)
@@ -373,8 +363,9 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
         if (keys.isEmpty())
             return CloseableIterator.emptyIterator();
 
-        if (!orderer.isBM25())
-        {
+        if (orderer.isBM25())
+            return orderByBM25(keys.stream(), orderer);
+        else
             return SortingIterator.createCloseable(
                 orderer.getComparator(),
                 keys,
@@ -397,16 +388,18 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
                 },
                 Runnables.doNothing()
             );
-        }
+    }
 
-        // BM25
-        var analyzer = indexContext.getAnalyzerFactory().create();
-        var queryTerms = orderer.getQueryTerms();
-        var docStats = computeDocumentFrequencies(queryContext, queryTerms);
-        var it = keys.stream()
-                     .map(pk -> BM25Utils.EagerDocTF.createFromDocument(pk, getCellForKey(pk), analyzer, queryTerms))
-                     .filter(Objects::nonNull)
-                     .iterator();
+    private CloseableIterator<PrimaryKeyWithSortKey> orderByBM25(Stream<PrimaryKey> stream, Orderer orderer)
+    {
+        assert orderer.isBM25();
+        List<ByteBuffer> queryTerms = orderer.getQueryTerms();
+        AbstractAnalyzer analyzer = indexContext.getAnalyzerFactory().create();
+        BM25Utils.DocStats docStats = computeDocumentFrequencies(queryTerms, analyzer);
+        Iterator<BM25Utils.DocTF> it = stream
+                                       .map(pk -> BM25Utils.EagerDocTF.createFromDocument(pk, getCellForKey(pk), analyzer, queryTerms))
+                                       .filter(Objects::nonNull)
+                                       .iterator();
         return BM25Utils.computeScores(CloseableIterator.wrap(it),
                                        queryTerms,
                                        docStats,
@@ -417,26 +410,11 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
     /**
      * Count document frequencies for each term using brute force
      */
-    private BM25Utils.DocStats computeDocumentFrequencies(QueryContext queryContext, List<ByteBuffer> queryTerms)
+    private BM25Utils.DocStats computeDocumentFrequencies(List<ByteBuffer> queryTerms, AbstractAnalyzer docAnalyzer)
     {
-        var termIterators = keyIteratorsPerTerm(queryContext, Bounds.unbounded(indexContext.getPartitioner()), queryTerms);
         var documentFrequencies = new HashMap<ByteBuffer, Long>();
-        for (int i = 0; i < queryTerms.size(); i++)
-        {
-            // KeyRangeIterator.getMaxKeys is not accurate enough, we have to count them
-            long keys = 0;
-            for (var it = termIterators.get(i); it.hasNext(); )
-            {
-                PrimaryKey pk = it.next();
-                Cell<?> cellForKey = getCellForKey(pk);
-                if (cellForKey == null)
-                    // skip deleted rows
-                    continue;
-                keys++;
-            }
-            documentFrequencies.put(queryTerms.get(i), keys);
-        }
         long docCount = 0;
+        long totalTermCount = 0;
 
         // count all documents in the queried column
         try (var it = memtable.partitionIterator(ColumnFilter.selection(RegularAndStaticColumns.of(indexContext.getDefinition())),
@@ -455,11 +433,30 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
                     if (cell == null)
                         continue;
 
+                    Set<ByteBuffer> queryTermsPerDoc = new HashSet<>(queryTerms.size());
+                    docAnalyzer.reset(cell.buffer());
+                    try
+                    {
+                        while (docAnalyzer.hasNext())
+                        {
+                            ByteBuffer term = docAnalyzer.next();
+                            totalTermCount++;
+                            if (queryTerms.contains(term))
+                                queryTermsPerDoc.add(term);
+                        }
+                    }
+                    finally
+                    {
+                        docAnalyzer.end();
+                    }
+                    for (ByteBuffer term : queryTermsPerDoc)
+                        documentFrequencies.merge(term, 1L, Long::sum);
+
                     docCount++;
                 }
             }
         }
-        return new BM25Utils.DocStats(documentFrequencies, docCount);
+        return new BM25Utils.DocStats(documentFrequencies, docCount, totalTermCount);
     }
 
     @Nullable

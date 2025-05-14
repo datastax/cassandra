@@ -78,6 +78,16 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
      * number of indexed rows (aka. pair of term and segmentRowId) in current segment
      */
     public final long numRows;
+    /**
+     * Represents the total count of terms in a segment.
+     * It used to caclulate the average document length for BM25.
+     */
+    public final long totalTermCount;
+    /**
+     * A constant representing an invalid total term count when it cannot be read
+     * from disk, since the SAI format version doesn't support serializing it.
+     */
+    public static final long INVALID_TOTAL_TERM_COUNT = -1;
 
     /**
      * Ordered by their token position in current segment
@@ -113,7 +123,8 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
                     ByteBuffer minTerm,
                     ByteBuffer maxTerm,
                     TermsDistribution termsDistribution,
-                    ComponentMetadataMap componentMetadatas)
+                    ComponentMetadataMap componentMetadatas,
+                    long totalTermCount)
     {
         // numRows can exceed Integer.MAX_VALUE because it is the count of unique term and segmentRowId pairs.
         Objects.requireNonNull(minKey);
@@ -126,6 +137,7 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
         this.minSSTableRowId = minSSTableRowId;
         this.maxSSTableRowId = maxSSTableRowId;
         this.numRows = numRows;
+        this.totalTermCount = totalTermCount;
         this.minKey = minKey;
         this.maxKey = maxKey;
         this.minTerm = minTerm;
@@ -198,6 +210,11 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
         }
         this.termsDistribution = td;
         this.componentMetadatas = new SegmentMetadata.ComponentMetadataMap(input);
+
+        if (version.onOrAfter(Version.ED))
+            this.totalTermCount = input.readLong();
+        else
+            this.totalTermCount = INVALID_TOTAL_TERM_COUNT;
     }
 
     @SuppressWarnings("resource")
@@ -276,6 +293,12 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
                 }
 
                 metadata.componentMetadatas.write(output);
+
+                if (writer.version().onOrAfter(Version.ED))
+                {
+                    assert metadata.totalTermCount >= 0 : "totalTermCount cannot be unknown on this or later version";
+                    output.writeLong(metadata.totalTermCount);
+                }
             }
         }
     }
