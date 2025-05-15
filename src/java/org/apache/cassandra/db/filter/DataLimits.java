@@ -24,16 +24,11 @@ import java.util.List;
 import java.util.StringJoiner;
 
 import com.google.common.annotations.VisibleForTesting;
+import org.apache.cassandra.db.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.cql3.PageSize;
-import org.apache.cassandra.db.Clustering;
-import org.apache.cassandra.db.ClusteringComparator;
-import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.db.Slices;
-import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.db.aggregation.AggregationSpecification;
 import org.apache.cassandra.db.aggregation.GroupMaker;
 import org.apache.cassandra.db.aggregation.GroupingState;
@@ -454,6 +449,15 @@ public abstract class DataLimits
         {
             super.onClose();
         }
+
+        protected int dataSize(Row row)
+        {
+            if (assumeLiveData)
+                return row.dataSize();
+
+            Row purged = row.purge(DeletionPurger.PURGE_ALL, nowInSec, enforceStrictLiveness);
+            return purged == null ? 0 : purged.dataSize();
+        }
     }
 
     /**
@@ -630,14 +634,14 @@ public abstract class DataLimits
             {
                 rowsInCurrentPartition = 0;
                 hasLiveStaticRow = !staticRow.isEmpty() && isLive(staticRow);
-                staticRowBytes = hasLiveStaticRow && bytesLimit != NO_LIMIT ? staticRow.dataSize() : 0;
+                staticRowBytes = hasLiveStaticRow && bytesLimit != NO_LIMIT ? dataSize(staticRow) : 0;
             }
 
             @Override
             public Row applyToRow(Row row)
             {
                 if (isLive(row))
-                    incrementRowCount(bytesLimit != NO_LIMIT ? row.dataSize() : 0);
+                    incrementRowCount(bytesLimit != NO_LIMIT ? dataSize(row) : 0);
                 return row;
             }
 
@@ -1112,7 +1116,7 @@ public abstract class DataLimits
                     }
                     hasReturnedRowsFromCurrentPartition = false;
                     hasLiveStaticRow = !staticRow.isEmpty() && isLive(staticRow);
-                    staticRowBytes = hasLiveStaticRow ? staticRow.dataSize() : 0;
+                    staticRowBytes = hasLiveStaticRow ? dataSize(staticRow) : 0;
                 }
                 currentPartitionKey = partitionKey;
                 // If we are done we need to preserve the groupInCurrentPartition and rowsCountedInCurrentPartition
@@ -1178,7 +1182,7 @@ public abstract class DataLimits
                 if (isLive(row))
                 {
                     hasUnfinishedGroup = true;
-                    incrementRowCount(bytesLimit != NO_LIMIT ? row.dataSize() : 0);
+                    incrementRowCount(bytesLimit != NO_LIMIT ? dataSize(row) : 0);
                     hasReturnedRowsFromCurrentPartition = true;
                 }
 
