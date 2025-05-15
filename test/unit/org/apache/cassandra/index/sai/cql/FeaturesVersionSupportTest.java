@@ -16,9 +16,12 @@
 
 package org.apache.cassandra.index.sai.cql;
 
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
+import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -28,13 +31,18 @@ import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.exceptions.ReadFailureException;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.index.sai.SAIUtil;
+import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.disk.format.Version;
+import org.apache.cassandra.index.sai.memory.MemtableIndex;
+import org.apache.cassandra.index.sai.memory.TrieMemoryIndex;
+import org.apache.cassandra.index.sai.memory.TrieMemtableIndex;
 import org.assertj.core.api.Assertions;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.Assert.assertEquals;
 
 /**
- * Tests the availabilty of features in different versions of the SAI on-disk format.
+ * Tests the availability of features in different versions of the SAI on-disk format.
  */
 @RunWith(Parameterized.class)
 public class FeaturesVersionSupportTest extends VectorTester
@@ -225,5 +233,108 @@ public class FeaturesVersionSupportTest extends VectorTester
         assertRows(execute("SELECT k FROM %s WHERE v : 'astra2'"), row(2));
         assertRows(execute("SELECT k FROM %s WHERE v : 'fox'"), row(1), row(2), row(3));
         assertRows(execute("SELECT k FROM %s WHERE v : 'foxes'"), row(3));
+    }
+
+    /**
+     * Asserts that memtable SAI index maintains expected row count, which is, then,
+     * used to store row count in SSTable SAI index and its segments. This is also
+     * asserted.
+     */
+    @Test
+    public void testIndexMetaForNumRows()
+    {
+        createTable("CREATE TABLE %s (id int PRIMARY KEY, category text, score int, " +
+                    "title text, body text, bodyset set<text>, " +
+                    "map_category map<int, text>, map_body map<text, text>)");
+        String bodyIndexName = createIndex("CREATE CUSTOM INDEX ON %s(body) " +
+                                           "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
+                                           "WITH OPTIONS = {" +
+                                           "'index_analyzer': '{" +
+                                           "\"tokenizer\" : {\"name\" : \"standard\"}, " +
+                                           "\"filters\" : [{\"name\" : \"porterstem\"}" +
+                                           ", {\"name\" : \"lowercase\"}]" +
+                                           "}'}"
+        );
+        String scoreIndexName = createIndex("CREATE CUSTOM INDEX ON %s (score) USING 'StorageAttachedIndex'");
+        String mapIndexName = createIndex("CREATE CUSTOM INDEX ON %s (map_category) USING 'StorageAttachedIndex'");
+        insertCollectionData();
+        int totalTermsCount = IntStream.range(0, DATASET.length)
+                                       .map(this::calculateTotalTermsForRow)
+                                       .sum();
+
+        assertNumRowsMemtable(scoreIndexName, DATASET.length);
+        assertNumRowsMemtable(bodyIndexName, DATASET.length);
+        assertNumRowsMemtable(mapIndexName, DATASET.length);
+        execute("DELETE FROM %s WHERE id = ?", 5);
+        totalTermsCount -= calculateTotalTermsForRow(4);
+        flush();
+        assertNumRowsAndTotalTermsSSTable(scoreIndexName, DATASET.length - 1, DATASET.length - 1);
+        assertNumRowsAndTotalTermsSSTable(bodyIndexName, DATASET.length - 1, totalTermsCount);
+        assertNumRowsSSTable(mapIndexName, DATASET.length - 1);
+        execute("DELETE FROM %s WHERE id = ?", 10);
+        flush();
+        assertNumRowsAndTotalTermsSSTable(scoreIndexName, DATASET.length - 1, DATASET.length - 1);
+        assertNumRowsAndTotalTermsSSTable(bodyIndexName, DATASET.length - 1, totalTermsCount);
+        assertNumRowsSSTable(mapIndexName, DATASET.length - 1);
+        compact();
+        totalTermsCount -= calculateTotalTermsForRow(9);
+        assertNumRowsAndTotalTermsSSTable(scoreIndexName, DATASET.length - 2, DATASET.length - 2);
+        assertNumRowsAndTotalTermsSSTable(bodyIndexName, DATASET.length - 2, totalTermsCount);
+        assertNumRowsSSTable(mapIndexName, DATASET.length - 2);
+    }
+
+    private int calculateTotalTermsForRow(int row)
+    {
+        String body = (String) DATASET[row][DATASET_BODY_COLUMN];
+        return PATTERN.split(body.toLowerCase()).length;
+    }
+
+    private void assertNumRowsMemtable(String indexName, int expectedNumRows)
+    {
+        int rowCount = 0;
+
+        for (var memtable : getCurrentColumnFamilyStore().getAllMemtables())
+        {
+            MemtableIndex memIndex = getIndexContext(indexName).getLiveMemtables().get(memtable);
+            assert memIndex instanceof TrieMemtableIndex;
+            rowCount = Arrays.stream(((TrieMemtableIndex) memIndex).getRangeIndexes())
+                             .map(index -> ((TrieMemoryIndex) index).getDocLengths().size())
+                             .mapToInt(Integer::intValue).sum();
+        }
+        assertEquals(expectedNumRows, rowCount);
+    }
+
+    private void assertNumRowsSSTable(String indexName, int expectedNumRows)
+    {
+        assertNumRowsAndTotalTermsSSTable(indexName, expectedNumRows, -1);
+    }
+
+    private void assertNumRowsAndTotalTermsSSTable(String indexName, int expectedNumRows, int expectedTotalTermsCount)
+    {
+        long indexRowCount = 0;
+        long segmentRowCount = 0;
+        long totalTermCount = 0;
+        for (SSTableIndex sstableIndex : getIndexContext(indexName).getView())
+        {
+            indexRowCount += sstableIndex.getRowCount();
+            for (var segment : sstableIndex.getSegments())
+            {
+                var metadata = segment.metadata;
+                Assert.assertNotNull(metadata);
+                segmentRowCount += metadata.numRows;
+                totalTermCount += metadata.totalTermCount;
+            }
+        }
+        assertEquals(indexRowCount, segmentRowCount);
+        assertEquals(expectedNumRows, indexRowCount);
+        if (version.onOrAfter(Version.ED))
+        {
+            if (expectedTotalTermsCount > 0)
+                assertEquals(expectedTotalTermsCount, totalTermCount);
+        }
+        else
+        {
+            assertEquals(-1, totalTermCount);
+        }
     }
 }
