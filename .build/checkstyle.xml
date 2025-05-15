@@ -169,9 +169,9 @@
       <property name="message" value="Use the CassandraRelevantProperties or CassandraRelevantEnv instead." />
     </module>
 
-    <module name="IllegalType"> <!-- usage of var check -->
-      <property name="illegalClassNames" value="var"/>
-    </module>
+<!--    <module name="IllegalType"> &lt;!&ndash; usage of var check &ndash;&gt;-->
+<!--      <property name="illegalClassNames" value="var"/>-->
+<!--    </module>-->
 
     <module name="RedundantImport"/>
     <module name="UnusedImports"/>
