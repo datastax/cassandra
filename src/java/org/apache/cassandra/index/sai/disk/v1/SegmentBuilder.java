@@ -78,8 +78,10 @@ public abstract class SegmentBuilder
 {
     private static final Logger logger = LoggerFactory.getLogger(SegmentBuilder.class);
 
-    /** for parallelism within a single compaction */
-    public static final ExecutorService compactionExecutor = new DebuggableThreadPoolExecutor(Runtime.getRuntime().availableProcessors(),
+    /** for parallelism within a single compaction
+     *  see comments to JVector PhysicalCoreExecutor -- HT tends to cause contention for the SIMD units
+     */
+    public static final ExecutorService compactionExecutor = new DebuggableThreadPoolExecutor(Runtime.getRuntime().availableProcessors() / 2,
                                                                                               1,
                                                                                               TimeUnit.MINUTES,
                                                                                               new ArrayBlockingQueue<>(10 * Runtime.getRuntime().availableProcessors()),
