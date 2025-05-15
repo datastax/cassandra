@@ -52,6 +52,13 @@ public abstract class FeaturesVersionSupportTester extends TestBaseImpl
     // To be called by inheritors in a method annotated with @BeforeClass
     protected static void initCluster(Version version) throws IOException
     {
+        // Clean up any existing cluster from a previous test
+        if (cluster != null)
+        {
+            cluster.close();
+            cluster = null;
+        }
+        
         FeaturesVersionSupportTester.version = version;
         cluster = init(Cluster.build(2)
                               .withInstanceInitializer((cl, n) -> BB.install(cl, n, version))
@@ -87,7 +94,12 @@ public abstract class FeaturesVersionSupportTester extends TestBaseImpl
     @AfterClass
     public static void cleanup()
     {
-        cluster.close();
+        if (cluster != null)
+        {
+            cluster.close();
+            cluster = null;
+        }
+        version = null;
     }
     
     /**
