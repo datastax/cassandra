@@ -177,6 +177,12 @@ abstract class IntersectionCursor<T, C extends Cursor<T>> implements Cursor<T>
     }
 
     @Override
+    public T content()
+    {
+        return source.content();
+    }
+
+    @Override
     public Direction direction()
     {
         return source.direction();
@@ -197,12 +203,6 @@ abstract class IntersectionCursor<T, C extends Cursor<T>> implements Cursor<T>
         }
 
         @Override
-        public T content()
-        {
-            return source.content();
-        }
-
-        @Override
         public Cursor<T> tailCursor(Direction direction)
         {
             switch (state)
@@ -211,6 +211,53 @@ abstract class IntersectionCursor<T, C extends Cursor<T>> implements Cursor<T>
                     return new Plain<>(source.tailCursor(direction), set.tailCursor(direction));
                 case SET_AHEAD:
                     return source.tailCursor(direction);
+                default:
+                    throw new AssertionError();
+            }
+        }
+    }
+
+    static class DeletionAware<T, D extends RangeState<D>>
+    extends IntersectionCursor<T, DeletionAwareCursor<T, D>>
+    implements DeletionAwareCursor<T, D>
+    {
+        RangeCursor<D> applicableDeletionBranch;
+
+        public DeletionAware(DeletionAwareCursor<T, D> source, TrieSetCursor set)
+        {
+            super(source, set);
+            applicableDeletionBranch = null;
+        }
+
+        @Override
+        public DeletionAwareCursor<T, D> tailCursor(Direction direction)
+        {
+            switch (state)
+            {
+                case MATCHING:
+                    return new DeletionAware<>(source.tailCursor(direction), set.tailCursor(direction));
+                case SET_AHEAD:
+                    return source.tailCursor(direction);
+                default:
+                    throw new AssertionError();
+            }
+        }
+
+        @Override
+        public RangeCursor<D> deletionBranchCursor(Direction direction)
+        {
+            RangeCursor<D> deletions = source.deletionBranchCursor(direction);
+            if (deletions == null)
+                return null;
+
+            switch (state)
+            {
+                case SET_AHEAD:
+                    // Since the deletion branch cannot extend outside this branch, it is fully covered by the set.
+                    return deletions;
+                case MATCHING:
+                    return new RangeIntersectionCursor<>(deletions,
+                                                         set.tailCursor(direction));
                 default:
                     throw new AssertionError();
             }

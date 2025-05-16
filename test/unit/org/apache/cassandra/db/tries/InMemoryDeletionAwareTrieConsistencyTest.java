@@ -19,6 +19,7 @@
 package org.apache.cassandra.db.tries;
 
 import java.util.Collection;
+import java.util.function.BiFunction;
 import java.util.function.Predicate;
 
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
@@ -26,19 +27,37 @@ import org.apache.cassandra.utils.concurrent.OpOrder;
 
 import static org.apache.cassandra.db.tries.TrieUtil.VERSION;
 
-public class InMemoryTrieConsistencyTest extends ConsistencyTestBase<InMemoryTrieConsistencyTest.Content, Trie<InMemoryTrieConsistencyTest.Content>, InMemoryTrie<InMemoryTrieConsistencyTest.Content>>
+/**
+ * Consistency test for InMemoryDeletionAwareTrie that validates concurrent operations
+ * with both live data and deletion markers under different atomicity guarantees.
+ * 
+ * This test extends ConsistencyTestBase to verify that InMemoryDeletionAwareTrie maintains
+ * correctness and consistency under concurrent access patterns typical of Cassandra's
+ * memtable operations with deletions.
+ */
+public class InMemoryDeletionAwareTrieConsistencyTest
+extends ConsistencyTestBase<InMemoryDeletionAwareTrieConsistencyTest.Content,
+                           DeletionAwareTrie<InMemoryDeletionAwareTrieConsistencyTest.Content, ConsistencyTestBase.TestRangeState>,
+                           InMemoryDeletionAwareTrie<InMemoryDeletionAwareTrieConsistencyTest.Content, ConsistencyTestBase.TestRangeState>>
 {
+
+    @SuppressWarnings("rawtypes") // type does not matter, we are always throwing an exception
+    static final InMemoryBaseTrie.UpsertTransformer UPSERT_THROW = (x, y) -> { throw new AssertionError(); };
+    @SuppressWarnings("rawtypes") // type does not matter, we are always throwing an exception
+    static final BiFunction BIFUNCTION_THROW = (x, y) -> { throw new AssertionError(); };
+
     @Override
-    InMemoryTrie<Content> makeTrie(OpOrder readOrder)
+    InMemoryDeletionAwareTrie<Content, TestRangeState> makeTrie(OpOrder readOrder)
     {
-        return InMemoryTrie.longLived(VERSION, readOrder);
+        return InMemoryDeletionAwareTrie.longLived(VERSION, readOrder);
     }
 
     @Override
-    Value value(ByteComparable b, ByteComparable cprefix, ByteComparable c, int add, int seqId)
+    Content value(ByteComparable b, ByteComparable cprefix, ByteComparable c, int add, int seqId)
     {
-        return new Value(b.byteComparableAsString(VERSION),
-                         (cprefix != null ? cprefix.byteComparableAsString(VERSION) : "") + c.byteComparableAsString(VERSION), add, seqId);
+        String pk = b.byteComparableAsString(VERSION);
+        String ck = (cprefix != null ? cprefix.byteComparableAsString(VERSION) : "") + c.byteComparableAsString(VERSION);
+        return new Value(pk, ck, add, seqId);
     }
 
     @Override
@@ -78,40 +97,62 @@ public class InMemoryTrieConsistencyTest extends ConsistencyTestBase<InMemoryTri
     }
 
     @Override
-    Trie<Content> makeSingleton(ByteComparable b, Content content)
+    DeletionAwareTrie<Content, TestRangeState> makeSingleton(ByteComparable b, Content content)
     {
-        return Trie.singleton(b, VERSION, content);
+        return DeletionAwareTrie.singleton(b, VERSION, content);
     }
 
     @Override
-    Trie<Content> withRootMetadata(Trie<Content> wrapped, Content metadata)
+    DeletionAwareTrie<Content, TestRangeState> withRootMetadata(DeletionAwareTrie<Content, TestRangeState> wrapped, Content metadata)
     {
         return TrieUtil.withRootMetadata(wrapped, metadata);
     }
 
     @Override
-    Trie<Content> merge(Collection<Trie<Content>> tries, Trie.CollectionMergeResolver<Content> mergeResolver)
+    DeletionAwareTrie<Content, TestRangeState> merge(Collection<DeletionAwareTrie<Content, TestRangeState>> tries,
+                                                      Trie.CollectionMergeResolver<Content> mergeResolver)
     {
-        return Trie.merge(tries, mergeResolver);
+        return DeletionAwareTrie.merge(tries,
+                                      mergeResolver,
+                                      Trie.throwingResolver(),
+                                      BIFUNCTION_THROW,
+                                      true); // deletionsAtFixedPoints = true for consistency
     }
 
     @Override
-    void apply(InMemoryTrie<Content> trie, Trie<Content> mutation, InMemoryBaseTrie.UpsertTransformer<Content, Content> mergeResolver, Predicate<InMemoryBaseTrie.NodeFeatures<Content>> forcedCopyChecker) throws TrieSpaceExhaustedException
+    void apply(InMemoryDeletionAwareTrie<Content, TestRangeState> trie,
+               DeletionAwareTrie<Content, TestRangeState> mutation,
+               InMemoryBaseTrie.UpsertTransformer<Content, Content> mergeResolver,
+               Predicate<InMemoryBaseTrie.NodeFeatures<Content>> forcedCopyChecker) throws TrieSpaceExhaustedException
     {
-        trie.apply(mutation, mergeResolver, forcedCopyChecker);
+        trie.apply(mutation,
+                  mergeResolver, // Use the provided merge resolver for content
+                   (del, incoming) -> { throw new AssertionError(); },
+                   (del, incoming) -> { throw new AssertionError(); },
+                   (del, incoming) -> { throw new AssertionError(); },
+                  true, // deletionsAtFixedPoints = true for consistency
+                  forcedCopyChecker); // Use the provided forced copy checker
     }
 
     @Override
-    void delete(InMemoryTrie<Content> trie,
+    void delete(InMemoryDeletionAwareTrie<Content, TestRangeState> trie,
                 ByteComparable deletionPrefix,
                 TestRangeState partitionMarker,
-                RangeTrie<TestRangeState> deletion,
+                RangeTrie<TestRangeState> deletionBranch,
                 InMemoryBaseTrie.UpsertTransformer<Content, TestRangeState> mergeResolver,
                 Predicate<InMemoryBaseTrie.NodeFeatures<TestRangeState>> forcedCopyChecker) throws TrieSpaceExhaustedException
     {
+        DeletionAwareTrie<TestRangeState, TestRangeState> deletion = DeletionAwareTrie.deletionBranch(ByteComparable.EMPTY, VERSION, deletionBranch);
         deletion = TrieUtil.withRootMetadata(deletion, partitionMarker);
         deletion = deletion.prefixedBy(deletionPrefix);
-        trie.apply(deletion, mergeResolver, forcedCopyChecker);
+
+        trie.apply(deletion,
+                  mergeResolver,
+                  (existing, incoming) -> TestRangeState.combine(existing, incoming),
+                  mergeResolver,
+                  BIFUNCTION_THROW,
+                  true,
+                  forcedCopyChecker);
     }
 
     @Override
@@ -123,28 +164,31 @@ public class InMemoryTrieConsistencyTest extends ConsistencyTestBase<InMemoryTri
     @Override
     Content mergeMetadata(Content c1, Content c2)
     {
+        if (c1 == null) return c2;
+        if (c2 == null) return c1;
         return ((Metadata) c1).mergeWith((Metadata) c2);
     }
 
     @Override
-    Content deleteMetadata(Content c1, int entriesToRemove)
+    Content deleteMetadata(Content existing, int entriesToRemove)
     {
-        return ((Metadata) c1).delete(entriesToRemove);
+        if (existing == null) return null;
+        return ((Metadata) existing).delete(entriesToRemove);
     }
 
     @Override
-    void printStats(InMemoryTrie<Content> trie, Predicate<InMemoryBaseTrie.NodeFeatures<Content>> forcedCopyChecker)
+    void printStats(InMemoryDeletionAwareTrie<Content, TestRangeState> trie,
+                    Predicate<InMemoryBaseTrie.NodeFeatures<Content>> forcedCopyChecker)
     {
-        System.out.format("Reuse %s %s atomicity %s on-heap %,d (+%,d) off-heap %,d\n",
+        System.out.format("DeletionAware Reuse %s %s on-heap %,d (+%,d) off-heap %,d\n",
                           trie.cellAllocator.getClass().getSimpleName(),
                           trie.bufferType,
-                          forcedCopyChecker == this.<Content>noAtomicity() ? "none" :
-                          forcedCopyChecker == this.<Content>forceAtomic() ? "atomic" : "consistent partition",
                           trie.usedSizeOnHeap(),
                           trie.unusedReservedOnHeapMemory(),
                           trie.usedSizeOffHeap());
     }
 
+    // Content hierarchy for deletion-aware consistency testing
     abstract static class Content
     {
         final String pk;

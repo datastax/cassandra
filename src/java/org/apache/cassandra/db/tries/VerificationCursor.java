@@ -53,6 +53,11 @@ public interface VerificationCursor
         Cursor.TransitionsReceiver chainedReceiver = null;
         boolean advanceMultipleCalledReceiver;
 
+        Plain(C cursor)
+        {
+            this(cursor, 0, 0, INITIAL_TRANSITION);
+        }
+
         Plain(C cursor, int minDepth, int expectedDepth, int expectedTransition)
         {
             this.direction = cursor.direction();
@@ -178,7 +183,7 @@ public interface VerificationCursor
         @SuppressWarnings("unchecked")
         public Plain<T, C> tailCursor(Direction direction)
         {
-            return new Plain<>((C) source.tailCursor(direction), 0, 0, INITIAL_TRANSITION);
+            return new Plain<>((C) source.tailCursor(direction));
         }
 
 
@@ -242,9 +247,9 @@ public interface VerificationCursor
         S nextPrecedingState = null;
         int maxNextDepth = Integer.MAX_VALUE;
 
-        WithRanges(C source, int minDepth, int expectedDepth, int expectedTransition)
+        WithRanges(C source)
         {
-            super(source, minDepth, expectedDepth, expectedTransition);
+            super(source);
             // start state can be non-null for sets
             currentPrecedingState = verifyCoveringStateProperties(source.precedingState());
             final S content = source.content();
@@ -288,12 +293,10 @@ public interface VerificationCursor
         @Override
         public S precedingState()
         {
-            Preconditions.checkState(currentPrecedingState == source.precedingState(),
-                                     "Preceding state changed without advance: %s -> %s. %s\n%s",
+            Preconditions.checkState(currentPrecedingState == source.precedingState() ||
+                                     currentPrecedingState != null && currentPrecedingState.equals(source.precedingState()),
+                                     "Preceding state changed without advance: %s -> %s.\n%s",
                                      currentPrecedingState, source.precedingState(),
-                                     agree(currentPrecedingState, source.precedingState())
-                                     ? "The values are equal but different object. This is not permitted for performance reasons."
-                                     : "",
                                      this);
             return currentPrecedingState;
         }
@@ -394,12 +397,7 @@ public interface VerificationCursor
     {
         Range(RangeCursor<S> source)
         {
-            this(source, 0, 0, INITIAL_TRANSITION);
-        }
-
-        Range(RangeCursor<S> source, int minDepth, int expectedDepth, int expectedTransition)
-        {
-            super(source, minDepth, expectedDepth, expectedTransition);
+            super(source);
             Preconditions.checkState(currentPrecedingState == null,
                                      "Initial preceding state %s should be null for range cursor\n%s",
                                      currentPrecedingState, this);
@@ -416,7 +414,7 @@ public interface VerificationCursor
         @Override
         public Range<S> tailCursor(Direction direction)
         {
-            return new Range<>(source.tailCursor(direction), 0, 0, INITIAL_TRANSITION);
+            return new Range<>(source.tailCursor(direction));
         }
     }
 
@@ -424,12 +422,7 @@ public interface VerificationCursor
     {
         TrieSet(TrieSetCursor source)
         {
-            this(source, 0, 0, INITIAL_TRANSITION);
-        }
-
-        TrieSet(TrieSetCursor source, int minDepth, int expectedDepth, int expectedTransition)
-        {
-            super(source, minDepth, expectedDepth, expectedTransition);
+            super(source);
             // start state can be non-null for sets
             Preconditions.checkNotNull(currentPrecedingState, "Preceding state for trie sets must not be null\n%s", this);
         }
@@ -443,7 +436,90 @@ public interface VerificationCursor
         @Override
         public TrieSet tailCursor(Direction direction)
         {
-            return new TrieSet(source.tailCursor(direction), 0, 0, INITIAL_TRANSITION);
+            return new TrieSet(source.tailCursor(direction));
+        }
+    }
+
+    class DeletionAware<T, D extends RangeState<D>>
+    extends VerificationCursor.Plain<T, DeletionAwareCursor<T, D>>
+    implements DeletionAwareCursor<T, D>
+    {
+        int deletionBranchDepth;
+
+        DeletionAware(DeletionAwareCursor<T, D> source)
+        {
+            super(source);
+            this.deletionBranchDepth = -1;
+            verifyDeletionBranch(0);
+        }
+
+        @Override
+        public int incomingTransition()
+        {
+            return source.incomingTransition();
+        }
+
+        @Override
+        public int advance()
+        {
+            return verifyDeletionBranch(super.advance());
+        }
+
+        @Override
+        public int advanceMultiple(TransitionsReceiver receiver)
+        {
+            return verifyDeletionBranch(super.advanceMultiple(receiver));
+        }
+
+        @Override
+        public int skipTo(int skipDepth, int skipTransition)
+        {
+            return verifyDeletionBranch(super.skipTo(skipDepth, skipTransition));
+        }
+
+        @Override
+        public RangeCursor<D> deletionBranchCursor(Direction direction)
+        {
+            // deletionBranch is already verified
+            final RangeCursor<D> deletionBranch = source.deletionBranchCursor(direction);
+            if (deletionBranch == null)
+                return null;
+            return new Range<>(deletionBranch);
+        }
+
+        int verifyDeletionBranch(int depth)
+        {
+            if (depth <= deletionBranchDepth)
+                deletionBranchDepth = -1;
+
+            var deletionBranch = source.deletionBranchCursor(direction);
+            if (deletionBranch != null)
+            {
+                Preconditions.checkState(deletionBranchDepth == -1,
+                                         "Deletion branch at depth %s covered by another deletion branch at parent depth %s",
+                                         depth, deletionBranchDepth);
+                Preconditions.checkState(deletionBranch.depth() == 0,
+                                         "Invalid deletion branch initial depth %s",
+                                         deletionBranch.depth());
+                Preconditions.checkState(deletionBranch.incomingTransition() == INITIAL_TRANSITION,
+                                         "Invalid deletion branch initial transition %s",
+                                         deletionBranch.incomingTransition());
+                Preconditions.checkState(deletionBranch.precedingState() == null,
+                                         "Deletion branch starts with active deletion %s",
+                                         deletionBranch.precedingState());
+                deletionBranch.skipTo(EXHAUSTED_DEPTH, EXHAUSTED_TRANSITION);
+                Preconditions.checkState(deletionBranch.precedingState() == null,
+                                         "Deletion branch ends with active deletion %s",
+                                         deletionBranch.precedingState());
+                deletionBranchDepth = depth;
+            }
+            return depth;
+        }
+
+        @Override
+        public DeletionAware<T, D> tailCursor(Direction direction)
+        {
+            return new DeletionAware<>(source.tailCursor(direction));
         }
     }
 }

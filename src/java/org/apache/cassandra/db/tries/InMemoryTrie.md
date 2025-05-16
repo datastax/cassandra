@@ -22,9 +22,10 @@ The `InMemoryTrie` is one of the main components of the trie infrastructure, a m
 modification and reads executing concurrently with writes from a single mutator thread.
 
 The main features of its implementation are:
-- full support of the `Trie` interface
+- full support of the `Trie` hierarchy of interfaces
 - using nodes of several different types for efficiency
 - support for content on any node, including intermediate (prefix)
+- support for alternate branch pointers
 - support for writes from a single mutator thread concurrent with multiple readers
 - various consistency and atomicity guarantees for readers
 - memory management, off-heap or on-heap
@@ -377,14 +378,15 @@ reachable with pointers, they only make sense as substructure of the split node.
 
 ![graph](InMemoryTrie.md.g3.svg)
 
-#### Content `Prefix`
+#### `Prefix` nodes
 
 Prefix nodes are not nodes in themselves, but they add information to the node they lead to. Specifically, they
-encode an index in the content array, and a pointer to the node to which this content is attached. In anything other
-than the content, they are equivalent to the linked node &mdash; i.e. a prefix node pointer has the same children as
-the node it links to (another way to see this is as a content-carrying node is one that has an _ε_ transition to the
-linked node and no other features except added content). We do not allow more than one prefix to a node (i.e. prefix
-can't point to another prefix), and the child of a prefix node cannot be a leaf.
+encode an index in the content array, a pointer to any alternate branch, and a pointer to the node to which this 
+additional information is attached. In anything other than the content/alternate, they are equivalent to the linked node
+&mdash; i.e. a prefix node pointer has the same children as the node it links to (another way to see this is as a
+content-carrying node that has an _ε_ transition to the linked node and no other features except added content and/or
+alternate branch). We do not allow more than one prefix to a node (i.e. prefix can't point to another prefix), and the
+child of a prefix node cannot be a leaf.
 
 There are two types of prefixes:
 - standalone, which has a full 32-bit pointer to the linked node
@@ -393,41 +395,51 @@ of the linked node
 
 Standalone prefixes have this layout:
 
-offset|content|example
----|---|---
-00 - 03|content index|00000001
-04|standalone flag, 0xFF|FF
-05 - 1B|unused|
-1C - 1F|linked node pointer|0000025E
+offset | content                  |example
+-------|--------------------------|---
+00 - 03| content pointer          |FFFFFFFE ~1
+04 - 07| alternate branch pointer |00000000 NONE
+08     | standalone flag, 0xFF    |FF
+09 - 1B| unused                   |
+1C - 1F| linked node pointer      |0000025E
 
 and pointer offset `0x1F`. The sample values above will be the ones used to link a prefix node to our `Sparse`
 example, where a prefix cannot be embedded as all the bytes of the cell are in use.
 
 If we want to attach the same prefix to the `Split` example, we will place this
 
-offset|content|example
----|---|---
-00 - 03|content index|00000001
-04|embedded offset within cell|1C
-05 - 1F|unused|
+offset | content                     |example
+-------|-----------------------------|---
+00 - 03| content pointer             |FFFFFFFE ~1
+04 - 07| alternate branch pointer    |00000000 NONE
+08     | embedded offset within cell |1C
+09 - 1F| unused                      |
 
 _inside_ the leading split cell, with pointer `0x1F`. Since this is an embedded node, the augmented one resides within
 the same cell, and thus we need only 5 bits to encode the pointer (the other 27 are the same as the prefix's).
-The combined content of the cell at `0x500-0x51F` will then be `00000001 1C000000 00000000 00000000 00000520 00000560
+The combined content of the cell at `0x500-0x51F` will then be `FFFFFFFE 00000000 1C000000 00000000 00000520 00000560
 00000000 00000000`:
 
-offset|content|example
----|---|---
-00 - 03|content index|00000001
-04|embedded offset within cell|1C
-05 - 0F|unused|
-10 - 13|mid-cell for leading 00|00000520
-14 - 17|mid-cell for leading 01|00000560
-18 - 1B|mid-cell for leading 10|00000000 NONE
-1C - 1F|mid-cell for leading 11|00000000 NONE
+offset | content                     |example
+-------|-----------------------------|---
+00 - 03| content pointer             |FFFFFFFE ~1
+04 - 07| alternate branch pointer    |00000000 NONE
+08     | embedded offset within cell |1C
+09 - 0F| unused                      |
+10 - 13| mid-cell for leading 00     |00000520
+14 - 17| mid-cell for leading 01     |00000560
+18 - 1B| mid-cell for leading 10     |00000000 NONE
+1C - 1F| mid-cell for leading 11     |00000000 NONE
 
 Both `0x51C` and `0x51F` are valid pointers in this cell. The former refers to the plain split node, the latter to its
 content-augmented version. The only difference between the two is the result of a call to `content()`.
+
+Note that for code simplicity we store content indexes as pointers, i.e. with the same value as the leaf node for the
+given content index. In the example above, `contentArray[1]` is encoded as `~1` i.e. `0xFFFFFFFE`.
+
+Alternate branch pointers can store a link to another branch of the trie. They are used by deletion-aware tries to store
+deletion branches and are ignored by other types of tries. Another possible application of these would be to implement
+non-deterministic tries.
 
 ![graph](InMemoryTrie.md.g4.svg)
 
@@ -443,7 +455,8 @@ interface implemented by `InMemoryTrie` (see `Trie.md` for a description of curs
 
 ![graph](InMemoryTrie.md.wc1.svg)
 
-(Edges in black show the trie's structure, and the ones in <span style="color:lightblue">light blue</span> the path the cursor walk takes.)
+(Edges in black show the trie's structure, and the ones in <span style="color:lightblue">light blue</span> the path the
+cursor walk takes.)
 
 ### Cursors over `InMemoryTrie`
 
