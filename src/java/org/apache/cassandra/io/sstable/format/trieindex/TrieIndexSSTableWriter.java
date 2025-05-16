@@ -42,7 +42,6 @@ import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.io.FSReadError;
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.compress.BufferType;
-import org.apache.cassandra.io.compress.CompressedSequentialWriter;
 import org.apache.cassandra.io.compress.CompressionMetadata;
 import org.apache.cassandra.io.compress.EncryptedSequentialWriter;
 import org.apache.cassandra.io.compress.ICompressor;
@@ -65,8 +64,6 @@ import org.apache.cassandra.io.util.SequentialWriterOption;
 import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
-import org.apache.cassandra.schema.TableParams;
-import org.apache.cassandra.utils.BloomFilter;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FilterFactory;
 import org.apache.cassandra.utils.IFilter;
@@ -199,12 +196,9 @@ public class TrieIndexSSTableWriter extends SortedTableWriter
             FileHandle ifile = iwriter.rowIndexFHBuilder.withLength(iwriter.rowIndexFile.getLastFlushOffset()).complete();
             // With trie indices it is no longer necessary to limit the file size; just make sure indices and data
             // get updated length / compression metadata.
-            dataFile.updateFileHandle(dbuilder);
-            if (compression)
-                dbuilder.withCompressionMetadata(((CompressedSequentialWriter) dataFile).open(dataLength));
+            dataFile.updateFileHandle(dbuilder, dataLength);
             int dataBufferSize = optimizationStrategy.bufferSize(stats.estimatedPartitionSize.percentile(DatabaseDescriptor.getDiskOptimizationEstimatePercentile()));
-            //TODO is withLength needed - Check CI results
-            FileHandle dfile = dbuilder.bufferSize(dataBufferSize).complete();
+            FileHandle dfile = dbuilder.bufferSize(dataBufferSize).withLength(dataLength).complete();
             invalidateCacheAtPreviousBoundary(dfile, dataLength);
             SSTableReader sstable = TrieIndexSSTableReader.internalOpen(descriptor,
                                                                components(), metadata,

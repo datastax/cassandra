@@ -178,7 +178,7 @@ public class EncryptedSequentialWriter extends SequentialWriter
         buffer.clear();
     }
 
-    public void updateFileHandle(FileHandle.Builder fhBuilder)
+    public void updateFileHandle(FileHandle.Builder fhBuilder, long dataLength)
     {
         // Set length to last content position to avoid having to read and decrypt the last chunk to find it.
         fhBuilder.withLength(lastContent);
