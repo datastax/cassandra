@@ -213,4 +213,36 @@ abstract class PrefixedCursor<T, C extends Cursor<T>> implements Cursor<T>
             }
         }
     }
+
+    static class DeletionAware<T, D extends RangeState<D>>
+    extends PrefixedCursor<T, DeletionAwareCursor<T, D>> implements DeletionAwareCursor<T, D>
+    {
+        DeletionAware(ByteComparable prefix, DeletionAwareCursor<T, D> tail)
+        {
+            super(prefix, tail);
+        }
+
+        DeletionAware(int firstPrefixByte, ByteSource prefix, DeletionAwareCursor<T, D> tail)
+        {
+            super(firstPrefixByte, prefix, tail);
+        }
+
+        @Override
+        public RangeCursor<D> deletionBranchCursor(Direction direction)
+        {
+            return prefixDone() ? tail.deletionBranchCursor(direction) : null;
+        }
+
+        @Override
+        public DeletionAwareCursor<T, D> tailCursor(Direction direction)
+        {
+            if (prefixDone())
+                return tail.tailCursor(direction);
+            else
+            {
+                assert depthOfPrefix >= 0 : "tailTrie called on exhausted cursor";
+                return new DeletionAware<>(nextPrefixByte, duplicateSource(), tail.tailCursor(direction));
+            }
+        }
+    }
 }

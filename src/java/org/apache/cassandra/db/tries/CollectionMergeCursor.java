@@ -19,7 +19,9 @@
 package org.apache.cassandra.db.tries;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
 import java.util.function.BiFunction;
 import java.util.function.IntFunction;
@@ -107,7 +109,6 @@ abstract class CollectionMergeCursor<T, C extends Cursor<T>> implements Cursor<T
         for (I src : inputs)
         {
             C cursor = extractor.apply(src, direction);
-            assert cursor.depth() == 0;
             if (i >= 0)
                 heap[i] = cursor;
             else
@@ -115,7 +116,11 @@ abstract class CollectionMergeCursor<T, C extends Cursor<T>> implements Cursor<T
             ++i;
         }
         // The cursors are all currently positioned on the root and thus in valid heap order.
+        assert Arrays.stream(heap).allMatch(x -> equalCursor(head, x));
     }
+
+    // TODO: consider if making these return boolean would be an optimization for some calls
+    // TODO: consider if head call can be included in these
 
     /// Interface for internal operations that can be applied to selected top elements of the heap.
     interface HeapOp<T, C extends Cursor<T>>
@@ -243,6 +248,55 @@ abstract class CollectionMergeCursor<T, C extends Cursor<T>> implements Cursor<T
     boolean isExhausted()
     {
         return head.depth() < 0;
+    }
+
+    /// Add the given source to this merger, replacing an exhausted one. Returns false if there is no place (i.e. no
+    /// source is exhausted).
+    boolean addCursor(C cursor)
+    {
+        if (isExhausted())
+        {
+            // easy case
+            head = cursor;
+            return true;
+        }
+
+        int index;
+        for (index = 0; index < heap.length; ++index)
+            if (heap[index].depth() < 0)
+                break;
+        if (index == heap.length)
+            return false;
+
+        heapifyUp(cursor, index);
+        return true;
+    }
+
+    /// Pull the given state up in the heap from the given index until it finds its proper place.
+    private void heapifyUp(C item, int index)
+    {
+        while (true)
+        {
+            if (index == 0)
+            {
+                if (greaterCursor(direction, head, item))
+                {
+                    heap[0] = head;
+                    head = item;
+                    return;
+                }
+                else
+                    break;
+            }
+            int prev = (index - 1) / 2;
+
+            // If the parent is lesser or equal, the invariant has been restored.
+            if (!greaterCursor(direction, heap[prev], item))
+                break;
+            heap[index] = heap[prev];
+            index = prev;
+        }
+        heap[index] = item;
     }
 
     @Override
@@ -458,7 +512,7 @@ abstract class CollectionMergeCursor<T, C extends Cursor<T>> implements Cursor<T
         @Override
         public RangeCursor<S> tailCursor(Direction direction)
         {
-            List<RangeCursor<S>> inputs = new ArrayList<>(heap.length);
+            List<RangeCursor<S>> inputs = new ArrayList<>(heap.length + 1);
             inputs.add(head);
             applyToAllOnHeap((self, cursor, index) ->
                              {
@@ -478,4 +532,316 @@ abstract class CollectionMergeCursor<T, C extends Cursor<T>> implements Cursor<T
         }
     }
 
+    /// Collection merge cursor for deletion-aware tries.
+    ///
+    /// This cursor efficiently merges multiple deletion-aware tries by walking their cursors in parallel
+    /// while properly handling both live data and deletion metadata. It extends the basic collection merge
+    /// functionality with deletion-aware semantics, including proper deletion application and branch management.
+    ///
+    /// The implementation maintains a separate merge cursor for deletion branches (`relevantDeletions`) and
+    /// coordinates between live data and deletions to ensure correct deletion application during iteration.
+    static class DeletionAware<T, D extends RangeState<D>>
+    extends CollectionMergeCursor<T, DeletionAwareCursor<T, D>> implements DeletionAwareCursor<T, D>
+    {
+        final BiFunction<D, T, T> deleter;
+        final Trie.CollectionMergeResolver<D> deletionResolver;
+
+        /// Critical performance optimization flag. When true, guarantees that if one merge source
+        /// has a deletion branch at some position, the other source cannot have deletion branches
+        /// below or above that position. This allows us to skip walking the data trie to look for
+        /// lower-level deletion branches when merging. If the flag is false, we cannot know where
+        /// in the covered branch we may have a deletion, thus to be sure to find all we _must_
+        /// walk the whole data subtrie. This can be terribly expensive.
+        ///
+        /// If we can guarantee that deletions always come at the same points in each path (e.g. at
+        /// partition roots), we can use this optimization.
+        final boolean deletionsAtFixedPoints;
+
+        Range<D> relevantDeletions;
+        int deletionBranchDepth = -1;
+
+        // TODO: Keep track of deletion state to avoid repeated calls to `relevantDeletions.precedingState`
+        // TODO: Consider not applying deletions to live and making a `Shadowable` deletion-aware variation, delaying
+        // the deleted data removal to after transformations have been applied.
+
+        enum DeletionState
+        {
+            NONE,
+            MATCHING,
+            AHEAD
+        }
+        DeletionState relevantDeletionsState = DeletionState.NONE;
+
+        /// Creates a deletion-aware collection merge cursor with configurable deletion optimization.
+        ///
+        /// @param liveResolver           resolver for merging live data content
+        /// @param deletionResolver       resolver for merging deletion metadata
+        /// @param deleter                function to apply deletions to live data
+        /// @param deletionsAtFixedPoints optimization flag for deletion handling
+        /// @param direction              iteration direction (forward or reverse)
+        /// @param inputs                 collection of input sources to merge
+        /// @param extractor              function to extract deletion-aware cursors from inputs
+        <L> DeletionAware(Trie.CollectionMergeResolver<T> liveResolver,
+                          Trie.CollectionMergeResolver<D> deletionResolver,
+                          BiFunction<D, T, T> deleter,
+                          boolean deletionsAtFixedPoints,
+                          Direction direction,
+                          Collection<L> inputs,
+                          BiFunction<L, Direction, DeletionAwareCursor<T, D>> extractor)
+        {
+            super(liveResolver,
+                  direction,
+                  inputs,
+                  DeletionAwareCursor[]::new,
+                  extractor);
+            // We will add deletion sources to the above as we find them.
+            this.deletionResolver = deletionResolver;
+            this.deleter = deleter;
+            this.deletionsAtFixedPoints = deletionsAtFixedPoints;
+            // Initialize deletion merger as null - we'll create it lazily when needed
+            relevantDeletions = null;
+            maybeAddDeletionsBranch(this.depth());
+        }
+
+        @Override
+        public int advance()
+        {
+            return maybeAddDeletionsBranch(super.advance());
+        }
+
+        @Override
+        public int skipTo(int skipDepth, int skipTransition)
+        {
+            return maybeAddDeletionsBranch(super.skipTo(skipDepth, skipTransition));
+        }
+
+        @Override
+        public int advanceMultiple(TransitionsReceiver receiver)
+        {
+            return (branchHasMultipleSources() || relevantDeletionsState == DeletionState.MATCHING)
+                   ? advance()
+                   : maybeAddDeletionsBranch(super.advanceMultiple(receiver));
+        }
+
+        /// Adjusts the deletion state based on the relative positions of deletion and content cursors.
+        /// This determines how deletions should be applied to live data at the current position.
+        void adjustDeletionState(int deletionDepth, int contentDepth, int contentTransition)
+        {
+            if (deletionDepth < 0)
+                relevantDeletionsState = DeletionState.NONE;
+            else if (deletionDepth < contentDepth)
+                relevantDeletionsState = DeletionState.AHEAD;
+            else if (direction.lt(contentTransition, relevantDeletions.incomingTransition()))
+                relevantDeletionsState = DeletionState.AHEAD;
+            else
+                relevantDeletionsState = DeletionState.MATCHING;
+        }
+
+        /// Manages deletion branches during cursor advancement.
+        /// This method coordinates between live data cursors and deletion cursors to ensure
+        /// proper deletion application at each position.
+        int maybeAddDeletionsBranch(int depth)
+        {
+            int contentTransition = incomingTransition();
+            int deletionDepth;
+            switch (relevantDeletionsState)
+            {
+                case MATCHING:
+                    deletionDepth = relevantDeletions.skipTo(depth, contentTransition);
+                    break;
+                case AHEAD:
+                    deletionDepth = relevantDeletions.skipToWhenAhead(depth, contentTransition);
+                    break;
+                default:
+                    deletionDepth = -1;
+                    break;
+            }
+
+            if (depth <= deletionBranchDepth)
+            {
+                // ascended above the common deletions root, we can report deletion branches again
+                deletionBranchDepth = -1;
+                assert deletionDepth < 0;
+            }
+
+            // If the branch is single-source, its deletions cannot affect the merge as they can't delete its own data.
+            // (Note that covering deletions from other sources can still affect it though.)
+            // Otherwise we need to get the deletions from all sources to track and apply them. However, if we are
+            // operating in fixed-deletion-points mode, we only need to do this if we haven't yet passed that deletion
+            // point on the current path.
+            if (branchHasMultipleSources() && (!deletionsAtFixedPoints || deletionDepth < 0))
+            {
+                maybeAddDeletionsBranch(head, 0);
+                applyToSelectedInHeap((self, cursor, index) -> ((DeletionAware<T, D>) self).maybeAddDeletionsBranch(cursor, index));
+                // TODO: if using boolean return from above, also optimize addCursor to not do heapification, calling
+                // the downward process here instead.
+                if (relevantDeletions != null)
+                    deletionDepth = relevantDeletions.depth();  // newly inserted cursors may have adjusted the deletion cursor's position
+            }
+
+            adjustDeletionState(deletionDepth, depth, contentTransition);
+            return depth;
+        }
+
+        /// Resolves content by applying deletions to live data.
+        /// This is the core method that implements deletion application during iteration.
+        @Override
+        T resolveContent()
+        {
+            T content = super.resolveContent();
+            if (content == null)
+                return null;
+
+            D deletion;
+            switch (relevantDeletionsState)
+            {
+                case MATCHING:
+                    deletion = relevantDeletions.state();
+                    break;
+                case AHEAD:
+                    deletion = relevantDeletions.precedingState();
+                    break;
+                default:
+                    deletion = null;
+            }
+            if (deletion == null)
+                return content;
+            return deleter.apply(deletion, content);
+        }
+
+        /// Adds deletion branches from individual cursors to the collection merge.
+        /// This method implements the core deletion merging logic with optimization support.
+        void maybeAddDeletionsBranch(DeletionAwareCursor<T, D> cursor, int ignoredIndex)
+        {
+            RangeCursor<D> deletionsBranch = cursor.deletionBranchCursor(direction);
+            if (deletionsBranch == null)
+                return;
+
+            // Make sure the deletion branch depths are in the same basis as the data paths
+            deletionsBranch = DepthAdjustedCursor.make(deletionsBranch, cursor.depth(), cursor.incomingTransition());
+
+            // Create relevantDeletions Range if this is the first deletion branch we encounter
+            if (relevantDeletions == null)
+            {
+                relevantDeletions = new Range<D>(deletionResolver,
+                                                 direction,
+                                                 Collections.nCopies(heap.length + 1,
+                                                                     RangeCursor.<D>done(direction, byteComparableVersion())),
+                                                 (c, dir) -> c);
+            }
+
+            boolean succeeded = relevantDeletions.addCursor(deletionsBranch);
+            assert succeeded : "Too many deletion cursors added likely due to non-overlap of deletion branches violation.";
+        }
+
+        /// Returns the deletion branch cursor for the current position.
+        /// This method implements the deletionsAtFixedPoints optimization for collection merges.
+        @Override
+        public RangeCursor<D> deletionBranchCursor(Direction direction)
+        {
+            int depth = depth();
+            if (deletionBranchDepth != -1 && depth > deletionBranchDepth)
+                return null;    // already covered by a deletion branch, if there is any here it will be reflected in that
+
+            if (!branchHasMultipleSources())
+                return head.deletionBranchCursor(direction);
+
+            // We are positioned at a multi-source branch. If one has a deletion branch, we must combine it with the
+            // deletion-tree branch of the others to make sure that we merge any lower-level deletion branch with it.
+
+            // We have already created the merge of all present deletion branches in relevantDeletions. If that's empty,
+            // or not rooted here, there's no deletion to report.
+            if (relevantDeletions == null || relevantDeletions.depth() != depth)
+                return null;
+
+            List<RangeCursor<D>> deletions = new ArrayList<>(heap.length + 1);
+            // Note: during the data path walk we add cursors to relevantDeletions as we find them. This copy,
+            // however, is walked independently, so we need to make sure it has the ability to walk the data trie
+            // to find and lower-level deletion sources.
+
+            maybeAddDeletionTrieBranch(head, 0, deletions);
+            applyToSelectedInHeap((self, cursor, index) -> maybeAddDeletionTrieBranch(cursor, index, deletions));
+            if (deletions.isEmpty())
+                return null;
+
+            deletionBranchDepth = depth;
+            return new Range<D>(deletionResolver, direction, deletions, (c, d) -> c);
+        }
+
+        /// Adds a deletion trie branch for the given cursor. This means either the deletion branch that it presents,
+        /// or, in the case where we accept non-aligned deletions, any deletion branch that may be present in its
+        /// substructure.
+        void maybeAddDeletionTrieBranch(DeletionAwareCursor<T,D> cursor, int ignoredIndex, List<RangeCursor<D>> deletions)
+        {
+            RangeCursor<D> deletionsBranch = cursor.deletionBranchCursor(direction);
+            if (deletionsBranch != null)
+                deletions.add(deletionsBranch);
+            else if (!deletionsAtFixedPoints)
+                deletions.add(new DeletionsTrieCursor<>(cursor.tailCursor(cursor.direction())));
+            // Otherwise there is no need to track the subtrie. If there are deletions, they must be presented here.
+        }
+
+        @Override
+        public T content()
+        {
+            return maybeCollectContent();
+        }
+
+        ///
+        /// Gets content from a specific cursor (required by CollectionMergeCursor).
+        ///
+        @Override
+        T getContent(DeletionAwareCursor<T, D> cursor)
+        {
+            return cursor.content();
+        }
+
+        @Override
+        public DeletionAwareCursor<T, D> tailCursor(Direction dir)
+        {
+            RangeCursor<D> deletions = null;
+            switch (relevantDeletionsState)
+            {
+                case NONE:
+                    break;
+                case MATCHING:
+                    deletions = relevantDeletions.tailCursor(direction);
+                    break;
+                case AHEAD:
+                    deletions = relevantDeletions.precedingStateCursor(direction);
+                    break;
+            }
+
+            if (deletions != null)
+            {
+                // Because deletions branch is already active (and no new one can be introduced now), we treat the
+                // sources as plain tries.
+                Cursor<T> source;
+
+                if (!branchHasMultipleSources())
+                    source = head.tailCursor(dir);
+                else
+                {
+                    List<DeletionAwareCursor<T, D>> inputs = new ArrayList<>(heap.length + 1);
+                    inputs.add(head);
+                    applyToSelectedInHeap((self, cursor, index) -> inputs.add(cursor));
+
+                    source = new Plain<>(resolver, dir, inputs, DeletionAwareCursor::tailCursor);
+                }
+
+                return new RangeApplyCursor.DeletionAwareDataBranch<>(deleter, deletions, source);
+            }
+            else
+            {
+                if (!branchHasMultipleSources())
+                    return head.tailCursor(dir);
+
+                List<DeletionAwareCursor<T, D>> inputs = new ArrayList<>(heap.length + 1);
+                inputs.add(head);
+                applyToSelectedInHeap((self, cursor, index) -> inputs.add(cursor));
+
+                return new DeletionAware<>(resolver, deletionResolver, deleter, deletionsAtFixedPoints, dir, inputs, DeletionAwareCursor::tailCursor);
+            }
+        }
+    }
 }

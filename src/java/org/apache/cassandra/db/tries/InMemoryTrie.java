@@ -84,7 +84,7 @@ public class InMemoryTrie<T> extends InMemoryBaseTrie<T> implements Trie<T>
 
     public InMemoryCursor makeCursor(Direction direction)
     {
-        return new InMemoryCursor(direction, root, 0, -1);
+        return new InMemoryCursor(this, direction, root, 0, -1);
     }
 
     /// Modify this trie to apply the mutation given in the form of a trie. Any content in the mutation will be resolved
@@ -208,12 +208,25 @@ public class InMemoryTrie<T> extends InMemoryBaseTrie<T> implements Trie<T>
 
     static class DeleteMutation<T, S extends RangeState<S>, C extends RangeCursor<S>> extends Mutation<T, S, C>
     {
+        final int initialDepth;
+
         DeleteMutation(UpsertTransformerWithKeyProducer<T, S> transformer,
                        Predicate<NodeFeatures<S>> needsForcedCopy,
                        C mutationCursor,
                        InMemoryBaseTrie<T>.ApplyState state)
         {
+            this(transformer, needsForcedCopy, mutationCursor, state, Integer.MAX_VALUE);
+        }
+
+        DeleteMutation(UpsertTransformerWithKeyProducer<T, S> transformer,
+                       Predicate<NodeFeatures<S>> needsForcedCopy,
+                       C mutationCursor,
+                       InMemoryBaseTrie<T>.ApplyState state,
+                       int initialForcedCopyDepth)
+        {
             super(transformer, needsForcedCopy, mutationCursor, state);
+            initialDepth = state.currentDepth;
+            forcedCopyDepth = initialForcedCopyDepth;
         }
 
         @Override
@@ -227,7 +240,6 @@ public class InMemoryTrie<T> extends InMemoryBaseTrie<T> implements Trie<T>
                 content = mutationCursor.content();
 
             int depth = state.currentDepth;
-            int prevAscendDepth = state.setAscendLimit(depth);
             while (true)
             {
                 if (depth < forcedCopyDepth)
@@ -245,15 +257,16 @@ public class InMemoryTrie<T> extends InMemoryBaseTrie<T> implements Trie<T>
                     }
                 }
 
-                depth = mutationCursor.advance();
+                depth = mutationCursor.advance() + initialDepth;
                 // Descend but do not modify anything yet.
-                if (!state.advanceTo(depth, mutationCursor.incomingTransition(), forcedCopyDepth))
+                if (!state.advanceTo(depth, mutationCursor.incomingTransition(), forcedCopyDepth, initialDepth))
                     break;
 
                 assert state.currentDepth == depth : "Unexpected change to applyState. Concurrent trie modification?";
                 content = mutationCursor.content();
             }
-            state.setAscendLimit(prevAscendDepth);
+
+            assert state.currentDepth == initialDepth;
         }
 
         /// Walk all existing content covered under a deletion. Returns true if the caller needs to continue processing
@@ -262,14 +275,14 @@ public class InMemoryTrie<T> extends InMemoryBaseTrie<T> implements Trie<T>
         boolean applyDeletionRange(S mutationCoveringState) throws TrieSpaceExhaustedException
         {
             boolean atMutation = true;
-            int depth = mutationCursor.depth();
+            int depth = mutationCursor.depth() + initialDepth;
             int transition = mutationCursor.incomingTransition();
             // We are walking both tries in parallel.
             while (true)
             {
                 if (atMutation)
                 {
-                    depth = mutationCursor.advance();
+                    depth = mutationCursor.advance() + initialDepth;
                     transition = mutationCursor.incomingTransition();
                     atMutation = false;
                 }
@@ -309,9 +322,12 @@ public class InMemoryTrie<T> extends InMemoryBaseTrie<T> implements Trie<T>
             if (content != null)
             {
                 T existingContent = state.getContent();
-                T combinedContent = transformer.apply(existingContent, content, state);
-                state.setContent(combinedContent, // can be null
-                                 state.currentDepth >= forcedCopyDepth); // this is called at the start of processing
+                if (existingContent != null)
+                {
+                    T combinedContent = transformer.apply(existingContent, content, state);
+                    state.setContent(combinedContent, // can be null
+                                     state.currentDepth >= forcedCopyDepth); // this is called at the start of processing
+                }
             }
         }
 

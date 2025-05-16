@@ -19,6 +19,7 @@ package org.apache.cassandra.db.tries;
 
 import java.util.Collection;
 import java.util.Iterator;
+import java.util.Map;
 import java.util.function.BiFunction;
 
 import com.google.common.base.Preconditions;
@@ -40,7 +41,7 @@ import org.apache.cassandra.utils.bytecomparable.ByteSource;
 /// See [RangeCursor] and [Trie.md](./Trie.md) for further details on the implementation of range tries.
 public interface RangeTrie<S extends RangeState<S>> extends BaseTrie<S, RangeCursor<S>, RangeTrie<S>>
 {
-    default <R> R process(Direction direction, Cursor.Walker<S, R> walker)
+    default <R> R process(Direction direction, Cursor.Walker<? super S, R> walker)
     {
         return cursor(direction).process(walker);
     }
@@ -57,7 +58,6 @@ public interface RangeTrie<S extends RangeState<S>> extends BaseTrie<S, RangeCur
         Preconditions.checkArgument(v.precedingState(Direction.REVERSE) == null);
         return dir -> new SingletonCursor.Range<>(dir, key.asComparableBytes(byteComparableVersion), byteComparableVersion, v);
     }
-
 
     /// Returns a range trie covering a single range. This performs the same process as intersecting a covered
     /// range by a set, converting the passed marker to the proper state depending on the set's coverage and boundaries.
@@ -162,6 +162,13 @@ public interface RangeTrie<S extends RangeState<S>> extends BaseTrie<S, RangeCur
             return c::precedingStateCursor;
         else
             return null;
+    }
+
+    /// Returns an entry set containing all tail tree constructed at the points that contain content of
+    /// the given type.
+    default Iterable<Map.Entry<ByteComparable, RangeTrie<S>>> tailTries(Direction direction, Class<? extends S> clazz)
+    {
+        return () -> new TrieTailsIterator.AsEntriesRange<>(cursor(direction), clazz);
     }
 
     RangeCursor<S> makeCursor(Direction direction);

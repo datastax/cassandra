@@ -164,4 +164,27 @@ class RangeApplyCursor<T, S extends RangeState<S>> implements Cursor<T>
         else
             return data.tailCursor(direction);
     }
+
+    static class DeletionAwareDataBranch<T, D extends RangeState<D>> extends RangeApplyCursor<T, D> implements DeletionAwareCursor<T, D>
+    {
+        DeletionAwareDataBranch(BiFunction<D, T, T> resolver, RangeCursor<D> range, Cursor<T> data)
+        {
+            super(resolver, range, data);
+        }
+
+        @Override
+        public RangeCursor<D> deletionBranchCursor(Direction direction)
+        {
+            return null;
+        }
+
+        @Override
+        public DeletionAwareCursor<T, D> tailCursor(Direction direction)
+        {
+            return new DeletionAwareDataBranch<>(resolver,
+                                                 atRange ? range.tailCursor(direction)
+                                                         : RangeCursor.empty(direction, byteComparableVersion()),
+                                                 data.tailCursor(direction));
+        }
+    }
 }

@@ -200,6 +200,21 @@ interface Cursor<T>
     /// @return the new depth, always <= previous depth + 1; -1 if the trie is exhausted
     int skipTo(int skipDepth, int skipTransition);
 
+    /// A version of [#skipTo] which checks if the requested position is ahead of the cursor's current position and only
+    /// advances if it is. This can only be used if the [#skipTo] instruction is issued from a position that is behind
+    /// this cursor's (i.e. if the [#skipTo] request is to descend, it is assumed to descend from a position _before_
+    /// this cursor's and will not be acted on).
+    ///
+    /// Used for parallel walks when one of the source cursors is known to be ahead of the current position.
+    default int skipToWhenAhead(int skipDepth, int skipTransition)
+    {
+        int depth = depth();
+        if (skipDepth < depth || skipDepth == depth && skipTransition > incomingTransition())
+            return skipTo(skipDepth, skipTransition);
+        else
+            return depth;
+    }
+
     /// Descend into the cursor with the given path.
     ///
     /// @return True if the descent is positioned at the end of the given path, false if the trie did not have a path
@@ -257,7 +272,7 @@ interface Cursor<T>
 
     /// Process the trie using the given [Walker].
     /// This method should only be called on a freshly constructed cursor.
-    default <R> R process(Cursor.Walker<T, R> walker)
+    default <R> R process(Cursor.Walker<? super T, R> walker)
     {
         assert depth() == 0 : "The provided cursor has already been advanced.";
         T content = content();   // handle content on the root node

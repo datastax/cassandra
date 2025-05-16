@@ -117,7 +117,7 @@ public interface TrieSet extends CursorWalkable<TrieSetCursor>
     /// Constuct a textual representation of the trie.
     default String dump()
     {
-        return cursor(Direction.FORWARD).process(new TrieDumper<>(Object::toString));
+        return cursor(Direction.FORWARD).process(new TrieDumper.Plain<>(Object::toString));
     }
 
     TrieSetCursor makeCursor(Direction direction);
