@@ -1816,17 +1816,9 @@ public class StorageProxy implements StorageProxyMBean
     private static AbstractWriteResponseHandler<IMutation> defaultMutateCounter(CounterMutation cm, String localDataCenter, long queryStartNanoTime) throws UnavailableException, OverloadedException
     {
         Replica replica = findSuitableReplica(cm.getKeyspaceName(), cm.key(), localDataCenter, cm.consistency());
-
-        // Counter leader involves local read and write forwarding. Include both into dynamic snitch if configured.
-        // Note that we can't customize `RequestCallback#trackLatencyForSnitch` to track latency because when coordinator
-        // is the counter leader, coordinator won't send counter leader request.
-        Runnable callback = null;
-        if (DatabaseDescriptor.isDynamicEndpointSnitch() && useDynamicSnitchForCounterLeader)
-            callback = () -> MessagingService.instance().latencySubscribers.add(replica.endpoint(), System.nanoTime() - queryStartNanoTime, NANOSECONDS);
-
         if (replica.isSelf())
         {
-            return applyCounterMutationOnCoordinator(cm, localDataCenter, callback, queryStartNanoTime);
+            return applyCounterMutationOnCoordinator(cm, localDataCenter, queryStartNanoTime);
         }
         else
         {
@@ -1839,8 +1831,7 @@ public class StorageProxy implements StorageProxyMBean
             ReplicaPlans.forWrite(keyspace, cm.consistency(), tk, ReplicaPlans.writeAll);
 
             // Forward the actual update to the chosen leader replica
-            AbstractWriteResponseHandler<IMutation> responseHandler = new WriteResponseHandler<>(ReplicaPlans.forForwardingCounterWrite(keyspace, tk, replica),
-                                                                                                 callback, WriteType.COUNTER, queryStartNanoTime);
+            AbstractWriteResponseHandler<IMutation> responseHandler = new WriteResponseHandler<>(ReplicaPlans.forForwardingCounterWrite(keyspace, tk, replica), WriteType.COUNTER, queryStartNanoTime);
 
             Tracing.trace("Enqueuing counter update to {}", replica);
             Message message = Message.outWithFlag(Verb.COUNTER_MUTATION_REQ, cm, MessageFlag.CALL_BACK_ON_FAILURE);
@@ -1913,10 +1904,10 @@ public class StorageProxy implements StorageProxyMBean
 
     // Same as applyCounterMutationOnLeader but must with the difference that it use the MUTATION stage to execute the write (while
     // applyCounterMutationOnLeader assumes it is on the MUTATION stage already)
-    public static AbstractWriteResponseHandler<IMutation> applyCounterMutationOnCoordinator(CounterMutation cm, String localDataCenter, Runnable callback, long queryStartNanoTime)
+    public static AbstractWriteResponseHandler<IMutation> applyCounterMutationOnCoordinator(CounterMutation cm, String localDataCenter, long queryStartNanoTime)
     throws UnavailableException, OverloadedException
     {
-        return mutator.mutateCounterOnLeader(cm, localDataCenter, counterWriteOnCoordinatorPerformer, callback, queryStartNanoTime);
+        return mutator.mutateCounterOnLeader(cm, localDataCenter, counterWriteOnCoordinatorPerformer, null, queryStartNanoTime);
     }
 
     private static Runnable counterWriteTask(final IMutation mutation,

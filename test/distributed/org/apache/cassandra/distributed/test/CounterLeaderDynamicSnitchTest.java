@@ -30,6 +30,7 @@ import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.distributed.api.ConsistencyLevel;
 import org.apache.cassandra.locator.DynamicEndpointSnitch;
 import org.apache.cassandra.net.Verb;
+import org.apache.cassandra.utils.FBUtilities;
 
 import static org.apache.cassandra.distributed.api.Feature.GOSSIP;
 import static org.apache.cassandra.distributed.api.Feature.NATIVE_PROTOCOL;
@@ -112,18 +113,21 @@ public class CounterLeaderDynamicSnitchTest extends TestBaseImpl
             else
                 assertTrue("Expected no remote counter leader failure " + failures, failures == 0);
 
-            // after executing counter requests: 2 scores on the coordinator
-            // local replica should have smaller score and remote replica has max score of 1.0
-            InetSocketAddress localReplica = cluster.get(coordinator).broadcastAddress();
+            // after executing counter requests: 1 score for remote replica on the coordinator
             InetSocketAddress remoteReplica = cluster.get(2).broadcastAddress();
             cluster.get(coordinator).runOnInstance(() -> {
                 DynamicEndpointSnitch snitch = (DynamicEndpointSnitch) DatabaseDescriptor.getEndpointSnitch();
                 snitch.updateScores();
-                assertEquals("Expect 2 scores, but got " + snitch.getScores(), snitch.getScores().size(), 2);
-                if (snitch.getScores().get(localReplica.getAddress()) >= 1.0)
-                    throw new RuntimeException("Expect smaller than 1.0 score for local replica, but got " + snitch.getScores().get(localReplica.getAddress()));
-                if (!snitch.getScores().get(remoteReplica.getAddress()).equals(1.0))
-                    throw new RuntimeException("Expect 1.0 max score for remote replica, but got " + snitch.getScores().get(remoteReplica.getAddress()));
+                if (remoteReplicaTimeout)
+                {
+                    assertEquals("Expect 1 score for remote replica, but got " + snitch.getScores(), snitch.getScores().size(), 1);
+                    if (!snitch.getScores().get(remoteReplica.getAddress()).equals(1.0))
+                        throw new RuntimeException("Expect 1.0 max score for remote replica, but got " + snitch.getScores().get(remoteReplica.getAddress()));
+                }
+                else
+                {
+                    assertEquals("Expect no score for remote replica, but got " + snitch.getScores(), snitch.getScores().size(), 0);
+                }
             });
         }
     }
@@ -154,35 +158,32 @@ public class CounterLeaderDynamicSnitchTest extends TestBaseImpl
             // fail if node2 is selected as counter leader
             cluster.filters().verbs(Verb.COUNTER_MUTATION_REQ.id).from(coordinator).to(2).drop();
             int failures = 0;
-            int requests = 10;
-            for (int key = 0; key < requests; key++)
+            int requests = 100;
+            int idx = 0;
+            while (failures == 0 && idx++ < requests)
             {
                 try
                 {
-                    cluster.coordinator(coordinator).execute("UPDATE k.t SET total = total + 1 WHERE k = ? AND c = 1", cl, key);
+                    cluster.coordinator(coordinator).execute("UPDATE k.t SET total = total + 1 WHERE k = ? AND c = 1", cl, idx);
                 }
                 catch (Throwable t)
                 {
                     failures++;
                 }
             }
-            assertTrue("Expected node2 failure " + failures, failures > 0 && failures < requests);
+            assertTrue("Expected node2 failure " + failures, failures > 0);
+
+            // wait for callback expired
+            FBUtilities.sleepQuietly(2000);
 
             // update dynamic snitch score: subsequent request should avoid coordinator as counter leader
-            InetSocketAddress localReplica = cluster.get(coordinator).broadcastAddress();
             InetSocketAddress remoteReplica2 = cluster.get(2).broadcastAddress();
-            InetSocketAddress remoteReplica3 = cluster.get(3).broadcastAddress();
             cluster.get(coordinator).runOnInstance(() -> {
                 DynamicEndpointSnitch snitch = (DynamicEndpointSnitch) DatabaseDescriptor.getEndpointSnitch();
                 snitch.updateScores();
-                assertEquals("Expect 3 scores, but got " + snitch.getScores(), snitch.getScores().size(), 3);
-
-                if (snitch.getScores().get(localReplica.getAddress()) >= 1.0)
-                    throw new RuntimeException("Expect smaller than 1.0 score for local replica, but got " + snitch.getScores().get(localReplica.getAddress()));
+                assertEquals("Expect 1 score from expired request, but got " + snitch.getScores(), snitch.getScores().size(), 1);
                 if (!snitch.getScores().get(remoteReplica2.getAddress()).equals(1.0))
                     throw new RuntimeException("Expect 1.0 max score for node2, but got " + snitch.getScores().get(remoteReplica2.getAddress()));
-                if (snitch.getScores().get(remoteReplica3.getAddress()) >= 1.0)
-                    throw new RuntimeException("Expect smaller than 1.0 score for node3, but got " + snitch.getScores().get(remoteReplica3.getAddress()));
             });
 
             // subsequent requests should not select node2 as leader

@@ -184,7 +184,7 @@ public class RequestCallbacks implements OutboundMessageCallbacks
 
     private void onExpired(CallbackInfo info)
     {
-        messagingService.latencySubscribers.maybeAdd(info.callback, info.peer, info.timeout(), NANOSECONDS);
+        messagingService.latencySubscribers.maybeAdd(info.callback, info.responseVerb, info.peer, info.timeout(), NANOSECONDS, true);
 
         InternodeOutboundMetrics.totalExpiredCallbacks.mark();
         messagingService.markExpiredCallback(info.peer);

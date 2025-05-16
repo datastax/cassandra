@@ -19,12 +19,14 @@ package org.apache.cassandra.service;
 
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.locator.ReplicaPlan;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.db.WriteType;
+import org.apache.cassandra.net.Verb;
 
 /**
  * Handles blocking writes for ONE, ANY, TWO, THREE, QUORUM, and ALL consistency levels.
@@ -32,6 +34,8 @@ import org.apache.cassandra.db.WriteType;
 public class WriteResponseHandler<T> extends AbstractWriteResponseHandler<T>
 {
     protected static final Logger logger = LoggerFactory.getLogger(WriteResponseHandler.class);
+
+    private static final boolean useDynamicSnitchForCounterLeader = CassandraRelevantProperties.USE_DYNAMIC_SNITCH_FOR_COUNTER_LEADER.getBoolean();
 
     protected volatile int responses;
     private static final AtomicIntegerFieldUpdater<WriteResponseHandler> responsesUpdater
@@ -51,6 +55,13 @@ public class WriteResponseHandler<T> extends AbstractWriteResponseHandler<T>
         this(replicaPlan, null, writeType, queryStartNanoTime);
     }
 
+    @Override
+    public boolean trackLatencyForSnitch(Verb responseVerb, boolean isTimeout)
+    {
+        return useDynamicSnitchForCounterLeader && responseVerb == Verb.COUNTER_MUTATION_RSP && isTimeout;
+    }
+
+    @Override
     public void onResponse(Message<T> m)
     {
         if (responsesUpdater.decrementAndGet(this) == 0)
