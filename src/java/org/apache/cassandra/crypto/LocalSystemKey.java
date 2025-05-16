@@ -15,7 +15,6 @@
  */
 package org.apache.cassandra.crypto;
 
-import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.file.Files;
@@ -32,7 +31,6 @@ import javax.crypto.Cipher;
 import javax.crypto.KeyGenerator;
 import javax.crypto.NoSuchPaddingException;
 import javax.crypto.SecretKey;
-import javax.crypto.spec.SecretKeySpec;
 
 import org.apache.commons.codec.binary.Base64;
 
@@ -42,71 +40,10 @@ import static java.nio.file.StandardOpenOption.APPEND;
 import static java.nio.file.attribute.PosixFilePermission.OWNER_READ;
 import static java.nio.file.attribute.PosixFilePermission.OWNER_WRITE;
 
-public class LocalSystemKey extends SystemKey
+public class LocalSystemKey
 {
     static final FileAttribute<Set<PosixFilePermission>> KEY_DEFAULT_PERMISSIONS = PosixFilePermissions.asFileAttribute(EnumSet.of(OWNER_READ, OWNER_WRITE));
-    private static final String NAME_PROPERTY_KEY = "name";
     private static final SecureRandom RANDOM = new SecureRandom();
-
-    private final Path keyPath;
-
-    private final String cipherName;
-    private final int keyStrength;
-    private final int ivLength;
-    private final SecretKey key;
-
-    public LocalSystemKey(Path keyPath) throws IOException
-    {
-        assert keyPath != null;
-        this.keyPath = keyPath;
-
-        // load system key
-        BufferedReader is = null;
-        try
-        {
-            is = Files.newBufferedReader(keyPath);
-            String line;
-            line = is.readLine();
-            if (line == null)
-                throw new IOException("Key file: " + keyPath + " is empty");
-            String[] fields = line.split(":");
-            if (fields.length != 3)
-                throw new IOException("Malformed key file");
-            cipherName = fields[0];
-            keyStrength = Integer.parseInt(fields[1]);
-            byte[] keyBytes = Base64.decodeBase64(fields[2].getBytes());
-            key = new SecretKeySpec(keyBytes, getKeyType(cipherName));
-            ivLength = getIvLength(cipherName);
-        }
-        finally
-        {
-            FileUtils.closeQuietly(is);
-        }
-    }
-
-    @Override
-    protected SecretKey getKey()
-    {
-        return key;
-    }
-
-    @Override
-    protected String getCipherName()
-    {
-        return cipherName;
-    }
-
-    @Override
-    protected int getKeyStrength()
-    {
-        return keyStrength;
-    }
-
-    @Override
-    protected int getIvLength()
-    {
-        return ivLength;
-    }
 
     public static Path createKey(String path, String cipherName, int keyStrength) throws IOException, NoSuchAlgorithmException, NoSuchPaddingException {
         return createKey(null, path, cipherName, keyStrength);
@@ -144,27 +81,8 @@ public class LocalSystemKey extends SystemKey
         return createdKeyPath;
     }
 
-    public static LocalSystemKey getKey(String path) throws IOException
+    protected static String getKeyType(String cipherName)
     {
-        Path systemKeyPath = getKeyFile(path);
-        if (!Files.exists(systemKeyPath))
-            throw new IOException(String.format("Master key file '%s' does not exist", systemKeyPath.toAbsolutePath()));
-
-        return new LocalSystemKey(systemKeyPath);
-    }
-
-    private static Path getKeyFile(String path)
-    {
-        return Paths.get(TDEConfigurationProvider.getConfiguration().systemKeyDirectory, path);
-    }
-
-    public String getName()
-    {
-        return keyPath.getFileName().toString();
-    }
-
-    public String getAbsolutePath()
-    {
-        return keyPath.toAbsolutePath().toString();
+        return cipherName.replaceAll("/.*", "");
     }
 }
