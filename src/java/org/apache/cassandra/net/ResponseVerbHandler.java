@@ -65,7 +65,7 @@ public class ResponseVerbHandler implements IVerbHandler
         }
         else
         {
-            MessagingService.instance().latencySubscribers.maybeAdd(cb, message.from(), latencyNanos, NANOSECONDS);
+            MessagingService.instance().latencySubscribers.maybeAdd(cb, message.verb(), message.from(), latencyNanos, NANOSECONDS, false);
             trackReplicaSensors(callbackInfo, message);
             cb.onResponse(message);
         }
