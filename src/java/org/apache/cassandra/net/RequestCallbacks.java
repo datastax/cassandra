@@ -165,7 +165,7 @@ public class RequestCallbacks implements OutboundMessageCallbacks
 
     private void onExpired(CallbackInfo info)
     {
-        messagingService.latencySubscribers.maybeAdd(info.callback, info.peer, info.timeout(), NANOSECONDS);
+        messagingService.latencySubscribers.maybeAdd(info.callback, info.requestVerb.responseVerb, info.peer, info.timeout(), NANOSECONDS, true);
 
         InternodeOutboundMetrics.totalExpiredCallbacks.mark();
         messagingService.markExpiredCallback(info.peer);
@@ -254,6 +254,7 @@ public class RequestCallbacks implements OutboundMessageCallbacks
 
         final InetAddressAndPort peer;
         public final RequestCallback callback;
+        public final Verb requestVerb;
 
         public CallbackInfo(Message message, InetAddressAndPort peer, RequestCallback callback)
         {
@@ -261,6 +262,7 @@ public class RequestCallbacks implements OutboundMessageCallbacks
             this.expiresAtNanos = message.expiresAtNanos();
             this.peer = peer;
             this.callback = callback;
+            this.requestVerb = message.verb();
         }
 
         public long timeout()
