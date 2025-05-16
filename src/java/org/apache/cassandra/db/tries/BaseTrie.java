@@ -99,13 +99,13 @@ public interface BaseTrie<T, C extends Cursor<T>, Q extends BaseTrie<T, C, Q>> e
     default void forEachEntry(Direction direction, BiConsumer<ByteComparable.Preencoded, T> consumer)
     {
         Cursor<T> cursor = cursor(direction);
-        cursor.process(new TrieEntriesWalker.WithConsumer<T>(consumer, cursor.byteComparableVersion()));
+        cursor.process(new TrieEntriesWalker.WithConsumer<>(consumer, cursor.byteComparableVersion()));
         // Note: we can't do the ValueConsumer trick here, because the implementation requires state and cannot be
         // implemented with default methods alone.
     }
 
     /// Process the trie using the given [Cursor.Walker].
-    default <R> R process(Direction direction, Cursor.Walker<T, R> walker)
+    default <R> R process(Direction direction, Cursor.Walker<? super T, R> walker)
     {
         return cursor(direction).process(walker);
     }
@@ -121,7 +121,7 @@ public interface BaseTrie<T, C extends Cursor<T>, Q extends BaseTrie<T, C, Q>> e
     default void forEachEntrySkippingBranches(Direction direction, BiConsumer<ByteComparable.Preencoded, T> consumer)
     {
         Cursor<T> cursor = cursor(direction);
-        cursor.processSkippingBranches(new TrieEntriesWalker.WithConsumer<T>(consumer, cursor.byteComparableVersion()));
+        cursor.processSkippingBranches(new TrieEntriesWalker.WithConsumer<>(consumer, cursor.byteComparableVersion()));
         // Note: we can't do the ValueConsumer trick here, because the implementation requires state and cannot be
         // implemented with default methods alone.
     }
@@ -151,7 +151,7 @@ public interface BaseTrie<T, C extends Cursor<T>, Q extends BaseTrie<T, C, Q>> e
     /// Constuct a textual representation of the trie using the given content-to-string mapper.
     default String dump(Function<T, String> contentToString)
     {
-        return process(Direction.FORWARD, new TrieDumper<>(contentToString));
+        return process(Direction.FORWARD, new TrieDumper.Plain<>(contentToString));
     }
 
     /// Returns the ordered entry set of this trie's content as an iterable.

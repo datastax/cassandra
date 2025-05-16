@@ -342,7 +342,7 @@ present positions before and after any valid key (both provided by our byte-comp
 correctly define ranges between any two keys, with the posibility of inclusive or exclusive boundaries as needed.
 
 As we also would also like to retrieve metadata on the paths leading to queried keys (e.g. a partition marker and stats
-when we query information for a subset of rows in that partition), the fact that these sets always produce prefixes can
+when we query information for a subset of rows in that partition), the fact that these sets always include prefixes can
 be seen as an advantage.
 
 ## Converting ranges to trie sets
@@ -545,8 +545,8 @@ a ->
 
 ## Union of range tries
 
-The union process is similar (with a second range trie instead of a set), but we walk all branches of both tries and
-combine their states. There are two differences from the normal trie union process:
+The merge process is similar (with a second range trie instead of a set), but we walk all branches of both tries and
+combine their states. There are two differences from the normal trie merge process:
 - We apply the merge resolver to states instead of content. This includes both content and preceding state, which is
   necessary to be able to report the correct state for the merged trie.
 - When one of the range cursors is ahead, we pass its `precedingState` as an argument to the merge resolver to modify
@@ -634,3 +634,216 @@ state for both forward and reverse iteration directions.
 Such richer state is not forbidden, but also not necessary for a general range trie. Because it is something that is
 pretty difficult to obtain (or store and maintain) for an in-memory trie, general range tries, which are meant to be
 stored in in-memory tries, do not provide it.
+
+# Deletion-Aware Tries
+
+Deletion-aware tries are designed to store live data together with ranges of deletions (aka tombstones) in a single
+structure, and be able to apply operations over them that properly restrict deletion ranges on intersections and apply
+the deletions of one source to the live content of others in merges.
+
+Our deletion-aware tries implement this by allowing nodes in the trie to offer a "deletions branch" which specifies
+and encloses the deletion ranges applicable to the branch rooted at that node. This can be provided at any level of the
+trie, but only once for any given path (i.e. there cannot be a deletion branch under another deletion branch). In many
+practical usecases the depth at which this deletion path is introduced will also be predetermined for any given path;
+merges implement an option that exploits this property to avoid some inefficiencies.
+
+It is also forbidden for live branches to contain data that is deleted by the trie's own deletion branches (aka
+shadowed data).
+
+## Alternatives
+
+Perhaps the easiest way to describe why we chose this approach is to discuss the alternatives and discuss the reasons
+we chose the structure and features of the option we went with.
+
+### Why not mix deletion ranges with live data?
+
+In this approach we store deletions as ranges, and live data as point ranges in the single structure. They are ordered
+together and, to facilitate an efficient `precedingState`, points need to specify the applicable deletions before and
+after the point. This approach is an evolution of Cassandra's `UnfilteredRowIterator` that mixes rows and tombstone
+markers.
+
+The example below represents a trie that contains a deletion from `aaa` to `acc` with timestamp 666, and a live point at
+`abb` with timestamp 700 in this fashion:
+```
+a ->
+  a ->
+    a -> start(666)
+  b -> covering(666)
+    b -> data(value, 700) + switch(666, 666)
+  c -> covering(666)
+    c -> end(666)
+```
+
+Having the point also declare the state before and after makes it easy to obtain the covering deletion e.g. for `aba`,
+`abc` or `ab`. This is a very acceptable amount of overhead that isn't a problem for the approach.
+
+The greatest strength of this approach is that it makes it very easy to perform merges because all of the necessary
+information is present at any position that the merging cursor visits.
+
+The reason to avoid this approach is that we often want to find only the live data between a given range of keys, or the
+closest live entry after a given key. In an approach like this we can have many thousands of deletion markers that
+precede the live entries, and to find it we have to filter these deletions out.
+
+In fact, we have found this situation to occur often in many practical applications of Cassandra. Solving this problem
+is one of the main reasons to implement the `Trie` machinery.
+
+This problem could be worked around by storing metadata at parent nodes whose branches don't contain live data; we went
+with a more flexible approach.
+
+### Why not store live data and deletions separately?
+
+In the other extreme, we can have two separate tries. For the example above, it could look like this:
+```
+LIVE
+b ->
+  b -> data(value, 700)
+DELETIONS
+a ->
+  a ->
+    a -> start(666)
+  c -> covering(666)
+    c -> end(666)
+```
+
+To perform a merge, we have to apply the DELETIONS trie of each source to the other's LIVE trie. In other words, a merge
+can be implemented as
+```
+merge(a, b).LIVE = merge(apply(b.DELETIONS, a.LIVE), apply(a.DELETIONS, b.LIVE))
+merge(a, b).DELETIONS = merge(a.DELETIONS, b.DELETIONS)
+```
+or (which makes better sense when multiple sources are merged):
+```
+d = merge(a.DELETIONS, b.DELETIONS)
+merge(a, b).LIVE = apply(d, merge(a.LIVE, b.LIVE))
+merge(a, b).DELETIONS = d
+```
+
+This can create extra complexity when multiple merge operations are applied on top of one another, but if we select all
+sources in advance and merge them with a single collection merge the method's performance is good.
+
+This solves the issue above: because we query live and deletions separately, we can efficiently get the first live item
+after a point. We can also get the preceding state of a deletion without storing extra information at live points.
+
+The approach we ultimately took is an evolution of this to avoid a couple of performance weaknesses. On one hand, it is
+a little inefficient to walk the same path in two separate tries, and it would be helpful if we can do this only once
+for at least some part of the key. On the other, there is a concurrency chokepoint at the root of this structure, because
+whenever a deletion actually finds live data to remove in an in-memory trie, to achieve atomicity of the operation we
+need to prepare and swap snapshots for the two full tries, which can waste work and limits caching efficiency.
+
+In Cassandra we use partitions as the unit of consistency, and also the limit that range deletions are not allowed to
+cross. It is natural, then, to split the live and deletion branches at the partition level rather than at the trie root.
+
+### Why not allow shadowed data, i.e. data deleted by the same trie's deletion branches?
+
+One way to avoid the concurrency issue above is to leave the live data in place and apply the deletion trie on every
+query. This does ease the atomicity problem, and in addition makes the merge process simpler as we can independently
+merge data and deletion branches.
+
+However, we pay a cost on live data read that is not insignificant, and the amount of space and effort we must spend
+to deal with the retained data items can quickly compound unless we apply garbage collection at some points. We prefer
+to do that garbage collection as early as possible, by not introducing the garbage in the first place.
+
+There is a potential application of relaxing this for intermediate states of transformation, e.g. by letting a merge
+delay the application of the deletions until the end of a chain of transformations. This is an internal implementation
+detail that would not change the requirements for the user.
+
+### Why not allow nested deletion branches?
+
+If it makes sense to permit deletion branches, then we could have them at multiple levels, reducing the amount of path
+duplication in the trie.
+
+For example, using a deletion branch we can represent the example above as
+```
+a ->
+  *** start deletion branch
+  a ->
+    a -> start(666)
+  c -> covering(666)
+    c -> end(666)
+  *** end deletion branch
+  b ->
+    b -> data(value, 700)
+```
+
+and if we then delete `aba-abc` with timestamp 777, represented as
+```
+a ->
+  b ->
+    *** start deletion branch
+    a -> start(777)
+    c -> end(777)
+    *** end deletion branch
+```
+we could merge it into the in-memory trie as
+```
+a ->
+  *** start deletion branch
+  a ->
+    a -> start(666)
+  c -> covering(666)
+    c -> end(666)
+  *** end deletion branch
+  b ->
+    *** start deletion branch
+    a -> start(777)
+    c -> end(777)
+    *** end deletion branch
+```
+
+This can work well for point queries and has some simplicity advantages for merging, but introduces a
+complication tracking the state when we want to walk over a range and apply deletion branches to data. The problem is
+that we don't easily know what deletion state applies e.g. when we advance from `abc` in the trie above; we either have
+to keep a stack of applicable ranges, or store the deletion to return to in the nested deletion branch, which would
+cancel out the simplicity advantages.
+
+### Why predetermined deletion levels (`deletionsAtFixedPoints`) are important
+
+The case above (nested deletion branches) is something that can naturally occur in merges, including as shown in the
+example. If we don't do anything special, this merge would create a nesting of branches.
+
+We fix this problem by applying "hoisting" during merges, i.e. by bringing other sources' covered deletion branches to
+the highest level that one source defines it. For the example above, this means that when the merged cursor encounters
+the in-memory deletion branch at `a`, it has to hoist the mutation's deletion to be rooted at `a` rather than `ab`.
+
+In other words, the mutation is changed to effectively become
+```
+a ->
+  *** start deletion branch
+  b ->
+    a -> start(777)
+    c -> end(777)
+  *** end deletion branch
+```
+
+which can then be correctly combined into
+```
+a ->
+  *** start deletion branch
+  a ->
+    a -> start(666)
+  b -> covering(666)
+    a -> switch(666, 777)
+    c -> switch(777, 666)
+  c -> covering(666)
+    c -> end(666)
+  *** end deletion branch
+```
+
+The hoisting process can be very inefficient. The reason for this is that we do not know where in the source trie a
+deletion branch is defined, and to bring them all to a certain level we must walk the whole live branch. If e.g. this
+in-memory trie never had a deletion before, this could mean walking all the live data in the trie, potentially millions
+of nodes.
+
+Provided that the result of this hoisting becomes a new deletion branch, which would be the case for in-memory tries,
+one can say that the amortized cost is still O(1) because once we hoist a branch we never have to walk that branch
+again. The delay of doing that pass could still cause problems; more importantly, in merge views we may have to do that
+multiple times, especially on nested merges.
+
+To avoid this issue, deletion-aware merges accept a flag called `deletionsAtFixedPoints`. When this flag is true, the
+merge expects that all sources can only define deletion branches at matching points. If this is guaranteed, we do not
+need to do any hoisting, because a covered deletion branch cannot exist. We expect most practical uses of this class to
+perform all merges with this flag set to true.
+
+This means preparing deletions so that they always share the same point of introduction of the deletion branch. For the
+example above it means preparing the deletion in the hoisted form. In Cassandra, for example, this can be guaranteed 
+by wiring the deletion branches to always be on the partition level.

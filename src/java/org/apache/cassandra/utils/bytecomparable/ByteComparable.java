@@ -171,6 +171,17 @@ public interface ByteComparable
         return version -> ByteSource.cut(src.asComparableBytes(version), cutoff);
     }
 
+    static ByteComparable skipFirst(ByteComparable src, int bytesToSkip)
+    {
+        return version ->
+        {
+            ByteSource bsrc = src.asComparableBytes(version);
+            for (int i = 0; i < bytesToSkip; i++)
+                bsrc.next();
+            return bsrc;
+        };
+    }
+
     /**
      * Return the length of a byte comparable, not including the terminator byte.
      */

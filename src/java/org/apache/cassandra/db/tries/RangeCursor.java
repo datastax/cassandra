@@ -95,6 +95,8 @@ interface RangeCursor<S extends RangeState<S>> extends Cursor<S>
     /// Returns a full-range cursor returning [#precedingState()].
     default RangeCursor<S> precedingStateCursor(Direction direction)
     {
+        // Note: this uses `precedingState` in the current direction, which must be the same as the preceding state we
+        // would get if we walked to the same state in the opposite direction.
         return new Empty<>(precedingState(), byteComparableVersion(), direction);
     }
 
@@ -130,6 +132,77 @@ interface RangeCursor<S extends RangeState<S>> extends Cursor<S>
     static <S extends RangeState<S>> RangeCursor<S> empty(Direction direction, ByteComparable.Version version)
     {
         return new Empty<S>(null, version, direction);
+    }
+
+    class Done<S extends RangeState<S>> implements RangeCursor<S>
+    {
+        final Direction direction;
+        final ByteComparable.Version version;
+
+        public Done(Direction direction, ByteComparable.Version version)
+        {
+            this.direction = direction;
+            this.version = version;
+        }
+
+        @Override
+        public S state()
+        {
+            return null;
+        }
+
+        @Override
+        public int depth()
+        {
+            return -1;
+        }
+
+        @Override
+        public int incomingTransition()
+        {
+            return -1;
+        }
+
+        @Override
+        public S content()
+        {
+            return null;
+        }
+
+        @Override
+        public Direction direction()
+        {
+            return direction;
+        }
+
+        @Override
+        public ByteComparable.Version byteComparableVersion()
+        {
+            return version;
+        }
+
+        @Override
+        public int advance()
+        {
+            return -1;
+        }
+
+        @Override
+        public int skipTo(int skipDepth, int skipTransition)
+        {
+            return -1;
+        }
+
+        @Override
+        public RangeCursor<S> tailCursor(Direction direction)
+        {
+            return this;
+        }
+    }
+
+    static <S extends RangeState<S>> RangeCursor<S> done(Direction direction, ByteComparable.Version version)
+    {
+        return new Done<>(direction, version);
     }
 
     class FromSet<S extends RangeState<S>> implements RangeCursor<S>

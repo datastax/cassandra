@@ -372,6 +372,15 @@ public class TrieUtil
         return wrapped.mergeWith(RangeTrie.singleton(ByteComparable.EMPTY, VERSION, metadata), Trie.throwingResolver());
     }
 
+    public static <T, D extends RangeState<D>> DeletionAwareTrie<T, D> withRootMetadata(DeletionAwareTrie<T, D> wrapped, T metadata)
+    {
+        return wrapped.mergeWith(DeletionAwareTrie.singleton(ByteComparable.EMPTY, VERSION, metadata),
+                                 Trie.throwingResolver(),
+                                 Trie.throwingResolver(),
+                                 (d,t) -> { throw new AssertionError(); },
+                                 false);
+    }
+
     static Trie<String> directTrie(String... points) throws TrieSpaceExhaustedException
     {
         InMemoryTrie<String> trie = InMemoryTrie.shortLived(VERSION);

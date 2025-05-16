@@ -605,7 +605,7 @@ public class IntersectionTrieTest
         Trie<String> expected = TrieUtil.directTrie("a", "ab", "abc");
         assertMapEquals(expected.entrySet(Direction.FORWARD), trie.intersect(set).entrySet(Direction.FORWARD), TrieUtil.FORWARD_COMPARATOR);
         assertMapEquals(expected.entrySet(Direction.REVERSE), trie.intersect(set).entrySet(Direction.REVERSE), TrieUtil.REVERSE_COMPARATOR);
-        assertEquals(expected.process(Direction.FORWARD, new TrieDumper<>(Object::toString)), trie.intersect(set).dump());
+        assertEquals(expected.process(Direction.FORWARD, new TrieDumper.Plain<>(Object::toString)), trie.intersect(set).dump());
     }
 
     @Test
@@ -616,7 +616,7 @@ public class IntersectionTrieTest
         Trie<String> expected = TrieUtil.directTrie("abc", "abce", "abcfff");
         assertMapEquals(expected.entrySet(Direction.FORWARD), trie.intersect(set).entrySet(Direction.FORWARD), TrieUtil.FORWARD_COMPARATOR);
         assertMapEquals(expected.entrySet(Direction.REVERSE), trie.intersect(set).entrySet(Direction.REVERSE), TrieUtil.REVERSE_COMPARATOR);
-        assertEquals(expected.process(Direction.FORWARD, new TrieDumper<>(Object::toString)), trie.intersect(set).dump());
+        assertEquals(expected.process(Direction.FORWARD, new TrieDumper.Plain<>(Object::toString)), trie.intersect(set).dump());
     }
 
     @Test(expected = AssertionError.class)

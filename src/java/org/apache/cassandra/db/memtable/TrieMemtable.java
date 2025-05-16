@@ -753,7 +753,7 @@ public class TrieMemtable extends AbstractAllocatorMemtable
         }
     }
 
-    static class PartitionIterator extends TrieTailsIterator<Object, TrieBackedPartition>
+    static class PartitionIterator extends TrieTailsIterator.Plain<Object, TrieBackedPartition>
     {
         final TableMetadata metadata;
         final EnsureOnHeap ensureOnHeap;

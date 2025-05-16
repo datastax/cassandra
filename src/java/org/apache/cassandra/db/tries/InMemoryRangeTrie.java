@@ -64,9 +64,9 @@ public class InMemoryRangeTrie<S extends RangeState<S>> extends InMemoryBaseTrie
         return new InMemoryRangeTrie<>(byteComparableVersion, bufferType, ExpectedLifetime.LONG, opOrder);
     }
 
-    public InMemoryRangeCursor makeCursor(Direction direction)
+    public InMemoryRangeCursor<S> makeCursor(Direction direction)
     {
-        return new InMemoryRangeCursor(direction, root, 0, -1);
+        return new InMemoryRangeCursor<>(this, direction, root, 0, -1);
     }
 
     protected long emptySizeOnHeap()
@@ -74,15 +74,15 @@ public class InMemoryRangeTrie<S extends RangeState<S>> extends InMemoryBaseTrie
         return bufferType == BufferType.ON_HEAP ? EMPTY_SIZE_ON_HEAP : EMPTY_SIZE_OFF_HEAP;
     }
 
-    class InMemoryRangeCursor extends InMemoryCursor implements RangeCursor<S>
+    static class InMemoryRangeCursor<S extends RangeState<S>> extends InMemoryCursor<S> implements RangeCursor<S>
     {
         boolean activeIsSet;
         S activeRange;  // only non-null if activeIsSet
         S prevContent;  // can only be non-null if activeIsSet
 
-        InMemoryRangeCursor(Direction direction, int root, int depth, int incomingTransition)
+        InMemoryRangeCursor(InMemoryReadTrie<S> trie, Direction direction, int root, int depth, int incomingTransition)
         {
-            super(direction, root, depth, incomingTransition);
+            super(trie, direction, root, depth, incomingTransition);
             activeIsSet = true;
             activeRange = null;
             prevContent = null;
@@ -164,13 +164,13 @@ public class InMemoryRangeTrie<S extends RangeState<S>> extends InMemoryBaseTrie
         {
             // Walk a copy of this cursor (non-range because we are only not doing anything smart with it) to find the
             // nearest child content in the direction of the cursor.
-            return new InMemoryCursor(direction, currentNode, 0, -1).advanceToContent(null);
+            return new InMemoryCursor<>(trie, direction, currentNode, 0, -1).advanceToContent(null);
         }
 
         @Override
-        public InMemoryRangeCursor tailCursor(Direction direction)
+        public InMemoryRangeCursor<S> tailCursor(Direction direction)
         {
-            InMemoryRangeCursor cursor = new InMemoryRangeCursor(direction, currentFullNode, 0, -1);
+            InMemoryRangeCursor<S> cursor = new InMemoryRangeCursor<>(trie, direction, currentFullNode, 0, -1);
             if (activeIsSet)
             {
                 // Copy the state we have already compiled to the child cursor.
@@ -184,11 +184,17 @@ public class InMemoryRangeTrie<S extends RangeState<S>> extends InMemoryBaseTrie
         }
     }
 
-    static class Mutation<M extends RangeState<M>, U extends RangeState<U>> extends InMemoryBaseTrie.Mutation<M, U, RangeCursor<U>>
+    static class Mutation<S extends RangeState<S>, U extends RangeState<U>> extends InMemoryBaseTrie.Mutation<S, U, RangeCursor<U>>
     {
-        Mutation(UpsertTransformerWithKeyProducer<M, U> transformer, Predicate<NodeFeatures<U>> needsForcedCopy, RangeCursor<U> source, InMemoryRangeTrie<M>.ApplyState state)
+        Mutation(UpsertTransformerWithKeyProducer<S, U> transformer, Predicate<NodeFeatures<U>> needsForcedCopy, RangeCursor<U> source, InMemoryRangeTrie<S>.ApplyState state)
+        {
+            this(transformer, needsForcedCopy, source, state, Integer.MAX_VALUE);
+        }
+
+        Mutation(UpsertTransformerWithKeyProducer<S, U> transformer, Predicate<NodeFeatures<U>> needsForcedCopy, RangeCursor<U> source, InMemoryRangeTrie<S>.ApplyState state, int forcedCopyDepth)
         {
             super(transformer, needsForcedCopy, source, state);
+            this.forcedCopyDepth = forcedCopyDepth;
         }
 
         @Override
@@ -198,9 +204,9 @@ public class InMemoryRangeTrie<S extends RangeState<S>> extends InMemoryBaseTrie
             assert state.currentDepth == 0 : "Unexpected change to applyState. Concurrent trie modification?";
         }
 
-        void applyContent(M existingState, U mutationState) throws TrieSpaceExhaustedException
+        void applyContent(S existingState, U mutationState) throws TrieSpaceExhaustedException
         {
-            M combined = transformer.apply(existingState, mutationState, state);
+            S combined = transformer.apply(existingState, mutationState, state);
             if (combined != null)
                 combined = combined.isBoundary() ? combined : null;
             state.setContent(combined, // can be null
@@ -216,7 +222,6 @@ public class InMemoryRangeTrie<S extends RangeState<S>> extends InMemoryBaseTrie
             // until we see another entry in mutation trie.
             // Repeat until mutation trie is exhausted.
             int depth = state.currentDepth;
-            int prevAscendDepth = state.setAscendLimit(depth);
             while (true)
             {
                 if (depth < forcedCopyDepth)
@@ -225,7 +230,7 @@ public class InMemoryRangeTrie<S extends RangeState<S>> extends InMemoryBaseTrie
                 U content = mutationCursor.content();
                 if (content != null)
                 {
-                    final M existingCoveringState = getExistingCoveringState();
+                    final S existingCoveringState = getExistingCoveringState();
                     applyContent(existingCoveringState, content);
                     U mutationCoveringState = content.precedingState(Direction.REVERSE);
                     // Several cases:
@@ -245,11 +250,10 @@ public class InMemoryRangeTrie<S extends RangeState<S>> extends InMemoryBaseTrie
                     break;
                 assert depth == state.currentDepth : "Unexpected change to applyState. Concurrent trie modification?";
             }
-            state.setAscendLimit(prevAscendDepth);
         }
 
-        void applyDeletionRange(M existingCoveringState,
-                                   U mutationCoveringState)
+        void applyDeletionRange(S existingCoveringState,
+                                U mutationCoveringState)
         throws TrieSpaceExhaustedException
         {
             boolean atMutation = true;
@@ -269,7 +273,7 @@ public class InMemoryRangeTrie<S extends RangeState<S>> extends InMemoryBaseTrie
                 }
                 atMutation = !state.advanceToNextExistingOr(depth, transition, forcedCopyDepth);
 
-                M existingContent = state.getContent();
+                S existingContent = state.getContent();
                 U mutationContent = atMutation ? mutationCursor.content() : null;
                 if (existingContent != null || mutationContent != null)
                 {
@@ -296,10 +300,10 @@ public class InMemoryRangeTrie<S extends RangeState<S>> extends InMemoryBaseTrie
             return rangeState.precedingState(Direction.REVERSE);
         }
 
-        M getExistingCoveringState()
+        S getExistingCoveringState()
         {
             // If the current node has content, use it.
-            M existingCoveringState = state.getContent();
+            S existingCoveringState = state.getContent();
             if (existingCoveringState != null)
                 return existingCoveringState;
 

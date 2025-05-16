@@ -226,7 +226,7 @@ public class CellReuseTest
                 else
                     markChild(trie, content, set, objs);
 
-                markChild(trie, trie.followContentTransition(node), set, objs);
+                markChild(trie, trie.followPrefixTransition(node), set, objs);
                 break;
             default:
                 assert trie.offset(node) <= InMemoryTrie.CHAIN_MAX_OFFSET && trie.offset(node) >= InMemoryTrie.CHAIN_MIN_OFFSET;

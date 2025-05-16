@@ -840,9 +840,15 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
         return allocateCell() + SPLIT_OFFSET;
     }
 
-    private int createPrefixNode(int contentId, int child, boolean isSafeChain) throws TrieSpaceExhaustedException
+    private int createContentNode(int contentId, int child, boolean isSafeChain) throws TrieSpaceExhaustedException
     {
-        assert !isNullOrLeaf(child) : "Prefix node cannot reference a childless node.";
+        return createPrefixNode(contentId, NONE, child, isSafeChain);
+    }
+
+    private int createPrefixNode(int contentId, int alternateBranch, int child, boolean isSafeChain) throws TrieSpaceExhaustedException
+    {
+        assert !isLeaf(child) : "Prefix node cannot reference a leaf node.";
+        assert !isNull(child) || !isNull(alternateBranch) : "Prefix node can only have a null child if it includes an alternate branch.";
 
         int offset = offset(child);
         int node;
@@ -864,6 +870,7 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
         }
 
         putInt(node + PREFIX_CONTENT_OFFSET, contentId);
+        putInt(node + PREFIX_ALTERNATE_OFFSET, alternateBranch);
         return node;
     }
 
@@ -892,7 +899,8 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
         {
             // No need to recycle this cell because that is already done by the modification of the child
             int contentId = getIntVolatile(node + PREFIX_CONTENT_OFFSET);
-            return createPrefixNode(contentId, child, true);
+            int alternateBranch = getIntVolatile(node + PREFIX_ALTERNATE_OFFSET);
+            return createPrefixNode(contentId, alternateBranch, child, true);
         }
     }
 
@@ -915,9 +923,9 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
     /// @param forcedCopy whether or not we need to preserve all pre-existing data for concurrent readers
     /// @return a node which has the children of updatedPostContentNode combined with the content of
     ///         `existingPreContentNode`
-    private int preserveContent(int existingPreContentNode,
-                                int existingPostContentNode,
-                                int updatedPostContentNode,
+    private int preservePrefix(int existingPreContentNode,
+                               int existingPostContentNode,
+                               int updatedPostContentNode,
                                boolean forcedCopy)
     throws TrieSpaceExhaustedException
     {
@@ -933,11 +941,11 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
         // else we have existing prefix node, and we need to reference a new child
         if (isLeaf(existingPreContentNode))
         {
-            return createPrefixNode(existingPreContentNode, updatedPostContentNode, true);
+            return createContentNode(existingPreContentNode, updatedPostContentNode, true);
         }
 
         assert offset(existingPreContentNode) == PREFIX_OFFSET : "Unexpected content in non-prefix and non-leaf node.";
-        if (updatedPostContentNode != NONE)
+        if (updatedPostContentNode != NONE || getIntVolatile(existingPreContentNode + PREFIX_ALTERNATE_OFFSET) != NONE)
             return updatePrefixNodeChild(existingPreContentNode, updatedPostContentNode, forcedCopy);
         else
         {
@@ -960,7 +968,6 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
     {
         int[] data = new int[16 * 5];
         int currentDepth = -1;
-        int ascendLimit = -1;
 
         /// Pointer to the existing node before skipping over content nodes, i.e. this is either the same as
         /// existingPostContentNode or a pointer to a prefix or leaf node whose child is `existingPostContentNode`.
@@ -1006,6 +1013,10 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
         {
             data[currentDepth * 5 + 2] = value;
         }
+        int updatedPostContentNodeAtDepth(int stackDepth)
+        {
+            return data[stackDepth * 5 + 2];
+        }
 
         /// The transition we took on the way down.
         int transition()
@@ -1019,6 +1030,10 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
         int transitionAtDepth(int stackDepth)
         {
             return data[stackDepth * 5 + 3];
+        }
+        int incomingTransition()
+        {
+            return transitionAtDepth(currentDepth - 1);
         }
 
         /// The compiled content id. Needed because we can only access a cursor's content on the way down but we can't
@@ -1036,19 +1051,17 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
             return data[stackDepth * 5 + 4];
         }
 
-        int setAscendLimit(int newLimit)
-        {
-            int prev = ascendLimit;
-            ascendLimit = newLimit;
-            return prev;
-        }
-
+        int alternateBranchToAttach = NONE;
 
         ApplyState start()
         {
+            return start(root);
+        }
+
+        ApplyState start(int root)
+        {
             int existingFullNode = root;
             currentDepth = -1;
-            ascendLimit = 0;
 
             descendInto(existingFullNode);
             return this;
@@ -1057,12 +1070,17 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
         /// Advance to the given depth and transition. Returns false if the depth signals mutation cursor is exhausted.
         boolean advanceTo(int depth, int transition, int forcedCopyDepth) throws TrieSpaceExhaustedException
         {
-            while (currentDepth > Math.max(ascendLimit, depth - 1))
+            return advanceTo(depth, transition, forcedCopyDepth, 0);
+        }
+        /// Advance to the given depth and transition. Returns false if the depth signals mutation cursor is exhausted.
+        boolean advanceTo(int depth, int transition, int forcedCopyDepth, int ascendLimit) throws TrieSpaceExhaustedException
+        {
+            while (currentDepth >= Math.max(ascendLimit + 1, depth))
             {
                 // There are no more children. Ascend to the parent state to continue walk.
                 attachAndMoveToParentState(forcedCopyDepth);
             }
-            if (depth == -1)
+            if (depth <= ascendLimit)
                 return false;
 
             // We have a transition, get child to descend into
@@ -1078,12 +1096,11 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
         /// non-exhausted position.
         boolean advanceToNextExistingOr(int limitDepth, int limitTransition, int forcedCopyDepth) throws TrieSpaceExhaustedException
         {
-            assert limitDepth > applyState.ascendLimit;
-            setTransition(-1); // we have newly descended to a node, start with its first child
+            assert limitDepth > 0;
             while (true)
             {
                 int currentTransition = transition();
-                int nextTransition = getNextTransition(existingPostContentNode(), currentTransition + 1);
+                int nextTransition = getNextTransition(updatedPostContentNode(), currentTransition + 1);
                 if (currentDepth + 1 == limitDepth && nextTransition >= limitTransition)
                 {
                     descend(limitTransition);
@@ -1102,11 +1119,15 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
         /// Advance to the next existing position in the trie.
         boolean advanceToNextExisting(int forcedCopyDepth) throws TrieSpaceExhaustedException
         {
-            setTransition(-1); // we have newly descended to a node, start with its first child
+            return advanceToNextExisting(forcedCopyDepth, 0);
+        }
+        /// Advance to the next existing position in the trie.
+        boolean advanceToNextExisting(int forcedCopyDepth, int ascendLimit) throws TrieSpaceExhaustedException
+        {
             while (true)
             {
                 int currentTransition = transition();
-                int nextTransition = getNextTransition(existingPostContentNode(), currentTransition + 1);
+                int nextTransition = getNextTransition(updatedPostContentNode(), currentTransition + 1);
                 if (nextTransition <= 0xFF)
                 {
                     descend(nextTransition);
@@ -1124,7 +1145,7 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
         void descend(int transition)
         {
             setTransition(transition);
-            int existingFullNode = getChild(existingFullNode(), transition);
+            int existingFullNode = getChild(updatedPostContentNode(), transition);
 
             descendInto(existingFullNode);
         }
@@ -1146,13 +1167,14 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
             else if (offset(existingFullNode) == PREFIX_OFFSET)
             {
                 existingContentId = getIntVolatile(existingFullNode + PREFIX_CONTENT_OFFSET);
-                existingPostContentNode = followContentTransition(existingFullNode);
+                existingPostContentNode = followPrefixTransition(existingFullNode);
             }
             else
                 existingPostContentNode = existingFullNode;
             setExistingPostContentNode(existingPostContentNode);
             setUpdatedPostContentNode(existingPostContentNode);
             setContentId(existingContentId);
+            setTransition(-1);
         }
 
         T getContent()
@@ -1200,7 +1222,7 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
             setTransition(-1);      // In the node we have just descended to, start with its first child
             for (; stackPos >= 0 && node == NONE; --stackPos)
             {
-                node = getNextChild(existingPostContentNodeAtDepth(stackPos), transitionAtDepth(stackPos) + 1);
+                node = getNextChild(updatedPostContentNodeAtDepth(stackPos), transitionAtDepth(stackPos) + 1);
             }
 
             while (node != NONE)
@@ -1211,6 +1233,11 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
                 node = getNextChild(node, 0);
             }
             return null;
+        }
+
+        public int alternateBranch()
+        {
+            return getAlternateBranch(existingFullNode());
         }
 
         /// Attach a child to the current node.
@@ -1234,6 +1261,13 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
         /// others.
         private int applyContent(boolean forcedCopy) throws TrieSpaceExhaustedException
         {
+            if (alternateBranchToAttach != NONE)
+            {
+                int alternateBranch = alternateBranchToAttach;
+                alternateBranchToAttach = NONE;
+                return applyContentWithAlternateBranch(alternateBranch, forcedCopy);
+            }
+
             // Note: the old content id itself is already released by setContent. Here we must release any standalone
             // prefix nodes that may reference it.
             int contentId = contentId();
@@ -1253,26 +1287,51 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
 
             if (isLeaf(existingPreContentNode))
                 return contentId != NONE
-                       ? createPrefixNode(contentId, updatedPostContentNode, true)
+                       ? createContentNode(contentId, updatedPostContentNode, true)
                        : updatedPostContentNode;
 
             return applyPrefixChange(updatedPostContentNode,
                                      existingPreContentNode,
                                      existingPostContentNode,
                                      contentId,
+                                     NONE,
                                      forcedCopy);
+        }
+
+        /// Apply the collected content to a node. Converts `NONE` to a leaf node, and adds or updates a prefix for all
+        /// others.
+        private int applyContentWithAlternateBranch(int alternateBranch, boolean forcedCopy) throws TrieSpaceExhaustedException
+        {
+            int contentId = contentId();
+            final int updatedPostContentNode = updatedPostContentNode();
+            final int existingPreContentNode = existingFullNode();
+            final int existingPostContentNode = existingPostContentNode();
+
+            // applyPrefixChange does not understand leaf nodes, handle upgrade from one explicitly.
+            if (isLeaf(existingPreContentNode))
+                return contentId != NONE
+                        ? createPrefixNode(contentId, alternateBranch, updatedPostContentNode, true)
+                        : updatedPostContentNode;
+
+            return applyPrefixChange(updatedPostContentNode,
+                    existingPreContentNode,
+                    existingPostContentNode,
+                    contentId,
+                    alternateBranch,
+                    forcedCopy);
         }
 
         private int applyPrefixChange(int updatedPostPrefixNode,
                                       int existingPrePrefixNode,
                                       int existingPostPrefixNode,
-                                      int prefixData,
+                                      int contentId,
+                                      int alternateBranch,
                                       boolean forcedCopy)
         throws TrieSpaceExhaustedException
         {
             boolean prefixWasPresent = existingPrePrefixNode != existingPostPrefixNode;
             boolean prefixWasEmbedded = prefixWasPresent && isEmbeddedPrefixNode(existingPrePrefixNode);
-            if (prefixData == NONE)
+            if (contentId == NONE && alternateBranch == NONE)
             {
                 if (prefixWasPresent && !prefixWasEmbedded)
                     recycleCell(existingPrePrefixNode);
@@ -1280,7 +1339,8 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
             }
 
             boolean childChanged = updatedPostPrefixNode != existingPostPrefixNode;
-            boolean dataChanged = !prefixWasPresent || prefixData != getIntVolatile(existingPrePrefixNode + PREFIX_CONTENT_OFFSET);
+            boolean dataChanged = !prefixWasPresent || contentId != getIntVolatile(existingPrePrefixNode + PREFIX_CONTENT_OFFSET)
+                    || alternateBranch != getIntVolatile(existingPrePrefixNode + PREFIX_ALTERNATE_OFFSET);
             if (!childChanged && !dataChanged)
                 return existingPrePrefixNode;
 
@@ -1299,19 +1359,22 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
                     recycleCell(existingPrePrefixNode);
                     // otherwise cell is already recycled by the recycling of the child
                 }
-                return createPrefixNode(prefixData, updatedPostPrefixNode, isNull(existingPostPrefixNode));
+                return createPrefixNode(contentId, alternateBranch, updatedPostPrefixNode, isNull(existingPostPrefixNode));
             }
 
             // We can't update in-place if there was no preexisting prefix, or if the
             // prefix was embedded and the target node must change.
             if (!prefixWasPresent || prefixWasEmbedded && childChanged)
-                return createPrefixNode(prefixData, updatedPostPrefixNode, isNull(existingPostPrefixNode));
+                return createPrefixNode(contentId, alternateBranch, updatedPostPrefixNode, isNull(existingPostPrefixNode));
 
             // Otherwise modify in place
             if (childChanged) // to use volatile write but also ensure we don't corrupt embedded nodes
                 putIntVolatile(existingPrePrefixNode + PREFIX_POINTER_OFFSET, updatedPostPrefixNode);
             if (dataChanged)
-                putIntVolatile(existingPrePrefixNode + PREFIX_CONTENT_OFFSET, prefixData);
+            {
+                putIntVolatile(existingPrePrefixNode + PREFIX_CONTENT_OFFSET, contentId);
+                putIntVolatile(existingPrePrefixNode + PREFIX_ALTERNATE_OFFSET, alternateBranch);
+            }
             return existingPrePrefixNode;
         }
 
@@ -1320,7 +1383,10 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
         /// one already exists).
         void attachAndMoveToParentState(int forcedCopyDepth) throws TrieSpaceExhaustedException
         {
-            int updatedFullNode = applyContent(currentDepth >= forcedCopyDepth);
+            attachBranchAndMoveToParentState(applyContent(currentDepth >= forcedCopyDepth), forcedCopyDepth);
+        }
+
+        void attachBranchAndMoveToParentState(int updatedFullNode, int forcedCopyDepth) throws TrieSpaceExhaustedException {
             int existingFullNode = existingFullNode();
             --currentDepth;
             assert currentDepth >= 0;
@@ -1329,11 +1395,21 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
                 attachChild(transition(), updatedFullNode, currentDepth >= forcedCopyDepth);
         }
 
-        /// Ascend and update the root at the end of processing.
-        void attachRoot(int forcedCopyDepth) throws TrieSpaceExhaustedException
+        int completeBranch(int forcedCopyDepth) throws TrieSpaceExhaustedException
         {
-            int updatedFullNode = applyContent(0 >= forcedCopyDepth);
+            return applyContent(currentDepth >= forcedCopyDepth);
+        }
+
+        /// Ascend and update the root at the end of processing.
+        void attachAndUpdateRoot(int forcedCopyDepth) throws TrieSpaceExhaustedException
+        {
+            attachRoot(applyContent(0 >= forcedCopyDepth), forcedCopyDepth);
+        }
+
+        void attachRoot(int updatedFullNode, int ignoredForcedCopyDepth) throws TrieSpaceExhaustedException
+        {
             int existingFullNode = existingFullNode();
+            --currentDepth;
             assert root == existingFullNode : "Unexpected change to root. Concurrent trie modification?";
             if (updatedFullNode != existingFullNode)
             {
@@ -1341,6 +1417,11 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
                 // we don't want to invalidate the value in other cores' caches unnecessarily).
                 root = updatedFullNode;
             }
+        }
+
+        void prepareToWalkBranchAgain() throws TrieSpaceExhaustedException
+        {
+            setTransition(-1);
         }
 
         public byte[] getBytes()
@@ -1390,6 +1471,8 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
 
         public String toString()
         {
+            if (data == null)
+                return "uninitialized";
             StringBuilder sb = new StringBuilder();
             sb.append('@');
             for (int i = 0; i < currentDepth; ++i)
@@ -1399,6 +1482,11 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
             sb.append(" updatedPostContentNode=").append(updatedPostContentNode());
             sb.append(" contentId=").append(contentId());
             return sb.toString();
+        }
+
+        public InMemoryBaseTrie<T> trie()
+        {
+            return InMemoryBaseTrie.this;
         }
     }
 
@@ -1498,7 +1586,6 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
                  InMemoryBaseTrie<T>.ApplyState state)
         {
             assert mutationCursor.depth() == 0 : "Unexpected non-fresh cursor.";
-            assert state.currentDepth == 0 : "Unexpected change to applyState. Concurrent trie modification?";
             this.transformer = transformer;
             this.needsForcedCopy = needsForcedCopy;
             this.mutationCursor = mutationCursor;
@@ -1540,7 +1627,7 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
         void complete() throws TrieSpaceExhaustedException
         {
             assert state.currentDepth == 0 : "Unexpected change to applyState. Concurrent trie modification?";
-            state.attachRoot(forcedCopyDepth);
+            state.attachAndUpdateRoot(forcedCopyDepth);
         }
 
         @Override
@@ -1599,12 +1686,12 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
         if (newChild == child)
             return node;
 
-        int skippedContent = followContentTransition(node);
+        int skippedContent = followPrefixTransition(node);
         int attachedChild = !isNull(skippedContent)
                             ? attachChild(skippedContent, transition, newChild)  // Single path, no copying required
                             : expandOrCreateChainNode(transition, newChild);
 
-        return preserveContent(node, skippedContent, attachedChild, false);
+        return preservePrefix(node, skippedContent, attachedChild, false);
     }
 
     private <R> int applyContent(int node, R value, UpsertTransformer<T, R> transformer) throws TrieSpaceExhaustedException
@@ -1631,15 +1718,26 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
         if (offset(node) == PREFIX_OFFSET)
         {
             int contentId = getIntVolatile(node + PREFIX_CONTENT_OFFSET);
-            T newContent = transformer.apply(getContent(contentId), value);
+            T newContent = transformer.apply(isNull(contentId) ? null : getContent(contentId), value);
             if (newContent != null)
             {
-                setContent(contentId, newContent);
+                if (!isNull(contentId))
+                    setContent(contentId, newContent);
+                else
+                    putIntVolatile(node + PREFIX_CONTENT_OFFSET, addContent(newContent));
                 return node;
             }
             else
             {
-                releaseContent(contentId);
+                if (!isNull(contentId))
+                    releaseContent(contentId);
+
+                if (!isNull(getIntVolatile(node + PREFIX_ALTERNATE_OFFSET)))
+                {
+                    // keep the prefix node for the alternate path
+                    putIntVolatile(node + PREFIX_CONTENT_OFFSET, NONE);
+                    return node;
+                }
 
                 int b = getUnsignedByte(node + PREFIX_FLAGS_OFFSET);
                 if (b < CELL_SIZE)
@@ -1660,7 +1758,7 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
         if (newContent == null)
             return node;
         else
-            return createPrefixNode(addContent(transformer.apply(null, value)), node, false);
+            return createContentNode(addContent(transformer.apply(null, value)), node, false);
     }
 
     void completeMutation()

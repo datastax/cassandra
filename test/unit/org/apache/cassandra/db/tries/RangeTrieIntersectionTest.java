@@ -317,7 +317,7 @@ public class RangeTrieIntersectionTest
             catch (AssertionError e)
             {
                 System.out.println("\nFORWARD:\n" + trie.dump(TestRangeState::toStringNoPosition));
-                System.out.println("\nREVERSE:\n" + trie.cursor(Direction.REVERSE).process(new TrieDumper<>(TestRangeState::toStringNoPosition)));
+                System.out.println("\nREVERSE:\n" + trie.cursor(Direction.REVERSE).process(new TrieDumper.Plain<>(TestRangeState::toStringNoPosition)));
                 throw e;
             }
         }

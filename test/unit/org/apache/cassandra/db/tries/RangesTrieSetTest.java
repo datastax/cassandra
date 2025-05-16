@@ -104,7 +104,7 @@ public class RangesTrieSetTest
 
     static String dump(TrieSet s, Direction direction)
     {
-        return fullTrie(s).process(direction, new TrieDumper<>(Object::toString));
+        return fullTrie(s).process(direction, new TrieDumper.Plain<>(Object::toString));
     }
 
     static void dumpToOut(TrieSet s)

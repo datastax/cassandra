@@ -183,4 +183,61 @@ class SingletonCursor<T> implements Cursor<T>
             return new Range<>(dir, nextTransition, duplicateSource(), byteComparableVersion, value);
         }
     }
+
+    static class DeletionAware<T, D extends RangeState<D>>
+    extends SingletonCursor<T> implements DeletionAwareCursor<T, D>
+    {
+        DeletionAware(Direction direction, ByteSource src, ByteComparable.Version byteComparableVersion, T value)
+        {
+            super(direction, src, byteComparableVersion, value);
+        }
+
+        DeletionAware(Direction direction, int firstByte, ByteSource src, ByteComparable.Version byteComparableVersion, T value)
+        {
+            super(direction, firstByte, src, byteComparableVersion, value);
+        }
+
+        @Override
+        public RangeCursor<D> deletionBranchCursor(Direction direction)
+        {
+            return null;
+        }
+
+        @Override
+        public DeletionAware<T, D> tailCursor(Direction dir)
+        {
+            return new DeletionAware<>(dir, nextTransition, duplicateSource(), byteComparableVersion, value);
+        }
+    }
+
+    static class DeletionBranch<T, D extends RangeState<D>>
+    extends SingletonCursor<T> implements DeletionAwareCursor<T, D>
+    {
+        RangeTrie<D> deletionBranch;
+
+        DeletionBranch(Direction direction, ByteSource src, ByteComparable.Version byteComparableVersion, RangeTrie<D> deletionBranch)
+        {
+            super(direction, src, byteComparableVersion, null);
+            this.deletionBranch = deletionBranch;
+        }
+
+        DeletionBranch(Direction direction, int firstByte, ByteSource src, ByteComparable.Version byteComparableVersion, RangeTrie<D> deletionBranch)
+        {
+
+            super(direction, firstByte, src, byteComparableVersion, null);
+            this.deletionBranch = deletionBranch;
+        }
+
+        @Override
+        public RangeCursor<D> deletionBranchCursor(Direction direction)
+        {
+            return atEnd() ? deletionBranch.cursor(direction) : null;
+        }
+
+        @Override
+        public DeletionBranch<T, D> tailCursor(Direction dir)
+        {
+            return new DeletionBranch<>(dir, nextTransition, duplicateSource(), byteComparableVersion, deletionBranch);
+        }
+    }
 }
