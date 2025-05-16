@@ -255,7 +255,7 @@ public class ReadCallback<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<
     }
 
     @Override
-    public boolean trackLatencyForSnitch()
+    public boolean trackLatencyForSnitch(Verb responseVerb, boolean isTimeout)
     {
         return true;
     }
