@@ -97,7 +97,6 @@ import org.apache.cassandra.exceptions.TruncateException;
 import org.apache.cassandra.exceptions.UnavailableException;
 import org.apache.cassandra.exceptions.WriteFailureException;
 import org.apache.cassandra.exceptions.WriteTimeoutException;
-import org.apache.cassandra.gms.FailureDetector;
 import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.gms.IFailureDetector;
 import org.apache.cassandra.hints.Hint;
@@ -202,6 +201,8 @@ public class StorageProxy implements StorageProxyMBean
     public static final StorageProxy instance = new StorageProxy();
 
     private static final Mutator mutator = MutatorProvider.instance;
+
+    private static final boolean useDynamicSnitchForCounterLeader = CassandraRelevantProperties.USE_DYNAMIC_SNITCH_FOR_COUNTER_LEADER.getBoolean();
 
     public static class DefaultMutator implements Mutator
     {
@@ -1950,7 +1951,6 @@ public class StorageProxy implements StorageProxyMBean
     private static AbstractWriteResponseHandler<IMutation> defaultMutateCounter(CounterMutation cm, String localDataCenter, Dispatcher.RequestTime requestTime) throws UnavailableException, OverloadedException
     {
         Replica replica = findSuitableReplica(cm.getKeyspaceName(), cm.key(), localDataCenter, cm.consistency());
-
         if (replica.isSelf())
         {
             return applyCounterMutationOnCoordinator(cm, localDataCenter, requestTime);
@@ -1986,11 +1986,6 @@ public class StorageProxy implements StorageProxyMBean
      * Find a suitable replica as leader for counter update.
      * For now, we pick a random replica in the local DC (or ask the snitch if
      * there is no replica alive in the local DC).
-     * TODO: if we track the latency of the counter writes (which makes sense
-     * contrarily to standard writes since there is a read involved), we could
-     * trust the dynamic snitch entirely, which may be a better solution. It
-     * is unclear we want to mix those latencies with read latencies, so this
-     * may be a bit involved.
      */
     private static Replica findSuitableReplica(String keyspaceName, DecoratedKey key, String localDataCenter, ConsistencyLevel cl) throws UnavailableException
     {
@@ -1999,13 +1994,18 @@ public class StorageProxy implements StorageProxyMBean
         AbstractReplicationStrategy replicationStrategy = keyspace.getReplicationStrategy();
         EndpointsForToken replicas = replicationStrategy.getNaturalReplicasForToken(key);
 
-        // CASSANDRA-13043: filter out those endpoints not accepting clients yet, maybe because still bootstrapping
+        // CASSANDRA-13043: filter out those endpoints not live yet, maybe because still bootstrapping
         // We have a keyspace, so filter by affinity too
         replicas = replicas.filter(IFailureDetector.isReplicaAlive)
                            .filter(snitch.filterByAffinity(keyspace.getName()));
 
-        // CASSANDRA-17411: filter out endpoints that are not alive
-        replicas = replicas.filter(replica -> FailureDetector.instance.isAlive(replica.endpoint()));
+        // Counter leader involves local read, coordinator will prioritize faster replica if configured
+        boolean endpointsSorted = false;
+        if (DatabaseDescriptor.isDynamicEndpointSnitch() && useDynamicSnitchForCounterLeader)
+        {
+            replicas = snitch.sortedByProximity(FBUtilities.getBroadcastAddressAndPort(), replicas);
+            endpointsSorted = true;
+        }
 
         // TODO have a way to compute the consistency level
         if (replicas.isEmpty())
@@ -2024,11 +2024,16 @@ public class StorageProxy implements StorageProxyMBean
                 throw UnavailableException.create(cl, cl.blockFor(replicationStrategy), 0);
 
             // No endpoint in local DC, pick the closest endpoint according to the snitch
-            replicas = snitch.sortedByProximity(FBUtilities.getBroadcastAddressAndPort(), replicas);
+            if (!endpointsSorted)
+                replicas = snitch.sortedByProximity(FBUtilities.getBroadcastAddressAndPort(), replicas);
             return replicas.get(0);
         }
 
-        return localReplicas.get(ThreadLocalRandom.current().nextInt(localReplicas.size()));
+        // if it's ordered, exclude the slowest one and pick randomly from the rest to avoid overloading single replica
+        int replicasToPick = localReplicas.size();
+        if (endpointsSorted && localReplicas.size() > 1)
+            replicasToPick--;
+        return localReplicas.get(ThreadLocalRandom.current().nextInt(replicasToPick));
     }
 
     // Must be called on a replica of the mutation. This replica becomes the
