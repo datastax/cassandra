@@ -59,10 +59,10 @@ public interface RequestCallback<T>
     }
 
     /**
-     * @return true if this callback is on the read path and its latency should be
+     * @return true if this callback is on the read path or it's expired counter leader response then its latency should be
      * given as input to the dynamic snitch.
      */
-    default boolean trackLatencyForSnitch()
+    default boolean trackLatencyForSnitch(Verb responseVerb, boolean isTimeout)
     {
         return false;
     }
