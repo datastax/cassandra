@@ -54,6 +54,7 @@ public class ClientRequestsMetricsTest
     protected static void releaseAll(ClientRequestsMetrics ccrm)
     {
         ccrm.readMetrics.release();
+        ccrm.aggregationMetrics.release();
         ccrm.rangeMetrics.release();
         ccrm.writeMetrics.release();
         ccrm.casWriteMetrics.release();
@@ -102,6 +103,20 @@ public class ClientRequestsMetricsTest
         updateClientRangeRequestMetrics(c2.rangeMetrics);
         verifyClientRangeRequestMetrics(c1.rangeMetrics, 1);
         verifyClientRangeRequestMetrics(c2.rangeMetrics, 1);
+    }
+
+    @Test
+    public void testAggregateMetrics()
+    {
+        // update tenant1 range metrics, tenant2 metrics remain 0
+        updateClientRangeRequestMetrics(c1.aggregationMetrics);
+        verifyClientRangeRequestMetrics(c1.aggregationMetrics, 1);
+        verifyClientRangeRequestMetrics(c2.aggregationMetrics, 0);
+
+        // update tenant2 range metrics, tenant1 metrics remain 1
+        updateClientRangeRequestMetrics(c2.aggregationMetrics);
+        verifyClientRangeRequestMetrics(c1.aggregationMetrics, 1);
+        verifyClientRangeRequestMetrics(c2.aggregationMetrics, 1);
     }
 
     @Test

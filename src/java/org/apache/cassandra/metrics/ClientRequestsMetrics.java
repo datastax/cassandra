@@ -27,6 +27,7 @@ import org.apache.cassandra.db.ConsistencyLevel;
 public class ClientRequestsMetrics
 {
     public final ClientRequestMetrics readMetrics;
+    public final ClientRangeRequestMetrics aggregationMetrics;
     public final ClientRangeRequestMetrics rangeMetrics;
     public final ClientWriteRequestMetrics writeMetrics;
     public final CASClientWriteRequestMetrics casWriteMetrics;
@@ -47,6 +48,7 @@ public class ClientRequestsMetrics
     public ClientRequestsMetrics(String namePrefix)
     {
         readMetrics = new ClientRequestMetrics("Read", namePrefix);
+        aggregationMetrics = new ClientRangeRequestMetrics("Aggregation", namePrefix);
         rangeMetrics = new ClientRangeRequestMetrics("RangeSlice", namePrefix);
         writeMetrics = new ClientWriteRequestMetrics("Write", namePrefix);
         casWriteMetrics = new CASClientWriteRequestMetrics("CASWrite", namePrefix);
@@ -81,6 +83,7 @@ public class ClientRequestsMetrics
     public void release()
     {
         readMetrics.release();
+        aggregationMetrics.release();
         rangeMetrics.release();
         writeMetrics.release();
         casWriteMetrics.release();

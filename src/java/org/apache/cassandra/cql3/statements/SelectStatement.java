@@ -790,7 +790,8 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         if (keyBounds == null)
             return ReadQuery.empty(table);
 
-        return PartitionRangeReadQuery.create(table, nowInSec, columnFilter, rowFilter, limit, new DataRange(keyBounds, clusteringIndexFilter));
+        boolean isAggregateQuery = (aggregationSpec != null);
+        return PartitionRangeReadQuery.create(table, nowInSec, columnFilter, rowFilter, limit, new DataRange(keyBounds, clusteringIndexFilter), isAggregateQuery);
     }
 
     private ClusteringIndexFilter makeClusteringIndexFilter(QueryOptions options, ColumnFilter columnFilter, QueryState queryState)
