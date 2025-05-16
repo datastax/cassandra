@@ -318,8 +318,11 @@ public class TrieIndexFormat implements SSTableFormat
         //               presence marker for partition level deletions
         // bb (DSE 6.8.5): added hostId of the node from which the sstable originated (DB-4629)
         // ca (DSE-DB aka Stargazer based on OSS 4.0): bb fields without maxColumnValueLengths + all OSS fields
-        // cb (OSS 5.0): token space coverage
+        // cb : token space coverage
         // cc : added explicitly frozen tuples in header, non-frozen UDT columns dropping support
+        //
+        // da (OSS 5.0.0): initial version of the BIT format
+        //
         // NOTE: when adding a new version, please add that to LegacySSTableTest, too.
 
         private final boolean isLatestVersion;
@@ -334,7 +337,7 @@ public class TrieIndexFormat implements SSTableFormat
         private final boolean hasMaxColumnValueLengths;
 
         private final int correspondingMessagingVersion;
-        private final boolean hasExplicitlyFrozenTuples;
+        private final boolean hasImplicitlyFrozenTuples;
 
         private final ByteComparable.Version byteComparableVersion;
 
@@ -348,7 +351,7 @@ public class TrieIndexFormat implements SSTableFormat
             hasOriginatingHostId = version.matches("(a[d-z])|(b[b-z])") || version.compareTo("ca") >= 0;
             hasMaxColumnValueLengths = version.matches("b[a-z]"); // DSE only field
             correspondingMessagingVersion = version.compareTo("ca") >= 0 ? MessagingService.VERSION_DS_10 : MessagingService.VERSION_3014;
-            hasExplicitlyFrozenTuples = version.compareTo("cc") < 0 || version.compareTo("da") >= 0; // we don't know if what DA is going to be eventually, but it is almost certain it will not include explicitly frozen tuples
+            hasImplicitlyFrozenTuples = version.compareTo("cc") < 0 || version.compareTo("da") >= 0; // `da` is found in C* 5.0 and CC `main-5.0`, and both have implicitly frozen tuples
             byteComparableVersion = version.compareTo("ca") >= 0 ? ByteComparable.Version.OSS41 : ByteComparable.Version.LEGACY;
         }
 
@@ -479,7 +482,7 @@ public class TrieIndexFormat implements SSTableFormat
         @Override
         public boolean hasImplicitlyFrozenTuples()
         {
-            return hasExplicitlyFrozenTuples;
+            return hasImplicitlyFrozenTuples;
         }
 
         @Override
