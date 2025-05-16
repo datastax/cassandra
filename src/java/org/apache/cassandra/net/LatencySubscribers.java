@@ -64,12 +64,14 @@ public class LatencySubscribers
     /**
      * Track latency information for the dynamic snitch
      *
-     * @param cb      the callback associated with this message -- this lets us know if it's a message type we're interested in
-     * @param address the host that replied to the message
+     * @param cb           the callback associated with this message -- this lets us know if it's a message type we're interested in
+     * @param responseVerb the verb to respond the request
+     * @param address      the host that replied to the message
+     * @param isTimeout    if the request has timed out
      */
-    public void maybeAdd(RequestCallback cb, InetAddressAndPort address, long latency, TimeUnit unit)
+    public void maybeAdd(RequestCallback cb, Verb responseVerb, InetAddressAndPort address, long latency, TimeUnit unit, boolean isTimeout)
     {
-        if (cb.trackLatencyForSnitch())
+        if (cb.trackLatencyForSnitch(responseVerb, isTimeout))
             add(address, latency, unit);
     }
 }
