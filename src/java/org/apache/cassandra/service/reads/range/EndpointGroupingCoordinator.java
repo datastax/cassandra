@@ -49,7 +49,6 @@ import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.RequestCallback;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.service.QueryInfoTracker;
-import org.apache.cassandra.service.StorageProxy;
 import org.apache.cassandra.service.reads.DataResolver;
 import org.apache.cassandra.service.reads.ReadCallback;
 import org.apache.cassandra.service.reads.ShortReadPartitionsProtection;
@@ -275,7 +274,7 @@ public class EndpointGroupingCoordinator
             }
 
             @Override
-            public boolean trackLatencyForSnitch()
+            public boolean trackLatencyForSnitch(Verb responseVerb, boolean isTimeout)
             {
                 return true;
             }
