@@ -132,7 +132,7 @@ public class SegmentsSystemViewTest extends SAITester
             SegmentBuilder.updateLastValidSegmentRowId(lastValidSegmentRowId);
 
             // compaction to rewrite segments
-            StorageService.instance.upgradeSSTables(KEYSPACE, false, new String[] { currentTable() });
+            StorageService.instance.upgradeSSTables(KEYSPACE, false, currentTable());
             // segment compaction is now disabled
             int segmentCount = (int) Math.ceil(num * 1.0 / (lastValidSegmentRowId + 1));
             assertRowCount(execute(SELECT, numericIndex), segmentCount);
@@ -191,7 +191,7 @@ public class SegmentsSystemViewTest extends SAITester
         assertEmpty(execute(SELECT, stringIndex));
     }
 
-    private HashMap<String, Long> indexFileLengths(String table) throws Exception
+    private HashMap<String, Long> indexFileLengths(String table)
     {
         ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
 
@@ -210,6 +210,7 @@ public class SegmentsSystemViewTest extends SAITester
                 {
                     addComponentSizeToMap(lengths, IndexComponentType.TERMS_DATA, index.getIndexContext(), indexDescriptor);
                     addComponentSizeToMap(lengths, IndexComponentType.POSTING_LISTS, index.getIndexContext(), indexDescriptor);
+                    addComponentSizeToMap(lengths, IndexComponentType.DOC_LENGTHS, index.getIndexContext(), indexDescriptor);
                 }
                 else
                 {
