@@ -34,6 +34,7 @@ import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.ObjectSizes;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.github.jamm.MemoryLayoutSpecification;
+import org.github.jamm.MemoryMeterStrategy;
 
 /**
  * In-memory trie built for fast modification and reads executing concurrently with writes from a single mutator thread.
@@ -1705,7 +1706,7 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
 
     private long usedObjectSpace()
     {
-        return (contentCount - objectAllocator.indexCountInPipeline()) * MemoryLayoutSpecification.SPEC.getReferenceSize();
+        return (contentCount - objectAllocator.indexCountInPipeline()) * MemoryMeterStrategy.MEMORY_LAYOUT.getReferenceSize();
     }
 
     /**
@@ -1731,7 +1732,7 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
         AtomicReferenceArray<T> contentArray = contentArrays[leadBit];
         int contentOverhead = ((contentArray != null ? contentArray.length() : 0) - ofs);
         contentOverhead += objectAllocator.indexCountInPipeline();
-        contentOverhead *= MemoryLayoutSpecification.SPEC.getReferenceSize();
+        contentOverhead *= MemoryMeterStrategy.MEMORY_LAYOUT.getReferenceSize();
 
         return bufferOverhead + contentOverhead;
     }

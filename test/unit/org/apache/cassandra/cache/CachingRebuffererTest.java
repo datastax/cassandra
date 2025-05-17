@@ -47,6 +47,7 @@ import org.apache.cassandra.utils.ObjectSizes;
 import org.apache.cassandra.utils.memory.BufferPool;
 import org.apache.cassandra.utils.memory.BufferPools;
 import org.github.jamm.MemoryMeter;
+import org.github.jamm.MemoryMeter.Guess;
 import org.mockito.Mockito;
 
 import static org.junit.Assert.assertEquals;
@@ -159,7 +160,9 @@ public class CachingRebuffererTest
         }
 
         Rebufferer rebufferer = ChunkCache.instance.maybeWrap(new EmptyAllocatingChunkReader()).instantiateRebufferer();
-        final MemoryMeter memoryMeter = new MemoryMeter().withGuessing(MemoryMeter.Guess.FALLBACK_UNSAFE);
+        final MemoryMeter memoryMeter = MemoryMeter.builder().withGuessing(Guess.INSTRUMENTATION_AND_SPECIFICATION,
+                                                                           Guess.UNSAFE)
+                                                   .build();
         final long initialHeap = memoryMeter.measureDeep(ChunkCache.instance);
         System.out.println("initial deepSize = " + FBUtilities.prettyPrintMemory(initialHeap));
 
