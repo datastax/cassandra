@@ -213,6 +213,7 @@ public final class SchemaEvent extends DiagnosticEvent
         ret.put("gcGraceSeconds", params.gcGraceSeconds);
         ret.put("bloomFilterFpChance", params.bloomFilterFpChance);
         ret.put("cdc", params.cdc);
+        ret.put("schema_type", params.schemaType.toString());
         ret.put("crcCheckChance", params.crcCheckChance);
         ret.put("memtableFlushPeriodInMs", params.memtableFlushPeriodInMs);
         ret.put("comment", params.comment);
