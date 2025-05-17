@@ -33,9 +33,12 @@ public class DocLengthsWriter implements Closeable
 {
     private final IndexOutputWriter output;
 
+    private final long startOffset;
+
     public DocLengthsWriter(IndexComponents.ForWrite components) throws IOException
     {
         this.output = components.addOrGet(IndexComponentType.DOC_LENGTHS).openOutput(true);
+        startOffset = output.getFilePointer();
         SAICodecUtils.writeHeader(output);
     }
 
@@ -63,6 +66,14 @@ public class DocLengthsWriter implements Closeable
     public long getFilePointer()
     {
         return output.getFilePointer();
+    }
+
+    /**
+     * @return file pointer where index structure begins (before header)
+     */
+    public long getStartOffset()
+    {
+        return startOffset;
     }
 
     @Override
