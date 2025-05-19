@@ -118,11 +118,22 @@ public interface IEndpointSnitch
     }
 
     /**
-     * Filters the given {@code addresses} by affinity to the given keyspace.
+     * Filters the given {@code addresses} by affinity to the given keyspace for read requests.
      * <br/><br/>
      * Always returns true by default.
      */
-    default Predicate<Replica> filterByAffinity(String keyspace)
+    default Predicate<Replica> filterByAffinityForReads(String keyspace)
+    {
+        return replica -> true;
+    }
+
+
+    /**
+     * Filters the given {@code addresses} by affinity to the given keyspace for write requests.
+     * <br/><br/>
+     * Always returns true by default.
+     */
+    default Predicate<InetAddressAndPort> filterByAffinityForWrites(String keyspace)
     {
         return replica -> true;
     }

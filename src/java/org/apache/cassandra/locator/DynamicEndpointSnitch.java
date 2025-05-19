@@ -476,8 +476,14 @@ public class DynamicEndpointSnitch extends AbstractEndpointSnitch implements Lat
     }
 
     @Override
-    public Predicate<Replica> filterByAffinity(String keyspace)
+    public Predicate<Replica> filterByAffinityForReads(String keyspace)
     {
-        return subsnitch.filterByAffinity(keyspace);
+        return subsnitch.filterByAffinityForReads(keyspace);
+    }
+
+    @Override
+    public Predicate<InetAddressAndPort> filterByAffinityForWrites(String keyspace)
+    {
+        return subsnitch.filterByAffinityForWrites(keyspace);
     }
 }

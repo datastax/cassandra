@@ -1997,7 +1997,7 @@ public class StorageProxy implements StorageProxyMBean
         // CASSANDRA-13043: filter out those endpoints not live yet, maybe because still bootstrapping
         // We have a keyspace, so filter by affinity too
         replicas = replicas.filter(IFailureDetector.isReplicaAlive)
-                           .filter(snitch.filterByAffinity(keyspace.getName()));
+                           .filter(snitch.filterByAffinityForReads(keyspace.getName()));
 
         // Counter leader involves local read, coordinator will prioritize faster replica if configured
         boolean endpointsSorted = false;
