@@ -30,6 +30,9 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.db.PartitionRangeReadCommand;
 import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.ReadResponse;
+import org.apache.cassandra.db.SinglePartitionReadCommand;
+import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
+import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.exceptions.ReadFailureException;
 import org.apache.cassandra.exceptions.ReadTimeoutException;
 import org.apache.cassandra.exceptions.RequestFailureReason;
@@ -41,6 +44,7 @@ import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.sensors.RequestTracker;
 import org.apache.cassandra.tracing.Tracing;
+import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.concurrent.SimpleCondition;
 
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
@@ -130,6 +134,10 @@ public class ReadCallback<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<
          */
         int received = resolver.responses.size();
         boolean failed = failures > 0 && (blockFor > received || !resolver.isDataPresent());
+
+        // Pretty-print all received responses for debugging
+        prettyPrintResponses();
+
         if (signaled && !failed)
             return;
 
@@ -189,7 +197,7 @@ public class ReadCallback<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<
     public void onFailure(InetAddressAndPort from, RequestFailureReason failureReason)
     {
         assertWaitingFor(from);
-                
+
         failureReasonByEndpoint.put(from, failureReason);
 
         int numContacts = replicaPlan().contacts().size();
@@ -215,5 +223,120 @@ public class ReadCallback<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<
         assert !replicaPlan().consistencyLevel().isDatacenterLocal()
                || DatabaseDescriptor.getLocalDataCenter().equals(DatabaseDescriptor.getEndpointSnitch().getDatacenter(from))
                : "Received read response from unexpected replica: " + from;
+    }
+
+    /**
+     * Pretty-prints all received read responses for debugging purposes.
+     * This method logs detailed information about each response including:
+     * - Source node
+     * - Whether it's a digest or data response
+     * - Response content (for data responses) or digest value (for digest responses)
+     * - Timing information
+     */
+    private void prettyPrintResponses()
+    {
+        if (!logger.isInfoEnabled())
+            return;
+
+        int received = resolver.responses.size();
+        if (received == 0)
+        {
+            logger.info("Read responses: None received");
+            return;
+        }
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("\n===== READ RESPONSES =====\n");
+        sb.append(String.format("Command: %s\n", command.getClass().getSimpleName()));
+        sb.append(String.format("Consistency Level: %s (blockFor=%d)\n", replicaPlan().consistencyLevel(), blockFor));
+        sb.append(String.format("Received: %d responses, Data present: %s, Failures: %d\n",
+                               received, resolver.isDataPresent(), failures));
+        sb.append("-------------------------\n");
+
+        // Get all responses
+        resolver.getMessages().snapshot().forEach(message -> {
+            InetAddressAndPort from = message.from();
+            ReadResponse response = message.payload;
+            boolean isDigest = response.isDigestResponse();
+
+            sb.append(String.format("From: %s\n", from));
+            sb.append(String.format("Response type: %s\n", isDigest ? "DIGEST" : "DATA"));
+
+            if (command.isDigestQuery())
+            {
+                sb.append(String.format("Digest: %s\n",
+                                      ByteBufferUtil.bytesToHex(response.digest(command))));
+            }
+            else if (command instanceof SinglePartitionReadCommand)
+            {
+                SinglePartitionReadCommand sprc = (SinglePartitionReadCommand) command;
+                sb.append(String.format("Content: %s\n",
+                                      response.toDebugString(command, sprc.partitionKey())));
+            }
+            else if (command instanceof PartitionRangeReadCommand)
+            {
+                PartitionRangeReadCommand rangeCmd = (PartitionRangeReadCommand) command;
+                sb.append(String.format("Range query: %s\n", rangeCmd.dataRange()));
+
+                if (!isDigest)
+                {
+                    try
+                    {
+                        // For data responses, try to extract some information about the results
+                        UnfilteredPartitionIterator iter = response.makeIterator(command);
+                        int partitionCount = 0;
+                        int rowCount = 0;
+                        long totalBytes = 0;
+
+                        while (iter.hasNext())
+                        {
+                            try (UnfilteredRowIterator partition = iter.next())
+                            {
+                                partitionCount++;
+
+                                // Count rows in this partition
+                                while (partition.hasNext())
+                                {
+                                    partition.next();
+                                    rowCount++;
+                                }
+
+                                // Add approximate size
+                                totalBytes += partition.partitionLevelDeletion().dataSize();
+                                if (partition.staticRow() != null)
+                                    totalBytes += partition.staticRow().dataSize();
+                            }
+                        }
+
+                        sb.append(String.format("Result summary: %d partitions, %d rows, ~%d bytes\n",
+                                              partitionCount, rowCount, totalBytes));
+                    }
+                    catch (Exception e)
+                    {
+                        sb.append(String.format("Could not extract range query details: %s\n", e.getMessage()));
+                    }
+                }
+                else
+                {
+                    sb.append(String.format("Digest: %s\n", ByteBufferUtil.bytesToHex(response.digest(command))));
+                }
+            }
+            else
+            {
+                sb.append("Content: <unknown query type>\n");
+            }
+
+            // Add failure reason if applicable
+            RequestFailureReason failureReason = failureReasonByEndpoint.get(from);
+            if (failureReason != null)
+            {
+                sb.append(String.format("Failure reason: %s\n", failureReason));
+            }
+
+            sb.append("-------------------------\n");
+        });
+
+        sb.append("===== END READ RESPONSES =====\n");
+        logger.info(sb.toString());
     }
 }

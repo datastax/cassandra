@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.service.reads.range;
 
+import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -52,7 +53,7 @@ public abstract class RangeCommandIterator extends AbstractIterator<RowIterator>
     private static final boolean ENDPOINT_GROUPING_ENABLED = RANGE_READ_ENDPOINT_GROUPING_ENABLED.getBoolean();
 
     @VisibleForTesting
-    public final ClientRangeRequestMetrics rangeMetrics;
+    public final ClientRangeRequestMetrics rangeMetrics; // set only for range read queries, but not for aggregation queries
 
     final CloseableIterator<ReplicaPlan.ForRangeRead> replicaPlans;
     final int totalRangeCount;
@@ -61,6 +62,7 @@ public abstract class RangeCommandIterator extends AbstractIterator<RowIterator>
 
     private final long startTime;
     final long queryStartNanoTime;
+    final PartitionRangeReadCommand.RoundTripsCounter roundTripsCounter;
     DataLimits.Counter counter;
     private PartitionIterator sentQueryIterator;
     protected QueryInfoTracker.ReadTracker readTracker;
@@ -71,7 +73,6 @@ public abstract class RangeCommandIterator extends AbstractIterator<RowIterator>
     // when it was not good enough initially.
     private int liveReturned;
     int rangesQueried;
-    int batchesRequested = 0;
 
     @SuppressWarnings("resource")
     public static RangeCommandIterator create(CloseableIterator<ReplicaPlan.ForRangeRead> replicaPlans,
@@ -107,10 +108,8 @@ public abstract class RangeCommandIterator extends AbstractIterator<RowIterator>
                          QueryInfoTracker.ReadTracker readTracker)
     {
         ClientRequestsMetrics clientMetrics = ClientRequestsMetricsProvider.instance.metrics(command.metadata().keyspace);
-        if (command.isAggregateQuery())
-            this.rangeMetrics = clientMetrics.aggregationMetrics;
-        else
-            this.rangeMetrics = clientMetrics.rangeMetrics;
+        this.rangeMetrics = command.isAggregateQuery() ? clientMetrics.aggregationMetrics : clientMetrics.rangeMetrics;
+        this.roundTripsCounter = command.getRoundTripsCounter();
         this.replicaPlans = replicaPlans;
         this.command = command;
         this.concurrencyFactor = concurrencyFactor;
@@ -144,6 +143,7 @@ public abstract class RangeCommandIterator extends AbstractIterator<RowIterator>
                     // returned so far to improve our rows-per-range estimate and update the concurrency accordingly
                     updateConcurrencyFactor();
                 }
+                logger.info("DUPA sending next requests on behalf of RangeCommandIterator {}", this);
                 sentQueryIterator = sendNextRequests();
             }
 
@@ -221,12 +221,20 @@ public abstract class RangeCommandIterator extends AbstractIterator<RowIterator>
         }
         finally
         {
-            rangeMetrics.roundTrips.update(batchesRequested);
             long endTime = System.nanoTime();
             long latency = endTime - startTime;
-            rangeMetrics.executionTimeMetrics.addNano(latency);
-            rangeMetrics.serviceTimeMetrics.addNano(endTime - queryStartNanoTime);
+            if (!command.isAggregateQuery())
+            {
+                rangeMetrics.roundTrips.update(roundTripsCounter.getNumberOfRequests());
+                rangeMetrics.executionTimeMetrics.addNano(latency);
+                rangeMetrics.serviceTimeMetrics.addNano(endTime - queryStartNanoTime);
+            }
+            else
+            {
+                // aggregation query metrics are updated in AggregationQueryPager, once the whole query is completed
+            }
             Keyspace.openAndGetStore(command.metadata()).metric.coordinatorScanLatency.update(latency, TimeUnit.NANOSECONDS);
+
         }
     }
 
@@ -236,10 +244,9 @@ public abstract class RangeCommandIterator extends AbstractIterator<RowIterator>
         return rangesQueried;
     }
 
-    @VisibleForTesting
-    int batchesRequested()
+    public int batchesRequested()
     {
-        return batchesRequested;
+        return roundTripsCounter.getNumberOfRequests();
     }
 
     @VisibleForTesting

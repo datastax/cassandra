@@ -190,7 +190,9 @@ public class RequestCallbacks implements OutboundMessageCallbacks
         messagingService.markExpiredCallback(info.peer);
 
         if (info.invokeOnFailure())
+        {
             INTERNAL_RESPONSE.submit(() -> info.callback.onFailure(info.peer, RequestFailureReason.TIMEOUT));
+        }
 
         // FIXME: this has never belonged here, should be part of onFailure() in AbstractWriteResponseHandler
         if (info.shouldHint())

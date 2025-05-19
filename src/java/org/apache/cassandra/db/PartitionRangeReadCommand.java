@@ -19,10 +19,13 @@ package org.apache.cassandra.db;
 
 import java.io.IOException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import com.google.common.annotations.VisibleForTesting;
 
 import org.apache.cassandra.db.memtable.Memtable;
+import org.apache.cassandra.net.Message;
+import org.apache.cassandra.net.MessageFlag;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -54,6 +57,7 @@ public class PartitionRangeReadCommand extends ReadCommand implements PartitionR
 
     private final DataRange dataRange;
     private final boolean isAggregate;
+    private RoundTripsCounter roundTripsCounter;
 
     private PartitionRangeReadCommand(boolean isDigest,
                                      int digestVersion,
@@ -65,11 +69,13 @@ public class PartitionRangeReadCommand extends ReadCommand implements PartitionR
                                      DataLimits limits,
                                      DataRange dataRange,
                                      Index.QueryPlan indexQueryPlan,
-                                     boolean isAggregate)
+                                     boolean isAggregate,
+                                     RoundTripsCounter roundTripsCounter)
     {
         super(Kind.PARTITION_RANGE, isDigest, digestVersion, acceptsTransient, metadata, nowInSec, columnFilter, rowFilter, limits, indexQueryPlan);
         this.dataRange = dataRange;
         this.isAggregate = isAggregate;
+        this.roundTripsCounter = roundTripsCounter;
     }
 
     public static PartitionRangeReadCommand createNonAggregateQuery(TableMetadata metadata,
@@ -90,7 +96,8 @@ public class PartitionRangeReadCommand extends ReadCommand implements PartitionR
                                              limits,
                                              dataRange,
                                              indexQueryPlan,
-                                             false);
+                                             false,
+                                             new RoundTripsCounterImpl());
     }
 
     public static PartitionRangeReadCommand create(TableMetadata metadata,
@@ -111,7 +118,8 @@ public class PartitionRangeReadCommand extends ReadCommand implements PartitionR
                                              limits,
                                              dataRange,
                                              findIndexQueryPlan(metadata, rowFilter),
-                                             isAggregate);
+                                             isAggregate,
+                                             new RoundTripsCounterImpl());
     }
 
     /**
@@ -134,7 +142,8 @@ public class PartitionRangeReadCommand extends ReadCommand implements PartitionR
                                              DataLimits.NONE,
                                              DataRange.allData(metadata.partitioner),
                                              null,
-                                             false);
+                                             false,
+                                             new RoundTripsCounterImpl());
     }
 
     public DataRange dataRange()
@@ -189,7 +198,8 @@ public class PartitionRangeReadCommand extends ReadCommand implements PartitionR
                                              isRangeContinuation ? limits() : limits().withoutState(),
                                              dataRange().forSubRange(range),
                                              indexQueryPlan(),
-                                             isAggregateQuery());
+                                             isAggregateQuery(),
+                                             getRoundTripsCounter());
     }
 
     public PartitionRangeReadCommand copy()
@@ -204,7 +214,8 @@ public class PartitionRangeReadCommand extends ReadCommand implements PartitionR
                                              limits(),
                                              dataRange(),
                                              indexQueryPlan(),
-                                             isAggregateQuery());
+                                             isAggregateQuery(),
+                                             getRoundTripsCounter());
     }
 
     @Override
@@ -220,7 +231,8 @@ public class PartitionRangeReadCommand extends ReadCommand implements PartitionR
                                              limits(),
                                              dataRange(),
                                              indexQueryPlan(),
-                                             isAggregateQuery());
+                                             isAggregateQuery(),
+                                             getRoundTripsCounter());
     }
 
     @Override
@@ -236,7 +248,8 @@ public class PartitionRangeReadCommand extends ReadCommand implements PartitionR
                                              limits(),
                                              dataRange(),
                                              indexQueryPlan(),
-                                             isAggregateQuery());
+                                             isAggregateQuery(),
+                                             getRoundTripsCounter());
     }
 
     @Override
@@ -252,7 +265,8 @@ public class PartitionRangeReadCommand extends ReadCommand implements PartitionR
                                              newLimits,
                                              dataRange(),
                                              indexQueryPlan(),
-                                             isAggregateQuery());
+                                             isAggregateQuery(),
+                                             getRoundTripsCounter());
     }
 
     @Override
@@ -268,12 +282,16 @@ public class PartitionRangeReadCommand extends ReadCommand implements PartitionR
                                              newLimits,
                                              newDataRange,
                                              indexQueryPlan(),
-                                             isAggregateQuery());
+                                             isAggregateQuery(),
+                                             getRoundTripsCounter());
     }
 
     public long getTimeout(TimeUnit unit)
     {
-        return DatabaseDescriptor.getRangeRpcTimeout(unit);
+        if (isAggregateQuery())
+            return DatabaseDescriptor.getAggregationRpcTimeout(unit);
+        else
+            return DatabaseDescriptor.getRangeRpcTimeout(unit);
     }
 
     public boolean isReversed()
@@ -455,9 +473,22 @@ public class PartitionRangeReadCommand extends ReadCommand implements PartitionR
             && dataRange.startKey().equals(dataRange.stopKey());
     }
 
+    @Override
+    public Message<ReadCommand> createMessage(boolean trackRepairedData)
+    {
+        return trackRepairedData
+               ? Message.outWithFlags(verb(), this, MessageFlag.CALL_BACK_ON_FAILURE, MessageFlag.TRACK_REPAIRED_DATA)
+               : Message.outWithFlag (verb(), this, MessageFlag.CALL_BACK_ON_FAILURE);
+    }
+
     public boolean isRangeRequest()
     {
         return true;
+    }
+
+    public RoundTripsCounter getRoundTripsCounter()
+    {
+        return roundTripsCounter;
     }
 
     private static class Deserializer extends SelectionDeserializer
@@ -476,7 +507,29 @@ public class PartitionRangeReadCommand extends ReadCommand implements PartitionR
         throws IOException
         {
             DataRange range = DataRange.serializer.deserialize(in, version, metadata);
-            return new PartitionRangeReadCommand(isDigest, digestVersion, acceptsTransient, metadata, nowInSec, columnFilter, rowFilter, limits, range, indexQueryPlan, false);
+            return new PartitionRangeReadCommand(isDigest, digestVersion, acceptsTransient, metadata, nowInSec, columnFilter, rowFilter, limits, range, indexQueryPlan, false, new RoundTripsCounterImpl());
+        }
+    }
+
+    public interface RoundTripsCounter
+    {
+        void increment();
+        int getNumberOfRequests();
+    }
+
+    public static class RoundTripsCounterImpl implements RoundTripsCounter
+    {
+        private final AtomicInteger counter = new AtomicInteger();
+
+        public void increment()
+        {
+            logger.info("DUPA bumping counter {} {}", this, counter.get(), new Exception("counter bumped"));
+            counter.incrementAndGet();
+        }
+
+        public int getNumberOfRequests()
+        {
+            return counter.get();
         }
     }
 }

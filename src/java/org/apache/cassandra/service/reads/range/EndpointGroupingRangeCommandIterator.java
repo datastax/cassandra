@@ -66,7 +66,7 @@ public class EndpointGroupingRangeCommandIterator extends RangeCommandIterator
         PartitionIterator partitions = coordinator.execute();
 
         rangesQueried += coordinator.vnodeRanges();
-        batchesRequested++;
+        roundTripsCounter.increment();
         Tracing.trace("Submitted concurrent grouped range read requests to {} endpoints", coordinator.endpoints());
         return partitions;
     }

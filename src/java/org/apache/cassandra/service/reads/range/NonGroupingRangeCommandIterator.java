@@ -38,9 +38,13 @@ import org.apache.cassandra.service.reads.ReadCallback;
 import org.apache.cassandra.service.reads.repair.ReadRepair;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.CloseableIterator;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class NonGroupingRangeCommandIterator extends RangeCommandIterator
 {
+    private static final Logger log = LoggerFactory.getLogger(NonGroupingRangeCommandIterator.class);
+
     NonGroupingRangeCommandIterator(CloseableIterator<ReplicaPlan.ForRangeRead> replicaPlans,
                                     PartitionRangeReadCommand command,
                                     int concurrencyFactor,
@@ -72,7 +76,7 @@ public class NonGroupingRangeCommandIterator extends RangeCommandIterator
                 rangesQueried += replicaPlan.vnodeCount();
                 i += replicaPlan.vnodeCount();
             }
-            batchesRequested++;
+            roundTripsCounter.increment();
         }
         catch (Throwable t)
         {
@@ -115,7 +119,7 @@ public class NonGroupingRangeCommandIterator extends RangeCommandIterator
         ReadCallback<EndpointsForRange, ReplicaPlan.ForRangeRead> handler =
         new ReadCallback<>(resolver, rangeCommand, sharedReplicaPlan, queryStartNanoTime);
 
-        if (replicaPlan.contacts().size() == 1 && replicaPlan.contacts().get(0).isSelf())
+        if (isLocalRead(replicaPlan))
         {
             Stage.READ.execute(new StorageProxy.LocalReadRunnable(rangeCommand, handler));
         }
@@ -131,5 +135,10 @@ public class NonGroupingRangeCommandIterator extends RangeCommandIterator
         }
 
         return new SingleRangeResponse(resolver, handler, readRepair);
+    }
+
+    private static boolean isLocalRead(ReplicaPlan.ForRangeRead replicaPlan)
+    {
+        return replicaPlan.contacts().size() == 1 && replicaPlan.contacts().get(0).isSelf();
     }
 }

@@ -22,11 +22,15 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
 import java.util.concurrent.locks.Condition;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 // fulfils the Condition interface without spurious wakeup problems
 // (or lost notify problems either: that is, even if you call await()
 // _after_ signal(), it will work as desired.)
 public class SimpleCondition implements Condition
 {
+    private static final Logger logger = LoggerFactory.getLogger(SimpleCondition.class);
     private static final AtomicReferenceFieldUpdater<SimpleCondition, WaitQueue> waitingUpdater = AtomicReferenceFieldUpdater.newUpdater(SimpleCondition.class, WaitQueue.class, "waiting");
 
     private volatile WaitQueue waiting;

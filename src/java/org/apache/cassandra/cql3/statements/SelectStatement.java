@@ -30,6 +30,8 @@ import com.google.common.math.IntMath;
 
 import org.apache.cassandra.cql3.Ordering;
 import org.apache.cassandra.cql3.restrictions.*;
+import org.apache.cassandra.metrics.ClientRequestsMetrics;
+import org.apache.cassandra.metrics.ClientRequestsMetricsProvider;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -670,7 +672,15 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         if (aggregationSpec == null || query.isEmpty())
             return pager;
 
-        return new AggregationQueryPager(pager, DatabaseDescriptor.getAggregationSubPageSize(), query.limits());
+        // assert query instanceof PartitionRangeReadCommand : "Expected a PartitionRangeReadCommand for aggregation queries; got " + query.getClass().getSimpleName();
+        Preconditions.checkState(query instanceof PartitionRangeReadCommand, "Expected a PartitionRangeReadCommand for aggregation queries; got " + query.getClass().getSimpleName());
+
+        return new AggregationQueryPager(
+                pager,
+                DatabaseDescriptor.getAggregationSubPageSize(),
+                query.limits(),
+                ClientRequestsMetricsProvider.instance.metrics(keyspace()).aggregationMetrics,
+                ((PartitionRangeReadCommand) query).getRoundTripsCounter());
     }
 
     public ResultSet process(PartitionIterator partitions, int nowInSec) throws InvalidRequestException

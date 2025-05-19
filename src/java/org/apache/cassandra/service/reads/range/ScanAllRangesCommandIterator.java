@@ -100,7 +100,7 @@ public class ScanAllRangesCommandIterator extends RangeCommandIterator
         }
 
         rangesQueried += plan.vnodeCount();
-        batchesRequested++;
+        roundTripsCounter.increment();
 
         Tracing.trace("Submitted scanning all ranges requests to {} nodes", nodes);
 

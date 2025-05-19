@@ -25,6 +25,7 @@ import java.util.*;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
+import org.apache.cassandra.metrics.ClientRangeRequestMetrics;
 import org.junit.After;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -1103,7 +1104,7 @@ public class QueryPagerTest
                   .contains("remaining=19")
                   .contains("current=0");
 
-        AggregationQueryPager aggregationQueryPager = new AggregationQueryPager(singlePartitionPager, PageSize.inBytes(512), limits);
+        AggregationQueryPager aggregationQueryPager = new AggregationQueryPager(singlePartitionPager, PageSize.inBytes(512), limits, new ClientRangeRequestMetrics("foo", "bar"), null);
         Assertions.assertThat(aggregationQueryPager.toString())
                   .contains("limits=" + limits)
                   .contains("subPageSize=512 bytes")
