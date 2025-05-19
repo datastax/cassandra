@@ -226,40 +226,29 @@ public class BigTableWriter extends SortedTableWriter
         dataFile.sync();
         iwriter.indexFile.sync();
 
-        return openFinal(SSTableReader.OpenReason.EARLY);
+        return openFinal(SSTableReader.OpenReason.EARLY, null);
     }
 
     @SuppressWarnings("resource")
-    protected SSTableReader openFinal(SSTableReader.OpenReason openReason)
+    @Override
+    protected SSTableReader openReader(SSTableReader.OpenReason reason, FileHandle dataFileHandle, StatsMetadata stats)
     {
-        if (maxDataAge < 0)
-            maxDataAge = System.currentTimeMillis();
-
-        StatsMetadata stats = statsMetadata();
-        // finalize in-memory state for the reader
         IndexSummary indexSummary = iwriter.summary.build(metadata().partitioner);
         long indexFileLength = descriptor.fileFor(Component.PRIMARY_INDEX).length();
-        int dataBufferSize = optimizationStrategy.bufferSize(stats.estimatedPartitionSize.percentile(DatabaseDescriptor.getDiskOptimizationEstimatePercentile()));
         int indexBufferSize = optimizationStrategy.bufferSize(indexFileLength / indexSummary.size());
         FileHandle ifile = iwriter.builder.bufferSize(indexBufferSize).complete();
-        if (compression)
-            dbuilder.withCompressionMetadata(((CompressedSequentialWriter) dataFile).open(0));
-        FileHandle dfile = dbuilder.bufferSize(dataBufferSize).complete();
-        invalidateCacheAtPreviousBoundary(dfile, Long.MAX_VALUE);
-        SSTableReader sstable = SSTableReader.internalOpen(descriptor,
-                                                           components(),
-                                                           metadata,
-                                                           ifile,
-                                                           dfile,
-                                                           indexSummary,
-                                                           iwriter.bf.sharedCopy(),
-                                                           maxDataAge,
-                                                           stats,
-                                                           openReason,
-                                                           header);
-        sstable.first = getMinimalKey(first);
-        sstable.last = getMinimalKey(last);
-        return sstable;
+
+        return SSTableReader.internalOpen(descriptor,
+                                          components(),
+                                          metadata,
+                                          ifile,
+                                          dataFileHandle,
+                                          indexSummary,
+                                          iwriter.bf.sharedCopy(),
+                                          maxDataAge,
+                                          stats,
+                                          reason,
+                                          header);
     }
 
     protected SortedTableWriter.TransactionalProxy txnProxy()

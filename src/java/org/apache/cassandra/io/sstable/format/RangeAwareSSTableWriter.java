@@ -35,6 +35,7 @@ import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTableMultiWriter;
+import org.apache.cassandra.io.sstable.StorageHandler;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.utils.FBUtilities;
 
@@ -112,7 +113,7 @@ public class RangeAwareSSTableWriter implements SSTableMultiWriter
     }
 
     @Override
-    public Collection<SSTableReader> finish(long repairedAt, long maxDataAge, boolean openResult)
+    public Collection<SSTableReader> finish(long repairedAt, long maxDataAge, boolean openResult, StorageHandler storageHandler)
     {
         if (currentWriter != null)
             finishedWriters.add(currentWriter);
@@ -120,7 +121,7 @@ public class RangeAwareSSTableWriter implements SSTableMultiWriter
         for (SSTableMultiWriter writer : finishedWriters)
         {
             if (writer.getBytesWritten() > 0)
-                finishedReaders.addAll(writer.finish(repairedAt, maxDataAge, openResult));
+                finishedReaders.addAll(writer.finish(repairedAt, maxDataAge, openResult, storageHandler));
             else
                 SSTableMultiWriter.abortOrDie(writer);
         }
@@ -128,7 +129,7 @@ public class RangeAwareSSTableWriter implements SSTableMultiWriter
     }
 
     @Override
-    public Collection<SSTableReader> finish(boolean openResult)
+    public Collection<SSTableReader> finish(boolean openResult, StorageHandler storageHandler)
     {
         if (currentWriter != null)
             finishedWriters.add(currentWriter);
@@ -136,7 +137,7 @@ public class RangeAwareSSTableWriter implements SSTableMultiWriter
         for (SSTableMultiWriter writer : finishedWriters)
         {
             if (writer.getBytesWritten() > 0)
-                finishedReaders.addAll(writer.finish(openResult));
+                finishedReaders.addAll(writer.finish(openResult, storageHandler));
             else
                 SSTableMultiWriter.abortOrDie(writer);
         }
@@ -150,10 +151,10 @@ public class RangeAwareSSTableWriter implements SSTableMultiWriter
     }
 
     @Override
-    public void openResult()
+    public void openResult(StorageHandler storageHandler)
     {
-        finishedWriters.forEach(SSTableMultiWriter::openResult);
-        currentWriter.openResult();
+        finishedWriters.forEach(w -> w.openResult(storageHandler));
+        currentWriter.openResult(storageHandler);
     }
 
     public String getFilename()
