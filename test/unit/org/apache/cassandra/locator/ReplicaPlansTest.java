@@ -71,7 +71,8 @@ public class ReplicaPlansTest
     private static final String KEYSPACE1 = "ks1";
     private static final String KEYSPACE2 = "ks2";
 
-    private static final Map<InetAddressAndPort, String> ipToKeyspaceAffinity = new HashMap<>();
+    private static final Map<InetAddressAndPort, String> ipToKeyspaceAffinityForReads = new HashMap<>();
+    private static final Map<InetAddressAndPort, String> ipToKeyspaceAffinityForWrites = new HashMap<>();
 
     private IEndpointSnitch savedEndpointSnitch;
 
@@ -106,11 +107,19 @@ public class ReplicaPlansTest
             return DC1;
         }
 
-        public Predicate<Replica> filterByAffinity(String keyspace)
+        public Predicate<Replica> filterByAffinityForReads(String keyspace)
         {
             return replica -> {
                 // Filter replicas by keyspace affinity
-                return ipToKeyspaceAffinity.get(replica.endpoint()).equals(keyspace);
+                return ipToKeyspaceAffinityForReads.get(replica.endpoint()).equals(keyspace);
+            };
+        }
+
+        public Predicate<InetAddressAndPort> filterByAffinityForWrites(String keyspace)
+        {
+            return replica -> {
+                // Filter replicas by keyspace affinity
+                return ipToKeyspaceAffinityForWrites.get(replica).equals(keyspace);
             };
         }
     }
@@ -136,6 +145,17 @@ public class ReplicaPlansTest
         Keyspace keyspace2 = keyspaceWithSnitch(KEYSPACE2, filterByKeyspaceAffinitySnitch);
         ReplicaPlan.ForTokenRead plan2 = ReplicaPlans.forRead(keyspace2, token, null, ANY, NeverSpeculativeRetryPolicy.INSTANCE);
         assertEndpointsMatchKeyspaceAffinity(KEYSPACE2, plan2.contacts());
+
+        // 127.1.0.255 belongs to write affinity keyspace2
+        EndpointsForToken natural = EndpointsForToken.of(token, full(InetAddressAndPort.getByName("127.1.0.255")));
+        EndpointsForToken pending = EndpointsForToken.empty(token);
+
+        ReplicaPlan.ForWrite writePlan1 =  ReplicaPlans.forWrite(keyspace1, ANY, natural, pending, Predicates.alwaysTrue(), ReplicaPlans.writeNormal);
+        assertTrue(writePlan1.live().isEmpty());
+
+        ReplicaPlan.ForWrite writePlan2 =  ReplicaPlans.forWrite(keyspace2, ANY, natural, pending, Predicates.alwaysTrue(), ReplicaPlans.writeNormal);
+        assertTrue(writePlan2.live().size() == 1);
+
     }
 
     private void setupReplicas() throws UnknownHostException
@@ -158,7 +178,8 @@ public class ReplicaPlansTest
             tokenMetadata.updateNormalToken(new Murmur3Partitioner.LongToken(i), ip);
 
             // Alternate keyspace affinity across replicas
-            ipToKeyspaceAffinity.put(ip, i % 2 == 0 ? KEYSPACE1 : KEYSPACE2);
+            ipToKeyspaceAffinityForReads.put(ip, i % 2 == 0 ? KEYSPACE1 : KEYSPACE2);
+            ipToKeyspaceAffinityForWrites.put(ip, i % 2 == 0 ? KEYSPACE2 : KEYSPACE1);
         }
     }
 
@@ -180,7 +201,7 @@ public class ReplicaPlansTest
     private void assertEndpointsMatchKeyspaceAffinity(String keyspaceName, EndpointsForToken endpoints)
     {
         assertTrue(endpoints.stream()
-                            .allMatch(replica -> ipToKeyspaceAffinity.get(replica.endpoint()).equals(keyspaceName)));
+                            .allMatch(replica -> ipToKeyspaceAffinityForReads.get(replica.endpoint()).equals(keyspaceName)));
     }
 
     static class Snitch extends AbstractNetworkTopologySnitch
