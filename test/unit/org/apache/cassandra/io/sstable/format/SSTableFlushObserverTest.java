@@ -336,7 +336,7 @@ public class SSTableFlushObserverTest
         try
         {
             partitions.forEach((key, rows) -> writer.append(new RowIterator(metadata, key, rows)));
-            reader = writer.finish(true);
+            reader = writer.finish(true, null);
         }
         finally
         {

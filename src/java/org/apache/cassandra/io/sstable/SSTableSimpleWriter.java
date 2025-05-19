@@ -81,7 +81,7 @@ class SSTableSimpleWriter extends AbstractSSTableSimpleWriter
             if (update != null)
                 writePartition(update.build());
             if (writer != null)
-                writer.finish(false);
+                writer.finish(false, null);
         }
         catch (Throwable t)
         {

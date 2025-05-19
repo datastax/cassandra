@@ -36,8 +36,8 @@ public interface SSTableMultiWriter extends Transactional
      */
     void append(UnfilteredRowIterator partition);
 
-    Collection<SSTableReader> finish(long repairedAt, long maxDataAge, boolean openResult);
-    Collection<SSTableReader> finish(boolean openResult);
+    Collection<SSTableReader> finish(long repairedAt, long maxDataAge, boolean openResult, StorageHandler handler);
+    Collection<SSTableReader> finish(boolean openResult, StorageHandler handler);
     Collection<SSTableReader> finished();
 
     /**
@@ -46,7 +46,7 @@ public interface SSTableMultiWriter extends Transactional
      * some of the resources used to create the underlying readers). When used, the readers can then be accessed by
      * calling `finished()`.
      */
-    void openResult();
+    void openResult(StorageHandler storageHandler);
 
     String getFilename();
     long getBytesWritten();
