@@ -30,6 +30,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
+import java.util.stream.Collectors;
 
 import javax.annotation.Nullable;
 
@@ -66,7 +67,6 @@ import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.service.reads.AlwaysSpeculativeRetryPolicy;
 import org.apache.cassandra.service.reads.SpeculativeRetryPolicy;
 import org.apache.cassandra.utils.FBUtilities;
-
 
 import static com.google.common.collect.Iterables.any;
 import static com.google.common.collect.Iterables.filter;
@@ -245,12 +245,16 @@ public class ReplicaPlans
         IEndpointSnitch snitch = DatabaseDescriptor.getEndpointSnitch();
         Multimap<String, InetAddressAndPort> localEndpoints = HashMultimap.create(topology.getDatacenterRacks()
                                                                                           .get(snitch.getLocalDatacenter()));
+
         // Replicas are picked manually:
         //  - replicas should be alive according to the failure detector
         //  - replicas should be in the local datacenter
         //  - choose min(2, number of qualifying candiates above)
         //  - allow the local node to be the only replica only if it's a single-node DC
         Collection<InetAddressAndPort> chosenEndpoints = filterBatchlogEndpoints(preferLocalRack, snitch.getLocalRack(), localEndpoints);
+
+        Predicate<InetAddressAndPort> endpointPredicate = snitch.filterByAffinityForWrites(keyspaceName);
+        chosenEndpoints = chosenEndpoints.stream().filter(endpointPredicate).collect(Collectors.toSet());;
 
         // Batchlog is hosted by either one node or two nodes from different racks.
         ConsistencyLevel consistencyLevel = chosenEndpoints.size() == 1 ? ConsistencyLevel.ONE : ConsistencyLevel.TWO;
@@ -472,6 +476,12 @@ public class ReplicaPlans
     {
         assert liveAndDown.replicationStrategy() == live.replicationStrategy()
                : "ReplicaLayout liveAndDown and live should be derived from the same replication strategy.";
+
+        // used by CNDB to filter out write replicas
+        IEndpointSnitch endpointSnitch = DatabaseDescriptor.getEndpointSnitch();
+        Predicate<InetAddressAndPort> writeEndpointFilter = endpointSnitch.filterByAffinityForWrites(keyspace.getName());
+        live = live.filter(r -> writeEndpointFilter.test(r.endpoint()));
+
         AbstractReplicationStrategy replicationStrategy = liveAndDown.replicationStrategy();
         EndpointsForToken contacts = selector.select(consistencyLevel, liveAndDown, live);
         assureSufficientLiveReplicasForWrite(replicationStrategy, consistencyLevel, live.all(), liveAndDown.pending());
@@ -724,9 +734,9 @@ public class ReplicaPlans
         AbstractReplicationStrategy replicationStrategy = keyspace.getReplicationStrategy();
         IEndpointSnitch endpointSnitch = DatabaseDescriptor.getEndpointSnitch();
         EndpointsForToken candidates = candidatesForRead(keyspace, indexQueryPlan, consistencyLevel, ReplicaLayout.forTokenReadLiveSorted(replicationStrategy, token).natural())
-                                       .filter(endpointSnitch.filterByAffinity(keyspace.getName()));
+                                       .filter(endpointSnitch.filterByAffinityForReads(keyspace.getName()));
         EndpointsForToken contacts = contactForRead(replicationStrategy, consistencyLevel, retry.equals(AlwaysSpeculativeRetryPolicy.INSTANCE), candidates)
-                                     .filter(endpointSnitch.filterByAffinity(keyspace.getName()));
+                                     .filter(endpointSnitch.filterByAffinityForReads(keyspace.getName()));
 
         assureSufficientLiveReplicasForRead(replicationStrategy, consistencyLevel, contacts);
         return new ReplicaPlan.ForTokenRead(keyspace, replicationStrategy, consistencyLevel, candidates, contacts);
@@ -748,9 +758,9 @@ public class ReplicaPlans
         AbstractReplicationStrategy replicationStrategy = keyspace.getReplicationStrategy();
         IEndpointSnitch endpointSnitch = DatabaseDescriptor.getEndpointSnitch();
         EndpointsForRange candidates = candidatesForRead(keyspace, indexQueryPlan, consistencyLevel, ReplicaLayout.forRangeReadLiveSorted(replicationStrategy, range).natural())
-                                       .filter(endpointSnitch.filterByAffinity(keyspace.getName()));
+                                       .filter(endpointSnitch.filterByAffinityForReads(keyspace.getName()));
         EndpointsForRange contacts = contactForRead(replicationStrategy, consistencyLevel, false, candidates)
-                                     .filter(endpointSnitch.filterByAffinity(keyspace.getName()));
+                                     .filter(endpointSnitch.filterByAffinityForReads(keyspace.getName()));
 
         assureSufficientLiveReplicasForRead(replicationStrategy, consistencyLevel, contacts);
         return new ReplicaPlan.ForRangeRead(keyspace, replicationStrategy, consistencyLevel, range, candidates, contacts, vnodeCount);

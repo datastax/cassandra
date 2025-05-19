@@ -20,6 +20,7 @@ package org.apache.cassandra.locator;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.UUID;
@@ -40,6 +41,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.service.StorageService;
 
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertFalse;
@@ -393,5 +395,54 @@ public class TokenMetadataTest
         ver = metadata.getRingVersion();
         metadata.removeEndpoint(ep3);
         assertEquals(ver, metadata.getRingVersion());
+    }
+
+    @Test
+    public void testUpdateAddressForNormalTokens() throws UnknownHostException
+    {
+        final InetAddressAndPort first = InetAddressAndPort.getByName("127.0.0.1");
+        final InetAddressAndPort second = InetAddressAndPort.getByName("127.0.0.6");
+
+        tmd.updateNormalToken(token(ONE), first);
+        tmd.updateNormalToken(token(SIX), second);
+
+        assertEquals(tmd.getTokens(first).size(), 1);
+        assertEquals(tmd.getTokens(first).iterator().next(), token(ONE));
+
+        assertEquals(tmd.getTokens(second).size(), 1);
+        assertEquals(tmd.getTokens(second).iterator().next(), token(SIX));
+
+        InetAddressAndPort updatedNode = InetAddressAndPort.getByName("127.0.0.10");
+        assertThatThrownBy(() -> tmd.updateAddressForNormalTokens(Collections.singleton(token(SIX)), first, updatedNode))
+                          .hasMessageContaining("different set of tokens");
+        tmd.updateAddressForNormalTokens(Collections.singleton(token(ONE)), first, updatedNode);
+
+        assertEquals(tmd.getTokens(updatedNode).size(), 1);
+        assertEquals(tmd.getTokens(updatedNode).iterator().next(), token(ONE));
+
+        assertEquals(tmd.getTokens(second).size(), 1);
+        assertEquals(tmd.getTokens(second).iterator().next(), token(SIX));
+    }
+
+    @Test
+    public void testUpdateAddressForHostId() throws UnknownHostException
+    {
+        final InetAddressAndPort first = InetAddressAndPort.getByName("127.0.0.1");
+        UUID firstId = UUID.randomUUID();
+
+        final InetAddressAndPort second = InetAddressAndPort.getByName("127.0.0.6");
+        UUID secondId = UUID.randomUUID();
+
+        tmd.updateHostId(firstId, first);
+        tmd.updateHostId(secondId, second);
+
+        assertEquals(tmd.getHostId(first), firstId);
+        assertEquals(tmd.getHostId(second), secondId);
+
+        InetAddressAndPort updatedNode = InetAddressAndPort.getByName("127.0.0.10");
+        tmd.updateAddressForHostId(secondId, second, updatedNode);
+
+        assertEquals(tmd.getHostId(first), firstId);
+        assertEquals(tmd.getHostId(updatedNode), secondId);
     }
 }
