@@ -438,7 +438,7 @@ public class FileHandle extends SharedCloseableImpl
                 if (compressed && compressionMetadata == null)
                 {
                     compressionMetadata = CompressionMetadata.read(channelCopy.getFile(), sliceDescriptor, encryptionOnly);
-                    if (!encryptionOnly)
+                    if (!encryptionOnly && overrideLength < 0)
                         overrideLength = compressionMetadata.compressedFileLength;
                     // else the compression metadata is for the corresponding data file rather than the index
                     // for which this is building a handle
