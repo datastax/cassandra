@@ -1088,15 +1088,15 @@ public class IndexHintsTest extends CQLTester
     {
         Assertions.assertThatThrownBy(() -> execute(query))
                   .isInstanceOf(InvalidRequestException.class)
-                  .hasMessageContaining(String.format(IndexHints.UNSELECTED_INDEX_ERROR, String.join(",", indexes)));
+                  .hasMessageContaining(String.format(IndexHints.NON_INCLUDABLE_INDEX_ERROR, String.join(",", indexes)));
     }
 
     private void assertAnyUnselectedIndexError(String query, String one, String other)
     {
         Assertions.assertThatThrownBy(() -> execute(query))
                   .isInstanceOf(InvalidRequestException.class)
-                  .matches(e -> e.getMessage().equals(String.format(IndexHints.UNSELECTED_INDEX_ERROR, one))
-                             || e.getMessage().equals(String.format(IndexHints.UNSELECTED_INDEX_ERROR, other)));
+                  .matches(e -> e.getMessage().equals(String.format(IndexHints.NON_INCLUDABLE_INDEX_ERROR, one))
+                             || e.getMessage().equals(String.format(IndexHints.NON_INCLUDABLE_INDEX_ERROR, other)));
     }
 
     private void assertNeedsAllowFiltering(String query)

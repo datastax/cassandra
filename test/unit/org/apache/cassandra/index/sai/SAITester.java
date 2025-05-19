@@ -1028,7 +1028,7 @@ public class SAITester extends CQLTester
             Assertions.assertThat(selectedIndexes).isEmpty();
         }
 
-        public void usesAnyOf(String index1, String index2, String... otherIndexes)
+        public PlanSelectionAssertion usesAnyOf(String index1, String index2, String... otherIndexes)
         {
             Set<String> expectedIndexes = new HashSet<>(otherIndexes.length + 1);
             expectedIndexes.add(index1);
@@ -1039,14 +1039,16 @@ public class SAITester extends CQLTester
                       .isNotNull()
                       .as("Expected to select any of %s, but got: %s", expectedIndexes, selectedIndexes)
                       .containsAnyElementsOf(expectedIndexes);
+            return this;
         }
 
-        public void usesAtLeast(String... indexes)
+        public PlanSelectionAssertion usesAtLeast(String... indexes)
         {
             Assertions.assertThat(selectedIndexes)
                       .isNotNull()
                       .as("Expected to select at least %s, but got: %s", indexes, selectedIndexes)
                       .containsAll(Set.of(indexes));
+            return this;
         }
 
         public void doesntWarn()

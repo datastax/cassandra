@@ -64,7 +64,7 @@ public class IndexHints
     public static final String CONFLICTING_INDEXES_ERROR = "Indexes cannot be both included and excluded: ";
     public static final String WRONG_KEYSPACE_ERROR = "Index %s is not in the same keyspace as the queried table.";
     public static final String MISSING_INDEX_ERROR = "Table %s doesn't have an index named %s";
-    public static final String UNSELECTED_INDEX_ERROR = "It wasn't possible to select the indexes %s";
+    public static final String NON_INCLUDABLE_INDEX_ERROR = "It wasn't possible to select the included indexes %s";
 
     public static final IndexHints NONE = new IndexHints(Collections.emptySet(), Collections.emptySet());
 
@@ -227,7 +227,7 @@ public class IndexHints
             if (included.isEmpty())
                 return;
             else
-                throw new InvalidRequestException(String.format(UNSELECTED_INDEX_ERROR, IndexMetadata.joinNames(included)));
+                throw new InvalidRequestException(String.format(NON_INCLUDABLE_INDEX_ERROR, IndexMetadata.joinNames(included)));
         }
 
         Set<IndexMetadata> missing = new HashSet<>();
@@ -237,7 +237,7 @@ public class IndexHints
                 missing.add(indexMetadata);
         }
         if (!missing.isEmpty())
-            throw new InvalidRequestException(String.format(UNSELECTED_INDEX_ERROR, IndexMetadata.joinNames(missing)));
+            throw new InvalidRequestException(String.format(NON_INCLUDABLE_INDEX_ERROR, IndexMetadata.joinNames(missing)));
 
         // excluded indexes should never be included because the query plans are built from a filtered list
     }

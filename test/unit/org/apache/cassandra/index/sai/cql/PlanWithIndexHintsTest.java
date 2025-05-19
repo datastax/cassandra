@@ -16,13 +16,7 @@
 
 package org.apache.cassandra.index.sai.cql;
 
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.List;
-
 import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.junit.runners.Parameterized;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
@@ -40,23 +34,10 @@ import org.assertj.core.api.Assertions;
  *    <li>Excluded indexes shouldn't be included in the query {@link Plan}.</li>
  * </ul>
  */
-@RunWith(Parameterized.class)
 public class PlanWithIndexHintsTest extends SAITester
 {
-    @Parameterized.Parameter
-    public boolean flush;
-
-    @Parameterized.Parameters(name = "{index}: flush={0}")
-    public static Collection<Object[]> parameters()
-    {
-        List<Object[]> result = new ArrayList<>();
-        for (boolean flush : new boolean[]{ false, true })
-            result.add(new Object[]{ flush });
-        return result;
-    }
-
     @Test
-    public void testQueryPlanning()
+    public void testQueryPlanning() throws Throwable
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v1 text, v2 text)");
         String idx1 = createIndex("CREATE CUSTOM INDEX idx1 ON %s(v1) USING 'StorageAttachedIndex'");
@@ -73,96 +54,96 @@ public class PlanWithIndexHintsTest extends SAITester
                     i == 0 || i == 2 ? "rare" : "common");
         }
 
-        if (flush)
-            flush();
+        beforeAndAfterFlush(() -> {
 
-        // test some queries without any hints, so selection is based on selectivity only
-        assertThatPlanFor("SELECT * FROM %s WHERE v1='rare' AND v2='rare'", 1).usesAnyOf(idx1, idx2);
-        assertThatPlanFor("SELECT * FROM %s WHERE v1='rare' AND v2='common'", 1).uses(idx1);
-        assertThatPlanFor("SELECT * FROM %s WHERE v1='common' AND v2='rare'", 1).uses(idx2);
-        assertThatPlanFor("SELECT * FROM %s WHERE v1='common' AND v2='common'", numRows - 3).usesAnyOf(idx1, idx2);
-        assertThatPlanFor("SELECT * FROM %s WHERE v1='rare' OR v2='rare'", 3).uses(idx1, idx2);
-        assertThatPlanFor("SELECT * FROM %s WHERE v1='rare' OR v2='common'", numRows - 1).uses(idx1, idx2);
-        assertThatPlanFor("SELECT * FROM %s WHERE v1='common' OR v2='rare'", numRows - 1).uses(idx1, idx2);
-        assertThatPlanFor("SELECT * FROM %s WHERE v1='common' OR v2='common'", numRows - 1).uses(idx1, idx2);
-        assertThatPlanFor("SELECT * FROM %s ORDER BY v1 LIMIT 10", 10).uses(idx1);
-        assertThatPlanFor("SELECT * FROM %s ORDER BY v2 LIMIT 10", 10).uses(idx2);
+            // test some queries without any hints, so selection is based on selectivity only
+            assertThatPlanFor("SELECT * FROM %s WHERE v1='rare' AND v2='rare'", 1).usesAnyOf(idx1, idx2);
+            assertThatPlanFor("SELECT * FROM %s WHERE v1='rare' AND v2='common'", 1).uses(idx1);
+            assertThatPlanFor("SELECT * FROM %s WHERE v1='common' AND v2='rare'", 1).uses(idx2);
+            assertThatPlanFor("SELECT * FROM %s WHERE v1='common' AND v2='common'", numRows - 3).usesAnyOf(idx1, idx2);
+            assertThatPlanFor("SELECT * FROM %s WHERE v1='rare' OR v2='rare'", 3).uses(idx1, idx2);
+            assertThatPlanFor("SELECT * FROM %s WHERE v1='rare' OR v2='common'", numRows - 1).uses(idx1, idx2);
+            assertThatPlanFor("SELECT * FROM %s WHERE v1='common' OR v2='rare'", numRows - 1).uses(idx1, idx2);
+            assertThatPlanFor("SELECT * FROM %s WHERE v1='common' OR v2='common'", numRows - 1).uses(idx1, idx2);
+            assertThatPlanFor("SELECT * FROM %s ORDER BY v1 LIMIT 10", 10).uses(idx1);
+            assertThatPlanFor("SELECT * FROM %s ORDER BY v2 LIMIT 10", 10).uses(idx2);
 
-        // run the same queries as before, but with hints including idx1
-        assertThatPlanFor("SELECT * FROM %s WHERE v1='rare' AND v2='rare' WITH included_indexes = {idx1}", 1).usesAtLeast(idx1);
-        assertThatPlanFor("SELECT * FROM %s WHERE v1='rare' AND v2='common' WITH included_indexes = {idx1}", 1).usesAtLeast(idx1);
-        assertThatPlanFor("SELECT * FROM %s WHERE v1='common' AND v2='rare' WITH included_indexes = {idx1}", 1).usesAtLeast(idx1);
-        assertThatPlanFor("SELECT * FROM %s WHERE v1='common' AND v2='common' WITH included_indexes = {idx1}", numRows - 3).usesAtLeast(idx1);
-        assertThatPlanFor("SELECT * FROM %s WHERE v1='rare' OR v2='rare' WITH included_indexes = {idx1}", 3).uses(idx1, idx2);
-        assertThatPlanFor("SELECT * FROM %s WHERE v1='rare' OR v2='common' WITH included_indexes = {idx1}", numRows - 1).uses(idx1, idx2);
-        assertThatPlanFor("SELECT * FROM %s WHERE v1='common' OR v2='rare' WITH included_indexes = {idx1}", numRows - 1).uses(idx1, idx2);
-        assertThatPlanFor("SELECT * FROM %s WHERE v1='common' OR v2='common' WITH included_indexes = {idx1}", numRows - 1).uses(idx1, idx2);
-        assertThatPlanFor("SELECT * FROM %s ORDER BY v1 LIMIT 10 WITH included_indexes = {idx1}", 10).uses(idx1);
-        assertUnselectedIndexError("SELECT * FROM %s ORDER BY v2 LIMIT 10 WITH included_indexes = {idx1}", idx1);
+            // run the same queries as before, but with hints including idx1
+            assertThatPlanFor("SELECT * FROM %s WHERE v1='rare' AND v2='rare' WITH included_indexes = {idx1}", 1).usesAtLeast(idx1);
+            assertThatPlanFor("SELECT * FROM %s WHERE v1='rare' AND v2='common' WITH included_indexes = {idx1}", 1).usesAtLeast(idx1);
+            assertThatPlanFor("SELECT * FROM %s WHERE v1='common' AND v2='rare' WITH included_indexes = {idx1}", 1).usesAtLeast(idx1);
+            assertThatPlanFor("SELECT * FROM %s WHERE v1='common' AND v2='common' WITH included_indexes = {idx1}", numRows - 3).usesAtLeast(idx1);
+            assertThatPlanFor("SELECT * FROM %s WHERE v1='rare' OR v2='rare' WITH included_indexes = {idx1}", 3).uses(idx1, idx2);
+            assertThatPlanFor("SELECT * FROM %s WHERE v1='rare' OR v2='common' WITH included_indexes = {idx1}", numRows - 1).uses(idx1, idx2);
+            assertThatPlanFor("SELECT * FROM %s WHERE v1='common' OR v2='rare' WITH included_indexes = {idx1}", numRows - 1).uses(idx1, idx2);
+            assertThatPlanFor("SELECT * FROM %s WHERE v1='common' OR v2='common' WITH included_indexes = {idx1}", numRows - 1).uses(idx1, idx2);
+            assertThatPlanFor("SELECT * FROM %s ORDER BY v1 LIMIT 10 WITH included_indexes = {idx1}", 10).uses(idx1);
+            assertNonIncludableIndexError("SELECT * FROM %s ORDER BY v2 LIMIT 10 WITH included_indexes = {idx1}", idx1);
 
-        // including idx2
-        assertThatPlanFor("SELECT * FROM %s WHERE v1='rare' AND v2='rare' WITH included_indexes = {idx2}", 1).usesAtLeast(idx2);
-        assertThatPlanFor("SELECT * FROM %s WHERE v1='rare' AND v2='common' WITH included_indexes = {idx2}", 1).usesAtLeast(idx2);
-        assertThatPlanFor("SELECT * FROM %s WHERE v1='common' AND v2='rare' WITH included_indexes = {idx2}", 1).usesAtLeast(idx2);
-        assertThatPlanFor("SELECT * FROM %s WHERE v1='common' AND v2='common' WITH included_indexes = {idx2}", numRows - 3).usesAtLeast(idx2);
-        assertThatPlanFor("SELECT * FROM %s WHERE v1='rare' OR v2='rare' WITH included_indexes = {idx2}", 3).uses(idx1, idx2);
-        assertThatPlanFor("SELECT * FROM %s WHERE v1='rare' OR v2='common' WITH included_indexes = {idx2}", numRows - 1).uses(idx1, idx2);
-        assertThatPlanFor("SELECT * FROM %s WHERE v1='common' OR v2='rare' WITH included_indexes = {idx2}", numRows - 1).uses(idx1, idx2);
-        assertThatPlanFor("SELECT * FROM %s WHERE v1='common' OR v2='common' WITH included_indexes = {idx2}", numRows - 1).uses(idx1, idx2);
-        assertUnselectedIndexError("SELECT * FROM %s ORDER BY v1 LIMIT 10 WITH included_indexes = {idx2}", idx2);
-        assertThatPlanFor("SELECT * FROM %s ORDER BY v2 LIMIT 10 WITH included_indexes = {idx2}", 10).uses(idx2);
+            // including idx2
+            assertThatPlanFor("SELECT * FROM %s WHERE v1='rare' AND v2='rare' WITH included_indexes = {idx2}", 1).usesAtLeast(idx2);
+            assertThatPlanFor("SELECT * FROM %s WHERE v1='rare' AND v2='common' WITH included_indexes = {idx2}", 1).usesAtLeast(idx2);
+            assertThatPlanFor("SELECT * FROM %s WHERE v1='common' AND v2='rare' WITH included_indexes = {idx2}", 1).usesAtLeast(idx2);
+            assertThatPlanFor("SELECT * FROM %s WHERE v1='common' AND v2='common' WITH included_indexes = {idx2}", numRows - 3).usesAtLeast(idx2);
+            assertThatPlanFor("SELECT * FROM %s WHERE v1='rare' OR v2='rare' WITH included_indexes = {idx2}", 3).uses(idx1, idx2);
+            assertThatPlanFor("SELECT * FROM %s WHERE v1='rare' OR v2='common' WITH included_indexes = {idx2}", numRows - 1).uses(idx1, idx2);
+            assertThatPlanFor("SELECT * FROM %s WHERE v1='common' OR v2='rare' WITH included_indexes = {idx2}", numRows - 1).uses(idx1, idx2);
+            assertThatPlanFor("SELECT * FROM %s WHERE v1='common' OR v2='common' WITH included_indexes = {idx2}", numRows - 1).uses(idx1, idx2);
+            assertNonIncludableIndexError("SELECT * FROM %s ORDER BY v1 LIMIT 10 WITH included_indexes = {idx2}", idx2);
+            assertThatPlanFor("SELECT * FROM %s ORDER BY v2 LIMIT 10 WITH included_indexes = {idx2}", 10).uses(idx2);
 
-        // including both idx1 and idx2
-        assertThatPlanFor("SELECT * FROM %s WHERE v1='rare' AND v2='rare' WITH included_indexes = {idx1,idx2}", 1).uses(idx1, idx2);
-        assertThatPlanFor("SELECT * FROM %s WHERE v1='rare' AND v2='common' WITH included_indexes = {idx1,idx2}", 1).uses(idx1, idx2);
-        assertThatPlanFor("SELECT * FROM %s WHERE v1='common' AND v2='rare' WITH included_indexes = {idx1,idx2}", 1).uses(idx1, idx2);
-        assertThatPlanFor("SELECT * FROM %s WHERE v1='common' AND v2='common'  WITH included_indexes = {idx1,idx2}", numRows - 3).uses(idx1, idx2);
-        assertThatPlanFor("SELECT * FROM %s WHERE v1='rare' OR v2='rare' WITH included_indexes = {idx1,idx2}", 3).uses(idx1, idx2);
-        assertThatPlanFor("SELECT * FROM %s WHERE v1='rare' OR v2='common' WITH included_indexes = {idx1,idx2}", numRows - 1).uses(idx1, idx2);
-        assertThatPlanFor("SELECT * FROM %s WHERE v1='common' OR v2='rare' WITH included_indexes = {idx1,idx2}", numRows - 1).uses(idx1, idx2);
-        assertThatPlanFor("SELECT * FROM %s WHERE v1='common' OR v2='common' WITH included_indexes = {idx1,idx2}", numRows - 1).uses(idx1, idx2);
-        assertUnselectedIndexError("SELECT * FROM %s ORDER BY v1 LIMIT 10 WITH included_indexes = {idx1,idx2}", idx2);
-        assertUnselectedIndexError("SELECT * FROM %s ORDER BY v2 LIMIT 10 WITH included_indexes = {idx1,idx2}", idx1);
+            // including both idx1 and idx2
+            assertThatPlanFor("SELECT * FROM %s WHERE v1='rare' AND v2='rare' WITH included_indexes = {idx1,idx2}", 1).uses(idx1, idx2);
+            assertThatPlanFor("SELECT * FROM %s WHERE v1='rare' AND v2='common' WITH included_indexes = {idx1,idx2}", 1).uses(idx1, idx2);
+            assertThatPlanFor("SELECT * FROM %s WHERE v1='common' AND v2='rare' WITH included_indexes = {idx1,idx2}", 1).uses(idx1, idx2);
+            assertThatPlanFor("SELECT * FROM %s WHERE v1='common' AND v2='common'  WITH included_indexes = {idx1,idx2}", numRows - 3).uses(idx1, idx2);
+            assertThatPlanFor("SELECT * FROM %s WHERE v1='rare' OR v2='rare' WITH included_indexes = {idx1,idx2}", 3).uses(idx1, idx2);
+            assertThatPlanFor("SELECT * FROM %s WHERE v1='rare' OR v2='common' WITH included_indexes = {idx1,idx2}", numRows - 1).uses(idx1, idx2);
+            assertThatPlanFor("SELECT * FROM %s WHERE v1='common' OR v2='rare' WITH included_indexes = {idx1,idx2}", numRows - 1).uses(idx1, idx2);
+            assertThatPlanFor("SELECT * FROM %s WHERE v1='common' OR v2='common' WITH included_indexes = {idx1,idx2}", numRows - 1).uses(idx1, idx2);
+            assertNonIncludableIndexError("SELECT * FROM %s ORDER BY v1 LIMIT 10 WITH included_indexes = {idx1,idx2}", idx2);
+            assertNonIncludableIndexError("SELECT * FROM %s ORDER BY v2 LIMIT 10 WITH included_indexes = {idx1,idx2}", idx1);
 
-        // excluding idx1
-        assertThatPlanFor("SELECT * FROM %s WHERE v1='rare' AND v2='rare' ALLOW FILTERING WITH excluded_indexes={idx1}", 1).uses(idx2);
-        assertThatPlanFor("SELECT * FROM %s WHERE v1='rare' AND v2='common' ALLOW FILTERING WITH excluded_indexes={idx1}", 1).uses(idx2);
-        assertThatPlanFor("SELECT * FROM %s WHERE v1='common' AND v2='rare' ALLOW FILTERING WITH excluded_indexes={idx1}", 1).uses(idx2);
-        assertThatPlanFor("SELECT * FROM %s WHERE v1='common' AND v2='common' ALLOW FILTERING WITH excluded_indexes={idx1}", numRows - 3).uses(idx2);
-        assertThatPlanFor("SELECT * FROM %s WHERE v1='rare' OR v2='rare' ALLOW FILTERING WITH excluded_indexes={idx1}", 3).usesNone();
-        assertThatPlanFor("SELECT * FROM %s WHERE v1='rare' OR v2='common'ALLOW FILTERING WITH excluded_indexes={idx1}", numRows - 1).usesNone();
-        assertThatPlanFor("SELECT * FROM %s WHERE v1='common' OR v2='rare' ALLOW FILTERING WITH excluded_indexes={idx1}", numRows - 1).usesNone();
-        assertThatPlanFor("SELECT * FROM %s WHERE v1='common' OR v2='common' ALLOW FILTERING WITH excluded_indexes={idx1}", numRows - 1).usesNone();
-        assertOrderingNeedsIndex("SELECT * FROM %s ORDER BY v1 LIMIT 10 WITH excluded_indexes={idx1}", "v1");
-        assertThatPlanFor("SELECT * FROM %s ORDER BY v2 LIMIT 10 WITH excluded_indexes={idx1}", 10).uses(idx2);
+            // excluding idx1
+            assertThatPlanFor("SELECT * FROM %s WHERE v1='rare' AND v2='rare' ALLOW FILTERING WITH excluded_indexes={idx1}", 1).uses(idx2);
+            assertThatPlanFor("SELECT * FROM %s WHERE v1='rare' AND v2='common' ALLOW FILTERING WITH excluded_indexes={idx1}", 1).uses(idx2);
+            assertThatPlanFor("SELECT * FROM %s WHERE v1='common' AND v2='rare' ALLOW FILTERING WITH excluded_indexes={idx1}", 1).uses(idx2);
+            assertThatPlanFor("SELECT * FROM %s WHERE v1='common' AND v2='common' ALLOW FILTERING WITH excluded_indexes={idx1}", numRows - 3).uses(idx2);
+            assertThatPlanFor("SELECT * FROM %s WHERE v1='rare' OR v2='rare' ALLOW FILTERING WITH excluded_indexes={idx1}", 3).usesNone();
+            assertThatPlanFor("SELECT * FROM %s WHERE v1='rare' OR v2='common'ALLOW FILTERING WITH excluded_indexes={idx1}", numRows - 1).usesNone();
+            assertThatPlanFor("SELECT * FROM %s WHERE v1='common' OR v2='rare' ALLOW FILTERING WITH excluded_indexes={idx1}", numRows - 1).usesNone();
+            assertThatPlanFor("SELECT * FROM %s WHERE v1='common' OR v2='common' ALLOW FILTERING WITH excluded_indexes={idx1}", numRows - 1).usesNone();
+            assertOrderingNeedsIndex("SELECT * FROM %s ORDER BY v1 LIMIT 10 WITH excluded_indexes={idx1}", "v1");
+            assertThatPlanFor("SELECT * FROM %s ORDER BY v2 LIMIT 10 WITH excluded_indexes={idx1}", 10).uses(idx2);
 
-        // excluding idx2
-        assertThatPlanFor("SELECT * FROM %s WHERE v1='rare' AND v2='rare' ALLOW FILTERING WITH excluded_indexes={idx2}", 1).uses(idx1);
-        assertThatPlanFor("SELECT * FROM %s WHERE v1='rare' AND v2='common' ALLOW FILTERING WITH excluded_indexes={idx2}", 1).uses(idx1);
-        assertThatPlanFor("SELECT * FROM %s WHERE v1='common' AND v2='rare' ALLOW FILTERING WITH excluded_indexes={idx2}", 1).uses(idx1);
-        assertThatPlanFor("SELECT * FROM %s WHERE v1='common' AND v2='common' ALLOW FILTERING WITH excluded_indexes={idx2}", numRows - 3).uses(idx1);
-        assertThatPlanFor("SELECT * FROM %s WHERE v1='rare' OR v2='rare' ALLOW FILTERING WITH excluded_indexes={idx2}", 3).usesNone();
-        assertThatPlanFor("SELECT * FROM %s WHERE v1='rare' OR v2='common'ALLOW FILTERING WITH excluded_indexes={idx2}", numRows - 1).usesNone();
-        assertThatPlanFor("SELECT * FROM %s WHERE v1='common' OR v2='rare' ALLOW FILTERING WITH excluded_indexes={idx2}", numRows - 1).usesNone();
-        assertThatPlanFor("SELECT * FROM %s WHERE v1='common' OR v2='common' ALLOW FILTERING WITH excluded_indexes={idx2}", numRows - 1).usesNone();
-        assertThatPlanFor("SELECT * FROM %s ORDER BY v1 LIMIT 10 WITH excluded_indexes={idx2}", 10).uses(idx1);
-        assertOrderingNeedsIndex("SELECT * FROM %s ORDER BY v2 LIMIT 10 WITH excluded_indexes={idx2}", "v2");
+            // excluding idx2
+            assertThatPlanFor("SELECT * FROM %s WHERE v1='rare' AND v2='rare' ALLOW FILTERING WITH excluded_indexes={idx2}", 1).uses(idx1);
+            assertThatPlanFor("SELECT * FROM %s WHERE v1='rare' AND v2='common' ALLOW FILTERING WITH excluded_indexes={idx2}", 1).uses(idx1);
+            assertThatPlanFor("SELECT * FROM %s WHERE v1='common' AND v2='rare' ALLOW FILTERING WITH excluded_indexes={idx2}", 1).uses(idx1);
+            assertThatPlanFor("SELECT * FROM %s WHERE v1='common' AND v2='common' ALLOW FILTERING WITH excluded_indexes={idx2}", numRows - 3).uses(idx1);
+            assertThatPlanFor("SELECT * FROM %s WHERE v1='rare' OR v2='rare' ALLOW FILTERING WITH excluded_indexes={idx2}", 3).usesNone();
+            assertThatPlanFor("SELECT * FROM %s WHERE v1='rare' OR v2='common'ALLOW FILTERING WITH excluded_indexes={idx2}", numRows - 1).usesNone();
+            assertThatPlanFor("SELECT * FROM %s WHERE v1='common' OR v2='rare' ALLOW FILTERING WITH excluded_indexes={idx2}", numRows - 1).usesNone();
+            assertThatPlanFor("SELECT * FROM %s WHERE v1='common' OR v2='common' ALLOW FILTERING WITH excluded_indexes={idx2}", numRows - 1).usesNone();
+            assertThatPlanFor("SELECT * FROM %s ORDER BY v1 LIMIT 10 WITH excluded_indexes={idx2}", 10).uses(idx1);
+            assertOrderingNeedsIndex("SELECT * FROM %s ORDER BY v2 LIMIT 10 WITH excluded_indexes={idx2}", "v2");
 
-        // excluding both idx1 and idx2
-        assertThatPlanFor("SELECT * FROM %s WHERE v1='rare' AND v2='rare' ALLOW FILTERING WITH excluded_indexes={idx1,idx2}", 1).usesNone();
-        assertThatPlanFor("SELECT * FROM %s WHERE v1='rare' AND v2='common' ALLOW FILTERING WITH excluded_indexes={idx1,idx2}", 1).usesNone();
-        assertThatPlanFor("SELECT * FROM %s WHERE v1='common' AND v2='rare' ALLOW FILTERING WITH excluded_indexes={idx1,idx2}", 1).usesNone();
-        assertThatPlanFor("SELECT * FROM %s WHERE v1='common' AND v2='common' ALLOW FILTERING WITH excluded_indexes={idx1,idx2}", numRows - 3).usesNone();
-        assertThatPlanFor("SELECT * FROM %s WHERE v1='rare' OR v2='rare' ALLOW FILTERING WITH excluded_indexes={idx1,idx2}", 3).usesNone();
-        assertThatPlanFor("SELECT * FROM %s WHERE v1='rare' OR v2='common'ALLOW FILTERING WITH excluded_indexes={idx1,idx2}", numRows - 1).usesNone();
-        assertThatPlanFor("SELECT * FROM %s WHERE v1='common' OR v2='rare' ALLOW FILTERING WITH excluded_indexes={idx1,idx2}", numRows - 1).usesNone();
-        assertThatPlanFor("SELECT * FROM %s WHERE v1='common' OR v2='common' ALLOW FILTERING WITH excluded_indexes={idx1,idx2}", numRows - 1).usesNone();
-        assertOrderingNeedsIndex("SELECT * FROM %s ORDER BY v1 LIMIT 10 WITH excluded_indexes={idx1,idx2}", "v1");
-        assertOrderingNeedsIndex("SELECT * FROM %s ORDER BY v2 LIMIT 10 WITH excluded_indexes={idx1,idx2}", "v2");
+            // excluding both idx1 and idx2
+            assertThatPlanFor("SELECT * FROM %s WHERE v1='rare' AND v2='rare' ALLOW FILTERING WITH excluded_indexes={idx1,idx2}", 1).usesNone();
+            assertThatPlanFor("SELECT * FROM %s WHERE v1='rare' AND v2='common' ALLOW FILTERING WITH excluded_indexes={idx1,idx2}", 1).usesNone();
+            assertThatPlanFor("SELECT * FROM %s WHERE v1='common' AND v2='rare' ALLOW FILTERING WITH excluded_indexes={idx1,idx2}", 1).usesNone();
+            assertThatPlanFor("SELECT * FROM %s WHERE v1='common' AND v2='common' ALLOW FILTERING WITH excluded_indexes={idx1,idx2}", numRows - 3).usesNone();
+            assertThatPlanFor("SELECT * FROM %s WHERE v1='rare' OR v2='rare' ALLOW FILTERING WITH excluded_indexes={idx1,idx2}", 3).usesNone();
+            assertThatPlanFor("SELECT * FROM %s WHERE v1='rare' OR v2='common'ALLOW FILTERING WITH excluded_indexes={idx1,idx2}", numRows - 1).usesNone();
+            assertThatPlanFor("SELECT * FROM %s WHERE v1='common' OR v2='rare' ALLOW FILTERING WITH excluded_indexes={idx1,idx2}", numRows - 1).usesNone();
+            assertThatPlanFor("SELECT * FROM %s WHERE v1='common' OR v2='common' ALLOW FILTERING WITH excluded_indexes={idx1,idx2}", numRows - 1).usesNone();
+            assertOrderingNeedsIndex("SELECT * FROM %s ORDER BY v1 LIMIT 10 WITH excluded_indexes={idx1,idx2}", "v1");
+            assertOrderingNeedsIndex("SELECT * FROM %s ORDER BY v2 LIMIT 10 WITH excluded_indexes={idx1,idx2}", "v2");
+        });
     }
 
     @Test
-    public void testQueryPlanningWithAnalyzer()
+    public void testQueryPlanningWithAnalyzer() throws Throwable
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v text)");
         String idx = createIndex("CREATE CUSTOM INDEX idx ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = { 'index_analyzer': 'standard' }");
@@ -177,45 +158,45 @@ public class PlanWithIndexHintsTest extends SAITester
         execute(insert, row3);
         execute(insert, row4);
 
-        if (flush)
-            flush();
+        beforeAndAfterFlush(() -> {
 
-        // eq without any hints
-        assertThatPlanFor("SELECT * FROM %s WHERE v='Strauss'", row1, row2, row3, row4).uses(idx);
-        assertThatPlanFor("SELECT * FROM %s WHERE v='Levi'", row3).uses(idx);
-        assertThatPlanFor("SELECT * FROM %s WHERE v='Lévi-Strauss'", row4).uses(idx);
+            // eq without any hints
+            assertThatPlanFor("SELECT * FROM %s WHERE v='Strauss'", row1, row2, row3, row4).uses(idx);
+            assertThatPlanFor("SELECT * FROM %s WHERE v='Levi'", row3).uses(idx);
+            assertThatPlanFor("SELECT * FROM %s WHERE v='Lévi-Strauss'", row4).uses(idx);
 
-        // match without any hints
-        assertThatPlanFor("SELECT * FROM %s WHERE v:'Strauss'", row1, row2, row3, row4).uses(idx);
-        assertThatPlanFor("SELECT * FROM %s WHERE v:'Levi'", row3).uses(idx);
-        assertThatPlanFor("SELECT * FROM %s WHERE v:'Lévi-Strauss'", row4).uses(idx);
+            // match without any hints
+            assertThatPlanFor("SELECT * FROM %s WHERE v:'Strauss'", row1, row2, row3, row4).uses(idx);
+            assertThatPlanFor("SELECT * FROM %s WHERE v:'Levi'", row3).uses(idx);
+            assertThatPlanFor("SELECT * FROM %s WHERE v:'Lévi-Strauss'", row4).uses(idx);
 
-        // eq including the index
-        assertThatPlanFor("SELECT * FROM %s WHERE v='Strauss' WITH included_indexes = {idx}", row1, row2, row3, row4).uses(idx);
-        assertThatPlanFor("SELECT * FROM %s WHERE v='Levi' WITH included_indexes = {idx}", row3).uses(idx);
-        assertThatPlanFor("SELECT * FROM %s WHERE v='Lévi-Strauss' WITH included_indexes = {idx}", row4).uses(idx);
+            // eq including the index
+            assertThatPlanFor("SELECT * FROM %s WHERE v='Strauss' WITH included_indexes = {idx}", row1, row2, row3, row4).uses(idx);
+            assertThatPlanFor("SELECT * FROM %s WHERE v='Levi' WITH included_indexes = {idx}", row3).uses(idx);
+            assertThatPlanFor("SELECT * FROM %s WHERE v='Lévi-Strauss' WITH included_indexes = {idx}", row4).uses(idx);
 
-        // match including the index
-        assertThatPlanFor("SELECT * FROM %s WHERE v:'Strauss' WITH included_indexes = {idx}", row1, row2, row3, row4).uses(idx);
-        assertThatPlanFor("SELECT * FROM %s WHERE v:'Levi' WITH included_indexes = {idx}", row3).uses(idx);
-        assertThatPlanFor("SELECT * FROM %s WHERE v:'Lévi-Strauss' WITH included_indexes = {idx}", row4).uses(idx);
+            // match including the index
+            assertThatPlanFor("SELECT * FROM %s WHERE v:'Strauss' WITH included_indexes = {idx}", row1, row2, row3, row4).uses(idx);
+            assertThatPlanFor("SELECT * FROM %s WHERE v:'Levi' WITH included_indexes = {idx}", row3).uses(idx);
+            assertThatPlanFor("SELECT * FROM %s WHERE v:'Lévi-Strauss' WITH included_indexes = {idx}", row4).uses(idx);
 
-        // eq excluding the index
-        assertThatPlanFor("SELECT * FROM %s WHERE v='Strauss' ALLOW FILTERING WITH excluded_indexes={idx}", 0).usesNone();
-        assertThatPlanFor("SELECT * FROM %s WHERE v='Levi' ALLOW FILTERING WITH excluded_indexes={idx}", 0).usesNone();
-        assertThatPlanFor("SELECT * FROM %s WHERE v='Lévi-Strauss' ALLOW FILTERING WITH excluded_indexes={idx}", row4).usesNone();
+            // eq excluding the index
+            assertThatPlanFor("SELECT * FROM %s WHERE v='Strauss' ALLOW FILTERING WITH excluded_indexes={idx}", 0).usesNone();
+            assertThatPlanFor("SELECT * FROM %s WHERE v='Levi' ALLOW FILTERING WITH excluded_indexes={idx}", 0).usesNone();
+            assertThatPlanFor("SELECT * FROM %s WHERE v='Lévi-Strauss' ALLOW FILTERING WITH excluded_indexes={idx}", row4).usesNone();
 
-        // match excluding the index
-        assertMatchNeedsIndex("SELECT * FROM %s WHERE v:'Strauss' ALLOW FILTERING WITH excluded_indexes={idx}", "v", "Strauss");
-        assertMatchNeedsIndex("SELECT * FROM %s WHERE v:'Levi' ALLOW FILTERING WITH excluded_indexes={idx}", "v", "Levi");
-        assertMatchNeedsIndex("SELECT * FROM %s WHERE v:'Lévi-Strauss' ALLOW FILTERING WITH excluded_indexes={idx}", "v", "Lévi-Strauss");
+            // match excluding the index
+            assertMatchNeedsIndex("SELECT * FROM %s WHERE v:'Strauss' ALLOW FILTERING WITH excluded_indexes={idx}", "v", "Strauss");
+            assertMatchNeedsIndex("SELECT * FROM %s WHERE v:'Levi' ALLOW FILTERING WITH excluded_indexes={idx}", "v", "Levi");
+            assertMatchNeedsIndex("SELECT * FROM %s WHERE v:'Lévi-Strauss' ALLOW FILTERING WITH excluded_indexes={idx}", "v", "Lévi-Strauss");
+        });
     }
 
     @Test
-    public void testQueryPlanningWithRestrictedButUnselectedIndex()
+    public void testQueryPlanningWithRestrictedButUnusableIndex() throws Throwable
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v1 int, v2 int, v3 int)");
-        String idx1 = createIndex("CREATE CUSTOM INDEX idx1 ON %s(v1) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX idx1 ON %s(v1) USING 'StorageAttachedIndex'");
         String idx3 = createIndex("CREATE CUSTOM INDEX idx3 ON %s(v3) USING 'StorageAttachedIndex'");
 
         String insert = "INSERT INTO %s (k, v1, v2, v3) VALUES (?, ?, ?, ?)";
@@ -228,25 +209,25 @@ public class PlanWithIndexHintsTest extends SAITester
         execute(insert, row3);
         execute(insert, row4);
 
-        if (flush)
-            flush();
+        beforeAndAfterFlush(() -> {
 
-        String query = "SELECT * FROM %s WHERE v1=0 OR v2=0 ALLOW FILTERING";
-        assertThatPlanFor(query, row1, row2, row3).usesNone();
-        assertUnselectedIndexError(query + " WITH included_indexes={idx1}");
-        assertThatPlanFor(query + " WITH excluded_indexes={idx1}", row1, row2, row3).usesNone();
+            String query = "SELECT * FROM %s WHERE v1=0 OR v2=0 ALLOW FILTERING";
+            assertThatPlanFor(query, row1, row2, row3).usesNone();
+            assertNonIncludableIndexError(query + " WITH included_indexes={idx1}");
+            assertThatPlanFor(query + " WITH excluded_indexes={idx1}", row1, row2, row3).usesNone();
 
-        query = "SELECT * FROM %s WHERE (v1=0 OR v2=0) AND v3=9 ALLOW FILTERING";
-        assertThatPlanFor(query, row1, row2, row3).uses(idx3);
-        assertUnselectedIndexError(query + " WITH included_indexes={idx1}");
-        assertThatPlanFor(query + " WITH excluded_indexes={idx1}", row1, row2, row3).uses(idx3);
+            query = "SELECT * FROM %s WHERE (v1=0 OR v2=0) AND v3=9 ALLOW FILTERING";
+            assertThatPlanFor(query, row1, row2, row3).uses(idx3);
+            assertNonIncludableIndexError(query + " WITH included_indexes={idx1}");
+            assertThatPlanFor(query + " WITH excluded_indexes={idx1}", row1, row2, row3).uses(idx3);
+        });
     }
 
     /**
      * Tests that there will be an error when the included indexes exceed the intersection clause limit.
      */
     @Test
-    public void testIntersectionClauseLimit()
+    public void testIntersectionClauseLimit() throws Throwable
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v1 int, v2 int, v3 int, v4 int)");
         String idx1 = createIndex("CREATE CUSTOM INDEX idx1 ON %s(v1) USING 'StorageAttachedIndex'");
@@ -264,52 +245,51 @@ public class PlanWithIndexHintsTest extends SAITester
         execute(insert, row3);
         execute(insert, row4);
 
-        if (flush)
-            flush();
-
         int defaultIntersectionClauseLimit = CassandraRelevantProperties.SAI_INTERSECTION_CLAUSE_LIMIT.getInt();
         try
         {
-            String query = "SELECT * FROM %s WHERE v1=0 AND v2=0 AND v3 = 0";
+            beforeAndAfterFlush(() -> {
+                String query = "SELECT * FROM %s WHERE v1=0 AND v2=0 AND v3 = 0";
 
-            CassandraRelevantProperties.SAI_INTERSECTION_CLAUSE_LIMIT.setInt(3);
-            assertThatPlanFor(query, row1).usesAnyOf(idx1, idx2, idx3);
-            assertThatPlanFor(query + " WITH included_indexes={idx1}", row1).uses(idx1);
-            assertThatPlanFor(query + " WITH included_indexes={idx1, idx2}", row1).uses(idx1, idx2);
-            assertThatPlanFor(query + " WITH included_indexes={idx1, idx2, idx3}", row1).uses(idx1, idx2, idx3);
+                CassandraRelevantProperties.SAI_INTERSECTION_CLAUSE_LIMIT.setInt(3);
+                assertThatPlanFor(query, row1).usesAnyOf(idx1, idx2, idx3);
+                assertThatPlanFor(query + " WITH included_indexes={idx1}", row1).uses(idx1);
+                assertThatPlanFor(query + " WITH included_indexes={idx1, idx2}", row1).uses(idx1, idx2);
+                assertThatPlanFor(query + " WITH included_indexes={idx1, idx2, idx3}", row1).uses(idx1, idx2, idx3);
 
-            CassandraRelevantProperties.SAI_INTERSECTION_CLAUSE_LIMIT.setInt(2);
-            assertThatPlanFor(query, row1).usesAnyOf(idx1, idx2, idx3);
-            assertThatPlanFor(query + " WITH included_indexes={idx1}", row1).uses(idx1);
-            assertThatPlanFor(query + " WITH included_indexes={idx1, idx2}", row1).uses(idx1, idx2);
-            assertHintsExceedIntersectionClauseLimit(query + " WITH included_indexes={idx1, idx2, idx3}");
+                CassandraRelevantProperties.SAI_INTERSECTION_CLAUSE_LIMIT.setInt(2);
+                assertThatPlanFor(query, row1).usesAnyOf(idx1, idx2, idx3);
+                assertThatPlanFor(query + " WITH included_indexes={idx1}", row1).uses(idx1);
+                assertThatPlanFor(query + " WITH included_indexes={idx1, idx2}", row1).uses(idx1, idx2);
+                assertHintsExceedIntersectionClauseLimit(query + " WITH included_indexes={idx1, idx2, idx3}");
 
-            CassandraRelevantProperties.SAI_INTERSECTION_CLAUSE_LIMIT.setInt(1);
-            assertThatPlanFor(query, row1).usesAnyOf(idx1, idx2, idx3);
-            assertThatPlanFor(query + " WITH included_indexes={idx1}", row1).uses(idx1);
-            assertHintsExceedIntersectionClauseLimit(query + " WITH included_indexes={idx1, idx2}");
-            assertHintsExceedIntersectionClauseLimit(query + " WITH included_indexes={idx1, idx2, idx3}");
+                CassandraRelevantProperties.SAI_INTERSECTION_CLAUSE_LIMIT.setInt(1);
+                assertThatPlanFor(query, row1).usesAnyOf(idx1, idx2, idx3);
+                assertThatPlanFor(query + " WITH included_indexes={idx1}", row1).uses(idx1);
+                assertHintsExceedIntersectionClauseLimit(query + " WITH included_indexes={idx1, idx2}");
+                assertHintsExceedIntersectionClauseLimit(query + " WITH included_indexes={idx1, idx2, idx3}");
 
-            // test with an OR clause, so the intersection is nested
-            query = "SELECT * FROM %s WHERE (v1=0 AND v2=0 AND v3 = 0) OR v4 = 0";
+                // test with an OR clause, so the intersection is nested
+                query = "SELECT * FROM %s WHERE (v1=0 AND v2=0 AND v3 = 0) OR v4 = 0";
 
-            CassandraRelevantProperties.SAI_INTERSECTION_CLAUSE_LIMIT.setInt(3);
-            assertThatPlanFor(query, row1).usesAnyOf(idx1, idx2, idx3, idx4);
-            assertThatPlanFor(query + " WITH included_indexes={idx1}", row1).uses(idx1, idx4);
-            assertThatPlanFor(query + " WITH included_indexes={idx1, idx2}", row1).uses(idx1, idx2, idx4);
-            assertThatPlanFor(query + " WITH included_indexes={idx1, idx2, idx3}", row1).uses(idx1, idx2, idx3, idx4);
+                CassandraRelevantProperties.SAI_INTERSECTION_CLAUSE_LIMIT.setInt(3);
+                assertThatPlanFor(query, row1).usesAnyOf(idx1, idx2, idx3, idx4).usesAtLeast(idx4);
+                assertThatPlanFor(query + " WITH included_indexes={idx1}", row1).uses(idx1, idx4);
+                assertThatPlanFor(query + " WITH included_indexes={idx1, idx2}", row1).uses(idx1, idx2, idx4);
+                assertThatPlanFor(query + " WITH included_indexes={idx1, idx2, idx3}", row1).uses(idx1, idx2, idx3, idx4);
 
-            CassandraRelevantProperties.SAI_INTERSECTION_CLAUSE_LIMIT.setInt(2);
-            assertThatPlanFor(query, row1).usesAnyOf(idx1, idx2, idx3, idx4);
-            assertThatPlanFor(query + " WITH included_indexes={idx1}", row1).uses(idx1, idx4);
-            assertThatPlanFor(query + " WITH included_indexes={idx1, idx2}", row1).uses(idx1, idx2, idx4);
-            assertHintsExceedIntersectionClauseLimit(query + " WITH included_indexes={idx1, idx2, idx3}");
+                CassandraRelevantProperties.SAI_INTERSECTION_CLAUSE_LIMIT.setInt(2);
+                assertThatPlanFor(query, row1).usesAnyOf(idx1, idx2, idx3, idx4).usesAtLeast(idx4);
+                assertThatPlanFor(query + " WITH included_indexes={idx1}", row1).uses(idx1, idx4);
+                assertThatPlanFor(query + " WITH included_indexes={idx1, idx2}", row1).uses(idx1, idx2, idx4);
+                assertHintsExceedIntersectionClauseLimit(query + " WITH included_indexes={idx1, idx2, idx3}");
 
-            CassandraRelevantProperties.SAI_INTERSECTION_CLAUSE_LIMIT.setInt(1);
-            assertThatPlanFor(query, row1).usesAnyOf(idx1, idx2, idx3, idx4);
-            assertThatPlanFor(query + " WITH included_indexes={idx1}", row1).uses(idx1, idx4);
-            assertHintsExceedIntersectionClauseLimit(query + " WITH included_indexes={idx1, idx2}");
-            assertHintsExceedIntersectionClauseLimit(query + " WITH included_indexes={idx1, idx2, idx3}");
+                CassandraRelevantProperties.SAI_INTERSECTION_CLAUSE_LIMIT.setInt(1);
+                assertThatPlanFor(query, row1).usesAnyOf(idx1, idx2, idx3, idx4).usesAtLeast(idx4);
+                assertThatPlanFor(query + " WITH included_indexes={idx1}", row1).uses(idx1, idx4);
+                assertHintsExceedIntersectionClauseLimit(query + " WITH included_indexes={idx1, idx2}");
+                assertHintsExceedIntersectionClauseLimit(query + " WITH included_indexes={idx1, idx2, idx3}");
+            });
         }
         finally
         {
@@ -318,7 +298,7 @@ public class PlanWithIndexHintsTest extends SAITester
     }
 
     @Test
-    public void testVector()
+    public void testVector() throws Throwable
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v vector<float, 2>)");
         String idx = createIndex("CREATE CUSTOM INDEX idx ON %s(v) USING 'StorageAttachedIndex'");
@@ -326,21 +306,21 @@ public class PlanWithIndexHintsTest extends SAITester
         String insert = "INSERT INTO %s (k, v) VALUES (?, ?)";
         execute(insert, row(1, vector(0.1f, 0.2f)));
 
-        if (flush)
-            flush();
+        beforeAndAfterFlush(() -> {
 
-        // with ANN queries
-        String query = "SELECT k FROM %s ORDER BY v ANN OF [0.1, 0.2] LIMIT 10";
-        assertThatPlanFor(query, row(1)).uses(idx);
-        assertThatPlanFor(query + " WITH included_indexes={idx}", row(1)).uses(idx);
-        assertOrderingNeedsIndex(query + " WITH excluded_indexes={idx}", "v");
+            // with ANN queries
+            String query = "SELECT k FROM %s ORDER BY v ANN OF [0.1, 0.2] LIMIT 10";
+            assertThatPlanFor(query, row(1)).uses(idx);
+            assertThatPlanFor(query + " WITH included_indexes={idx}", row(1)).uses(idx);
+            assertOrderingNeedsIndex(query + " WITH excluded_indexes={idx}", "v");
 
-        // with an unsupported eq query, that can be unshaded with excluded_indexes and ALLOW FILTERING
-        query = "SELECT k FROM %s WHERE v = [0.1, 0.2] LIMIT 10";
-        assertUnsupportVectorOperator(query);
-        assertUnsupportVectorOperator(query + " WITH included_indexes={idx}");
-        assertNeedsAllowFiltering(query + " WITH excluded_indexes={idx}");
-        assertThatPlanFor(query + " ALLOW FILTERING WITH excluded_indexes={idx}", row(1)).usesNone();
+            // with an unsupported eq query, that can be unshaded with excluded_indexes and ALLOW FILTERING
+            query = "SELECT k FROM %s WHERE v = [0.1, 0.2] LIMIT 10";
+            assertUnsupportVectorOperator(query);
+            assertUnsupportVectorOperator(query + " WITH included_indexes={idx}");
+            assertNeedsAllowFiltering(query + " WITH excluded_indexes={idx}");
+            assertThatPlanFor(query + " ALLOW FILTERING WITH excluded_indexes={idx}", row(1)).usesNone();
+        });
     }
 
     private void assertNeedsAllowFiltering(String query)
@@ -359,11 +339,11 @@ public class PlanWithIndexHintsTest extends SAITester
                                                       CassandraRelevantProperties.SAI_INTERSECTION_CLAUSE_LIMIT.name()));
     }
 
-    public void assertUnselectedIndexError(String query, String... indexes)
+    public void assertNonIncludableIndexError(String query, String... indexes)
     {
         Assertions.assertThatThrownBy(() -> execute(query))
                   .isInstanceOf(InvalidRequestException.class)
-                  .hasMessageContaining(String.format(IndexHints.UNSELECTED_INDEX_ERROR, String.join(",", indexes)));
+                  .hasMessageContaining(String.format(IndexHints.NON_INCLUDABLE_INDEX_ERROR, String.join(",", indexes)));
     }
 
     private void assertOrderingNeedsIndex(String query, String column)

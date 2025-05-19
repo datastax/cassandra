@@ -52,7 +52,8 @@ public class IndexHintsDistributedTest extends TestBaseImpl
 
         try (Cluster cluster = init(Cluster.build(NUM_REPLICAS)
                                            .withConfig(config -> config.with(GOSSIP).with(NETWORK))
-                                           .start(), RF))
+                                           .start(),
+                                    RF))
         {
             // null indicates that the query should succeed
             testSelectWithIndexHints(cluster, null);
@@ -79,7 +80,7 @@ public class IndexHintsDistributedTest extends TestBaseImpl
      * Test that index hints are rejected in clusters with some nodes below DS 12.
      */
     @Test
-    public void testIndexHintsWithMixedDS10AndDS12() throws Throwable
+    public void testIndexHintsWithMixedDS11AndDS12() throws Throwable
     {
         assert CassandraRelevantProperties.DS_CURRENT_MESSAGING_VERSION.getInt() >= MessagingService.VERSION_DS_12;
 
