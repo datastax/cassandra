@@ -1615,14 +1615,14 @@ public class CustomIndexTest extends CQLTester
             }
 
             @Override
-            public QueryPlan queryPlanFor(RowFilter rowFilter)
+            public IndexWithSharedGroupQueryPlan queryPlanFor(RowFilter rowFilter)
             {
                 for (RowFilter.Expression e : rowFilter.withoutDisjunctions().expressions())
                 {
                     for (Index index : indexes.values())
                     {
                         if (index.supportsExpression(e))
-                            return new QueryPlan(index, index.getPostIndexQueryFilter(rowFilter), indexes.values());
+                            return new IndexWithSharedGroupQueryPlan(index, index.getPostIndexQueryFilter(rowFilter), indexes.values());
                     }
                 }
 
@@ -1698,11 +1698,11 @@ public class CustomIndexTest extends CQLTester
             }
         }
 
-        private static class QueryPlan extends SingletonIndexQueryPlan
+        private static class IndexWithSharedGroupQueryPlan extends SingletonIndexQueryPlan
         {
             private final Set<Index> indexes;
 
-            public <T extends Index> QueryPlan(Index index, RowFilter postIndexFilter, Collection<T> indexes)
+            public <T extends Index> IndexWithSharedGroupQueryPlan(Index index, RowFilter postIndexFilter, Collection<T> indexes)
             {
                 super(index, postIndexFilter);
                 this.indexes = ImmutableSet.copyOf(indexes);

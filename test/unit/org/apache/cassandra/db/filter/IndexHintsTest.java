@@ -113,13 +113,13 @@ public class IndexHintsTest extends CQLTester
         missingIndexError = String.format(MISSING_INDEX_ERROR, currentTable(), "idx2");
         assertInvalidThrowMessage(missingIndexError,
                                   InvalidRequestException.class,
-                                  "SELECT * FROM %s WHERE a = 1 WITH included_indexes={idx2}");
+                                  query + "WITH included_indexes={idx2}");
         execute(query + "WITH excluded_indexes={}");
         execute(query + "WITH excluded_indexes={idx1}");
         assertInvalidThrowMessage(missingIndexError,
                                   InvalidRequestException.class,
                                   query + "WITH excluded_indexes={idx2}");
-        execute("SELECT * FROM %s WHERE a = 1 WITH included_indexes={} AND excluded_indexes={}");
+        execute(query + "WITH included_indexes={} AND excluded_indexes={}");
         assertInvalidThrowMessage(missingIndexError,
                                   InvalidRequestException.class,
                                   query + "WITH included_indexes={idx1} AND excluded_indexes={idx2}");
@@ -256,14 +256,18 @@ public class IndexHintsTest extends CQLTester
     @Test
     public void testTransport()
     {
-        createTable("CREATE TABLE %s (k int PRIMARY KEY, a int, b int)");
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, a int, b int, c int, d int)");
         createIndex(String.format("CREATE CUSTOM INDEX idx1 ON %%s(a) USING '%s'", GroupedIndex.class.getName()));
         createIndex(String.format("CREATE CUSTOM INDEX idx2 ON %%s(b) USING '%s'", GroupedIndex.class.getName()));
+        createIndex(String.format("CREATE CUSTOM INDEX idx3 ON %%s(c) USING '%s'", GroupedIndex.class.getName()));
+        createIndex(String.format("CREATE CUSTOM INDEX idx4 ON %%s(d) USING '%s'", GroupedIndex.class.getName()));
         IndexMetadata idx1 = getCurrentColumnFamilyStore().indexManager.getIndexByName("idx1").getIndexMetadata();
         IndexMetadata idx2 = getCurrentColumnFamilyStore().indexManager.getIndexByName("idx2").getIndexMetadata();
-        String query = "SELECT * FROM %s WHERE a = 1 AND b = 2 ALLOW FILTERING ";
+        IndexMetadata idx3 = getCurrentColumnFamilyStore().indexManager.getIndexByName("idx3").getIndexMetadata();
+        IndexMetadata idx4 = getCurrentColumnFamilyStore().indexManager.getIndexByName("idx4").getIndexMetadata();
+        String query = "SELECT * FROM %s WHERE a = 1 AND b = 2 AND c = 3 AND d = 4 ALLOW FILTERING ";
 
-        // unespecified hints should be mapped to NONE
+        // unspecified hints should be mapped to NONE
         testTransport(query, IndexHints.NONE);
         testTransport(query + "WITH included_indexes={}", IndexHints.NONE);
         testTransport(query + "WITH excluded_indexes={}", IndexHints.NONE);
@@ -271,10 +275,12 @@ public class IndexHintsTest extends CQLTester
         // hints with a single index
         testTransport(query + "WITH included_indexes={idx1}", IndexHints.create(indexes(idx1), indexes()));
         testTransport(query + "WITH excluded_indexes={idx1}", IndexHints.create(indexes(), indexes(idx1)));
+        testTransport(query + "WITH included_indexes={idx1} AND excluded_indexes={idx2}", IndexHints.create(indexes(idx1), indexes(idx2)));
 
         // hints with multiple indexes
         testTransport(query + "WITH included_indexes={idx1,idx2}", IndexHints.create(indexes(idx1, idx2), indexes()));
         testTransport(query + "WITH excluded_indexes={idx1,idx2}", IndexHints.create(indexes(), indexes(idx1, idx2)));
+        testTransport(query + "WITH included_indexes={idx1,idx2} AND excluded_indexes={idx3,idx4}", IndexHints.create(indexes(idx1, idx2), indexes(idx3, idx4)));
     }
 
     private void testTransport(String query, IndexHints expectedHints)
