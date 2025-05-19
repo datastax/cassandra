@@ -549,7 +549,7 @@ public class ChunkCache
         public ByteBuffer buffer()
         {
             assert isReferenced() : "Already unreferenced";
-            return buffer.duplicate();
+            return buffer.duplicate().limit(bytesRead);
         }
 
         public long offset()
