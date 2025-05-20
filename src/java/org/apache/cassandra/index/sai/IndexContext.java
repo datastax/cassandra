@@ -666,7 +666,7 @@ public class IndexContext
             View view = viewManager.getView();
             if (view.reference())
                 return view;
-        } while (MonotonicClock.approxTime.isAfter(deadline));
+        } while (!MonotonicClock.approxTime.isAfter(deadline));
 
         return null;
     }
