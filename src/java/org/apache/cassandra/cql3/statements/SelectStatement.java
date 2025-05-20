@@ -439,10 +439,6 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             checkFalse(aggregationSpec != null, TOPK_AGGREGATION_ERROR);
         }
 
-        // Handle additional validation for index hints
-        Index.QueryPlan queryPlan = query.indexQueryPlan();
-        query.rowFilter().indexHints().validate(queryPlan);
-
         selectOptions.validate(queryState, indexRegistry, table, userLimit);
 
         // If there's a secondary index that the command can use, have it validate the request parameters.

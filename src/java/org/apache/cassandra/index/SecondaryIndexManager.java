@@ -1201,8 +1201,13 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
      */
     public Index.QueryPlan getBestIndexQueryPlanFor(RowFilter rowFilter)
     {
+        IndexHints hints = rowFilter.indexHints();
+
         if (indexes.isEmpty() || rowFilter.isEmpty())
+        {
+            hints.validate((Index.QueryPlan) null);
             return null;
+        }
 
         for (RowFilter.Expression expression : rowFilter.expressions())
         {
@@ -1226,14 +1231,18 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
 
         if (queryPlans.isEmpty())
         {
+            hints.validate((Index.QueryPlan) null);
             logger.trace("No applicable indexes found");
             Tracing.trace("No applicable indexes found");
             return null;
         }
 
-        // Prepare a plan comparator based first on the user-provided hints, which will prefer the plan using the most
-        // preferred indexes, and then on the index-provided selectivity, which will prefer the most selective index.
-        Comparator<Index.QueryPlan> hintsComparator = rowFilter.indexHints().comparator();
+        // Prepare a plan comparator based first on the user-provided hints, which will prefer the plan closest to
+        // satisfying the index hints, and then on the index-provided selectivity, which will prefer the most selective
+        // index. We let pass plans that don't satisfy the index hints so we can provide a better error message later,
+        // at the validation at the end of this method. That validation will be done over the plan that is closest to
+        // satisfying the index hints, so the error message will only complain about the missing parts.
+        Comparator<Index.QueryPlan> hintsComparator = hints.comparator();
         Comparator<Index.QueryPlan> selectivityComparator = Comparator.<Index.QueryPlan>naturalOrder().reversed();
         Comparator<Index.QueryPlan> planComparator = hintsComparator.thenComparing(selectivityComparator);
 
@@ -1253,6 +1262,9 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
                                     .collect(Collectors.joining(",")),
                           Index.joinNames(selected.getIndexes()));
         }
+
+        hints.validate(selected);
+
         return selected;
     }
 

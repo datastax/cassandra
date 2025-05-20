@@ -306,6 +306,9 @@ public class IndexHints
     }
 
     /**
+     * Returns a comparator of index query plans based on which one has the most included indexes, so it can be used to
+     * select the plans that satisfy the index hints first, and the plans that are closest to satisfy them later.
+     *
      * @return a comparator of index query plans based on which one has the most included indexes
      */
     public Comparator<Index.QueryPlan> comparator()
