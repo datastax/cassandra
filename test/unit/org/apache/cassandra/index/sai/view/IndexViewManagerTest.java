@@ -293,7 +293,8 @@ public class IndexViewManagerTest extends SAITester
                     .onMethod("getView"))
                 .build();
 
-        try {
+        try
+        {
             // Inject the barrier and counter
             Injections.inject(viewReferencePause, referenceCounter);
 
@@ -327,10 +328,12 @@ public class IndexViewManagerTest extends SAITester
             // Clean up
             result.release();
         }
-        catch (Exception e) {
+        catch (Exception e)
+        {
             throw new RuntimeException(e);
         }
-        finally {
+        finally
+        {
             Injections.deleteAll();
         }
     }
