@@ -359,7 +359,7 @@ public class IndexHintsTest extends CQLTester
         assertThatIndexQueryPlanFor("SELECT * FROM %s ALLOW FILTERING", row1, row2, row3).selectsNone();
         assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v1=0 ALLOW FILTERING", row1).selects(idx1);
         assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v2=0 ALLOW FILTERING", row2).selects(idx2);
-        assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v3=0 ALLOW FILTERING", row3);
+        assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v3=0 ALLOW FILTERING", row3).selectsNone();
         assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING").selectsAnyOf(idx1, idx2);
         assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v1=0 AND v3=0 ALLOW FILTERING").selects(idx1);
         assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v2=0 AND v3=0 ALLOW FILTERING").selects(idx2);
@@ -917,7 +917,7 @@ public class IndexHintsTest extends CQLTester
         execute(insert, row1);
         execute(insert, row2);
 
-        // test index selection with EQ query, the hints will desambiguate the query and will produce different results
+        // test index selection with EQ query, the hints will disambiguate the query and will produce different results
         // depending on the selected index
         String query = "SELECT * FROM %s WHERE v = 'Strauss' ";
         assertEqualityPredicateIsAmbiguous(query);
