@@ -18,17 +18,13 @@
 
 package org.apache.cassandra.db;
 
-import java.util.List;
-
 import org.junit.Test;
 
-import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.UntypedResultSet;
-import org.assertj.core.api.Assertions;
 
 import static org.junit.Assert.assertTrue;
 
-public class SinglePartitionReadCommandCQLTest extends CQLTester
+public class SinglePartitionReadCommandCQLTest extends ReadCommandCQLTester<SinglePartitionReadCommand>
 {
     @Test
     public void partitionLevelDeletionTest()
@@ -44,31 +40,30 @@ public class SinglePartitionReadCommandCQLTest extends CQLTester
     }
 
     @Test
-    public void testToCQLString()
+    public void assertToCQLString()
     {
         createTable("CREATE TABLE %s (k int, c int, v int, PRIMARY KEY (k, c))");
 
-        testToCQLString("SELECT * FROM %s WHERE k = 0", "SELECT * FROM %s WHERE k = 0");
+        assertToCQLString("SELECT * FROM %s WHERE k = 0", "SELECT * FROM %s WHERE k = 0");
 
-        testToCQLString("SELECT * FROM %s WHERE k = 0 AND c = 0", "SELECT * FROM %s WHERE k = 0 AND (c) = (0)");
-        testToCQLString("SELECT * FROM %s WHERE k = 0 AND (c) = (0)", "SELECT * FROM %s WHERE k = 0 AND (c) = (0)");
-        testToCQLString("SELECT * FROM %s WHERE k = 0 AND c > 0", "SELECT * FROM %s WHERE k = 0 AND c > 0");
-        testToCQLString("SELECT * FROM %s WHERE k = 0 AND c < 0", "SELECT * FROM %s WHERE k = 0 AND c < 0");
-        testToCQLString("SELECT * FROM %s WHERE k = 0 AND c >= 0", "SELECT * FROM %s WHERE k = 0 AND c >= 0");
-        testToCQLString("SELECT * FROM %s WHERE k = 0 AND c <= 0", "SELECT * FROM %s WHERE k = 0 AND c <= 0");
+        assertToCQLString("SELECT * FROM %s WHERE k = 0 AND c = 0", "SELECT * FROM %s WHERE k = 0 AND (c) = (0)");
+        assertToCQLString("SELECT * FROM %s WHERE k = 0 AND (c) = (0)", "SELECT * FROM %s WHERE k = 0 AND (c) = (0)");
+        assertToCQLString("SELECT * FROM %s WHERE k = 0 AND c > 0", "SELECT * FROM %s WHERE k = 0 AND c > 0");
+        assertToCQLString("SELECT * FROM %s WHERE k = 0 AND c < 0", "SELECT * FROM %s WHERE k = 0 AND c < 0");
+        assertToCQLString("SELECT * FROM %s WHERE k = 0 AND c >= 0", "SELECT * FROM %s WHERE k = 0 AND c >= 0");
+        assertToCQLString("SELECT * FROM %s WHERE k = 0 AND c <= 0", "SELECT * FROM %s WHERE k = 0 AND c <= 0");
 
-        testToCQLString("SELECT * FROM %s WHERE k = 0 AND v = 1 ALLOW FILTERING", "SELECT * FROM %s WHERE k = 0 AND v = 1");
-        testToCQLString("SELECT * FROM %s WHERE k = 0 AND c = 0 AND v = 1 ALLOW FILTERING", "SELECT * FROM %s WHERE k = 0 AND v = 1 AND (c) = (0)");
-        testToCQLString("SELECT * FROM %s WHERE k = 0 AND c > 0 AND v = 1 ALLOW FILTERING", "SELECT * FROM %s WHERE k = 0 AND v = 1 AND c > 0");
-        testToCQLString("SELECT * FROM %s WHERE k = 0 AND c < 0 AND v = 1 ALLOW FILTERING", "SELECT * FROM %s WHERE k = 0 AND v = 1 AND c < 0");
-        testToCQLString("SELECT * FROM %s WHERE k = 0 AND c >= 0 AND v = 1 ALLOW FILTERING", "SELECT * FROM %s WHERE k = 0 AND v = 1 AND c >= 0");
-        testToCQLString("SELECT * FROM %s WHERE k = 0 AND c <= 0 AND v = 1 ALLOW FILTERING", "SELECT * FROM %s WHERE k = 0 AND v = 1 AND c <= 0");
+        assertToCQLString("SELECT * FROM %s WHERE k = 0 AND v = 1 ALLOW FILTERING", "SELECT * FROM %s WHERE k = 0 AND v = 1");
+        assertToCQLString("SELECT * FROM %s WHERE k = 0 AND c = 0 AND v = 1 ALLOW FILTERING", "SELECT * FROM %s WHERE k = 0 AND v = 1 AND (c) = (0)");
+        assertToCQLString("SELECT * FROM %s WHERE k = 0 AND c > 0 AND v = 1 ALLOW FILTERING", "SELECT * FROM %s WHERE k = 0 AND v = 1 AND c > 0");
+        assertToCQLString("SELECT * FROM %s WHERE k = 0 AND c < 0 AND v = 1 ALLOW FILTERING", "SELECT * FROM %s WHERE k = 0 AND v = 1 AND c < 0");
+        assertToCQLString("SELECT * FROM %s WHERE k = 0 AND c >= 0 AND v = 1 ALLOW FILTERING", "SELECT * FROM %s WHERE k = 0 AND v = 1 AND c >= 0");
+        assertToCQLString("SELECT * FROM %s WHERE k = 0 AND c <= 0 AND v = 1 ALLOW FILTERING", "SELECT * FROM %s WHERE k = 0 AND v = 1 AND c <= 0");
     }
 
-    private void testToCQLString(String query, String expected)
+    @Override
+    protected SinglePartitionReadCommand parseCommand(String query)
     {
-        List<SinglePartitionReadCommand> commands = parseReadCommandGroup(query);
-        Assertions.assertThat(commands.get(0).toCQLString())
-                  .isEqualTo(formatQuery(expected));
+        return parseReadCommandGroup(query).get(0);
     }
 }
