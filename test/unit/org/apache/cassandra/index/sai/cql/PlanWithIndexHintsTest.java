@@ -199,6 +199,129 @@ public class PlanWithIndexHintsTest extends SAITester
     }
 
     @Test
+    public void testQueryPlanningWithNumericQueries() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v1 int, v2 int)");
+        String idx1 = createIndex("CREATE CUSTOM INDEX idx1 ON %s(v1) USING 'StorageAttachedIndex'");
+        String idx2 = createIndex("CREATE CUSTOM INDEX idx2 ON %s(v2) USING 'StorageAttachedIndex'");
+
+        String insert = "INSERT INTO %s (k, v1, v2) VALUES (?, ?, ?)";
+        Object[] row1 = row(1, 0, 0);
+        Object[] row2 = row(2, 0, 1);
+        Object[] row3 = row(3, 1, 0);
+        Object[] row4 = row(4, 1, 1);
+        Object[] row5 = row(5, 2, 0);
+        Object[] row6 = row(6, 2, 1);
+        execute(insert, row1);
+        execute(insert, row2);
+        execute(insert, row3);
+        execute(insert, row4);
+        execute(insert, row5);
+        execute(insert, row6);
+
+        beforeAndAfterFlush(() -> {
+
+            // without any hints
+            assertThatPlanFor("SELECT * FROM %s WHERE v1=0", row1, row2).uses(idx1);
+            assertThatPlanFor("SELECT * FROM %s WHERE v1>0", row3, row4, row5, row6).uses(idx1);
+            assertThatPlanFor("SELECT * FROM %s WHERE v1<2", row1, row2, row3, row4).uses(idx1);
+            assertThatPlanFor("SELECT * FROM %s WHERE v1>=0", row1, row2, row3, row4, row5, row6).uses(idx1);
+            assertThatPlanFor("SELECT * FROM %s WHERE v1<=2", row1, row2, row3, row4, row5, row6).uses(idx1);
+            assertThatPlanFor("SELECT * FROM %s WHERE v2=0", row1, row3, row5).uses(idx2);
+            assertThatPlanFor("SELECT * FROM %s WHERE v2>0", row2, row4, row6).uses(idx2);
+            assertThatPlanFor("SELECT * FROM %s WHERE v2<2", row1, row2, row3, row4, row5, row6).uses(idx2);
+            assertThatPlanFor("SELECT * FROM %s WHERE v2>=0", row1, row2, row3, row4, row5, row6).uses(idx2);
+            assertThatPlanFor("SELECT * FROM %s WHERE v2<=2", row1, row2, row3, row4, row5, row6).uses(idx2);
+            assertThatPlanFor("SELECT * FROM %s WHERE v1=0 AND v2=0", row1).usesAnyOf(idx1, idx2);
+            assertThatPlanFor("SELECT * FROM %s WHERE v1=0 AND v2>0", row2).usesAnyOf(idx1, idx2);
+            assertThatPlanFor("SELECT * FROM %s WHERE v1=0 AND v2>=0", row1, row2).usesAnyOf(idx1, idx2);
+            assertThatPlanFor("SELECT * FROM %s WHERE v1>0 AND v2=0", row3, row5).usesAnyOf(idx1, idx2);
+            assertThatPlanFor("SELECT * FROM %s WHERE v1>0 AND v2>0", row4, row6).usesAnyOf(idx1, idx2);
+            assertThatPlanFor("SELECT * FROM %s WHERE v1>0 AND v2>=0", row3, row4, row5, row6).usesAnyOf(idx1, idx2);
+            assertThatPlanFor("SELECT * FROM %s WHERE v1>=0 AND v2=0", row1, row3, row5).usesAnyOf(idx1, idx2);
+            assertThatPlanFor("SELECT * FROM %s WHERE v1>=0 AND v2>0", row2, row4, row6).usesAnyOf(idx1, idx2);
+            assertThatPlanFor("SELECT * FROM %s WHERE v1>=0 AND v2>=0", row1, row2, row3, row4, row5, row6).usesAnyOf(idx1, idx2);
+
+            // with restriction in one column only and hints including idx1
+            assertThatPlanFor("SELECT * FROM %s WHERE v1=0 WITH included_indexes = {idx1}", row1, row2).uses(idx1);
+            assertThatPlanFor("SELECT * FROM %s WHERE v1>0 WITH included_indexes = {idx1}", row3, row4, row5, row6).uses(idx1);
+            assertThatPlanFor("SELECT * FROM %s WHERE v1<2 WITH included_indexes = {idx1}", row1, row2, row3, row4).uses(idx1);
+            assertThatPlanFor("SELECT * FROM %s WHERE v1>=0 WITH included_indexes = {idx1}", row1, row2, row3, row4, row5, row6).uses(idx1);
+            assertThatPlanFor("SELECT * FROM %s WHERE v1<=2 WITH included_indexes = {idx1}", row1, row2, row3, row4, row5, row6).uses(idx1);
+            assertNonIncludableIndexError("SELECT * FROM %s WHERE v2=0 WITH included_indexes = {idx1}", idx1);
+            assertNonIncludableIndexError("SELECT * FROM %s WHERE v2>0 WITH included_indexes = {idx1}", idx1);
+            assertNonIncludableIndexError("SELECT * FROM %s WHERE v2<2 WITH included_indexes = {idx1}", idx1);
+            assertNonIncludableIndexError("SELECT * FROM %s WHERE v2>=0 WITH included_indexes = {idx1}", idx1);
+            assertNonIncludableIndexError("SELECT * FROM %s WHERE v2<=2 WITH included_indexes = {idx1}", idx1);
+
+            // with restriction in one column only and hints including idx2
+            assertNonIncludableIndexError("SELECT * FROM %s WHERE v1=0 WITH included_indexes = {idx2}", idx2);
+            assertNonIncludableIndexError("SELECT * FROM %s WHERE v1>0 WITH included_indexes = {idx2}", idx2);
+            assertNonIncludableIndexError("SELECT * FROM %s WHERE v1<2 WITH included_indexes = {idx2}", idx2);
+            assertNonIncludableIndexError("SELECT * FROM %s WHERE v1>=0 WITH included_indexes = {idx2}", idx2);
+            assertNonIncludableIndexError("SELECT * FROM %s WHERE v1<=2 WITH included_indexes = {idx2}", idx2);
+            assertThatPlanFor("SELECT * FROM %s WHERE v2=0 WITH included_indexes = {idx2}", row1, row3, row5).uses(idx2);
+            assertThatPlanFor("SELECT * FROM %s WHERE v2>0 WITH included_indexes = {idx2}", row2, row4, row6).uses(idx2);
+            assertThatPlanFor("SELECT * FROM %s WHERE v2<2 WITH included_indexes = {idx2}", row1, row2, row3, row4, row5, row6).uses(idx2);
+            assertThatPlanFor("SELECT * FROM %s WHERE v2>=0 WITH included_indexes = {idx2}", row1, row2, row3, row4, row5, row6).uses(idx2);
+            assertThatPlanFor("SELECT * FROM %s WHERE v2<=2 WITH included_indexes = {idx2}", row1, row2, row3, row4, row5, row6).uses(idx2);
+
+            // with restrictions in both columns and hints including either idx1 or idx2
+            for (String idx : Arrays.asList(idx1, idx2))
+            {
+                assertThatPlanFor(format("SELECT * FROM %%s WHERE v1=0 AND v2=0 WITH included_indexes = {%s}", idx), row1).usesAtLeast(idx);
+                assertThatPlanFor(format("SELECT * FROM %%s WHERE v1=0 AND v2>0 WITH included_indexes = {%s}", idx), row2).usesAtLeast(idx);
+                assertThatPlanFor(format("SELECT * FROM %%s WHERE v1=0 AND v2>=0 WITH included_indexes = {%s}", idx), row1, row2).usesAtLeast(idx);
+                assertThatPlanFor(format("SELECT * FROM %%s WHERE v1>0 AND v2=0 WITH included_indexes = {%s}", idx), row3, row5).usesAtLeast(idx);
+                assertThatPlanFor(format("SELECT * FROM %%s WHERE v1>0 AND v2>0 WITH included_indexes = {%s}", idx), row4, row6).usesAtLeast(idx);
+                assertThatPlanFor(format("SELECT * FROM %%s WHERE v1>0 AND v2>=0 WITH included_indexes = {%s}", idx), row3, row4, row5, row6).usesAtLeast(idx);
+                assertThatPlanFor(format("SELECT * FROM %%s WHERE v1>=0 AND v2=0 WITH included_indexes = {%s}", idx), row1, row3, row5).usesAtLeast(idx);
+                assertThatPlanFor(format("SELECT * FROM %%s WHERE v1>=0 AND v2>0 WITH included_indexes = {%s}", idx), row2, row4, row6).usesAtLeast(idx);
+                assertThatPlanFor(format("SELECT * FROM %%s WHERE v1>=0 AND v2>=0 WITH included_indexes = {%s}", idx), row1, row2, row3, row4, row5, row6).usesAtLeast(idx);
+            }
+
+            // with restriction in one column only and hints excluding idx1
+            assertThatPlanFor("SELECT * FROM %s WHERE v1=0 ALLOW FILTERING WITH excluded_indexes = {idx1}", row1, row2).usesNone();
+            assertThatPlanFor("SELECT * FROM %s WHERE v1>0 ALLOW FILTERING WITH excluded_indexes = {idx1}", row3, row4, row5, row6).usesNone();
+            assertThatPlanFor("SELECT * FROM %s WHERE v1<2 ALLOW FILTERING WITH excluded_indexes = {idx1}", row1, row2, row3, row4).usesNone();
+            assertThatPlanFor("SELECT * FROM %s WHERE v1>=0 ALLOW FILTERING WITH excluded_indexes = {idx1}", row1, row2, row3, row4, row5, row6).usesNone();
+            assertThatPlanFor("SELECT * FROM %s WHERE v1<=2 ALLOW FILTERING WITH excluded_indexes = {idx1}", row1, row2, row3, row4, row5, row6).usesNone();
+            assertThatPlanFor("SELECT * FROM %s WHERE v2=0 WITH excluded_indexes = {idx1}", row1, row3, row5).uses(idx2);
+            assertThatPlanFor("SELECT * FROM %s WHERE v2>0 WITH excluded_indexes = {idx1}", row2, row4, row6).uses(idx2);
+            assertThatPlanFor("SELECT * FROM %s WHERE v2<2 WITH excluded_indexes = {idx1}", row1, row2, row3, row4, row5, row6).uses(idx2);
+            assertThatPlanFor("SELECT * FROM %s WHERE v2>=0 WITH excluded_indexes = {idx1}", row1, row2, row3, row4, row5, row6).uses(idx2);
+            assertThatPlanFor("SELECT * FROM %s WHERE v2<=2 WITH excluded_indexes = {idx1}", row1, row2, row3, row4, row5, row6).uses(idx2);
+
+            // with restriction in one column only and hints excluding idx2
+            assertThatPlanFor("SELECT * FROM %s WHERE v1=0 WITH excluded_indexes = {idx2}", row1, row2).uses(idx1);
+            assertThatPlanFor("SELECT * FROM %s WHERE v1>0 WITH excluded_indexes = {idx2}", row3, row4, row5, row6).uses(idx1);
+            assertThatPlanFor("SELECT * FROM %s WHERE v1<2 WITH excluded_indexes = {idx2}", row1, row2, row3, row4).uses(idx1);
+            assertThatPlanFor("SELECT * FROM %s WHERE v1>=0 WITH excluded_indexes = {idx2}", row1, row2, row3, row4, row5, row6).uses(idx1);
+            assertThatPlanFor("SELECT * FROM %s WHERE v1<=2 WITH excluded_indexes = {idx2}", row1, row2, row3, row4, row5, row6).uses(idx1);
+            assertThatPlanFor("SELECT * FROM %s WHERE v2=0 ALLOW FILTERING WITH excluded_indexes = {idx2}", row1, row3, row5).usesNone();
+            assertThatPlanFor("SELECT * FROM %s WHERE v2>0 ALLOW FILTERING WITH excluded_indexes = {idx2}", row2, row4, row6).usesNone();
+            assertThatPlanFor("SELECT * FROM %s WHERE v2<2 ALLOW FILTERING WITH excluded_indexes = {idx2}", row1, row2, row3, row4, row5, row6).usesNone();
+            assertThatPlanFor("SELECT * FROM %s WHERE v2>=0 ALLOW FILTERING WITH excluded_indexes = {idx2}", row1, row2, row3, row4, row5, row6).usesNone();
+            assertThatPlanFor("SELECT * FROM %s WHERE v2<=2 ALLOW FILTERING WITH excluded_indexes = {idx2}", row1, row2, row3, row4, row5, row6).usesNone();
+
+            // with restrictions in both columns and hints excluding either idx1 or idx2
+            for (String one : Arrays.asList(idx1, idx2))
+            {
+                String other = one.equals(idx1) ? idx2 : idx1;
+                assertThatPlanFor(format("SELECT * FROM %%s WHERE v1=0 AND v2=0 ALLOW FILTERING WITH excluded_indexes = {%s}", one), row1).uses(other);
+                assertThatPlanFor(format("SELECT * FROM %%s WHERE v1=0 AND v2>0 ALLOW FILTERING WITH excluded_indexes = {%s}", one), row2).uses(other);
+                assertThatPlanFor(format("SELECT * FROM %%s WHERE v1=0 AND v2>=0 ALLOW FILTERING WITH excluded_indexes = {%s}", one), row1, row2).uses(other);
+                assertThatPlanFor(format("SELECT * FROM %%s WHERE v1>0 AND v2=0 ALLOW FILTERING WITH excluded_indexes = {%s}", one), row3, row5).uses(other);
+                assertThatPlanFor(format("SELECT * FROM %%s WHERE v1>0 AND v2>0 ALLOW FILTERING WITH excluded_indexes = {%s}", one), row4, row6).uses(other);
+                assertThatPlanFor(format("SELECT * FROM %%s WHERE v1>0 AND v2>=0 ALLOW FILTERING WITH excluded_indexes = {%s}", one), row3, row4, row5, row6).uses(other);
+                assertThatPlanFor(format("SELECT * FROM %%s WHERE v1>=0 AND v2=0 ALLOW FILTERING WITH excluded_indexes = {%s}", one), row1, row3, row5).uses(other);
+                assertThatPlanFor(format("SELECT * FROM %%s WHERE v1>=0 AND v2>0 ALLOW FILTERING WITH excluded_indexes = {%s}", one), row2, row4, row6).uses(other);
+                assertThatPlanFor(format("SELECT * FROM %%s WHERE v1>=0 AND v2>=0 ALLOW FILTERING WITH excluded_indexes = {%s}", one), row1, row2, row3, row4, row5, row6).uses(other);
+            }
+        });
+    }
+
+    @Test
     public void testQueryPlanningWithRestrictedButUnusableIndex() throws Throwable
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v1 int, v2 int, v3 int)");
