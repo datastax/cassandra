@@ -217,7 +217,8 @@ public final class SingleColumnRelation extends Relation
             throw invalidRequest(AnalyzerEqOperatorSupport.EQ_AMBIGUOUS_ERROR,
                                  columnDef.toString(),
                                  Index.joinNames(ebi.matchIndexes),
-                                 Index.joinNames(ebi.eqIndexes));
+                                 Index.joinNames(ebi.eqIndexes),
+                                 ebi.matchIndexes.iterator().next().getIndexMetadata().name);
         }
         List<? extends ColumnSpecification> receivers = toReceivers(columnDef);
         Term entryKey = toTerm(Collections.singletonList(receivers.get(0)), mapKey, table.keyspace, boundNames);

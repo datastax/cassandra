@@ -61,7 +61,8 @@ public class AnalyzerEqOperatorSupport
     public static final String EQ_AMBIGUOUS_ERROR =
     String.format("Column [%%s] equality predicate is ambiguous.  It has both analyzed indexes [%%s] configured with '%s':'%s', " +
                   "and an un-analyzed indexes [%%s].  " +
-                  "To avoid ambiguity, drop the analyzed indexes and recreate them with option '%s':'%s'.",
+                  "To avoid ambiguity, drop the analyzed indexes and recreate them with option '%s':'%s', " +
+                  "or use index hints to disambiguate, as in SELECT ... WITH included_indexes={%%s}.",
                   OPTION, Value.MATCH.toString().toLowerCase(), OPTION, Value.UNSUPPORTED.toString().toLowerCase());
 
 
