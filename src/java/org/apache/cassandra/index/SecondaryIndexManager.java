@@ -71,6 +71,7 @@ import org.apache.cassandra.concurrent.JMXEnabledThreadPoolExecutor;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.cql3.PageSize;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget;
 import org.apache.cassandra.db.Clustering;
@@ -1269,15 +1270,15 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
     }
 
     @Override
-    public Optional<Index> getBestIndexFor(RowFilter.Expression expression, IndexHints indexHints)
+    public Optional<Index> getBestIndexFor(ColumnMetadata column, Operator operator, IndexHints hints)
     {
-        return indexHints.getBestIndexFor(indexes.values(), i -> i.supportsExpression(expression));
+        return hints.getBestIndexFor(indexes.values(), i -> i.supportsExpression(column, operator));
     }
 
     public <T extends Index> Optional<T> getBestIndexFor(RowFilter.Expression expression, IndexHints indexHints, Class<T> indexType)
     {
         return indexHints.getBestIndexFor(indexes.values(), i -> i.supportsExpression(expression) && indexType.isInstance(i))
-                    .map(indexType::cast);
+                         .map(indexType::cast);
     }
 
     /**

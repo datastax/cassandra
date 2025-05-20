@@ -1035,9 +1035,9 @@ public class IndexHintsTest extends CQLTester
         assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v CONTAINS 'Richard' WITH included_indexes={literal}").selects(literal);
         assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v CONTAINS 'Debussy' WITH included_indexes={literal}").selects(literal);
         assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS 'Richard Strauss' WITH included_indexes={literal}", row1).selects(literal);
-        assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS 'Strauss' WITH included_indexes={literal}").selects(literal);
-        assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS 'Johann' WITH included_indexes={literal}").selects(literal);
-        assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS 'Richard' WITH included_indexes={literal}", row1).selects(literal);
+        assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS 'Strauss' WITH included_indexes={literal}", row1, row2).selects(literal);
+        assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS 'Johann' WITH included_indexes={literal}", row1, row2).selects(literal);
+        assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS 'Richard' WITH included_indexes={literal}", row1, row2).selects(literal);
         assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS 'Debussy' WITH included_indexes={literal}", row1, row2).selects(literal);
 
         // CONTAINS and NOT CONTAINS with hints including the analyzed index.

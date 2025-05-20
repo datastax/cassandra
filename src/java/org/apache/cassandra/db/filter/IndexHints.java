@@ -160,6 +160,10 @@ public class IndexHints
         if (candidates.isEmpty())
             return Optional.empty();
 
+        // if there is only one candidate index, return it
+        if (candidates.size() == 1)
+            return Optional.of(candidates.iterator().next());
+
         // try to find an included index
         for (T index : candidates)
         {
@@ -167,7 +171,8 @@ public class IndexHints
                 return Optional.of(index);
         }
 
-        return Optional.of(candidates.iterator().next());
+        // return the candidate with the best selectivity
+        return candidates.stream().min(Comparator.comparing(Index::getEstimatedResultRows));
     }
 
     /**
