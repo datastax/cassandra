@@ -823,27 +823,30 @@ public class IndexHintsTest extends CQLTester
         String insert = "INSERT INTO %s (k, v) VALUES (?, ?)";
         Object[] row1 = new Object[]{ 1, "Richard Strauss" };
         Object[] row2 = new Object[]{ 2, "Johann Strauss" };
+        Object[] row3 = new Object[]{ 3, "Strauss" };
         execute(insert, row1);
         execute(insert, row2);
+        execute(insert, row3);
 
         // test index selection with EQ query
         String query = "SELECT * FROM %s WHERE v = 'Strauss' ";
-        assertThatIndexQueryPlanFor(query).selects(literal);
-        assertThatIndexQueryPlanFor(query + "WITH included_indexes={legacy}").selects(legacy);
-        assertThatIndexQueryPlanFor(query + "WITH included_indexes={literal}").selects(literal);
+        assertThatIndexQueryPlanFor(query, row3).selects(literal);
+        assertThatIndexQueryPlanFor(query + "WITH included_indexes={legacy}", row3).selects(legacy);
+        assertThatIndexQueryPlanFor(query + "WITH included_indexes={literal}", row3).selects(literal);
         assertUnselectedIndexError(query + "WITH included_indexes={analyzed}", analyzed); // analyzed is not applicable to =
         assertUnselectedIndexError(query + "WITH included_indexes={legacy,literal}", legacy); // literal is selected over idx1
         assertUnselectedIndexError(query + "WITH included_indexes={legacy,analyzed}", analyzed); // analyzed is not applicable to =
         assertUnselectedIndexError(query + "WITH included_indexes={literal,analyzed}", analyzed); // analyzed is not applicable to =
         assertUnselectedIndexError(query + "WITH included_indexes={legacy,literal,analyzed}", analyzed, legacy); // analyzed is not applicable to =, literal is selected over idx1
-        assertThatIndexQueryPlanFor(query + "WITH excluded_indexes={legacy}").selects(literal);
-        assertThatIndexQueryPlanFor(query + "WITH excluded_indexes={literal}").selects(legacy);
-        assertThatIndexQueryPlanFor(query + "WITH excluded_indexes={analyzed}").selects(literal);
+        assertThatIndexQueryPlanFor(query + "WITH excluded_indexes={legacy}", row3).selects(literal);
+        assertThatIndexQueryPlanFor(query + "WITH excluded_indexes={literal}", row3).selects(legacy);
+        assertThatIndexQueryPlanFor(query + "WITH excluded_indexes={analyzed}", row3).selects(literal);
         assertIndexDoesNotSupportOperator(query + "WITH excluded_indexes={legacy,literal}", "v");
-        assertThatIndexQueryPlanFor(query + "WITH excluded_indexes={legacy,analyzed}").selects(literal);
-        assertThatIndexQueryPlanFor(query + "WITH excluded_indexes={literal,analyzed}").selects(legacy);
+        assertThatIndexQueryPlanFor(query + "ALLOW FILTERING WITH excluded_indexes={legacy,literal}", row3).selectsNone();
+        assertThatIndexQueryPlanFor(query + "WITH excluded_indexes={legacy,analyzed}", row3).selects(literal);
+        assertThatIndexQueryPlanFor(query + "WITH excluded_indexes={literal,analyzed}", row3).selects(legacy);
         assertNeedsAllowFiltering(query + "WITH excluded_indexes={legacy,literal,analyzed}");
-        assertThatIndexQueryPlanFor(query + "ALLOW FILTERING WITH excluded_indexes={legacy,literal,analyzed}").selectsNone();
+        assertThatIndexQueryPlanFor(query + "ALLOW FILTERING WITH excluded_indexes={legacy,literal,analyzed}", row3).selectsNone();
 
         // test the same EQ query with a different value
         query = "SELECT * FROM %s WHERE v = 'Richard Strauss' ";
@@ -864,21 +867,20 @@ public class IndexHintsTest extends CQLTester
         assertNeedsAllowFiltering(query + "WITH excluded_indexes={legacy,literal,analyzed}");
         assertThatIndexQueryPlanFor(query + "ALLOW FILTERING WITH excluded_indexes={legacy,literal,analyzed}", row1).selectsNone();
 
-
         // test index selection with MATCH query
         query = "SELECT * FROM %s WHERE v : 'strauss' ";
-        assertThatIndexQueryPlanFor(query, row1, row2).selects(analyzed);
+        assertThatIndexQueryPlanFor(query, row1, row2, row3).selects(analyzed);
         assertUnselectedIndexError(query + "WITH included_indexes={legacy}", legacy); // legacy is not applicable to :
         assertUnselectedIndexError(query + "WITH included_indexes={literal}", literal); // literal is not applicable to :
-        assertThatIndexQueryPlanFor(query + "WITH included_indexes={analyzed}", row1, row2).selects(analyzed);
+        assertThatIndexQueryPlanFor(query + "WITH included_indexes={analyzed}", row1, row2, row3).selects(analyzed);
         assertUnselectedIndexError(query + "WITH included_indexes={legacy,literal}", legacy, literal); // legacy and literal are not applicable to :
         assertUnselectedIndexError(query + "WITH included_indexes={legacy,analyzed}", legacy);
         assertUnselectedIndexError(query + "WITH included_indexes={literal,analyzed}", literal);
         assertUnselectedIndexError(query + "WITH included_indexes={legacy,literal,analyzed}", legacy, literal);
-        assertThatIndexQueryPlanFor(query + "WITH excluded_indexes={legacy}", row1, row2).selects(analyzed);
-        assertThatIndexQueryPlanFor(query + "WITH excluded_indexes={literal}", row1, row2).selects(analyzed);
+        assertThatIndexQueryPlanFor(query + "WITH excluded_indexes={legacy}", row1, row2, row3).selects(analyzed);
+        assertThatIndexQueryPlanFor(query + "WITH excluded_indexes={literal}", row1, row2, row3).selects(analyzed);
         assertIndexDoesNotSupportAnalyzerMatches(query + "WITH excluded_indexes={analyzed}", "v");
-        assertThatIndexQueryPlanFor(query + "WITH excluded_indexes={legacy,literal}", row1, row2).selects(analyzed);
+        assertThatIndexQueryPlanFor(query + "WITH excluded_indexes={legacy,literal}", row1, row2, row3).selects(analyzed);
         assertIndexDoesNotSupportAnalyzerMatches(query + "WITH excluded_indexes={legacy,analyzed}", "v");
         assertIndexDoesNotSupportAnalyzerMatches(query + "WITH excluded_indexes={literal,analyzed}", "v");
         assertMatchNeedsIndex(query + "WITH excluded_indexes={legacy,literal,analyzed}", "v", "strauss");
@@ -914,28 +916,30 @@ public class IndexHintsTest extends CQLTester
         String insert = "INSERT INTO %s (k, v) VALUES (?, ?)";
         Object[] row1 = new Object[]{ 1, "Richard Strauss" };
         Object[] row2 = new Object[]{ 2, "Johann Strauss" };
+        Object[] row3 = new Object[]{ 3, "Strauss" };
         execute(insert, row1);
         execute(insert, row2);
+        execute(insert, row3);
 
         // test index selection with EQ query, the hints will disambiguate the query and will produce different results
         // depending on the selected index
         String query = "SELECT * FROM %s WHERE v = 'Strauss' ";
         assertEqualityPredicateIsAmbiguous(query);
-        assertThatIndexQueryPlanFor(query + "WITH included_indexes={legacy}").selects(legacy);
-        assertThatIndexQueryPlanFor(query + "WITH included_indexes={literal}").selects(literal);
-        assertThatIndexQueryPlanFor(query + "WITH included_indexes={analyzed}", row1, row2).selects(analyzed);
+        assertThatIndexQueryPlanFor(query + "WITH included_indexes={legacy}", row3).selects(legacy);
+        assertThatIndexQueryPlanFor(query + "WITH included_indexes={literal}", row3).selects(literal);
+        assertThatIndexQueryPlanFor(query + "WITH included_indexes={analyzed}", row1, row2, row3).selects(analyzed);
         assertUnselectedIndexError(query + "WITH included_indexes={legacy,literal}", legacy);
         assertEqualityPredicateIsAmbiguous(query + "WITH included_indexes={legacy,analyzed}");
         assertEqualityPredicateIsAmbiguous(query + "WITH included_indexes={literal,analyzed}");
         assertEqualityPredicateIsAmbiguous(query + "WITH included_indexes={legacy,literal,analyzed}");
         assertEqualityPredicateIsAmbiguous(query + "WITH excluded_indexes={legacy}");
         assertEqualityPredicateIsAmbiguous(query + "WITH excluded_indexes={literal}");
-        assertThatIndexQueryPlanFor(query + "WITH excluded_indexes={analyzed}").selects(literal);
-        assertThatIndexQueryPlanFor(query + "WITH excluded_indexes={legacy,literal}", row1, row2).selects(analyzed);
-        assertThatIndexQueryPlanFor(query + "WITH excluded_indexes={legacy,analyzed}").selects(literal);
-        assertThatIndexQueryPlanFor(query + "WITH excluded_indexes={literal,analyzed}").selects(legacy);
+        assertThatIndexQueryPlanFor(query + "WITH excluded_indexes={analyzed}", row3).selects(literal);
+        assertThatIndexQueryPlanFor(query + "WITH excluded_indexes={legacy,literal}", row1, row2, row3).selects(analyzed);
+        assertThatIndexQueryPlanFor(query + "WITH excluded_indexes={legacy,analyzed}", row3).selects(literal);
+        assertThatIndexQueryPlanFor(query + "WITH excluded_indexes={literal,analyzed}", row3).selects(legacy);
         assertNeedsAllowFiltering(query + "WITH excluded_indexes={legacy,literal,analyzed}");
-        assertThatIndexQueryPlanFor(query + "ALLOW FILTERING WITH excluded_indexes={legacy,literal,analyzed}").selectsNone();
+        assertThatIndexQueryPlanFor(query + "ALLOW FILTERING WITH excluded_indexes={legacy,literal,analyzed}", row3).selectsNone();
 
         // test the same EQ query with a different value
         query = "SELECT * FROM %s WHERE v = 'Richard Strauss' ";
@@ -958,18 +962,18 @@ public class IndexHintsTest extends CQLTester
 
         // test index selection with MATCH query
         query = "SELECT * FROM %s WHERE v : 'strauss' ";
-        assertThatIndexQueryPlanFor(query, row1, row2).selects(analyzed);
+        assertThatIndexQueryPlanFor(query, row1, row2, row3).selects(analyzed);
         assertUnselectedIndexError(query + "WITH included_indexes={legacy}", legacy); // legacy is not applicable to :
         assertUnselectedIndexError(query + "WITH included_indexes={literal}", literal); // literal is not applicable to :
-        assertThatIndexQueryPlanFor(query + "WITH included_indexes={analyzed}", row1, row2).selects(analyzed);
+        assertThatIndexQueryPlanFor(query + "WITH included_indexes={analyzed}", row1, row2, row3).selects(analyzed);
         assertUnselectedIndexError(query + "WITH included_indexes={legacy,literal}", legacy, literal); // legacy and literal are not applicable to :
         assertUnselectedIndexError(query + "WITH included_indexes={legacy,analyzed}", legacy);
         assertUnselectedIndexError(query + "WITH included_indexes={literal,analyzed}", literal);
         assertUnselectedIndexError(query + "WITH included_indexes={legacy,literal,analyzed}", legacy, literal);
-        assertThatIndexQueryPlanFor(query + "WITH excluded_indexes={legacy}", row1, row2).selects(analyzed);
-        assertThatIndexQueryPlanFor(query + "WITH excluded_indexes={literal}", row1, row2).selects(analyzed);
+        assertThatIndexQueryPlanFor(query + "WITH excluded_indexes={legacy}", row1, row2, row3).selects(analyzed);
+        assertThatIndexQueryPlanFor(query + "WITH excluded_indexes={literal}", row1, row2, row3).selects(analyzed);
         assertIndexDoesNotSupportAnalyzerMatches(query + "WITH excluded_indexes={analyzed}", "v");
-        assertThatIndexQueryPlanFor(query + "WITH excluded_indexes={legacy,literal}", row1, row2).selects(analyzed);
+        assertThatIndexQueryPlanFor(query + "WITH excluded_indexes={legacy,literal}", row1, row2, row3).selects(analyzed);
         assertIndexDoesNotSupportAnalyzerMatches(query + "WITH excluded_indexes={legacy,analyzed}", "v");
         assertIndexDoesNotSupportAnalyzerMatches(query + "WITH excluded_indexes={literal,analyzed}", "v");
         assertMatchNeedsIndex(query + "WITH excluded_indexes={legacy,literal,analyzed}", "v", "strauss");
