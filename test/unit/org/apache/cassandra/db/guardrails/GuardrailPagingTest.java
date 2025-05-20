@@ -22,6 +22,7 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 
+import org.apache.cassandra.serializers.LongSerializer;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.BeforeClass;
@@ -98,13 +99,14 @@ public class GuardrailPagingTest extends GuardrailTester
     @Before
     public void setUp() throws Throwable
     {
+        DatabaseDescriptor.setAggregationSubPageSize(PageSize.inBytes(1024));
         DatabaseDescriptor.getGuardrailsConfig().setPageWeightThreshold(DatabaseDescriptor.getGuardrailsConfig().getPageWeightWarnThreshold(), testPageWeightFailureThreshold);
 
-        createTable("CREATE TABLE IF NOT EXISTS %s (k INT, c INT, v TEXT, PRIMARY KEY(k, c))");
+        createTable("CREATE TABLE IF NOT EXISTS %s (k INT, c INT, v TEXT, a INT, PRIMARY KEY(k, c))");
 
         for (int i = 0; i < partitionCount; i++)
             for (int j = 0; j < rowsPerPartition; j++)
-                execute("INSERT INTO %s (k, c, v) VALUES (?, ?, ?)", i, j, "long long test message bla bla bla bla bla bla bla bla bla bla bla");
+                execute("INSERT INTO %s (k, c, v, a) VALUES (?, ?, ?, ?)", i, j, "long long test message bla bla bla bla bla bla bla bla bla bla bla", null);
     }
 
     private ResultMessage.Rows selectWithPaging(String query, PageSize pageSize, ClientState clientState) throws InvalidRequestException
@@ -125,7 +127,7 @@ public class GuardrailPagingTest extends GuardrailTester
         return (ResultMessage.Rows) prepared.statement.execute(queryState, options, Dispatcher.RequestTime.forImmediateExecution());
     }
 
-    private ResultMessage.Rows testQueryWithPagedByRows(String query, PageSize pageSize, int rowLimit) throws Throwable
+    private ResultMessage.Rows testQueryWithPagedByRows(String query, PageSize pageSize, int rowLimit)
     {
         ResultMessage.Rows result = selectWithPaging(query, pageSize, ClientState.forExternalCalls(AuthenticatedUser.ANONYMOUS_USER));
         Assertions.assertThat(result.result.rows.size()).isLessThan(rowLimit);
@@ -172,5 +174,24 @@ public class GuardrailPagingTest extends GuardrailTester
     {
         selectWithPaging(query, PageSize.inBytes(10 * 1024), ClientState.forInternalCalls());
         selectWithPaging(query, PageSize.inBytes(10 * 1024), ClientState.forExternalCalls(new AuthenticatedUser("cassandra")));
+    }
+
+    /**
+     * DSP-22813, DBPE-16245, DBPE-16378 and CNDB-13978: Test that count(*) aggregation queries return the correct
+     * number of rows, even if there are tombstones and paging is required.
+     * </p>
+     * Before the DSP-22813/DBPE-16245/DBPE-16378/CNDB-13978 fix these queries would stop counting after hitting the
+     * {@code page_size_failure_threshold_in_kb} guardrail, returning only the count of a single page.
+     */
+    @Test
+    public void testCountWithGuardrailIsAccurate()
+    {
+        // transform the tested query into an equivalent count(*) query with the same restrictions
+        String countQuery = query.replace("*", "count(*)");
+
+        // ask for more rows per page than can fit with the current guardrail
+        ResultMessage.Rows result = selectWithPaging(countQuery, PageSize.inRows(limit), ClientState.forExternalCalls(AuthenticatedUser.ANONYMOUS_USER));
+        Long rowsCounted = LongSerializer.instance.deserialize(result.result.rows.get(0).get(0));
+        Assertions.assertThat(rowsCounted.intValue()).isEqualTo(limit);
     }
 }
