@@ -55,7 +55,9 @@ public class BM25Test extends SAITester
     @Parameterized.Parameters(name = "version={0}")
     public static List<Object> data()
     {
-        return Arrays.asList(new Object[]{ Version.BM25_EARLIEST, Version.ED });
+        return Version.ALL.stream().filter(v -> v.onOrAfter(Version.BM25_EARLIEST))
+                                   .map(v -> new Object[]{ v })
+                                   .collect(Collectors.toList());
     }
 
     @Before
