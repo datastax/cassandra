@@ -325,6 +325,14 @@ public interface Row extends Unfiltered, Iterable<ColumnData>, IMeasurableMemory
 
     public int dataSize();
 
+    /**
+     * Returns the original data size in bytes of this row as it was returned by {@link #dataSize()} before purging it
+     * from all deletion info with {@link #purge}.
+     *
+     * @return the original data size of this row in bytes before purging
+     */
+    int originalDataSize();
+
     public long unsharedHeapSizeExcludingData();
 
     public String toString(TableMetadata metadata, boolean fullDetails);
