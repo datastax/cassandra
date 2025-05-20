@@ -51,6 +51,7 @@ import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.MonotonicClock;
 import org.awaitility.Awaitility;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -58,6 +59,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -267,10 +269,10 @@ public class IndexViewManagerTest extends SAITester
     {
         createTable("CREATE TABLE %S (k INT PRIMARY KEY, v INT)");
         String indexName = createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
+        disableCompaction();
 
         ColumnFamilyStore store = getCurrentColumnFamilyStore();
         IndexContext columnContext = columnIndex(store, indexName);
-        store.disableAutoCompaction();
 
         // Insert data and flush to create initial SSTable
         execute("INSERT INTO %s(k, v) VALUES (1, 10)");
@@ -279,7 +281,7 @@ public class IndexViewManagerTest extends SAITester
 
         // Create a barrier that will pause the getReferencedView method
         Injections.Barrier viewReferencePause =
-            Injections.newBarrier("pause_get_referenced_view", 2, false)
+            Injections.newBarrier("pause_get_referenced_view", 3, false)
                 .add(InvokePointBuilder.newInvokePoint()
                                        .onClass(View.class)
                                        .onMethod("reference"))
@@ -299,38 +301,43 @@ public class IndexViewManagerTest extends SAITester
             Injections.inject(viewReferencePause, referenceCounter);
 
             // Start a thread that will try to get a referenced view. The deadline is high because we want to loop.
-            Future<View> viewFuture = CompletableFuture.supplyAsync(() -> {
+            Future<View> viewFutureExpectSuccess = CompletableFuture.supplyAsync(() -> {
                 return columnContext.getReferencedView(TimeUnit.SECONDS.toNanos(100));
             });
 
-            // Wait for the barrier to be hit
+            // Start a thread that will try to get a referenced view. The deadline is high because we want to loop.
+            Future<View> viewFutureExpectNull = CompletableFuture.supplyAsync(() -> {
+                return columnContext.getReferencedView(0);
+            });
+
+            //  Barrier should have 1 remaining await
             Awaitility.await().atMost(10, TimeUnit.SECONDS).until(() -> viewReferencePause.getCount() == 1);
+
+            // Sleep long enough for the next call to isAfter to return true
+            Thread.sleep(TimeUnit.NANOSECONDS.toMillis(MonotonicClock.approxTime.error()));
 
             // While getReferencedView is paused, perform a compaction to change the view
             execute("INSERT INTO %s(k, v) VALUES (3, 30)");
             flush();
 
             // Confirm state before proceeding
-            assertEquals("getReferencedView should be paused", 1, viewReferencePause.getCount());
-            assertEquals("getView should have been called once so far", 1, referenceCounter.get());
+            assertEquals("getView should have been called once so far", 2, referenceCounter.get());
 
-            // Release the barrier to allow getReferencedView to continue
+            // Release just in case it hasn't been yet.
             viewReferencePause.countDown();
 
             // Get the result and verify it's not null
-            View result = viewFuture.get(5, TimeUnit.SECONDS);
+            View result = viewFutureExpectSuccess.get(5, TimeUnit.SECONDS);
             assertNotNull("Should have eventually gotten a referenced view", result);
 
-            // Verify that reference() was called more than once (indicating retry)
-            assertTrue("Reference should have been called multiple times",
-                       referenceCounter.get() > 1);
+            // Verify that the other thread got a null result
+            assertNull("Should have eventually gotten a null view", viewFutureExpectNull.get());
+
+            // Verify that reference() was called 3 times (indicating retry on the first but not the second)
+            assertEquals("Reference should have been called 3 times", referenceCounter.get(), 3);
 
             // Clean up
             result.release();
-        }
-        catch (Exception e)
-        {
-            throw new RuntimeException(e);
         }
         finally
         {
