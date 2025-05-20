@@ -47,6 +47,7 @@ import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.v1.SegmentBuilder;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
+import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.SchemaConstants;
@@ -233,6 +234,17 @@ public class SegmentsSystemViewTest extends SAITester
                 {
                     addComponentSizeToMap(lengths, IndexComponentType.TERMS_DATA, index.getIndexContext(), indexDescriptor);
                     addComponentSizeToMap(lengths, IndexComponentType.POSTING_LISTS, index.getIndexContext(), indexDescriptor);
+                    if (version.onOrAfter(Version.BM25_EARLIEST))
+                    {
+                        addComponentSizeToMap(lengths, IndexComponentType.DOC_LENGTHS, index.getIndexContext(), indexDescriptor);
+                        // Version EC does not count the length of the segment header in the DOC_LENGTHS file, so
+                        // we do a special adjustment here
+                        if (version.equals(Version.EC))
+                        {
+                            var error = sstableIndex.getSegments().size() * SAICodecUtils.headerSize();
+                            lengths.computeIfPresent(IndexComponentType.DOC_LENGTHS.name(), (typeName, acc) -> acc - error);
+                        }
+                    }
                 }
                 else
                 {
