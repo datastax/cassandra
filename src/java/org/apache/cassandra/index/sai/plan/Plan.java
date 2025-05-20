@@ -1436,7 +1436,7 @@ abstract public class Plan
         @Override
         protected boolean usesIncludedIndex()
         {
-            return true;
+            return factory.hints.includes(getIndexName());
         }
 
         @Override
