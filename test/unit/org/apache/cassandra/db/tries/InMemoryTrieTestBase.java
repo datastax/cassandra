@@ -41,6 +41,7 @@ import org.apache.cassandra.utils.ObjectSizes;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 @RunWith(Parameterized.class)
 public abstract class InMemoryTrieTestBase
@@ -86,6 +87,28 @@ public abstract class InMemoryTrieTestBase
         System.out.println("Trie " + trie.dump());
         assertEquals("test", trie.get(e));
         assertEquals(null, trie.get(ByteComparable.of("teste")));
+    }
+
+    @Test
+    public void testUpdateWithNull()
+    {
+        ByteComparable b1 = ByteComparable.preencoded(byteComparableVersion, new byte[]{ 1 });
+        ByteComparable b2 = ByteComparable.preencoded(byteComparableVersion, new byte[]{ 0 });
+        InMemoryTrie<String> trie = strategy.create();
+        putSimpleTransform(trie, b1, "test1", (x, y) -> y);
+        putSimpleTransform(trie, b2, "test2", (x, y) -> y);
+        putSimpleTransform(trie, b1, "test3", (x, y) -> null);
+        putSimpleTransform(trie, b1, "test4", (x, y) -> y);
+        System.out.println("Trie " + trie.dump());
+
+        Set<Byte> values = new HashSet<>();
+        for (var e : trie.entrySet())
+        {
+            byte[] key = e.getKey().asByteComparableArray(byteComparableVersion);
+            System.out.println(Arrays.toString(key) + " -> " + e.getValue());
+            assertEquals(1, key.length);
+            assertTrue(values.add(key[0]));
+        }
     }
 
     public enum ReuseStrategy
@@ -769,6 +792,21 @@ public abstract class InMemoryTrieTestBase
                               value,
                               (existing, update) -> existing != null ? resolver.resolve(existing, update) : update,
                               usePut);
+        }
+        catch (TrieSpaceExhaustedException e)
+        {
+            throw Throwables.propagate(e);
+        }
+    }
+
+    <T> void putSimpleTransform(InMemoryTrie<T> trie,
+                                ByteComparable key,
+                                T value,
+                                InMemoryTrie.UpsertTransformer<T, T> transformer)
+    {
+        try
+        {
+            trie.putSingleton(key, value, transformer, usePut());
         }
         catch (TrieSpaceExhaustedException e)
         {
