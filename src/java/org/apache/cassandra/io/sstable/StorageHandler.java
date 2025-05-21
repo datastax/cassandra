@@ -20,13 +20,18 @@ package org.apache.cassandra.io.sstable;
 
 import java.lang.reflect.InvocationTargetException;
 import java.util.Collection;
+import java.util.Set;
 
 import com.google.common.base.Preconditions;
 
+import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.lifecycle.Tracker;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.SortedTableWriter;
+import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
+import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.FBUtilities;
 
@@ -145,6 +150,16 @@ public abstract class StorageHandler
      * Called when the CFS is unloaded, this needs to perform any cleanup.
      */
     public abstract void unload();
+
+    public abstract SSTableReader onOpeningWrittenSSTableFailure(SSTableReader.OpenReason reason,
+                                                                 Descriptor descriptor,
+                                                                 Set<Component> components,
+                                                                 long compressedSize,
+                                                                 long uncompressedSize,
+                                                                 StatsMetadata stats,
+                                                                 DecoratedKey firstKey,
+                                                                 DecoratedKey lastKey,
+                                                                 Throwable throwable);
 
     public static StorageHandler create(TableMetadataRef metadata, Directories directories, Tracker dataTracker)
     {
