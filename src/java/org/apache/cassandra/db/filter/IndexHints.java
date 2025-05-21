@@ -101,7 +101,12 @@ public class IndexHints
      */
     public boolean includes(String indexName)
     {
-        return included.stream().anyMatch(i -> i.name.equals(indexName));
+        for (IndexMetadata i : included)
+        {
+            if (i.name.equals(indexName))
+                return true;
+        }
+        return false;
     }
 
     /**
@@ -153,7 +158,12 @@ public class IndexHints
      */
     public boolean excludes(String indexName)
     {
-        return excluded.stream().anyMatch(i -> i.name.equals(indexName));
+        for (IndexMetadata i : excluded)
+        {
+            if (i.name.equals(indexName))
+                return true;
+        }
+        return false;
     }
 
     /**
@@ -192,7 +202,18 @@ public class IndexHints
         }
 
         // return the candidate with the best selectivity
-        return candidates.stream().min(Comparator.comparing(Index::getEstimatedResultRows));
+        T bestIndex = null;
+        long bestSelectivity = Long.MAX_VALUE;
+        for (T index : candidates)
+        {
+            long selectivity = index.getEstimatedResultRows();
+            if (bestIndex == null || selectivity < bestSelectivity)
+            {
+                bestIndex = index;
+                bestSelectivity = selectivity;
+            }
+        }
+        return Optional.of(bestIndex);
     }
 
     /**
@@ -258,7 +279,16 @@ public class IndexHints
         Set<IndexMetadata> missing = new HashSet<>();
         for (IndexMetadata indexMetadata : included)
         {
-            if (queryPlan.getIndexes().stream().noneMatch(i -> i.getIndexMetadata().equals(indexMetadata)))
+            boolean found = false;
+            for (Index i : queryPlan.getIndexes())
+            {
+                if (i.getIndexMetadata().equals(indexMetadata))
+                {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found)
                 missing.add(indexMetadata);
         }
         if (!missing.isEmpty())

@@ -20,16 +20,15 @@ package org.apache.cassandra.db;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
-import java.util.TreeSet;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.function.LongPredicate;
-import java.util.stream.Collectors;
 import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -802,8 +801,12 @@ public abstract class ReadCommand extends AbstractReadQuery
         builder.appendOptions(b -> {
 
             IndexHints indexHints = rowFilter().indexHints();
-            Set<String> included = indexHints.included.stream().map(i -> i.name).collect(Collectors.toSet());
-            Set<String> excluded = indexHints.excluded.stream().map(i -> i.name).collect(Collectors.toSet());
+            Set<String> included = new HashSet<>();
+            for (IndexMetadata i : indexHints.included)
+                included.add(i.name);
+            Set<String> excluded = new HashSet<>();
+            for (IndexMetadata i : indexHints.excluded)
+                excluded.add(i.name);
 
             b.append(SelectOptions.INCLUDED_INDEXES, included)
              .append(SelectOptions.EXCLUDED_INDEXES, excluded)
