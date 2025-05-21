@@ -980,6 +980,7 @@ public class SAITester extends CQLTester
     private PlanSelectionAssertion assertThatPlanFor(String query, Consumer<UntypedResultSet> resultSetConsumer)
     {
         // First execute the query capturing warnings and check the query results
+        disablePreparedReuseForTest();
         ClientWarn.instance.captureWarnings();
         resultSetConsumer.accept(execute(query));
         List<String> warnings = ClientWarn.instance.getWarnings();
@@ -1005,13 +1006,13 @@ public class SAITester extends CQLTester
 
     protected static class PlanSelectionAssertion
     {
-        private final List<String> warnings;
         private final Set<String> selectedIndexes;
+        private final List<String> warnings;
 
         public PlanSelectionAssertion(Set<String> selectedIndexes, @Nullable List<String> warnings)
         {
-            this.warnings = warnings;
             this.selectedIndexes = selectedIndexes;
+            this.warnings = warnings;
         }
 
         public PlanSelectionAssertion uses(String... indexes)
@@ -1023,9 +1024,10 @@ public class SAITester extends CQLTester
             return this;
         }
 
-        public void usesNone()
+        public PlanSelectionAssertion usesNone()
         {
             Assertions.assertThat(selectedIndexes).isEmpty();
+            return this;
         }
 
         public PlanSelectionAssertion usesAnyOf(String index1, String index2, String... otherIndexes)
@@ -1042,13 +1044,12 @@ public class SAITester extends CQLTester
             return this;
         }
 
-        public PlanSelectionAssertion usesAtLeast(String... indexes)
+        public void usesAtLeast(String... indexes)
         {
             Assertions.assertThat(selectedIndexes)
                       .isNotNull()
                       .as("Expected to select at least %s, but got: %s", indexes, selectedIndexes)
                       .containsAll(Set.of(indexes));
-            return this;
         }
 
         public void doesntWarn()

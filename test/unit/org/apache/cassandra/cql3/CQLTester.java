@@ -65,6 +65,7 @@ import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
+import org.apache.cassandra.service.ClientWarn;
 import org.junit.After;
 import org.junit.AfterClass;
 import org.junit.Assert;
@@ -2939,36 +2940,43 @@ public abstract class CQLTester
 
     protected PlanSelectionAssertion assertThatIndexQueryPlanFor(String query, Object[]... expectedRows)
     {
-        // First execute the query and check returned rows
+        // First execute the query capturing warnings and check the query results
+        disablePreparedReuseForTest();
+        ClientWarn.instance.captureWarnings();
         assertRowsIgnoringOrder(execute(query), expectedRows);
+        List<String> warnings = ClientWarn.instance.getWarnings();
+        ClientWarn.instance.resetWarnings();
 
         ReadCommand command = parseReadCommand(query);
         Index.QueryPlan queryPlan = command.indexQueryPlan();
         if (queryPlan == null)
-            return new PlanSelectionAssertion(null);
+            return new PlanSelectionAssertion(null, warnings);
 
         Set<String> indexes = queryPlan.getIndexes().stream().map(i -> i.getIndexMetadata().name).collect(Collectors.toSet());
-        return new PlanSelectionAssertion(indexes);
+        return new PlanSelectionAssertion(indexes, warnings);
     }
 
     protected static class PlanSelectionAssertion
     {
+        private final List<String> warnings;
         private final Set<String> selectedIndexes;
 
-        protected PlanSelectionAssertion(@Nullable Set<String> selectedIndexes)
+        protected PlanSelectionAssertion(@Nullable Set<String> selectedIndexes, @Nullable List<String> warnings)
         {
             this.selectedIndexes = selectedIndexes;
+            this.warnings = warnings;
         }
 
-        public void selects(String... indexes)
+        public PlanSelectionAssertion selects(String... indexes)
         {
             Assertions.assertThat(selectedIndexes)
                       .isNotNull()
                       .as("Expected to select only %s, but got: %s", indexes, selectedIndexes)
                       .isEqualTo(Set.of(indexes));
+            return this;
         }
 
-        public void selectsAnyOf(String index1, String index2, String... otherIndexes)
+        public PlanSelectionAssertion selectsAnyOf(String index1, String index2, String... otherIndexes)
         {
             Set<String> expectedIndexes = new HashSet<>(otherIndexes.length + 1);
             expectedIndexes.add(index1);
@@ -2979,11 +2987,25 @@ public abstract class CQLTester
                       .isNotNull()
                       .as("Expected to select any of %s, but got: %s", otherIndexes, selectedIndexes)
                       .containsAnyElementsOf(expectedIndexes);
+            return this;
         }
 
-        public void selectsNone()
+        public PlanSelectionAssertion selectsNone()
         {
             Assertions.assertThat(selectedIndexes).isNull();
+            return this;
+        }
+
+        public void doesntWarn()
+        {
+            Assert.assertNull(warnings);
+        }
+
+        public void warns(String expectedWarning)
+        {
+            Assert.assertNotNull(warnings);
+            Assert.assertEquals(1, warnings.size());
+            Assert.assertEquals(expectedWarning, warnings.get(0));
         }
     }
 }

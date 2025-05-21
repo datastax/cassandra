@@ -18,6 +18,7 @@ package org.apache.cassandra.index.sai.cql;
 
 import java.util.Arrays;
 
+import org.apache.cassandra.index.sai.analyzer.AnalyzerEqOperatorSupport;
 import org.junit.Test;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
@@ -164,32 +165,35 @@ public class PlanWithIndexHintsTest extends SAITester
         execute(insert, row3);
         execute(insert, row4);
 
+        // equality queries using the analyzed index should emit a warning
+        String warning = format(AnalyzerEqOperatorSupport.EQ_RESTRICTION_ON_ANALYZED_WARNING, 'v', idx);
+
         beforeAndAfterFlush(() -> {
 
             // eq without any hints
-            assertThatPlanFor("SELECT * FROM %s WHERE v='Strauss'", row1, row2, row3, row4).uses(idx);
-            assertThatPlanFor("SELECT * FROM %s WHERE v='Levi'", row3).uses(idx);
-            assertThatPlanFor("SELECT * FROM %s WHERE v='Lévi-Strauss'", row4).uses(idx);
+            assertThatPlanFor("SELECT * FROM %s WHERE v='Strauss'", row1, row2, row3, row4).uses(idx).warns(warning);
+            assertThatPlanFor("SELECT * FROM %s WHERE v='Levi'", row3).uses(idx).warns(warning);
+            assertThatPlanFor("SELECT * FROM %s WHERE v='Lévi-Strauss'", row4).uses(idx).warns(warning);
 
             // match without any hints
-            assertThatPlanFor("SELECT * FROM %s WHERE v:'Strauss'", row1, row2, row3, row4).uses(idx);
-            assertThatPlanFor("SELECT * FROM %s WHERE v:'Levi'", row3).uses(idx);
-            assertThatPlanFor("SELECT * FROM %s WHERE v:'Lévi-Strauss'", row4).uses(idx);
+            assertThatPlanFor("SELECT * FROM %s WHERE v:'Strauss'", row1, row2, row3, row4).uses(idx).doesntWarn();
+            assertThatPlanFor("SELECT * FROM %s WHERE v:'Levi'", row3).uses(idx).doesntWarn();
+            assertThatPlanFor("SELECT * FROM %s WHERE v:'Lévi-Strauss'", row4).uses(idx).doesntWarn();
 
             // eq including the index
-            assertThatPlanFor("SELECT * FROM %s WHERE v='Strauss' WITH included_indexes = {idx}", row1, row2, row3, row4).uses(idx);
-            assertThatPlanFor("SELECT * FROM %s WHERE v='Levi' WITH included_indexes = {idx}", row3).uses(idx);
-            assertThatPlanFor("SELECT * FROM %s WHERE v='Lévi-Strauss' WITH included_indexes = {idx}", row4).uses(idx);
+            assertThatPlanFor("SELECT * FROM %s WHERE v='Strauss' WITH included_indexes = {idx}", row1, row2, row3, row4).uses(idx).warns(warning);
+            assertThatPlanFor("SELECT * FROM %s WHERE v='Levi' WITH included_indexes = {idx}", row3).uses(idx).warns(warning);
+            assertThatPlanFor("SELECT * FROM %s WHERE v='Lévi-Strauss' WITH included_indexes = {idx}", row4).uses(idx).warns(warning);
 
             // match including the index
-            assertThatPlanFor("SELECT * FROM %s WHERE v:'Strauss' WITH included_indexes = {idx}", row1, row2, row3, row4).uses(idx);
-            assertThatPlanFor("SELECT * FROM %s WHERE v:'Levi' WITH included_indexes = {idx}", row3).uses(idx);
-            assertThatPlanFor("SELECT * FROM %s WHERE v:'Lévi-Strauss' WITH included_indexes = {idx}", row4).uses(idx);
+            assertThatPlanFor("SELECT * FROM %s WHERE v:'Strauss' WITH included_indexes = {idx}", row1, row2, row3, row4).uses(idx).doesntWarn();
+            assertThatPlanFor("SELECT * FROM %s WHERE v:'Levi' WITH included_indexes = {idx}", row3).uses(idx).doesntWarn();
+            assertThatPlanFor("SELECT * FROM %s WHERE v:'Lévi-Strauss' WITH included_indexes = {idx}", row4).uses(idx).doesntWarn();
 
             // eq excluding the index
-            assertThatPlanFor("SELECT * FROM %s WHERE v='Strauss' ALLOW FILTERING WITH excluded_indexes={idx}", 0).usesNone();
-            assertThatPlanFor("SELECT * FROM %s WHERE v='Levi' ALLOW FILTERING WITH excluded_indexes={idx}", 0).usesNone();
-            assertThatPlanFor("SELECT * FROM %s WHERE v='Lévi-Strauss' ALLOW FILTERING WITH excluded_indexes={idx}", row4).usesNone();
+            assertThatPlanFor("SELECT * FROM %s WHERE v='Strauss' ALLOW FILTERING WITH excluded_indexes={idx}", 0).usesNone().doesntWarn();
+            assertThatPlanFor("SELECT * FROM %s WHERE v='Levi' ALLOW FILTERING WITH excluded_indexes={idx}", 0).usesNone().doesntWarn();
+            assertThatPlanFor("SELECT * FROM %s WHERE v='Lévi-Strauss' ALLOW FILTERING WITH excluded_indexes={idx}", row4).usesNone().doesntWarn();
 
             // match excluding the index
             assertMatchNeedsIndex("SELECT * FROM %s WHERE v:'Strauss' ALLOW FILTERING WITH excluded_indexes={idx}", "v", "Strauss");
