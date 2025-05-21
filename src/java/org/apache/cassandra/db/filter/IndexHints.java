@@ -115,7 +115,7 @@ public class IndexHints
      * @param indexes a collection of indexes
      * @return the indexes that are included by these hints
      */
-    public Set<Index> included(Collection<Index> indexes)
+    public Set<Index> includedIn(Collection<Index> indexes)
     {
         if (indexes.isEmpty())
             return Collections.emptySet();

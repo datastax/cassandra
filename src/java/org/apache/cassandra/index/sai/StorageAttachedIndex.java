@@ -740,7 +740,7 @@ public class StorageAttachedIndex implements Index
         if (indexQueryPlan == null)
             return;
 
-        Set<Index> includedIndexes = command.rowFilter().indexHints().included(indexQueryPlan.getIndexes());
+        Set<Index> includedIndexes = command.rowFilter().indexHints().includedIn(indexQueryPlan.getIndexes());
         checkHintsDoesntExceedIntersectionClauseLimit(command.rowFilter().root(), includedIndexes);
 
         if (!indexQueryPlan.isTopK())
