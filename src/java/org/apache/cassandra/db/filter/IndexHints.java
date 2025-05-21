@@ -105,6 +105,26 @@ public class IndexHints
     }
 
     /**
+     * Returns the indexes in the specified collection of indexes that are included by these hints.
+     *
+     * @param indexes a collection of indexes
+     * @return the indexes that are included by these hints
+     */
+    public Set<Index> included(Collection<Index> indexes)
+    {
+        if (indexes.isEmpty())
+            return Collections.emptySet();
+
+        Set<Index> result = new HashSet<>();
+        for (Index index : indexes)
+        {
+            if (includes(index))
+                result.add(index);
+        }
+        return result;
+    }
+
+    /**
      * @param indexes a collection of indexes
      * @return {@code true} if any of the indexes is included, {@code false} otherwise
      */

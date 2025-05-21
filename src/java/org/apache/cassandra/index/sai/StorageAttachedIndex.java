@@ -64,7 +64,6 @@ import org.apache.cassandra.db.WriteContext;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.compaction.TableOperation;
-import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.db.marshal.AbstractType;
@@ -741,9 +740,8 @@ public class StorageAttachedIndex implements Index
         if (indexQueryPlan == null)
             return;
 
-        checkHintsDoesntExceedIntersectionClauseLimit(command.rowFilter().root(),
-                                                      command.rowFilter().indexHints(),
-                                                      indexQueryPlan.getIndexes());
+        Set<Index> includedIndexes = command.rowFilter().indexHints().included(indexQueryPlan.getIndexes());
+        checkHintsDoesntExceedIntersectionClauseLimit(command.rowFilter().root(), includedIndexes);
 
         if (!indexQueryPlan.isTopK())
             return;
@@ -759,11 +757,9 @@ public class StorageAttachedIndex implements Index
     /**
      * Rejects queries with index hints including indexes enough to exceed the intersection clause limit.
      */
-    private static void checkHintsDoesntExceedIntersectionClauseLimit(RowFilter.FilterElement element,
-                                                                      IndexHints hints,
-                                                                      Set<Index> selectedIndexes)
+    private static void checkHintsDoesntExceedIntersectionClauseLimit(RowFilter.FilterElement element, Set<Index> includedIndexes)
     {
-        if (hints.included.isEmpty())
+        if (includedIndexes.isEmpty())
             return;
 
         if (!element.isDisjunction())
@@ -771,9 +767,9 @@ public class StorageAttachedIndex implements Index
             int numClausesInIntersection = 0;
             for (RowFilter.Expression expression : element.expressions())
             {
-                for (Index index : selectedIndexes)
+                for (Index index : includedIndexes)
                 {
-                    if (hints.includes(index) && index.supportsExpression(expression))
+                    if (index.supportsExpression(expression))
                     {
                         numClausesInIntersection++;
                     }
@@ -789,7 +785,7 @@ public class StorageAttachedIndex implements Index
 
         for (RowFilter.FilterElement child : element.children())
         {
-            checkHintsDoesntExceedIntersectionClauseLimit(child, hints, selectedIndexes);
+            checkHintsDoesntExceedIntersectionClauseLimit(child, includedIndexes);
         }
     }
 
