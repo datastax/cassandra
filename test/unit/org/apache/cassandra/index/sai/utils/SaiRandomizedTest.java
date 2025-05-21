@@ -18,9 +18,11 @@
 package org.apache.cassandra.index.sai.utils;
 
 import java.io.IOException;
+import java.nio.file.Files;
 import java.util.Random;
 
 import com.google.common.base.Preconditions;
+import org.apache.cassandra.io.util.FileUtils;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.ClassRule;
@@ -42,6 +44,19 @@ import org.apache.cassandra.io.util.SequentialWriterOption;
 @ThreadLeakScope(ThreadLeakScope.Scope.NONE)
 public class SaiRandomizedTest extends RandomizedTest
 {
+
+    static
+    {
+        try
+        {
+            Files.createDirectories(FileUtils.getTempDir().toPath());
+        }
+        catch (IOException e)
+        {
+            throw new RuntimeException("Failed to create temporary directories", e);
+        }
+    }
+
     private static Thread.UncaughtExceptionHandler handler;
 
     @SuppressWarnings("unused")
