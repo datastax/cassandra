@@ -70,6 +70,7 @@ import org.apache.cassandra.index.sai.utils.PrimaryKeyWithByteComparable;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeys;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
+import org.apache.cassandra.utils.AbstractGuavaIterator;
 import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.BinaryHeap;
 import org.apache.cassandra.utils.CloseableIterator;
@@ -276,21 +277,23 @@ public class TrieMemoryIndex extends MemoryIndex
     public Iterator<Pair<ByteComparable.Preencoded, List<PkWithFrequency>>> iterator()
     {
         Iterator<Map.Entry<ByteComparable.Preencoded, PrimaryKeys>> iterator = data.entrySet().iterator();
-        return new Iterator<>()
+        return new AbstractGuavaIterator<>()
         {
             @Override
-            public boolean hasNext()
+            public Pair<ByteComparable.Preencoded, List<PkWithFrequency>> computeNext()
             {
-                return iterator.hasNext();
-            }
+                while (iterator.hasNext())
+                {
+                    Map.Entry<ByteComparable.Preencoded, PrimaryKeys> entry = iterator.next();
+                    PrimaryKeys primaryKeys = entry.getValue();
+                    if (primaryKeys.isEmpty())
+                        continue;
 
-            @Override
-            public Pair<ByteComparable.Preencoded, List<PkWithFrequency>> next()
-            {
-                Map.Entry<ByteComparable.Preencoded, PrimaryKeys> entry = iterator.next();
-                var pairs = new ArrayList<PkWithFrequency>(entry.getValue().size());
-                Iterators.addAll(pairs, entry.getValue().iterator());
-                return Pair.create(entry.getKey(), pairs);
+                    var pairs = new ArrayList<PkWithFrequency>(primaryKeys.size());
+                    Iterators.addAll(pairs, primaryKeys.iterator());
+                    return Pair.create(entry.getKey(), pairs);
+                }
+                return endOfData();
             }
         };
     }
@@ -626,11 +629,7 @@ public class TrieMemoryIndex extends MemoryIndex
                 return existing;
 
             heapAllocations.add(existing.remove(neww));
-            if (!existing.isEmpty())
-                return existing;
-
-            heapAllocations.add(-PrimaryKeys.unsharedHeapSize());
-            return null;
+            return existing;
         }
     }
 
