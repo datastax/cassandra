@@ -339,7 +339,7 @@ public class TrieMemoryIndex extends MemoryIndex
     {
         final ByteComparable prefix = expression.lower == null ? ByteComparable.EMPTY : asByteComparable(expression.lower.value.encoded);
         final PrimaryKeys primaryKeys = data.get(prefix);
-        if (primaryKeys == null)
+        if (primaryKeys == null || primaryKeys.keys().isEmpty())
         {
             return KeyRangeIterator.empty();
         }
@@ -879,10 +879,12 @@ public class TrieMemoryIndex extends MemoryIndex
             if (primaryKeysIterator.hasNext())
                 return new PrimaryKeyWithByteComparable(indexContext, memtable, primaryKeysIterator.next(), byteComparableTerm);
 
-            if (iterator.hasNext())
+            while (iterator.hasNext())
             {
                 var entry = iterator.next();
                 primaryKeysIterator = entry.getValue().keys().iterator();
+                if (!primaryKeysIterator.hasNext())
+                    continue;
                 byteComparableTerm = entry.getKey();
                 return new PrimaryKeyWithByteComparable(indexContext, memtable, primaryKeysIterator.next(), byteComparableTerm);
             }
