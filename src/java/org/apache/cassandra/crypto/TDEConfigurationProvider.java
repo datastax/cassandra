@@ -23,7 +23,7 @@ public class TDEConfigurationProvider
 
     public static TDEConfiguration getConfiguration()
     {
-        //TODO TDE porting: for now, just return a default configuration
+        //TODO replace with reading the system key directory from config file
         return new TDEConfiguration(systemKeyDirectoryProperty);
     }
 
