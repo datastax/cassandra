@@ -175,9 +175,9 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                     Plan.IndexScan indexScan = (Plan.IndexScan) node;
                     indexes.add(indexScan.getIndexName());
                 }
-                if (node instanceof Plan.AnnIndexScan)
+                if (node instanceof Plan.ScoredIndexScan)
                 {
-                    Plan.AnnIndexScan indexScan = (Plan.AnnIndexScan) node;
+                    Plan.ScoredIndexScan indexScan = (Plan.ScoredIndexScan) node;
                     indexes.add(indexScan.getIndexName());
                 }
                 return Plan.ControlFlow.Continue;

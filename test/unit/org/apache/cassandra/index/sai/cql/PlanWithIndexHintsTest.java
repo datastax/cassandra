@@ -17,9 +17,17 @@
 package org.apache.cassandra.index.sai.cql;
 
 import java.util.Arrays;
+import java.util.List;
+import java.util.stream.Collectors;
 
+import org.apache.cassandra.index.sai.SAIUtil;
 import org.apache.cassandra.index.sai.analyzer.AnalyzerEqOperatorSupport;
+
+import org.junit.Assume;
+import org.junit.Before;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
@@ -27,6 +35,7 @@ import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.plan.Plan;
 import org.assertj.core.api.Assertions;
 
@@ -39,8 +48,24 @@ import static java.lang.String.format;
  *    <li>Excluded indexes shouldn't be included in the query {@link Plan}.</li>
  * </ul>
  */
+@RunWith(Parameterized.class)
 public class PlanWithIndexHintsTest extends SAITester
 {
+    @Parameterized.Parameter
+    public Version version;
+
+    @Parameterized.Parameters(name = "version={0}")
+    public static List<Object> data()
+    {
+        return Version.ALL.stream().map(v -> new Object[]{v}).collect(Collectors.toList());
+    }
+
+    @Before
+    public void setup() throws Throwable
+    {
+        SAIUtil.setCurrentVersion(version);
+    }
+
     @Test
     public void testQueryPlanning() throws Throwable
     {
@@ -199,6 +224,22 @@ public class PlanWithIndexHintsTest extends SAITester
             assertMatchNeedsIndex("SELECT * FROM %s WHERE v:'Strauss' ALLOW FILTERING WITH excluded_indexes={idx}", "v", "Strauss");
             assertMatchNeedsIndex("SELECT * FROM %s WHERE v:'Levi' ALLOW FILTERING WITH excluded_indexes={idx}", "v", "Levi");
             assertMatchNeedsIndex("SELECT * FROM %s WHERE v:'Lévi-Strauss' ALLOW FILTERING WITH excluded_indexes={idx}", "v", "Lévi-Strauss");
+
+            // if the tested version supports BM25...
+            if (version.onOrAfter(Version.BM25_EARLIEST))
+            {
+                // BM25 without any hints
+                assertThatPlanFor("SELECT * FROM %s ORDER BY v BM25 OF 'Strauss' LIMIT 10", row1, row2, row3, row4).uses(idx).doesntWarn();
+                assertThatPlanFor("SELECT * FROM %s ORDER BY v BM25 OF 'Strauss' LIMIT 2", row1, row2).uses(idx).doesntWarn();
+
+                // BM25 including the index
+                assertThatPlanFor("SELECT * FROM %s ORDER BY v BM25 OF 'Strauss' LIMIT 10 WITH included_indexes = {idx}", row1, row2, row3, row4).uses(idx).doesntWarn();
+                assertThatPlanFor("SELECT * FROM %s ORDER BY v BM25 OF 'Strauss' LIMIT 2 WITH included_indexes = {idx}", row1, row2).uses(idx).doesntWarn();
+
+                // BM25 excluding the index
+                assertBM25RequiresAnAnalyzedIndex("SELECT * FROM %s ORDER BY v BM25 OF 'Strauss' LIMIT 10 WITH excluded_indexes={idx}", "v");
+                assertBM25RequiresAnAnalyzedIndex("SELECT * FROM %s ORDER BY v BM25 OF 'Strauss' LIMIT 2 WITH excluded_indexes={idx}", "v");
+            }
         });
     }
 
@@ -433,6 +474,8 @@ public class PlanWithIndexHintsTest extends SAITester
     @Test
     public void testVector() throws Throwable
     {
+        Assume.assumeTrue(version.onOrAfter(Version.JVECTOR_EARLIEST));
+
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v vector<float, 2>)");
         String idx = createIndex("CREATE CUSTOM INDEX idx ON %s(v) USING 'StorageAttachedIndex'");
 
@@ -500,5 +543,12 @@ public class PlanWithIndexHintsTest extends SAITester
                   .hasMessageContaining(String.format(StatementRestrictions.RESTRICTION_REQUIRES_INDEX_MESSAGE,
                                                       ':',
                                                       String.format("%s : '%s'", column, value)));
+    }
+
+    private void assertBM25RequiresAnAnalyzedIndex(String query, String column)
+    {
+        Assertions.assertThatThrownBy(() -> execute(query))
+                  .isInstanceOf(InvalidRequestException.class)
+                  .hasMessageContaining(format(StatementRestrictions.BM25_ORDERING_REQUIRES_ANALYZED_INDEX_MESSAGE, column));
     }
 }
