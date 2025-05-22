@@ -316,6 +316,7 @@ public interface IndexRegistry
     Collection<Index.Group> listIndexGroups();
 
     Index getIndex(IndexMetadata indexMetadata);
+    @Nullable
     Index getIndexByName(String indexName);
     Collection<Index> listIndexes();
 
@@ -437,16 +438,16 @@ public interface IndexRegistry
 
         // we should consider the user-provided index hints, which can be used to disambiguate EQ queries
         boolean prefersEq = hints.includesAnyOf(eqOnlyIndexes);
-        boolean prefersBoth = hints.includesAnyOf(eqAndMatchIndexes);
+        boolean prefersMatch = hints.includesAnyOf(eqAndMatchIndexes);
 
         // If we have indexes supporting only EQ and indexes supporting both, return AMBIGUOUS,
         // unless the index hints prefer one index over the other.
         if (!eqOnlyIndexes.isEmpty() && !eqAndMatchIndexes.isEmpty())
         {
-            if (prefersBoth == prefersEq)
+            if (prefersMatch == prefersEq)
                 return EqBehaviorIndexes.ambiguous(eqOnlyIndexes, eqAndMatchIndexes);
 
-            return prefersBoth ? EqBehaviorIndexes.match(eqAndMatchIndexes) : EqBehaviorIndexes.eq(eqOnlyIndexes);
+            return prefersMatch ? EqBehaviorIndexes.match(eqAndMatchIndexes) : EqBehaviorIndexes.eq(eqOnlyIndexes);
         }
 
         // If we have indexes supporting both EQ and MATCHES, return MATCHES

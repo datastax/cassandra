@@ -108,6 +108,20 @@ public class IndexHintsTest extends CQLTester
                                   InvalidRequestException.class,
                                   query + "WITH included_indexes={idx1} AND excluded_indexes={idx2}");
 
+        // invalid queries with repeated included or excluded indexes
+        assertInvalidThrowMessage("Multiple definition for property 'included_indexes'",
+                                  SyntaxException.class,
+                                  query + "WITH included_indexes={idx1} AND included_indexes={idx2}");
+        assertInvalidThrowMessage("Multiple definition for property 'excluded_indexes'",
+                                  SyntaxException.class,
+                                  query + "WITH excluded_indexes={idx1} AND excluded_indexes={idx2}");
+        assertInvalidThrowMessage("Multiple definition for property 'included_indexes'",
+                                  SyntaxException.class,
+                                  query + "WITH included_indexes={idx1} AND included_indexes={idx2} AND excluded_indexes={idx3}");
+        assertInvalidThrowMessage("Multiple definition for property 'excluded_indexes'",
+                                  SyntaxException.class,
+                                  query + "WITH included_indexes={idx1} AND excluded_indexes={idx2} AND excluded_indexes={idx3}");
+
         // create a single index and test queries with it
         createIndex(String.format("CREATE CUSTOM INDEX idx1 ON %%s(a) USING '%s'", GroupedIndex.class.getName()));
         execute(query + "WITH included_indexes={}");
