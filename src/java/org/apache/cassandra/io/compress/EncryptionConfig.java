@@ -153,9 +153,7 @@ public class EncryptionConfig
             }
             else
             {
-                // Note: The default class is not actually present in dse-db, because it has too many dependencies
-                // on hcd-core.
-                className = "ReplicatedKeyProviderFactory";
+                className = "LocalFileSystemKeyProvider";
             }
 
             if (!className.contains("."))
