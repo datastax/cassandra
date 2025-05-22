@@ -146,6 +146,12 @@ public class ComplexColumnData extends ColumnData implements Iterable<Cell<?>>
         return size;
     }
 
+    @Override
+    public int liveDataSize(int nowInSec)
+    {
+        return complexDeletion.isLive() ? dataSize() : 0;
+    }
+
     public long unsharedHeapSizeExcludingData()
     {
         long heapSize = EMPTY_SIZE + BTree.sizeOnHeapOf(cells);

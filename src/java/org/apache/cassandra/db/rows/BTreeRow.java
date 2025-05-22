@@ -88,7 +88,7 @@ public class BTreeRow extends AbstractRow
     // no expiring cells, this will be Integer.MAX_VALUE;
     private final int minLocalDeletionTime;
 
-    private BTreeRow(Clustering clustering,
+    private BTreeRow(Clustering<?> clustering,
                      LivenessInfo primaryKeyLivenessInfo,
                      Deletion deletion,
                      Object[] btree,
@@ -455,8 +455,8 @@ public class BTreeRow extends AbstractRow
     /**
      * Returns a copy of the row where all timestamps for live data have replaced by {@code newTimestamp} and
      * all deletion timestamp by {@code newTimestamp - 1}.
-     *
-     * This exists for the Paxos path, see {@link PartitionUpdate#updateAllTimestamp} for additional details.
+     * </p>
+     * This exists for the Paxos path, see {@link PartitionUpdate#withUpdatedTimestamps(long)} for additional details.
      */
     public Row updateAllTimestamp(long newTimestamp)
     {
@@ -482,6 +482,7 @@ public class BTreeRow extends AbstractRow
              : new BTreeRow(clustering, primaryKeyLivenessInfo, Deletion.regular(newDeletion), btree, Integer.MIN_VALUE);
     }
 
+    @Override
     public Row purge(DeletionPurger purger, int nowInSec, boolean enforceStrictLiveness)
     {
         if (!hasDeletion(nowInSec))
@@ -494,7 +495,8 @@ public class BTreeRow extends AbstractRow
         if (enforceStrictLiveness && newDeletion.isLive() && newInfo.isEmpty())
             return null;
 
-        return transformAndFilter(newInfo, newDeletion, (cd) -> cd.purge(purger, nowInSec));
+        Function<ColumnData, ColumnData> columnDataPurger = (cd) -> cd.purge(purger, nowInSec);
+        return update(newInfo, newDeletion, BTree.transformAndFilter(btree, columnDataPurger));
     }
 
     @Override
@@ -512,6 +514,7 @@ public class BTreeRow extends AbstractRow
             return null;
 
         int minDeletionTime = minDeletionTime(newTree, info, deletion.time());
+
         return BTreeRow.create(clustering, info, deletion, newTree, minDeletionTime);
     }
 
@@ -540,6 +543,16 @@ public class BTreeRow extends AbstractRow
                      + deletion.dataSize();
 
         return Ints.checkedCast(accumulate((cd, v) -> v + cd.dataSize(), dataSize));
+    }
+
+    @Override
+    public int liveDataSize(int nowInSec)
+    {
+        int dataSize = clustering.dataSize()
+                       + primaryKeyLivenessInfo.dataSize()
+                       + deletion.dataSize();
+
+        return Ints.checkedCast(accumulate((cd, v) -> v + cd.liveDataSize(nowInSec), dataSize));
     }
 
     public long unsharedHeapSizeExcludingData()

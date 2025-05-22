@@ -280,6 +280,12 @@ public class RowWithSourceTable implements Row
     }
 
     @Override
+    public int liveDataSize(int nowInSec)
+    {
+        return row.liveDataSize(nowInSec);
+    }
+
+    @Override
     public long unsharedHeapSizeExcludingData()
     {
         return row.unsharedHeapSizeExcludingData() + EMPTY_SIZE;
