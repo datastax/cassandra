@@ -353,7 +353,7 @@ public class FileHandle extends SharedCloseableImpl
             this.compressed = Objects.nonNull(metadata);
             this.encryptionOnly = this.compressed && !metadata.hasOffsets();
             if (compressed && !encryptionOnly)
-                this.overrideLength = metadata.compressedFileLength;        //TODO revisit lenght overriding
+                this.overrideLength = metadata.compressedFileLength;
             return this;
         }
 
