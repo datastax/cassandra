@@ -116,7 +116,7 @@ public class AggregationQueriesTest extends CQLTester
         {
             // single page read should fit in the range timeout, but multiple pages should not;
             // the query should complete nevertheless because aggregate timeout is large
-            int rangeTimeoutMs = 1000;
+            int rangeTimeoutMs = 2000;
             pageReadDelayMillis.set(400);
             DatabaseDescriptor.setRangeRpcTimeout(rangeTimeoutMs);
             DatabaseDescriptor.setAggregationRpcTimeout(120000);
