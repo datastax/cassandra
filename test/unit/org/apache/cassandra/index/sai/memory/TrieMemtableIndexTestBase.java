@@ -289,14 +289,13 @@ public abstract class TrieMemtableIndexTestBase extends SAITester
         // Update row 1 to remove 2 and 3, keep 1, add 7 and 8 (note we have to manually match the 1,2,3 from above)
         updateRowWithCollection(1, List.of(1, 2, 3).iterator(), List.of(1, 7, 8).iterator());
 
-        // We net 1 new PrimaryKeys object.
-        expectedOnHeap += PrimaryKeys.unsharedHeapSize();
+        // We get 2 new PrimaryKeys objects.
+        expectedOnHeap += PrimaryKeys.unsharedHeapSize() * 2;
         assertEquals(expectedOnHeap, trieMemoryIndex.estimatedTrieValuesMemoryUsed());
 
         updateRowWithCollection(1, List.of(1, 7, 8).iterator(), List.of(1, 4, 8).iterator());
 
-        // We remove a PrimaryKeys object without adding any new keys to the trie.
-        expectedOnHeap -= PrimaryKeys.unsharedHeapSize();
+        // For now, we don't remove the old PrimaryKeys objects, so we don't change the heap size
         assertEquals(expectedOnHeap, trieMemoryIndex.estimatedTrieValuesMemoryUsed());
 
         // Run additional queries to ensure values
