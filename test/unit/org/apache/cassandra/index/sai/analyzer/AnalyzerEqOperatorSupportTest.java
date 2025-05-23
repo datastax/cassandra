@@ -16,8 +16,6 @@
 
 package org.apache.cassandra.index.sai.analyzer;
 
-import java.lang.UnsupportedOperationException;
-
 import org.junit.Before;
 import org.junit.Test;
 
@@ -373,9 +371,9 @@ public class AnalyzerEqOperatorSupportTest extends SAITester
         createTable("CREATE TABLE %s (x text, y text, z text, a set<text>, PRIMARY KEY ((x, y), z))");
 
         // Create case-insensitive index on all columns except y since it is essentially the same as x here
-        createIndex(createCaseInsentiveIndexString("x", AnalyzerEqOperatorSupport.Value.UNSUPPORTED));
-        createIndex(createCaseInsentiveIndexString("z", AnalyzerEqOperatorSupport.Value.UNSUPPORTED));
-        createIndex(createCaseInsentiveIndexString("values(a)", AnalyzerEqOperatorSupport.Value.UNSUPPORTED));
+        createIndex(createCaseInsensitiveIndexString("x", AnalyzerEqOperatorSupport.Value.UNSUPPORTED));
+        createIndex(createCaseInsensitiveIndexString("z", AnalyzerEqOperatorSupport.Value.UNSUPPORTED));
+        createIndex(createCaseInsensitiveIndexString("values(a)", AnalyzerEqOperatorSupport.Value.UNSUPPORTED));
 
         // Set up two unique rows that will map to the same index terms
         execute("INSERT INTO %s (x, y, z, a) VALUES (?, ?, ?, ?)", "a", "b", "c", set("d", "e", "f"));
@@ -401,7 +399,8 @@ public class AnalyzerEqOperatorSupportTest extends SAITester
             .isInstanceOf(InvalidRequestException.class)
             .hasMessageContaining(String.format(SingleColumnRestriction.AnalyzerMatchesRestriction.CANNOT_BE_RESTRICTED_BY_CLUSTERING_ERROR, "z"));
 
-            // Expect failure for eq on partition key column since it
+            // Expect failure for eq on partition key column since it is interpreted as eq and forms an incomplete
+            // partition key restriction.
             assertThatThrownBy(() -> execute("SELECT * FROM %s WHERE x = 'a'"))
             .isInstanceOf(InvalidRequestException.class)
             .hasMessageContaining("Cannot execute this query as it might involve data filtering and thus may have unpredictable performance.");
@@ -419,9 +418,9 @@ public class AnalyzerEqOperatorSupportTest extends SAITester
         createTable("CREATE TABLE %s (x text, y text, z text, a set<text>, PRIMARY KEY ((x, y), z))");
 
         // Create case-insensitive index on all columns except y since it is essentially the same as x here
-        createIndex(createCaseInsentiveIndexString("x", AnalyzerEqOperatorSupport.Value.MATCH));
-        createIndex(createCaseInsentiveIndexString("z", AnalyzerEqOperatorSupport.Value.MATCH));
-        createIndex(createCaseInsentiveIndexString("values(a)", AnalyzerEqOperatorSupport.Value.MATCH));
+        createIndex(createCaseInsensitiveIndexString("x", AnalyzerEqOperatorSupport.Value.MATCH));
+        createIndex(createCaseInsensitiveIndexString("z", AnalyzerEqOperatorSupport.Value.MATCH));
+        createIndex(createCaseInsensitiveIndexString("values(a)", AnalyzerEqOperatorSupport.Value.MATCH));
 
         // Set up two unique rows that will map to the same index terms
         execute("INSERT INTO %s (x, y, z, a) VALUES (?, ?, ?, ?)", "a", "b", "c", set("d", "e", "f"));
@@ -454,7 +453,7 @@ public class AnalyzerEqOperatorSupportTest extends SAITester
         });
     }
 
-    private String createCaseInsentiveIndexString(String column, AnalyzerEqOperatorSupport.Value eqBehaviour)
+    private String createCaseInsensitiveIndexString(String column, AnalyzerEqOperatorSupport.Value eqBehaviour)
     {
         return "CREATE CUSTOM INDEX ON %s(" + column + ") " +
                "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
