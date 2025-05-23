@@ -67,32 +67,33 @@ public class SequentialWriterTest extends AbstractTransactionalTest
 
     protected static class TestableSW extends TestableTransaction
     {
-        protected static final int BUFFER_SIZE = 8 << 10;
+        protected static final int DEFAULT_BUFFER_SIZE = 8 << 10;
         protected final File file;
         protected final SequentialWriter writer;
-        protected final byte[] fullContents, partialContents;
+        protected final byte[] fullContents;
+        protected byte[] partialContents;
 
         protected TestableSW() throws IOException
         {
-            this(tempFile("sequentialwriter"));
+            this(tempFile("sequentialwriter"), DEFAULT_BUFFER_SIZE);
         }
 
-        protected TestableSW(File file) throws IOException
+        protected TestableSW(File file, int bufferSize) throws IOException
         {
             this(file, new SequentialWriter(file, SequentialWriterOption.newBuilder()
-                                                                        .bufferSize(8 << 10)
+                                                                        .bufferSize(bufferSize)
                                                                         .bufferType(BufferType.OFF_HEAP)
-                                                                        .build()));
+                                                                        .build()), bufferSize);
         }
 
-        protected TestableSW(File file, SequentialWriter sw) throws IOException
+        protected TestableSW(File file, SequentialWriter sw, int bufferSize) throws IOException
         {
             super(sw);
             this.file = file;
             this.writer = sw;
-            fullContents = new byte[BUFFER_SIZE + BUFFER_SIZE / 2];
+            fullContents = new byte[bufferSize + bufferSize / 2];
             ThreadLocalRandom.current().nextBytes(fullContents);
-            partialContents = Arrays.copyOf(fullContents, BUFFER_SIZE);
+            partialContents = Arrays.copyOf(fullContents, bufferSize);
             sw.write(fullContents);
         }
 
