@@ -82,7 +82,6 @@ import org.apache.cassandra.db.marshal.ListType;
 import org.apache.cassandra.db.marshal.LongType;
 import org.apache.cassandra.db.marshal.MapType;
 import org.apache.cassandra.db.marshal.MultiCellCapableType;
-import org.apache.cassandra.db.marshal.NumberType;
 import org.apache.cassandra.db.marshal.PartitionerDefinedOrder;
 import org.apache.cassandra.db.marshal.PointType;
 import org.apache.cassandra.db.marshal.PolygonType;
@@ -515,7 +514,7 @@ public final class AbstractTypeGenerators
                     case VECTOR:
                     {
                         Gen<Integer> sizeGen = vectorSizeGen != null ? vectorSizeGen : defaultSizeGen;
-                        return vectorTypeGen(filter(primitiveGen, NumberType.class::isInstance), sizeGen).generate(rnd);
+                        return vectorTypeGen(filter(primitiveGen, FloatType.class::isInstance), sizeGen).generate(rnd);
                     }
                     case COMPOSITE:
                         return compositeTypeGen(compositeElementGen != null ? compositeElementGen : next.get(), compositeSizeGen != null ? compositeSizeGen : defaultSizeGen).generate(rnd);
