@@ -221,11 +221,11 @@ public class CompressedSequentialWriter extends SequentialWriter
             runPostFlush.run();
     }
 
-    public CompressionMetadata open(long overrideLength)
+    public void updateFileHandle(FileHandle.Builder fhBuilder, long dataLength)
     {
-        if (overrideLength <= 0)
-            overrideLength = lastFlushOffset;
-        return metadataWriter.open(overrideLength, chunkOffset);
+        long length = dataLength > 0 ? dataLength : lastFlushOffset;
+        if (length > 0)
+            fhBuilder.withCompressionMetadata(metadataWriter.open(length, chunkOffset));
     }
 
     @Override
