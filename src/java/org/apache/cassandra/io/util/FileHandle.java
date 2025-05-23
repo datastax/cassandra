@@ -29,8 +29,6 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.cache.ChunkCache;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.compress.CompressionMetadata;
-import org.apache.cassandra.io.compress.EncryptedSequentialWriter;
-import org.apache.cassandra.io.compress.ICompressor;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.concurrent.Ref;
 import org.apache.cassandra.utils.concurrent.RefCounted;
@@ -295,8 +293,7 @@ public class FileHandle extends SharedCloseableImpl
         private boolean mmapped = false;
         private boolean compressed = false;
         private boolean adviseRandom = false;
-        private long overrideLength = -1;
-        private boolean encryptionOnly = false;
+        private long length = -1;
 
         public Builder(File file)
         {
@@ -312,20 +309,7 @@ public class FileHandle extends SharedCloseableImpl
 
         public Builder compressed(boolean compressed)
         {
-            assert !encryptionOnly : "compressed() and maybeEncrypted() are not to be used together";
             this.compressed = compressed;
-            return this;
-        }
-
-        /**
-         * Setting this to true means that the file _may_ be encrypted, if the compressor passed
-         * contains an encryption component.
-         */
-        public Builder maybeEncrypted(boolean dataFileCompressed)
-        {
-            assert !compressed : "compressed() and maybeEncrypted() are not to be used together";
-            this.compressed = dataFileCompressed;
-            this.encryptionOnly = dataFileCompressed;
             return this;
         }
 
@@ -349,11 +333,8 @@ public class FileHandle extends SharedCloseableImpl
          */
         public Builder withCompressionMetadata(CompressionMetadata metadata)
         {
-            this.compressionMetadata = metadata;
             this.compressed = Objects.nonNull(metadata);
-            this.encryptionOnly = this.compressed && !metadata.hasOffsets();
-            if (compressed && !encryptionOnly)
-                this.overrideLength = metadata.compressedFileLength;
+            this.compressionMetadata = metadata;
             return this;
         }
 
@@ -406,7 +387,7 @@ public class FileHandle extends SharedCloseableImpl
 
         public Builder withLength(long length)
         {
-            this.overrideLength = length;
+            this.length = length;
             return this;
         }
 
@@ -422,8 +403,25 @@ public class FileHandle extends SharedCloseableImpl
             return this;
         }
 
-        @SuppressWarnings("resource")
+        /**
+         * Complete building {@link FileHandle} without overriding file length.
+         *
+         * @see #complete(long)
+         */
         public FileHandle complete()
+        {
+            return complete(length);
+        }
+
+        /**
+         * Complete building {@link FileHandle} with the given length, which overrides the file length.
+         *
+         * @param overrideLength Override file length (in bytes) so that read cannot go further than this value.
+         *                       If the value is less than or equal to 0, then the value is ignored.
+         * @return Built file
+         */
+        @SuppressWarnings("resource")
+        public FileHandle complete(long overrideLength)
         {
             boolean channelOpened = false;
             if (channel == null)
@@ -436,21 +434,13 @@ public class FileHandle extends SharedCloseableImpl
             try
             {
                 if (compressed && compressionMetadata == null)
-                {
-                    compressionMetadata = CompressionMetadata.read(channelCopy.getFile(), sliceDescriptor, encryptionOnly);
-                    if (!encryptionOnly && overrideLength < 0)
-                        overrideLength = compressionMetadata.compressedFileLength;
-                    // else the compression metadata is for the corresponding data file rather than the index
-                    // for which this is building a handle
-                }
+                    compressionMetadata = CompressionMetadata.create(channelCopy.getFile(), sliceDescriptor);
 
                 long length = overrideLength > 0
                               ? overrideLength
-                              : channelCopy.size();
-
-                ICompressor encryptionOnlyEncryptor = null;
-                if (encryptionOnly)
-                    encryptionOnlyEncryptor = compressionMetadata.compressor().encryptionOnly();
+                              : compressed
+                                ? compressionMetadata.compressedFileLength
+                                : channelCopy.size();
 
                 RebuffererFactory rebuffererFactory;
                 if (length == 0)
@@ -459,22 +449,10 @@ public class FileHandle extends SharedCloseableImpl
                 }
                 else if (mmapped)
                 {
-                    if (encryptionOnlyEncryptor != null)
+                    if (compressed)
                     {
-                        // we need to be able to read the whole chunk that contains the last valid position, so map
-                        // that too (it is necessarily already written).
-                        updateRegions(channel, ((length - 1) | (EncryptedSequentialWriter.CHUNK_SIZE - 1)) + 1, sliceDescriptor.sliceStart);
-                        rebuffererFactory = maybeCached(EncryptedChunkReader.createMmap(channelCopy,
-                                regions.sharedCopy(),
-                                encryptionOnlyEncryptor,
-                                compressionMetadata.parameters,
-                                length,
-                                overrideLength));
-                    }
-                    else if (compressed && !encryptionOnly)
-                    {
-                        updateRegions(channelCopy, compressionMetadata, sliceDescriptor.sliceStart, adviseRandom);
-                        rebuffererFactory = maybeCached(new CompressedChunkReader.Mmap(channelCopy, compressionMetadata, regions.sharedCopy(), sliceDescriptor.sliceStart));
+                        regions = MmappedRegions.map(channelCopy, compressionMetadata, sliceDescriptor.sliceStart, adviseRandom);
+                        rebuffererFactory = maybeCached(new CompressedChunkReader.Mmap(channelCopy, compressionMetadata, regions, sliceDescriptor.sliceStart));
                     }
                     else
                     {
@@ -488,29 +466,19 @@ public class FileHandle extends SharedCloseableImpl
                         logger.warn("adviseRandom ignored for non-mmapped FileHandle {}", file);
 
                     regions = null;
-
-
-                    ChunkReader reader = null;
-                    if (encryptionOnlyEncryptor != null)
-                        reader = EncryptedChunkReader.createStandard(channelCopy,
-                                encryptionOnlyEncryptor,
-                                compressionMetadata.parameters,
-                                length,
-                                overrideLength);
-                    else if (compressed && !encryptionOnly)
-                        reader = new CompressedChunkReader.Standard(channelCopy, compressionMetadata, sliceDescriptor.sliceStart);
-
-
-                    if (reader == null)
+                    if (compressed)
+                    {
+                        rebuffererFactory = maybeCached(new CompressedChunkReader.Standard(channelCopy, compressionMetadata, sliceDescriptor.sliceStart));
+                    }
+                    else
                     {
                         int chunkSize = DiskOptimizationStrategy.roundForCaching(bufferSize, ChunkCache.roundUp);
                         if (sliceDescriptor.chunkSize > 0 && sliceDescriptor.chunkSize < chunkSize)
                             // if the chunk size in the slice was smaller than the one we used in the rebufferer,
                             // we could end up aligning the file position to the value lower than the slice start
                             chunkSize = sliceDescriptor.chunkSize;
-                        reader = new SimpleChunkReader(channelCopy, sliceDescriptor.dataEndOr(length), bufferType, chunkSize, sliceDescriptor.sliceStart);
+                        rebuffererFactory = maybeCached(new SimpleChunkReader(channelCopy, sliceDescriptor.dataEndOr(length), bufferType, chunkSize, sliceDescriptor.sliceStart));
                     }
-                    rebuffererFactory = maybeCached(reader);
                 }
                 Cleanup cleanup = new Cleanup(channelCopy, rebuffererFactory, compressionMetadata);
                 return new FileHandle(cleanup, channelCopy, rebuffererFactory, compressionMetadata, order, length, sliceDescriptor);
@@ -530,7 +498,7 @@ public class FileHandle extends SharedCloseableImpl
 
         public Throwable close(Throwable accumulate)
         {
-            if (regions != null)
+            if (!compressed && regions != null)
                 accumulate = regions.close(accumulate);
             if (channel != null)
                 return channel.close(accumulate);
@@ -548,14 +516,6 @@ public class FileHandle extends SharedCloseableImpl
             if (chunkCache != null && chunkCache.capacity() > 0)
                 return chunkCache.maybeWrap(reader);
             return reader;
-        }
-
-        private void updateRegions(ChannelProxy channel, CompressionMetadata compressionMetadata, long uncompressedSliceOffset, boolean adviseRandom)
-        {
-            if (regions != null)
-                regions.closeQuietly();
-
-            regions = MmappedRegions.map(channel, compressionMetadata, uncompressedSliceOffset, adviseRandom);
         }
 
         private void updateRegions(ChannelProxy channel, long length, long startOffset)

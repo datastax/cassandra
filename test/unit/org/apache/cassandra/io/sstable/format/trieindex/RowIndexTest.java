@@ -208,7 +208,7 @@ public class RowIndexTest
         complete();
 
         try (FileHandle.Builder builder = new FileHandle.Builder(file)
-                                                        .mmapped(accessMode == Config.DiskAccessMode.mmap))
+                                          .mmapped(accessMode == Config.DiskAccessMode.mmap))
         {
             fh = builder.complete();
             try (RandomAccessReader rdr = fh.createReader())

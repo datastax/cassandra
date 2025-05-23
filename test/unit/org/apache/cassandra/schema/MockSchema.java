@@ -161,7 +161,7 @@ public class MockSchema
         }
         // .complete() with size to make sstable.onDiskLength work
         try (FileHandle.Builder builder = new FileHandle.Builder(new ChannelProxy(tempFile)).bufferSize(size);
-             FileHandle fileHandle = builder.withLength(size).complete())
+             FileHandle fileHandle = builder.complete(size))
         {
             if (size > 0)
             {

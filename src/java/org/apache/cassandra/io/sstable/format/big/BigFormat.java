@@ -173,7 +173,7 @@ public class BigFormat implements SSTableFormat
         @Override
         public PartitionIndexIterator indexIterator(Descriptor descriptor, TableMetadata metadata)
         {
-            try (FileHandle iFile = defaultIndexHandleBuilder(descriptor, Component.PRIMARY_INDEX, false).complete()) {
+            try (FileHandle iFile = defaultIndexHandleBuilder(descriptor, Component.PRIMARY_INDEX).complete()) {
                 SerializationHeader.Component headerComponent = (SerializationHeader.Component)
                                                                 descriptor.getMetadataSerializer()
                                                                           .deserialize(descriptor, MetadataType.HEADER);
@@ -292,18 +292,6 @@ public class BigFormat implements SSTableFormat
         public boolean hasMetadataChecksum()
         {
             return hasMetadataChecksum;
-        }
-
-        @Override
-        public boolean indicesAreEncrypted()
-        {
-            return false;
-        }
-
-        @Override
-        public boolean metadataAreEncrypted()
-        {
-            return false;
         }
 
         @Override

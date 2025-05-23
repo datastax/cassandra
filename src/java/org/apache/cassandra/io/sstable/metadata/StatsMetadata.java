@@ -54,10 +54,6 @@ import org.apache.cassandra.utils.streamhist.TombstoneHistogram;
 
 /**
  * SSTable metadata that always stay on heap.
- *
- * Note that some of the metadata of this class include user data (for instance {@link #minClusteringValues},
- * {@link #maxClusteringValues} or {@link #zeroCopyMetadata}) and this component must thus be encrypted
- * when encryption is enabled. This is done by {@link MetadataSerializer}.
  */
 public class StatsMetadata extends MetadataComponent
 {

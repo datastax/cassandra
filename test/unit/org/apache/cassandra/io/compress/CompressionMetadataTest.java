@@ -82,7 +82,7 @@ public class CompressionMetadataTest
 
     private void checkSlice(File f, long compressedSize, long from, long to, Consumer<CompressionMetadata> check)
     {
-        try (CompressionMetadata md = new CompressionMetadata(f, compressedSize, true, new SliceDescriptor(from, to, 16), false))
+        try (CompressionMetadata md = new CompressionMetadata(f, compressedSize, true, new SliceDescriptor(from, to, 16)))
         {
             check.accept(md);
         }

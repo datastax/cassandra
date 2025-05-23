@@ -235,11 +235,6 @@ abstract public class AbstractTrieTestBase
             return 0;
         }
 
-        public long adjustPosition(long position)
-        {
-            return position;
-        }
-
         @Override
         public void release()
         {

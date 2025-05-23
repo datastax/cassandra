@@ -818,7 +818,7 @@ public class SSTableHeaderFixTest
 
             try (SequentialWriter out = new SequentialWriter(statsFile))
             {
-                desc.getMetadataSerializer().serialize(Collections.singletonMap(MetadataType.HEADER, header), out, desc);
+                desc.getMetadataSerializer().serialize(Collections.singletonMap(MetadataType.HEADER, header), out, version);
                 out.finish();
             }
 
