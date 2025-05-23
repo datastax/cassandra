@@ -39,8 +39,8 @@ public class VectorsTest extends CQLTester
     @Test
     public void testDescendingOrderingOfVectorIsSupported() throws Throwable
     {
-        createTable("CREATE TABLE %s (k int, v vector<int, 3>, PRIMARY KEY (k, v)) WITH CLUSTERING ORDER BY (v DESC)");
-        execute("INSERT INTO %s(k, v) VALUES (1, [1,2,3])");
-        beforeAndAfterFlush(() -> assertRows(execute("SELECT v FROM %s WHERE k = 1 and v = [1,2,3]"), row(List.of(1, 2, 3))));
+        createTable("CREATE TABLE %s (k int, v vector<float, 3>, PRIMARY KEY (k, v)) WITH CLUSTERING ORDER BY (v DESC)");
+        execute("INSERT INTO %s(k, v) VALUES (1, [1.0,2.0,3.0])");
+        beforeAndAfterFlush(() -> assertRows(execute("SELECT v FROM %s WHERE k = 1 and v = [1.0,2.0,3.0]"), row(List.of(1.0f, 2.0f, 3.0f))));
     }
 }
