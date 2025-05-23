@@ -71,6 +71,7 @@ import org.apache.cassandra.index.sai.utils.PrimaryKeyWithByteComparable;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeys;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
+import org.apache.cassandra.utils.AbstractGuavaIterator;
 import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.BinaryHeap;
 import org.apache.cassandra.utils.CloseableIterator;
@@ -308,21 +309,23 @@ public class TrieMemoryIndex extends MemoryIndex
     public Iterator<Pair<ByteComparable.Preencoded, List<PkWithFrequency>>> iterator()
     {
         Iterator<Map.Entry<ByteComparable.Preencoded, PrimaryKeys>> iterator = data.entrySet().iterator();
-        return new Iterator<>()
+        return new AbstractGuavaIterator<>()
         {
             @Override
-            public boolean hasNext()
+            public Pair<ByteComparable.Preencoded, List<PkWithFrequency>> computeNext()
             {
-                return iterator.hasNext();
-            }
+                while (iterator.hasNext())
+                {
+                    Map.Entry<ByteComparable.Preencoded, PrimaryKeys> entry = iterator.next();
+                    PrimaryKeys primaryKeys = entry.getValue();
+                    if (primaryKeys.isEmpty())
+                        continue;
 
-            @Override
-            public Pair<ByteComparable.Preencoded, List<PkWithFrequency>> next()
-            {
-                Map.Entry<ByteComparable.Preencoded, PrimaryKeys> entry = iterator.next();
-                var pairs = new ArrayList<PkWithFrequency>(entry.getValue().size());
-                Iterators.addAll(pairs, entry.getValue().iterator());
-                return Pair.create(entry.getKey(), pairs);
+                    var pairs = new ArrayList<PkWithFrequency>(primaryKeys.size());
+                    Iterators.addAll(pairs, primaryKeys.iterator());
+                    return Pair.create(entry.getKey(), pairs);
+                }
+                return endOfData();
             }
         };
     }
@@ -353,7 +356,7 @@ public class TrieMemoryIndex extends MemoryIndex
     {
         final ByteComparable prefix = expression.lower == null ? ByteComparable.EMPTY : asByteComparable(expression.lower.value.encoded);
         final PrimaryKeys primaryKeys = data.get(prefix);
-        if (primaryKeys == null)
+        if (primaryKeys == null || primaryKeys.keys().isEmpty())
         {
             return KeyRangeIterator.empty();
         }
@@ -443,11 +446,7 @@ public class TrieMemoryIndex extends MemoryIndex
                 return existing;
 
             heapAllocations.add(existing.remove(neww));
-            if (!existing.isEmpty())
-                return existing;
-
-            heapAllocations.add(-PrimaryKeys.unsharedHeapSize());
-            return null;
+            return existing;
         }
     }
 
@@ -916,10 +915,12 @@ public class TrieMemoryIndex extends MemoryIndex
             if (primaryKeysIterator.hasNext())
                 return new PrimaryKeyWithByteComparable(indexContext, memtable, primaryKeysIterator.next(), byteComparableTerm);
 
-            if (iterator.hasNext())
+            while (iterator.hasNext())
             {
                 var entry = iterator.next();
                 primaryKeysIterator = entry.getValue().keys().iterator();
+                if (!primaryKeysIterator.hasNext())
+                    continue;
                 byteComparableTerm = entry.getKey();
                 return new PrimaryKeyWithByteComparable(indexContext, memtable, primaryKeysIterator.next(), byteComparableTerm);
             }
