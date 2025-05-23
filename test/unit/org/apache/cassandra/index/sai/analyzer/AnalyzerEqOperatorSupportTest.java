@@ -23,6 +23,7 @@ import org.junit.Test;
 
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.conditions.ColumnCondition;
+import org.apache.cassandra.cql3.restrictions.SingleColumnRestriction;
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.SAITester;
@@ -394,9 +395,11 @@ public class AnalyzerEqOperatorSupportTest extends SAITester
             assertEquals(2, execute("SELECT * FROM %s WHERE x : 'a'").size());
             assertEquals(2, execute("SELECT * FROM %s WHERE a CONTAINS 'd'").size());
 
-            // TODO this should either work or needs a better error message.
+            // Setting this as a proper exception so that we get a good error back to the client. It has
+            // been failing for a while, so this at least produces a nice error message.
             assertThatThrownBy(() -> execute("SELECT * FROM %s WHERE z : 'c'"))
-            .isInstanceOf(UnsupportedOperationException.class);
+            .isInstanceOf(InvalidRequestException.class)
+            .hasMessageContaining(String.format(SingleColumnRestriction.AnalyzerMatchesRestriction.CANNOT_BE_RESTRICTED_BY_CLUSTERING_ERROR, "z"));
 
             // Expect failure for eq on partition key column since it
             assertThatThrownBy(() -> execute("SELECT * FROM %s WHERE x = 'a'"))
@@ -443,9 +446,11 @@ public class AnalyzerEqOperatorSupportTest extends SAITester
             assertRows(execute("SELECT x FROM %s WHERE x : 'a'"), row("A"), row("a"));
             assertRows(execute("SELECT x FROM %s WHERE a CONTAINS 'd'"), row("A"), row("a"));
 
-            // TODO this should either work or needs a better error message.
+            // Setting this as a proper exception so that we get a good error back to the client. It has
+            // been failing for a while, so this at least produces a nice error message.
             assertThatThrownBy(() -> execute("SELECT * FROM %s WHERE z : 'c'"))
-            .isInstanceOf(UnsupportedOperationException.class);
+            .isInstanceOf(InvalidRequestException.class)
+            .hasMessageContaining(String.format(SingleColumnRestriction.AnalyzerMatchesRestriction.CANNOT_BE_RESTRICTED_BY_CLUSTERING_ERROR, "z"));
         });
     }
 
