@@ -261,6 +261,27 @@ public class ComplexQueryTest extends SAITester
     }
 
     @Test
+    public void testUpdatesWithLargeIndexedValues() throws Throwable
+    {
+        // We use wide rows to ensure the values are in the same trie memory index shard
+        createTable("CREATE TABLE %s (pk int, ck int, val text, PRIMARY KEY(pk, ck))");
+        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+
+        // Only use values greater than MAX_RECURSIVE_KEY_LENGTH, and make sure they share a prefix (otherwise we
+        // don't hit the error on flush)
+        var aa = "a".repeat(1000);
+        var ab = "a".repeat(999) + 'b';
+        execute("INSERT INTO %s (pk, ck, val) VALUES (?, ?, ?)", 0, 1, aa);
+        execute("INSERT INTO %s (pk, ck, val) VALUES (?, ?, ?)", 0, 1, ab);
+        execute("INSERT INTO %s (pk, ck, val) VALUES (?, ?, ?)", 0, 2, aa);
+
+        beforeAndAfterFlush(() -> {
+            assertRows(execute("SELECT ck FROM %s WHERE val = ?", aa), row(2));
+            assertRows(execute("SELECT ck FROM %s WHERE val = ?", ab), row(1));
+        });
+    }
+
+    @Test
     public void complexQueryWithMultipleNEQ()
     {
         createTable("CREATE TABLE %s (pk int, ck int, a int, b int, PRIMARY KEY(pk, ck))");
