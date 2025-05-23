@@ -68,8 +68,7 @@ public class SSTableIndexWriter implements PerIndexWriter
     private final IndexContext indexContext;
     private final int nowInSec = FBUtilities.nowInSeconds();
     private final NamedMemoryLimiter limiter;
-    private final BooleanSupplier isIndexDropped;
-    private final BooleanSupplier isIndexUnloaded;
+    private final BooleanSupplier isIndexValid;
     private final long keyCount;
 
     private boolean aborted = false;
@@ -78,15 +77,13 @@ public class SSTableIndexWriter implements PerIndexWriter
     private SegmentBuilder currentBuilder;
     private final List<SegmentMetadata> segments = new ArrayList<>();
 
-    public SSTableIndexWriter(IndexComponents.ForWrite perIndexComponents, NamedMemoryLimiter limiter,
-                              BooleanSupplier isIndexDropped, BooleanSupplier isIndexUnloaded, long keyCount)
+    public SSTableIndexWriter(IndexComponents.ForWrite perIndexComponents, NamedMemoryLimiter limiter, BooleanSupplier isIndexValid, long keyCount)
     {
         this.perIndexComponents = perIndexComponents;
         this.indexContext = perIndexComponents.context();
         Preconditions.checkNotNull(indexContext, "Provided components %s are the per-sstable ones, expected per-index ones", perIndexComponents);
         this.limiter = limiter;
-        this.isIndexDropped = isIndexDropped;
-        this.isIndexUnloaded = isIndexUnloaded;
+        this.isIndexValid = isIndexValid;
         this.keyCount = keyCount;
     }
 
@@ -225,23 +222,11 @@ public class SSTableIndexWriter implements PerIndexWriter
         if (aborted)
             return true;
 
-        boolean dropped = isIndexDropped.getAsBoolean();
-        boolean unloaded = isIndexUnloaded.getAsBoolean();
-        if (!dropped && !unloaded)
+        if (isIndexValid.getAsBoolean())
             return false;
 
-        String message = String.format("index %s is %s", indexContext.getIndexName(), dropped ? "dropped" : "unloaded");
-        RuntimeException runtimeException = new RuntimeException(message);
-
-        // abort index build for remove on disk index file
-        abort(runtimeException);
-
-        // if index is dropped, we can continue compaction task or index build without current index
-        if (dropped)
-            return true;
-
-        // if index is unloaded after unassigning tenant, fail the compaction task or index build to avoid incomplete index files
-        throw runtimeException;
+        abort(new RuntimeException(String.format("index %s is dropped", indexContext.getIndexName())));
+        return true;
     }
 
     private boolean addTerm(ByteBuffer term, PrimaryKey key, long sstableRowId, AbstractType<?> type) throws IOException
