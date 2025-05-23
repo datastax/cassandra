@@ -21,13 +21,17 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Random;
+import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
+
+import javax.crypto.SecretKey;
+import javax.crypto.spec.SecretKeySpec;
 
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
@@ -44,6 +48,8 @@ import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.UntypedResultSet;
+import org.apache.cassandra.crypto.IKeyProvider;
+import org.apache.cassandra.crypto.IKeyProviderFactory;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.SinglePartitionSliceCommandTest;
@@ -60,7 +66,6 @@ import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.Version;
-import org.apache.cassandra.io.sstable.format.big.BigFormat;
 import org.apache.cassandra.io.sstable.format.trieindex.TrieIndexFormat;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileInputStreamPlus;
@@ -293,6 +298,90 @@ public class LegacySSTableTest
             streamLegacyTables(legacyVersion);
             verifyReads(legacyVersion);
         }
+    }
+
+    @Test
+    public void testEncryptedTables()
+    {
+        QueryProcessor.executeInternal(String.format("CREATE TABLE legacy_tables.legacy_encrypted_table_pk (pk text PRIMARY KEY, val text) %s", localSystemKeyEncryptionCompressionSuffix("Encryptor")));
+        QueryProcessor.executeInternal(String.format("CREATE TABLE legacy_tables.legacy_encrypted_table_pk_ck (pk text, ck text, val text, PRIMARY KEY (pk, ck)) %s", localSystemKeyEncryptionCompressionSuffix("Encryptor")));
+
+
+
+        String legacyVersion = "bb";
+        truncateLegacyEncryptedTables();
+        loadLegacyEncryptedTable("legacy_encrypted_table_pk", legacyVersion);
+        loadLegacyEncryptedTable("legacy_encrypted_table_pk_ck", legacyVersion);
+
+        CacheService.instance.invalidateKeyCache();
+    }
+
+    private String localSystemKeyEncryptionCompressionSuffix(String className)
+    {
+        return String.format(" WITH compression = " +
+                             "{'class' : '%s', " +
+                             "'cipher_algorithm' : 'AES/ECB/PKCS5Padding', " +
+                             "'secret_key_strength' : 128, " +
+                             "'key_provider' : '%s'};", className, KeyProviderFactoryStub.class.getName());
+    }
+
+    public static class KeyProviderFactoryStub implements IKeyProviderFactory
+    {
+
+        @Override
+        public IKeyProvider getKeyProvider(Map<String, String> options)
+        {
+            return new KeyProviderStub();
+        }
+
+        @Override
+        public Set<String> supportedOptions()
+        {
+            return Collections.emptySet();
+        }
+    }
+
+    public static class KeyProviderStub implements IKeyProvider
+    {
+        @Override
+        public SecretKey getSecretKey(String cipherName, int keyStrength)
+        {
+            byte[] bytes = new byte[keyStrength / 8];
+            Arrays.fill(bytes, (byte) 6);
+            return new SecretKeySpec(bytes, cipherName.replaceAll("/.*", ""));
+        }
+    }
+
+    private static void truncateLegacyEncryptedTables()
+    {
+        Keyspace.open("legacy_tables").getColumnFamilyStore("legacy_encrypted_table_pk").truncateBlocking();
+        Keyspace.open("legacy_tables").getColumnFamilyStore("legacy_encrypted_table_pk_ck").truncateBlocking();
+        CacheService.instance.invalidateCounterCache();
+        CacheService.instance.invalidateKeyCache();
+    }
+
+    private static void loadLegacyEncryptedTable(String table, String legacyVersion)
+    {
+        logger.info("Loading legacy table {}", table);
+
+        ColumnFamilyStore cfs = Keyspace.open("legacy_tables").getColumnFamilyStore(table);
+
+        for (File cfDir : cfs.getDirectories().getCFDirectories())
+        {
+            try
+            {
+                copySstablesToTestData(legacyVersion, table, cfDir);
+            }
+            catch (IOException e)
+            {
+                throw new AssertionError(e);
+            }
+        }
+
+        int s0 = cfs.getLiveSSTables().size();
+        cfs.loadNewSSTables();
+        int s1 = cfs.getLiveSSTables().size();
+        assertThat(s1).isGreaterThan(s0);
     }
 
     @Test
