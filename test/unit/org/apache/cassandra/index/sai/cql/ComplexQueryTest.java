@@ -18,18 +18,44 @@
 
 package org.apache.cassandra.index.sai.cql;
 
+import java.util.List;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
+import org.junit.Before;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
 
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.SAITester;
+import org.apache.cassandra.index.sai.SAIUtil;
+import org.apache.cassandra.index.sai.disk.format.Version;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
 
+@RunWith(Parameterized.class)
 public class ComplexQueryTest extends SAITester
 {
+
+    @Parameterized.Parameters(name = "version={0}")
+    public static List<Object> data()
+    {
+        return Stream.of(Version.AA, Version.CURRENT, Version.LATEST).map(v -> new Object[]{ v}).collect(Collectors.toList());
+    }
+
+    @Parameterized.Parameter
+    public Version version;
+
+    @Before
+    public void setup() throws Throwable
+    {
+        SAIUtil.setCurrentVersion(version);
+    }
+
     @Test
     public void partialUpdateTest()
     {
@@ -298,5 +324,25 @@ public class ComplexQueryTest extends SAITester
         assertRowsIgnoringOrder(execute("SELECT ck FROM %s WHERE pk = 1 AND a != 2 AND a != 3"), row(1), row(4));
         assertRowsIgnoringOrder(execute("SELECT ck FROM %s WHERE pk = 1 AND a NOT IN (2, 3)"), row(1), row(4));
         assertRowsIgnoringOrder(execute("SELECT ck FROM %s WHERE pk = 1 AND a NOT IN (2, 3) AND b NOT IN (7, 8)"), row(1));
+    }
+
+    @Test
+    public void testComplexQueryWithClusteringKey() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int, ck int, a int, PRIMARY KEY(pk, ck))");
+        createIndex("CREATE CUSTOM INDEX ON %s(a) USING 'StorageAttachedIndex'");
+
+        // Insert data with different clustering column values but the same value for a and then do some updates
+        execute("INSERT INTO %s (pk, ck, a) VALUES (?, ?, ?)", 1, 1, 10);
+        execute("INSERT INTO %s (pk, ck, a) VALUES (?, ?, ?)", 1, 2, 10);
+        execute("INSERT INTO %s (pk, ck, a) VALUES (?, ?, ?)", 1, 3, 10);
+
+        // Update 1,2
+        execute("INSERT INTO %s (pk, ck, a) VALUES (?, ?, ?)", 1, 2, 15);
+
+        beforeAndAfterFlush(() -> {
+            assertRowsIgnoringOrder(execute("SELECT ck FROM %s WHERE pk = 1 AND a = 10"), row(1), row(3));
+            assertRowsIgnoringOrder(execute("SELECT ck FROM %s WHERE pk = 1 AND a = 15"), row(2));
+        });
     }
 }
