@@ -412,6 +412,13 @@ public class IndexContext
 
     public void update(DecoratedKey key, Row oldRow, Row newRow, Memtable memtable, OpOrder.Group opGroup)
     {
+        if (Version.current().equals(Version.AA))
+        {
+            // AA cannot handle updates because it indexes partition keys instead of fully qualified primary keys.
+            index(key, newRow, memtable, opGroup);
+            return;
+        }
+
         MemtableIndex target = liveMemtables.get(memtable);
         if (target == null)
             return;
