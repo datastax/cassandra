@@ -18,7 +18,14 @@
 
 package org.apache.cassandra.index.sai.cql;
 
+import java.util.Collection;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
+import org.junit.Before;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
 
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.cql3.UntypedResultSet;
@@ -30,7 +37,9 @@ import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SAITester;
+import org.apache.cassandra.index.sai.SAIUtil;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.iterators.KeyRangeUnionIterator;
 import org.apache.cassandra.index.sai.plan.Expression;
 
@@ -41,8 +50,25 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
+@RunWith(Parameterized.class)
 public class LuceneUpdateDeleteTest extends SAITester
 {
+    @Parameterized.Parameter
+    public Version version;
+
+    @Parameterized.Parameters(name = "{0}")
+    public static Collection<Object[]> data()
+    {
+        // Confirm it works for AA, current, and latest versions
+        return Stream.of(Version.AA, Version.CURRENT, Version.LATEST).map(v -> new Object[]{ v}).collect(Collectors.toList());
+    }
+
+    @Before
+    public void setupVersion() throws Throwable
+    {
+        SAIUtil.setCurrentVersion(version);
+    }
+
     @Test
     public void updateAndDeleteWithAnalyzerRestrictionQueryShouldFail()
     {
@@ -586,11 +612,22 @@ public class LuceneUpdateDeleteTest extends SAITester
         // Overwrite the value for the first of the 2 rows in partition 0
         execute("INSERT INTO %s (pk, x, val) VALUES (0, 0, 'random')");
 
-        // Confirm the expected behavior
-        searchMemtable(indexName, "indexed"); // overwritten, and the update removes the value
+        // Confirm the expected behavior (AA does not support updates, so we have to branch)
+        if (version.equals(Version.AA))
+        {
+            searchMemtable(indexName, "indexed", 0);
+            searchMemtable(indexName, "phrase", 1, 0);
+            // random is in all 3 memtable index rows, but only 2 partitions, and AA indexes partition keys
+            searchMemtable(indexName, "random", 1, 0);
+        }
+        else
+        {
+            searchMemtable(indexName, "indexed"); // overwritten, and the update removes the value
+            searchMemtable(indexName, "phrase", 1); // was deleted/overwritten in 0, so just in 1 now
+            searchMemtable(indexName, "random", 1, 0, 0); // random is in all 3 memtable index rows
+        }
+        // True for all versions
         searchMemtable(indexName, "something", 0); // range deleted, but not yet removed
-        searchMemtable(indexName, "random", 1, 0, 0); // random is in all 3 memtable index rows
-        searchMemtable(indexName, "phrase", 1); // was deleted/overwritten in 0, so just in 1 now
     }
 
     @Test
@@ -610,8 +647,11 @@ public class LuceneUpdateDeleteTest extends SAITester
         // Run update and remove 'indexed' from the trie
         execute("INSERT INTO %s (pk, val) VALUES (0, 'random')");
 
-        // Validate that we get no results
-        searchMemtable(indexName, "indexed");
+        // Validate that we get no results for all but AA
+        if (version.equals(Version.AA))
+            searchMemtable(indexName, "indexed", 0);
+        else
+            searchMemtable(indexName, "indexed");
     }
 
     private void searchMemtable(String indexName, String value, int... expectedResults) throws Throwable
