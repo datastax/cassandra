@@ -320,7 +320,7 @@ public abstract class SortedTableWriter extends SSTableWriter
         File file = desc.fileFor(Component.STATS);
         try (SequentialWriter out = new SequentialWriter(file, writerOption))
         {
-            desc.getMetadataSerializer().serialize(components, out, desc.version);
+            desc.getMetadataSerializer().serialize(components, out, desc);
             out.finish();
         }
         catch (IOException e)

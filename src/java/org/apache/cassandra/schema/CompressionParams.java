@@ -49,6 +49,7 @@ import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.utils.PageAware;
 
 import static java.lang.String.format;
+import static org.apache.cassandra.io.compress.EncryptionConfig.CIPHER_ALGORITHM;
 
 @SuppressWarnings("deprecation")
 public final class CompressionParams
@@ -314,7 +315,7 @@ public final class CompressionParams
         if (className == null || className.isEmpty())
             return null;
 
-        className = className.contains(".") ? className : "org.apache.cassandra.io.compress." + className;
+        className = expandCompressorName(className);
         try
         {
             return Class.forName(className);
@@ -385,6 +386,22 @@ public final class CompressionParams
         {
             throw new ConfigurationException("Cannot initialize class " + compressorClass.getName());
         }
+    }
+
+    public static String prepareCompressorName(Class<?> clazz)
+    {
+        String compressorName = clazz.getName();
+        String simpleName = clazz.getSimpleName();
+
+        if (expandCompressorName(simpleName).equals(compressorName))
+            return simpleName;
+        else
+            return compressorName;
+    }
+
+    private static String expandCompressorName(String className)
+    {
+        return className.contains(".") ? className : "org.apache.cassandra.io.compress." + className;
     }
 
     public static ICompressor createCompressor(ParameterizedClass compression) throws ConfigurationException
@@ -476,12 +493,25 @@ public final class CompressionParams
      */
     private static double removeMinCompressRatio(Map<String, String> options)
     {
-        String ratio = options.remove(MIN_COMPRESS_RATIO);
-        if (ratio != null)
+        String ratioString = options.remove(MIN_COMPRESS_RATIO);
+        double ratio = DEFAULT_MIN_COMPRESS_RATIO;
+
+        if (ratioString != null)
+            ratio = Double.parseDouble(ratioString);
+
+        // Make sure we never skip compression if it includes encryption
+        if (options.containsKey(CIPHER_ALGORITHM))
         {
-            return Double.parseDouble(ratio);
+            if (ratioString != null && ratio != 0.0)
+            {
+                logger.warn("Option {} is not compatible with encryption. Ignoring given value {} and using 0 to always encrypt.",
+                            MIN_COMPRESS_RATIO,
+                            ratioString);
+            }
+            ratio = 0.0;
         }
-        return DEFAULT_MIN_COMPRESS_RATIO;
+
+        return ratio;
     }
 
     /**
@@ -581,6 +611,8 @@ public final class CompressionParams
             return Collections.singletonMap(ENABLED, "false");
 
         Map<String, String> options = new HashMap<>(otherOptions);
+        // Store the full name here. We could also use prepareCompressorName, but that would change the names users
+        // see and may cause something to break unnecessarily.
         options.put(CLASS, sstableCompressor.getClass().getName());
         options.put(CHUNK_LENGTH_IN_KB, chunkLengthInKB());
         if (minCompressRatio != DEFAULT_MIN_COMPRESS_RATIO)
@@ -643,7 +675,8 @@ public final class CompressionParams
     {
         public void serialize(CompressionParams parameters, DataOutputPlus out, int version) throws IOException
         {
-            out.writeUTF(parameters.sstableCompressor.getClass().getSimpleName());
+            String compressorName = prepareCompressorName(parameters.sstableCompressor.getClass());
+            out.writeUTF(compressorName);
             out.writeInt(parameters.otherOptions.size());
             for (Map.Entry<String, String> entry : parameters.otherOptions.entrySet())
             {
