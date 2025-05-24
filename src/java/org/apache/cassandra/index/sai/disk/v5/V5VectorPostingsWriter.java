@@ -129,9 +129,8 @@ public class V5VectorPostingsWriter<T>
             int maxOldOrdinal = Integer.MIN_VALUE;
             int maxRow = Integer.MIN_VALUE;
             var extraOrdinals = new Int2IntHashMap(Integer.MIN_VALUE);
-            for (var entry : postingsMap.entrySet())
+            for (var postings : postingsMap.values())
             {
-                var postings = entry.getValue();
                 int ordinal = postings.getOrdinal();
 
                 maxOldOrdinal = Math.max(maxOldOrdinal, ordinal);
@@ -470,8 +469,20 @@ public class V5VectorPostingsWriter<T>
      */
     public static <T> RemappedPostings createGenericIdentityMapping(Map<VectorFloat<?>, ? extends VectorPostings<T>> postingsMap)
     {
-        var maxOldOrdinal = postingsMap.values().stream().mapToInt(VectorPostings::getOrdinal).max().orElseThrow();
-        int maxRow = postingsMap.values().stream().flatMap(p -> p.getRowIds().stream()).mapToInt(i -> i).max().orElseThrow();
+        // It can be expensive to iterate over the postings map. We do it once to get the max ordinal and then
+        // again to build the bitset.
+        int maxOldOrdinal = Integer.MIN_VALUE;
+        int maxRow = Integer.MIN_VALUE;
+        for (var postings : postingsMap.values())
+        {
+            maxOldOrdinal = max(maxOldOrdinal, postings.getOrdinal());
+            for (int rowId : postings.getRowIds())
+                maxRow = max(maxRow, rowId);
+        }
+
+        assert maxOldOrdinal >= 0;
+        assert maxRow >= 0;
+
         var presentOrdinals = new FixedBitSet(maxOldOrdinal + 1);
         for (var entry : postingsMap.entrySet())
             presentOrdinals.set(entry.getValue().getOrdinal());

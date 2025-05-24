@@ -18,9 +18,9 @@
 
 package org.apache.cassandra.index.sai.disk.vector;
 
+import java.io.IOException;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.function.Function;
 import java.util.function.ToIntFunction;
 
 import com.google.common.base.Preconditions;
@@ -30,6 +30,8 @@ import net.openhft.chronicle.bytes.Bytes;
 import net.openhft.chronicle.hash.serialization.BytesReader;
 import net.openhft.chronicle.hash.serialization.BytesWriter;
 import org.agrona.collections.IntArrayList;
+import org.apache.lucene.store.DataInput;
+import org.apache.lucene.store.DataOutput;
 
 public class VectorPostings<T>
 {
@@ -160,7 +162,10 @@ public class VectorPostings<T>
         return ordinal;
     }
 
-    public static class CompactionVectorPostings extends VectorPostings<Integer> {
+    public static class CompactionVectorPostings extends VectorPostings<Integer>
+    {
+        private volatile boolean shouldCompress = false;
+
         public CompactionVectorPostings(int ordinal, List<Integer> raw)
         {
             super(raw);
@@ -179,6 +184,11 @@ public class VectorPostings<T>
             throw new UnsupportedOperationException();
         }
 
+        public void setShouldCompress(boolean shouldCompress)
+        {
+            this.shouldCompress = shouldCompress;
+        }
+
         @Override
         public IntArrayList getRowIds()
         {
@@ -193,7 +203,7 @@ public class VectorPostings<T>
         public long bytesPerPosting()
         {
             long REF_BYTES = RamUsageEstimator.NUM_BYTES_OBJECT_REF;
-            return REF_BYTES + Integer.BYTES;
+            return REF_BYTES + Integer.BYTES + 1; // 1 byte for boolean
         }
     }
 
@@ -203,8 +213,24 @@ public class VectorPostings<T>
         public void write(Bytes out, CompactionVectorPostings postings) {
             out.writeInt(postings.ordinal);
             out.writeInt(postings.size());
-            for (Integer posting : postings.getPostings()) {
-                out.writeInt(posting);
+            out.writeBoolean(postings.shouldCompress);
+            if (postings.shouldCompress)
+            {
+                try
+                {
+                    BytesDataOutput writer = new BytesDataOutput(out);
+                    for (int posting : postings.getPostings())
+                        writer.writeVInt(posting);
+                }
+                catch (Exception e)
+                {
+                    throw new RuntimeException(e);
+                }
+            }
+            else
+            {
+                for (Integer posting : postings.getPostings())
+                    out.writeInt(posting);
             }
         }
 
@@ -213,20 +239,88 @@ public class VectorPostings<T>
             int ordinal = in.readInt();
             int size = in.readInt();
             assert size >= 0 : size;
-            CompactionVectorPostings cvp;
-            if (size == 1) {
-                cvp = new CompactionVectorPostings(ordinal, in.readInt());
+            boolean isCompressed = in.readBoolean();
+            if (isCompressed)
+            {
+                try
+                {
+                    BytesDataInput reader = new BytesDataInput(in);
+                    var postingsList = new IntArrayList(size, -1);
+                    for (int i = 0; i < size; i++)
+                        postingsList.add(reader.readVInt());
+
+                    return new CompactionVectorPostings(ordinal, postingsList);
+                }
+                catch (Exception e)
+                {
+                    throw new RuntimeException(e);
+                }
             }
             else
             {
-                var postingsList = new IntArrayList(size, -1);
-                for (int i = 0; i < size; i++)
+                if (size == 1)
                 {
-                    postingsList.add(in.readInt());
+                    return new CompactionVectorPostings(ordinal, in.readInt());
                 }
-                cvp = new CompactionVectorPostings(ordinal, postingsList);
+                else
+                {
+                    var postingsList = new IntArrayList(size, -1);
+                    for (int i = 0; i < size; i++)
+                        postingsList.add(in.readInt());
+
+                    return new CompactionVectorPostings(ordinal, postingsList);
+                }
             }
-            return cvp;
+        }
+
+        private static class BytesDataOutput extends DataOutput
+        {
+            private final Bytes<?> bytes;
+
+            public BytesDataOutput(Bytes<?> bytes)
+            {
+                this.bytes = bytes;
+            }
+
+            @Override
+            public void writeByte(byte b) throws IOException
+            {
+                bytes.writeByte(b);
+            }
+
+            @Override
+            public void writeBytes(byte[] b, int off, int len) throws IOException
+            {
+                bytes.write(b, off, len);
+            }
+        }
+
+        private static class BytesDataInput extends DataInput
+        {
+            private final Bytes<?> bytes;
+
+            public BytesDataInput(Bytes<?> bytes)
+            {
+                this.bytes = bytes;
+            }
+
+            @Override
+            public byte readByte() throws IOException
+            {
+                return bytes.readByte();
+            }
+
+            @Override
+            public void readBytes(byte[] b, int off, int len)
+            {
+                bytes.read(b, off, len);
+            }
+
+            @Override
+            public void skipBytes(long l)
+            {
+                bytes.readSkip(l);
+            }
         }
     }
 }
