@@ -22,6 +22,7 @@ import java.io.IOException;
 import java.lang.invoke.MethodHandles;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.util.Collections;
 import java.util.EnumSet;
 import java.util.Set;
 
@@ -58,6 +59,7 @@ import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.metrics.CassandraMetricsRegistry;
 import org.apache.cassandra.metrics.DefaultNameFactory;
+import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
@@ -186,7 +188,7 @@ public class V1OnDiskFormat implements OnDiskFormat
     }
 
     @Override
-    public PerSSTableWriter newPerSSTableWriter(IndexDescriptor indexDescriptor) throws IOException
+    public PerSSTableWriter newPerSSTableWriter(IndexDescriptor indexDescriptor, CompressionParams compression) throws IOException
     {
         return new SSTableComponentsWriter(indexDescriptor.newPerSSTableComponentsForWrite());
     }
@@ -311,6 +313,12 @@ public class V1OnDiskFormat implements OnDiskFormat
         return TypeUtil.isLiteral(type)
                ? ByteBuffer.wrap(ByteSourceInverse.readBytes(value.asComparableBytes(ByteComparable.Version.OSS41)))
                : TypeUtil.fromComparableBytes(value, type, ByteComparable.Version.OSS41);
+    }
+
+    @Override
+    public Set<IndexComponentType> compressionInfoComponentTypes()
+    {
+        return Collections.emptySet();
     }
 
     /** vector data components (that did not have checksums before v3) */

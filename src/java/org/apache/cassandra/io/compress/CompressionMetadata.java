@@ -124,7 +124,6 @@ public class CompressionMetadata implements AutoCloseable
                                        skipOffsets);
     }
 
-    @VisibleForTesting
     public CompressionMetadata(File indexFilePath, long compressedLength, boolean hasMaxCompressedSize)
     {
         this(indexFilePath, compressedLength, hasMaxCompressedSize, SliceDescriptor.NONE, false);
@@ -464,6 +463,7 @@ public class CompressionMetadata implements AutoCloseable
 
         private Writer(CompressionParams parameters, File path)
         {
+            Preconditions.checkNotNull(path, "Path must not be null");
             this.parameters = parameters;
             filePath = path;
             offsets = new SafeMemory(maxCount * 8L);
