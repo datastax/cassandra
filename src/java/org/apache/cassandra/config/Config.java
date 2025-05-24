@@ -20,7 +20,6 @@ package org.apache.cassandra.config;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -38,7 +37,6 @@ import org.apache.cassandra.audit.AuditLogOptions;
 import org.apache.cassandra.fql.FullQueryLoggerOptions;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.guardrails.GuardrailsConfig;
-import org.apache.cassandra.io.compress.AdaptiveCompressor;
 import org.apache.cassandra.utils.FBUtilities;
 
 /**
@@ -102,6 +100,8 @@ public class Config
     public volatile long read_request_timeout_in_ms = 5000L;
 
     public volatile long range_request_timeout_in_ms = 10000L;
+
+    public volatile long aggregation_request_timeout_in_ms = 120000L;
 
     public volatile long write_request_timeout_in_ms = 2000L;
 
