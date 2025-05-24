@@ -71,6 +71,7 @@ import org.apache.cassandra.concurrent.JMXEnabledThreadPoolExecutor;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.cql3.PageSize;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget;
 import org.apache.cassandra.db.Clustering;
@@ -89,6 +90,7 @@ import org.apache.cassandra.db.SinglePartitionReadCommand;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.WriteContext;
 import org.apache.cassandra.db.compaction.CompactionManager;
+import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.lifecycle.View;
@@ -625,7 +627,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
 
         logger.info("Submitting index {} of {} for data in {}",
                     isFullRebuild ? "recovery" : "build",
-                    commaSeparated(indexes),
+                    Index.joinNames(indexes),
                     sstables.stream().map(SSTableReader::toString).collect(Collectors.joining(",")));
 
         // Group all building tasks
@@ -660,7 +662,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
                                public void onSuccess(Object o)
                                {
                                    groupedIndexes.forEach(i -> markIndexBuilt(i, isFullRebuild));
-                                   logger.info("Index build of {} completed", getIndexNames(groupedIndexes));
+                                   logger.info("Index build of {} completed", Index.joinNames(groupedIndexes));
                                    builtIndexes.addAll(groupedIndexes);
                                    build.set(o);
                                }
@@ -727,14 +729,6 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
                 throw e;
             }
         }
-    }
-
-    private String getIndexNames(Set<Index> indexes)
-    {
-        List<String> indexNames = indexes.stream()
-                                         .map(i -> i.getIndexMetadata().name)
-                                         .collect(Collectors.toList());
-        return StringUtils.join(indexNames, ',');
     }
 
     /**
@@ -861,9 +855,9 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
     {
         JVMStabilityInspector.inspectThrowable(indexBuildFailure);
         if (indexBuildFailure != null)
-            logger.warn("Index build of {} failed. Please run full index rebuild to fix it.", getIndexNames(indexes), indexBuildFailure);
+            logger.warn("Index build of {} failed. Please run full index rebuild to fix it.", Index.joinNames(indexes), indexBuildFailure);
         else
-            logger.warn("Index build of {} failed. Please run full index rebuild to fix it.", getIndexNames(indexes));
+            logger.warn("Index build of {} failed. Please run full index rebuild to fix it.", Index.joinNames(indexes));
         indexes.forEach(i -> this.markIndexFailed(i, isInitialBuild));
     }
 
@@ -884,6 +878,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         propagateLocalIndexStatus(keyspace.getName(), indexName, Index.Status.DROPPED);
     }
 
+    @Override
     public Index getIndexByName(String indexName)
     {
         return indexes.get(indexName);
@@ -1207,8 +1202,13 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
      */
     public Index.QueryPlan getBestIndexQueryPlanFor(RowFilter rowFilter)
     {
+        IndexHints hints = rowFilter.indexHints();
+
         if (indexes.isEmpty() || rowFilter.isEmpty())
+        {
+            hints.validate((Index.QueryPlan) null);
             return null;
+        }
 
         for (RowFilter.Expression expression : rowFilter.expressions())
         {
@@ -1232,48 +1232,53 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
 
         if (queryPlans.isEmpty())
         {
+            hints.validate((Index.QueryPlan) null);
             logger.trace("No applicable indexes found");
             Tracing.trace("No applicable indexes found");
             return null;
         }
 
+        // Prepare a plan comparator based first on the user-provided hints, which will prefer the plan closest to
+        // satisfying the index hints, and then on the index-provided selectivity, which will prefer the most selective
+        // index. We let pass plans that don't satisfy the index hints so we can provide a better error message later,
+        // at the validation at the end of this method. That validation will be done over the plan that is closest to
+        // satisfying the index hints, so the error message will only complain about the missing parts.
+        Comparator<Index.QueryPlan> hintsComparator = hints.comparator();
+        Comparator<Index.QueryPlan> selectivityComparator = Comparator.<Index.QueryPlan>naturalOrder().reversed();
+        Comparator<Index.QueryPlan> planComparator = hintsComparator.thenComparing(selectivityComparator);
+
         // find the best plan
         Index.QueryPlan selected = queryPlans.size() == 1
                                    ? Iterables.getOnlyElement(queryPlans)
                                    : queryPlans.stream()
-                                               .min(Comparator.naturalOrder())
-                                               .orElseThrow(() -> new AssertionError("Could not select most selective index"));
+                                               .max(planComparator)
+                                               .orElseThrow(() -> new AssertionError("Could not select the most adequate index plan"));
 
         // pay for an additional threadlocal get() rather than build the strings unnecessarily
         if (Tracing.isTracing())
         {
             Tracing.trace("Index mean cardinalities are {}. Scanning with {}.",
                           queryPlans.stream()
-                                    .map(p -> commaSeparated(p.getIndexes()) + ':' + p.getEstimatedResultRows())
+                                    .map(p -> Index.joinNames(p.getIndexes()) + ':' + p.getEstimatedResultRows())
                                     .collect(Collectors.joining(",")),
-                          commaSeparated(selected.getIndexes()));
+                          Index.joinNames(selected.getIndexes()));
         }
+
+        hints.validate(selected);
+
         return selected;
     }
 
-    private static String commaSeparated(Collection<Index> indexes)
+    @Override
+    public Optional<Index> getBestIndexFor(ColumnMetadata column, Operator operator, IndexHints hints)
     {
-        return indexes.stream().map(i -> i.getIndexMetadata().name).collect(Collectors.joining(","));
+        return hints.getBestIndexFor(indexes.values(), i -> i.supportsExpression(column, operator));
     }
 
-
-    public Optional<Index> getBestIndexFor(RowFilter.Expression expression)
+    public <T extends Index> Optional<T> getBestIndexFor(RowFilter.Expression expression, IndexHints indexHints, Class<T> indexType)
     {
-        return indexes.values().stream().filter((i) -> i.supportsExpression(expression.column(), expression.operator())).findFirst();
-    }
-
-    public <T extends Index> Optional<T> getBestIndexFor(RowFilter.Expression expression, Class<T> indexType)
-    {
-        return indexes.values()
-                      .stream()
-                      .filter(i -> indexType.isInstance(i) && i.supportsExpression(expression.column(), expression.operator()))
-                      .map(indexType::cast)
-                      .findFirst();
+        return indexHints.getBestIndexFor(indexes.values(), i -> i.supportsExpression(expression) && indexType.isInstance(i))
+                         .map(indexType::cast);
     }
 
     /**
