@@ -20,10 +20,12 @@ package org.apache.cassandra.db.commitlog;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.file.FileStore;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -33,6 +35,7 @@ import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiPredicate;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 import java.util.zip.CRC32;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -91,8 +94,9 @@ public class CommitLog implements CommitLogMBean
     public final CommitLogArchiver archiver;
     public final CommitLogMetrics metrics;
     final AbstractCommitLogService executor;
-    private Set<String> segmentsWithInvalidOrFailedMutations;
-
+    private Set<String> segmentsWithInvalidMutations;
+    private Set<String> segmentsWithFailedMutations;
+    private final String nameOfInvalidMutationDirectory = "INVALID_MUTATIONS";
     volatile Configuration configuration;
     private boolean started = false;
 
@@ -233,10 +237,16 @@ public class CommitLog implements CommitLogMBean
             replayedKeyspaces = recoverFiles(flushReason, files);
             logger.info("Log replay complete, {} replayed mutations", replayedKeyspaces.values().stream().reduce(Integer::sum).orElse(0));
 
+            Set<String> segmentsWithInvalidAndNoFailedMutations = new HashSet<>(segmentsWithInvalidMutations).stream()
+                                                                        .filter(segment -> !segmentsWithFailedMutations.contains(segment))
+                                                                        .collect(Collectors.toSet());
+
+            // We retain all segments with failed mutations in the commit log directory of the host so that they can be replayed again.
+            // Move all segments with invalid (and no failed) mutations to a different sub-directory and delete the segment from the commit log directory of the host.
             for (File f : files)
             {
-                boolean hasInvalidOrFailedMutations = segmentsWithInvalidOrFailedMutations.contains(f.name());
-                segmentManager.handleReplayedSegment(f, hasInvalidOrFailedMutations);
+                boolean hasFailedMutations = segmentsWithFailedMutations.contains(f.name());
+                segmentManager.handleReplayedSegment(f, segmentsWithInvalidAndNoFailedMutations.contains(f.name()), hasFailedMutations);
             }
         }
 
@@ -258,8 +268,14 @@ public class CommitLog implements CommitLogMBean
         replayer.replayFiles(clogs);
 
         Map<Keyspace, Integer> res = replayer.blockForWrites(flushReason);
-        segmentsWithInvalidOrFailedMutations = replayer.getSegmentWithInvalidOrFailedMutations();
+        segmentsWithFailedMutations = replayer.getSegmentWithFailedMutations();
+        segmentsWithInvalidMutations = replayer.getSegmentWithInvalidMutations();
         return res;
+    }
+
+    public String getNameOfInvalidMutationDirectory()
+    {
+        return nameOfInvalidMutationDirectory;
     }
 
     public void recoverPath(String path, boolean tolerateTruncation) throws IOException
@@ -280,6 +296,11 @@ public class CommitLog implements CommitLogMBean
     public void recover(String path) throws IOException
     {
         recoverPath(path, false);
+    }
+
+    public void setCommitLogSegmentHandler(CommitLogSegmentHandler handler)
+    {
+        AbstractCommitLogSegmentManager.commitLogSegmentHandler = handler;
     }
 
     /**
