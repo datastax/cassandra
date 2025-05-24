@@ -53,7 +53,7 @@ public class V3OnDiskFormat extends V2OnDiskFormat
     public static boolean JVECTOR_USE_PRUNING_DEFAULT = Boolean.parseBoolean(System.getProperty("cassandra.sai.jvector.use_pruning_default", "true"));
 
     // These are built to be backwards and forwards compatible. Not final only for testing.
-    public static int JVECTOR_VERSION = Integer.parseInt(System.getProperty("cassandra.sai.jvector_version", "4"));
+    public static int JVECTOR_VERSION = Integer.parseInt(System.getProperty("cassandra.sai.jvector_version", "2"));
     static
     {
         // JVector 3 is not compatible with the latest jvector changes, so we fail fast if the config is enabled.
