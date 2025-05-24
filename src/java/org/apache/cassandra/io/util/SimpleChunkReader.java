@@ -78,6 +78,11 @@ class SimpleChunkReader extends AbstractReaderFileProxy implements ChunkReader
             return new BufferManagingRebufferer.Unaligned(this);
     }
 
+    @Override
+    public void invalidateIfCached(long position)
+    {
+    }
+
     public ReaderType type()
     {
         return ReaderType.SIMPLE;

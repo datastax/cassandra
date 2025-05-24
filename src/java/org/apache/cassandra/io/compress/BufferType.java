@@ -42,9 +42,4 @@ public enum BufferType
     {
         return buffer.isDirect() ? OFF_HEAP : ON_HEAP;
     }
-
-    public static BufferType preferredForCompression()
-    {
-        return OFF_HEAP;
-    }
 }

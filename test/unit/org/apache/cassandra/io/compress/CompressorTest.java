@@ -26,7 +26,6 @@ import java.nio.file.StandardOpenOption;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Random;
-import java.util.Set;
 
 import com.google.common.io.Files;
 import org.junit.Assert;
@@ -41,7 +40,6 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
 
 public class CompressorTest
 {
@@ -288,68 +286,4 @@ public class CompressorTest
         dest.put(random);
     }
 
-    private static class FakeCompressor implements ICompressor
-    {
-        @Override
-        public int initialCompressedBufferLength(int chunkLength)
-        {
-            // simulate encryption blocking
-            return ((chunkLength + 1) + 31) & -32;
-        }
-
-        @Override
-        public int uncompress(byte[] input, int inputOffset, int inputLength, byte[] output, int outputOffset) throws IOException
-        {
-            throw new AssertionError();
-        }
-
-        @Override
-        public void compress(ByteBuffer input, ByteBuffer output) throws IOException
-        {
-            throw new AssertionError();
-        }
-
-        @Override
-        public void uncompress(ByteBuffer input, ByteBuffer output) throws IOException
-        {
-            throw new AssertionError();
-        }
-
-        @Override
-        public BufferType preferredBufferType()
-        {
-            throw new AssertionError();
-        }
-
-        @Override
-        public boolean supports(BufferType bufferType)
-        {
-            throw new AssertionError();
-        }
-
-        @Override
-        public Set<String> supportedOptions()
-        {
-            throw new AssertionError();
-        }
-    }
-
-    @Test
-    public void testMaxBytesInChunk()
-    {
-        for (ICompressor compressor : new ICompressor[]
-                { SnappyCompressor.instance,
-                        LZ4Compressor.create(Collections.emptyMap()),
-                        DeflateCompressor.instance,
-                        new FakeCompressor()
-                })
-            for (int sizeBase : new int[] { 1024, 4096, 16384, 65536 })
-                for (int size = sizeBase - 25; size <= sizeBase + 25; ++size)
-                {
-                    int inputSize = compressor.findMaxBytesInChunk(size);
-                    // System.out.format("compressor %s in %d out %d limit %d\n", compressor.getClass().getSimpleName(), inputSize, compressor.initialCompressedBufferLength(inputSize), size);
-                    assertTrue(compressor.initialCompressedBufferLength(inputSize) <= size);
-                    assertTrue(compressor.initialCompressedBufferLength(inputSize + 1) > size);
-                }
-    }
 }

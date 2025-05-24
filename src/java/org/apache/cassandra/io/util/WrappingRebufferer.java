@@ -76,12 +76,6 @@ public abstract class WrappingRebufferer implements Rebufferer, Rebufferer.Buffe
     }
 
     @Override
-    public long adjustPosition(long position)
-    {
-        return source.adjustPosition(position);
-    }
-
-    @Override
     public void close()
     {
         assert buffer == null : "Rebufferer is attempted to be closed but the buffer holder has not been released";

@@ -153,8 +153,6 @@ public abstract class RebufferingInputStream extends InputStream implements Data
     @Override
     public int skipBytes(int n) throws IOException
     {
-        // Note: This implementation works correctly with files that may have holes between buffers
-        // (see EncryptedChunkReader). If changing this code, make sure to account for that.
         if (n <= 0)
             return 0;
         int requested = n;

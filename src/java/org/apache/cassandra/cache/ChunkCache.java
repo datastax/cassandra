@@ -549,7 +549,7 @@ public class ChunkCache
         public ByteBuffer buffer()
         {
             assert isReferenced() : "Already unreferenced";
-            return buffer.duplicate().limit(bytesRead);
+            return buffer.duplicate();
         }
 
         public long offset()
@@ -687,12 +687,6 @@ public class ChunkCache
         {
             long pageAlignedPos = position & alignmentMask;
             synchronousCache.invalidate(new Key(readerId, pageAlignedPos));
-        }
-
-        @Override
-        public long adjustPosition(long position)
-        {
-            return source.adjustPosition(position);
         }
 
         @Override

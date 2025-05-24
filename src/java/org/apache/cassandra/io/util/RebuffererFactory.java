@@ -36,8 +36,5 @@ public interface RebuffererFactory extends ReaderFileProxy
      */
     int chunkSize();
 
-    default void invalidateIfCached(long position)
-    {
-        // nothing in base class, to be overridden by CachingRebufferer
-    }
+    void invalidateIfCached(long position);
 }

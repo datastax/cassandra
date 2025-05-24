@@ -200,8 +200,8 @@ public class TrieIndexFormat implements SSTableFormat
             {
                 @SuppressWarnings("unused") StatsMetadata stats = (StatsMetadata) desc.getMetadataSerializer().deserialize(desc, MetadataType.STATS);
 
-                try (FileHandle.Builder piBuilder = defaultIndexHandleBuilder(desc, Component.PARTITION_INDEX, compressedData);
-                     FileHandle.Builder riBuilder = defaultIndexHandleBuilder(desc, Component.ROW_INDEX, compressedData);
+                try (FileHandle.Builder piBuilder = defaultIndexHandleBuilder(desc, Component.PARTITION_INDEX);
+                     FileHandle.Builder riBuilder = defaultIndexHandleBuilder(desc, Component.ROW_INDEX);
                      FileHandle.Builder dBuilder = defaultDataHandleBuilder(desc, stats.zeroCopyMetadata).compressed(compressedData);
                      PartitionIndex index = PartitionIndex.load(piBuilder, partitioner, false, stats.zeroCopyMetadata, desc.version.getByteComparableVersion());
                      FileHandle dFile = dBuilder.complete();
@@ -392,28 +392,6 @@ public class TrieIndexFormat implements SSTableFormat
         public boolean hasMetadataChecksum()
         {
             return true;
-        }
-
-        @Override
-        public boolean indicesAreEncrypted()
-        {
-            // DSE generated sstables with pre b do not have encrypted indexes
-            // those with b* do have encrypted indexes
-            // such distinction was needed as the encryption was introduced gradually
-            // in CC the data + index encryption has been added at once, thus there is no need
-            // to distinguish between various c* versions
-            return version.compareTo("b") >= 0;
-        }
-
-        @Override
-        public boolean metadataAreEncrypted()
-        {
-            // DSE generated sstables with pre ba do not have encrypted metadata
-            // those with b* do have encrypted metadata
-            // such distinction was needed as the encryption was introduced gradually
-            // in CC the data + metadata encryption has been added at once, thus there is no need
-            // to distinguish between various c* versions
-            return version.compareTo("ba") >= 0;
         }
 
         @Override

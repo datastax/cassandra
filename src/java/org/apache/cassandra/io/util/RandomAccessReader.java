@@ -69,7 +69,6 @@ public class RandomAccessReader extends RebufferingInputStream implements FileDa
 
     private void reBufferAt(long position)
     {
-        position = rebufferer.adjustPosition(position);
         bufferHolder.release();
         if (position == length())
         {

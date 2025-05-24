@@ -102,14 +102,14 @@ public abstract class SSTableReaderBuilder
 
     public abstract SSTableReader build();
 
-    public static FileHandle.Builder defaultIndexHandleBuilder(Descriptor descriptor, Component component, boolean dataFileCompressed)
+    public static FileHandle.Builder defaultIndexHandleBuilder(Descriptor descriptor, Component component)
     {
-        return StorageProvider.instance.fileHandleBuilderFor(descriptor, component).maybeEncrypted(dataFileCompressed && descriptor.version.indicesAreEncrypted());
+        return StorageProvider.instance.fileHandleBuilderFor(descriptor, component);
     }
 
-    public static FileHandle.Builder primaryIndexWriteTimeBuilder(Descriptor descriptor, Component component, OperationType operationType, boolean dataFileCompressed)
+    public static FileHandle.Builder primaryIndexWriteTimeBuilder(Descriptor descriptor, Component component, OperationType operationType)
     {
-        return StorageProvider.instance.primaryIndexWriteTimeFileHandleBuilderFor(descriptor, component, operationType).maybeEncrypted(dataFileCompressed && descriptor.version.indicesAreEncrypted());
+        return StorageProvider.instance.primaryIndexWriteTimeFileHandleBuilderFor(descriptor, component, operationType);
     }
 
     @SuppressWarnings("resource")
@@ -332,7 +332,7 @@ public abstract class SSTableReaderBuilder
             initSummary(dataFile, components, statsMetadata);
 
             boolean compression = components.contains(Component.COMPRESSION_INFO);
-            try (FileHandle.Builder ibuilder = defaultIndexHandleBuilder(descriptor, Component.PRIMARY_INDEX, compression);
+            try (FileHandle.Builder ibuilder = defaultIndexHandleBuilder(descriptor, Component.PRIMARY_INDEX);
                  FileHandle.Builder dbuilder = defaultDataHandleBuilder(descriptor, statsMetadata.zeroCopyMetadata).compressed(compression))
             {
                 long indexFileLength = descriptor.fileFor(Component.PRIMARY_INDEX).length();
@@ -458,7 +458,7 @@ public abstract class SSTableReaderBuilder
                   Set<Component> components) throws IOException
         {
             boolean compression = components.contains(Component.COMPRESSION_INFO);
-            try (FileHandle.Builder ibuilder = defaultIndexHandleBuilder(descriptor, Component.PRIMARY_INDEX, compression);
+            try (FileHandle.Builder ibuilder = defaultIndexHandleBuilder(descriptor, Component.PRIMARY_INDEX);
                  FileHandle.Builder dbuilder = defaultDataHandleBuilder(descriptor, statsMetadata.zeroCopyMetadata).compressed(compression))
             {
                 loadSummary();

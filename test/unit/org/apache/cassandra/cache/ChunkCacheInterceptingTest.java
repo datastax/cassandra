@@ -105,12 +105,6 @@ public class ChunkCacheInterceptingTest
         }
 
         @Override
-        public long adjustPosition(long position)
-        {
-            return wrapped.adjustPosition(position);
-        }
-
-        @Override
         public double getCrcCheckChance()
         {
             return wrapped.getCrcCheckChance();
@@ -127,6 +121,11 @@ public class ChunkCacheInterceptingTest
         public int chunkSize()
         {
             return wrapped.chunkSize();
+        }
+
+        @Override
+        public void invalidateIfCached(long position)
+        {
         }
     }
 }
