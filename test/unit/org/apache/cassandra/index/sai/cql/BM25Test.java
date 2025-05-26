@@ -464,7 +464,7 @@ public class BM25Test extends SAITester
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, p int, v text)");
         createAnalyzedIndex();
-        execute("CREATE CUSTOM INDEX ON %s(p) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(p) USING 'StorageAttachedIndex'");
 
         // Insert documents with varying frequencies of the term "apple"
         execute("INSERT INTO %s (k, p, v) VALUES (1, 5, 'apple')");
@@ -535,7 +535,7 @@ public class BM25Test extends SAITester
     {
         createTable("CREATE TABLE %s (k1 int, k2 int, p int, v text, PRIMARY KEY (k1, k2))");
         createAnalyzedIndex();
-        execute("CREATE CUSTOM INDEX ON %s(p) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(p) USING 'StorageAttachedIndex'");
 
         // Insert documents with varying frequencies of the term "apple"
         execute("INSERT INTO %s (k1, k2, p, v) VALUES (0, 1, 5, 'apple')");
