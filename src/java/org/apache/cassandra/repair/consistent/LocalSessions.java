@@ -55,6 +55,8 @@ import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.MoreExecutors;
 
+import org.apache.commons.lang.exception.ExceptionUtils;
+
 import org.apache.cassandra.cql3.PageSize;
 import org.apache.cassandra.db.compaction.AbstractCompactionTask;
 import org.apache.cassandra.db.compaction.CleanupTask;
@@ -493,6 +495,7 @@ public class LocalSessions
                         continue;
                     default:
                         logger.info("Found repair session {} with state = {} - failing the repair", session.sessionID, session.getState());
+                        logger.debug(ExceptionUtils.getStackTrace(new Throwable()));
                         failSession(session, true);
                 }
             }

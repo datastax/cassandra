@@ -121,6 +121,7 @@ import org.apache.cassandra.streaming.PreviewKind;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.MBeanWrapper;
+import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.utils.NonThrowingCloseable;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.UUIDGen;
@@ -2423,10 +2424,7 @@ public class CompactionManager implements CompactionManagerMBean
         {
             for (ColumnFamilyStore cfs : cfss)
             {
-                if (((System.nanoTime() - start)/1000/1000/1000 % 10) == 0)
-                {
-                    logger.debug("waitForCessation waiting on: " + Arrays.toString(cfs.getTracker().getCompacting().toArray()));
-                }
+                NoSpamLogger.getLogger(logger, 30, TimeUnit.SECONDS).debug("waitForCessation waiting on: " + Arrays.toString(cfs.getTracker().getCompacting().toArray()));
             }
             if (CompactionManager.instance.isCompacting(cfss, sstablePredicate))
                 Uninterruptibles.sleepUninterruptibly(1, TimeUnit.MILLISECONDS);
