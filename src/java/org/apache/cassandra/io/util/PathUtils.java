@@ -114,6 +114,7 @@ public final class PathUtils
         }
         catch (IOException e)
         {
+            logger.error("Error on file opening, path {}", path, e);
             throw propagateUncheckedOrNoSuchFileException(e, path, options.contains(WRITE));
         }
     }

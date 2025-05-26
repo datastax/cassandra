@@ -34,6 +34,9 @@ import com.google.common.base.Preconditions;
 import com.google.common.base.Throwables;
 import com.google.common.primitives.Longs;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.FSReadError;
@@ -56,11 +59,15 @@ import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.concurrent.Ref;
 import org.apache.cassandra.utils.concurrent.Transactional;
 
+import static org.apache.cassandra.db.lifecycle.ILogTransactionsFactory.logger;
+
 /**
  * Holds metadata about compressed file
  */
 public class CompressionMetadata implements AutoCloseable
 {
+    private static final Logger logger = LoggerFactory.getLogger(CompressionMetadata.class);
+
     private static final AtomicLong NATIVE_MEMORY_USAGE = new AtomicLong(0);
     /**
      * DataLength can represent either the true length of the file
@@ -193,10 +200,12 @@ public class CompressionMetadata implements AutoCloseable
         }
         catch (FileNotFoundException | NoSuchFileException e)
         {
+            logger.error("Other exception when opening compression metadata", e);
             throw new RuntimeException(e);
         }
         catch (IOException e)
         {
+            logger.error("IOException when opening compression metadata", e);
             throw new CorruptSSTableException(e, indexFilePath);
         }
 
