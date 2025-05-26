@@ -19,6 +19,7 @@ package org.apache.cassandra.index.sai.cql;
 
 import org.junit.Test;
 
+import org.apache.cassandra.cql3.restrictions.SingleColumnRestriction;
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.apache.cassandra.index.IndexBuildInProgressException;
 import org.apache.cassandra.index.sai.SAITester;
@@ -435,7 +436,7 @@ public class AllowFilteringTest extends SAITester
 
         // Analyzer restriction
         assertInvalidMessage(": restriction is only supported on properly indexed columns. a : 'Test' is not valid.", "SELECT * FROM %s WHERE a : 'Test'");
-        assertInvalidMessage(String.format(StatementRestrictions.INDEX_DOES_NOT_SUPPORT_ANALYZER_MATCHES_MESSAGE, 'b'), "SELECT * FROM %s WHERE b : 'Test'");
+        assertInvalidMessage(String.format(SingleColumnRestriction.AnalyzerMatchesRestriction.CANNOT_BE_RESTRICTED_BY_CLUSTERING_ERROR, 'b'), "SELECT * FROM %s WHERE b : 'Test'");
         assertInvalidMessage(String.format(StatementRestrictions.INDEX_DOES_NOT_SUPPORT_ANALYZER_MATCHES_MESSAGE, 'c'), "SELECT * FROM %s WHERE c : 'Test'");
         assertInvalidMessage(String.format(StatementRestrictions.INDEX_DOES_NOT_SUPPORT_ANALYZER_MATCHES_MESSAGE, 'd'), "SELECT * FROM %s WHERE d : 'Test'");
     }
