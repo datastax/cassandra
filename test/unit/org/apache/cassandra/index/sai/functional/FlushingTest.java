@@ -23,12 +23,19 @@ package org.apache.cassandra.index.sai.functional;
 import org.junit.Test;
 
 import com.datastax.driver.core.ResultSet;
+import com.datastax.driver.core.exceptions.ReadFailureException;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.disk.v1.kdtree.NumericIndexWriter;
+import org.apache.cassandra.inject.ActionBuilder;
+import org.apache.cassandra.inject.Expression;
+import org.apache.cassandra.inject.Injection;
+import org.apache.cassandra.inject.Injections;
+import org.apache.cassandra.inject.InvokePointBuilder;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertThrows;
 
 public class FlushingTest extends SAITester
 {
@@ -83,5 +90,40 @@ public class FlushingTest extends SAITester
         verifySSTableIndexes(numericIndexContext.getIndexName(), 1, 1);
 
         assertIndexFilesInToc(indexFiles());
+    }
+
+    @Test
+    public void testMemtableIndexFlushFailure() throws Throwable
+    {
+        Injection failMemtableComplete = Injections.newCustom("FailMemtableIndexWriterComplete")
+                                                   .add(InvokePointBuilder.newInvokePoint()
+                                                                          .onClass("org.apache.cassandra.index.sai.disk.v1.MemtableIndexWriter")
+                                                                          .onMethod("complete", "com.google.common.base.Stopwatch")
+                                                   )
+                                                   .add(ActionBuilder.newActionBuilder().actions()
+                                                                     .doThrow(java.io.IOException.class, Expression.quote("Byteman-injected fault in MemtableIndexWriter.complete"))
+                                                   )
+                                                   .build();
+        Injections.inject(failMemtableComplete);
+
+        createTable(CREATE_TABLE_TEMPLATE);
+        createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
+
+        String pkValue = "key_bm_flush_fail";
+        int indexedValue = 456;
+
+        execute("INSERT INTO %s (id1, v1) VALUES (?, ?)", pkValue, indexedValue);
+
+        // The Byteman rule will cause the SAI part of the flush to fail
+        flush();
+
+        // Assert that the index is not queryable for the inserted data due to the injected fault.
+        assertThrows(ReadFailureException.class, () -> {
+            executeNet("SELECT id1 FROM %s WHERE v1 = ?", indexedValue);
+        });
+
+        // Assert that the table is still queryable by primary key.
+        ResultSet pkQueryResults = executeNet("SELECT v1 FROM %s WHERE id1 = ?", pkValue);
+        assertEquals("Table should still be queryable by primary key", 1, pkQueryResults.all().size());
     }
 }
