@@ -304,9 +304,9 @@ public class CellReuseTest
                    {
                        if (upd instanceof Boolean)
                        {
-                           if (upd != null && !((Boolean) upd))
+                           if (!((Boolean) upd))
                                throw new TestException();
-                           return null;
+                           return true;
                        }
                        else
                            return upd;
