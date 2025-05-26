@@ -303,7 +303,7 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
         
         // For non-compaction, make any indexes involved in this transaction non-queryable, as they will likely not match the backing table.
         // For compaction: the compaction task should be aborted and new sstables will not be added to tracker
-        if (fromIndex && opType != OperationType.COMPACTION)
+        if (fromIndex && opType != OperationType.COMPACTION && opType != OperationType.FLUSH)
             indices.forEach(StorageAttachedIndex::makeIndexNonQueryable);
         
         for (PerIndexWriter perIndexWriter : perIndexWriters)
