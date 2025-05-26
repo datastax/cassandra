@@ -1350,17 +1350,24 @@ public abstract class SingleColumnRestriction implements SingleRestriction
     public static final class AnalyzerMatchesRestriction extends SingleColumnRestriction
     {
         public static final String CANNOT_BE_MERGED_ERROR = "%s cannot be restricted by other operators if it includes analyzer match (:)";
+        public static final String CANNOT_BE_RESTRICTED_BY_CLUSTERING_ERROR =
+        "Cannot restrict column '%s' by analyzer match (:) because it is a clustering column. Equals (=) can be used " +
+        "instead of match, but it will produce incomplete results due to clustering column post filtering.";
+
         private final List<Term> values;
 
         public AnalyzerMatchesRestriction(ColumnMetadata columnDef, Term value)
         {
-            super(columnDef);
-            this.values = Collections.singletonList(value);
+            this(columnDef, Collections.singletonList(value));
         }
 
         public AnalyzerMatchesRestriction(ColumnMetadata columnDef, List<Term> values)
         {
             super(columnDef);
+            // If we don't fail here, we would alternatively fail with the call to this::appendTo, which produces
+            // an unhelpful error message.
+            if (columnDef.isClusteringColumn())
+                throw invalidRequest(CANNOT_BE_RESTRICTED_BY_CLUSTERING_ERROR, columnDef.name);
             this.values = values;
         }
 
