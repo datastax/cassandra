@@ -34,7 +34,8 @@ public class VectorDotProductWithLengthTest extends VectorTester
     {
         super.setup();
         // we are testing unit vector detection which is part of the v3 changes, but continues in all subsequent versions
-        assert V3OnDiskFormat.JVECTOR_VERSION >= 3 : "This test assumes JVector version 3 or greater";
+        if (V3OnDiskFormat.JVECTOR_VERSION < 4)
+            V3OnDiskFormat.JVECTOR_VERSION = 4;
     }
 
     // This tests our detection of unit-length vectors used with dot product and PQ.
