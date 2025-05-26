@@ -252,7 +252,7 @@ public class TrieMemoryIndex extends MemoryIndex
 
                 try
                 {
-                    data.putSingleton(encodedTerm, primaryKey, transformer, term.limit() <= MAX_RECURSIVE_KEY_LENGTH);
+                    data.putSingleton(encodedTerm, primaryKey, transformer, term.remaining() <= MAX_RECURSIVE_KEY_LENGTH);
                 }
                 catch (TrieSpaceExhaustedException e)
                 {
