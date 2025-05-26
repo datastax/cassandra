@@ -21,10 +21,13 @@ import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.concurrent.atomic.AtomicReferenceArray;
 
-import com.google.common.annotations.VisibleForTesting;
-import java.util.function.Predicate;
+import javax.annotation.Nonnull;
 
+import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Preconditions;
 import com.google.common.base.Predicates;
+
+import java.util.function.Predicate;
 
 import org.agrona.concurrent.UnsafeBuffer;
 import org.apache.cassandra.config.CassandraRelevantProperties;
@@ -298,8 +301,9 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
      * @return A content id that can be used to reference the content, encoded as ~index where index is the
      *         position of the value in the content array.
      */
-    private int addContent(T value) throws TrieSpaceExhaustedException
+    private int addContent(@Nonnull T value) throws TrieSpaceExhaustedException
     {
+        Preconditions.checkNotNull(value, "Content value cannot be null");
         int index = objectAllocator.allocate();
         int leadBit = getBufferIdx(index, CONTENTS_START_SHIFT, CONTENTS_START_SIZE);
         int ofs = inBufferOffset(index, leadBit, CONTENTS_START_SIZE);
@@ -1331,9 +1335,9 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
          * @param existing Existing content for this key, or null if there isn't any.
          * @param update   The update, always non-null.
          * @param keyState An interface that can be used to retrieve the path of the value being updated.
-         * @return The combined value to use.
+         * @return The combined value to use. Cannot be null.
          */
-        T apply(T existing, U update, KeyProducer<T> keyState);
+        @Nonnull T apply(T existing, @Nonnull U update, @Nonnull KeyProducer<T> keyState);
     }
 
     /**
@@ -1355,7 +1359,7 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
          * @param update   The update, always non-null.
          * @return The combined value to use. Cannot be null.
          */
-        T apply(T existing, U update);
+        @Nonnull T apply(T existing, @Nonnull U update);
 
         /**
          * Version of the above that also provides the path of a value being updated.
@@ -1365,7 +1369,7 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
          * @param keyState An interface that can be used to retrieve the path of the value being updated.
          * @return The combined value to use. Cannot be null.
          */
-        default T apply(T existing, U update, KeyProducer<T> keyState)
+        default @Nonnull T apply(T existing, @Nonnull U update, @Nonnull KeyProducer<T> keyState)
         {
             return apply(existing, update);
         }
@@ -1443,7 +1447,10 @@ public class InMemoryTrie<T> extends InMemoryReadTrie<T>
             {
                 T existingContent = state.getContent();
                 T combinedContent = transformer.apply(existingContent, content, state);
-                state.setContent(combinedContent, // can be null
+                if (combinedContent == null)
+                    throw new AssertionError("Transformer " + transformer + " returned null content for "
+                                             + existingContent + ", " + content);
+                state.setContent(combinedContent,
                                  state.currentDepth >= forcedCopyDepth); // this is called at the start of processing
             }
         }
