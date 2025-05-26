@@ -155,7 +155,7 @@ public class SegmentFlushTest
                                                      MockSchema.newCFS("ks"));
 
         IndexComponents.ForWrite components = indexDescriptor.newPerIndexComponentsForWrite(indexContext);
-        SSTableIndexWriter writer = new SSTableIndexWriter(components, V1OnDiskFormat.SEGMENT_BUILD_MEMORY_LIMITER, () -> true, 2);
+        SSTableIndexWriter writer = new SSTableIndexWriter(components, V1OnDiskFormat.SEGMENT_BUILD_MEMORY_LIMITER, () -> false, () -> false, 2);
 
         List<DecoratedKey> keys = Arrays.asList(dk("1"), dk("2"));
         Collections.sort(keys);
