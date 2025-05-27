@@ -18,6 +18,8 @@
 
 package org.apache.cassandra.index.sai.metrics;
 
+import org.junit.AfterClass;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -26,6 +28,18 @@ import static org.junit.Assert.assertEquals;
 
 public class IndexSelectionTest extends AbstractMetricsTest
 {
+    @BeforeClass
+    public static void setPrioritizeSAIOverLegacyIndex()
+    {
+        DatabaseDescriptor.setPrioritizeSAIOverLegacyIndex(false);
+    }
+
+    @AfterClass
+    public static void unsetPrioritizeSAIOverLegacyIndex()
+    {
+        DatabaseDescriptor.setPrioritizeSAIOverLegacyIndex(true);
+    }
+
     @Test
     public void shouldSelectLegacyIndexByDefault()
     {
