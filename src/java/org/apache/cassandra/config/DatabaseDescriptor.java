@@ -272,7 +272,7 @@ public class DatabaseDescriptor
      * It cannot delete directories because on remote storage this would result
      * in errors if the test containers for remote storage are being shutdown
      * concurrently. The caller should delete any directories if required.
-     * TODO If you run into problems with undeleted directories or with the 
+     * TODO If you run into problems with undeleted directories or with the
      * caller deleting them, please add additional details here.
      * <p/>
      * This method is called by integration tests that run in the same JVM.
@@ -1450,6 +1450,12 @@ public class DatabaseDescriptor
             conf.range_request_timeout = new DurationSpec.LongMillisecondsBound("10ms");
         }
 
+        if(conf.aggregation_request_timeout.toMilliseconds() < LOWEST_ACCEPTED_TIMEOUT.toMilliseconds())
+        {
+            logInfo("aggregation_request_timeout", conf.aggregation_request_timeout, LOWEST_ACCEPTED_TIMEOUT);
+            conf.aggregation_request_timeout = new DurationSpec.LongMillisecondsBound("10ms");
+        }
+
         if(conf.request_timeout.toMilliseconds() < LOWEST_ACCEPTED_TIMEOUT.toMilliseconds())
         {
             logInfo("request_timeout", conf.request_timeout, LOWEST_ACCEPTED_TIMEOUT);
@@ -2304,6 +2310,16 @@ public class DatabaseDescriptor
         conf.range_request_timeout = new DurationSpec.LongMillisecondsBound(timeOutInMillis);
     }
 
+    public static long getAggregationRpcTimeout(TimeUnit unit)
+    {
+        return conf.aggregation_request_timeout.to(unit);
+    }
+
+    public static void setAggregationRpcTimeout(long timeOutInMillis)
+    {
+        conf.aggregation_request_timeout = new DurationSpec.LongMillisecondsBound(timeOutInMillis);
+    }
+
     public static long getWriteRpcTimeout(TimeUnit unit)
     {
         return conf.write_request_timeout.to(unit);
@@ -2385,13 +2401,14 @@ public class DatabaseDescriptor
     }
 
     /**
-     * @return the minimum configured {read, write, range, truncate, misc} timeout
+     * @return the minimum configured {read, write, range, aggregated, truncate, misc} timeout
      */
     public static long getMinRpcTimeout(TimeUnit unit)
     {
         return Longs.min(getRpcTimeout(unit),
                          getReadRpcTimeout(unit),
                          getRangeRpcTimeout(unit),
+                         getAggregationRpcTimeout(unit),
                          getWriteRpcTimeout(unit),
                          getCounterWriteRpcTimeout(unit),
                          getTruncateRpcTimeout(unit));
