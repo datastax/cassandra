@@ -1324,14 +1324,21 @@ uuid_sstable_identifiers_enabled: true
 # low is equally ill-advised since clients could get timeouts even for successful
 # operations just because the timeout setting is too tight.
 
-# How long the coordinator should wait for read operations to complete.
+# How long the coordinator should wait for read operations to complete. This
+# timeout does not apply to aggregated queries such as SELECT COUNT(*), MIN(x), etc.
 # Lowest acceptable value is 10 ms.
 # Min unit: ms
 read_request_timeout: 5000ms
-# How long the coordinator should wait for seq or index scans to complete.
+# How long the coordinator should wait for seq or index scans to complete. This
+# timeout does not apply to aggregated queries such as SELECT COUNT(*), MIN(x), etc.
 # Lowest acceptable value is 10 ms.
 # Min unit: ms
 range_request_timeout: 10000ms
+# How long the coordinator should wait for aggregation read operations to complete,
+# such as SELECT COUNT(*), MIN(x), etc.
+# Lowest acceptable value is 10 ms.
+# Min unit: ms
+aggregation_request_timeout: 120000ms
 # How long the coordinator should wait for writes to complete.
 # Lowest acceptable value is 10 ms.
 # Min unit: ms
