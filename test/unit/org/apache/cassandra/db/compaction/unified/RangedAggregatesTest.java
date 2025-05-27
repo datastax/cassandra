@@ -122,7 +122,7 @@ public class RangedAggregatesTest extends ShardingTestBase
         {
             // execute each partial aggregate separately because we can only mark the inputs compacting once
             List<AbstractCompactionTask> tasks = new ArrayList<>();
-            strategy.createAndAddTasks(0, maximal, tasks);
+            strategy.createAndAddTasks(0, maximal, tasks, strategy);
             totalTaskCount += tasks.size();
             List<Future<?>> futures = tasks.stream()
                                            .map(t -> ForkJoinPool.commonPool()
