@@ -28,4 +28,10 @@ public class ReadTimeoutException extends RequestTimeoutException
         super(ExceptionCode.READ_TIMEOUT, consistency, received, blockFor);
         this.dataPresent = dataPresent;
     }
+
+    public ReadTimeoutException(ConsistencyLevel consistency)
+    {
+        super(ExceptionCode.READ_TIMEOUT, consistency);
+        this.dataPresent = false;
+    }
 }
