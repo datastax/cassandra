@@ -34,7 +34,7 @@ public class StorageAttachedIndexOptions
     public double zerocopy_used_threshold = DEFAULT_ZEROCOPY_USED_THRESHOLD;
     public double ann_brute_force_factor = DEFAULT_ANN_BRUTE_FORCE_FACTOR;
 
-    public volatile boolean prioritize_over_legacy_index = false;
+    public volatile boolean prioritize_over_legacy_index = true;
 
     public void validate()
     {
