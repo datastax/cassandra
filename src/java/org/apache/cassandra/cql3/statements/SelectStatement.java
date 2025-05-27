@@ -812,7 +812,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         if (aggregationSpecFactory == null || query.isEmpty())
             return pager;
 
-        return new AggregationQueryPager(pager, DatabaseDescriptor.getAggregationSubPageSize(), query.limits());
+        return new AggregationQueryPager(pager, DatabaseDescriptor.getAggregationSubPageSize(), query.limits(), DatabaseDescriptor.getAggregationRpcTimeout(TimeUnit.NANOSECONDS));
     }
 
     public Map<DecoratedKey, List<Row>> executeRawInternal(QueryOptions options, ClientState state, long nowInSec) throws RequestExecutionException, RequestValidationException
