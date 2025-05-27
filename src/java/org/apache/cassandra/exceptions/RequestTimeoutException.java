@@ -40,4 +40,12 @@ public class RequestTimeoutException extends RequestExecutionException
         this.received = received;
         this.blockFor = blockFor;
     }
+
+    public RequestTimeoutException(ExceptionCode exceptionCode, ConsistencyLevel consistency)
+    {
+        super(exceptionCode, "Operation timeout out");
+        this.consistency = consistency;
+        this.received = 0;
+        this.blockFor = 0;
+    }
 }

@@ -73,6 +73,7 @@ write_request_timeout_in_ms: 20000
 counter_write_request_timeout_in_ms: 20000
 cas_contention_timeout_in_ms: 20000
 request_timeout_in_ms: 20000
+aggregation_request_timeout_in_ms: 120000
 default_compaction:
     class_name: UnifiedCompactionStrategy
     parameters:
