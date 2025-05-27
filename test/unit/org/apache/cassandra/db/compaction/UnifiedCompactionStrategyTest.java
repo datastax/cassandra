@@ -30,10 +30,13 @@ import java.util.Map;
 import java.util.Random;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+
+import javax.annotation.Nullable;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
@@ -1755,6 +1758,59 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         assertEquals(1, tasks.size());
         assertEquals(allSSTables, tasks.get(0).inputSSTables());
     }
+
+    @Test
+    public void testCustomCompositeCompactionObserver()
+    {
+        int numShards = 5;
+        Set<SSTableReader> allSSTables = new HashSet<>();
+        allSSTables.addAll(mockNonOverlappingSSTables(10, 0, 100 << 20));
+        allSSTables.addAll(mockNonOverlappingSSTables(15, 1, 200 << 20));
+        allSSTables.addAll(mockNonOverlappingSSTables(25, 2, 400 << 20));
+        dataTracker.addInitialSSTables(allSSTables);
+        Controller controller = Mockito.mock(Controller.class);
+        when(controller.getNumShards(anyDouble())).thenReturn(numShards);
+        when(controller.parallelizeOutputShards()).thenReturn(true);
+        UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(strategyFactory, controller);
+        strategy.startup();
+        LifecycleTransaction txn = dataTracker.tryModify(allSSTables, OperationType.COMPACTION);
+        var tasks = new ArrayList<CompactionTask>();
+
+        AtomicInteger compositeInProgress = new AtomicInteger(0);
+        AtomicInteger compositedCompleted = new AtomicInteger(0);
+        CompactionObserver compositeCompactionObserver = new CompactionObserver()
+        {
+            @Override
+            public void onInProgress(CompactionProgress progress)
+            {
+                compositeInProgress.incrementAndGet();
+            }
+
+            @Override
+            public void onCompleted(TimeUUID id, @Nullable Throwable error)
+            {
+                compositedCompleted.incrementAndGet();
+            }
+        };
+        strategy.createAndAddTasks(0, txn, null, false, strategy.makeShardingStats(txn), 1000, tasks, compositeCompactionObserver);
+        assertEquals(numShards, tasks.size());
+
+        // move all tasks to in-progress
+        CompactionProgress progress = mockProgress(strategy, txn.opId());
+        for (CompactionTask task : tasks)
+            task.getCompObservers().forEach(o -> o.onInProgress(progress));
+
+        assertThat(compositeInProgress).hasValue(1);
+        assertThat(compositedCompleted).hasValue(0);
+
+        // move all tasks to complete
+        for (CompactionTask task : tasks)
+            task.getCompObservers().forEach(o -> o.onCompleted(task.transaction.opId(), null));
+
+        assertThat(compositeInProgress).hasValue(1);
+        assertThat(compositedCompleted).hasValue(1);
+    }
+
     @Test
     public void testMaximalSelection()
     {
