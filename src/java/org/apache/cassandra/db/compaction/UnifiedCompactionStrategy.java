@@ -32,6 +32,8 @@ import java.util.function.BiPredicate;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import javax.annotation.Nullable;
+
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Iterables;
@@ -342,7 +344,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         if (expirationTasks != null)
             return expirationTasks;
 
-        return getNextBackgroundTasks(getNextCompactionAggregates(), gcBefore, this);
+        return getNextBackgroundTasks(getNextCompactionAggregates(), gcBefore, null);
     }
 
     /// Check for fully expired sstables and return a collection of expiration tasks if found.
@@ -403,14 +405,14 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
     /// Used by CNDB where compaction aggregates come from etcd rather than the strategy.
     /// @return collection of `AbstractCompactionTask`, which could be either a `CompactionTask` or a `UnifiedCompactionTask`
     public synchronized Collection<AbstractCompactionTask> getNextBackgroundTasks(Collection<CompactionAggregate> aggregates, int gcBefore,
-                                                                                  CompactionObserver compositeCompactionObserver)
+                                                                                  @Nullable CompactionObserver compositeCompactionObserver)
     {
         controller.onStrategyBackgroundTaskRequest();
         return createCompactionTasks(aggregates, gcBefore, compositeCompactionObserver);
     }
 
     private Collection<AbstractCompactionTask> createCompactionTasks(Collection<CompactionAggregate> aggregates, int gcBefore,
-                                                                     CompactionObserver compositeCompactionObserver)
+                                                                     @Nullable CompactionObserver compositeCompactionObserver)
     {
         Collection<AbstractCompactionTask> tasks = new ArrayList<>(aggregates.size());
         try
@@ -428,7 +430,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
 
     /// Create compaction tasks for the given aggregate and add them to the given tasks list.
     public void createAndAddTasks(int gcBefore, CompactionAggregate.UnifiedAggregate aggregate,
-                                  Collection<? super UnifiedCompactionTask> tasks, CompactionObserver compositeCompactionObserver)
+                                  Collection<? super UnifiedCompactionTask> tasks, @Nullable CompactionObserver compositeCompactionObserver)
     {
         CompactionPick selected = aggregate.getSelected();
         int parallelism = aggregate.getPermittedParallelism();
@@ -614,7 +616,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                            int parallelism,
                            Collection<? super CompactionTask> tasks)
     {
-        createAndAddTasks(gcBefore, transaction, null, false, shardingStats, parallelism, tasks, this);
+        createAndAddTasks(gcBefore, transaction, null, false, shardingStats, parallelism, tasks, null);
     }
 
     @VisibleForTesting
@@ -625,7 +627,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                            ShardingStats shardingStats,
                            int parallelism,
                            Collection<? super UnifiedCompactionTask> tasks,
-                           CompactionObserver compositeCompactionObserver)
+                           @Nullable CompactionObserver compositeCompactionObserver)
     {
         if (controller.parallelizeOutputShards() && parallelism > 1)
             tasks.addAll(createParallelCompactionTasks(transaction, operationRange, keepOriginals, shardingStats, gcBefore, parallelism, compositeCompactionObserver));
@@ -701,7 +703,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                                                                             ShardingStats shardingStats,
                                                                             int gcBefore,
                                                                             int parallelism,
-                                                                            CompactionObserver compositeCompactionObserver)
+                                                                            @Nullable CompactionObserver compositeCompactionObserver)
     {
         final int coveredShardCount = shardingStats.coveredShardCount;
         assert parallelism > 1;
@@ -710,7 +712,11 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         ShardManager shardManager = getShardManager();
         CompositeLifecycleTransaction compositeTransaction = new CompositeLifecycleTransaction(transaction);
         SharedCompactionProgress sharedProgress = new SharedCompactionProgress(transaction.opId(), transaction.opType(), TableOperation.Unit.BYTES);
-        SharedCompactionObserver sharedObserver = new SharedCompactionObserver(compositeCompactionObserver);
+        SharedCompactionObserver sharedObserver = new SharedCompactionObserver(this);
+        // if additional observer for composition compaction exists, register into sharedObserver
+        if (compositeCompactionObserver != null)
+            sharedObserver.registerObserver(compositeCompactionObserver);
+
         SharedTableOperation sharedOperation = new SharedTableOperation(sharedProgress);
         List<UnifiedCompactionTask> tasks = shardManager.splitSSTablesInShardsLimited(
             sstables,
