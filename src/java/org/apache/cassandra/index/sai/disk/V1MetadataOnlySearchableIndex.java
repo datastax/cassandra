@@ -32,6 +32,7 @@ import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SSTableContext;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.MetadataSource;
 import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
 import org.apache.cassandra.index.sai.disk.v1.Segment;
@@ -61,8 +62,8 @@ import static org.apache.cassandra.index.sai.virtual.SegmentsSystemView.START_TO
 import static org.apache.cassandra.index.sai.virtual.SegmentsSystemView.TABLE_NAME;
 
 /**
- * An index that eagerly loads segment metadata and nothing else. It is currently only used for vector indexes to
- * read PQ files during compaction.
+ * An index that eagerly loads segment metadata, can load index files on demand to provide insight into information
+ * about the index, but does not support searching.
  */
 public class V1MetadataOnlySearchableIndex implements SearchableIndex
 {
@@ -197,6 +198,8 @@ public class V1MetadataOnlySearchableIndex implements SearchableIndex
         // May result in downloading file, but this metadata is valuable. We use a stream to avoid loading all the
         // structures at once.
         return metadatas.stream()
+                        // V2 doesn't know, so we skip it and err on the side of being optimistic.  See comments in CompactionGraph
+                        .filter(m -> m.version.onOrAfter(Version.DC))
                         .map(m -> {
                             try (var odm = m.version.onDiskFormat().newOnDiskOrdinalsMap(indexFiles, m))
                             {
@@ -211,7 +214,7 @@ public class V1MetadataOnlySearchableIndex implements SearchableIndex
         // We have to load from disk here
         try (var pq = indexFiles.pq())
         {
-            // Returns null if wrong uses wrong compression type.
+            // Returns null if segment does not use PQ compression.
             return ProductQuantizationFetcher.maybeReadPqFromSegment(metadatas.get(segmentPosition), pq);
         }
     }

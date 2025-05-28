@@ -254,8 +254,15 @@ public class VectorCompactionTest extends VectorTester.Versioned
             assertEquals(i.getRowCount(), sstableDiff);
 
             var postingsStructures = i.getPostingsStructures().collect(Collectors.toList());
-            assertEquals(1, postingsStructures.size());
-            assertEquals(V5VectorPostingsWriter.Structure.ONE_TO_ONE, postingsStructures.get(0));
+            if (Version.current().onOrAfter(Version.DC))
+            {
+                assertEquals(1, postingsStructures.size());
+                assertEquals(V5VectorPostingsWriter.Structure.ONE_TO_ONE, postingsStructures.get(0));
+            }
+            else
+            {
+                assertEquals(0, postingsStructures.size());
+            }
         });
 
         // Now compact (this exercises the code, but doesn't actually prove that we used the past segment's PQ)
