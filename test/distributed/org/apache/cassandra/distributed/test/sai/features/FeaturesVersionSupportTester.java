@@ -29,7 +29,6 @@ import org.apache.cassandra.distributed.api.ICoordinator;
 import org.apache.cassandra.distributed.test.TestBaseImpl;
 import org.apache.cassandra.distributed.test.sai.SAIUtil;
 import org.apache.cassandra.exceptions.RequestFailureReason;
-import org.apache.cassandra.index.FeatureNeedsIndexRebuildException;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.assertj.core.api.Assertions;
 
