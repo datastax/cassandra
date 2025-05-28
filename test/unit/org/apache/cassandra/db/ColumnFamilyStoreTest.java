@@ -720,6 +720,11 @@ public class ColumnFamilyStoreTest
             }
 
             @Override
+            public void signalFlushRequired(ColumnFamilyStore.FlushReason flushReason, boolean skipIfSignaled)
+            {
+            }
+
+            @Override
             public void markExtraOnHeapUsed(long additionalSpace, OpOrder.Group opGroup)
             {
             }

@@ -25,9 +25,14 @@ import org.apache.cassandra.schema.TableMetadata;
 public class DefaultIndexComponentDiscovery extends IndexComponentDiscovery
 {
     @Override
-    public SSTableIndexComponentsState discoverComponents(SSTableReader sstable) {
-        Descriptor descriptor = sstable.getDescriptor();
+    public SSTableIndexComponentsState discoverComponents(SSTableReader sstable)
+    {
+        return discoverComponents(sstable.getDescriptor(), sstable.metadata());
+    }
 
+    @Override
+    public SSTableIndexComponentsState discoverComponents(Descriptor descriptor, TableMetadata metadata)
+    {
         // Older versions might not have all components in the TOC, we should not trust it (fix for CNDB-13582):
         if (descriptor.version.getVersion().compareTo("ca") < 0)
            return discoverComponentsFromDiskFallback(descriptor);

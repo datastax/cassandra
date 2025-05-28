@@ -18,9 +18,11 @@
 package org.apache.cassandra.index.sai.utils;
 
 import java.io.IOException;
+import java.nio.file.Files;
 import java.util.Random;
 
 import com.google.common.base.Preconditions;
+import org.apache.cassandra.io.util.FileUtils;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.ClassRule;
@@ -31,8 +33,6 @@ import org.junit.rules.TestRule;
 import com.carrotsearch.randomizedtesting.RandomizedTest;
 import com.carrotsearch.randomizedtesting.annotations.ThreadLeakScope;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.db.marshal.Int32Type;
-import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.io.compress.BufferType;
@@ -40,11 +40,23 @@ import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SequenceBasedSSTableId;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.SequentialWriterOption;
-import org.apache.cassandra.schema.TableMetadata;
 
 @ThreadLeakScope(ThreadLeakScope.Scope.NONE)
 public class SaiRandomizedTest extends RandomizedTest
 {
+
+    static
+    {
+        try
+        {
+            Files.createDirectories(FileUtils.getTempDir().toPath());
+        }
+        catch (IOException e)
+        {
+            throw new RuntimeException("Failed to create temporary directories", e);
+        }
+    }
+
     private static Thread.UncaughtExceptionHandler handler;
 
     @SuppressWarnings("unused")

@@ -86,6 +86,7 @@ import org.apache.cassandra.cache.RowCacheSentinel;
 import org.apache.cassandra.concurrent.JMXEnabledThreadPoolExecutor;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.concurrent.Stage;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
@@ -128,6 +129,7 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.StartupException;
+import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.SecondaryIndexManager;
 import org.apache.cassandra.index.internal.CassandraIndex;
 import org.apache.cassandra.index.transactions.UpdateTransaction;
@@ -258,7 +260,10 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         UNIT_TESTS, // explicitly requested flush needed for a test
         /** Flush performed to a remote storage. Used by remote commit log replay */
         REMOTE_REPLAY,
-        BATCHLOG_REPLAY
+        BATCHLOG_REPLAY,
+        TRIE_LIMIT,
+        INDEX_MEMTABLE_LIMIT,
+        INDEX_MEMTABLE_PERIOD_EXPIRED,
     }
 
     private static final String[] COUNTER_NAMES = new String[]{"table", "count", "error", "value"};
@@ -1452,11 +1457,11 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
                     // This can throw on remote storage, e.g. if a file cannot be uploaded
                     txn.prepareToCommit();
 
-                    // Open the underlying readers, the one that will be returne below by `finished()`.
+                    // Open the underlying readers, the one that will be returned below by `finished()`.
                     // Currently needs to be called before commit, because committing will close a certain number
                     // of resources used by the writers which are accessed to open the readers.
                     for (SSTableMultiWriter writer : flushResults)
-                        writer.openResult();
+                        writer.openResult(storageHandler);
                 }
                 catch (Throwable t)
                 {
@@ -1963,6 +1968,29 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     public OpOrder readOrdering()
     {
         return readOrdering;
+    }
+
+    @Override
+    public int getMemtableFlushPeriodInMs()
+    {
+        int flushPeriodInMs = metadata().params.memtableFlushPeriodInMs;
+        flushPeriodInMs = pickSmallerFlushPeriod(flushPeriodInMs, CassandraRelevantProperties.FLUSH_PERIOD_IN_MILLIS.getInt());
+
+        // When creating CFS, indexManager is initialized after memtable, we need to handle null here; Later when SAI
+        // is initialized, SAI will force flush to create new memtable with proper flush period.
+        if (indexManager == null)
+            return flushPeriodInMs;
+
+        for (Index index : indexManager.listIndexes())
+            flushPeriodInMs = pickSmallerFlushPeriod(flushPeriodInMs, index.getFlushPeriodInMs());
+        return flushPeriodInMs;
+    }
+
+    private static int pickSmallerFlushPeriod(int period1, int period2)
+    {
+        if (period1 > 0 && period2 > 0)
+            return Math.min(period1, period2);
+        return period1 > 0 ? period1 : period2;
     }
 
     public Map<UUID, PendingStat> getPendingRepairStats()
@@ -2551,7 +2579,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         {
             try
             {
-                Collection<SSTableReader> sstables = memtableContent.finish(true);
+                Collection<SSTableReader> sstables = memtableContent.finish(true, storageHandler);
                 try (Refs sstableReferences = Refs.ref(sstables))
                 {
                     // This moves all references to placeIntoRefs, clearing sstableReferences

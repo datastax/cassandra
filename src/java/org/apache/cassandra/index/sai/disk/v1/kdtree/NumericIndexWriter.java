@@ -32,7 +32,6 @@ import org.apache.cassandra.index.sai.disk.io.IndexOutput;
 import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.oldlucene.MutablePointValues;
-import org.apache.lucene.index.PointValues;
 import org.apache.lucene.util.IOUtils;
 import org.apache.lucene.util.packed.PackedInts;
 import org.apache.lucene.util.packed.PackedLongValues;
@@ -58,31 +57,31 @@ public class NumericIndexWriter implements Closeable
 
     /**
      * @param maxSegmentRowId maximum possible segment row ID, used to create `maxDoc` for kd-tree
-     * @param numRows must be greater than number of added rowIds, only used for validation.
+     * @param totalPointCount must be greater than number of added rowIds, only used for validation.
      */
     public NumericIndexWriter(IndexComponents.ForWrite components,
                               int bytesPerDim,
                               int maxSegmentRowId,
-                              int numRows,
+                              long totalPointCount,
                               IndexWriterConfig config) throws IOException
     {
-        this(components, MAX_POINTS_IN_LEAF_NODE, bytesPerDim, maxSegmentRowId, numRows, config);
+        this(components, MAX_POINTS_IN_LEAF_NODE, bytesPerDim, maxSegmentRowId, totalPointCount, config);
     }
 
     public NumericIndexWriter(IndexComponents.ForWrite components,
                               int maxPointsInLeafNode,
                               int bytesPerDim,
                               int maxSegmentRowId,
-                              int numRows,
+                              long totalPointCount,
                               IndexWriterConfig config) throws IOException
     {
         checkArgument(maxSegmentRowId >= 0,
                       "[%s] maxRowId must be non-negative value, but got %s",
                       config.getIndexName(), maxSegmentRowId);
 
-        checkArgument(numRows >= 0,
-                      "[$s] numRows must be non-negative value, but got %s",
-                      config.getIndexName(), numRows);
+        checkArgument(totalPointCount >= 0,
+                      "[$s] totalPointCount must be non-negative value, but got %s",
+                      config.getIndexName(), totalPointCount);
 
         this.components = components;
         this.bytesPerDim = bytesPerDim;
@@ -92,7 +91,7 @@ public class NumericIndexWriter implements Closeable
                                     bytesPerDim,
                                     maxPointsInLeafNode,
                                     BKDWriter.DEFAULT_MAX_MB_SORT_IN_HEAP,
-                                    numRows,
+                                    totalPointCount,
                                     true, null,
                                     components.addOrGet(IndexComponentType.KD_TREE).byteOrder());
     }

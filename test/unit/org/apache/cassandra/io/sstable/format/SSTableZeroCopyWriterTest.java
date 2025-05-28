@@ -170,7 +170,7 @@ public class SSTableZeroCopyWriterTest
             }
         }
 
-        Collection<SSTableReader> readers = btzcw.finish(true);
+        Collection<SSTableReader> readers = btzcw.finish(true, store.getStorageHandler());
 
         SSTableReader reader = readers.toArray(new SSTableReader[0])[0];
 

@@ -456,7 +456,7 @@
 
     <target name="realclean" depends="clean" description="Remove the entire build directory and all downloaded artifacts">
         <delete>
-          <fileset dir="${build.lib}" excludes="cassandra-driver-internal-only-*"/>
+          <fileset dir="${build.lib}" excludes="cassandra-driver-internal-only-*,puresasl-internal-only-*"/>
         </delete>
         <delete includeemptydirs="false" dir="${build.dir}" failonerror="false"/>
         <delete dir="${doc.dir}/build" />
@@ -754,7 +754,7 @@
           <dependency groupId="org.apache.lucene" artifactId="lucene-core" version="9.8.0" />
           <dependency groupId="org.apache.lucene" artifactId="lucene-analysis-common" version="9.8.0" />
           <dependency groupId="org.apache.lucene" artifactId="lucene-backward-codecs" version="9.8.0" />
-          <dependency groupId="io.github.jbellis" artifactId="jvector" version="4.0.0-beta.4" />
+          <dependency groupId="io.github.jbellis" artifactId="jvector" version="4.0.0-beta.5" />
           <dependency groupId="com.bpodgursky" artifactId="jbool_expressions" version="1.14" scope="test"/>
 
           <dependency groupId="com.carrotsearch.randomizedtesting" artifactId="randomizedtesting-runner" version="2.1.2" scope="test">

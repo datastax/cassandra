@@ -38,7 +38,6 @@ import org.apache.cassandra.utils.EstimatedHistogram;
 
 import static java.lang.Math.max;
 import static java.lang.Math.min;
-import static org.apache.cassandra.utils.EstimatedHistogram.USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES;
 
 /**
  * A decaying histogram reservoir where values collected during each minute will be twice as significant as the values
@@ -81,6 +80,7 @@ import static org.apache.cassandra.utils.EstimatedHistogram.USE_DSE_COMPATIBLE_H
  */
 public class DecayingEstimatedHistogramReservoir implements Reservoir
 {
+    public static final boolean USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES = CassandraRelevantProperties.USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES.getBoolean();
     /**
      * The default number of decayingBuckets. Use this bucket count to reduce memory allocation for bucket offsets.
      */
@@ -224,7 +224,10 @@ public class DecayingEstimatedHistogramReservoir implements Reservoir
         }
         else
         {
-            bucketOffsets = EstimatedHistogram.newOffsets(bucketCount, considerZeroes);
+            if (USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES)
+                bucketOffsets = newDseOffsets(bucketCount, considerZeroes);
+            else
+                bucketOffsets = EstimatedHistogram.newOffsets(bucketCount, considerZeroes);
         }
 
         nStripes = stripes;
