@@ -20,6 +20,8 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
 
+import org.apache.cassandra.exceptions.ReadFailureException;
+import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.index.sai.SAIUtil;
 import org.apache.cassandra.index.sai.analyzer.AnalyzerEqOperatorSupport;
 
@@ -37,6 +39,8 @@ import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.plan.Plan;
+import org.apache.cassandra.inject.Injections;
+import org.apache.cassandra.inject.InvokePointBuilder;
 import org.assertj.core.api.Assertions;
 
 import static java.lang.String.format;
@@ -523,6 +527,52 @@ public class PlanWithIndexHintsTest extends SAITester
             assertNeedsAllowFiltering(query + " WITH excluded_indexes={idx}");
             assertThatPlanFor(query + " ALLOW FILTERING WITH excluded_indexes={idx}", row(1)).usesNone();
         });
+    }
+
+    /**
+     * Test that index hints can bed used as a workaround for CNDB-12425,
+     * where queries with {@code ALLOW FILTERING} stop working during index build.
+     * Index hints can be used to explicitly exclude the non-queryable index.
+     */
+    @Test
+    public void testExcludeDuringIndexBuild() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v int)");
+
+        String insert = "INSERT INTO %s (k, v) VALUES (?, ?)";
+        Object[] row1 = row(1, 1);
+        Object[] row2 = row(2, 2);
+        execute(insert, row1);
+        execute(insert, row2);
+
+        // verify that an ALLOW FILTERING query works without any index
+        String select = "SELECT * FROM %s WHERE v=1 ALLOW FILTERING";
+        assertThatPlanFor(select, row1).usesNone();
+
+        // create an index on the filtered column, blocked on its building task
+        Injections.Barrier barrier = Injections.newBarrier("block_index_build", 2, false)
+                                               .add(InvokePointBuilder.newInvokePoint()
+                                                                      .onClass(StorageAttachedIndex.class)
+                                                                      .onMethod("startInitialBuild"))
+                                               .build();
+        Injections.inject(barrier);
+        String idx = createIndexAsync("CREATE CUSTOM INDEX idx ON %s(v) USING 'StorageAttachedIndex'");
+
+        // verify that the previous ALLOW FILTERING query stops working, as described by CNDB-12425
+        Assertions.assertThatThrownBy(() -> execute(select))
+                  .isInstanceOf(ReadFailureException.class)
+                  .hasMessageContaining(RequestFailureReason.INDEX_BUILD_IN_PROGRESS.name());
+
+        // verify that the previous query works again is we use index hints to exclude the non-queryable index
+        assertThatPlanFor(select + " WITH excluded_indexes={idx}", row1).usesNone();
+
+        // allow the index build to complete
+        barrier.countDown();
+        barrier.disable();
+        waitForIndexQueryable(idx);
+
+        // verify that the previous query works again without any index hints
+        assertThatPlanFor(select, row1).uses(idx);
     }
 
     private void assertNeedsAllowFiltering(String query)
