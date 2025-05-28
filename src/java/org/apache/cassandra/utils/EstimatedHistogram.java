@@ -26,17 +26,14 @@ import com.google.common.base.Objects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.io.ISerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
-import org.apache.cassandra.metrics.DecayingEstimatedHistogramReservoir;
 
 public class EstimatedHistogram implements DoubleToLongFunction
 {
     public static final EstimatedHistogramSerializer serializer = new EstimatedHistogramSerializer();
-    public static final boolean USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES = CassandraRelevantProperties.USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES.getBoolean();
 
     public static final int DEFAULT_BUCKET_COUNT = 90;
 
@@ -93,10 +90,7 @@ public class EstimatedHistogram implements DoubleToLongFunction
 
     public static long[] newOffsets(int size, boolean considerZeroes)
     {
-        if (USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES)
-            return DecayingEstimatedHistogramReservoir.newDseOffsets(size, considerZeroes);
-        else
-            return newCassandraOffsets(size, considerZeroes);
+        return newCassandraOffsets(size, considerZeroes);
     }
 
     public static long[] newCassandraOffsets(int size, boolean considerZeroes)
