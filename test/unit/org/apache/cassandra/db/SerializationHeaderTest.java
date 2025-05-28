@@ -135,7 +135,7 @@ public class SerializationHeaderTest
                         Row row = BTreeRow.singleCellRow(clustering, cell);
                         sstableWriter.append(PartitionUpdate.singleRowUpdate(schema, schema.partitioner.decorateKey(value), row).unfilteredIterator());
                     }
-                    sstableWriter.finish(false);
+                    sstableWriter.finish(false, null);
                     txn.finish();
                 }
                 return descriptor;

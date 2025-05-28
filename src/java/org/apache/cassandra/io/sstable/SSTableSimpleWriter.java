@@ -142,7 +142,7 @@ class SSTableSimpleWriter extends AbstractSSTableSimpleWriter
             if (writer == null)
                 return;
 
-            Collection<SSTableReader> finished = writer.finish(shouldOpenSSTables());
+            Collection<SSTableReader> finished = writer.finish(shouldOpenSSTables(), null);
             notifySSTableProduced(finished);
         }
         catch (Throwable t)
