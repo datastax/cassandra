@@ -20,9 +20,9 @@ package org.apache.cassandra.io.sstable;
 
 import java.nio.ByteBuffer;
 import java.util.Collection;
-import java.util.concurrent.Phaser;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.Random;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
@@ -31,24 +31,24 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
-import org.apache.cassandra.cache.ChunkCache;
+import com.carrotsearch.randomizedtesting.generators.RandomStrings;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
+import org.apache.cassandra.db.lifecycle.WrappedLifecycleTransaction;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.notifications.INotificationConsumer;
-import org.apache.cassandra.notifications.SSTableAddingNotification;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.SSTABLE_FORMAT_DEFAULT;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
 @RunWith(Parameterized.class)
-public class EarlyOpenCachingTest extends CQLTester
+public class EarlyOpenIterationTest extends CQLTester
 {
     @Parameterized.Parameters(name = "format={0}")
     public static Collection<Object> generateParameters()
@@ -65,6 +65,8 @@ public class EarlyOpenCachingTest extends CQLTester
         DatabaseDescriptor.setDiskAccessMode(Config.DiskAccessMode.standard);
     }
 
+    Random rand = new Random();
+
     @Parameterized.Parameter
     public SSTableFormat<?, ?> format = DatabaseDescriptor.getSelectedSSTableFormat();
 
@@ -75,14 +77,14 @@ public class EarlyOpenCachingTest extends CQLTester
     }
 
     @Test
-    public void testFinalOpenRetainsCachedData() throws InterruptedException
+    public void testFinalOpenIteration() throws InterruptedException
     {
         SSTABLE_FORMAT_DEFAULT.setString(format.name());
         createTable("CREATE TABLE %s (pkey text, ckey text, val blob, PRIMARY KEY (pkey, ckey))");
 
         for (int i = 0; i < 800; i++)
         {
-            String pkey = getRandom().nextAsciiString(10, 10);
+            String pkey = RandomStrings.randomAsciiOfLengthBetween(rand, 10, 10);
             for (int j = 0; j < 100; j++)
                 execute("INSERT INTO %s (pkey, ckey, val) VALUES (?, ?, ?)", pkey, "" + j, ByteBuffer.allocate(300));
         }
@@ -90,28 +92,28 @@ public class EarlyOpenCachingTest extends CQLTester
         ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
 
         AtomicInteger opened = new AtomicInteger(0);
-        AtomicBoolean completed = new AtomicBoolean(false);
-        Phaser phaser = new Phaser(1);
         assertEquals(1, cfs.getLiveSSTables().size());
         SSTableReader source = cfs.getLiveSSTables().iterator().next();
 
-        INotificationConsumer consumer = (notification, sender) -> {
-            System.out.println("Received notification: " + notification);
-            if (!(notification instanceof SSTableAddingNotification) || completed.get())
-                return;
-            SSTableAddingNotification n = (SSTableAddingNotification) notification;
-            SSTableReader s = n.adding.iterator().next();
-            EarlyOpenIterationTest.readAllAndVerifyKeySpan(s);
-            assertTrue("Chunk cache is not used",
-                       ChunkCache.instance.sizeOfFile(s.getDataFile()) > 0);
-            phaser.register();
-            opened.incrementAndGet();
-            s.runOnClose(phaser::arriveAndDeregister);
+        Consumer<Iterable<SSTableReader>> consumer = current -> {
+            for (SSTableReader s : current)
+            {
+                readAllAndVerifyKeySpan(s);
+                if (s.openReason == SSTableReader.OpenReason.EARLY)
+                    opened.incrementAndGet();
+            }
         };
 
         SSTableReader finalReader;
-        cfs.getTracker().subscribe(consumer);
-        try (LifecycleTransaction txn = cfs.getTracker().tryModify(source, OperationType.COMPACTION);
+        try (WrappedLifecycleTransaction txn = new WrappedLifecycleTransaction(cfs.getTracker().tryModify(source, OperationType.COMPACTION))
+             {
+                 @Override
+                 public void checkpoint()
+                 {
+                     consumer.accept(((LifecycleTransaction) delegate).current());
+                     super.checkpoint();
+                 }
+             };
              SSTableRewriter writer = new SSTableRewriter(txn, 1000, 100L << 10, false))
         {
             writer.switchWriter(SSTableWriterTestBase.getWriter(format, cfs, cfs.getDirectories().getDirectoryForNewSSTables(), txn));
@@ -121,15 +123,35 @@ public class EarlyOpenCachingTest extends CQLTester
                 var next = iter.next();
                 writer.append(next);
             }
-            completed.set(true);
             finalReader = writer.finish().iterator().next();
         }
-        phaser.arriveAndAwaitAdvance();
         assertTrue("No early opening occured", opened.get() > 0);
 
-        assertTrue("Chunk cache is not retained for early open sstable",
-                   ChunkCache.instance.sizeOfFile(finalReader.getDataFile()) > 0);
         assertEquals(Sets.newHashSet(finalReader), cfs.getLiveSSTables());
-        EarlyOpenIterationTest.readAllAndVerifyKeySpan(finalReader);
+        readAllAndVerifyKeySpan(finalReader);
+    }
+
+    static void readAllAndVerifyKeySpan(SSTableReader s)
+    {
+        DecoratedKey firstKey = null;
+        DecoratedKey lastKey = null;
+        try (var iter = s.getScanner())
+        {
+            while (iter.hasNext())
+            {
+                try (var partition = iter.next())
+                {
+                    // consume all rows, so that the data is cached
+                    partition.forEachRemaining(column -> {
+                        // consume all columns
+                    });
+                    if (firstKey == null)
+                        firstKey = partition.partitionKey();
+                    lastKey = partition.partitionKey();
+                }
+            }
+        }
+        assertEquals("Simple scanner does not iterate all content", s.getFirst(), firstKey);
+        assertEquals("Simple scanner does not iterate all content", s.getLast(), lastKey);
     }
 }
