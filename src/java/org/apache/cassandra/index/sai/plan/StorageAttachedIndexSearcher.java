@@ -108,14 +108,8 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         {
             Plan plan = controller.buildPlan().optimize();
             Set<String> indexes = new HashSet<>();
-            plan.forEach(node -> {
-                if (node instanceof Plan.IndexScan)
-                {
-                    Plan.IndexScan indexScan = (Plan.IndexScan) node;
-                    indexes.add(indexScan.getIndexName());
-                }
-                return Plan.ControlFlow.Continue;
-            });
+            plan.nodesOfType(Plan.IndexScan.class)
+                .forEach(s -> indexes.add(s.getIndexName()));
             return indexes;
         }
         finally

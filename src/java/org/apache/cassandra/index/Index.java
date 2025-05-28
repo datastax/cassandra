@@ -1054,18 +1054,20 @@ public interface Index
             return indexes.stream().filter((i) -> i.supportsExpression(column, operator)).findFirst();
 
         // if we have a contains operator, we prefer indexes without an analyzer (see CNDB-13925)
-        T analyzedIndex = null;
+        T firstAnalyzedIndex = null;
         for (T index : indexes)
         {
             if (index.supportsExpression(column, operator))
             {
-                if (index.getAnalyzer(null).isPresent())
-                    analyzedIndex = index;
-                else
+                // we prefer indexes without an analyzer
+                if (index.getAnalyzer(null).isEmpty())
                     return Optional.of(index);
+
+                if (firstAnalyzedIndex == null)
+                    firstAnalyzedIndex = index;
             }
         }
 
-        return Optional.ofNullable(analyzedIndex);
+        return Optional.ofNullable(firstAnalyzedIndex);
     }
 }

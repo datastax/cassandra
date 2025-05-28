@@ -1270,13 +1270,12 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
 
     public <T extends Index> Optional<T> getBestIndexFor(RowFilter.Expression expression, Class<T> indexType)
     {
-        return Index.getBestIndexFor(indexes.values()
-                                            .stream()
-                                            .filter(indexType::isInstance)
-                                            .map(indexType::cast)
-                                            .collect(Collectors.toSet()),
-                                     expression.column(),
-                                     expression.operator());
+        Set<T> candidates = indexes.values()
+                                   .stream()
+                                   .filter(indexType::isInstance)
+                                   .map(indexType::cast)
+                                   .collect(Collectors.toSet());
+        return Index.getBestIndexFor(candidates, expression.column(), expression.operator());
     }
 
     /**
