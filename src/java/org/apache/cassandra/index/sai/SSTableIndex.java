@@ -102,7 +102,7 @@ public class SSTableIndex
             if (!perIndexComponents.isEmpty()
                 && context != null
                 && context.isVector()
-                && CassandraRelevantProperties.SAI_INDEX_LOAD_SEGMENT_METADATA_ONLY.getBoolean())
+                && CassandraRelevantProperties.SAI_INDEX_LOAD_SEGMENT_METADATA.getBoolean())
             {
                 logger.info("Creating a lazy index searcher for sstable {} as SAI index reads are disabled, but this is a vector index", sstableContext.sstable.descriptor.id);
                 return new V1MetadataOnlySearchableIndex(sstableContext, perIndexComponents);

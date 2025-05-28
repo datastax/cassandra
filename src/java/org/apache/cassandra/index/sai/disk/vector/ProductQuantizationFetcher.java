@@ -197,7 +197,7 @@ public class ProductQuantizationFetcher
         }
         catch (IOException e)
         {
-            logger.warn("Failed to read PQ from segment {}. Skipping", sm, e);
+            logger.warn("Failed to read PQ from segment {} for {}. Skipping", sm, fh, e);
         }
         return null;
     }
