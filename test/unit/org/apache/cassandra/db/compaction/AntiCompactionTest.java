@@ -288,7 +288,7 @@ public class AntiCompactionTest
                 writer.append(builder.build().unfilteredIterator());
 
             }
-            Collection<SSTableReader> sstables = writer.finish(true);
+            Collection<SSTableReader> sstables = writer.finish(true, null);
             assertNotNull(sstables);
             assertEquals(1, sstables.size());
             return sstables.iterator().next();
