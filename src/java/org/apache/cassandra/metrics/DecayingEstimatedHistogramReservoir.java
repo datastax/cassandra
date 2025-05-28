@@ -44,7 +44,8 @@ import org.apache.cassandra.utils.NoSpamLogger;
 import static java.lang.Math.max;
 import static java.lang.Math.min;
 import static org.apache.cassandra.config.CassandraRelevantProperties.DECAYING_ESTIMATED_HISTOGRAM_RESERVOIR_STRIPE_COUNT;
-import static org.apache.cassandra.utils.EstimatedHistogram.USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES;
+
+import org.apache.cassandra.config.CassandraRelevantProperties;
 
 /**
  * A decaying histogram reservoir where values collected during each minute will be twice as significant as the values
@@ -90,6 +91,7 @@ public class DecayingEstimatedHistogramReservoir implements SnapshottingReservoi
 {
     private static final Logger logger = LoggerFactory.getLogger(DecayingEstimatedHistogramReservoir.class);
     private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(logger, 5L, TimeUnit.MINUTES);
+    public static final boolean USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES = CassandraRelevantProperties.USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES.getBoolean();
     /**
      * The default number of decayingBuckets. Use this bucket count to reduce memory allocation for bucket offsets.
      */
@@ -245,7 +247,10 @@ public class DecayingEstimatedHistogramReservoir implements SnapshottingReservoi
         }
         else
         {
-            bucketOffsets = EstimatedHistogram.newOffsets(bucketCount, considerZeroes);
+            if (USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES)
+                bucketOffsets = newDseOffsets(bucketCount, considerZeroes);
+            else
+                bucketOffsets = EstimatedHistogram.newOffsets(bucketCount, considerZeroes);
         }
 
         nStripes = stripes;
