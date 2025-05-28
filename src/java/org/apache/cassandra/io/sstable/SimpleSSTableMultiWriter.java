@@ -49,9 +49,9 @@ public class SimpleSSTableMultiWriter implements SSTableMultiWriter
         writer.append(partition);
     }
 
-    public Collection<SSTableReader> finish(boolean openResult)
+    public Collection<SSTableReader> finish(boolean openResult, StorageHandler storageHandler)
     {
-        return Collections.singleton(writer.finish(openResult));
+        return Collections.singleton(writer.finish(openResult, storageHandler));
     }
 
     public Collection<SSTableReader> finished()
@@ -59,9 +59,9 @@ public class SimpleSSTableMultiWriter implements SSTableMultiWriter
         return Collections.singleton(writer.finished());
     }
 
-    public void openResult()
+    public void openResult(StorageHandler storageHandler)
     {
-        writer.openResult();
+        writer.openResult(storageHandler);
     }
 
     public String getFilename()

@@ -130,7 +130,7 @@ public class SSTableCorruptionDetectionTest extends SSTableWriterTestBase
         }
         Util.flush(cfs);
 
-        ssTableReader = writer.finish(true);
+        ssTableReader = writer.finish(true, null);
         txn.update(ssTableReader, false);
         LifecycleTransaction.waitForDeletions();
     }
