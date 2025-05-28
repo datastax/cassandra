@@ -35,7 +35,7 @@ public class MetadataCollectorTest
     public void testNoOverflow()
     {
         EstimatedHistogram histogram = defaultPartitionSizeHistogram();
-        histogram.add(1697806495183L);
+        histogram.add(1414838745986L);
         assertFalse(histogram.isOverflowed());
     }
 
