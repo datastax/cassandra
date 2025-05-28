@@ -112,6 +112,18 @@ public class CQLSSTableWriterTest
     @Test
     public void testUnsortedWriter() throws Exception
     {
+        testWriter(false);
+    }
+
+    @Test
+    public void testSortedWriter() throws Exception
+    {
+        testWriter(true);
+    }
+
+    private void testWriter(boolean sorted) throws Exception
+    {
+        // Note: the use of ByteOrdered makes this work for both sorted and unsorted case.
         try (AutoCloseable switcher = Util.switchPartitioner(ByteOrderedPartitioner.instance))
         {
             String schema = "CREATE TABLE " + qualifiedTable + " ("
@@ -123,10 +135,14 @@ public class CQLSSTableWriterTest
 
             SchemaLoader.load(keyspace, schema);
 
-            CQLSSTableWriter writer = CQLSSTableWriter.builder()
-                                                      .inDirectory(dataDir)
-                                                      .forTable(schema)
-                                                      .using(insert).build();
+            CQLSSTableWriter.Builder builder = CQLSSTableWriter.builder()
+                                                               .inDirectory(dataDir)
+                                                               .forTable(schema)
+                                                               .using(insert);
+            if (sorted)
+                builder.sorted();
+
+            CQLSSTableWriter writer = builder.build();
 
             writer.addRow(0, "test1", 24);
             writer.addRow(1, "test2", 44);
@@ -244,7 +260,6 @@ public class CQLSSTableWriterTest
         writer.close();
 
     }
-
 
 
     private static final int NUMBER_WRITES_IN_RUNNABLE = 10;
