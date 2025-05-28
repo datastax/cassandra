@@ -146,19 +146,6 @@ public class ShardedMultiWriter implements SSTableMultiWriter
     }
 
     @Override
-    public Collection<SSTableReader> finish(long repairedAt, long maxDataAge, boolean openResult, @Nullable StorageHandler storageHandler)
-    {
-        List<SSTableReader> sstables = new ArrayList<>(writers.length);
-        for (SSTableWriter writer : writers)
-            if (writer != null)
-            {
-                boundaries.applyTokenSpaceCoverage(writer);
-                sstables.add(writer.finish(repairedAt, maxDataAge, openResult, storageHandler));
-            }
-        return sstables;
-    }
-
-    @Override
     public Collection<SSTableReader> finish(boolean openResult, @Nullable StorageHandler storageHandler)
     {
         List<SSTableReader> sstables = new ArrayList<>(writers.length);

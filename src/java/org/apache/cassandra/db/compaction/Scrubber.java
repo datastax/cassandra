@@ -375,7 +375,8 @@ public class Scrubber implements Closeable
                 {
                     for (Partition partition : outOfOrder)
                         inOrderWriter.append(partition.unfilteredIterator());
-                    newInOrderSstable = inOrderWriter.finish(-1, sstable.maxDataAge, true, null);
+                    inOrderWriter.setMaxDataAge(sstable.maxDataAge);
+                    newInOrderSstable = inOrderWriter.finish(true, null);
                 }
                 transaction.update(newInOrderSstable, false);
                 finished.add(newInOrderSstable);

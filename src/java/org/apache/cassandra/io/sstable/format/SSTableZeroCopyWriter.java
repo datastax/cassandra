@@ -118,12 +118,6 @@ public class SSTableZeroCopyWriter extends SSTable implements SSTableMultiWriter
     }
 
     @Override
-    public Collection<SSTableReader> finish(long repairedAt, long maxDataAge, boolean openResult, StorageHandler storageHandler)
-    {
-        return finish(openResult, storageHandler);
-    }
-
-    @Override
     public Collection<SSTableReader> finish(boolean openResult, StorageHandler storageHandler)
     {
         for (SequentialWriter writer : componentWriters.values())

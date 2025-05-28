@@ -49,11 +49,6 @@ public class SimpleSSTableMultiWriter implements SSTableMultiWriter
         writer.append(partition);
     }
 
-    public Collection<SSTableReader> finish(long repairedAt, long maxDataAge, boolean openResult, StorageHandler storageHandler)
-    {
-        return Collections.singleton(writer.finish(repairedAt, maxDataAge, openResult, storageHandler));
-    }
-
     public Collection<SSTableReader> finish(boolean openResult, StorageHandler storageHandler)
     {
         return Collections.singleton(writer.finish(openResult, storageHandler));

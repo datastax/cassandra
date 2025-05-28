@@ -113,22 +113,6 @@ public class RangeAwareSSTableWriter implements SSTableMultiWriter
     }
 
     @Override
-    public Collection<SSTableReader> finish(long repairedAt, long maxDataAge, boolean openResult, StorageHandler storageHandler)
-    {
-        if (currentWriter != null)
-            finishedWriters.add(currentWriter);
-        currentWriter = null;
-        for (SSTableMultiWriter writer : finishedWriters)
-        {
-            if (writer.getBytesWritten() > 0)
-                finishedReaders.addAll(writer.finish(repairedAt, maxDataAge, openResult, storageHandler));
-            else
-                SSTableMultiWriter.abortOrDie(writer);
-        }
-        return finishedReaders;
-    }
-
-    @Override
     public Collection<SSTableReader> finish(boolean openResult, StorageHandler storageHandler)
     {
         if (currentWriter != null)

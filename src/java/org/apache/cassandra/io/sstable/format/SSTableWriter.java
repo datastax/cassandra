@@ -322,14 +322,6 @@ public abstract class SSTableWriter extends SSTable implements Transactional
      */
     public abstract SSTableReader openFinalEarly();
 
-    public SSTableReader finish(long repairedAt, long maxDataAge, boolean openResult, @Nullable StorageHandler storageHandler)
-    {
-        if (repairedAt > 0)
-            this.repairedAt = repairedAt;
-        this.maxDataAge = maxDataAge;
-        return finish(openResult, storageHandler);
-    }
-
     public SSTableReader finish(boolean openResult, @Nullable StorageHandler storageHandler)
     {
         prepareToCommit();
