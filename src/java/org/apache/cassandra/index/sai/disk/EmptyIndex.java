@@ -31,6 +31,7 @@ import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.disk.v1.Segment;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
+import org.apache.cassandra.index.sai.disk.vector.ProductQuantizationFetcher;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.plan.Orderer;
@@ -126,6 +127,12 @@ public class EmptyIndex implements SearchableIndex
     public Stream<V5VectorPostingsWriter.Structure> getPostingsStructures()
     {
         return Stream.empty();
+    }
+
+    @Override
+    public ProductQuantizationFetcher.PqInfo getPqInfo(int segmentPosition)
+    {
+        return null;
     }
 
     @Override

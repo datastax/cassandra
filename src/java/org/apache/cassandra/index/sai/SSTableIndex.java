@@ -26,6 +26,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.MoreObjects;
 import com.google.common.base.Objects;
 
@@ -49,6 +50,7 @@ import org.apache.cassandra.index.sai.disk.v1.Segment;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.v1.V1SearchableIndex;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
+import org.apache.cassandra.index.sai.disk.vector.ProductQuantizationFetcher;
 import org.apache.cassandra.index.sai.iterators.KeyRangeAntiJoinIterator;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.plan.Expression;
@@ -145,15 +147,15 @@ public class SSTableIndex
         return searchableIndex.getSegmentMetadatas();
     }
 
+    @VisibleForTesting
     public boolean areSegmentsLoaded()
     {
         return searchableIndex instanceof V1SearchableIndex;
     }
 
-    public PerIndexFiles indexFiles()
+    public ProductQuantizationFetcher.PqInfo getPqInfo(int segmentPosition)
     {
-        assert searchableIndex instanceof V1MetadataOnlySearchableIndex;
-        return ((V1MetadataOnlySearchableIndex) searchableIndex).indexFiles();
+        return searchableIndex.getPqInfo(segmentPosition);
     }
 
     public long indexFileCacheSize()

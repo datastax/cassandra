@@ -112,27 +112,7 @@ public class ProductQuantizationFetcher
         @SuppressWarnings("resource")
         private PqInfo getPqInfo()
         {
-            if (sstableIndex.areSegmentsLoaded())
-            {
-                var segment = sstableIndex.getSegments().get(segmentPosition);
-                V2VectorIndexSearcher searcher = (V2VectorIndexSearcher) segment.getIndexSearcher();
-                // Skip segments that don't have PQ
-                if (VectorCompression.CompressionType.PRODUCT_QUANTIZATION != searcher.getCompression().type)
-                    return null;
-
-                // Because we sorted based on size then timestamp, this is the best match
-                return new PqInfo(searcher.getPQ(), searcher.containsUnitVectors(), segment.metadata.numRows);
-            }
-            else
-            {
-                // We have to load from disk here
-                var segmentMetadata = sstableIndex.getSegmentMetadatas().get(segmentPosition);
-                try (var pq = sstableIndex.indexFiles().pq())
-                {
-                    // Returns null if wrong uses wrong compression type.
-                    return maybeReadPqFromSegment(segmentMetadata, pq);
-                }
-            }
+            return sstableIndex.getPqInfo(segmentPosition);
         }
 
         @Override

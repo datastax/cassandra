@@ -32,6 +32,7 @@ import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.disk.v1.Segment;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
+import org.apache.cassandra.index.sai.disk.vector.ProductQuantizationFetcher;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.plan.Orderer;
@@ -90,6 +91,8 @@ public interface SearchableIndex extends Closeable
     List<SegmentMetadata> getSegmentMetadatas();
 
     Stream<V5VectorPostingsWriter.Structure> getPostingsStructures();
+
+    ProductQuantizationFetcher.PqInfo getPqInfo(int segmentPosition);
 
     public void populateSystemView(SimpleDataSet dataSet, SSTableReader sstable);
 

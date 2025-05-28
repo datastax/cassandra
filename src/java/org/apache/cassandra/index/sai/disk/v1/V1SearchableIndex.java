@@ -36,8 +36,11 @@ import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SSTableContext;
 import org.apache.cassandra.index.sai.disk.SearchableIndex;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
+import org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorIndexSearcher;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
+import org.apache.cassandra.index.sai.disk.vector.ProductQuantizationFetcher;
+import org.apache.cassandra.index.sai.disk.vector.VectorCompression;
 import org.apache.cassandra.index.sai.iterators.KeyRangeConcatIterator;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.plan.Expression;
@@ -269,6 +272,20 @@ public class V1SearchableIndex implements SearchableIndex
                        .filter(s -> s.getIndexSearcher() instanceof V5VectorIndexSearcher)
                        .map(s -> (V5VectorIndexSearcher) s.getIndexSearcher())
                        .map(V5VectorIndexSearcher::getPostingsStructure);
+    }
+
+    @Override
+    public ProductQuantizationFetcher.PqInfo getPqInfo(int segmentPosition)
+    {
+        var segment = segments.get(segmentPosition);
+        assert segment.getIndexSearcher() instanceof V2VectorIndexSearcher : "Index searcher is not a V2VectorIndexSearcher. Found: " + segment.getIndexSearcher().getClass();
+        V2VectorIndexSearcher searcher = (V2VectorIndexSearcher) segment.getIndexSearcher();
+        // Skip segments that don't have PQ
+        if (VectorCompression.CompressionType.PRODUCT_QUANTIZATION != searcher.getCompression().type)
+            return null;
+
+        // Because we sorted based on size then timestamp, this is the best match
+        return new ProductQuantizationFetcher.PqInfo(searcher.getPQ(), searcher.containsUnitVectors(), segment.metadata.numRows);
     }
 
     @Override

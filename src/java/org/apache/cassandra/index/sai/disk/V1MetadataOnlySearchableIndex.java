@@ -37,6 +37,7 @@ import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
 import org.apache.cassandra.index.sai.disk.v1.Segment;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
+import org.apache.cassandra.index.sai.disk.vector.ProductQuantizationFetcher;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.plan.Orderer;
@@ -204,9 +205,15 @@ public class V1MetadataOnlySearchableIndex implements SearchableIndex
                         });
     }
 
-    public PerIndexFiles indexFiles()
+    @Override
+    public ProductQuantizationFetcher.PqInfo getPqInfo(int segmentPosition)
     {
-        return indexFiles;
+        // We have to load from disk here
+        try (var pq = indexFiles.pq())
+        {
+            // Returns null if wrong uses wrong compression type.
+            return ProductQuantizationFetcher.maybeReadPqFromSegment(metadatas.get(segmentPosition), pq);
+        }
     }
 
     @Override
