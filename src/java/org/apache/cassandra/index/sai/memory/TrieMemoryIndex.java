@@ -93,6 +93,7 @@ public class TrieMemoryIndex extends MemoryIndex
     private final boolean analyzerTransformsValue;
     private final Map<PrimaryKey, Integer> docLengths = new HashMap<>();
     private final AtomicInteger indexedRows = new AtomicInteger(0);
+    private final LongAdder totalTermCount = new LongAdder();
 
     private final Memtable memtable;
     private AbstractBounds<PartitionPosition> keyBounds;
@@ -135,6 +136,17 @@ public class TrieMemoryIndex extends MemoryIndex
     public int indexedRows()
     {
         return indexedRows.get();
+    }
+
+    /**
+     * The count of terms for indexed rows is maintainded during insersions and updates.
+     * Deletes are accounted for. Thus, the count is approximated.
+     *
+     * @return the total number of terms in the indexed rows
+     */
+    public long approximateTotalTermCount()
+    {
+        return totalTermCount.sum();
     }
 
     public synchronized void add(DecoratedKey key,
@@ -263,6 +275,12 @@ public class TrieMemoryIndex extends MemoryIndex
             Object prev = docLengths.put(primaryKey, tokenCount);
             if (prev != null)
             {
+                // An update first transforms with Accumulator to the new value,
+                // then transforms with Remover from the old value.
+                if (transformer instanceof PrimaryKeysAccumulator)
+                    totalTermCount.add(tokenCount);
+                if (transformer instanceof PrimaryKeysRemover)
+                    totalTermCount.add(-tokenCount);
                 // heap used for doc lengths
                 long heapUsed = RamUsageEstimator.HASHTABLE_RAM_BYTES_PER_ENTRY
                                 + primaryKey.ramBytesUsed() // TODO do we count these bytes?
@@ -272,6 +290,7 @@ public class TrieMemoryIndex extends MemoryIndex
             else
             {
                 indexedRows.incrementAndGet();
+                totalTermCount.add(tokenCount);
             }
 
             // memory used by the trie

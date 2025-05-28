@@ -863,10 +863,21 @@ public class BM25Test extends SAITester
                                        .map(this::calculateTotalTermsForRow)
                                        .sum();
 
-        assertNumRowsMemtable(scoreIndexName, DATASET.length);
-        assertNumRowsMemtable(bodyIndexName, DATASET.length);
+        assertNumRowsMemtable(scoreIndexName, DATASET.length, DATASET.length);
+        assertNumRowsMemtable(bodyIndexName, DATASET.length, totalTermsCount);
         assertNumRowsMemtable(mapIndexName, DATASET.length);
         execute("DELETE FROM %s WHERE id = ?", 5);
+        // Deletion is not tracked by Memindex
+        assertNumRowsMemtable(bodyIndexName, DATASET.length, totalTermsCount);
+        // Test an update to different value for analyzed index
+        execute("UPDATE %s SET body = ? WHERE id = ?", DATASET[10][DATASET_BODY_COLUMN], 7);
+        totalTermsCount += calculateTotalTermsForRow(10) - calculateTotalTermsForRow(6);
+        assertNumRowsMemtable(bodyIndexName, DATASET.length, totalTermsCount);
+        // Update back to the original value
+        execute("UPDATE %s SET body = ? WHERE id = ?", DATASET[6][DATASET_BODY_COLUMN], 11);
+        totalTermsCount += calculateTotalTermsForRow(6) - calculateTotalTermsForRow(10);
+        assertNumRowsMemtable(bodyIndexName, DATASET.length, totalTermsCount);
+        // Flush will account for the deleted row
         totalTermsCount -= calculateTotalTermsForRow(4);
         flush();
         assertNumRowsAndTotalTermsSSTable(scoreIndexName, DATASET.length - 1, DATASET.length - 1);
@@ -886,17 +897,24 @@ public class BM25Test extends SAITester
 
     private void assertNumRowsMemtable(String indexName, int expectedNumRows)
     {
+        assertNumRowsMemtable(indexName, expectedNumRows, -1);
+    }
+
+    private void assertNumRowsMemtable(String indexName, int expectedNumRows, int expectedTotalTermsCount)
+    {
         int rowCount = 0;
+        long termCount = 0;
 
         for (var memtable : getCurrentColumnFamilyStore().getAllMemtables())
         {
             MemtableIndex memIndex = getIndexContext(indexName).getLiveMemtables().get(memtable);
             assert memIndex instanceof TrieMemtableIndex;
-            rowCount = Arrays.stream(((TrieMemtableIndex) memIndex).getRangeIndexes())
-                             .map(index -> ((TrieMemoryIndex) index).getDocLengths().size())
-                             .mapToInt(Integer::intValue).sum();
+            rowCount += ((TrieMemtableIndex) memIndex).indexedRows();
+            termCount += ((TrieMemtableIndex) memIndex).approximateTotalTermCount();
         }
         assertEquals(expectedNumRows, rowCount);
+        if (expectedTotalTermsCount >= 0)
+            assertEquals(expectedTotalTermsCount, termCount);
     }
 
     private void assertNumRowsSSTable(String indexName, int expectedNumRows)
@@ -923,7 +941,7 @@ public class BM25Test extends SAITester
         }
         assertEquals(indexRowCount, segmentRowCount);
         assertEquals(expectedNumRows, indexRowCount);
-        if (expectedTotalTermsCount > 0)
+        if (expectedTotalTermsCount >= 0)
             assertEquals(expectedTotalTermsCount, totalTermCount);
     }
 
