@@ -78,7 +78,6 @@ public class ProductQuantizationFetcher
     public static class PqInfo
     {
         public final ProductQuantization pq;
-        /** an empty Optional indicates that the index was written with an older version that did not record this information */
         public final boolean unitVectors;
         public final long rowCount;
 
