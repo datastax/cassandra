@@ -22,7 +22,7 @@ import org.assertj.core.api.Assertions;
 public class PartitionRangeReadCommandCQLTest extends ReadCommandCQLTester<PartitionRangeReadCommand>
 {
     @Test
-    public void assertToCQLString()
+    public void testToCQLString()
     {
         createTable("CREATE TABLE %s (k int, c int, v int, PRIMARY KEY (k, c))");
 
