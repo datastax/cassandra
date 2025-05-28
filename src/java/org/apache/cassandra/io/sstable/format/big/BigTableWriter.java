@@ -232,6 +232,12 @@ public class BigTableWriter extends SortedTableWriter<BigFormatPartitionWriter, 
         return openInternal(null, openReason);
     }
 
+    @Override
+    public void openResult(@javax.annotation.Nullable org.apache.cassandra.io.sstable.StorageHandler storageHandler)
+    {
+        txnProxy.openResult(storageHandler);
+    }
+
     /**
      * Encapsulates writing the index and filter for an SSTable. The state of this object is not valid until it has been closed.
      */

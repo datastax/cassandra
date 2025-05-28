@@ -101,11 +101,11 @@ public class SSTableTxnWriter extends Transactional.AbstractTransactional implem
         return super.doPostCleanup(accumulate);
     }
 
-    public Collection<SSTableReader> finish(boolean openResult)
+    public Collection<SSTableReader> finish(boolean openResult, StorageHandler storageHandler)
     {
         prepareToCommit();
         if (openResult)
-            writer.openResult();
+            writer.openResult(storageHandler);
         commit();
         return writer.finished();
     }

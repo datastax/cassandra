@@ -268,7 +268,7 @@ class SSTableSimpleUnsortedWriter extends AbstractSSTableSimpleWriter
                     {
                         for (Map.Entry<DecoratedKey, PartitionUpdate.Builder> entry : b.entrySet())
                             writer.append(entry.getValue().build().unfilteredIterator());
-                        Collection<SSTableReader> finished = writer.finish(shouldOpenSSTables());
+                        Collection<SSTableReader> finished = writer.finish(shouldOpenSSTables(), null);
                         notifySSTableProduced(finished);
                     }
                 }
