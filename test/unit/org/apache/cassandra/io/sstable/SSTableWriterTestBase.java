@@ -36,6 +36,7 @@ import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.compaction.CompactionManager;
+import org.apache.cassandra.db.lifecycle.ILifecycleTransaction;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.rows.EncodingStats;
 import org.apache.cassandra.exceptions.ConfigurationException;
@@ -154,7 +155,7 @@ public class SSTableWriterTestBase extends SchemaLoader
             assertFalse(CompactionManager.instance.submitMaximal(cfs, cfs.gcBefore((int) (System.currentTimeMillis() / 1000)), false).isEmpty());
     }
 
-    public static SSTableWriter getWriter(ColumnFamilyStore cfs, File directory, LifecycleTransaction txn, long repairedAt, TimeUUID pendingRepair, boolean isTransient)
+    public static SSTableWriter getWriter(ColumnFamilyStore cfs, File directory, ILifecycleTransaction txn, long repairedAt, TimeUUID pendingRepair, boolean isTransient)
     {
         Descriptor desc = cfs.newSSTableDescriptor(directory);
         return desc.getFormat().getWriterFactory().builder(desc)
@@ -170,12 +171,12 @@ public class SSTableWriterTestBase extends SchemaLoader
                    .build(txn, cfs);
     }
 
-    public static SSTableWriter getWriter(ColumnFamilyStore cfs, File directory, LifecycleTransaction txn)
+    public static SSTableWriter getWriter(ColumnFamilyStore cfs, File directory, ILifecycleTransaction txn)
     {
         return getWriter(cfs, directory, txn, 0, null, false);
     }
 
-    public static SSTableWriter getWriter(SSTableFormat<?, ?> format, ColumnFamilyStore cfs, File directory, LifecycleTransaction txn)
+    public static SSTableWriter getWriter(SSTableFormat<?, ?> format, ColumnFamilyStore cfs, File directory, ILifecycleTransaction txn)
     {
         Descriptor desc = cfs.newSSTableDescriptor(directory, format);
         return desc.getFormat().getWriterFactory().builder(desc)
