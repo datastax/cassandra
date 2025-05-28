@@ -643,6 +643,68 @@ public class IndexHintsTest extends CQLTester
     }
 
     @Test
+    public void testLegacy()
+    {
+        testSingletonIndex("CREATE INDEX %s ON %%s(%s)");
+    }
+
+    @Test
+    public void testSASI()
+    {
+        testSingletonIndex("CREATE CUSTOM INDEX %s ON %%s(%s) USING 'org.apache.cassandra.index.sasi.SASIIndex'");
+    }
+
+    private void testSingletonIndex(String createIndexQuery)
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v1 int, v2 int)");
+        String idx1 = createIndex(format(createIndexQuery, "idx1", "v1"));
+        String idx2 = createIndex(format(createIndexQuery, "idx2", "v2"));
+
+        String insert = "INSERT INTO %s (k, v1, v2) VALUES (?, ?, ?)";
+        Object[] row1 = new Object[]{ 1, 0, 0 };
+        Object[] row2 = new Object[]{ 2, 0, 1 };
+        Object[] row3 = new Object[]{ 3, 1, 0 };
+        Object[] row4 = new Object[]{ 4, 1, 1 };
+        execute(insert, row1);
+        execute(insert, row2);
+        execute(insert, row3);
+        execute(insert, row4);
+
+        // without any hints
+        assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v1=0", row1, row2).selects(idx1);
+        assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v2=0", row1, row3).selects(idx2);
+        assertNeedsAllowFiltering("SELECT * FROM %s WHERE v1=0 AND v2=0");
+        assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING", row1).selectsAnyOf(idx1, idx2);
+
+        // including idx1
+        assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v1=0 WITH included_indexes={idx1}", row1, row2).selects(idx1);
+        assertNonIncludableIndexesError("SELECT * FROM %s WHERE v2=0 WITH included_indexes={idx1}");
+        assertNeedsAllowFiltering("SELECT * FROM %s WHERE v1=0 AND v2=0 WITH included_indexes={idx1}");
+        assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING WITH included_indexes={idx1}", row1).selects(idx1);
+
+        // including idx1 and idx2
+        assertNonIncludableIndexesError("SELECT * FROM %s WHERE v1=0 WITH included_indexes={idx1,idx2}");
+        assertNonIncludableIndexesError("SELECT * FROM %s WHERE v2=0 WITH included_indexes={idx1,idx2}");
+        assertNeedsAllowFiltering("SELECT * FROM %s WHERE v1=0 AND v2=0 WITH included_indexes={idx1,idx2}");
+        assertNonIncludableIndexesError("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING WITH included_indexes={idx1,idx2}");
+
+        // excluding idx1
+        assertNeedsAllowFiltering("SELECT * FROM %s WHERE v1=0 WITH excluded_indexes={idx1}");
+        assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v1=0 ALLOW FILTERING WITH excluded_indexes={idx1}", row1, row2).selectsNone();
+        assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v2=0 WITH excluded_indexes={idx1}", row1, row3).selects(idx2);
+        assertNeedsAllowFiltering("SELECT * FROM %s WHERE v1=0 AND v2=0 WITH excluded_indexes={idx1}");
+        assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING WITH excluded_indexes={idx1}", row1).selects(idx2);
+
+        // excluding idx1 and idx2
+        assertNeedsAllowFiltering("SELECT * FROM %s WHERE v1=0 WITH excluded_indexes={idx1,idx2}");
+        assertNeedsAllowFiltering("SELECT * FROM %s WHERE v2=0 WITH excluded_indexes={idx1,idx2}");
+        assertNeedsAllowFiltering("SELECT * FROM %s WHERE v1=0 AND v2=0 WITH excluded_indexes={idx1,idx2}");
+        assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v1=0 ALLOW FILTERING WITH excluded_indexes={idx1,idx2}", row1, row2).selectsNone();
+        assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v2=0 ALLOW FILTERING WITH excluded_indexes={idx1,idx2}", row1, row3).selectsNone();
+        assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v1=0 AND v2=0 ALLOW FILTERING WITH excluded_indexes={idx1,idx2}", row1).selectsNone();
+    }
+
+    @Test
     public void testMixedIndexImplementations()
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v1 int, v2 int, v3 int)");
