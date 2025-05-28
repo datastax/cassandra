@@ -359,7 +359,7 @@ public class SSTableRewriter extends Transactional.AbstractTransactional impleme
             assert writer.getFilePointer() > 0;
             writer.setRepairedAt(repairedAt);
             writer.prepareToCommit();
-            writer.openResult();
+            writer.openResult(null);
             SSTableReader reader = writer.finished();
             transaction.update(reader, false);
             preparedForCommit.add(reader);

@@ -112,7 +112,7 @@ public class RangeAwareSSTableWriter implements SSTableMultiWriter
     }
 
     @Override
-    public Collection<SSTableReader> finish(boolean openResult)
+    public Collection<SSTableReader> finish(boolean openResult, StorageHandler storageHandler)
     {
         if (currentWriter != null)
             finishedWriters.add(currentWriter);
@@ -120,7 +120,7 @@ public class RangeAwareSSTableWriter implements SSTableMultiWriter
         for (SSTableMultiWriter writer : finishedWriters)
         {
             if (writer.getBytesWritten() > 0)
-                finishedReaders.addAll(writer.finish(openResult));
+                finishedReaders.addAll(writer.finish(openResult, storageHandler));
             else
                 SSTableMultiWriter.abortOrDie(writer);
         }
@@ -134,10 +134,10 @@ public class RangeAwareSSTableWriter implements SSTableMultiWriter
     }
 
     @Override
-    public void openResult()
+    public void openResult(StorageHandler storageHandler)
     {
-        finishedWriters.forEach(SSTableMultiWriter::openResult);
-        currentWriter.openResult();
+        finishedWriters.forEach(w -> w.openResult(storageHandler));
+        currentWriter.openResult(storageHandler);
     }
 
     public String getFilename()
