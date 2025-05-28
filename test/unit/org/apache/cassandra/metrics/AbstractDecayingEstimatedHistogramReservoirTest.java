@@ -83,7 +83,12 @@ public abstract class AbstractDecayingEstimatedHistogramReservoirTest
             assertEquals(useDseHistogramBehaviour, CassandraRelevantProperties.USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES.getBoolean());
             return integers().from(DecayingEstimatedHistogramReservoir.DEFAULT_BUCKET_COUNT)
                              .upToAndIncluding(DecayingEstimatedHistogramReservoir.MAX_BUCKET_COUNT - 10)
-                             .zip(booleans().all(), EstimatedHistogram::newOffsets);
+                             .zip(booleans().all(), (size, considerZeroes) -> {
+                                 if (useDseHistogramBehaviour)
+                                     return DecayingEstimatedHistogramReservoir.newDseOffsets(size, considerZeroes);
+                                 else
+                                     return EstimatedHistogram.newOffsets(size, considerZeroes);
+                             });
         }
 
         public NonParameterizedTests()
