@@ -26,6 +26,7 @@ import org.junit.Test;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.Message;
+import org.apache.cassandra.net.Verb;
 
 public class FailureRecordingCallbackTest
 {
@@ -40,7 +41,7 @@ public class FailureRecordingCallbackTest
             @Override
             public boolean invokeOnFailure() { return super.invokeOnFailure();}
             @Override
-            public boolean trackLatencyForSnitch() { return super.trackLatencyForSnitch();}
+            public boolean trackLatencyForSnitch(Verb responseVerb, boolean isTimeout) { return super.trackLatencyForSnitch(responseVerb, isTimeout);}
         };
         cb.onFailureWithMutex(InetAddressAndPort.getByName("127.0.0.1"), RequestFailureReason.UNKNOWN);
         cb.onFailureWithMutex(InetAddressAndPort.getByName("127.0.0.2"), RequestFailureReason.UNKNOWN);

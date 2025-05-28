@@ -171,7 +171,7 @@ public class SSTableFlushObserverTest
 
                 writer.append(new RowIterator(cfm, key, Collections.singletonList(buildRow(expected.get(key)))));
                 writer.onSSTableWriterSwitched();
-                reader = writer.finish(true);
+                reader = writer.finish(true, null);
             }
             finally
             {
