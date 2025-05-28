@@ -38,6 +38,7 @@ import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.TOCComponent;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.PathUtils;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.NoSpamLogger;
 
@@ -80,10 +81,30 @@ public abstract class IndexComponentDiscovery
      * @return the discovered {@link ComponentsBuildId} to use for both per-sstable and each per-index components. The
      * returned build IDs should usually correspond to existing index components on disk but this is not a strong
      * asumption: if some group of components corresponding to the returned build ID has no completion marker or is
-     * missing files, the group will not be usuable (and the corresponding index/indexes will not be usable) but this
+     * missing files, the group will not be usuable (and the corresponding index/indexes will not be usable), but this
      * should be handled "gracefully" by callers.
      */
     public abstract SSTableIndexComponentsState discoverComponents(SSTableReader sstable);
+
+    /**
+     * Returns the set of groups of SAI components that should be used for the provided sstable.
+     * <p>
+     * Note that "discovery" in this method only means finding out the "build ID" (version and generation) that should
+     * be used for each group of components (per-sstable and per-index).
+     * <p>
+     * Please note that the {@link #discoverComponents(SSTableReader)} method should be prefered when a
+     * {@link SSTableReader} exists as some implementations may be more optimal or use additional checks when provided
+     * a reader.
+     *
+     * @param descriptor the descriptor of the sstable for which to discover components.
+     * @param metadata the metadata of the table the sstable belongs to.
+     * @return the discovered {@link ComponentsBuildId} to use for both per-sstable and each per-index component. The
+     * returned build IDs should usually correspond to existing index components on disk, but this is not a strong
+     * asumption: if some group of components corresponding to the returned build ID has no completion marker or is
+     * missing files, the group will not be usuable (and the corresponding index/indexes will not be usable), but this
+     * should be handled "gracefully" by callers.
+     */
+    public abstract SSTableIndexComponentsState discoverComponents(Descriptor descriptor, TableMetadata metadata);
 
     protected static IndexComponentType completionMarker(@Nullable String name)
     {

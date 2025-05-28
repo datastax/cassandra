@@ -29,6 +29,8 @@ import java.util.Set;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
+import javax.annotation.Nullable;
+
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
@@ -50,6 +52,7 @@ import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.sstable.SSTableFlushObserver;
 import org.apache.cassandra.io.sstable.SSTableZeroCopyWriter;
+import org.apache.cassandra.io.sstable.StorageHandler;
 import org.apache.cassandra.io.sstable.format.SSTableFormat.Components;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.io.sstable.metadata.MetadataComponent;
@@ -234,10 +237,15 @@ public abstract class SSTableWriter extends SSTable implements Transactional, SS
         return this;
     }
 
-    public void openResult()
-    {
-        txnProxy.openResult();
-    }
+    /**
+     * Open the resultant SSTableReader after it has been fully written.
+     *
+     * @param storageHandler the underlying storage handler. This is used in case of a failure opening the
+     *                       SSTableReader to call the `StorageHandler#onOpeningWrittenSSTableFailure` callback, which
+     *                       in some implementations may attempt to recover from the error. If `null`, the said callback
+     *                       will not be called on failure.
+     */
+    public abstract void openResult(@Nullable StorageHandler storageHandler);
 
     /**
      * Open the resultant SSTableReader before it has been fully written.
@@ -259,11 +267,11 @@ public abstract class SSTableWriter extends SSTable implements Transactional, SS
 
     protected abstract SSTableReader openFinal(SSTableReader.OpenReason openReason);
 
-    public SSTableReader finish(boolean openResult)
+    public SSTableReader finish(boolean openResult, @Nullable StorageHandler storageHandler)
     {
         prepareToCommit();
         if (openResult)
-            openResult();
+            openResult(storageHandler);
         txnProxy.commit();
         return finished();
     }
@@ -376,6 +384,11 @@ public abstract class SSTableWriter extends SSTable implements Transactional, SS
             this.transactionals = transactionals;
         }
 
+        public void openResult(@Nullable StorageHandler storageHandler)
+        {
+            openResultInternal(storageHandler);
+        }
+
         // finalise our state on disk, including renaming
         protected void doPrepare()
         {
@@ -386,9 +399,33 @@ public abstract class SSTableWriter extends SSTable implements Transactional, SS
             TOCComponent.appendTOC(descriptor, components());
         }
 
-        private void openResult()
+        protected void openResultInternal(@Nullable StorageHandler storageHandler)
         {
-            finalReader = openFinal(SSTableReader.OpenReason.NORMAL);
+            try
+            {
+                finalReader = openFinal(SSTableReader.OpenReason.NORMAL);
+            }
+            catch (Throwable t)
+            {
+                if (storageHandler != null)
+                {
+                    StatsMetadata stats = statsMetadata();
+                    finalReader = storageHandler.onOpeningWrittenSSTableFailure(SSTableReader.OpenReason.NORMAL,
+                                                                                descriptor,
+                                                                                components(),
+                                                                                getOnDiskFilePointer(),
+                                                                                getFilePointer(),
+                                                                                stats,
+                                                                                first,
+                                                                                last,
+                                                                                stats.totalRows,
+                                                                                t);
+                }
+                else
+                {
+                    throw Throwables.unchecked(t);
+                }
+            }
         }
 
         protected Throwable doCommit(Throwable accumulate)

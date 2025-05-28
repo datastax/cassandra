@@ -231,7 +231,7 @@ public class SSTableUtils
             SerializationHeader header = appender.header();
             SSTableTxnWriter writer = SSTableTxnWriter.create(cfs, Descriptor.fromFileWithComponent(datafile, false).left, expectedSize, UNREPAIRED_SSTABLE, NO_PENDING_REPAIR, false, header);
             while (appender.append(writer)) { /* pass */ }
-            Collection<SSTableReader> readers = writer.finish(true);
+            Collection<SSTableReader> readers = writer.finish(true, null);
 
             // mark all components for removal
             if (cleanup)
