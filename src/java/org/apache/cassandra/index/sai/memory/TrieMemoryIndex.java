@@ -139,8 +139,8 @@ public class TrieMemoryIndex extends MemoryIndex
     }
 
     /**
-     * The count of terms for indexed rows is maintainded during insersions and updates.
-     * Deletes are accounted for. Thus, the count is approximated.
+     * The count of terms for indexed rows is maintained during insertions and updates.
+     * Deletes are not accounted for. Thus, the count is approximated.
      *
      * @return the total number of terms in the indexed rows
      */
