@@ -36,7 +36,6 @@ import org.apache.cassandra.metrics.DecayingEstimatedHistogramReservoir;
 public class EstimatedHistogram
 {
     public static final EstimatedHistogramSerializer serializer = new EstimatedHistogramSerializer();
-    public static final boolean USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES = CassandraRelevantProperties.USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES.getBoolean();
 
     /**
      * The series of values to which the counts in `buckets` correspond:
@@ -91,10 +90,7 @@ public class EstimatedHistogram
 
     public static long[] newOffsets(int size, boolean considerZeroes)
     {
-        if (USE_DSE_COMPATIBLE_HISTOGRAM_BOUNDARIES)
-            return DecayingEstimatedHistogramReservoir.newDseOffsets(size, considerZeroes);
-        else
-            return newCassandraOffsets(size, considerZeroes);
+        return newCassandraOffsets(size, considerZeroes);
     }
 
     public static long[] newCassandraOffsets(int size, boolean considerZeroes)
