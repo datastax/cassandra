@@ -41,9 +41,9 @@ public abstract class ColumnQueryMetrics extends AbstractMetrics
         /**
          * Trie index metrics.
          */
-        private final Timer termsTraversalTotalTime;
+        public final Timer termsTraversalTotalTime;
 
-        private final QueryEventListener.PostingListEventListener postingsListener;
+        public final QueryEventListener.PostingListEventListener postingsListener;
 
         public TrieIndexMetrics(String keyspace, String table, String indexName)
         {
@@ -79,9 +79,9 @@ public abstract class ColumnQueryMetrics extends AbstractMetrics
         /**
          * BKD index metrics.
          */
-        private final Timer intersectionLatency;
-        private final Meter postingsNumPostings;
-        private final Meter intersectionEarlyExits;
+        public final Timer intersectionLatency;
+        public final Meter postingsNumPostings;
+        public final Meter intersectionEarlyExits;
 
         private final QueryEventListener.PostingListEventListener postingsListener;
 

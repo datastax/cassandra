@@ -24,7 +24,6 @@ import java.util.stream.Collectors;
 import com.google.common.annotations.VisibleForTesting;
 
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
-import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.disk.vector.VectorSourceModel;
@@ -370,8 +369,7 @@ public class IndexWriterConfig
             }
         }
 
-        return new IndexWriterConfig(indexName, skip, minLeaves, maximumNodeConnections, queueSize,
-                                   similarityFunction, sourceModel, neighborhoodOverflow, alpha, enableHierarchy);
+        return new IndexWriterConfig(indexName, skip, minLeaves, maximumNodeConnections, queueSize, similarityFunction, sourceModel, neighborhoodOverflow, alpha, enableHierarchy);
     }
 
     public static IndexWriterConfig defaultConfig(String indexName)

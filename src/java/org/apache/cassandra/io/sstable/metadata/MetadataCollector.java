@@ -56,7 +56,8 @@ public class MetadataCollector implements PartitionStatisticsCollector
 
     static EstimatedHistogram defaultPartitionSizeHistogram()
     {
-        // EH of 150 can track a max value of 1697806495183, i.e., > 1.5PB
+        // EH of 150 can track a max value of 1414838745986, i.e., ~ 1.5PB
+        // see {@link MetadataCollectorTest#testFindMaxSampleWithoutOverflow} for details
         return new EstimatedHistogram(150);
     }
 

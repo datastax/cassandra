@@ -122,6 +122,12 @@ public class SkipListMemtable extends AbstractAllocatorMemtable
             {
                 return null;
             }
+
+            @Override
+            public int getMemtableFlushPeriodInMs()
+            {
+                return -1;
+            }
         });
     }
 
@@ -134,6 +140,12 @@ public class SkipListMemtable extends AbstractAllocatorMemtable
     public void addMemoryUsageTo(MemoryUsage stats)
     {
         super.addMemoryUsageTo(stats);
+    }
+
+    @Override
+    public void signalFlushRequired(ColumnFamilyStore.FlushReason flushReason, boolean skipIfSignaled)
+    {
+        owner.signalFlushRequired(this, flushReason);
     }
 
     public boolean isClean()

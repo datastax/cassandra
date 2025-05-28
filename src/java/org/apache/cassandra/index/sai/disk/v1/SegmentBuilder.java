@@ -116,6 +116,7 @@ public abstract class SegmentBuilder
     private long maxSSTableRowId = -1;
     private long segmentRowIdOffset = 0;
     int rowCount = 0;
+    long totalTermCount = 0;
     int maxSegmentRowId = -1;
     // in token order
     private PrimaryKey minKey;
@@ -170,7 +171,7 @@ public abstract class SegmentBuilder
             try (NumericIndexWriter writer = new NumericIndexWriter(components,
                                                                     TypeUtil.fixedSizeOf(termComparator),
                                                                     maxSegmentRowId,
-                                                                    rowCount,
+                                                                    kdTreeRamBuffer.numPoints(),
                                                                     indexWriterConfig))
             {
 
@@ -466,6 +467,7 @@ public abstract class SegmentBuilder
         metadataBuilder.setRowIdRange(minSSTableRowId, maxSSTableRowId);
         metadataBuilder.setTermRange(minTerm, maxTerm);
         metadataBuilder.setNumRows(getRowCount());
+        metadataBuilder.setTotalTermCount(totalTermCount);
 
         flushInternal(metadataBuilder);
         return metadataBuilder.build();
@@ -478,10 +480,12 @@ public abstract class SegmentBuilder
         {
             var terms = ByteLimitedMaterializer.materializeTokens(analyzer, rawTerm, components.context(), key);
             totalSize += add(terms, key, sstableRowId);
+            totalTermCount += terms.size();
         }
         else
         {
             totalSize += add(List.of(rawTerm), key, sstableRowId);
+            totalTermCount++;
         }
         return totalSize;
     }
@@ -620,8 +624,10 @@ public abstract class SegmentBuilder
     }
 
     @VisibleForTesting
-    public static void updateLastValidSegmentRowId(long lastValidSegmentRowID)
+    public static long updateLastValidSegmentRowId(long lastValidSegmentRowID)
     {
+        long current = testLastValidSegmentRowId;
         testLastValidSegmentRowId = lastValidSegmentRowID;
+        return current;
     }
 }

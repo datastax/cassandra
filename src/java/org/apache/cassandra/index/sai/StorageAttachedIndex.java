@@ -234,8 +234,9 @@ public class StorageAttachedIndex implements Index
     // Tracks whether or not we've started the index build on initialization.
     private volatile boolean canFlushFromMemtableIndex = false;
 
-    // Tracks whether the index has been invalidated due to removal, a table drop, etc.
-    private volatile boolean valid = true;
+    // Tracks whether the index has been dropped due to removal, a table drop, etc or index schema is unloaded after schema unassignment
+    private volatile boolean dropped = false;
+    private volatile boolean unloaded = false;
 
     /**
      * Called via reflection from SecondaryIndexManager
@@ -554,7 +555,7 @@ public class StorageAttachedIndex implements Index
         return () ->
         {
             // mark index as invalid, in-progress SSTableIndexWriters will abort
-            valid = false;
+            dropped = true;
 
             // in case of dropping table, SSTable indexes should already been removed by SSTableListChangedNotification.
             for (SSTableIndex sstableIndex : indexContext.getView().getIndexes())
@@ -574,7 +575,7 @@ public class StorageAttachedIndex implements Index
         return () ->
         {
             // mark index as invalid, in-progress SSTableIndexWriters will abort
-            valid = false;
+            unloaded = true;
 
             indexContext.invalidate(false);
             return null;
@@ -600,9 +601,14 @@ public class StorageAttachedIndex implements Index
         return canFlushFromMemtableIndex;
     }
 
-    public BooleanSupplier isIndexValid()
+    public BooleanSupplier isDropped()
     {
-        return () -> valid;
+        return () -> dropped;
+    }
+
+    public BooleanSupplier isUnloaded()
+    {
+        return () -> unloaded;
     }
 
     private Future<?> startPreJoinTask()
@@ -766,6 +772,15 @@ public class StorageAttachedIndex implements Index
         DecoratedKey key = update.partitionKey();
         for (Row row : update.rows())
             indexContext.validate(key, row);
+    }
+
+
+    @Override
+    public int getFlushPeriodInMs()
+    {
+        return indexContext.isVector()
+               ? CassandraRelevantProperties.SAI_VECTOR_FLUSH_PERIOD_IN_MILLIS.getInt()
+               : CassandraRelevantProperties.SAI_NON_VECTOR_FLUSH_PERIOD_IN_MILLIS.getInt();
     }
 
     /**

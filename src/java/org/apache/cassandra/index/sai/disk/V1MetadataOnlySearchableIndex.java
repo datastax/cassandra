@@ -85,7 +85,7 @@ public class V1MetadataOnlySearchableIndex implements SearchableIndex
             final MetadataSource source = MetadataSource.loadMetadata(perIndexComponents);
 
             // We skip loading the terms distribution becuase this class doesn't use them for now.
-            metadatas = SegmentMetadata.load(source, indexContext, false);
+            metadatas = SegmentMetadata.load(source, indexContext, sstableContext, false);
 
             this.minKey = metadatas.get(0).minKey.partitionKey();
             this.maxKey = metadatas.get(metadatas.size() - 1).maxKey.partitionKey();

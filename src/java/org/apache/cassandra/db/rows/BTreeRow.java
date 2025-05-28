@@ -88,11 +88,17 @@ public class BTreeRow extends AbstractRow
     // no expiring cells, this will be Integer.MAX_VALUE;
     private final int minLocalDeletionTime;
 
-    private BTreeRow(Clustering clustering,
+    /**
+     * The original data size of this row before purging it, or -1 if it hasn't been purged.
+     */
+    private final int originalDataSize;
+
+    private BTreeRow(Clustering<?> clustering,
                      LivenessInfo primaryKeyLivenessInfo,
                      Deletion deletion,
                      Object[] btree,
-                     int minLocalDeletionTime)
+                     int minLocalDeletionTime,
+                     int originalDataSize)
     {
         assert !deletion.isShadowedBy(primaryKeyLivenessInfo);
         this.clustering = clustering;
@@ -100,6 +106,16 @@ public class BTreeRow extends AbstractRow
         this.deletion = deletion;
         this.btree = btree;
         this.minLocalDeletionTime = minLocalDeletionTime;
+        this.originalDataSize = originalDataSize;
+    }
+
+    private BTreeRow(Clustering<?> clustering,
+                     LivenessInfo primaryKeyLivenessInfo,
+                     Deletion deletion,
+                     Object[] btree,
+                     int minLocalDeletionTime)
+    {
+        this(clustering, primaryKeyLivenessInfo, deletion, btree, minLocalDeletionTime, -1);
     }
 
     private BTreeRow(Clustering<?> clustering, Object[] btree, int minLocalDeletionTime)
@@ -127,9 +143,19 @@ public class BTreeRow extends AbstractRow
                                   LivenessInfo primaryKeyLivenessInfo,
                                   Deletion deletion,
                                   Object[] btree,
+                                  int minDeletionTime,
+                                  int originalDataSize)
+    {
+        return new BTreeRow(clustering, primaryKeyLivenessInfo, deletion, btree, minDeletionTime, originalDataSize);
+    }
+
+    public static BTreeRow create(Clustering<?> clustering,
+                                  LivenessInfo primaryKeyLivenessInfo,
+                                  Deletion deletion,
+                                  Object[] btree,
                                   int minDeletionTime)
     {
-        return new BTreeRow(clustering, primaryKeyLivenessInfo, deletion, btree, minDeletionTime);
+        return create(clustering, primaryKeyLivenessInfo, deletion, btree, minDeletionTime, -1);
     }
 
     public static BTreeRow emptyRow(Clustering<?> clustering)
@@ -455,8 +481,8 @@ public class BTreeRow extends AbstractRow
     /**
      * Returns a copy of the row where all timestamps for live data have replaced by {@code newTimestamp} and
      * all deletion timestamp by {@code newTimestamp - 1}.
-     *
-     * This exists for the Paxos path, see {@link PartitionUpdate#updateAllTimestamp} for additional details.
+     * </p>
+     * This exists for the Paxos path, see {@link PartitionUpdate#withUpdatedTimestamps(long)} for additional details.
      */
     public Row updateAllTimestamp(long newTimestamp)
     {
@@ -512,7 +538,7 @@ public class BTreeRow extends AbstractRow
             return null;
 
         int minDeletionTime = minDeletionTime(newTree, info, deletion.time());
-        return BTreeRow.create(clustering, info, deletion, newTree, minDeletionTime);
+        return BTreeRow.create(clustering, info, deletion, newTree, minDeletionTime, originalDataSize());
     }
 
     @Override
@@ -540,6 +566,12 @@ public class BTreeRow extends AbstractRow
                      + deletion.dataSize();
 
         return Ints.checkedCast(accumulate((cd, v) -> v + cd.dataSize(), dataSize));
+    }
+
+    @Override
+    public int originalDataSize()
+    {
+        return originalDataSize >= 0 ? originalDataSize : dataSize();
     }
 
     public long unsharedHeapSizeExcludingData()

@@ -155,7 +155,7 @@ public class SegmentFlushTest
                                                      MockSchema.newCFS("ks"));
 
         IndexComponents.ForWrite components = indexDescriptor.newPerIndexComponentsForWrite(indexContext);
-        SSTableIndexWriter writer = new SSTableIndexWriter(components, V1OnDiskFormat.SEGMENT_BUILD_MEMORY_LIMITER, () -> true, 2);
+        SSTableIndexWriter writer = new SSTableIndexWriter(components, V1OnDiskFormat.SEGMENT_BUILD_MEMORY_LIMITER, () -> false, () -> false, 2);
 
         List<DecoratedKey> keys = Arrays.asList(dk("1"), dk("2"));
         Collections.sort(keys);
@@ -176,7 +176,9 @@ public class SegmentFlushTest
         MetadataSource source = MetadataSource.loadMetadata(components);
 
         // verify segment count
-        List<SegmentMetadata> segmentMetadatas = SegmentMetadata.load(source, indexContext);
+        // We use a custome loader that skips resolving the full primary key bounds because we don't actually have
+        // a complete segment where the min/max row ids map to token positions in the per sstable index file.
+        List<SegmentMetadata> segmentMetadatas = SegmentMetadata.loadForTesting(source, indexContext);
         assertEquals(segments, segmentMetadatas.size());
 
         // verify segment metadata

@@ -41,10 +41,8 @@ public class V7OnDiskFormat extends V6OnDiskFormat
     @Override
     public Set<IndexComponentType> perIndexComponentTypes(AbstractType<?> validator)
     {
-        if (validator.isVector())
-            return V3OnDiskFormat.VECTOR_COMPONENTS_V3;
         if (TypeUtil.isLiteral(validator))
             return LITERAL_COMPONENTS;
-        return V1OnDiskFormat.NUMERIC_COMPONENTS;
+        return super.perIndexComponentTypes(validator);
     }
 }

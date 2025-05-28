@@ -55,11 +55,11 @@ import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.memory.MemoryIndex;
-import org.apache.cassandra.index.sai.memory.MemtableIndex;
 import org.apache.cassandra.index.sai.metrics.ColumnQueryMetrics;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.plan.Orderer;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.index.sai.utils.PrimaryKeyListUtil;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithScore;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
@@ -77,13 +77,12 @@ import static java.lang.Math.max;
 import static java.lang.Math.min;
 import static java.lang.Math.pow;
 
-public class VectorMemtableIndex implements MemtableIndex
+public class VectorMemtableIndex extends AbstractMemtableIndex
 {
     private static final Logger logger = LoggerFactory.getLogger(VectorMemtableIndex.class);
     private static final VectorTypeSupport vts = VectorizationProvider.getInstance().getVectorTypeSupport();
     public static int GLOBAL_BRUTE_FORCE_ROWS = Integer.MAX_VALUE; // not final so test can inject its own setting
 
-    private final IndexContext indexContext;
     private final ColumnQueryMetrics.VectorIndexMetrics columnQueryMetrics;
     private final CassandraOnHeapGraph<PrimaryKey> graph;
     private final LongAdder writeCount = new LongAdder();
@@ -94,20 +93,18 @@ public class VectorMemtableIndex implements MemtableIndex
     private PrimaryKey maximumKey;
 
     private final NavigableSet<PrimaryKey> primaryKeys = new ConcurrentSkipListSet<>();
-    private final Memtable mt;
 
     public VectorMemtableIndex(IndexContext indexContext, Memtable mt)
     {
-        this.indexContext = indexContext;
+        super(indexContext, mt);
         this.columnQueryMetrics = (ColumnQueryMetrics.VectorIndexMetrics) indexContext.getColumnQueryMetrics();
         this.graph = new CassandraOnHeapGraph<>(indexContext, true, mt);
-        this.mt = mt;
     }
 
     @Override
     public Memtable getMemtable()
     {
-        return mt;
+        return memtable;
     }
 
     @Override
@@ -119,6 +116,7 @@ public class VectorMemtableIndex implements MemtableIndex
         var primaryKey = indexContext.keyFactory().create(key, clustering);
         long allocatedBytes = index(primaryKey, value);
         memtable.markExtraOnHeapUsed(allocatedBytes, opGroup);
+        onIndexUpdated();
     }
 
     private long index(PrimaryKey primaryKey, ByteBuffer value)
@@ -174,6 +172,8 @@ public class VectorMemtableIndex implements MemtableIndex
                 primaryKeys.remove(primaryKey);
                 removedCount.increment();
             }
+
+            onIndexUpdated();
         }
     }
 
@@ -306,10 +306,10 @@ public class VectorMemtableIndex implements MemtableIndex
         // Compute the keys that exist in the current memtable and their corresponding graph ordinals
         var keysInGraph = new HashSet<PrimaryKey>();
         var relevantOrdinals = new IntHashSet();
-        keys.stream()
-            .dropWhile(k -> k.compareTo(minimumKey) < 0)
-            .takeWhile(k -> k.compareTo(maximumKey) <= 0)
-            .forEach(k ->
+
+        var keysInRange = PrimaryKeyListUtil.getKeysInRange(keys, minimumKey, maximumKey);
+
+        keysInRange.forEach(k ->
         {
             var v = graph.vectorForKey(k);
             if (v == null)
@@ -393,7 +393,7 @@ public class VectorMemtableIndex implements MemtableIndex
         var score = similarityFunction.compare(queryVector, vector);
         if (score < threshold)
             return null;
-        return new PrimaryKeyWithScore(indexContext, mt, key, score);
+        return new PrimaryKeyWithScore(indexContext, memtable, key, score);
     }
 
     private int maxBruteForceRows(int rerankK, int nPermittedOrdinals, int graphSize)
@@ -456,7 +456,8 @@ public class VectorMemtableIndex implements MemtableIndex
         return graph.preFlush(ordinalMapper);
     }
 
-    public int size()
+    @Override
+    public int indexedRows()
     {
         return graph.size();
     }
@@ -582,7 +583,7 @@ public class VectorMemtableIndex implements MemtableIndex
                 SearchResult.NodeScore nodeScore = nodeScores.next();
                 primaryKeysForNode = graph.keysFromOrdinal(nodeScore.node)
                                           .stream()
-                                          .map(pk -> new PrimaryKeyWithScore(indexContext, mt, pk, nodeScore.score))
+                                          .map(pk -> new PrimaryKeyWithScore(indexContext, memtable, pk, nodeScore.score))
                                           .iterator();
                 if (primaryKeysForNode.hasNext())
                     return primaryKeysForNode.next();

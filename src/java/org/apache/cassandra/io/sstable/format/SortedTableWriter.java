@@ -44,15 +44,16 @@ import org.apache.cassandra.db.rows.Rows;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.guardrails.Guardrails;
 import org.apache.cassandra.io.FSWriteError;
-import org.apache.cassandra.io.compress.AdaptiveCompressor;
 import org.apache.cassandra.io.compress.CompressedSequentialWriter;
 import org.apache.cassandra.io.compress.ICompressor;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTable;
+import org.apache.cassandra.io.sstable.StorageHandler;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.io.sstable.metadata.MetadataComponent;
 import org.apache.cassandra.io.sstable.metadata.MetadataType;
+import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.io.sstable.metadata.ZeroCopyMetadata;
 import org.apache.cassandra.io.util.ChecksummedSequentialWriter;
 import org.apache.cassandra.io.util.DataPosition;
@@ -65,6 +66,7 @@ import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.IFilter;
 import org.apache.cassandra.utils.Throwables;
 
 public abstract class SortedTableWriter extends SSTableWriter
@@ -329,9 +331,9 @@ public abstract class SortedTableWriter extends SSTableWriter
         }
     }
 
-    public void openResult()
+    public void openResult(StorageHandler storageHandler)
     {
-        txnProxy().openResult();
+        txnProxy().openResult(storageHandler);
     }
 
     public SSTableReader finished()
@@ -340,7 +342,46 @@ public abstract class SortedTableWriter extends SSTableWriter
         return txnProxy().finalReader;
     }
 
-    abstract protected SSTableReader openFinal(SSTableReader.OpenReason reason);
+    protected SSTableReader openFinal(SSTableReader.OpenReason reason, StorageHandler storageHandler)
+    {
+        if (maxDataAge < 0)
+            maxDataAge = System.currentTimeMillis();
+
+        StatsMetadata stats = statsMetadata();
+
+        int dataBufferSize = optimizationStrategy.bufferSize(stats.estimatedPartitionSize.percentile(DatabaseDescriptor.getDiskOptimizationEstimatePercentile()));
+        // Note that creating the `CompressionMetadata` below does not read from disk: the compression metadata is
+        // kept in memory by the writer and used to build the final instance. If we were reading from disk, we would
+        // need to move this inside the `try` so that the `storageHandler` callback can intercept reading issues.
+        // Which would imply being able to get at the compressed/uncompressed sizes upfront (directly from the
+        // writer, without reading the compression metadata written file) in some other way.
+        if (compression)
+            dbuilder.withCompressionMetadata(((CompressedSequentialWriter) dataFile).open(0));
+        FileHandle dfile = dbuilder.bufferSize(dataBufferSize).complete();
+        invalidateCacheAtPreviousBoundary(dfile, Long.MAX_VALUE);
+
+        DecoratedKey firstMinimized = getMinimalKey(first);
+        DecoratedKey lastMinimized = getMinimalKey(last);
+        try
+        {
+            SSTableReader reader = openReader(reason, dfile, stats);
+            reader.first = firstMinimized;
+            reader.last = lastMinimized;
+            return reader;
+        }
+        catch (Throwable t)
+        {
+            Throwable err = Throwables.close(t, dfile);
+
+            if (storageHandler != null)
+                return storageHandler.onOpeningWrittenSSTableFailure(reason, descriptor, components(), dfile.onDiskLength, dfile.dataLength(), stats, firstMinimized, lastMinimized, keyCount, err);
+
+            throw Throwables.unchecked(err);
+        }
+    }
+
+    abstract protected SSTableReader openReader(SSTableReader.OpenReason reason, FileHandle dataFileHandle, StatsMetadata stats);
+
     abstract protected SequentialWriterOption writerOption();
 
     abstract protected TransactionalProxy txnProxy();
@@ -362,9 +403,9 @@ public abstract class SortedTableWriter extends SSTableWriter
             SSTable.appendTOC(descriptor, components());
         }
 
-        private void openResult()
+        private void openResult(StorageHandler storageHandler)
         {
-            finalReader = openFinal(SSTableReader.OpenReason.NORMAL);
+            finalReader = openFinal(SSTableReader.OpenReason.NORMAL, storageHandler);
             finalReaderAccessed = false;
         }
 

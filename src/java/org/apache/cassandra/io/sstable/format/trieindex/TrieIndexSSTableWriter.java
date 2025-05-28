@@ -218,37 +218,27 @@ public class TrieIndexSSTableWriter extends SortedTableWriter
         // Note: Nothing must be written to any of the files after this point, as the chunk cache could pick up and
         // retain a partially-written page (see DB-2446).
 
-        return openFinal(SSTableReader.OpenReason.EARLY);
+        return openFinal(SSTableReader.OpenReason.EARLY, null);
     }
 
     @SuppressWarnings("resource")
-    protected SSTableReader openFinal(SSTableReader.OpenReason openReason)
+    @Override
+    protected SSTableReader openReader(SSTableReader.OpenReason reason, FileHandle dataFileHandle, StatsMetadata stats)
     {
-        if (maxDataAge < 0)
-            maxDataAge = System.currentTimeMillis();
-
-        StatsMetadata stats = statsMetadata();
-        // finalize in-memory state for the reader
         PartitionIndex partitionIndex = iwriter.completedPartitionIndex();
         FileHandle rowIndexFile = iwriter.rowIndexFHBuilder.complete();
-        int dataBufferSize = optimizationStrategy.bufferSize(stats.estimatedPartitionSize.percentile(DatabaseDescriptor.getDiskOptimizationEstimatePercentile()));
-        if (compression)
-            dbuilder.withCompressionMetadata(((CompressedSequentialWriter) dataFile).open(0));
-        FileHandle dfile = dbuilder.bufferSize(dataBufferSize).complete();
-        invalidateCacheAtPreviousBoundary(dfile, Long.MAX_VALUE);
+
         SSTableReader sstable = TrieIndexSSTableReader.internalOpen(descriptor,
                                                             components(),
                                                             this.metadata,
                                                             rowIndexFile,
-                                                            dfile,
+                                                            dataFileHandle,
                                                             partitionIndex,
                                                             iwriter.bf.sharedCopy(),
                                                             maxDataAge,
                                                             stats,
-                                                            openReason,
+                                                            reason,
                                                             header);
-        sstable.first = getMinimalKey(first);
-        sstable.last = getMinimalKey(last);
         sstable.setup(true);
         return sstable;
     }

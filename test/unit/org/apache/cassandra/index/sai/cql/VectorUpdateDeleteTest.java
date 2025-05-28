@@ -34,15 +34,6 @@ import static org.junit.Assert.assertEquals;
 
 public class VectorUpdateDeleteTest extends VectorTester.VersionedWithChecksums
 {
-    @Before
-    public void setup() throws Throwable
-    {
-        super.setup();
-
-        // Enable the optimizer by default. If there are any tests that need to disable it, they can do so explicitly.
-        QueryController.QUERY_OPT_LEVEL = 1;
-    }
-
     // partition delete won't trigger UpdateTransaction#onUpdated
     @Test
     public void partitionDeleteVectorInMemoryTest()
@@ -961,7 +952,7 @@ public class VectorUpdateDeleteTest extends VectorTester.VersionedWithChecksums
         var indexes = sai.getIndexContext().getLiveMemtables().values();
         assertEquals("Expect just one memtable index", 1, indexes.size());
         var vectorIndex = (VectorMemtableIndex) indexes.iterator().next();
-        assertEquals("We dont' remove vectors, so we're still stuck with it", 2, vectorIndex.size());
+        assertEquals("We dont' remove vectors, so we're still stuck with it", 2, vectorIndex.indexedRows());
 
         // Flush to build the on disk graph (before the fix, flush failed due to a row having two vectors)
         flush();

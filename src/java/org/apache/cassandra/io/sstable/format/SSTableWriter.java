@@ -30,6 +30,8 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.function.Consumer;
 
+import javax.annotation.Nullable;
+
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Sets;
@@ -50,6 +52,7 @@ import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTable;
+import org.apache.cassandra.io.sstable.StorageHandler;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.io.sstable.metadata.MetadataComponent;
 import org.apache.cassandra.io.sstable.metadata.MetadataType;
@@ -298,7 +301,15 @@ public abstract class SSTableWriter extends SSTable implements Transactional
         return this;
     }
 
-    public abstract void openResult();
+    /**
+     * Open the resultant SSTableReader after it has been fully written.
+     *
+     * @param storageHandler the underlying storage handler. This is used in case of a failure opening the
+     *                       SSTableReader to call the `StorageHandler#onOpeningWrittenSSTableFailure` callback, which
+     *                       in some implementations may attempt to recover from the error. If `null`, the said callback
+     *                       will not be called on failure.
+     */
+    public abstract void openResult(@Nullable StorageHandler storageHandler);
 
     /**
      * Open the resultant SSTableReader before it has been fully written
@@ -311,19 +322,11 @@ public abstract class SSTableWriter extends SSTable implements Transactional
      */
     public abstract SSTableReader openFinalEarly();
 
-    public SSTableReader finish(long repairedAt, long maxDataAge, boolean openResult)
-    {
-        if (repairedAt > 0)
-            this.repairedAt = repairedAt;
-        this.maxDataAge = maxDataAge;
-        return finish(openResult);
-    }
-
-    public SSTableReader finish(boolean openResult)
+    public SSTableReader finish(boolean openResult, @Nullable StorageHandler storageHandler)
     {
         prepareToCommit();
         if (openResult)
-            openResult();
+            openResult(storageHandler);
         txnProxy().commit();
         return finished();
     }
