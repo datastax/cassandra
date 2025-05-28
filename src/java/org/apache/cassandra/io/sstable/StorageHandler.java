@@ -20,15 +20,19 @@ package org.apache.cassandra.io.sstable;
 
 import java.lang.reflect.InvocationTargetException;
 import java.util.Collection;
+import java.util.Set;
 
 import com.google.common.base.Preconditions;
 
+import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.lifecycle.Tracker;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.Throwables;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.REMOTE_STORAGE_HANDLER_FACTORY;
 
@@ -147,6 +151,45 @@ public abstract class StorageHandler
      * Called when the CFS is unloaded, this needs to perform any cleanup.
      */
     public abstract void unload();
+
+    /**
+     * Called during flush when we try to open a {@link SSTableReader} on the written sstable but reading it fails.
+     * <p>
+     * The default implementation simply propagates the exception that failed the opening, but it can be overriden to
+     * try to recover and return a proper reader. This method provides as much information on the written sstable
+     * as to allow recovering. In the case of tiered storage, where some tier may be temporarily unresponsive, it
+     * can be used to provide a "shim" reader to avoid failing the flush and until sstable can be successfully reloaded.
+     *
+     * @param reason the {@link SSTableReader.OpenReason} for the opening that failed.
+     * @param descriptor the sstable descriptor.
+     * @param components the components that have been written.
+     * @param compressedSize the size on disk of the file that was writen.
+     * @param uncompressedSize the size of the uncompressed data that was written. If the sstable is not compressed, it
+     *                         will be the same as {@code compressedSize}.
+     * @param stats the metadata/statistics on the written sstable.
+     * @param firstKey the first key of the sstable.
+     * @param lastKey the last key of the sstable.
+     * @param estimatedKeys the number of keys written in the sstable (this is allowed to be an estimation, to mimick
+     *                      what {@link SSTableReader#estimatedKeys()} would return, but in practice it will be exact
+     *                      since we know how many keys we just wrote).
+     * @param throwable the exeption that failed the sstable opening.
+     * @return a reader for the sstable, if one can be created despite the initial error. If not, this message should
+     * simply rethrow {@code throwable}.
+     */
+    public SSTableReader onOpeningWrittenSSTableFailure(SSTableReader.OpenReason reason,
+                                                        Descriptor descriptor,
+                                                        Set<Component> components,
+                                                        long compressedSize,
+                                                        long uncompressedSize,
+                                                        StatsMetadata stats,
+                                                        DecoratedKey firstKey,
+                                                        DecoratedKey lastKey,
+                                                        long estimatedKeys,
+                                                        Throwable throwable)
+    {
+        // By default, just propagate the exception (not much we can do with local storage in particular).
+        throw Throwables.unchecked(throwable);
+    }
 
     public static StorageHandler create(SSTable.Owner owner, TableMetadataRef metadata, Directories directories, Tracker dataTracker)
     {
