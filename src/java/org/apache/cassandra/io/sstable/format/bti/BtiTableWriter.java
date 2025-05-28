@@ -155,6 +155,12 @@ public class BtiTableWriter extends SortedTableWriter<BtiFormatPartitionWriter, 
         return openInternal(openReason, NO_LENGTH_OVERRIDE, indexWriter::completedPartitionIndex);
     }
 
+    @Override
+    public void openResult(@javax.annotation.Nullable org.apache.cassandra.io.sstable.StorageHandler storageHandler)
+    {
+        txnProxy.openResult(storageHandler);
+    }
+
     /**
      * Encapsulates writing the index and filter for an SSTable. The state of this object is not valid until it has been closed.
      */

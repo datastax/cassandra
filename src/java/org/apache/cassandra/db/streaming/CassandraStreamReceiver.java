@@ -108,7 +108,7 @@ public class CassandraStreamReceiver implements StreamReceiver
         SSTableMultiWriter sstable = file.getSSTable();
         try
         {
-            finished = sstable.finish(true);
+            finished = sstable.finish(true, cfs.getStorageHandler());
         }
         catch (Throwable t)
         {

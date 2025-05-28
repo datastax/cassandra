@@ -588,7 +588,7 @@ public class ScrubTest
 
                     writer.append(update.unfilteredIterator());
                 }
-                writer.finish(false);
+                writer.finish(false, null);
             }
 
             try
