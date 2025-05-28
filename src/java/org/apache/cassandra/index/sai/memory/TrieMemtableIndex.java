@@ -139,8 +139,8 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
         long count = 0;
         for (MemoryIndex memoryIndex : rangeIndexes)
         {
-            if (memoryIndex instanceof TrieMemoryIndex)
-                count += ((TrieMemoryIndex) memoryIndex).approximateTotalTermCount();
+            assert memoryIndex instanceof TrieMemoryIndex;
+            count += ((TrieMemoryIndex) memoryIndex).approximateTotalTermCount();
         }
         return count;
     }
