@@ -250,7 +250,7 @@ public abstract class SortedTableScrubber<R extends SSTableReaderWithFilter> imp
                 inOrderWriter.append(partition.unfilteredIterator());
             inOrderWriter.setRepairedAt(-1);
             inOrderWriter.setMaxDataAge(sstable.maxDataAge);
-            newInOrderSstable = inOrderWriter.finish(true);
+            newInOrderSstable = inOrderWriter.finish(true, null);
         }
         transaction.update(newInOrderSstable, false);
         outputHandler.warn("%d out of order partition (or partitions without of order rows) found while scrubbing %s; " +
