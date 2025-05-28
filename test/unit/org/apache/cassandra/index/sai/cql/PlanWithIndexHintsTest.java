@@ -102,8 +102,8 @@ public class PlanWithIndexHintsTest extends SAITester
 
             // run the same queries as before, but with hints including either idx1 or idx2
             assertThatPlanFor("SELECT * FROM %s WHERE v1='rare' WITH included_indexes = {idx1}", 2).uses(idx1);
-            assertNonIncludableIndexError("SELECT * FROM %s WHERE v1='rare' WITH included_indexes = {idx2}", idx2);
-            assertNonIncludableIndexError("SELECT * FROM %s WHERE v2='rare' WITH included_indexes = {idx1}", idx1);
+            assertNonIncludableIndexesError("SELECT * FROM %s WHERE v1='rare' WITH included_indexes = {idx2}", idx2);
+            assertNonIncludableIndexesError("SELECT * FROM %s WHERE v2='rare' WITH included_indexes = {idx1}", idx1);
             assertThatPlanFor("SELECT * FROM %s WHERE v2='rare' WITH included_indexes = {idx2}", 2).uses(idx2);
             for (String idx : Arrays.asList(idx1, idx2))
             {
@@ -118,13 +118,13 @@ public class PlanWithIndexHintsTest extends SAITester
                 assertThatPlanFor(format("SELECT * FROM %%s WHERE v1='common' OR v2='common' WITH included_indexes = {%s}", idx), numRows - 1).uses(idx, otherIdx);
             }
             assertThatPlanFor("SELECT * FROM %s ORDER BY v1 LIMIT 10 WITH included_indexes = {idx1}", 10).uses(idx1);
-            assertNonIncludableIndexError("SELECT * FROM %s ORDER BY v2 LIMIT 10 WITH included_indexes = {idx1}", idx1);
-            assertNonIncludableIndexError("SELECT * FROM %s ORDER BY v1 LIMIT 10 WITH included_indexes = {idx2}", idx2);
+            assertNonIncludableIndexesError("SELECT * FROM %s ORDER BY v2 LIMIT 10 WITH included_indexes = {idx1}", idx1);
+            assertNonIncludableIndexesError("SELECT * FROM %s ORDER BY v1 LIMIT 10 WITH included_indexes = {idx2}", idx2);
             assertThatPlanFor("SELECT * FROM %s ORDER BY v2 LIMIT 10 WITH included_indexes = {idx2}", 10).uses(idx2);
 
             // including both idx1 and idx2
-            assertNonIncludableIndexError("SELECT * FROM %s WHERE v1='rare' WITH included_indexes = {idx1,idx2}", idx2);
-            assertNonIncludableIndexError("SELECT * FROM %s WHERE v2='rare' WITH included_indexes = {idx1,idx2}", idx1);
+            assertNonIncludableIndexesError("SELECT * FROM %s WHERE v1='rare' WITH included_indexes = {idx1,idx2}", idx2);
+            assertNonIncludableIndexesError("SELECT * FROM %s WHERE v2='rare' WITH included_indexes = {idx1,idx2}", idx1);
             assertThatPlanFor("SELECT * FROM %s WHERE v1='rare' AND v2='rare' WITH included_indexes = {idx1,idx2}", 1).uses(idx1, idx2);
             assertThatPlanFor("SELECT * FROM %s WHERE v1='rare' AND v2='common' WITH included_indexes = {idx1,idx2}", 1).uses(idx1, idx2);
             assertThatPlanFor("SELECT * FROM %s WHERE v1='common' AND v2='rare' WITH included_indexes = {idx1,idx2}", 1).uses(idx1, idx2);
@@ -133,8 +133,8 @@ public class PlanWithIndexHintsTest extends SAITester
             assertThatPlanFor("SELECT * FROM %s WHERE v1='rare' OR v2='common' WITH included_indexes = {idx1,idx2}", numRows - 1).uses(idx1, idx2);
             assertThatPlanFor("SELECT * FROM %s WHERE v1='common' OR v2='rare' WITH included_indexes = {idx1,idx2}", numRows - 1).uses(idx1, idx2);
             assertThatPlanFor("SELECT * FROM %s WHERE v1='common' OR v2='common' WITH included_indexes = {idx1,idx2}", numRows - 1).uses(idx1, idx2);
-            assertNonIncludableIndexError("SELECT * FROM %s ORDER BY v1 LIMIT 10 WITH included_indexes = {idx1,idx2}", idx2);
-            assertNonIncludableIndexError("SELECT * FROM %s ORDER BY v2 LIMIT 10 WITH included_indexes = {idx1,idx2}", idx1);
+            assertNonIncludableIndexesError("SELECT * FROM %s ORDER BY v1 LIMIT 10 WITH included_indexes = {idx1,idx2}", idx2);
+            assertNonIncludableIndexesError("SELECT * FROM %s ORDER BY v2 LIMIT 10 WITH included_indexes = {idx1,idx2}", idx1);
 
             // excluding either idx1 or idx2
             assertNeedsAllowFiltering("SELECT * FROM %s WHERE v1='rare' WITH excluded_indexes = {idx1}");
@@ -300,23 +300,23 @@ public class PlanWithIndexHintsTest extends SAITester
             assertThatPlanFor("SELECT * FROM %s WHERE v1<=2 WITH included_indexes = {idx1}", row1, row2, row3, row4, row5, row6).uses(idx1);
             assertThatPlanFor("SELECT * FROM %s WHERE v1>0 AND v1<=2 WITH included_indexes = {idx1}", row3, row4, row5, row6).uses(idx1);
             assertThatPlanFor("SELECT * FROM %s WHERE v1>=0 AND v1<2 WITH included_indexes = {idx1}", row1, row2, row3, row4).uses(idx1);
-            assertNonIncludableIndexError("SELECT * FROM %s WHERE v2=0 WITH included_indexes = {idx1}", idx1);
-            assertNonIncludableIndexError("SELECT * FROM %s WHERE v2>0 WITH included_indexes = {idx1}", idx1);
-            assertNonIncludableIndexError("SELECT * FROM %s WHERE v2<2 WITH included_indexes = {idx1}", idx1);
-            assertNonIncludableIndexError("SELECT * FROM %s WHERE v2>=0 WITH included_indexes = {idx1}", idx1);
-            assertNonIncludableIndexError("SELECT * FROM %s WHERE v2<=2 WITH included_indexes = {idx1}", idx1);
-            assertNonIncludableIndexError("SELECT * FROM %s WHERE v2>0 AND v2<=1 WITH included_indexes = {idx1}", idx1);
-            assertNonIncludableIndexError("SELECT * FROM %s WHERE v2>=0 AND v2<1 WITH included_indexes = {idx1}", idx1);
+            assertNonIncludableIndexesError("SELECT * FROM %s WHERE v2=0 WITH included_indexes = {idx1}", idx1);
+            assertNonIncludableIndexesError("SELECT * FROM %s WHERE v2>0 WITH included_indexes = {idx1}", idx1);
+            assertNonIncludableIndexesError("SELECT * FROM %s WHERE v2<2 WITH included_indexes = {idx1}", idx1);
+            assertNonIncludableIndexesError("SELECT * FROM %s WHERE v2>=0 WITH included_indexes = {idx1}", idx1);
+            assertNonIncludableIndexesError("SELECT * FROM %s WHERE v2<=2 WITH included_indexes = {idx1}", idx1);
+            assertNonIncludableIndexesError("SELECT * FROM %s WHERE v2>0 AND v2<=1 WITH included_indexes = {idx1}", idx1);
+            assertNonIncludableIndexesError("SELECT * FROM %s WHERE v2>=0 AND v2<1 WITH included_indexes = {idx1}", idx1);
 
             // with restriction in one column only and hints including idx2
-            assertNonIncludableIndexError("SELECT * FROM %s WHERE v1=0 WITH included_indexes = {idx2}", idx2);
-            assertNonIncludableIndexError("SELECT * FROM %s WHERE v1!=0 WITH included_indexes = {idx2}", idx2);
-            assertNonIncludableIndexError("SELECT * FROM %s WHERE v1>0 WITH included_indexes = {idx2}", idx2);
-            assertNonIncludableIndexError("SELECT * FROM %s WHERE v1<2 WITH included_indexes = {idx2}", idx2);
-            assertNonIncludableIndexError("SELECT * FROM %s WHERE v1>=0 WITH included_indexes = {idx2}", idx2);
-            assertNonIncludableIndexError("SELECT * FROM %s WHERE v1<=2 WITH included_indexes = {idx2}", idx2);
-            assertNonIncludableIndexError("SELECT * FROM %s WHERE v1>0 AND v1<=2 WITH included_indexes = {idx2}", idx2);
-            assertNonIncludableIndexError("SELECT * FROM %s WHERE v1>=0 AND v1<2 WITH included_indexes = {idx2}", idx2);
+            assertNonIncludableIndexesError("SELECT * FROM %s WHERE v1=0 WITH included_indexes = {idx2}", idx2);
+            assertNonIncludableIndexesError("SELECT * FROM %s WHERE v1!=0 WITH included_indexes = {idx2}", idx2);
+            assertNonIncludableIndexesError("SELECT * FROM %s WHERE v1>0 WITH included_indexes = {idx2}", idx2);
+            assertNonIncludableIndexesError("SELECT * FROM %s WHERE v1<2 WITH included_indexes = {idx2}", idx2);
+            assertNonIncludableIndexesError("SELECT * FROM %s WHERE v1>=0 WITH included_indexes = {idx2}", idx2);
+            assertNonIncludableIndexesError("SELECT * FROM %s WHERE v1<=2 WITH included_indexes = {idx2}", idx2);
+            assertNonIncludableIndexesError("SELECT * FROM %s WHERE v1>0 AND v1<=2 WITH included_indexes = {idx2}", idx2);
+            assertNonIncludableIndexesError("SELECT * FROM %s WHERE v1>=0 AND v1<2 WITH included_indexes = {idx2}", idx2);
             assertThatPlanFor("SELECT * FROM %s WHERE v2=0 WITH included_indexes = {idx2}", row1, row3, row5).uses(idx2);
             assertThatPlanFor("SELECT * FROM %s WHERE v2>0 WITH included_indexes = {idx2}", row2, row4, row6).uses(idx2);
             assertThatPlanFor("SELECT * FROM %s WHERE v2<2 WITH included_indexes = {idx2}", row1, row2, row3, row4, row5, row6).uses(idx2);
@@ -413,12 +413,12 @@ public class PlanWithIndexHintsTest extends SAITester
 
             String query = "SELECT * FROM %s WHERE v1=0 OR v2=0 ALLOW FILTERING";
             assertThatPlanFor(query, row1, row2, row3).usesNone();
-            assertNonIncludableIndexError(query + " WITH included_indexes={idx1}");
+            assertNonIncludableIndexesError(query + " WITH included_indexes={idx1}");
             assertThatPlanFor(query + " WITH excluded_indexes={idx1}", row1, row2, row3).usesNone();
 
             query = "SELECT * FROM %s WHERE (v1=0 OR v2=0) AND v3=9 ALLOW FILTERING";
             assertThatPlanFor(query, row1, row2, row3).uses(idx3);
-            assertNonIncludableIndexError(query + " WITH included_indexes={idx1}");
+            assertNonIncludableIndexesError(query + " WITH included_indexes={idx1}");
             assertThatPlanFor(query + " WITH excluded_indexes={idx1}", row1, row2, row3).uses(idx3);
         });
     }
@@ -529,52 +529,52 @@ public class PlanWithIndexHintsTest extends SAITester
     {
         Assertions.assertThatThrownBy(() -> execute(query))
                   .isInstanceOf(InvalidRequestException.class)
-                  .hasMessageContaining(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE);
+                  .hasMessage(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE);
     }
 
     private void assertHintsExceedIntersectionClauseLimit(String query)
     {
         Assertions.assertThatThrownBy(() -> execute(query))
                   .isInstanceOf(InvalidRequestException.class)
-                  .hasMessageContaining(String.format(StorageAttachedIndex.HINTS_EXCEED_INTERSECTION_CLAUSE_LIMIT_ERROR,
-                                                      CassandraRelevantProperties.SAI_INTERSECTION_CLAUSE_LIMIT.getInt(),
-                                                      CassandraRelevantProperties.SAI_INTERSECTION_CLAUSE_LIMIT.name()));
+                  .hasMessage(format(StorageAttachedIndex.HINTS_EXCEED_INTERSECTION_CLAUSE_LIMIT_ERROR,
+                                     CassandraRelevantProperties.SAI_INTERSECTION_CLAUSE_LIMIT.getInt(),
+                                     CassandraRelevantProperties.SAI_INTERSECTION_CLAUSE_LIMIT.name()));
     }
 
-    public void assertNonIncludableIndexError(String query, String... indexes)
+    public void assertNonIncludableIndexesError(String query, String... indexes)
     {
         Assertions.assertThatThrownBy(() -> execute(query))
                   .isInstanceOf(InvalidRequestException.class)
-                  .hasMessageContaining(String.format(IndexHints.NON_INCLUDABLE_INDEX_ERROR, String.join(",", indexes)));
+                  .hasMessage(IndexHints.NON_INCLUDABLE_INDEXES_ERROR);
     }
 
     private void assertOrderingNeedsIndex(String query, String column)
     {
         Assertions.assertThatThrownBy(() -> execute(query))
                   .isInstanceOf(InvalidRequestException.class)
-                  .hasMessageContaining(String.format(StatementRestrictions.NON_CLUSTER_ORDERING_REQUIRES_INDEX_MESSAGE, column));
+                  .hasMessage(format(StatementRestrictions.NON_CLUSTER_ORDERING_REQUIRES_INDEX_MESSAGE, column));
     }
 
     private void assertUnsupportVectorOperator(String query)
     {
         Assertions.assertThatThrownBy(() -> execute(query))
                   .isInstanceOf(InvalidRequestException.class)
-                  .hasMessageContaining(StatementRestrictions.VECTOR_INDEXES_UNSUPPORTED_OP_MESSAGE);
+                  .hasMessage(StatementRestrictions.VECTOR_INDEXES_UNSUPPORTED_OP_MESSAGE);
     }
 
     private void assertMatchNeedsIndex(String query, String column, String value)
     {
         Assertions.assertThatThrownBy(() -> execute(query))
                   .isInstanceOf(InvalidRequestException.class)
-                  .hasMessageContaining(String.format(StatementRestrictions.RESTRICTION_REQUIRES_INDEX_MESSAGE,
-                                                      ':',
-                                                      String.format("%s : '%s'", column, value)));
+                  .hasMessage(format(StatementRestrictions.RESTRICTION_REQUIRES_INDEX_MESSAGE,
+                                     ':',
+                                     format("%s : '%s'", column, value)));
     }
 
     private void assertBM25RequiresAnAnalyzedIndex(String query, String column)
     {
         Assertions.assertThatThrownBy(() -> execute(query))
                   .isInstanceOf(InvalidRequestException.class)
-                  .hasMessageContaining(format(StatementRestrictions.BM25_ORDERING_REQUIRES_ANALYZED_INDEX_MESSAGE, column));
+                  .hasMessage(format(StatementRestrictions.BM25_ORDERING_REQUIRES_ANALYZED_INDEX_MESSAGE, column));
     }
 }
