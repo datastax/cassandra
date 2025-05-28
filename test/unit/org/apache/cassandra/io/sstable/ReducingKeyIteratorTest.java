@@ -18,13 +18,10 @@
 package org.apache.cassandra.io.sstable;
 
 import java.io.IOException;
-import java.util.Set;
-
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
-
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.SchemaLoader;
@@ -32,7 +29,8 @@ import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.RowUpdateBuilder;
 import org.apache.cassandra.db.compaction.CompactionManager;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.db.lifecycle.SSTableSet;
+import org.apache.cassandra.db.lifecycle.View;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
@@ -47,11 +45,12 @@ public class ReducingKeyIteratorTest
     public static void setup() throws Exception
     {
         SchemaLoader.prepareServer();
-        CompactionManager.instance.disableAutoCompaction();
 
         SchemaLoader.createKeyspace(KEYSPACE1,
                                     KeyspaceParams.simple(1),
                                     SchemaLoader.standardCFMD(KEYSPACE1, CF_STANDARD));
+        // schema must exist before we can disable compaction on it
+        CompactionManager.instance.disableAutoCompaction();
     }
 
     @After
@@ -92,14 +91,17 @@ public class ReducingKeyIteratorTest
             store.forceBlockingFlush(UNIT_TESTS);
         }
 
-        Set<SSTableReader> sstables = store.getLiveSSTables();
-        ReducingKeyIterator reducingIterator = new ReducingKeyIterator(sstables);
-
-        while (reducingIterator.hasNext())
+        try (ColumnFamilyStore.RefViewFragment viewFragment = store.selectAndReference(View.selectFunction(SSTableSet.LIVE));
+             ReducingKeyIterator reducingIterator = new ReducingKeyIterator(viewFragment.sstables))
         {
-            Assert.assertTrue(reducingIterator.getTotalBytes() >= reducingIterator.getBytesRead());
-            reducingIterator.next();
+            // verify we have the expected number of sstables
+            Assert.assertEquals(tableCount, viewFragment.sstables.size());
+            while (reducingIterator.hasNext())
+            {
+                Assert.assertTrue(reducingIterator.getTotalBytes() >= reducingIterator.getBytesRead());
+                reducingIterator.next();
+            }
+            Assert.assertEquals(reducingIterator.getTotalBytes(), reducingIterator.getBytesRead());
         }
-        Assert.assertEquals(reducingIterator.getTotalBytes(), reducingIterator.getBytesRead());
     }
 }
