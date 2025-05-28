@@ -81,6 +81,7 @@ import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.when;
 
 /**
@@ -1769,7 +1770,9 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         Controller controller = Mockito.mock(Controller.class);
         when(controller.getNumShards(anyDouble())).thenReturn(numShards);
         when(controller.parallelizeOutputShards()).thenReturn(true);
-        UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(strategyFactory, controller);
+
+        BackgroundCompactions backgroundCompactions = Mockito.mock(BackgroundCompactions.class);
+        UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(strategyFactory, backgroundCompactions, controller);
         strategy.startup();
         LifecycleTransaction txn = dataTracker.tryModify(allSSTables, OperationType.COMPACTION);
         var tasks = new ArrayList<CompactionTask>();
@@ -1793,6 +1796,10 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         strategy.createAndAddTasks(0, txn, null, false, strategy.makeShardingStats(txn), 1000, tasks, compositeCompactionObserver);
         assertEquals(numShards, tasks.size());
 
+        assertThat(compositedCompleted).hasValue(0);
+        Mockito.verify(backgroundCompactions, times(0)).onInProgress(Mockito.any());
+        Mockito.verify(backgroundCompactions, times(0)).onCompleted(Mockito.any(), Mockito.any());
+
         // move all tasks to in-progress
         CompactionProgress progress = mockProgress(strategy, txn.opId());
         for (CompactionTask task : tasks)
@@ -1800,6 +1807,8 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
 
         assertThat(compositeInProgress).hasValue(1);
         assertThat(compositedCompleted).hasValue(0);
+        Mockito.verify(backgroundCompactions, times(1)).onInProgress(Mockito.any());
+        Mockito.verify(backgroundCompactions, times(0)).onCompleted(Mockito.any(), Mockito.any());
 
         // move all tasks to complete
         for (CompactionTask task : tasks)
@@ -1807,6 +1816,8 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
 
         assertThat(compositeInProgress).hasValue(1);
         assertThat(compositedCompleted).hasValue(1);
+        Mockito.verify(backgroundCompactions, times(1)).onInProgress(Mockito.any());
+        Mockito.verify(backgroundCompactions, times(1)).onCompleted(Mockito.any(), Mockito.any());
     }
 
     @Test
