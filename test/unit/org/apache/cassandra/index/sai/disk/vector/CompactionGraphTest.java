@@ -55,7 +55,7 @@ public class CompactionGraphTest
         testEntries(50000000, 5000, 100);
     }
 
-    // Callers of this method are expected to provide enought iterations and postings added per iteration
+    // Callers of this method are expected to provide enough iterations and postings added per iteration
     // to hit the entry size limit without exceeding it too much. Note that we add postings one at a time in the
     // compaction graph, so we only ever increment by 4 bytes each time we attempt to re-serialize the entry.
     private void testEntries(int entries, int iterations, int postingsAddedPerIteration) throws Exception

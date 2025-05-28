@@ -222,8 +222,9 @@ public class VectorPostings<T>
                     for (int posting : postings.getPostings())
                         writer.writeVInt(posting);
                 }
-                catch (Exception e)
+                catch (IOException e)
                 {
+                    // Not be reachable because the Bytes out object does not throw an exception on write.
                     throw new RuntimeException(e);
                 }
             }
@@ -251,8 +252,9 @@ public class VectorPostings<T>
 
                     return new CompactionVectorPostings(ordinal, postingsList);
                 }
-                catch (Exception e)
+                catch (IOException e)
                 {
+                    // Not be reachable because the Bytes in object does not throw an exception on read.
                     throw new RuntimeException(e);
                 }
             }
@@ -283,13 +285,13 @@ public class VectorPostings<T>
             }
 
             @Override
-            public void writeByte(byte b) throws IOException
+            public void writeByte(byte b)
             {
                 bytes.writeByte(b);
             }
 
             @Override
-            public void writeBytes(byte[] b, int off, int len) throws IOException
+            public void writeBytes(byte[] b, int off, int len)
             {
                 bytes.write(b, off, len);
             }
@@ -305,7 +307,7 @@ public class VectorPostings<T>
             }
 
             @Override
-            public byte readByte() throws IOException
+            public byte readByte()
             {
                 return bytes.readByte();
             }

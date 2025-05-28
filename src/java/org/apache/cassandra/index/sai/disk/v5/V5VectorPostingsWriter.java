@@ -480,8 +480,8 @@ public class V5VectorPostingsWriter<T>
                 maxRow = max(maxRow, rowId);
         }
 
-        assert maxOldOrdinal >= 0;
-        assert maxRow >= 0;
+        if (maxOldOrdinal < 0 || maxRow < 0)
+            throw new IllegalStateException("maxOldOrdinal or maxRow is negative: " + maxOldOrdinal + ' ' + maxRow);
 
         var presentOrdinals = new FixedBitSet(maxOldOrdinal + 1);
         for (var entry : postingsMap.entrySet())
