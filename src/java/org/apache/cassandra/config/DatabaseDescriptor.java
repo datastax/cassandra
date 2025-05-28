@@ -154,7 +154,7 @@ public class DatabaseDescriptor
     private static boolean toolInitialized;
     private static boolean daemonInitialized;
     private static boolean enableMemtableAndCommitLog;
-    
+
     private static final int searchConcurrencyFactor = Integer.parseInt(System.getProperty(Config.PROPERTY_PREFIX + "search_concurrency_factor", "1"));
 
     private static volatile boolean disableSTCSInL0 = Boolean.getBoolean(Config.PROPERTY_PREFIX + "disable_stcs_in_l0");
@@ -188,7 +188,7 @@ public class DatabaseDescriptor
      * It cannot delete directories because on remote storage this would result
      * in errors if the test containers for remote storage are being shutdown
      * concurrently. The caller should delete any directories if required.
-     * TODO If you run into problems with undeleted directories or with the 
+     * TODO If you run into problems with undeleted directories or with the
      * caller deleting them, please add additional details here.
      * <p/>
      * This method is called by integration tests that run in the same JVM.
@@ -346,7 +346,7 @@ public class DatabaseDescriptor
     {
         enableMemtableAndCommitLog = true;
     }
-    
+
     public static boolean enableMemtableAndCommitLog()
     {
         return daemonInitialized || enableMemtableAndCommitLog;
@@ -639,7 +639,7 @@ public class DatabaseDescriptor
         {
             conf.native_transport_max_concurrent_requests_in_bytes_per_ip = Runtime.getRuntime().maxMemory() / 40;
         }
-        
+
         if (conf.native_transport_rate_limiting_enabled)
             logger.info("Native transport rate-limiting enabled at {} requests/second.", conf.native_transport_max_requests_per_second);
         else
@@ -1197,6 +1197,12 @@ public class DatabaseDescriptor
            conf.range_request_timeout_in_ms = LOWEST_ACCEPTED_TIMEOUT;
         }
 
+        if(conf.aggregation_request_timeout_in_ms < LOWEST_ACCEPTED_TIMEOUT)
+        {
+           logInfo("aggregation_request_timeout_in_ms", conf.aggregation_request_timeout_in_ms, LOWEST_ACCEPTED_TIMEOUT);
+           conf.aggregation_request_timeout_in_ms = LOWEST_ACCEPTED_TIMEOUT;
+        }
+
         if(conf.request_timeout_in_ms < LOWEST_ACCEPTED_TIMEOUT)
         {
            logInfo("request_timeout_in_ms", conf.request_timeout_in_ms, LOWEST_ACCEPTED_TIMEOUT);
@@ -1717,6 +1723,16 @@ public class DatabaseDescriptor
         conf.range_request_timeout_in_ms = timeOutInMillis;
     }
 
+    public static long getAggregationRpcTimeout(TimeUnit unit)
+    {
+        return unit.convert(conf.aggregation_request_timeout_in_ms, MILLISECONDS);
+    }
+
+    public static void setAggregationRpcTimeout(long timeOutInMillis)
+    {
+        conf.aggregation_request_timeout_in_ms = timeOutInMillis;
+    }
+
     public static long getWriteRpcTimeout(TimeUnit unit)
     {
         return unit.convert(conf.write_request_timeout_in_ms, MILLISECONDS);
@@ -1788,13 +1804,14 @@ public class DatabaseDescriptor
     }
 
     /**
-     * @return the minimum configured {read, write, range, truncate, misc} timeout
+     * @return the minimum configured {read, write, range, aggregated, truncate, misc} timeout
      */
     public static long getMinRpcTimeout(TimeUnit unit)
     {
         return Longs.min(getRpcTimeout(unit),
                          getReadRpcTimeout(unit),
                          getRangeRpcTimeout(unit),
+                         getAggregationRpcTimeout(unit),
                          getWriteRpcTimeout(unit),
                          getCounterWriteRpcTimeout(unit),
                          getTruncateRpcTimeout(unit));
@@ -3416,7 +3433,7 @@ public class DatabaseDescriptor
         if (value > getConcurrentCompactors())
             logger.warn("max_concurrent_automatic_sstable_upgrades ({}) is larger than concurrent_compactors ({})", value, getConcurrentCompactors());
     }
-    
+
     public static AuditLogOptions getAuditLoggingOptions()
     {
         return conf.audit_logging_options;
@@ -3700,7 +3717,7 @@ public class DatabaseDescriptor
     {
         conf.sai_options.zerocopy_used_threshold = threshold;
     }
-    
+
     public static GuardrailsConfig getGuardrailsConfig()
     {
         return conf.guardrails;
