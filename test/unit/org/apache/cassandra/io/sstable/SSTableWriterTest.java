@@ -127,7 +127,7 @@ public class SSTableWriterTest extends SSTableWriterTestBase
                     builder.newRow("" + j).add("val", ByteBuffer.allocate(1000));
                 writer.append(builder.build().unfilteredIterator());
             }
-            SSTableReader sstable = writer.finish(true);
+            SSTableReader sstable = writer.finish(true, null);
             int datafiles = assertFileCounts(dir.tryListNames());
             assertEquals(datafiles, 1);
 
@@ -174,7 +174,7 @@ public class SSTableWriterTest extends SSTableWriterTestBase
                     builder.newRow("" + j).add("val", ByteBuffer.allocate(1000));
                 writer2.append(builder.build().unfilteredIterator());
             }
-            SSTableReader sstable = writer1.finish(true);
+            SSTableReader sstable = writer1.finish(true, null);
             txn.update(sstable, false);
 
             assertFileCounts(dir.tryListNames());
@@ -214,7 +214,7 @@ public class SSTableWriterTest extends SSTableWriterTestBase
             largeValue.newRow("clustering").add("val", ByteBuffer.allocate(2 * 1024 * 1024));
             writer1.append(largeValue.build().unfilteredIterator());
 
-            SSTableReader sstable = writer1.finish(true);
+            SSTableReader sstable = writer1.finish(true, null);
 
             txn.update(sstable, false);
 

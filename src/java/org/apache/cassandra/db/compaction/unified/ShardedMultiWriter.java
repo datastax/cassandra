@@ -20,6 +20,8 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 
+import javax.annotation.Nullable;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -34,6 +36,7 @@ import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTableMultiWriter;
+import org.apache.cassandra.io.sstable.StorageHandler;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
@@ -145,14 +148,14 @@ public class ShardedMultiWriter implements SSTableMultiWriter
     }
 
     @Override
-    public Collection<SSTableReader> finish(boolean openResult)
+    public Collection<SSTableReader> finish(boolean openResult, @Nullable StorageHandler storageHandler)
     {
         List<SSTableReader> sstables = new ArrayList<>(writers.length);
         for (SSTableWriter writer : writers)
             if (writer != null)
             {
                 boundaries.applyTokenSpaceCoverage(writer);
-                sstables.add(writer.finish(openResult));
+                sstables.add(writer.finish(openResult, storageHandler));
             }
         return sstables;
     }
@@ -168,11 +171,11 @@ public class ShardedMultiWriter implements SSTableMultiWriter
     }
 
     @Override
-    public void openResult()
+    public void openResult(@Nullable StorageHandler storageHandler)
     {
         for (SSTableWriter writer : writers)
             if (writer != null)
-                writer.openResult();
+                writer.openResult(storageHandler);
     }
 
     @Override
