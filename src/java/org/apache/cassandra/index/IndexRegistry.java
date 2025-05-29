@@ -95,7 +95,7 @@ public interface IndexRegistry
         }
 
         @Override
-        public Optional<Index> getBestIndexFor(RowFilter.Expression expression)
+        public Optional<Index> getBestIndexFor(ColumnMetadata column, Operator operator)
         {
             return Optional.empty();
         }
@@ -293,7 +293,7 @@ public interface IndexRegistry
         }
 
         @Override
-        public Optional<Index> getBestIndexFor(RowFilter.Expression expression)
+        public Optional<Index> getBestIndexFor(ColumnMetadata column, Operator operator)
         {
             return Optional.empty();
         }
@@ -329,7 +329,12 @@ public interface IndexRegistry
         return Optional.empty();
     }
 
-    Optional<Index> getBestIndexFor(RowFilter.Expression expression);
+    Optional<Index> getBestIndexFor(ColumnMetadata column, Operator operator);
+
+    default Optional<Index> getBestIndexFor(RowFilter.Expression expression)
+    {
+        return getBestIndexFor(expression.column(), expression.operator());
+    }
 
     /**
      * Called at write time to ensure that values present in the update
