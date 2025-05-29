@@ -256,9 +256,8 @@ public class AbstractTypeTest
             {
                 if (upgradeFrom.expectCompatibleWith(l, r))
                     assertions.assertThat(upgradeTo.expectCompatibleWith(l, r)).describedAs(isCompatibleWithDesc(l, r)).isTrue();
-// TODO after https://issues.apache.org/jira/browse/CASSANDRA-18760
-//            if (upgradeFrom.expectSerializationCompatibleWith(l, r))
-//                assertions.assertThat(upgradeTo.expectSerializationCompatibleWith(l, r)).describedAs(isSerializationCompatibleWithDesc(l, r)).isTrue();
+            if (upgradeFrom.expectSerializationCompatibleWith(l, r))
+                assertions.assertThat(upgradeTo.expectSerializationCompatibleWith(l, r)).describedAs(isSerializationCompatibleWithDesc(l, r)).isTrue();
                 if (upgradeFrom.expectValueCompatibleWith(l, r))
                     assertions.assertThat(upgradeTo.expectValueCompatibleWith(l, r)).describedAs(isValueCompatibleWithDesc(l, r)).isTrue();
             }
@@ -332,9 +331,7 @@ public class AbstractTypeTest
                 // serialization compatibility means that we can read a cell written using right's type serializer with left's type serializer;
                 // this additinoally imposes the requirement for storing the buffer lenght in the serialized form if the value is of variable length
                 // as well as, either both types serialize into a single or multiple cells
-// TODO after https://issues.apache.org/jira/browse/CASSANDRA-18760
-//                if (left.isSerializationCompatibleWith(right))
-                if (left.isValueCompatibleWith(right) && left.valueLengthIfFixed() == right.valueLengthIfFixed() && left.isMultiCell() == right.isMultiCell())
+                if (left.isSerializationCompatibleWith(right))
                 {
                     if (!left.isMultiCell() && !right.isMultiCell())
                         verifySerializationCompatibilityForSimpleCells(left, right, v, rightTable, rightColumn1, rightHelper, leftHeader, leftHelper, leftColumn1);
@@ -612,9 +609,8 @@ public class AbstractTypeTest
                             out.append(" cmp");
                         if (l.isValueCompatibleWith(r))
                             out.append(" val");
-// TODO after https://issues.apache.org/jira/browse/CASSANDRA-18760
-//                        if (l.isSerializationCompatibleWith(r))
-//                            out.append(" ser");
+                        if (l.isSerializationCompatibleWith(r))
+                            out.append(" ser");
                         if (out.length() > 0)
                             return String.format("%s is%s compatible with %s", l, out, r);
                         else
@@ -640,11 +636,10 @@ public class AbstractTypeTest
         return typeRelDesc("isValueCompatibleWith", left, right);
     }
 
-// TODO after https://issues.apache.org/jira/browse/CASSANDRA-18760
-//    private static Description isSerializationCompatibleWithDesc(AbstractType<?> left, AbstractType<?> right)
-//    {
-//        return typeRelDesc("isSerializationCompatibleWith", left, right);
-//    }
+    private static Description isSerializationCompatibleWithDesc(AbstractType<?> left, AbstractType<?> right)
+    {
+        return typeRelDesc("isSerializationCompatibleWith", left, right);
+    }
 
     /**
      * The instances of this class provides types compatibility checks valid for a certain version of Cassandra.
@@ -673,7 +668,7 @@ public class AbstractTypeTest
         public <T extends AbstractType> void checkExpectedTypeCompatibility(T left, T right, SoftAssertions assertions)
         {
             assertions.assertThat(left.isCompatibleWith(right)).as(isCompatibleWithDesc(left, right)).isEqualTo(expectCompatibleWith(left, right));
-//            assertions.assertThat(left.isSerializationCompatibleWith(right)).as(isSerializationCompatibleWithDesc(left, right)).isEqualTo(expectSerializationCompatibleWith(left, right));
+            assertions.assertThat(left.isSerializationCompatibleWith(right)).as(isSerializationCompatibleWithDesc(left, right)).isEqualTo(expectSerializationCompatibleWith(left, right));
             assertions.assertThat(left.isValueCompatibleWith(right)).as(isValueCompatibleWithDesc(left, right)).isEqualTo(expectValueCompatibleWith(left, right));
         }
 
@@ -681,7 +676,7 @@ public class AbstractTypeTest
 
         public abstract boolean expectValueCompatibleWith(AbstractType left, AbstractType right);
 
-//        public abstract boolean expectSerializationCompatibleWith(AbstractType left, AbstractType right);
+        public abstract boolean expectSerializationCompatibleWith(AbstractType left, AbstractType right);
 
         public abstract Set<Class<? extends AbstractType>> knownTypes();
 
@@ -729,12 +724,11 @@ public class AbstractTypeTest
                     assertThat(l1.isCompatibleWith(r1)).isTrue();
                     compatibleWithMap.put(l.toString(), r.toString());
                 }
-// TODO after https://issues.apache.org/jira/browse/CASSANDRA-18760
-//                if (l.isSerializationCompatibleWith(r))
-//                {
-//                    assertThat(l1.isSerializationCompatibleWith(r1)).isTrue();
-//                    serializationCompatibleWithMap.put(l.toString(), r.toString());
-//                }
+                if (l.isSerializationCompatibleWith(r))
+                {
+                    assertThat(l1.isSerializationCompatibleWith(r1)).isTrue();
+                    serializationCompatibleWithMap.put(l.toString(), r.toString());
+                }
 
                 if (l.isValueCompatibleWith(r))
                 {
@@ -890,14 +884,13 @@ public class AbstractTypeTest
                 return true;
             return valueCompatibleWith.containsEntry(left, right);
         }
-// TODO after https://issues.apache.org/jira/browse/CASSANDRA-18760
-//        @Override
-//        public boolean expectSerializationCompatibleWith(AbstractType left, AbstractType right)
-//        {
-//            if (left.equals(right))
-//              return true;
-//            return serializationCompatibleWith.containsEntry(left, right);
-//        }
+        @Override
+        public boolean expectSerializationCompatibleWith(AbstractType left, AbstractType right)
+        {
+            if (left.equals(right))
+              return true;
+            return serializationCompatibleWith.containsEntry(left, right);
+        }
 
         @Override
         public Set<Class<? extends AbstractType>> knownTypes()
@@ -1068,11 +1061,10 @@ public class AbstractTypeTest
             return expectedCompatibility(left, right, primitiveValueCompatibleWith::containsEntry, AbstractType::isValueCompatibleWith);
         }
 
-// TODO after https://issues.apache.org/jira/browse/CASSANDRA-18760
-//        @Override
-//        public boolean expectSerializationCompatibleWith(AbstractType left, AbstractType right)
-//        {
-//            return expectedCompatibility(left, right, primitiveSerializationCompatibleWith::containsEntry, AbstractType::isSerializationCompatibleWith);
-//        }
+        @Override
+        public boolean expectSerializationCompatibleWith(AbstractType left, AbstractType right)
+        {
+            return expectedCompatibility(left, right, primitiveSerializationCompatibleWith::containsEntry, AbstractType::isSerializationCompatibleWith);
+        }
     }
 }
