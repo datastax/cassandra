@@ -453,6 +453,12 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         }
     }
 
+    /// Return the num of in-progress compactions tracked by UCS
+    public int getCompactionInProgress()
+    {
+        return backgroundCompactions.getCompactionsInProgress().size();
+    }
+
     private static RuntimeException rejectTasks(Iterable<? extends AbstractCompactionTask> tasks, Throwable error)
     {
         for (var task : tasks)
