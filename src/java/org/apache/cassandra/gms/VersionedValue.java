@@ -277,7 +277,8 @@ public class VersionedValue implements Comparable<VersionedValue>
 
         public VersionedValue releaseVersion()
         {
-            return new VersionedValue(FBUtilities.getReleaseVersionString());
+            // CC versions come with a sha suffix that non-CC nodes fail parsing in EndpointState.getReleaseVersion()
+            return new VersionedValue(FBUtilities.getReleaseVersionString().replaceFirst("-[0-9a-f]{7,40}$", ""));
         }
 
         @VisibleForTesting
