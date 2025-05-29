@@ -344,8 +344,8 @@ public class SSTableIndexComponentsStateTest
             Descriptor descriptor = Descriptor.fromFilename(temporaryFolder.newFolder().getAbsolutePath() + "/ca-1-bti-Data.db");
 
             createFakeDataFile(descriptor);
-            createFakePerSSTableComponents(descriptor, Version.latest(), 0, 1 * 1024 * 1024); // 1mb per file
-            createFakePerIndexComponents(descriptor, idx1, Version.latest(), 1, 2 * 1024 * 1024); // 2mb per file
+            createFakePerSSTableComponents(descriptor, Version.current(), 0, 1 * 1024 * 1024); // 1mb per file
+            createFakePerIndexComponents(descriptor, idx1, Version.current(), 1, 2 * 1024 * 1024); // 2mb per file
             createFakePerIndexComponents(descriptor, idx2, Version.DB, 0, 3 * 1024 * 1024); // 3mb per file
 
             SSTableReader sstable = Mockito.mock(SSTableReader.class);
@@ -363,11 +363,11 @@ public class SSTableIndexComponentsStateTest
 
             assertEquals(Set.of(idx1.getIndexName(), idx2.getIndexName()), state.includedIndexes());
 
-            assertEquals(Version.latest(), state.perSSTable().buildId.version());
+            assertEquals(Version.current(), state.perSSTable().buildId.version());
             assertEquals(0, state.perSSTable().buildId.generation());
             assertEquals(6, state.perSSTable().sizeInMB);
 
-            assertEquals(Version.latest(), state.perIndex(idx1.getIndexName()).buildId.version());
+            assertEquals(Version.current(), state.perIndex(idx1.getIndexName()).buildId.version());
             assertEquals(1, state.perIndex(idx1.getIndexName()).buildId.generation());
             assertEquals(8, state.perIndex(idx1.getIndexName()).sizeInMB);
 
