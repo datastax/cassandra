@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.gms;
 
+import java.io.IOException;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.Collections;
@@ -33,6 +34,9 @@ import org.junit.Test;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.io.util.DataInputBuffer;
+import org.apache.cassandra.io.util.DataOutputBuffer;
+import org.apache.cassandra.net.MessagingService;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
@@ -164,5 +168,35 @@ public class EndpointStateTest
         assertTrue(values.containsKey(ApplicationState.TOKENS));
         assertTrue(values.containsKey(ApplicationState.INTERNAL_IP));
         assertTrue(values.containsKey(ApplicationState.HOST_ID));
+    }
+
+    @Test
+    public void testCCReleaseVersion() throws IOException
+    {
+        String versionString = "4.0.11.0-0b982c438bfc";
+        String c3safeVersionString = "4.0.11.0";
+        VersionedValue releaseVersion = valueFactory.releaseVersion(versionString);
+
+        assertEquals(versionString, EndpointStateSerializer.filterValue(ApplicationState.RELEASE_VERSION, releaseVersion, MessagingService.VERSION_40).value);
+        assertEquals(c3safeVersionString, EndpointStateSerializer.filterValue(ApplicationState.RELEASE_VERSION, releaseVersion, MessagingService.VERSION_3014).value);
+
+        HeartBeatState hb = new HeartBeatState(0);
+        EndpointState state = new EndpointState(hb);
+        Map<ApplicationState, VersionedValue> states = new EnumMap<>(ApplicationState.class);
+        states.put(ApplicationState.RELEASE_VERSION, releaseVersion);
+        state.addApplicationStates(states);
+        assertEquals(versionString, state.getApplicationState(ApplicationState.RELEASE_VERSION).value);
+
+        DataOutputBuffer buffer = new DataOutputBuffer();
+        EndpointState.serializer.serialize(state, buffer, MessagingService.VERSION_40);
+        DataInputBuffer input = new DataInputBuffer(buffer.buffer(), false);
+        EndpointState deserializedCurrent = EndpointState.serializer.deserialize(input, MessagingService.VERSION_40);
+        assertEquals(versionString, deserializedCurrent.getApplicationState(ApplicationState.RELEASE_VERSION).value);
+
+        buffer = new DataOutputBuffer();
+        EndpointState.serializer.serialize(state, buffer, MessagingService.VERSION_3014);
+        input = new DataInputBuffer(buffer.buffer(), false);
+        EndpointState deserializedOld = EndpointState.serializer.deserialize(input, MessagingService.VERSION_3014);
+        assertEquals(c3safeVersionString, deserializedOld.getApplicationState(ApplicationState.RELEASE_VERSION).value);
     }
 }
