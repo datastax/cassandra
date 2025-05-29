@@ -591,12 +591,13 @@ public enum Operator
     }
 
     /**
-     * Checks if this operator is CONTAINS operator.
-     * @return {@code true} if this operator is a CONTAINS operator, {@code false} otherwise.
+     * Checks if this operator is any of the variations of contains ({@code [NOT] CONTAINS [KEY]}).
+     *
+     * @return {@code true} if this operator is any kind of contains operator, {@code false} otherwise.
      */
     public boolean isContains()
     {
-        return this == CONTAINS;
+        return this == CONTAINS || this == CONTAINS_KEY || this == NOT_CONTAINS || this == NOT_CONTAINS_KEY;
     }
 
     /**
