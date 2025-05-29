@@ -38,6 +38,7 @@ import org.apache.cassandra.cql3.statements.Bound;
 import org.apache.cassandra.db.MultiClusteringBuilder;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.IndexRegistry;
+import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Pair;
 
@@ -563,6 +564,8 @@ public abstract class SingleColumnRestriction implements SingleRestriction
     // This holds CONTAINS, CONTAINS_KEY, NOT CONTAINS, NOT CONTAINS KEY and map[key] = value restrictions because we might want to have any combination of them.
     public static final class ContainsRestriction extends SingleColumnRestriction
     {
+        public static final String MULTIPLE_INDEXES_WARNING = "Multiple indexes found for CONTAINS restriction on %s. Using not-analyzed index %s";
+
         private final List<Term> values = new ArrayList<>(); // for CONTAINS
         private final List<Term> negativeValues = new ArrayList<>(); // for NOT_CONTAINS
         private final List<Term> keys = new ArrayList<>(); // for CONTAINS_KEY
@@ -817,6 +820,38 @@ public abstract class SingleColumnRestriction implements SingleRestriction
             to.negativeEntryKeys.addAll(from.negativeEntryKeys);
             to.negativeEntryValues.addAll(from.negativeEntryValues);
 
+        }
+
+        @Override
+        public Index findSupportingIndex(IndexRegistry indexRegistry)
+        {
+            // if there are multiple supporting indexes, we prefer those without an analyzer (see CNDB-13925)
+            Index notAnalyzedIndex = null;
+            Index analyzedIndex = null;
+            for (Index index : indexRegistry.listIndexes())
+            {
+                if (isSupportedBy(index))
+                {
+                    if (index.getAnalyzer(null).isPresent())
+                        analyzedIndex = index;
+                    else
+                        notAnalyzedIndex = index;
+                }
+            }
+
+            if (notAnalyzedIndex != null)
+            {
+                // We prefer the not analyzed index, but if there was also an analyzed index, we warn the user.
+                // We use a client warning key so the warning is emitted just once per query.
+                if (analyzedIndex != null)
+                {
+                    String msg = String.format(MULTIPLE_INDEXES_WARNING, columnDef.name, notAnalyzedIndex.getIndexMetadata().name);
+                    ClientWarn.instance.warn(msg, "multiple_indexes_for_contains_on_" + columnDef.name);
+                }
+                return notAnalyzedIndex;
+            }
+
+            return analyzedIndex;
         }
     }
 
