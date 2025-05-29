@@ -18,6 +18,8 @@ package org.apache.cassandra.index.sai.cql;
 
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -38,6 +40,7 @@ import org.apache.cassandra.index.sai.memory.TrieMemoryIndex;
 import org.apache.cassandra.index.sai.memory.TrieMemtableIndex;
 import org.assertj.core.api.Assertions;
 
+import static org.apache.cassandra.index.sai.cql.BM25Test.*;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.assertEquals;
 
@@ -287,6 +290,40 @@ public class FeaturesVersionSupportTest extends VectorTester
     {
         String body = (String) DATASET[row][DATASET_BODY_COLUMN];
         return PATTERN.split(body.toLowerCase()).length;
+    }
+
+    private void insertCollectionData()
+    {
+        int setsize = 1;
+        for (int row = 0; row < DATASET.length; row++)
+        {
+            var set = new HashSet<String>();
+            for (int j = 0; j < setsize; j++)
+                set.add((String) DATASET[row - j][3]);
+            if (setsize >= 3)
+                setsize -= 2;
+            else
+                setsize++;
+            var map = new HashMap<Integer, String>();
+            var map_text = new HashMap<String, String>();
+            for (int j = 0; j <= row && j < 3; j++)
+            {
+                map.putIfAbsent((Integer) DATASET[row - j][2], (String) DATASET[row - j][1]);
+                map_text.putIfAbsent((String) DATASET[row - j][1], (String) DATASET[row - j][3]);
+            }
+
+            execute(
+                    "INSERT INTO %s (id, category, score, body, bodyset, map_category, map_body) " +
+                            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    DATASET[row][0],
+                    DATASET[row][1],
+                    DATASET[row][2],
+                    DATASET[row][3],
+                    set,
+                    map,
+                    map_text
+            );
+        }
     }
 
     private void assertNumRowsMemtable(String indexName, int expectedNumRows)
