@@ -405,20 +405,20 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
     /// Used by CNDB where compaction aggregates come from etcd rather than the strategy.
     /// @return collection of `AbstractCompactionTask`, which could be either a `CompactionTask` or a `UnifiedCompactionTask`
     public synchronized Collection<AbstractCompactionTask> getNextBackgroundTasks(Collection<CompactionAggregate> aggregates, int gcBefore,
-                                                                                  @Nullable CompactionObserver additionObserver)
+                                                                                  @Nullable CompactionObserver additionalObserver)
     {
         controller.onStrategyBackgroundTaskRequest();
-        return createCompactionTasks(aggregates, gcBefore, additionObserver);
+        return createCompactionTasks(aggregates, gcBefore, additionalObserver);
     }
 
     private Collection<AbstractCompactionTask> createCompactionTasks(Collection<CompactionAggregate> aggregates, int gcBefore,
-                                                                     @Nullable CompactionObserver additionObserver)
+                                                                     @Nullable CompactionObserver additionalObserver)
     {
         Collection<AbstractCompactionTask> tasks = new ArrayList<>(aggregates.size());
         try
         {
             for (CompactionAggregate aggregate : aggregates)
-                createAndAddTasks(gcBefore, (CompactionAggregate.UnifiedAggregate) aggregate, tasks, additionObserver);
+                createAndAddTasks(gcBefore, (CompactionAggregate.UnifiedAggregate) aggregate, tasks, additionalObserver);
 
             return tasks;
         }
@@ -430,7 +430,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
 
     /// Create compaction tasks for the given aggregate and add them to the given tasks list.
     public void createAndAddTasks(int gcBefore, CompactionAggregate.UnifiedAggregate aggregate,
-                                  Collection<? super UnifiedCompactionTask> tasks, @Nullable CompactionObserver additionObserver)
+                                  Collection<? super UnifiedCompactionTask> tasks, @Nullable CompactionObserver additionalObserver)
     {
         CompactionPick selected = aggregate.getSelected();
         int parallelism = aggregate.getPermittedParallelism();
@@ -444,7 +444,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         {
             // This will ignore the range of the operation, which is fine.
             backgroundCompactions.setSubmitted(this, transaction.opId(), aggregate);
-            createAndAddTasks(gcBefore, transaction, aggregate.operationRange(), aggregate.keepOriginals(), getShardingStats(aggregate), parallelism, tasks, additionObserver);
+            createAndAddTasks(gcBefore, transaction, aggregate.operationRange(), aggregate.keepOriginals(), getShardingStats(aggregate), parallelism, tasks, additionalObserver);
         }
         else
         {
