@@ -748,7 +748,7 @@ public class BM25Test extends SAITester
         createIndex("CREATE CUSTOM INDEX ON %s (category) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s (map_category) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s (KEYS(map_body)) USING 'StorageAttachedIndex'");
-        insertCollectionData();
+        insertCollectionData(this);
         analyzeDataset("climate");
         analyzeDataset("health");
 
@@ -896,7 +896,7 @@ public class BM25Test extends SAITester
         }
     }
 
-    private void insertCollectionData()
+    public static void insertCollectionData(SAITester tester)
     {
         int setsize = 1;
         for (int row = 0; row < DATASET.length; row++)
@@ -916,7 +916,7 @@ public class BM25Test extends SAITester
                 map_text.putIfAbsent((String) DATASET[row - j][1], (String) DATASET[row - j][3]);
             }
 
-            execute(
+            tester.execute(
             "INSERT INTO %s (id, category, score, body, bodyset, map_category, map_body) " +
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
             DATASET[row][0],

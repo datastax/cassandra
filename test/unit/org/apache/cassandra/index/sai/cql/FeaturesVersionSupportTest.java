@@ -18,8 +18,6 @@ package org.apache.cassandra.index.sai.cql;
 
 import java.util.Arrays;
 import java.util.Collection;
-import java.util.HashMap;
-import java.util.HashSet;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -260,7 +258,7 @@ public class FeaturesVersionSupportTest extends VectorTester
         );
         String scoreIndexName = createIndex("CREATE CUSTOM INDEX ON %s (score) USING 'StorageAttachedIndex'");
         String mapIndexName = createIndex("CREATE CUSTOM INDEX ON %s (map_category) USING 'StorageAttachedIndex'");
-        insertCollectionData();
+        BM25Test.insertCollectionData(this);
         int totalTermsCount = IntStream.range(0, DATASET.length)
                                        .map(this::calculateTotalTermsForRow)
                                        .sum();
@@ -292,40 +290,6 @@ public class FeaturesVersionSupportTest extends VectorTester
         return PATTERN.split(body.toLowerCase()).length;
     }
 
-    private void insertCollectionData()
-    {
-        int setsize = 1;
-        for (int row = 0; row < DATASET.length; row++)
-        {
-            var set = new HashSet<String>();
-            for (int j = 0; j < setsize; j++)
-                set.add((String) DATASET[row - j][3]);
-            if (setsize >= 3)
-                setsize -= 2;
-            else
-                setsize++;
-            var map = new HashMap<Integer, String>();
-            var map_text = new HashMap<String, String>();
-            for (int j = 0; j <= row && j < 3; j++)
-            {
-                map.putIfAbsent((Integer) DATASET[row - j][2], (String) DATASET[row - j][1]);
-                map_text.putIfAbsent((String) DATASET[row - j][1], (String) DATASET[row - j][3]);
-            }
-
-            execute(
-                    "INSERT INTO %s (id, category, score, body, bodyset, map_category, map_body) " +
-                            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    DATASET[row][0],
-                    DATASET[row][1],
-                    DATASET[row][2],
-                    DATASET[row][3],
-                    set,
-                    map,
-                    map_text
-            );
-        }
-    }
-
     private void assertNumRowsMemtable(String indexName, int expectedNumRows)
     {
         int rowCount = 0;
@@ -334,7 +298,7 @@ public class FeaturesVersionSupportTest extends VectorTester
         {
             MemtableIndex memIndex = getIndexContext(indexName).getLiveMemtables().get(memtable);
             assert memIndex instanceof TrieMemtableIndex;
-            rowCount = Arrays.stream(((TrieMemtableIndex) memIndex).getRangeIndexes())
+            rowCount += Arrays.stream(((TrieMemtableIndex) memIndex).getRangeIndexes())
                              .map(index -> ((TrieMemoryIndex) index).getDocLengths().size())
                              .mapToInt(Integer::intValue).sum();
         }
