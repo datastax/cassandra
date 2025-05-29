@@ -41,7 +41,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.antlr.runtime.RecognitionException;
-import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.ColumnIdentifier;
@@ -1124,6 +1123,7 @@ public final class SchemaKeyspace
         String name = row.getString("index_name");
         IndexMetadata.Kind type = IndexMetadata.Kind.valueOf(row.getString("kind"));
         Map<String, String> options = row.getFrozenTextMap("options");
+
         return IndexMetadata.fromSchemaMetadata(name, type, options);
     }
 
