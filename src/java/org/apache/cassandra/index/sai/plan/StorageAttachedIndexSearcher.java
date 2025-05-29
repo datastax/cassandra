@@ -29,11 +29,13 @@ import java.util.concurrent.TimeUnit;
 import java.util.Map;
 import java.util.PriorityQueue;
 import java.util.Queue;
+import java.util.Set;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -105,6 +107,24 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
     public ReadCommand command()
     {
         return command;
+    }
+
+    @VisibleForTesting
+    public final Set<String> plannedIndexes()
+    {
+        try
+        {
+            Plan plan = controller.buildPlan().optimize();
+            Set<String> indexes = new HashSet<>();
+            plan.nodesOfType(Plan.IndexScan.class)
+                .forEach(s -> indexes.add(s.getIndexName()));
+            return indexes;
+        }
+        finally
+        {
+            // we need to call this to clean up the resources opened by the plan
+            controller.abort();
+        }
     }
 
     @Override
