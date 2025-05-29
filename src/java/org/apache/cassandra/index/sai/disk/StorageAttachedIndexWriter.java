@@ -266,8 +266,12 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
             {
                 logger.error(indexDescriptor.logMessage("Failed to complete an index build"), t);
                 abort(t, true);
+
                 // fail compaction task or index build task if SAI failed
-                throw Throwables.unchecked(t);
+                // do not throw on flush, because the sstable is already written and usable,
+                // and the index was already marked as non-queryable
+                if (opType != OperationType.FLUSH)
+                    throw Throwables.unchecked(t);
             }
         }
         finally
