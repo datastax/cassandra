@@ -1162,4 +1162,41 @@ public interface Index
             throw new IllegalArgumentException("Unrecognized code: " + code);
         }
     }
+
+    /**
+     * Returns the best index for a given column and operator among the specified collection of indexes.
+     * </p>
+     * The best index is simply the first one that supports the column and operator, because we shouldn't have multiple
+     * indexes for the same column and operator, so we can just return the first one. The only exception to this is when
+     * the operator is {@code [NOT] CONTAINS [KEY]}, in which case the best index be the first one that doesn't use an
+     * analyzer.
+     *
+     * @param indexes a collection on indexes
+     * @param column a column
+     * @param operator an operator
+     * @return the best index for the column and operator among the specified indexes
+     */
+    static <T extends Index> Optional<T> getBestIndexFor(Collection<T> indexes, ColumnMetadata column, Operator operator)
+    {
+        // we simply return the first index that supports the expression, unless it's a contains operator
+        if (!operator.isContains())
+            return indexes.stream().filter((i) -> i.supportsExpression(column, operator)).findFirst();
+
+        // if we have a contains operator, we prefer indexes without an analyzer (see CNDB-13925)
+        T firstAnalyzedIndex = null;
+        for (T index : indexes)
+        {
+            if (index.supportsExpression(column, operator))
+            {
+                // we prefer indexes without an analyzer
+                if (index.getAnalyzer(null).isEmpty())
+                    return Optional.of(index);
+
+                if (firstAnalyzedIndex == null)
+                    firstAnalyzedIndex = index;
+            }
+        }
+
+        return Optional.ofNullable(firstAnalyzedIndex);
+    }
 }
