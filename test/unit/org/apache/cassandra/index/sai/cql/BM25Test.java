@@ -16,25 +16,15 @@
 
 package org.apache.cassandra.index.sai.cql;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
+import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
-import java.util.stream.IntStream;
 
-import org.apache.cassandra.index.sai.SSTableIndex;
-import org.apache.cassandra.index.sai.memory.MemtableIndex;
-import org.apache.cassandra.index.sai.memory.TrieMemoryIndex;
-import org.apache.cassandra.index.sai.memory.TrieMemtableIndex;
 import org.assertj.core.api.Assertions;
 
-import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -64,11 +54,13 @@ public class BM25Test extends SAITester
     @Parameterized.Parameters(name = "version={0}")
     public static List<Object> data()
     {
-        return Arrays.asList(new Object[]{ Version.BM25_EARLIEST, Version.ED });
+        return Version.ALL.stream().filter(v -> v.onOrAfter(Version.BM25_EARLIEST))
+                                   .map(v -> new Object[]{ v })
+                                   .collect(Collectors.toList());
     }
 
     // Pattern that treats apostrophes within words as part of the word
-    private static final Pattern PATTERN = Pattern.compile("[^\\w']+|'(?=\\s)|(?<=\\s)'");
+    public static final Pattern PATTERN = Pattern.compile("[^\\w']+|'(?=\\s)|(?<=\\s)'");
     public static final int DATASET_BODY_COLUMN = 3;
 
     @Before
@@ -756,7 +748,7 @@ public class BM25Test extends SAITester
         createIndex("CREATE CUSTOM INDEX ON %s (category) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s (map_category) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s (KEYS(map_body)) USING 'StorageAttachedIndex'");
-        insertCollectionData();
+        insertCollectionData(this);
         analyzeDataset("climate");
         analyzeDataset("health");
 
@@ -842,92 +834,7 @@ public class BM25Test extends SAITester
                 "climate");
     }
 
-    /**
-     * Asserts that memtable SAI index maintains expected row count, which is, then,
-     * used to store row count in SSTable SAI index and its segments. This is also
-     * asserted.
-     */
-    @Test
-    public void testIndexMetaForNumRows()
-    {
-        SAIUtil.setCurrentVersion(Version.ED);
-
-        createTable("CREATE TABLE %s (id int PRIMARY KEY, category text, score int, " +
-                    "title text, body text, bodyset set<text>, " +
-                    "map_category map<int, text>, map_body map<text, text>)");
-        String bodyIndexName = createAnalyzedIndex("body", true);
-        String scoreIndexName = createIndex("CREATE CUSTOM INDEX ON %s (score) USING 'StorageAttachedIndex'");
-        String mapIndexName = createIndex("CREATE CUSTOM INDEX ON %s (map_category) USING 'StorageAttachedIndex'");
-        insertCollectionData();
-        int totalTermsCount = IntStream.range(0, DATASET.length)
-                                       .map(this::calculateTotalTermsForRow)
-                                       .sum();
-
-        assertNumRowsMemtable(scoreIndexName, DATASET.length);
-        assertNumRowsMemtable(bodyIndexName, DATASET.length);
-        assertNumRowsMemtable(mapIndexName, DATASET.length);
-        execute("DELETE FROM %s WHERE id = ?", 5);
-        totalTermsCount -= calculateTotalTermsForRow(4);
-        flush();
-        assertNumRowsAndTotalTermsSSTable(scoreIndexName, DATASET.length - 1, DATASET.length - 1);
-        assertNumRowsAndTotalTermsSSTable(bodyIndexName, DATASET.length - 1, totalTermsCount);
-        assertNumRowsSSTable(mapIndexName, DATASET.length - 1);
-        execute("DELETE FROM %s WHERE id = ?", 10);
-        flush();
-        assertNumRowsAndTotalTermsSSTable(scoreIndexName, DATASET.length - 1, DATASET.length - 1);
-        assertNumRowsAndTotalTermsSSTable(bodyIndexName, DATASET.length - 1, totalTermsCount);
-        assertNumRowsSSTable(mapIndexName, DATASET.length - 1);
-        compact();
-        totalTermsCount -= calculateTotalTermsForRow(9);
-        assertNumRowsAndTotalTermsSSTable(scoreIndexName, DATASET.length - 2, DATASET.length - 2);
-        assertNumRowsAndTotalTermsSSTable(bodyIndexName, DATASET.length - 2, totalTermsCount);
-        assertNumRowsSSTable(mapIndexName, DATASET.length - 2);
-    }
-
-    private void assertNumRowsMemtable(String indexName, int expectedNumRows)
-    {
-        int rowCount = 0;
-
-        for (var memtable : getCurrentColumnFamilyStore().getAllMemtables())
-        {
-            MemtableIndex memIndex = getIndexContext(indexName).getLiveMemtables().get(memtable);
-            assert memIndex instanceof TrieMemtableIndex;
-            rowCount = Arrays.stream(((TrieMemtableIndex) memIndex).getRangeIndexes())
-                             .map(index -> ((TrieMemoryIndex) index).getDocLengths().size())
-                             .mapToInt(Integer::intValue).sum();
-        }
-        assertEquals(expectedNumRows, rowCount);
-    }
-
-    private void assertNumRowsSSTable(String indexName, int expectedNumRows)
-    {
-        assertNumRowsAndTotalTermsSSTable(indexName, expectedNumRows, -1);
-    }
-
-    private void assertNumRowsAndTotalTermsSSTable(String indexName, int expectedNumRows, int expectedTotalTermsCount
-    )
-    {
-        long indexRowCount = 0;
-        long segmentRowCount = 0;
-        long totalTermCount = 0;
-        for (SSTableIndex sstableIndex : getIndexContext(indexName).getView())
-        {
-            indexRowCount += sstableIndex.getRowCount();
-            for (var segment : sstableIndex.getSegments())
-            {
-                var metadata = segment.metadata;
-                Assert.assertNotNull(metadata);
-                segmentRowCount += metadata.numRows;
-                totalTermCount += metadata.totalTermCount;
-            }
-        }
-        assertEquals(indexRowCount, segmentRowCount);
-        assertEquals(expectedNumRows, indexRowCount);
-        if (expectedTotalTermsCount > 0)
-            assertEquals(expectedTotalTermsCount, totalTermCount);
-    }
-
-    private final static Object[][] DATASET =
+    protected final static Object[][] DATASET =
     {
     { 1, "Climate", 5, "Climate change is a pressing issue. Climate patterns are shifting globally. Scientists study climate data daily.", 1 },
     { 2, "Technology", 3, "Technology is advancing. New technology in AI and robotics is groundbreaking.", 1 },
@@ -969,12 +876,6 @@ public class BM25Test extends SAITester
         }
     }
 
-    private int calculateTotalTermsForRow(int row)
-    {
-        String body = (String) DATASET[row][DATASET_BODY_COLUMN];
-        return PATTERN.split(body.toLowerCase()).length;
-    }
-
     private void insertPrimitiveData()
     {
         insertPrimitiveData(0, DATASET.length);
@@ -995,7 +896,7 @@ public class BM25Test extends SAITester
         }
     }
 
-    private void insertCollectionData()
+    public static void insertCollectionData(SAITester tester)
     {
         int setsize = 1;
         for (int row = 0; row < DATASET.length; row++)
@@ -1015,7 +916,7 @@ public class BM25Test extends SAITester
                 map_text.putIfAbsent((String) DATASET[row - j][1], (String) DATASET[row - j][3]);
             }
 
-            execute(
+            tester.execute(
             "INSERT INTO %s (id, category, score, body, bodyset, map_category, map_body) " +
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
             DATASET[row][0],
