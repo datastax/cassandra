@@ -36,6 +36,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.ThreadLocalRandom;
 
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.*;
 
 public class SharedCompactionObserverTest
@@ -199,6 +200,42 @@ public class SharedCompactionObserverTest
         verify(mockObserver2, times(1)).onInProgress(mockProgress);
 
         sharedCompactionObserver.onCompleted(operationId, null);
+        verify(mockObserver1, times(1)).onCompleted(operationId, null);
+        verify(mockObserver2, times(1)).onCompleted(operationId, null);
+    }
+
+    @Test
+    public void testMultipleObserverWithOnInProgressError()
+    {
+        CompactionObserver mockObserver1 = Mockito.mock(CompactionObserver.class);
+        CompactionObserver mockObserver2 = Mockito.mock(CompactionObserver.class);
+        Mockito.doThrow(new RuntimeException("Injected Exception")).when(mockObserver1).onInProgress(any());
+
+        SharedCompactionObserver sharedCompactionObserver = new SharedCompactionObserver(mockObserver1, mockObserver2);
+
+        sharedCompactionObserver.registerExpectedSubtask();
+        assertThatThrownBy(() -> sharedCompactionObserver.onInProgress(mockProgress)).isInstanceOf(RuntimeException.class);
+
+        // both onInProgress are called
+        verify(mockObserver1, times(1)).onInProgress(mockProgress);
+        verify(mockObserver2, times(1)).onInProgress(mockProgress);
+    }
+
+    @Test
+    public void testMultipleObserverWithOnCompleteError()
+    {
+        CompactionObserver mockObserver1 = Mockito.mock(CompactionObserver.class);
+        CompactionObserver mockObserver2 = Mockito.mock(CompactionObserver.class);
+        Mockito.doThrow(new RuntimeException("Injected Exception")).when(mockObserver1).onCompleted(any(), any());
+
+        SharedCompactionObserver sharedCompactionObserver = new SharedCompactionObserver(mockObserver1, mockObserver2);
+
+        sharedCompactionObserver.registerExpectedSubtask();
+        sharedCompactionObserver.onInProgress(mockProgress);
+        verify(mockObserver1, times(1)).onInProgress(mockProgress);
+        verify(mockObserver2, times(1)).onInProgress(mockProgress);
+
+        assertThatThrownBy(() -> sharedCompactionObserver.onCompleted(operationId, null)).isInstanceOf(RuntimeException.class);
         verify(mockObserver1, times(1)).onCompleted(operationId, null);
         verify(mockObserver2, times(1)).onCompleted(operationId, null);
     }

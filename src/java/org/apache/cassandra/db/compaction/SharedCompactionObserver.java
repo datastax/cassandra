@@ -18,7 +18,6 @@
 
 package org.apache.cassandra.db.compaction;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -26,6 +25,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import javax.annotation.Nullable;
 
+import com.google.common.collect.ImmutableList;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -60,10 +60,7 @@ public class SharedCompactionObserver implements CompactionObserver
         if (primary == null)
             throw new IllegalArgumentException("Primary observer cannot be null");
 
-        this.compObservers = new ArrayList<>(2);
-        this.compObservers.add(primary);
-        if (secondary != null)
-            this.compObservers.add(secondary);
+        this.compObservers = secondary != null ? ImmutableList.of(primary, secondary) : ImmutableList.of(primary);
     }
 
     public void registerExpectedSubtask()
@@ -82,8 +79,7 @@ public class SharedCompactionObserver implements CompactionObserver
             for (CompactionObserver compObserver : compObservers)
                 err = Throwables.perform(err, () -> compObserver.onInProgress(progress));
 
-            if (err != null)
-                logger.error("Failed to notify CompactionObserver.onInProgress for {}", progress.operationId(), err);
+            Throwables.maybeFail(err);
         }
         else
             assert inProgressReported.get() == progress; // progress object must also be shared
@@ -103,8 +99,7 @@ public class SharedCompactionObserver implements CompactionObserver
             for (CompactionObserver compObserver : compObservers)
                 error = Throwables.perform(error, () -> compObserver.onCompleted(inProgressReported.get().operationId(), onCompleteException.get()));
 
-            if (error != null)
-                logger.error("Failed to notify CompactionObserver.onCompleted for {}", inProgressReported.get().operationId(), error);
+            Throwables.maybeFail(error);
         }
     }
 }
