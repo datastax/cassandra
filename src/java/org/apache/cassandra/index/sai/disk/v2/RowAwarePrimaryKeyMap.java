@@ -152,7 +152,6 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
     private final PrimaryKey.Factory primaryKeyFactory;
     private final ClusteringComparator clusteringComparator;
     private final SSTableId<?> sstableId;
-    private final ByteBuffer tokenBuffer = ByteBuffer.allocate(Long.BYTES);
 
     private RowAwarePrimaryKeyMap(LongArray rowIdToToken,
                                   SortedTermsReader sortedTermsReader,
@@ -185,9 +184,8 @@ public class RowAwarePrimaryKeyMap implements PrimaryKeyMap
     @Override
     public PrimaryKey primaryKeyFromRowId(long sstableRowId)
     {
-        tokenBuffer.putLong(rowIdToToken.get(sstableRowId));
-        tokenBuffer.rewind();
-        return primaryKeyFactory.createDeferred(partitioner.getTokenFactory().fromByteArray(tokenBuffer), () -> supplier(sstableRowId));
+        long token = rowIdToToken.get(sstableRowId);
+        return primaryKeyFactory.createDeferred(partitioner.getTokenFactory().fromLongValue(token), () -> supplier(sstableRowId));
     }
 
     private long skinnyExactRowIdOrInvertedCeiling(PrimaryKey key)

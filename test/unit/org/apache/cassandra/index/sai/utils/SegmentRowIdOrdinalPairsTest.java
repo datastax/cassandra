@@ -16,6 +16,8 @@
 
 package org.apache.cassandra.index.sai.utils;
 
+import io.github.jbellis.jvector.graph.NodeQueue;
+import io.github.jbellis.jvector.graph.similarity.ScoreFunction;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -23,7 +25,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertThrows;
+import static org.junit.Assert.assertTrue;
 
 public class SegmentRowIdOrdinalPairsTest
 {
@@ -96,32 +100,6 @@ public class SegmentRowIdOrdinalPairsTest
     }
 
     @Test
-    public void testForEachIndexOrdinalPair()
-    {
-        SegmentRowIdOrdinalPairs pairs = new SegmentRowIdOrdinalPairs(3);
-        pairs.add(1, 10);
-        pairs.add(2, 20);
-        pairs.add(3, 30);
-
-        List<Integer> indices = new ArrayList<>();
-        List<Integer> ordinals = new ArrayList<>();
-
-        pairs.forEachIndexOrdinalPair((index, ordinal) -> {
-            indices.add(index);
-            ordinals.add(ordinal);
-        });
-
-        assertEquals(3, indices.size());
-        assertEquals(3, ordinals.size());
-        assertEquals(Integer.valueOf(0), indices.get(0));
-        assertEquals(Integer.valueOf(10), ordinals.get(0));
-        assertEquals(Integer.valueOf(1), indices.get(1));
-        assertEquals(Integer.valueOf(20), ordinals.get(1));
-        assertEquals(Integer.valueOf(2), indices.get(2));
-        assertEquals(Integer.valueOf(30), ordinals.get(2));
-    }
-
-    @Test
     public void testGetSegmentRowIdAndOrdinalBoundaryChecks()
     {
         SegmentRowIdOrdinalPairs pairs = new SegmentRowIdOrdinalPairs(2);
@@ -158,9 +136,6 @@ public class SegmentRowIdOrdinalPairsTest
 
         pairs.forEachSegmentRowIdOrdinalPair((x, y) -> count.incrementAndGet());
         assertEquals(0, count.get());
-
-        pairs.forEachIndexOrdinalPair((x, y) -> count.incrementAndGet());
-        assertEquals(0, count.get());
     }
 
     @Test
@@ -169,5 +144,82 @@ public class SegmentRowIdOrdinalPairsTest
         SegmentRowIdOrdinalPairs pairs = new SegmentRowIdOrdinalPairs(0);
         assertEquals(0, pairs.size());
         assertThrows(IndexOutOfBoundsException.class, () -> pairs.add(1, 10));
+    }
+
+    @Test
+    public void testMapToSegmentRowIdScoreIterator()
+    {
+        SegmentRowIdOrdinalPairs pairs = new SegmentRowIdOrdinalPairs(3);
+        pairs.add(1, 10);
+        pairs.add(2, 20);
+        pairs.add(3, 30);
+
+        // Create a simple score function that returns the ordinal value divided by 10 as the score
+        ScoreFunction.ExactScoreFunction scoreFunction = ordinal -> ordinal / 10.0f;
+
+        NodeQueue.NodeScoreIterator iterator = pairs.mapToSegmentRowIdScoreIterator(scoreFunction);
+
+        // Test first pair
+        assertTrue(iterator.hasNext());
+        assertEquals(1.0f, iterator.topScore(), 0.001f);
+        assertEquals(1, iterator.pop());
+
+        // Test second pair
+        assertTrue(iterator.hasNext());
+        assertEquals(2.0f, iterator.topScore(), 0.001f);
+        assertEquals(2, iterator.pop());
+
+        // Test third pair
+        assertTrue(iterator.hasNext());
+        assertEquals(3.0f, iterator.topScore(), 0.001f);
+        assertEquals(3, iterator.pop());
+
+        // Test end of iteration
+        assertFalse(iterator.hasNext());
+    }
+
+    @Test
+    public void testMapToIndexScoreIterator()
+    {
+        SegmentRowIdOrdinalPairs pairs = new SegmentRowIdOrdinalPairs(3);
+        pairs.add(1, 10);
+        pairs.add(2, 20);
+        pairs.add(3, 30);
+
+        // Create a simple score function that returns the ordinal value divided by 10 as the score
+        ScoreFunction.ExactScoreFunction scoreFunction = ordinal -> ordinal / 10.0f;
+
+        NodeQueue.NodeScoreIterator iterator = pairs.mapToIndexScoreIterator(scoreFunction);
+
+        // Test first pair
+        assertTrue(iterator.hasNext());
+        assertEquals(1.0f, iterator.topScore(), 0.001f);
+        assertEquals(0, iterator.pop());
+
+        // Test second pair
+        assertTrue(iterator.hasNext());
+        assertEquals(2.0f, iterator.topScore(), 0.001f);
+        assertEquals(1, iterator.pop());
+
+        // Test third pair
+        assertTrue(iterator.hasNext());
+        assertEquals(3.0f, iterator.topScore(), 0.001f);
+        assertEquals(2, iterator.pop());
+
+        // Test end of iteration
+        assertFalse(iterator.hasNext());
+    }
+
+    @Test
+    public void testEmptyIterators()
+    {
+        SegmentRowIdOrdinalPairs pairs = new SegmentRowIdOrdinalPairs(0);
+        ScoreFunction.ExactScoreFunction scoreFunction = ordinal -> ordinal / 10.0f;
+
+        NodeQueue.NodeScoreIterator segmentRowIdIterator = pairs.mapToSegmentRowIdScoreIterator(scoreFunction);
+        assertFalse(segmentRowIdIterator.hasNext());
+
+        NodeQueue.NodeScoreIterator indexIterator = pairs.mapToIndexScoreIterator(scoreFunction);
+        assertFalse(indexIterator.hasNext());
     }
 }
