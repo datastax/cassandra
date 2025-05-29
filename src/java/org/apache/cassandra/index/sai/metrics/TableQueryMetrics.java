@@ -126,12 +126,12 @@ public class TableQueryMetrics extends AbstractMetrics
             sstablesHit = Metrics.histogram(createMetricName("SSTableIndexesHit"), false);
             segmentsHit = Metrics.histogram(createMetricName("IndexSegmentsHit"), false);
 
-            kdTreePostingsSkips = Metrics.histogram(createMetricName("KDTreePostingsSkips"), false);
+            kdTreePostingsSkips = Metrics.histogram(createMetricName("KDTreePostingsSkips"), true);
 
             kdTreePostingsNumPostings = Metrics.histogram(createMetricName("KDTreePostingsNumPostings"), false);
             kdTreePostingsDecodes = Metrics.histogram(createMetricName("KDTreePostingsDecodes"), false);
 
-            postingsSkips = Metrics.histogram(createMetricName("PostingsSkips"), false);
+            postingsSkips = Metrics.histogram(createMetricName("PostingsSkips"), true);
             postingsDecodes = Metrics.histogram(createMetricName("PostingsDecodes"), false);
 
             partitionReads = Metrics.histogram(createMetricName("PartitionReads"), false);
