@@ -1759,9 +1759,25 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
     }
 
     @Test
-    public void testCustomCompositeCompactionObserver()
+    public void testAdditionalCompactionObserverForParallelCompaction()
     {
-        int numShards = 5;
+        testAdditionalCompactionObserver(5, 1000);
+    }
+
+    @Test
+    public void testAdditionalCompactionObserverForSingleCompactionSingleShard()
+    {
+        testAdditionalCompactionObserver(1, 1000);
+    }
+
+    @Test
+    public void testAdditionalCompactionObserverForSingleCompactionLimitedParallelism()
+    {
+        testAdditionalCompactionObserver(5, 1);
+    }
+
+    private void testAdditionalCompactionObserver(int numShards, int parallelism)
+    {
         Set<SSTableReader> allSSTables = new HashSet<>();
         allSSTables.addAll(mockNonOverlappingSSTables(10, 0, 100 << 20));
         allSSTables.addAll(mockNonOverlappingSSTables(15, 1, 200 << 20));
@@ -1793,8 +1809,11 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
                 compositedCompleted.incrementAndGet();
             }
         };
-        strategy.createAndAddTasks(0, txn, null, false, strategy.makeShardingStats(txn), 1000, tasks, compositeCompactionObserver);
-        assertEquals(numShards, tasks.size());
+        strategy.createAndAddTasks(0, txn, null, false, strategy.makeShardingStats(txn), parallelism, tasks, compositeCompactionObserver);
+        if (parallelism > 1)
+            assertEquals(numShards, tasks.size());
+        else
+            assertEquals(1, tasks.size());
 
         assertThat(compositedCompleted).hasValue(0);
         Mockito.verify(backgroundCompactions, times(0)).onInProgress(Mockito.any());
@@ -1819,6 +1838,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         Mockito.verify(backgroundCompactions, times(1)).onInProgress(Mockito.any());
         Mockito.verify(backgroundCompactions, times(1)).onCompleted(Mockito.any(), Mockito.any());
     }
+
 
     @Test
     public void testMaximalSelection()

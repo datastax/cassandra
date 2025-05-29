@@ -18,10 +18,13 @@
 
 package org.apache.cassandra.db.compaction;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+
+import javax.annotation.Nullable;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -44,18 +47,23 @@ public class SharedCompactionObserver implements CompactionObserver
     private final AtomicInteger toReportOnComplete = new AtomicInteger(0);
     private final AtomicReference<Throwable> onCompleteException = new AtomicReference(null);
     private final AtomicReference<CompactionProgress> inProgressReported = new AtomicReference<>(null);
-    private final CompactionObserver observer;
 
-    private final CopyOnWriteArrayList<CompactionObserver> compObservers = new CopyOnWriteArrayList<>();
+    private final List<CompactionObserver> compObservers;
 
     public SharedCompactionObserver(CompactionObserver observer)
     {
-        this.observer = observer;
+        this(observer, null);
     }
 
-    public void registerObserver(CompactionObserver observer)
+    public SharedCompactionObserver(CompactionObserver primary, @Nullable CompactionObserver secondary)
     {
-        this.compObservers.add(observer);
+        if (primary == null)
+            throw new IllegalArgumentException("Primary observer cannot be null");
+
+        this.compObservers = new ArrayList<>(2);
+        this.compObservers.add(primary);
+        if (secondary != null)
+            this.compObservers.add(secondary);
     }
 
     public void registerExpectedSubtask()
@@ -70,19 +78,12 @@ public class SharedCompactionObserver implements CompactionObserver
     {
         if (inProgressReported.compareAndSet(null, progress))
         {
-            try
-            {
-                observer.onInProgress(progress);
-            }
-            finally
-            {
-                Throwable err = null;
-                for (CompactionObserver compObserver : compObservers)
-                    err = Throwables.perform(err, () -> compObserver.onInProgress(progress));
+            Throwable err = null;
+            for (CompactionObserver compObserver : compObservers)
+                err = Throwables.perform(err, () -> compObserver.onInProgress(progress));
 
-                if (err != null)
-                    logger.error("Failed to notify CompactionObserver.onInProgress for {}", progress.operationId(), err);
-            }
+            if (err != null)
+                logger.error("Failed to notify CompactionObserver.onInProgress for {}", progress.operationId(), err);
         }
         else
             assert inProgressReported.get() == progress; // progress object must also be shared
@@ -98,19 +99,12 @@ public class SharedCompactionObserver implements CompactionObserver
         // The individual operation ID given here may be different from the shared ID. Pass on the shared one.
         if (remainingToComplete == 0)
         {
-            try
-            {
-                observer.onCompleted(inProgressReported.get().operationId(), onCompleteException.get());
-            }
-            finally
-            {
-                Throwable error = null;
-                for (CompactionObserver compObserver : compObservers)
-                    error = Throwables.perform(error, () -> compObserver.onCompleted(inProgressReported.get().operationId(), onCompleteException.get()));
+            Throwable error = null;
+            for (CompactionObserver compObserver : compObservers)
+                error = Throwables.perform(error, () -> compObserver.onCompleted(inProgressReported.get().operationId(), onCompleteException.get()));
 
-                if (error != null)
-                    logger.error("Failed to notify CompactionObserver.onCompleted for {}", inProgressReported.get().operationId(), error);
-            }
+            if (error != null)
+                logger.error("Failed to notify CompactionObserver.onCompleted for {}", inProgressReported.get().operationId(), error);
         }
     }
 }

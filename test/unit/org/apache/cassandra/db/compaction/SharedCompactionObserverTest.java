@@ -185,4 +185,21 @@ public class SharedCompactionObserverTest
         when(mockProgress2.operationId()).thenReturn(UUID.randomUUID());
         Assert.assertThrows(AssertionError.class, () -> sharedCompactionObserver.onInProgress(mockProgress2));
     }
+
+    @Test
+    public void testMultipleObserver()
+    {
+        CompactionObserver mockObserver1 = Mockito.mock(CompactionObserver.class);
+        CompactionObserver mockObserver2 = Mockito.mock(CompactionObserver.class);
+        SharedCompactionObserver sharedCompactionObserver = new SharedCompactionObserver(mockObserver1, mockObserver2);
+
+        sharedCompactionObserver.registerExpectedSubtask();
+        sharedCompactionObserver.onInProgress(mockProgress);
+        verify(mockObserver1, times(1)).onInProgress(mockProgress);
+        verify(mockObserver2, times(1)).onInProgress(mockProgress);
+
+        sharedCompactionObserver.onCompleted(operationId, null);
+        verify(mockObserver1, times(1)).onCompleted(operationId, null);
+        verify(mockObserver2, times(1)).onCompleted(operationId, null);
+    }
 }
