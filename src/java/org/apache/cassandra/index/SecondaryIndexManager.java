@@ -71,6 +71,7 @@ import org.apache.cassandra.concurrent.JMXEnabledThreadPoolExecutor;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.cql3.PageSize;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget;
 import org.apache.cassandra.db.Clustering;
@@ -1261,19 +1262,20 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         return indexes.stream().map(i -> i.getIndexMetadata().name).collect(Collectors.joining(","));
     }
 
-
-    public Optional<Index> getBestIndexFor(RowFilter.Expression expression)
+    @Override
+    public Optional<Index> getBestIndexFor(ColumnMetadata column, Operator operator)
     {
-        return indexes.values().stream().filter((i) -> i.supportsExpression(expression.column(), expression.operator())).findFirst();
+        return Index.getBestIndexFor(indexes.values(), column, operator);
     }
 
     public <T extends Index> Optional<T> getBestIndexFor(RowFilter.Expression expression, Class<T> indexType)
     {
-        return indexes.values()
-                      .stream()
-                      .filter(i -> indexType.isInstance(i) && i.supportsExpression(expression.column(), expression.operator()))
-                      .map(indexType::cast)
-                      .findFirst();
+        Set<T> candidates = indexes.values()
+                                   .stream()
+                                   .filter(indexType::isInstance)
+                                   .map(indexType::cast)
+                                   .collect(Collectors.toSet());
+        return Index.getBestIndexFor(candidates, expression.column(), expression.operator());
     }
 
     /**
