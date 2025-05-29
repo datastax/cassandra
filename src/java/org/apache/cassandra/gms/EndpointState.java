@@ -48,6 +48,7 @@ import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.nodes.LocalInfo;
 import org.apache.cassandra.nodes.NodeInfo;
 import org.apache.cassandra.utils.CassandraVersion;
@@ -488,7 +489,7 @@ class EndpointStateSerializer implements IVersionedSerializer<EndpointState>
         out.writeInt(states.size());
         for (Map.Entry<ApplicationState, VersionedValue> state : states)
         {
-            VersionedValue value = state.getValue();
+            VersionedValue value = filterValue(state.getKey(), state.getValue(), version);
             out.writeInt(state.getKey().ordinal());
             VersionedValue.serializer.serialize(value, out, version);
         }
@@ -517,10 +518,19 @@ class EndpointStateSerializer implements IVersionedSerializer<EndpointState>
         size += TypeSizes.sizeof(states.size());
         for (Map.Entry<ApplicationState, VersionedValue> state : states)
         {
-            VersionedValue value = state.getValue();
+            VersionedValue value = filterValue(state.getKey(), state.getValue(), version);
             size += TypeSizes.sizeof(state.getKey().ordinal());
             size += VersionedValue.serializer.serializedSize(value, version);
         }
         return size;
+    }
+
+    @VisibleForTesting
+    static VersionedValue filterValue(ApplicationState state, VersionedValue value, int version)
+    {
+        // CC versions come with a sha suffix that C* 3.x nodes cannot parse
+        return version < MessagingService.VERSION_40 && ApplicationState.RELEASE_VERSION == state
+                ? VersionedValue.unsafeMakeVersionedValue(value.value.replaceFirst("-[0-9a-f]{7,40}$", ""), value.version)
+                : value;
     }
 }
