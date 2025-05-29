@@ -26,6 +26,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.atomic.LongAdder;
@@ -320,6 +321,20 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
         return builder.build();
     }
 
+    public KeyRangeIterator eagerSearch(Expression expression, AbstractBounds<PartitionPosition> keyRange)
+    {
+        int startShard = boundaries.getShardForToken(keyRange.left.getToken());
+        int endShard = keyRange.right.isMinimum() ? boundaries.shardCount() - 1 : boundaries.getShardForToken(keyRange.right.getToken());
+
+        KeyRangeConcatIterator.Builder builder = KeyRangeConcatIterator.builder(endShard - startShard + 1);
+        for (int shard = startShard; shard <= endShard; ++shard)
+        {
+            assert rangeIndexes[shard] != null;
+            builder.add(rangeIndexes[shard].search(expression, keyRange));
+        }
+        return builder.build();
+    }
+
     @Override
     public List<CloseableIterator<PrimaryKeyWithSortKey>> orderBy(QueryContext queryContext,
                                                                   Orderer orderer,
@@ -334,10 +349,21 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
         {
             // Intersect iterators to find documents containing all terms
             List<ByteBuffer> queryTerms = orderer.getQueryTerms();
-            List<KeyRangeIterator> termIterators = keyIteratorsPerTerm(queryContext, keyRange, queryTerms);
+            Map<ByteBuffer, Long> documentFrequencies = new HashMap<>();
+            List<KeyRangeIterator> termIterators = new ArrayList<>(queryTerms.size());
+            for (ByteBuffer term : queryTerms)
+            {
+                Expression expr = new Expression(indexContext);
+                expr.add(Operator.ANALYZER_MATCHES, term);
+                // Because this is an in memory, eager search, the max keys is exact and cumulative over all shards.
+                // Also, the key range is not eagerly applied, so the
+                KeyRangeIterator iterator = eagerSearch(expr, keyRange);
+                documentFrequencies.put(term, iterator.getMaxKeys());
+                termIterators.add(iterator);
+            }
             KeyRangeIterator intersectedIterator = KeyRangeIntersectionIterator.builder(termIterators).build();
 
-            return List.of(orderByBM25(Streams.stream(intersectedIterator), orderer));
+            return List.of(orderByBM25(Streams.stream(intersectedIterator), documentFrequencies, orderer));
         }
         else
         {
@@ -349,19 +375,6 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
             }
             return iterators;
         }
-    }
-
-    private List<KeyRangeIterator> keyIteratorsPerTerm(QueryContext queryContext, AbstractBounds<PartitionPosition> keyRange, List<ByteBuffer> queryTerms)
-    {
-        List<KeyRangeIterator> termIterators = new ArrayList<>(queryTerms.size());
-        for (ByteBuffer term : queryTerms)
-        {
-            Expression expr = new Expression(indexContext);
-            expr.add(Operator.ANALYZER_MATCHES, term);
-            KeyRangeIterator iterator = search(queryContext, expr, keyRange, Integer.MAX_VALUE);
-            termIterators.add(iterator);
-        }
-        return termIterators;
     }
 
     @Override
@@ -379,8 +392,19 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
             return CloseableIterator.emptyIterator();
 
         if (orderer.isBM25())
-            return orderByBM25(keys.stream(), orderer);
+        {
+            HashMap<ByteBuffer, Long> documentFrequencies = new HashMap<>();
+            // We don't want to filter the document frequencies, so we use the whole range
+            DataRange dataRange = DataRange.allData(memtable.metadata().partitioner);
+            for (ByteBuffer term : orderer.getQueryTerms())
+            {
+                Expression expression = new Expression(indexContext).add(Operator.ANALYZER_MATCHES, term);
+                documentFrequencies.put(term, estimateMatchingRowsCount(expression, dataRange.keyRange()));
+            }
+            return orderByBM25(keys.stream(), documentFrequencies, orderer);
+        }
         else
+        {
             return SortingIterator.createCloseable(
                 orderer.getComparator(),
                 keys,
@@ -403,14 +427,15 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
                 },
                 Runnables.doNothing()
             );
+        }
     }
 
-    private CloseableIterator<PrimaryKeyWithSortKey> orderByBM25(Stream<PrimaryKey> stream, Orderer orderer)
+    private CloseableIterator<PrimaryKeyWithSortKey> orderByBM25(Stream<PrimaryKey> stream, Map<ByteBuffer, Long> documentFrequencies, Orderer orderer)
     {
         assert orderer.isBM25();
         List<ByteBuffer> queryTerms = orderer.getQueryTerms();
         AbstractAnalyzer analyzer = indexContext.getAnalyzerFactory().create();
-        BM25Utils.DocStats docStats = computeDocumentFrequencies(queryTerms, analyzer);
+        BM25Utils.DocStats docStats = new BM25Utils.DocStats(documentFrequencies, indexedRows(), approximateTotalTermCount());
         Iterator<BM25Utils.DocTF> it = stream
                                        .map(pk -> BM25Utils.EagerDocTF.createFromDocument(pk, getCellForKey(pk), analyzer, queryTerms))
                                        .filter(Objects::nonNull)
@@ -420,54 +445,6 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
                                        docStats,
                                        indexContext,
                                        memtable);
-    }
-
-    /**
-     * Count document frequencies for each term using brute force
-     */
-    private BM25Utils.DocStats computeDocumentFrequencies(List<ByteBuffer> queryTerms, AbstractAnalyzer docAnalyzer)
-    {
-        var documentFrequencies = new HashMap<ByteBuffer, Long>();
-
-        // count all documents in the queried column
-        try (var it = memtable.makePartitionIterator(ColumnFilter.selection(RegularAndStaticColumns.of(indexContext.getDefinition())),
-                                                     DataRange.allData(memtable.metadata().partitioner)))
-        {
-            while (it.hasNext())
-            {
-                var partitions = it.next();
-                while (partitions.hasNext())
-                {
-                    var unfiltered = partitions.next();
-                    if (!unfiltered.isRow())
-                        continue;
-                    var row = (Row) unfiltered;
-                    var cell = row.getCell(indexContext.getDefinition());
-                    if (cell == null)
-                        continue;
-
-                    Set<ByteBuffer> queryTermsPerDoc = new HashSet<>(queryTerms.size());
-                    docAnalyzer.reset(cell.buffer());
-                    try
-                    {
-                        while (docAnalyzer.hasNext())
-                        {
-                            ByteBuffer term = docAnalyzer.next();
-                            if (queryTerms.contains(term))
-                                queryTermsPerDoc.add(term);
-                        }
-                    }
-                    finally
-                    {
-                        docAnalyzer.end();
-                    }
-                    for (ByteBuffer term : queryTermsPerDoc)
-                        documentFrequencies.merge(term, 1L, Long::sum);
-
-                }
-            }
-        }
-        return new BM25Utils.DocStats(documentFrequencies, indexedRows(), approximateTotalTermCount());
     }
 
     @Nullable

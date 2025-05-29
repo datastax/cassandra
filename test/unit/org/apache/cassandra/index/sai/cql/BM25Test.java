@@ -823,7 +823,7 @@ public class BM25Test extends SAITester
         // 0 and 5 win over 10 and 18.
         executeQuery(Arrays.asList(0, 5, 10, 18, 15, 11, 17), "SELECT * FROM %s  ORDER BY body BM25 OF ? LIMIT 10",
                 "climate");
-        executeQuery(Arrays.asList(0, 10, 18), "SELECT * FROM %s WHERE score = 5 ORDER BY body BM25 OF ? LIMIT 10",
+        executeQuery(Arrays.asList(10, 18, 0), "SELECT * FROM %s WHERE score = 5 ORDER BY body BM25 OF ? LIMIT 10",
                 "climate");
 
         // Flush into Two sstables - same result as the different above
