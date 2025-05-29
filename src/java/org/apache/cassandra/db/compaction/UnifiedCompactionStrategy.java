@@ -41,7 +41,9 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DiskBoundaries;
+import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
@@ -313,29 +315,38 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
     /// @param gcBefore throw away tombstones older than this
     /// @return collection of AbstractCompactionTask, which could be either a CompactionTask or an UnifiedCompactionTask
     @Override
-    public synchronized Collection<AbstractCompactionTask> getNextBackgroundTasks(int gcBefore)
+    public Collection<AbstractCompactionTask> getNextBackgroundTasks(int gcBefore)
     {
-        // TODO - we should perhaps consider executing this code less frequently than legacy strategies
-        // since it's more expensive, and we should therefore prevent a second concurrent thread from executing at all
+        Keyspace ks = Keyspace.open(realm.getKeyspaceName());
+        ColumnFamilyStore cfs = ks.getColumnFamilyStore(realm.metadata().id);
 
-        // Repairs can leave behind sstables in pending repair state if they race with a compaction on those sstables.
-        // Both the repair and the compact process can't modify the same sstables set at the same time. So compaction
-        // is left to eventually move those sstables from FINALIZED repair sessions away from repair states.
-        Collection<AbstractCompactionTask> repairFinalizationTasks = ActiveRepairService
-                                                                     .instance
-                                                                     .consistent
-                                                                     .local
-                                                                     .getZombieRepairFinalizationTasks(realm, realm.getLiveSSTables());
-        if (!repairFinalizationTasks.isEmpty())
-            return repairFinalizationTasks;
+        synchronized (cfs)
+        {
+            synchronized (this)
+            {
+                // TODO - we should perhaps consider executing this code less frequently than legacy strategies
+                // since it's more expensive, and we should therefore prevent a second concurrent thread from executing at all
 
-        // Expirations have to run before compaction (if run in parallel they may cause overlap tracker to leave
-        // unnecessary tombstones in place), so return only them if found.
-        Collection<AbstractCompactionTask> expirationTasks = getExpirationTasks(gcBefore);
-        if (expirationTasks != null)
-            return expirationTasks;
+                // Repairs can leave behind sstables in pending repair state if they race with a compaction on those sstables.
+                // Both the repair and the compact process can't modify the same sstables set at the same time. So compaction
+                // is left to eventually move those sstables from FINALIZED repair sessions away from repair states.
+                Collection<AbstractCompactionTask> repairFinalizationTasks = ActiveRepairService
+                                                                             .instance
+                                                                             .consistent
+                                                                             .local
+                                                                             .getZombieRepairFinalizationTasks(realm, realm.getLiveSSTables());
+                if (!repairFinalizationTasks.isEmpty())
+                    return repairFinalizationTasks;
 
-        return getNextBackgroundTasks(getNextCompactionAggregates(), gcBefore);
+                // Expirations have to run before compaction (if run in parallel they may cause overlap tracker to leave
+                // unnecessary tombstones in place), so return only them if found.
+                Collection<AbstractCompactionTask> expirationTasks = getExpirationTasks(gcBefore);
+                if (expirationTasks != null)
+                    return expirationTasks;
+
+                return getNextBackgroundTasks(getNextCompactionAggregates(), gcBefore);
+            }
+        }
     }
 
     /// Check for fully expired sstables and return a collection of expiration tasks if found. Called by CNDB directly.

@@ -24,12 +24,16 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 import com.google.common.collect.ImmutableList;
 import org.junit.Assert;
 import org.junit.Test;
 
+import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.compaction.UnifiedCompactionStrategy.Arena;
 import org.apache.cassandra.db.compaction.unified.UnifiedCompactionTask;
 import org.apache.cassandra.io.sstable.Component;
@@ -60,6 +64,68 @@ public class UnifiedCompactionContainerPendingRepairTest extends AbstractPending
     void handleOrphan(SSTableReader sstable)
     {
         // UCS is stateless, so nothing to do
+    }
+
+    @Test
+    public void testStrategyDoesNotBlock() throws InterruptedException
+    {
+//        CountDownLatch cfsLockLatch = new CountDownLatch(1);
+//        CountDownLatch cfsLockAcquiredLatch = new CountDownLatch(1);
+//
+//        CountDownLatch compactionTaskStartedLatch = new CountDownLatch(1);
+//
+//        CountDownLatch strategyLockAcquiredLatch = new CountDownLatch(1);
+//        
+//        ColumnFamilyStore cfs = Keyspace.open(ks).getColumnFamilyStore(tbl);
+//        CompactionStrategy strategy = cfs.getCompactionStrategyContainer()
+//                                         .getStrategies(false, null)
+//                                         .get(0);
+//
+//        // Start a thread that will need cfs and strategy locks. Any repair or other operational similar commands will.
+//        Thread operatorTask = new Thread(() -> { cfs.runWithCompactionsDisabled(() -> {
+//                                                                                cfsLockAcquiredLatch.countDown();
+//                                                                                synchronized (cfs.getCompactionStrategy())
+//                                                                                {
+//                                                                                    cfsLockLatch.await();
+//                                                                                }
+//                                                                                return null;}, 
+//                                                                                true,
+//                                                                                true,
+//                                                                                TableOperation.StopTrigger.UNIT_TESTS);
+//        });
+//        operatorTask.start();
+//        assertTrue(cfsLockAcquiredLatch.await(30, TimeUnit.SECONDS));
+//        
+//        Thread compactionTask = new Thread(() -> {
+//            compactionTaskStartedLatch.countDown();
+//            strategy.getNextBackgroundTasks(FBUtilities.nowInSeconds());});
+//        compactionTask.start();
+//        assertTrue(compactionTaskStartedLatch.await(30, TimeUnit.SECONDS));
+
+        ColumnFamilyStore cfs = Keyspace.open(ks).getColumnFamilyStore(tbl);
+        CompactionStrategy strategy = cfs.getCompactionStrategyContainer()
+                                         .getStrategies(false, null)
+                                         .get(0);
+
+        CountDownLatch compactionTaskStartedLatch = new CountDownLatch(1);
+        CountDownLatch compactionTaskCompletedLatch = new CountDownLatch(1);
+        
+        Thread compactionTask = new Thread(() -> {
+            compactionTaskStartedLatch.countDown();
+            Thread.holdsLock(cfs);
+            strategy.getNextBackgroundTasks(FBUtilities.nowInSeconds());
+            compactionTaskCompletedLatch.countDown();});
+        
+        synchronized (cfs)
+        {
+            compactionTask.start();
+            assertTrue(compactionTaskStartedLatch.await(5, TimeUnit.SECONDS));
+            
+            assertFalse(compactionTaskCompletedLatch.await(5, TimeUnit.SECONDS));
+        }
+
+        assertTrue(compactionTaskCompletedLatch.await(5, TimeUnit.SECONDS));
+
     }
 
     @Override
