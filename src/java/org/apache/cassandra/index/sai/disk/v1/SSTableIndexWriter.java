@@ -32,7 +32,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.github.jbellis.jvector.quantization.BinaryQuantization;
-import io.github.jbellis.jvector.quantization.ProductQuantization;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.VectorType;
@@ -42,12 +41,9 @@ import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.disk.PerIndexWriter;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
-import org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher;
 import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
-import org.apache.cassandra.index.sai.disk.v5.V5VectorIndexSearcher;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
-import org.apache.cassandra.index.sai.disk.vector.CassandraDiskAnn;
-import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
+import org.apache.cassandra.index.sai.disk.vector.ProductQuantizationFetcher;
 import org.apache.cassandra.index.sai.disk.vector.VectorCompression.CompressionType;
 import org.apache.cassandra.index.sai.utils.NamedMemoryLimiter;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
@@ -372,7 +368,7 @@ public class SSTableIndexWriter implements PerIndexWriter
 
             // if we have a PQ instance available, we can use it to build a CompactionGraph;
             // otherwise, build on heap (which will create PQ for next time, if we have enough vectors)
-            var pqi = CassandraOnHeapGraph.getPqIfPresent(indexContext, vc -> vc.type == CompressionType.PRODUCT_QUANTIZATION);
+            var pqi = ProductQuantizationFetcher.getPqIfPresent(indexContext);
             // If no PQ instance available in indexes of completed sstables, check if we just wrote one in the previous segment
             if (pqi == null && !segments.isEmpty())
                 pqi = maybeReadPqFromLastSegment();
@@ -409,53 +405,36 @@ public class SSTableIndexWriter implements PerIndexWriter
 
     private static boolean allRowsHaveVectorsInWrittenSegments(IndexContext indexContext)
     {
-        for (SSTableIndex index : indexContext.getView().getIndexes())
+        // TODO should we load all of these for this op? It seems very unlikely that we want to consider the whole
+        // table when checking if all rows have vectors. A single empty vector will be enough to make this false,
+        // but that should really only impact that table.
+        var view = indexContext.getReferencedView(TimeUnit.SECONDS.toNanos(5));
+        try
         {
-            for (Segment segment : index.getSegments())
-            {
-                if (segment.getIndexSearcher() instanceof  V2VectorIndexSearcher)
-                    return true; // V2 doesn't know, so we err on the side of being optimistic.  See comments in CompactionGraph
-                var searcher = (V5VectorIndexSearcher) segment.getIndexSearcher();
-                var structure = searcher.getPostingsStructure();
-                if (structure == V5VectorPostingsWriter.Structure.ZERO_OR_ONE_TO_MANY)
-                    return false;
-            }
+            // If we couldn't get the view, assume best case scenario.
+            if (view == null)
+                return true;
+
+            return view.getIndexes()
+                       .stream()
+                       .flatMap(SSTableIndex::getPostingsStructures)
+                       .noneMatch(structure -> structure == V5VectorPostingsWriter.Structure.ZERO_OR_ONE_TO_MANY);
         }
-        return true;
+        finally
+        {
+            if (view != null)
+                view.release();
+        }
     }
 
-    private CassandraOnHeapGraph.PqInfo maybeReadPqFromLastSegment() throws IOException
+    private ProductQuantizationFetcher.PqInfo maybeReadPqFromLastSegment() throws IOException
     {
         var pqComponent = perIndexComponents.get(IndexComponentType.PQ);
         assert pqComponent != null; // we always have a PQ component even if it's not actually PQ compression
-
         try (var fhBuilder = StorageProvider.instance.indexBuildTimeFileHandleBuilderFor(pqComponent);
-             var fh = fhBuilder.complete();
-             var reader = fh.createReader())
+             var fh = fhBuilder.complete())
         {
-            var sm = segments.get(segments.size() - 1);
-            long offset = sm.componentMetadatas.get(IndexComponentType.PQ).offset;
-            // close parallel to code in CassandraDiskANN constructor, but different enough
-            // (we only want the PQ codebook) that it's difficult to extract into a common method
-            reader.seek(offset);
-            boolean unitVectors;
-            if (reader.readInt() == CassandraDiskAnn.PQ_MAGIC)
-            {
-                reader.readInt(); // skip over version
-                unitVectors = reader.readBoolean();
-            }
-            else
-            {
-                unitVectors = true;
-                reader.seek(offset);
-            }
-            var compressionType = CompressionType.values()[reader.readByte()];
-            if (compressionType == CompressionType.PRODUCT_QUANTIZATION)
-            {
-                var pq = ProductQuantization.load(reader);
-                return new CassandraOnHeapGraph.PqInfo(pq, unitVectors, sm.numRows);
-            }
+            return ProductQuantizationFetcher.maybeReadPqFromSegment(segments.get(segments.size() - 1), fh);
         }
-        return null;
     }
 }
