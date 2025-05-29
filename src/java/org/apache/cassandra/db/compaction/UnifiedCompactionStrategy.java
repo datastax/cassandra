@@ -60,6 +60,7 @@ import org.apache.cassandra.db.lifecycle.PartialLifecycleTransaction;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTableMultiWriter;
@@ -318,9 +319,17 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
     public Collection<AbstractCompactionTask> getNextBackgroundTasks(int gcBefore)
     {
         Keyspace ks = Keyspace.open(realm.getKeyspaceName());
-        ColumnFamilyStore cfs = ks.getColumnFamilyStore(realm.metadata().id);
+        ColumnFamilyStore cfs = null;
+        try
+        {
+            cfs = ks.getColumnFamilyStore(realm.metadata().id);
+        }
+        catch (IllegalArgumentException e)
+        {
+            // Non existing cfs, common in some junits and other mocking scenarios
+        }
 
-        synchronized (cfs)
+        synchronized (cfs != null ? cfs : this) // cfs might be null in some mocking scenarios, fall back to previous behavior
         {
             synchronized (this)
             {

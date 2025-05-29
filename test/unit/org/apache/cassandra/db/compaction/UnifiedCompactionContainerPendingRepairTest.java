@@ -66,65 +66,88 @@ public class UnifiedCompactionContainerPendingRepairTest extends AbstractPending
         // UCS is stateless, so nothing to do
     }
 
+    /** UCS will lock the strategy and cfs objects and this might result in deadlocks with some operations:
+     *  - Operator command locks cfs and later the strategy object to pause() or resume() i.e.
+     *  - The strategy locks the strategy object and later cfs to update ranges and similar operations
+     *  That can result in a deadlock
+     */
     @Test
     public void testStrategyDoesNotBlock() throws InterruptedException
     {
-//        CountDownLatch cfsLockLatch = new CountDownLatch(1);
-//        CountDownLatch cfsLockAcquiredLatch = new CountDownLatch(1);
-//
-//        CountDownLatch compactionTaskStartedLatch = new CountDownLatch(1);
-//
-//        CountDownLatch strategyLockAcquiredLatch = new CountDownLatch(1);
-//        
-//        ColumnFamilyStore cfs = Keyspace.open(ks).getColumnFamilyStore(tbl);
-//        CompactionStrategy strategy = cfs.getCompactionStrategyContainer()
-//                                         .getStrategies(false, null)
-//                                         .get(0);
-//
-//        // Start a thread that will need cfs and strategy locks. Any repair or other operational similar commands will.
-//        Thread operatorTask = new Thread(() -> { cfs.runWithCompactionsDisabled(() -> {
-//                                                                                cfsLockAcquiredLatch.countDown();
-//                                                                                synchronized (cfs.getCompactionStrategy())
-//                                                                                {
-//                                                                                    cfsLockLatch.await();
-//                                                                                }
-//                                                                                return null;}, 
-//                                                                                true,
-//                                                                                true,
-//                                                                                TableOperation.StopTrigger.UNIT_TESTS);
-//        });
-//        operatorTask.start();
-//        assertTrue(cfsLockAcquiredLatch.await(30, TimeUnit.SECONDS));
-//        
-//        Thread compactionTask = new Thread(() -> {
-//            compactionTaskStartedLatch.countDown();
-//            strategy.getNextBackgroundTasks(FBUtilities.nowInSeconds());});
-//        compactionTask.start();
-//        assertTrue(compactionTaskStartedLatch.await(30, TimeUnit.SECONDS));
+        CountDownLatch finishOpreatorTaskLatch = new CountDownLatch(1);
+        CountDownLatch operatorTaskStartedLatch = new CountDownLatch(1);
+        CountDownLatch compactionTaskStartedLatch = new CountDownLatch(1);
+        CountDownLatch compactionTaskCompletedLatch = new CountDownLatch(1);
+        CountDownLatch deadlockPreventedLatch = new CountDownLatch(1);
 
         ColumnFamilyStore cfs = Keyspace.open(ks).getColumnFamilyStore(tbl);
         CompactionStrategy strategy = cfs.getCompactionStrategyContainer()
                                          .getStrategies(false, null)
                                          .get(0);
 
-        CountDownLatch compactionTaskStartedLatch = new CountDownLatch(1);
-        CountDownLatch compactionTaskCompletedLatch = new CountDownLatch(1);
-        
+        // Start a thread locking cfs like repair or other similar operational commands do:
+        Thread operatorTask = new Thread(() -> { cfs.runWithCompactionsDisabled(() -> {
+                                                                                operatorTaskStartedLatch.countDown();
+                                                                                finishOpreatorTaskLatch.await();
+                                                                                return null;}, 
+                                                                                true,
+                                                                                true,
+                                                                                TableOperation.StopTrigger.UNIT_TESTS);
+        });
+        operatorTask.start();
+        assertTrue(operatorTaskStartedLatch.await(5, TimeUnit.SECONDS));
+
         Thread compactionTask = new Thread(() -> {
             compactionTaskStartedLatch.countDown();
-            Thread.holdsLock(cfs);
             strategy.getNextBackgroundTasks(FBUtilities.nowInSeconds());
             compactionTaskCompletedLatch.countDown();});
+        compactionTask.start();
+        assertTrue(compactionTaskStartedLatch.await(5, TimeUnit.SECONDS));
         
-        synchronized (cfs)
-        {
-            compactionTask.start();
-            assertTrue(compactionTaskStartedLatch.await(5, TimeUnit.SECONDS));
-            
-            assertFalse(compactionTaskCompletedLatch.await(5, TimeUnit.SECONDS));
-        }
-
-        assertTrue(compactionTaskCompletedLatch.await(5, TimeUnit.SECONDS));
+        // If I can synch on the strategy the compaction task is correctly still waiting on a lock for cfs
+        Thread deadlockDetector = new Thread(() -> {
+            synchronized (strategy)
+            {
+                deadlockPreventedLatch.countDown();
+            }
+        });
+        deadlockDetector.start();
+        assertTrue(deadlockPreventedLatch.await(5, TimeUnit.SECONDS));
+        assertFalse(compactionTaskCompletedLatch.await(5, TimeUnit.SECONDS));
+        
+        finishOpreatorTaskLatch.countDown();
+        if (deadlockDetector.isAlive())
+            deadlockDetector.interrupt();
+        deadlockDetector.join();
+        operatorTask.join();
+        compactionTask.join();
+        
+        
+        
+        
+//        ColumnFamilyStore cfs = Keyspace.open(ks).getColumnFamilyStore(tbl);
+//        CompactionStrategy strategy = cfs.getCompactionStrategyContainer()
+//                                         .getStrategies(false, null)
+//                                         .get(0);
+//
+//        CountDownLatch compactionTaskStartedLatch = new CountDownLatch(1);
+//        CountDownLatch compactionTaskCompletedLatch = new CountDownLatch(1);
+//        
+//        Thread compactionTask = new Thread(() -> {
+//            compactionTaskStartedLatch.countDown();
+//            Thread.holdsLock(cfs);
+//            strategy.getNextBackgroundTasks(FBUtilities.nowInSeconds());
+//            compactionTaskCompletedLatch.countDown();});
+//        
+//        synchronized (cfs)
+//        {
+//            compactionTask.start();
+//            assertTrue(compactionTaskStartedLatch.await(5, TimeUnit.SECONDS));
+//            
+//            assertFalse(compactionTaskCompletedLatch.await(5, TimeUnit.SECONDS));
+//        }
+//
+//        assertTrue(compactionTaskCompletedLatch.await(5, TimeUnit.SECONDS));
 
     }
 
