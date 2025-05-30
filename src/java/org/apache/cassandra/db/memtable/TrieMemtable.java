@@ -30,6 +30,7 @@ import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.BufferDecoratedKey;
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -49,7 +50,6 @@ import org.apache.cassandra.db.partitions.TrieBackedPartition;
 import org.apache.cassandra.db.partitions.TriePartitionUpdate;
 import org.apache.cassandra.db.partitions.TriePartitionUpdater;
 import org.apache.cassandra.db.rows.EncodingStats;
-import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.tries.Direction;
 import org.apache.cassandra.db.tries.InMemoryTrie;
@@ -150,10 +150,8 @@ public class TrieMemtable extends AbstractAllocatorMemtable
      */
     private volatile MemtableAverageRowSize estimatedAverageRowSize;
 
-    @VisibleForTesting
-    public static final String SHARD_COUNT_PROPERTY = "cassandra.trie.memtable.shard.count";
-
-    public static volatile int SHARD_COUNT = Integer.getInteger(SHARD_COUNT_PROPERTY, autoShardCount());
+    public static volatile int SHARD_COUNT = CassandraRelevantProperties.TRIE_MEMTABLE_SHARD_COUNT.getInt(autoShardCount());
+    public static volatile boolean SHARD_LOCK_FAIRNESS = CassandraRelevantProperties.TRIE_MEMTABLE_SHARD_LOCK_FAIRNESS.getBoolean();
 
     private static int autoShardCount()
     {
@@ -595,7 +593,7 @@ public class TrieMemtable extends AbstractAllocatorMemtable
         private volatile int partitionCount = 0;
 
         @Unmetered
-        private ReentrantLock writeLock = new ReentrantLock();
+        private ReentrantLock writeLock = new ReentrantLock(SHARD_LOCK_FAIRNESS);
 
         // Content map for the given shard. This is implemented as a memtable trie which uses the prefix-free
         // byte-comparable ByteSource representations of the keys to address the partitions.
@@ -886,12 +884,14 @@ public class TrieMemtable extends AbstractAllocatorMemtable
             if ("auto".equalsIgnoreCase(shardCount))
             {
                 SHARD_COUNT = autoShardCount();
+                CassandraRelevantProperties.TRIE_MEMTABLE_SHARD_COUNT.setInt(SHARD_COUNT);
             }
             else
             {
                 try
                 {
                     SHARD_COUNT = Integer.valueOf(shardCount);
+                    CassandraRelevantProperties.TRIE_MEMTABLE_SHARD_COUNT.setInt(SHARD_COUNT);
                 }
                 catch (NumberFormatException ex)
                 {
@@ -907,6 +907,20 @@ public class TrieMemtable extends AbstractAllocatorMemtable
         public String getShardCount()
         {
             return "" + SHARD_COUNT;
+        }
+
+        @Override
+        public void setLockFairness(String fairness)
+        {
+            SHARD_LOCK_FAIRNESS = Boolean.parseBoolean(fairness);
+            CassandraRelevantProperties.TRIE_MEMTABLE_SHARD_LOCK_FAIRNESS.setBoolean(SHARD_LOCK_FAIRNESS);
+            logger.info("Requested setting shard lock fairness to {}; set to: {}", fairness, SHARD_LOCK_FAIRNESS);
+        }
+
+        @Override
+        public String getLockFairness()
+        {
+            return "" + SHARD_LOCK_FAIRNESS;
         }
     }
 
