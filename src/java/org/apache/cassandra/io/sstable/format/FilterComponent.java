@@ -74,9 +74,9 @@ public class FilterComponent
 
     public static void save(IFilter filter, Descriptor descriptor, boolean deleteOnFailure) throws IOException
     {
-        if (!(filter instanceof BloomFilter))
+        if (!filter.isSerializable())
         {
-            logger.info("Skipped saving bloom filter {} for {} to disk", filter, descriptor);
+            logger.info("Skipped saving non-serializable bloom filter {} for {} to disk", filter, descriptor);
             return;
         }
 
