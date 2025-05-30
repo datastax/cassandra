@@ -51,4 +51,12 @@ public class V6OnDiskFormat extends V5OnDiskFormat
     {
         return v6IndexFeatureSet;
     }
+
+    @Override
+    public int jvectorFileFormatVersion()
+    {
+        // Before version EB, we used JVector format 2. Version DC introduced format 4, so we can start using it
+        // starting with version EB to ensure proper backward compatibility.
+        return 4;
+    }
 }
