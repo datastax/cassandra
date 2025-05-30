@@ -204,6 +204,12 @@ public class BloomFilter extends WrappedSharedCloseable implements IFilter
     }
 
     @Override
+    public boolean isSerializable()
+    {
+        return true;
+    }
+
+    @Override
     public String toString()
     {
         return "BloomFilter[hashCount=" + hashCount + ";capacity=" + bitset.capacity() + ']';
