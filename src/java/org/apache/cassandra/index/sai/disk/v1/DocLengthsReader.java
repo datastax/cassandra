@@ -28,7 +28,6 @@ import org.apache.cassandra.index.sai.utils.IndexFileUtils;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
-import org.apache.lucene.codecs.CodecUtil;
 
 /**
  * Reads the component written by {@link org.apache.cassandra.index.sai.disk.v1.trie.DocLengthsWriter}.
