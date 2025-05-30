@@ -30,6 +30,7 @@ import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.BufferDecoratedKey;
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -149,12 +150,8 @@ public class TrieMemtable extends AbstractAllocatorMemtable
      */
     private volatile MemtableAverageRowSize estimatedAverageRowSize;
 
-    @VisibleForTesting
-    public static final String SHARD_COUNT_PROPERTY = "cassandra.trie.memtable.shard.count";
-    public static final String SHARD_LOCK_FAIRNESS_PROPERTY = "cassandra.trie.memtable.shard.lock.fairness";
-
-    public static volatile int SHARD_COUNT = Integer.getInteger(SHARD_COUNT_PROPERTY, autoShardCount());
-    public static volatile boolean SHARD_LOCK_FAIRNESS = Boolean.getBoolean(SHARD_LOCK_FAIRNESS_PROPERTY);
+    public static volatile int SHARD_COUNT = CassandraRelevantProperties.TRIE_MEMTABLE_SHARD_COUNT.getInt(autoShardCount());
+    public static volatile boolean SHARD_LOCK_FAIRNESS = CassandraRelevantProperties.TRIE_MEMTABLE_SHARD_LOCK_FAIRNESS.getBoolean();
 
     private static int autoShardCount()
     {
@@ -887,12 +884,14 @@ public class TrieMemtable extends AbstractAllocatorMemtable
             if ("auto".equalsIgnoreCase(shardCount))
             {
                 SHARD_COUNT = autoShardCount();
+                CassandraRelevantProperties.TRIE_MEMTABLE_SHARD_COUNT.setInt(SHARD_COUNT);
             }
             else
             {
                 try
                 {
                     SHARD_COUNT = Integer.valueOf(shardCount);
+                    CassandraRelevantProperties.TRIE_MEMTABLE_SHARD_COUNT.setInt(SHARD_COUNT);
                 }
                 catch (NumberFormatException ex)
                 {
@@ -914,6 +913,7 @@ public class TrieMemtable extends AbstractAllocatorMemtable
         public void setLockFairness(String fairness)
         {
             SHARD_LOCK_FAIRNESS = Boolean.parseBoolean(fairness);
+            CassandraRelevantProperties.TRIE_MEMTABLE_SHARD_LOCK_FAIRNESS.setBoolean(SHARD_LOCK_FAIRNESS);
             logger.info("Requested setting shard lock fairness to {}; set to: {}", fairness, SHARD_LOCK_FAIRNESS);
         }
 
