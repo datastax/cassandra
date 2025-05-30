@@ -163,6 +163,12 @@ public class FilterFactory
         }
 
         @Override
+        public boolean isSerializable()
+        {
+            return false;
+        }
+
+        @Override
         public String toString()
         {
             return "AlwaysPresentFilter";

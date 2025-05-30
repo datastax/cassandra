@@ -59,4 +59,11 @@ public interface IFilter extends SharedCloseable
     long offHeapSize();
 
     boolean isInformative();
+
+    /**
+     * This is used to avoid creating empty file for filters that do not support serialization
+     *
+     * @return true if current filter supports serialization to disk
+     */
+    boolean isSerializable();
 }
