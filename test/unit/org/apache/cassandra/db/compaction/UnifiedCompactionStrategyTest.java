@@ -30,6 +30,7 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.BiFunction;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -1579,6 +1580,69 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         assertEquals(3, aggregates.size());
         for (CompactionAggregate aggregate : aggregates)
             assertEquals(8, aggregate.getPending().size());
+    }
+
+    @Test
+    public void applyMaxParallelism()
+    {
+        int maxParallelism = 4;
+        List<Pair<List<String>, Double>> shards = Arrays.asList(Pair.create(Arrays.asList("sstablea", "sstableb"), 1.0),
+                                                                Pair.create(Arrays.asList("sstablec", "sstabled"), 1.0),
+                                                                Pair.create(Arrays.asList("sstablee", "sstablef"), 1.0),
+                                                                Pair.create(Arrays.asList("sstableg", "sstableh"), 1.0),
+                                                                Pair.create(Arrays.asList("sstablei", "sstablej"), 1.0),
+                                                                Pair.create(Arrays.asList("sstablek", "sstablel"), 1.0),
+                                                                Pair.create(Arrays.asList("sstablem", "sstablen"), 1.0),
+                                                                Pair.create(Arrays.asList("sstableo", "sstablep"), 1.0),
+                                                                Pair.create(Arrays.asList("sstableq", "sstabler"), 1.0),
+                                                                Pair.create(Arrays.asList("sstables", "sstablet"), 1.0));
+        int actualParallelism = shards.size();
+
+        // Otherwise we have to group shards together. Define a target token span per task and greedily group
+        // to be as close to it as possible.
+        double spanPerTask = shards.stream().map(Pair::right).mapToDouble(t -> t).sum() / maxParallelism;
+        System.out.println("spanPerTask: " + spanPerTask);
+        double currentSpan = 0;
+        Set<String> currentSSTables = new HashSet<>();
+        Token rangeStart = null;
+        Token prevEnd = null;
+        List<String> tasks = new ArrayList<>(maxParallelism);
+        int taskOrdinal=0;
+        for (var pair : shards)
+        {
+//            final Token currentEnd = pair.right.right;
+//            final Token currentStart = pair.right.left;
+            double span = pair.right;
+//            if (rangeStart == null)
+//                rangeStart = currentStart;
+            System.out.println("Start of loop for Pair: " + pair);
+            System.out.println("span: " + span);
+            if (currentSpan + span >= spanPerTask - 0.001) // rounding error safety
+            {
+                boolean includeCurrent = currentSpan + span - spanPerTask <= spanPerTask - currentSpan;
+                if (includeCurrent)
+                    currentSSTables.addAll(pair.left);
+                System.out.println("Emit task");
+                tasks.add("Task" + ++taskOrdinal + ": " + currentSSTables);
+                currentSpan -= spanPerTask;
+                System.out.println("currentSpanA: " + currentSpan);
+                rangeStart = null;
+                currentSSTables.clear();
+                if (!includeCurrent)
+                {
+                    currentSSTables.addAll(pair.left);
+                    //rangeStart = currentStart;
+                }
+            }
+            else
+                currentSSTables.addAll(pair.left);
+
+            currentSpan += span;
+            System.out.println("End of loop currentSpan: " + currentSpan + " sstables: " + currentSSTables);
+            //prevEnd = currentEnd;
+        }
+        assert currentSSTables.isEmpty();
+        System.out.println(tasks);
     }
 
     @Test

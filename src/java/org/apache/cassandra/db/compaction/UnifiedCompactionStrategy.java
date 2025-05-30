@@ -41,7 +41,9 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DiskBoundaries;
+import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
@@ -58,6 +60,7 @@ import org.apache.cassandra.db.lifecycle.PartialLifecycleTransaction;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTableMultiWriter;
@@ -259,12 +262,13 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
             permittedParallelism = Integer.MAX_VALUE;
 
         List<AbstractCompactionTask> tasks = new ArrayList<>();
+        LifecycleTransaction txn = null;
         try
         {
             // Split the space into independently compactable groups.
             for (var aggregate : getMaximalAggregates())
             {
-                LifecycleTransaction txn = realm.tryModify(aggregate.getSelected().sstables(),
+                txn = realm.tryModify(aggregate.getSelected().sstables(),
                                                            OperationType.COMPACTION,
                                                            aggregate.getSelected().id());
 
@@ -284,6 +288,8 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         }
         catch (Throwable t)
         {
+            if (txn != null)
+                txn.close();
             throw rejectTasks(tasks, t);
         }
     }
@@ -310,29 +316,46 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
     /// @param gcBefore throw away tombstones older than this
     /// @return collection of AbstractCompactionTask, which could be either a CompactionTask or an UnifiedCompactionTask
     @Override
-    public synchronized Collection<AbstractCompactionTask> getNextBackgroundTasks(int gcBefore)
+    public Collection<AbstractCompactionTask> getNextBackgroundTasks(int gcBefore)
     {
-        // TODO - we should perhaps consider executing this code less frequently than legacy strategies
-        // since it's more expensive, and we should therefore prevent a second concurrent thread from executing at all
+        ColumnFamilyStore cfs = null;
+        try
+        {
+            Keyspace ks = Keyspace.open(realm.getKeyspaceName());
+            cfs = ks == null ? null : ks.getColumnFamilyStore(realm.metadata().id);
+        }
+        catch (IllegalArgumentException | AssertionError e)
+        {
+            // Non initialized ks.cfs, common in some junits and some mocking scenarios
+        }
 
-        // Repairs can leave behind sstables in pending repair state if they race with a compaction on those sstables.
-        // Both the repair and the compact process can't modify the same sstables set at the same time. So compaction
-        // is left to eventually move those sstables from FINALIZED repair sessions away from repair states.
-        Collection<AbstractCompactionTask> repairFinalizationTasks = ActiveRepairService
-                                                                     .instance
-                                                                     .consistent
-                                                                     .local
-                                                                     .getZombieRepairFinalizationTasks(realm, realm.getLiveSSTables());
-        if (!repairFinalizationTasks.isEmpty())
-            return repairFinalizationTasks;
+        synchronized (cfs == null ? this : cfs)
+        {
+            synchronized (this)
+            {
+                // TODO - we should perhaps consider executing this code less frequently than legacy strategies
+                // since it's more expensive, and we should therefore prevent a second concurrent thread from executing at all
 
-        // Expirations have to run before compaction (if run in parallel they may cause overlap tracker to leave
-        // unnecessary tombstones in place), so return only them if found.
-        Collection<AbstractCompactionTask> expirationTasks = getExpirationTasks(gcBefore);
-        if (expirationTasks != null)
-            return expirationTasks;
+                // Repairs can leave behind sstables in pending repair state if they race with a compaction on those sstables.
+                // Both the repair and the compact process can't modify the same sstables set at the same time. So compaction
+                // is left to eventually move those sstables from FINALIZED repair sessions away from repair states.
+                Collection<AbstractCompactionTask> repairFinalizationTasks = ActiveRepairService
+                                                                             .instance
+                                                                             .consistent
+                                                                             .local
+                                                                             .getZombieRepairFinalizationTasks(realm, realm.getLiveSSTables());
+                if (!repairFinalizationTasks.isEmpty())
+                    return repairFinalizationTasks;
 
-        return getNextBackgroundTasks(getNextCompactionAggregates(), gcBefore);
+                // Expirations have to run before compaction (if run in parallel they may cause overlap tracker to leave
+                // unnecessary tombstones in place), so return only them if found.
+                Collection<AbstractCompactionTask> expirationTasks = getExpirationTasks(gcBefore);
+                if (expirationTasks != null)
+                    return expirationTasks;
+
+                return getNextBackgroundTasks(getNextCompactionAggregates(), gcBefore);
+            }
+        }
     }
 
     /// Check for fully expired sstables and return a collection of expiration tasks if found. Called by CNDB directly.
@@ -414,9 +437,17 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                                                            selected.id());
         if (transaction != null)
         {
-            // This will ignore the range of the operation, which is fine.
-            backgroundCompactions.setSubmitted(this, transaction.opId(), aggregate);
-            createAndAddTasks(gcBefore, transaction, aggregate.operationRange(), aggregate.keepOriginals(), getShardingStats(aggregate), parallelism, tasks);
+            try
+            {
+                // This will ignore the range of the operation, which is fine.
+                backgroundCompactions.setSubmitted(this, transaction.opId(), aggregate);
+                createAndAddTasks(gcBefore, transaction, aggregate.operationRange(), aggregate.keepOriginals(), getShardingStats(aggregate), parallelism, tasks);
+            }
+            catch (Throwable e)
+            {
+                transaction.close();
+                throw e;
+            }
         }
         else
         {
@@ -687,8 +718,8 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                                                                 sharedObserver)
         );
         compositeTransaction.completeInitialization();
-        assert tasks.size() <= parallelism;
-        assert tasks.size() <= coveredShardCount;
+        assert tasks.size() <= parallelism : "Task size: " + tasks.size() + " vs parallelism of: " + parallelism;
+        assert tasks.size() <= coveredShardCount : "Task size: " + tasks.size() + " vs covered shard count: " + coveredShardCount;
 
         if (tasks.isEmpty())
             transaction.close(); // this should not be reachable normally, close the transaction for safety

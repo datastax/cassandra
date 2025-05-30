@@ -26,6 +26,8 @@ import com.google.common.base.Predicate;
 import com.google.common.collect.*;
 import com.google.common.util.concurrent.Runnables;
 
+import org.apache.commons.lang3.exception.ExceptionUtils;
+
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.io.util.File;
 import org.slf4j.Logger;
@@ -571,6 +573,9 @@ public class LifecycleTransaction extends Transactional.AbstractTransactional im
 
     private Throwable unmarkCompacting(Set<SSTableReader> unmark, Throwable accumulate)
     {
+        if (!unmark.isEmpty())
+            logger.debug("unmarkCompacting unmark: {} \n {}", unmark, ExceptionUtils.getStackTrace(new Exception()));
+
         accumulate = tracker.apply(updateCompacting(unmark, emptySet()), accumulate);
         // when the CFS is invalidated, it will call unreferenceSSTables().  However, unreferenceSSTables only deals
         // with sstables that aren't currently being compacted.  If there are ongoing compactions that finish or are
