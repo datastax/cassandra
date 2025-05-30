@@ -209,7 +209,7 @@ public class InvertedIndexSearcher extends IndexSearcher
 
         var pkm = primaryKeyMapFactory.newPerSSTablePrimaryKeyMap();
         var merged = IntersectingPostingList.intersect(postingLists);
-        var docLengthsReader = new DocLengthsReader(docLengths, docLengthsMeta);
+        var docLengthsReader = new DocLengthsReader(docLengths, docLengthsMeta, version);
 
         // Wrap the iterator with resource management
         var it = new AbstractIterator<BM25Utils.DocTF>() { // Anonymous class extends AbstractIterator
