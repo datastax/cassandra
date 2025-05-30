@@ -26,6 +26,7 @@ import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.cql3.statements.CQL3CasRequest;
 import org.apache.cassandra.db.Clustering;
+import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.index.IndexRegistry;
 import org.apache.cassandra.schema.ColumnMetadata;
 
@@ -66,7 +67,7 @@ public interface Conditions
     /**
      * @return the column definitions of the conditions supported by a {@link org.apache.cassandra.index.Index.Analyzer}.
      */
-    Set<ColumnMetadata> getAnalyzedColumns(IndexRegistry indexRegistry);
+    Set<ColumnMetadata> getAnalyzedColumns(IndexRegistry indexRegistry, IndexHints indexHints);
 
     /**
      * Checks if this <code>Conditions</code> is empty.
