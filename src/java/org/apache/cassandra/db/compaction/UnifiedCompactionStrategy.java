@@ -318,18 +318,18 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
     @Override
     public Collection<AbstractCompactionTask> getNextBackgroundTasks(int gcBefore)
     {
-        Keyspace ks = Keyspace.open(realm.getKeyspaceName());
         ColumnFamilyStore cfs = null;
         try
         {
-            cfs = ks.getColumnFamilyStore(realm.metadata().id);
+            Keyspace ks = Keyspace.open(realm.getKeyspaceName());
+            cfs = ks == null ? null : ks.getColumnFamilyStore(realm.metadata().id);
         }
-        catch (IllegalArgumentException e)
+        catch (IllegalArgumentException | AssertionError e)
         {
-            // Non existing cfs, common in some junits and other mocking scenarios
+            // Non initialized ks.cfs, common in some junits and some mocking scenarios
         }
 
-        synchronized (cfs != null ? cfs : this) // cfs might be null in some mocking scenarios, fall back to previous behavior
+        synchronized (cfs == null ? this : cfs)
         {
             synchronized (this)
             {
