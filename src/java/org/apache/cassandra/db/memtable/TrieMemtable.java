@@ -30,6 +30,7 @@ import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.BufferDecoratedKey;
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -70,6 +71,8 @@ import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.Clock;
 import org.apache.cassandra.utils.ObjectSizes;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
+import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.MBeanWrapper;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.utils.memory.EnsureOnHeap;
@@ -101,6 +104,16 @@ public class TrieMemtable extends AbstractShardedMemtable
     public static final Predicate<InMemoryTrie.NodeFeatures<Object>> FORCE_COPY_PARTITION_BOUNDARY = features -> isPartitionBoundary(features.content());
 
     public static final Predicate<Object> IS_PARTITION_BOUNDARY = TrieMemtable::isPartitionBoundary;
+
+    public static volatile int SHARD_COUNT = CassandraRelevantProperties.TRIE_MEMTABLE_SHARD_COUNT.getInt(autoShardCount());
+    public static volatile boolean SHARD_LOCK_FAIRNESS = CassandraRelevantProperties.TRIE_MEMTABLE_SHARD_LOCK_FAIRNESS.getBoolean();
+
+    public static final String TRIE_MEMTABLE_CONFIG_OBJECT_NAME = "org.apache.cassandra.db:type=TrieMemtableConfig";
+    
+    static
+    {
+        MBeanWrapper.instance.registerMBean(new TrieMemtableConfig(), TRIE_MEMTABLE_CONFIG_OBJECT_NAME, MBeanWrapper.OnException.LOG);
+    }
 
     // Set to true when the memtable requests a switch (e.g. for trie size limit being reached) to ensure only one
     // thread calls cfs.switchMemtableIfCurrent.
@@ -137,6 +150,11 @@ public class TrieMemtable extends AbstractShardedMemtable
         this.shards = generatePartitionShards(boundaries.shardCount(), metadataRef, metrics, owner.readOrdering());
         this.mergedTrie = makeMergedTrie(shards);
         logger.trace("Created memtable with {} shards", this.shards.length);
+    }
+
+    private static int autoShardCount()
+    {
+        return 4 * FBUtilities.getAvailableProcessors();
     }
 
     private static MemtableShard[] generatePartitionShards(int splits,
@@ -576,7 +594,7 @@ public class TrieMemtable extends AbstractShardedMemtable
         private volatile int partitionCount = 0;
 
         @Unmetered
-        private final ReentrantLock writeLock = new ReentrantLock();
+        private final ReentrantLock writeLock = new ReentrantLock(SHARD_LOCK_FAIRNESS);
 
         // Content map for the given shard. This is implemented as a memtable trie which uses the prefix-free
         // byte-comparable ByteSource representations of the keys to address the partitions.
@@ -841,5 +859,53 @@ public class TrieMemtable extends AbstractShardedMemtable
     {
         for (MemtableShard shard : shards)
             shard.data.releaseReferencesUnsafe();
+    }
+
+    public static class TrieMemtableConfig implements TrieMemtableConfigMXBean
+    {
+        @Override
+        public void setShardCount(String shardCount)
+        {
+            if ("auto".equalsIgnoreCase(shardCount))
+            {
+                SHARD_COUNT = autoShardCount();
+                CassandraRelevantProperties.TRIE_MEMTABLE_SHARD_COUNT.setInt(SHARD_COUNT);
+            }
+            else
+            {
+                try
+                {
+                    SHARD_COUNT = Integer.valueOf(shardCount);
+                    CassandraRelevantProperties.TRIE_MEMTABLE_SHARD_COUNT.setInt(SHARD_COUNT);
+                }
+                catch (NumberFormatException ex)
+                {
+                    logger.warn("Unable to parse {} as valid value for shard count; leaving it as {}",
+                                shardCount, SHARD_COUNT);
+                    return;
+                }
+            }
+            logger.info("Requested setting shard count to {}; set to: {}", shardCount, SHARD_COUNT);
+        }
+
+        @Override
+        public String getShardCount()
+        {
+            return "" + SHARD_COUNT;
+        }
+
+        @Override
+        public void setLockFairness(String fairness)
+        {
+            SHARD_LOCK_FAIRNESS = Boolean.parseBoolean(fairness);
+            CassandraRelevantProperties.TRIE_MEMTABLE_SHARD_LOCK_FAIRNESS.setBoolean(SHARD_LOCK_FAIRNESS);
+            logger.info("Requested setting shard lock fairness to {}; set to: {}", fairness, SHARD_LOCK_FAIRNESS);
+        }
+
+        @Override
+        public String getLockFairness()
+        {
+            return "" + SHARD_LOCK_FAIRNESS;
+        }
     }
 }

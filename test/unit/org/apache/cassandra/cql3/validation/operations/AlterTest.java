@@ -46,7 +46,7 @@ import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static java.lang.String.format;
-import static org.apache.cassandra.config.CassandraRelevantProperties.MEMTABLE_SHARD_COUNT;
+import static org.apache.cassandra.config.CassandraRelevantProperties.TRIE_MEMTABLE_SHARD_COUNT;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
@@ -61,7 +61,7 @@ public class AlterTest extends CQLTester
     {
         // AlterTest uses Murmur3 partitioner, but injects OrderPreservingPartitioner.StringToken
         // into TokenMetadata; expect trouble
-        MEMTABLE_SHARD_COUNT.setString("1");
+        TRIE_MEMTABLE_SHARD_COUNT.setString("1");
         CQLTester.setUpClass();
         assertThat(AbstractShardedMemtable.getDefaultShardCount()).isEqualTo(1);;
     }
