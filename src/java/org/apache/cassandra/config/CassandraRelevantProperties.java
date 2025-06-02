@@ -27,6 +27,7 @@ import com.google.common.primitives.Ints;
 
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.db.compaction.unified.Reservations;
+import org.apache.cassandra.db.memtable.TrieMemtable;
 import org.apache.cassandra.db.virtual.LogMessagesTable;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.compress.AdaptiveCompressor;
@@ -899,6 +900,17 @@ public enum CassandraRelevantProperties
      * Allows to set custom current trie index format. This node will produce sstables in this format.
      */
     TRIE_INDEX_FORMAT_VERSION("cassandra.trie_index_format_version", "cc"),
+
+    /**
+     * Number of shards for TrieMemtable. If not specified, defaults to {@link TrieMemtable#autoShardCount}
+     */
+    TRIE_MEMTABLE_SHARD_COUNT("cassandra.trie.memtable.shard.count"),
+
+    /**
+     * Whether to use fair locking for TrieMemtable shard locks. Defaults to false.
+     */
+    TRIE_MEMTABLE_SHARD_LOCK_FAIRNESS("cassandra.trie.memtable.shard.lock.fairness", "false"),
+
     TRIGGERS_DIR("cassandra.triggers_dir"),
     TRUNCATE_BALLOT_METADATA("cassandra.truncate_ballot_metadata"),
     /**
