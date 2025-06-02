@@ -130,6 +130,23 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
         return size;
     }
 
+    /**
+     * Approximate total count of terms in the memory index.
+     * The count is approximate because deletions are not accounted for.
+     *
+     * @return total count of terms for indexes rows.
+     */
+    public long approximateTotalTermCount()
+    {
+        long count = 0;
+        for (MemoryIndex memoryIndex : rangeIndexes)
+        {
+            assert memoryIndex instanceof TrieMemoryIndex;
+            count += ((TrieMemoryIndex) memoryIndex).approximateTotalTermCount();
+        }
+        return count;
+    }
+
     @VisibleForTesting
     public int shardCount()
     {
@@ -413,8 +430,6 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
     private BM25Utils.DocStats computeDocumentFrequencies(List<ByteBuffer> queryTerms, AbstractAnalyzer docAnalyzer)
     {
         var documentFrequencies = new HashMap<ByteBuffer, Long>();
-        long docCount = 0;
-        long totalTermCount = 0;
 
         // count all documents in the queried column
         try (var it = memtable.partitionIterator(ColumnFilter.selection(RegularAndStaticColumns.of(indexContext.getDefinition())),
@@ -440,7 +455,6 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
                         while (docAnalyzer.hasNext())
                         {
                             ByteBuffer term = docAnalyzer.next();
-                            totalTermCount++;
                             if (queryTerms.contains(term))
                                 queryTermsPerDoc.add(term);
                         }
@@ -452,11 +466,10 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
                     for (ByteBuffer term : queryTermsPerDoc)
                         documentFrequencies.merge(term, 1L, Long::sum);
 
-                    docCount++;
                 }
             }
         }
-        return new BM25Utils.DocStats(documentFrequencies, docCount, totalTermCount);
+        return new BM25Utils.DocStats(documentFrequencies, indexedRows(), approximateTotalTermCount());
     }
 
     @Nullable
