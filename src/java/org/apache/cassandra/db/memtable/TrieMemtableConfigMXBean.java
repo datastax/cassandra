@@ -23,4 +23,8 @@ public interface TrieMemtableConfigMXBean
     public void setShardCount(String numShards);
 
     public String getShardCount();
+
+    public void setLockFairness(String fairness);
+
+    public String getLockFairness();
 }
