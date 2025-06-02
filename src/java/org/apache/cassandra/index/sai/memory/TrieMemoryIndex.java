@@ -92,8 +92,8 @@ public class TrieMemoryIndex extends MemoryIndex
     private final PrimaryKeysRemover primaryKeysRemover;
     private final boolean analyzerTransformsValue;
     private final Map<PrimaryKey, Integer> docLengths = new HashMap<>();
-    private final AtomicInteger indexedRows = new AtomicInteger(0);
-    private final LongAdder totalTermCount = new LongAdder();
+    private volatile int indexedRows = 0;
+    private volatile long totalTermCount = 0;
 
     private final Memtable memtable;
     private AbstractBounds<PartitionPosition> keyBounds;
@@ -135,7 +135,7 @@ public class TrieMemoryIndex extends MemoryIndex
     @Override
     public int indexedRows()
     {
-        return indexedRows.get();
+        return indexedRows;
     }
 
     /**
@@ -146,7 +146,7 @@ public class TrieMemoryIndex extends MemoryIndex
      */
     public long approximateTotalTermCount()
     {
-        return totalTermCount.sum();
+        return totalTermCount;
     }
 
     public synchronized void add(DecoratedKey key,
@@ -278,9 +278,9 @@ public class TrieMemoryIndex extends MemoryIndex
                 // An update first transforms with Accumulator to the new value,
                 // then transforms with Remover from the old value.
                 if (transformer instanceof PrimaryKeysAccumulator)
-                    totalTermCount.add(tokenCount);
+                    totalTermCount += tokenCount;
                 if (transformer instanceof PrimaryKeysRemover)
-                    totalTermCount.add(-tokenCount);
+                    totalTermCount -= tokenCount;
                 // heap used for doc lengths
                 long heapUsed = RamUsageEstimator.HASHTABLE_RAM_BYTES_PER_ENTRY
                                 + primaryKey.ramBytesUsed() // TODO do we count these bytes?
@@ -289,8 +289,8 @@ public class TrieMemoryIndex extends MemoryIndex
             }
             else
             {
-                indexedRows.incrementAndGet();
-                totalTermCount.add(tokenCount);
+                indexedRows++;
+                totalTermCount += tokenCount;
             }
 
             // memory used by the trie
