@@ -18,9 +18,17 @@
 
 package org.apache.cassandra.db.compaction;
 
+import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
+import javax.annotation.Nullable;
+
+import com.google.common.collect.ImmutableList;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.TimeUUID;
 
 /// Utility class to share a compaction observer among multiple compaction tasks and only report start and completion
@@ -34,14 +42,24 @@ import org.apache.cassandra.utils.TimeUUID;
 /// if assertions are enabled.
 public class SharedCompactionObserver implements CompactionObserver
 {
+    private static final Logger logger = LoggerFactory.getLogger(SharedCompactionObserver.class);
     private final AtomicInteger toReportOnComplete = new AtomicInteger(0);
     private final AtomicReference<Throwable> onCompleteException = new AtomicReference(null);
     private final AtomicReference<CompactionProgress> inProgressReported = new AtomicReference<>(null);
-    private final CompactionObserver observer;
+
+    private final List<CompactionObserver> compObservers;
 
     public SharedCompactionObserver(CompactionObserver observer)
     {
-        this.observer = observer;
+        this(observer, null);
+    }
+
+    public SharedCompactionObserver(CompactionObserver primary, @Nullable CompactionObserver secondary)
+    {
+        if (primary == null)
+            throw new IllegalArgumentException("Primary observer cannot be null");
+
+        this.compObservers = secondary != null ? ImmutableList.of(primary, secondary) : ImmutableList.of(primary);
     }
 
     public void registerExpectedSubtask()
@@ -55,7 +73,13 @@ public class SharedCompactionObserver implements CompactionObserver
     public void onInProgress(CompactionProgress progress)
     {
         if (inProgressReported.compareAndSet(null, progress))
-            observer.onInProgress(progress);
+        {
+            Throwable err = null;
+            for (CompactionObserver compObserver : compObservers)
+                err = Throwables.perform(err, () -> compObserver.onInProgress(progress));
+
+            Throwables.maybeFail(err);
+        }
         else
             assert inProgressReported.get() == progress; // progress object must also be shared
     }
@@ -69,6 +93,12 @@ public class SharedCompactionObserver implements CompactionObserver
         assert remainingToComplete >= 0 : "onCompleted called without corresponding registerExpectedSubtask";
         // The individual operation ID given here may be different from the shared ID. Pass on the shared one.
         if (remainingToComplete == 0)
-            observer.onCompleted(inProgressReported.get().operationId(), onCompleteException.get());
+        {
+            Throwable error = null;
+            for (CompactionObserver compObserver : compObservers)
+                error = Throwables.perform(error, () -> compObserver.onCompleted(inProgressReported.get().operationId(), onCompleteException.get()));
+
+            Throwables.maybeFail(error);
+        }
     }
 }
