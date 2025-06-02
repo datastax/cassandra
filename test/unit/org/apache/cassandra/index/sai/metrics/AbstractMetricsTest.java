@@ -76,7 +76,7 @@ public abstract class AbstractMetricsTest extends SAITester
             try
             {
                 double mean = (double) jmxConnection.getAttribute(name, "Mean");
-                assertTrue("Median " + mean + " is not between " + min + " and " + max, mean >= min && mean <= max);
+                assertTrue("Median " + mean + " is between " + min + " and " + max, mean >= min && mean <= max);
             }
             catch (Throwable ex)
             {
