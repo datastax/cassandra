@@ -30,7 +30,6 @@ import java.util.stream.IntStream;
 
 import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.memory.MemtableIndex;
-import org.apache.cassandra.index.sai.memory.TrieMemoryIndex;
 import org.apache.cassandra.index.sai.memory.TrieMemtableIndex;
 import org.assertj.core.api.Assertions;
 
@@ -762,45 +761,45 @@ public class BM25Test extends SAITester
 
         beforeAndAfterFlush(
         () -> {
-            // ID 11: total words = 12, climate occurrences = 4
-            // ID 19: total words = 13, climate occurrences = 4
-            // ID 1: total words = 16, climate occurrences = 3
-            // ID 16: total words = 11, climate occurrences = 2
-            // ID 6: total words = 13, climate occurrences = 2
-            // ID 12: total words = 12, climate occurrences = 1
-            // ID 18: total words = 14, climate occurrences = 1
-            executeQuery(Arrays.asList(11, 19, 1, 16, 6, 12, 18), "SELECT * FROM %s  ORDER BY body BM25 OF ? LIMIT 10",
+            // ID 10: total words = 12, climate occurrences = 4
+            // ID 18: total words = 13, climate occurrences = 4
+            // ID 0: total words = 16, climate occurrences = 3
+            // ID 15: total words = 11, climate occurrences = 2
+            // ID 5: total words = 13, climate occurrences = 2
+            // ID 11: total words = 12, climate occurrences = 1
+            // ID 17: total words = 14, climate occurrences = 1
+            executeQuery(Arrays.asList(10, 18, 0, 15, 5, 11, 17), "SELECT * FROM %s  ORDER BY body BM25 OF ? LIMIT 10",
                          "climate");
-            executeQuery(Arrays.asList(11, 19, 1), "SELECT * FROM %s WHERE score = 5 ORDER BY body BM25 OF ? LIMIT 10",
+            executeQuery(Arrays.asList(10, 18, 0), "SELECT * FROM %s WHERE score = 5 ORDER BY body BM25 OF ? LIMIT 10",
                          "climate");
-            executeQuery(Arrays.asList(11, 19, 1, 16, 6, 12, 18), "SELECT * FROM %s WHERE bodyset CONTAINS 'climate' ORDER BY body BM25 OF ? LIMIT 10",
+            executeQuery(Arrays.asList(10, 18, 0, 15, 5, 11, 17), "SELECT * FROM %s WHERE bodyset CONTAINS 'climate' ORDER BY body BM25 OF ? LIMIT 10",
                          "climate");
-            executeQuery(Arrays.asList(16, 6, 12, 18), "SELECT * FROM %s WHERE bodyset CONTAINS 'health' ORDER BY body BM25 OF ? LIMIT 10",
+            executeQuery(Arrays.asList(15, 5, 11, 17), "SELECT * FROM %s WHERE bodyset CONTAINS 'health' ORDER BY body BM25 OF ? LIMIT 10",
                          "climate");
-            executeQuery(Arrays.asList(11, 19, 1, 16, 6, 12, 18), "SELECT * FROM %s WHERE map_category CONTAINS 'Climate' ORDER BY body BM25 OF ? LIMIT 10",
+            executeQuery(Arrays.asList(10, 18, 0, 15, 5, 11, 17), "SELECT * FROM %s WHERE map_category CONTAINS 'Climate' ORDER BY body BM25 OF ? LIMIT 10",
                          "climate");
-            executeQuery(Arrays.asList(19, 16, 6, 12, 18), "SELECT * FROM %s WHERE map_category CONTAINS 'Health' ORDER BY body BM25 OF ? LIMIT 10",
+            executeQuery(Arrays.asList(18, 15, 5, 11, 17), "SELECT * FROM %s WHERE map_category CONTAINS 'Health' ORDER BY body BM25 OF ? LIMIT 10",
                          "climate");
-            executeQuery(Arrays.asList(11, 19, 1, 16, 6, 12, 18), "SELECT * FROM %s WHERE map_body CONTAINS 'Climate' ORDER BY body BM25 OF ? LIMIT 10",
+            executeQuery(Arrays.asList(10, 18, 0, 15, 5, 11, 17), "SELECT * FROM %s WHERE map_body CONTAINS 'Climate' ORDER BY body BM25 OF ? LIMIT 10",
                          "climate");
-            executeQuery(Arrays.asList(11, 19, 16, 6, 12, 18), "SELECT * FROM %s WHERE map_body CONTAINS 'health' ORDER BY body BM25 OF ? LIMIT 10",
+            executeQuery(Arrays.asList(10, 18, 15, 5, 11, 17), "SELECT * FROM %s WHERE map_body CONTAINS 'health' ORDER BY body BM25 OF ? LIMIT 10",
                          "climate");
-            executeQuery(Arrays.asList(11, 19, 16, 6, 12, 18), "SELECT * FROM %s WHERE map_body CONTAINS KEY 'Health' ORDER BY body BM25 OF ? LIMIT 10",
+            executeQuery(Arrays.asList(10, 18, 15, 5, 11, 17), "SELECT * FROM %s WHERE map_body CONTAINS KEY 'Health' ORDER BY body BM25 OF ? LIMIT 10",
                          "climate");
 
-            // ID 4: total words = 15, health occurrences = 3
-            // ID 12: total words = 12, health occurrences = 2
-            // ID 6: total words = 13, health occurrences = 2
-            // ID 9: total words = 13, health occurrences = 2
-            // ID 18: total words = 14, health occurrences = 2
-            // ID 14: total words = 11, health occurrences = 1
-            // ID 16: total words = 11, health occurrences = 1
-            executeQuery(Arrays.asList(6, 16), "SELECT * FROM %s WHERE score > 3 ORDER BY body BM25 OF ? LIMIT 10",
+            // ID 3: total words = 15, health occurrences = 3
+            // ID 11: total words = 12, health occurrences = 2
+            // ID 5: total words = 13, health occurrences = 2
+            // ID 8: total words = 13, health occurrences = 2
+            // ID 17: total words = 14, health occurrences = 2
+            // ID 13: total words = 11, health occurrences = 1
+            // ID 15: total words = 11, health occurrences = 1
+            executeQuery(Arrays.asList(5, 15), "SELECT * FROM %s WHERE score > 3 ORDER BY body BM25 OF ? LIMIT 10",
                          "health");
-            executeQuery(Arrays.asList(4, 12, 9, 18, 14), "SELECT * FROM %s WHERE category = 'Health' " +
+            executeQuery(Arrays.asList(3, 11, 8, 17, 13), "SELECT * FROM %s WHERE category = 'Health' " +
                                                           "ORDER BY body BM25 OF ? LIMIT 10",
                          "Health");
-            executeQuery(Arrays.asList(4, 12, 9, 18, 14), "SELECT * FROM %s WHERE score <= 3 AND category = 'Health' " +
+            executeQuery(Arrays.asList(3, 11, 8, 17, 13), "SELECT * FROM %s WHERE score <= 3 AND category = 'Health' " +
                                                           "ORDER BY body BM25 OF ? LIMIT 10",
                          "health");
         });
@@ -818,27 +817,27 @@ public class BM25Test extends SAITester
         insertPrimitiveData(10, 20);
 
         // One memtable, one sstable - different result from the reference in testCollections
-        // ID 1 and 6 contain 3 and 2 climate occurrences correspondingly,
-        // while ID 11 and 19 - 4 climate occurrences. However,
+        // ID 0 and 5 contain 3 and 2 climate occurrences correspondingly,
+        // while ID 10 and 18 - 4 climate occurrences. However,
         // since the segment with 0-9 IDs have only 2 rows with climate and 10-19 - 5,
-        // 1 and 6 win over 11 and 19.
-        executeQuery(Arrays.asList(1, 6, 11, 19, 16, 12, 18), "SELECT * FROM %s  ORDER BY body BM25 OF ? LIMIT 10",
+        // 0 and 5 win over 10 and 18.
+        executeQuery(Arrays.asList(0, 5, 10, 18, 15, 11, 17), "SELECT * FROM %s  ORDER BY body BM25 OF ? LIMIT 10",
                 "climate");
-        executeQuery(Arrays.asList(1, 11, 19), "SELECT * FROM %s WHERE score = 5 ORDER BY body BM25 OF ? LIMIT 10",
+        executeQuery(Arrays.asList(0, 10, 18), "SELECT * FROM %s WHERE score = 5 ORDER BY body BM25 OF ? LIMIT 10",
                 "climate");
 
         // Flush into Two sstables - same result as the different above
         flush();
-        executeQuery(Arrays.asList(1, 6, 11, 19, 16, 12, 18), "SELECT * FROM %s  ORDER BY body BM25 OF ? LIMIT 10",
+        executeQuery(Arrays.asList(0, 5, 10, 18, 15, 11, 17), "SELECT * FROM %s  ORDER BY body BM25 OF ? LIMIT 10",
                 "climate");
-        executeQuery(Arrays.asList(1, 11, 19), "SELECT * FROM %s WHERE score = 5 ORDER BY body BM25 OF ? LIMIT 10",
+        executeQuery(Arrays.asList(0, 10, 18), "SELECT * FROM %s WHERE score = 5 ORDER BY body BM25 OF ? LIMIT 10",
                 "climate");
 
         // Compact into one sstable - same as reference from testCollections
         compact();
-        executeQuery(Arrays.asList(11, 19, 1, 16, 6, 12, 18), "SELECT * FROM %s  ORDER BY body BM25 OF ? LIMIT 10",
+        executeQuery(Arrays.asList(10, 18, 0, 15, 5, 11, 17), "SELECT * FROM %s  ORDER BY body BM25 OF ? LIMIT 10",
                 "climate");
-        executeQuery(Arrays.asList(11, 19, 1), "SELECT * FROM %s WHERE score = 5 ORDER BY body BM25 OF ? LIMIT 10",
+        executeQuery(Arrays.asList(10, 18, 0), "SELECT * FROM %s WHERE score = 5 ORDER BY body BM25 OF ? LIMIT 10",
                 "climate");
     }
 
@@ -863,16 +862,27 @@ public class BM25Test extends SAITester
                                        .map(this::calculateTotalTermsForRow)
                                        .sum();
 
-        assertNumRowsMemtable(scoreIndexName, DATASET.length);
-        assertNumRowsMemtable(bodyIndexName, DATASET.length);
+        assertNumRowsMemtable(scoreIndexName, DATASET.length, DATASET.length);
+        assertNumRowsMemtable(bodyIndexName, DATASET.length, totalTermsCount);
         assertNumRowsMemtable(mapIndexName, DATASET.length);
-        execute("DELETE FROM %s WHERE id = ?", 5);
+        execute("DELETE FROM %s WHERE id = ?", 4);
+        // Deletion is not tracked by Memindex
+        assertNumRowsMemtable(bodyIndexName, DATASET.length, totalTermsCount);
+        // Test an update to different value for analyzed index
+        execute("UPDATE %s SET body = ? WHERE id = ?", DATASET[10][DATASET_BODY_COLUMN], 6);
+        totalTermsCount += calculateTotalTermsForRow(10) - calculateTotalTermsForRow(6);
+        assertNumRowsMemtable(bodyIndexName, DATASET.length, totalTermsCount);
+        // Update back to the original value
+        execute("UPDATE %s SET body = ? WHERE id = ?", DATASET[6][DATASET_BODY_COLUMN], 10);
+        totalTermsCount += calculateTotalTermsForRow(6) - calculateTotalTermsForRow(10);
+        assertNumRowsMemtable(bodyIndexName, DATASET.length, totalTermsCount);
+        // Flush will account for the deleted row
         totalTermsCount -= calculateTotalTermsForRow(4);
         flush();
         assertNumRowsAndTotalTermsSSTable(scoreIndexName, DATASET.length - 1, DATASET.length - 1);
         assertNumRowsAndTotalTermsSSTable(bodyIndexName, DATASET.length - 1, totalTermsCount);
         assertNumRowsSSTable(mapIndexName, DATASET.length - 1);
-        execute("DELETE FROM %s WHERE id = ?", 10);
+        execute("DELETE FROM %s WHERE id = ?", 9);
         flush();
         assertNumRowsAndTotalTermsSSTable(scoreIndexName, DATASET.length - 1, DATASET.length - 1);
         assertNumRowsAndTotalTermsSSTable(bodyIndexName, DATASET.length - 1, totalTermsCount);
@@ -886,17 +896,24 @@ public class BM25Test extends SAITester
 
     private void assertNumRowsMemtable(String indexName, int expectedNumRows)
     {
+        assertNumRowsMemtable(indexName, expectedNumRows, -1);
+    }
+
+    private void assertNumRowsMemtable(String indexName, int expectedNumRows, int expectedTotalTermsCount)
+    {
         int rowCount = 0;
+        long termCount = 0;
 
         for (var memtable : getCurrentColumnFamilyStore().getAllMemtables())
         {
             MemtableIndex memIndex = getIndexContext(indexName).getLiveMemtables().get(memtable);
             assert memIndex instanceof TrieMemtableIndex;
-            rowCount = Arrays.stream(((TrieMemtableIndex) memIndex).getRangeIndexes())
-                             .map(index -> ((TrieMemoryIndex) index).getDocLengths().size())
-                             .mapToInt(Integer::intValue).sum();
+            rowCount += ((TrieMemtableIndex) memIndex).indexedRows();
+            termCount += ((TrieMemtableIndex) memIndex).approximateTotalTermCount();
         }
         assertEquals(expectedNumRows, rowCount);
+        if (expectedTotalTermsCount >= 0)
+            assertEquals(expectedTotalTermsCount, termCount);
     }
 
     private void assertNumRowsSSTable(String indexName, int expectedNumRows)
@@ -923,32 +940,32 @@ public class BM25Test extends SAITester
         }
         assertEquals(indexRowCount, segmentRowCount);
         assertEquals(expectedNumRows, indexRowCount);
-        if (expectedTotalTermsCount > 0)
+        if (expectedTotalTermsCount >= 0)
             assertEquals(expectedTotalTermsCount, totalTermCount);
     }
 
     private final static Object[][] DATASET =
     {
-    { 1, "Climate", 5, "Climate change is a pressing issue. Climate patterns are shifting globally. Scientists study climate data daily.", 1 },
-    { 2, "Technology", 3, "Technology is advancing. New technology in AI and robotics is groundbreaking.", 1 },
-    { 3, "Economy", 4, "The economy is recovering. Economy experts are optimistic. However, the global economy still faces risks.", 1 },
-    { 4, "Health", 3, "Health is wealth. Health policies need to be improved to ensure better public health outcomes.", 1 },
-    { 5, "Education", 2, "Education is the foundation of success. Online education is booming.", 4 },
-    { 6, "Climate", 4, "Climate and health are closely linked. Climate affects air quality and health outcomes.", 2 },
-    { 7, "Education", 3, "Technology and education go hand in hand. EdTech is revolutionizing education through technology.", 3 },
-    { 8, "Economy", 3, "The global economy is influenced by technology. Fintech is a key part of the economy today.", 2 },
-    { 9, "Health", 3, "Education and health programs must be prioritized. Health education is vital in schools.", 2 },
-    { 10, "Mixed", 3, "Technology, economy, and education are pillars of development.", 2 },
-    { 11, "Climate", 5, "Climate climate climate. It's everywhere. Climate drives political and economic decisions.", 1 },
-    { 12, "Health", 2, "Health concerns rise with climate issues. Health organizations are sounding the alarm.", 2 },
-    { 13, "Economy", 3, "The economy is fluctuating. Uncertainty looms over the economy.", 1 },
-    { 14, "Health", 3, "Cutting-edge technology is transforming healthcare. Healthtech merges health and technology.", 1 },
-    { 15, "Education", 2, "Education reforms are underway. Education experts suggest holistic changes.", 1 },
-    { 16, "Climate", 4, "Climate affects the economy and health. Climate events cost billions annually.", 1 },
-    { 17, "Technology", 3, "Technology is the backbone of the modern economy. Without technology, economic growth stagnates.", 2 },
-    { 18, "Health", 2, "Health is discussed less than economy or climate or technology, but health matters deeply.", 1 },
-    { 19, "Climate", 5, "Climate change, climate policies, climate research—climate is the buzzword of our time.", 2 },
-    { 20, "Mixed", 3, "Investments in education and technology will shape the future of the global economy.", 1 }
+    { 0, "Climate", 5, "Climate change is a pressing issue. Climate patterns are shifting globally. Scientists study climate data daily.", 1 },
+    { 1, "Technology", 3, "Technology is advancing. New technology in AI and robotics is groundbreaking.", 1 },
+    { 2, "Economy", 4, "The economy is recovering. Economy experts are optimistic. However, the global economy still faces risks.", 1 },
+    { 3, "Health", 3, "Health is wealth. Health policies need to be improved to ensure better public health outcomes.", 1 },
+    { 4, "Education", 2, "Education is the foundation of success. Online education is booming.", 4 },
+    { 5, "Climate", 4, "Climate and health are closely linked. Climate affects air quality and health outcomes.", 2 },
+    { 6, "Education", 3, "Technology and education go hand in hand. EdTech is revolutionizing education through technology.", 3 },
+    { 7, "Economy", 3, "The global economy is influenced by technology. Fintech is a key part of the economy today.", 2 },
+    { 8, "Health", 3, "Education and health programs must be prioritized. Health education is vital in schools.", 2 },
+    { 9, "Mixed", 3, "Technology, economy, and education are pillars of development.", 2 },
+    { 10, "Climate", 5, "Climate climate climate. It's everywhere. Climate drives political and economic decisions.", 1 },
+    { 11, "Health", 2, "Health concerns rise with climate issues. Health organizations are sounding the alarm.", 2 },
+    { 12, "Economy", 3, "The economy is fluctuating. Uncertainty looms over the economy.", 1 },
+    { 13, "Health", 3, "Cutting-edge technology is transforming healthcare. Healthtech merges health and technology.", 1 },
+    { 14, "Education", 2, "Education reforms are underway. Education experts suggest holistic changes.", 1 },
+    { 15, "Climate", 4, "Climate affects the economy and health. Climate events cost billions annually.", 1 },
+    { 16, "Technology", 3, "Technology is the backbone of the modern economy. Without technology, economic growth stagnates.", 2 },
+    { 17, "Health", 2, "Health is discussed less than economy or climate or technology, but health matters deeply.", 1 },
+    { 18, "Climate", 5, "Climate change, climate policies, climate research—climate is the buzzword of our time.", 2 },
+    { 19, "Mixed", 3, "Investments in education and technology will shape the future of the global economy.", 1 }
     };
 
     private void analyzeDataset(String term)
