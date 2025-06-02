@@ -44,6 +44,7 @@ import org.quicktheories.core.Gen;
 
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static java.util.concurrent.TimeUnit.SECONDS;
+import static org.apache.cassandra.metrics.DecayingEstimatedHistogramReservoir.DEFAULT_STRIPE_COUNT;
 import static org.apache.cassandra.metrics.DecayingEstimatedHistogramReservoir.MAX_BUCKET_COUNT;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -77,7 +78,13 @@ public abstract class DecayingEstimatedHistogramReservoirTestBase
     {
         return integers().from(DecayingEstimatedHistogramReservoir.DEFAULT_BUCKET_COUNT)
                          .upToAndIncluding(DecayingEstimatedHistogramReservoir.MAX_BUCKET_COUNT - 10)
-                         .zip(booleans().all(), EstimatedHistogram::newOffsets);
+                         .zip(booleans().all(), DecayingEstimatedHistogramReservoirTestBase::decayingHistogramOffsets);
+    }
+
+    private static long[] decayingHistogramOffsets(int bucketsCount, boolean considerZeroes)
+    {
+        return ((DecayingEstimatedHistogramReservoir.EstimatedHistogramReservoirSnapshot)
+                new DecayingEstimatedHistogramReservoir(considerZeroes, bucketsCount, DEFAULT_STRIPE_COUNT).getSnapshot()).getOffsets();
     }
 
     @Test
@@ -86,6 +93,7 @@ public abstract class DecayingEstimatedHistogramReservoirTestBase
         qt().withExamples(numExamples)
             .forAll(booleans().all()
                               .flatMap(b -> offsets.flatMap(offs -> this.offsetsAndValue(offs, b, 0))))
+                              .describedAs(pair -> String.format("offsets=%s, value=%d", Arrays.toString(pair.left), pair.right))
             .check(this::checkFindIndex);
     }
 
@@ -309,7 +317,7 @@ public abstract class DecayingEstimatedHistogramReservoirTestBase
 
             DecayingEstimatedHistogramReservoir histogram = new DecayingEstimatedHistogramReservoir(true,
                                                                                                     DecayingEstimatedHistogramReservoir.DEFAULT_BUCKET_COUNT,
-                                                                                                    DecayingEstimatedHistogramReservoir.DEFAULT_STRIPE_COUNT,
+                                                                                                    DEFAULT_STRIPE_COUNT,
                                                                                                     clock);
             for (int i = 0; i < 40; i++)
                 histogram.update(0);
@@ -425,7 +433,7 @@ public abstract class DecayingEstimatedHistogramReservoirTestBase
 
             DecayingEstimatedHistogramReservoir histogram = new DecayingEstimatedHistogramReservoir(true,
                                                                                                     DecayingEstimatedHistogramReservoir.DEFAULT_BUCKET_COUNT,
-                                                                                                    DecayingEstimatedHistogramReservoir.DEFAULT_STRIPE_COUNT,
+                                                                                                    DEFAULT_STRIPE_COUNT,
                                                                                                     clock);
             histogram.update(0);
             histogram.update(0);

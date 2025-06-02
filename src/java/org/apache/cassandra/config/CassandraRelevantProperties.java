@@ -21,6 +21,7 @@ package org.apache.cassandra.config;
 import java.util.concurrent.TimeUnit;
 
 import org.apache.cassandra.concurrent.Stage;
+import org.apache.cassandra.db.memtable.TrieMemtable;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.compress.AdaptiveCompressor;
 import org.apache.cassandra.io.compress.LZ4Compressor;
@@ -276,7 +277,7 @@ public enum CassandraRelevantProperties
 
     /** Represents the maximum size (in bytes) of a serialized mutation that can be cached **/
     CACHEABLE_MUTATION_SIZE_LIMIT("cassandra.cacheable_mutation_size_limit_bytes", Long.toString(1_000_000)),
-    
+
     MIGRATION_DELAY("cassandra.migration_delay_ms", "60000"),
     /** Defines how often schema definitions are pulled from the other nodes */
     SCHEMA_PULL_INTERVAL_MS("cassandra.schema_pull_interval_ms", "60000"),
@@ -316,7 +317,7 @@ public enum CassandraRelevantProperties
      * Number of polls without gossip state change to consider gossip as settled.
      */
     GOSSIP_SETTLE_POLL_SUCCESSES_REQUIRED("cassandra.gossip_settle_poll_success_required", "3"),
-    
+
     /** Which class to use for token metadata provider */
     CUSTOM_TMD_PROVIDER_PROPERTY("cassandra.custom_token_metadata_provider_class"),
 
@@ -367,6 +368,9 @@ public enum CassandraRelevantProperties
 
     /** Whether to validate terms that will be SAI indexed at the coordinator */
     SAI_VALIDATE_TERMS_AT_COORDINATOR("cassandra.sai.validate_terms_at_coordinator", "true"),
+
+    /** Whether to optimize query plans */
+    SAI_QUERY_OPTIMIZATION_LEVEL("cassandra.sai.query_optimization_level", "1"),
 
     /** Whether vector type only allows float vectors. True by default. **/
     VECTOR_FLOAT_ONLY("cassandra.float_only_vectors", "true"),
@@ -641,7 +645,17 @@ public enum CassandraRelevantProperties
      * Allows custom implementation of {@link OperationContext.Factory} to optionally create and configure custom
      * {@link OperationContext} instances.
      */
-    OPERATION_CONTEXT_FACTORY("cassandra.operation_context_factory_class");
+    OPERATION_CONTEXT_FACTORY("cassandra.operation_context_factory_class"),
+
+    /**
+     * Number of shards for TrieMemtable. If not specified, defaults to {@link TrieMemtable#autoShardCount}
+     */
+    TRIE_MEMTABLE_SHARD_COUNT("cassandra.trie.memtable.shard.count"),
+
+    /**
+     * Whether to use fair locking for TrieMemtable shard locks. Defaults to false.
+     */
+    TRIE_MEMTABLE_SHARD_LOCK_FAIRNESS("cassandra.trie.memtable.shard.lock.fairness", "false");
 
     CassandraRelevantProperties(String key, String defaultVal)
     {

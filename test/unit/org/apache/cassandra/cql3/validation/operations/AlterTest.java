@@ -54,7 +54,7 @@ public class AlterTest extends CQLTester
     {
         // AlterTest uses Murmur3 partitioner, but injects OrderPreservingPartitioner.StringToken
         // into TokenMetadata; expect trouble
-        System.setProperty(TrieMemtable.SHARD_COUNT_PROPERTY, "1");
+        System.setProperty(CassandraRelevantProperties.TRIE_MEMTABLE_SHARD_COUNT.getKey(), "1");
         CQLTester.setUpClass();
     }
 

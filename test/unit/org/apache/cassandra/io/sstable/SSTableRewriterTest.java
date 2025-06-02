@@ -1004,7 +1004,7 @@ public class SSTableRewriterTest extends SSTableWriterTestBase
 
                     writer.append(builder.build().unfilteredIterator());
                 }
-                result.addAll(writer.finish(true));
+                result.addAll(writer.finish(true, cfs.getStorageHandler()));
             }
         }
         return result;

@@ -62,6 +62,7 @@ import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.lifecycle.View;
@@ -74,6 +75,8 @@ import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.SegmentBuilder;
 import org.apache.cassandra.index.sai.plan.QueryController;
+import org.apache.cassandra.index.sai.plan.StorageAttachedIndexQueryPlan;
+import org.apache.cassandra.index.sai.plan.StorageAttachedIndexSearcher;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.ResourceLeakDetector;
 import org.apache.cassandra.inject.ActionBuilder;
@@ -89,10 +92,12 @@ import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.MockSchema;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableId;
+import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.lucene.codecs.CodecUtil;
+import org.assertj.core.api.Assertions;
 
 import static org.apache.cassandra.inject.ActionBuilder.newActionBuilder;
 import static org.apache.cassandra.inject.Expression.expr;
@@ -966,6 +971,59 @@ public class SAITester extends CQLTester
             {
                 throw Throwables.unchecked(e);
             }
+        }
+    }
+
+    protected PlanSelectionAssertion assertThatPlanFor(String query, Object[]... expectedRows)
+    {
+        // First execute the query and check the number of rows returned
+        ClientWarn.instance.captureWarnings();
+        assertRowsIgnoringOrder(execute(query), expectedRows);
+        List<String> warnings = ClientWarn.instance.getWarnings();
+        ClientWarn.instance.resetWarnings();
+
+        ReadCommand command = parseReadCommand(query);
+        Index.QueryPlan queryPlan = command.indexQueryPlan();
+        if (queryPlan == null)
+            return new PlanSelectionAssertion(null, warnings);
+
+        StorageAttachedIndexQueryPlan saiQueryPlan = (StorageAttachedIndexQueryPlan) queryPlan;
+        Assertions.assertThat(saiQueryPlan).isNotNull();
+        StorageAttachedIndexSearcher searcher = saiQueryPlan.searcherFor(command);
+        Set<String> selectedIndexes = searcher.plannedIndexes();
+        return new PlanSelectionAssertion(selectedIndexes, warnings);
+    }
+
+    protected static class PlanSelectionAssertion
+    {
+        private final List<String> warnings;
+        private final Set<String> selectedIndexes;
+
+        public PlanSelectionAssertion(@Nullable Set<String> selectedIndexes, @Nullable List<String> warnings)
+        {
+            this.warnings = warnings;
+            this.selectedIndexes = selectedIndexes;
+        }
+
+        public PlanSelectionAssertion uses(String... indexes)
+        {
+            Assertions.assertThat(selectedIndexes)
+                      .isNotNull()
+                      .as("Expected to select only %s, but got: %s", indexes, selectedIndexes)
+                      .isEqualTo(Set.of(indexes));
+            return this;
+        }
+
+        public void doesntWarn()
+        {
+            Assert.assertNull(warnings);
+        }
+
+        public void warns(String expectedWarning)
+        {
+            Assert.assertNotNull(warnings);
+            Assert.assertEquals(1, warnings.size());
+            Assert.assertEquals(expectedWarning, warnings.get(0));
         }
     }
 }

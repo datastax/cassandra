@@ -29,10 +29,13 @@ import java.util.Random;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+
+import javax.annotation.Nullable;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
@@ -78,6 +81,7 @@ import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.when;
 
 /**
@@ -1753,6 +1757,89 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         assertEquals(1, tasks.size());
         assertEquals(allSSTables, tasks.get(0).inputSSTables());
     }
+
+    @Test
+    public void testAdditionalCompactionObserverForParallelCompaction()
+    {
+        testAdditionalCompactionObserver(5, 1000);
+    }
+
+    @Test
+    public void testAdditionalCompactionObserverForSingleCompactionSingleShard()
+    {
+        testAdditionalCompactionObserver(1, 1000);
+    }
+
+    @Test
+    public void testAdditionalCompactionObserverForSingleCompactionLimitedParallelism()
+    {
+        testAdditionalCompactionObserver(5, 1);
+    }
+
+    private void testAdditionalCompactionObserver(int numShards, int parallelism)
+    {
+        Set<SSTableReader> allSSTables = new HashSet<>();
+        allSSTables.addAll(mockNonOverlappingSSTables(10, 0, 100 << 20));
+        allSSTables.addAll(mockNonOverlappingSSTables(15, 1, 200 << 20));
+        allSSTables.addAll(mockNonOverlappingSSTables(25, 2, 400 << 20));
+        dataTracker.addInitialSSTables(allSSTables);
+        Controller controller = Mockito.mock(Controller.class);
+        when(controller.getNumShards(anyDouble())).thenReturn(numShards);
+        when(controller.parallelizeOutputShards()).thenReturn(true);
+
+        BackgroundCompactions backgroundCompactions = Mockito.mock(BackgroundCompactions.class);
+        UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(strategyFactory, backgroundCompactions, controller);
+        strategy.startup();
+        LifecycleTransaction txn = dataTracker.tryModify(allSSTables, OperationType.COMPACTION);
+        var tasks = new ArrayList<CompactionTask>();
+
+        AtomicInteger compositeInProgress = new AtomicInteger(0);
+        AtomicInteger compositedCompleted = new AtomicInteger(0);
+        CompactionObserver compositeCompactionObserver = new CompactionObserver()
+        {
+            @Override
+            public void onInProgress(CompactionProgress progress)
+            {
+                compositeInProgress.incrementAndGet();
+            }
+
+            @Override
+            public void onCompleted(UUID id, @Nullable Throwable error)
+            {
+                compositedCompleted.incrementAndGet();
+            }
+        };
+        strategy.createAndAddTasks(0, txn, null, false, strategy.makeShardingStats(txn), parallelism, tasks, compositeCompactionObserver);
+        if (parallelism > 1)
+            assertEquals(numShards, tasks.size());
+        else
+            assertEquals(1, tasks.size());
+
+        assertThat(compositedCompleted).hasValue(0);
+        Mockito.verify(backgroundCompactions, times(0)).onInProgress(Mockito.any());
+        Mockito.verify(backgroundCompactions, times(0)).onCompleted(Mockito.any(), Mockito.any());
+
+        // move all tasks to in-progress
+        CompactionProgress progress = mockProgress(strategy, txn.opId());
+        for (CompactionTask task : tasks)
+            task.getCompObservers().forEach(o -> o.onInProgress(progress));
+
+        assertThat(compositeInProgress).hasValue(1);
+        assertThat(compositedCompleted).hasValue(0);
+        Mockito.verify(backgroundCompactions, times(1)).onInProgress(Mockito.any());
+        Mockito.verify(backgroundCompactions, times(0)).onCompleted(Mockito.any(), Mockito.any());
+
+        // move all tasks to complete
+        for (CompactionTask task : tasks)
+            task.getCompObservers().forEach(o -> o.onCompleted(task.transaction.opId(), null));
+
+        assertThat(compositeInProgress).hasValue(1);
+        assertThat(compositedCompleted).hasValue(1);
+        Mockito.verify(backgroundCompactions, times(1)).onInProgress(Mockito.any());
+        Mockito.verify(backgroundCompactions, times(1)).onCompleted(Mockito.any(), Mockito.any());
+    }
+
+
     @Test
     public void testMaximalSelection()
     {

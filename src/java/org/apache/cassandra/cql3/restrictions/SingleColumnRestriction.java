@@ -38,6 +38,7 @@ import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.IndexRegistry;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.serializers.ListSerializer;
+import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Pair;
@@ -564,6 +565,8 @@ public abstract class SingleColumnRestriction implements SingleRestriction
     // This holds CONTAINS, CONTAINS_KEY, NOT CONTAINS, NOT CONTAINS KEY and map[key] = value restrictions because we might want to have any combination of them.
     public static final class ContainsRestriction extends SingleColumnRestriction
     {
+        public static final String MULTIPLE_INDEXES_WARNING = "Multiple indexes found for CONTAINS restriction on %s. Using not-analyzed index %s";
+
         private final List<Term> values = new ArrayList<>(); // for CONTAINS
         private final List<Term> negativeValues = new ArrayList<>(); // for NOT_CONTAINS
         private final List<Term> keys = new ArrayList<>(); // for CONTAINS_KEY
@@ -730,6 +733,38 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         public int numberOfNegativeEntries()
         {
             return negativeEntryKeys.size();
+        }
+
+        @Override
+        public Index findSupportingIndex(IndexRegistry indexRegistry)
+        {
+            // if there are multiple supporting indexes, we prefer those without an analyzer (see CNDB-13925)
+            Index notAnalyzedIndex = null;
+            Index analyzedIndex = null;
+            for (Index index : indexRegistry.listIndexes())
+            {
+                if (isSupportedBy(index))
+                {
+                    if (index.getAnalyzer(null).isPresent())
+                        analyzedIndex = index;
+                    else
+                        notAnalyzedIndex = index;
+                }
+            }
+
+            if (notAnalyzedIndex != null)
+            {
+                // We prefer the not analyzed index, but if there was also an analyzed index, we warn the user.
+                // We use a client warning key so the warning is emitted just once per query.
+                if (analyzedIndex != null)
+                {
+                    String msg = String.format(MULTIPLE_INDEXES_WARNING, columnDef.name, notAnalyzedIndex.getIndexMetadata().name);
+                    ClientWarn.instance.warn(msg, "multiple_indexes_for_contains_on_" + columnDef.name);
+                }
+                return notAnalyzedIndex;
+            }
+
+            return analyzedIndex;
         }
 
         @Override
@@ -1336,17 +1371,24 @@ public abstract class SingleColumnRestriction implements SingleRestriction
     public static final class AnalyzerMatchesRestriction extends SingleColumnRestriction
     {
         public static final String CANNOT_BE_MERGED_ERROR = "%s cannot be restricted by other operators if it includes analyzer match (:)";
+        public static final String CANNOT_BE_RESTRICTED_BY_CLUSTERING_ERROR =
+        "Cannot restrict column '%s' by analyzer match (:) because it is a clustering column. Equals (=) can be used " +
+        "instead of match, but it will produce incomplete results due to clustering column post filtering.";
+
         private final List<Term> values;
 
         public AnalyzerMatchesRestriction(ColumnMetadata columnDef, Term value)
         {
-            super(columnDef);
-            this.values = Collections.singletonList(value);
+            this(columnDef, Collections.singletonList(value));
         }
 
         public AnalyzerMatchesRestriction(ColumnMetadata columnDef, List<Term> values)
         {
             super(columnDef);
+            // If we don't fail here, we would alternatively fail with the call to this::appendTo, which produces
+            // an unhelpful error message.
+            if (columnDef.isClusteringColumn())
+                throw invalidRequest(CANNOT_BE_RESTRICTED_BY_CLUSTERING_ERROR, columnDef.name);
             this.values = values;
         }
 
