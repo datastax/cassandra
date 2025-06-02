@@ -131,7 +131,7 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
 
     /**
      * Approximate total count of terms in the memory index.
-     * The count is approximate because deletions are not accounted for.
+     * The count is approximate because range deletions are not accounted for.
      *
      * @return total count of terms for indexes rows.
      */
