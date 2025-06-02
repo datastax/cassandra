@@ -30,16 +30,21 @@ class SingletonCursor<T> implements Cursor<T>
     private final T value;
     private int currentDepth = 0;
     private int currentTransition = -1;
-    private int nextTransition;
+    protected int nextTransition;
 
 
     public SingletonCursor(Direction direction, ByteSource src, ByteComparable.Version byteComparableVersion, T value)
+    {
+        this(direction, src.next(), src, byteComparableVersion, value);
+    }
+
+    public SingletonCursor(Direction direction, int firstByte, ByteSource src, ByteComparable.Version byteComparableVersion, T value)
     {
         this.src = src;
         this.direction = direction;
         this.byteComparableVersion = byteComparableVersion;
         this.value = value;
-        this.nextTransition = src.next();
+        this.nextTransition = firstByte;
     }
 
     @Override
@@ -129,12 +134,16 @@ class SingletonCursor<T> implements Cursor<T>
     }
 
     @Override
-    public SingletonCursor tailCursor(Direction dir)
+    public SingletonCursor<T> tailCursor(Direction dir)
+    {
+        return new SingletonCursor<>(dir, nextTransition, duplicateSource(), byteComparableVersion, value);
+    }
+
+    ByteSource.Duplicatable duplicateSource()
     {
         if (!(src instanceof ByteSource.Duplicatable))
             src = ByteSource.duplicatable(src);
         ByteSource.Duplicatable duplicatableSource = (ByteSource.Duplicatable) src;
-
-        return new SingletonCursor(dir, duplicatableSource.duplicate(), byteComparableVersion, value);
+        return duplicatableSource.duplicate();
     }
 }

@@ -37,10 +37,15 @@ class PrefixedCursor<T> implements Cursor<T>
 
     PrefixedCursor(ByteSource prefix, Cursor<T> tail)
     {
+        this(prefix.next(), prefix, tail);
+    }
+
+    PrefixedCursor(int firstPrefixByte, ByteSource prefix, Cursor<T> tail)
+    {
         this.tail = tail;
         prefixBytes = prefix;
         incomingTransition = -1;
-        nextPrefixByte = prefixBytes.next();
+        nextPrefixByte = firstPrefixByte;
         depthOfPrefix = 0;
     }
 
@@ -139,6 +144,14 @@ class PrefixedCursor<T> implements Cursor<T>
         return prefixDone() ? tail.content() : null;
     }
 
+    ByteSource.Duplicatable duplicateSource()
+    {
+        if (!(prefixBytes instanceof ByteSource.Duplicatable))
+            prefixBytes = ByteSource.duplicatable(prefixBytes);
+        ByteSource.Duplicatable duplicatableSource = (ByteSource.Duplicatable) prefixBytes;
+        return duplicatableSource.duplicate();
+    }
+
     @Override
     public Cursor<T> tailCursor(Direction direction)
     {
@@ -147,11 +160,7 @@ class PrefixedCursor<T> implements Cursor<T>
         else
         {
             assert depthOfPrefix >= 0 : "tailTrie called on exhausted cursor";
-            if (!(prefixBytes instanceof ByteSource.Duplicatable))
-                prefixBytes = ByteSource.duplicatable(prefixBytes);
-            ByteSource.Duplicatable duplicatableSource = (ByteSource.Duplicatable) prefixBytes;
-
-            return new PrefixedCursor<>(duplicatableSource.duplicate(), tail.tailCursor(direction));
+            return new PrefixedCursor<>(nextPrefixByte, duplicateSource(), tail.tailCursor(direction));
         }
     }
 }
