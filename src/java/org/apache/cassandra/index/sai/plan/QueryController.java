@@ -27,6 +27,7 @@ import com.google.common.base.Preconditions;
 import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Multimap;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.index.FeatureNeedsIndexRebuildException;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.slf4j.Logger;
@@ -106,7 +107,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
      * Note: the config is not final to simplify testing.
      */
     @VisibleForTesting
-    public static int QUERY_OPT_LEVEL = Integer.getInteger("cassandra.sai.query.optimization.level", 1);
+    public static int QUERY_OPT_LEVEL = CassandraRelevantProperties.SAI_QUERY_OPTIMIZATION_LEVEL.getInt();
 
     private final ColumnFamilyStore cfs;
     private final ReadCommand command;
