@@ -61,7 +61,7 @@ public abstract class AbstractMetricsTest extends SAITester
         }, 60, TimeUnit.SECONDS);
     }
 
-    protected void waitForVerifyHistogram(ObjectName name, long count)
+    protected void waitForHistogramCountEquals(ObjectName name, long count)
     {
         waitForAssert(() -> {
             try
@@ -74,6 +74,22 @@ public abstract class AbstractMetricsTest extends SAITester
             }
         }, 10, TimeUnit.SECONDS);
     }
+
+    protected void waitForHistogramMeanBetween(ObjectName name, double min, double max)
+    {
+        waitForAssert(() -> {
+            try
+            {
+                double mean = (double) jmxConnection.getAttribute(name, "Mean");
+                assertTrue("Median " + mean + " is not between " + min + " and " + max, mean >= min && mean <= max);
+            }
+            catch (Throwable ex)
+            {
+                throw Throwables.unchecked(ex);
+            }
+        }, 10, TimeUnit.SECONDS);
+    }
+
 
     protected void waitForGreaterThanZero(ObjectName name)
     {
