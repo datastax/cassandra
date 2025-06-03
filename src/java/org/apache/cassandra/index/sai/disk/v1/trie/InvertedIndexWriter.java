@@ -103,7 +103,7 @@ public class InvertedIndexWriter implements Closeable
         // Write doc lengths
         if (docLengthsWriter != null)
         {
-            long docLengthsOffset = docLengthsWriter.getFilePointer();
+            long docLengthsOffset = docLengthsWriter.getStartOffset();
             docLengthsWriter.writeDocLengths(docLengths);
             long docLengthsLength = docLengthsWriter.getFilePointer() - docLengthsOffset;
             components.put(IndexComponentType.DOC_LENGTHS, -1, docLengthsOffset, docLengthsLength);
