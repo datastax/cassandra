@@ -27,6 +27,7 @@ import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.TermsReader;
 import org.apache.cassandra.index.sai.disk.v1.postings.PostingsReader;
+import org.apache.cassandra.index.sai.plan.QueryController;
 import org.apache.cassandra.inject.Injection;
 import org.apache.cassandra.inject.Injections;
 import org.apache.cassandra.io.sstable.IKeyFetcher;
@@ -48,6 +49,10 @@ public class SingleNodeQueryFailureTest extends SAITester
     {
         requireNetwork();
         setupTableAndIndexes();
+
+        // Disable query optimization for this test so all indexes are queried,
+        // and we can inject failures into any of them.
+        QueryController.QUERY_OPT_LEVEL = 0;
     }
 
     @After
