@@ -33,6 +33,7 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
@@ -372,6 +373,8 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     private final BloomFilterTracker bloomFilterTracker = BloomFilterTracker.createMeterTracker();
 
     private final RequestTracker requestTracker = RequestTracker.instance;
+
+    private final ReentrantLock rwcdLock = new ReentrantLock();
 
     public static void shutdownPostFlushExecutor() throws InterruptedException
     {
@@ -2792,7 +2795,8 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     {
         // synchronize so that concurrent invocations don't re-enable compactions partway through unexpectedly,
         // and so we only run one major compaction at a time
-        synchronized (this)
+        rwcdLock.lock();
+        try
         {
             logger.trace("Cancelling in-progress compactions for {}", metadata.name);
             Iterable<ColumnFamilyStore> toInterruptFor = concatWith(interruptIndexes, interruptViews);
@@ -2819,13 +2823,20 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
                 // run our task
                 try
                 {
-                    return callable.call();
+                    synchronized (this)
+                    {
+                        return callable.call();
+                    }
                 }
                 catch (Exception e)
                 {
                     throw new RuntimeException(e);
                 }
             }
+        }
+        finally
+        {
+            rwcdLock.unlock();
         }
     }
 
