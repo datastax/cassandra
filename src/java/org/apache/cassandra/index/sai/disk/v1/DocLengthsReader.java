@@ -20,30 +20,40 @@ package org.apache.cassandra.index.sai.disk.v1;
 import java.io.Closeable;
 import java.io.IOException;
 
-import org.apache.cassandra.index.sai.disk.io.IndexFileUtils;
 import javax.annotation.concurrent.NotThreadSafe;
 
+import org.apache.cassandra.index.sai.disk.format.Version;
+import org.apache.cassandra.index.sai.disk.io.IndexFileUtils;
 import org.apache.cassandra.index.sai.disk.io.IndexInputReader;
+import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
 
+/**
+ * Reads the component written by {@link org.apache.cassandra.index.sai.disk.v1.trie.DocLengthsWriter}.
+ */
 @NotThreadSafe
 public class DocLengthsReader implements Closeable
 {
     private final IndexInputReader input;
-    private final SegmentMetadata.ComponentMetadata componentMetadata;
+    private final long offset;
+    private final long upperBound;
 
-    public DocLengthsReader(FileHandle fileHandle, SegmentMetadata.ComponentMetadata componentMetadata)
+    public DocLengthsReader(FileHandle fileHandle, SegmentMetadata.ComponentMetadata componentMetadata, Version version)
     {
         this.input = IndexFileUtils.instance().openInput(fileHandle);
-        this.componentMetadata = componentMetadata;
+        // Version EC skipped the header in the doc lengths component metadata.
+        int headerAdjustment = Version.EC.equals(version) ? 0 : SAICodecUtils.headerSize();
+        this.offset = componentMetadata.offset + headerAdjustment;
+        // The offset + length get you the end of the file for all relevant versions.
+        this.upperBound = componentMetadata.offset + componentMetadata.length;
     }
 
     public int get(int rowID) throws IOException
     {
         // Account for header size in offset calculation
-        long position = componentMetadata.offset + (long) rowID * Integer.BYTES;
-        if (position >= componentMetadata.offset + componentMetadata.length)
+        long position = offset + (long) rowID * Integer.BYTES;
+        if (position >= upperBound)
             return 0;
         input.seek(position);
         return input.readInt();
