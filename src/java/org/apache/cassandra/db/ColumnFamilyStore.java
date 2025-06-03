@@ -2825,6 +2825,17 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
                 {
                     synchronized (this)
                     {
+                        // doublecheck that we finished, instead of timing out
+                        for (ColumnFamilyStore cfs : toInterruptFor)
+                        {
+                            if (cfs.getTracker().getCompacting().stream().anyMatch(sstablesPredicate))
+                            {
+                                logger.warn("Unable to cancel in-progress compactions for {}.{}.  Perhaps there is an unusually " +
+                                            "large row in progress somewhere, or the system is simply overloaded.", metadata.keyspace, metadata.name);
+                                logger.debug("In-flight compactions: {}", Arrays.toString(cfs.getTracker().getCompacting().toArray()));
+                                return null;
+                            }
+                        }
                         return callable.call();
                     }
                 }
