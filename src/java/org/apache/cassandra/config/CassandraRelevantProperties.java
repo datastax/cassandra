@@ -439,7 +439,7 @@ public enum CassandraRelevantProperties
      * Number of polls without gossip state change to consider gossip as settled.
      */
     GOSSIP_SETTLE_POLL_SUCCESSES_REQUIRED("cassandra.gossip_settle_poll_success_required", "3"),
-    
+
     IGNORED_SCHEMA_CHECK_ENDPOINTS("cassandra.skip_schema_check_for_endpoints"),
     IGNORED_SCHEMA_CHECK_VERSIONS("cassandra.skip_schema_check_for_versions"),
     IGNORE_CORRUPTED_SCHEMA_TABLES("cassandra.ignore_corrupted_schema_tables"),

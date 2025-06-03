@@ -28,6 +28,7 @@ import org.junit.rules.ExpectedException;
 
 import com.datastax.driver.core.ResultSet;
 import org.apache.cassandra.index.sai.disk.format.Version;
+import org.apache.cassandra.index.sai.plan.QueryController;
 import org.apache.cassandra.metrics.CassandraMetricsRegistry;
 
 import static org.apache.cassandra.index.sai.metrics.TableQueryMetrics.TABLE_QUERY_METRIC_TYPE;
@@ -227,6 +228,11 @@ public class QueryMetricsTest extends AbstractMetricsTest
     @Test
     public void testKDTreePostingsQueryMetricsWithSingleIndex()
     {
+        // Turn off the query optimizer.
+        // We need to do this in order to remove unpredictability of query plans, so that we get consistent metrics.
+        // We don't want the query optimizer to eliminate the use of indexes.
+        QueryController.QUERY_OPT_LEVEL = 0;
+
         String table = "test_kdtree_postings_metrics_through_write_lifecycle";
         String v1Index = "test_kdtree_postings_metrics_through_write_lifecycle_v1_index";
         String v2Index = "test_kdtree_postings_metrics_through_write_lifecycle_v2_index";
@@ -257,13 +263,20 @@ public class QueryMetricsTest extends AbstractMetricsTest
         assertEquals(rowsWritten, actualRows);
 
         assertTrue(((Number) getMetricValue(objectName("NumPostings", keyspace, table, v1Index, "KDTreePostings"))).longValue() > 0);
+        waitForHistogramCountEquals(objectNameNoIndex("KDTreePostingsNumPostings", keyspace, table, PER_QUERY_METRIC_TYPE), 1);
+        waitForHistogramMeanBetween(objectNameNoIndex("KDTreePostingsNumPostings", keyspace, table, PER_QUERY_METRIC_TYPE), 1.0, 1.0);
 
-        waitForVerifyHistogram(objectNameNoIndex("KDTreePostingsNumPostings", keyspace, table, PER_QUERY_METRIC_TYPE), 1);
+        // the query performed no skips, but the metric should be updated because the index was used, so we should get
+        // a single entry in the histogram with 0 skips
+        waitForHistogramCountEquals(objectNameNoIndex("KDTreePostingsSkips", keyspace, table, PER_QUERY_METRIC_TYPE), 1);
+        waitForHistogramMeanBetween(objectNameNoIndex("KDTreePostingsSkips", keyspace, table, PER_QUERY_METRIC_TYPE), 0.0, 0.0);
 
-        // V2 index is very selective, so it should lead the union merge process, causing V1 index to be not used at all.
-        execute("SELECT id1 FROM " + keyspace + "." + table + " WHERE v1 >= 0 AND v1 <= 1000 AND v2 = '5' ALLOW FILTERING");
+        // V2 index is very selective, so it should lead the union merge process, causing V1 index to skip/advance
+        execute("SELECT id1 FROM " + keyspace + "." + table + " WHERE v1 >= 0 AND v1 <= 1000 AND v2 IN ('5', '10', '20', '22') ALLOW FILTERING");
 
-        waitForVerifyHistogram(objectNameNoIndex("KDTreePostingsSkips", keyspace, table, PER_QUERY_METRIC_TYPE), 2);
+        // we expect exactly 4 skips from this query, but the mean will be 2.0 because of the previous query which had 0 skips
+        waitForHistogramCountEquals(objectNameNoIndex("KDTreePostingsSkips", keyspace, table, PER_QUERY_METRIC_TYPE), 2);
+        waitForHistogramMeanBetween(objectNameNoIndex("KDTreePostingsSkips", keyspace, table, PER_QUERY_METRIC_TYPE), 1.99, 2.01);
     }
 
     @Test
@@ -355,7 +368,7 @@ public class QueryMetricsTest extends AbstractMetricsTest
 
         //TODO This needs revisiting with STAR-903 because we are now reading rows one at a time
         waitForEquals(objectNameNoIndex("TotalPartitionReads", keyspace, table, TABLE_QUERY_METRIC_TYPE), Version.latest() == Version.AA ? 2 : 3);
-        waitForVerifyHistogram(objectNameNoIndex("RowsFiltered", keyspace, table, PER_QUERY_METRIC_TYPE), 1);
+        waitForHistogramCountEquals(objectNameNoIndex("RowsFiltered", keyspace, table, PER_QUERY_METRIC_TYPE), 1);
         waitForEquals(objectNameNoIndex("TotalRowsFiltered", keyspace, table, TABLE_QUERY_METRIC_TYPE), 3);
     }
 
