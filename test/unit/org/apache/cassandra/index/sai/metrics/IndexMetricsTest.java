@@ -118,7 +118,7 @@ public class IndexMetricsTest extends AbstractMetricsTest
         assertEquals(0L, getMetricValue(objectName("DiskUsedBytes", KEYSPACE, table, index, "IndexMetrics")));
         assertEquals(0L, getMetricValue(objectName("CompactionCount", KEYSPACE, table, index, "IndexMetrics")));
 
-        waitForVerifyHistogram(objectName("MemtableIndexFlushCellsPerSecond", KEYSPACE, table, index, "IndexMetrics"), 0);
+        waitForHistogramCountEquals(objectName("MemtableIndexFlushCellsPerSecond", KEYSPACE, table, index, "IndexMetrics"), 0);
 
         flush(KEYSPACE, table);
 
@@ -130,7 +130,8 @@ public class IndexMetricsTest extends AbstractMetricsTest
         assertTrue((Long)getMetricValue(objectName("DiskUsedBytes", KEYSPACE, table, index, "IndexMetrics")) > 0);
         assertEquals(0L, getMetricValue(objectName("CompactionCount", KEYSPACE, table, index, "IndexMetrics")));
 
-        waitForVerifyHistogram(objectName("MemtableIndexFlushCellsPerSecond", KEYSPACE, table, index, "IndexMetrics"), 1);
+        waitForHistogramCountEquals(objectName("MemtableIndexFlushCellsPerSecond", KEYSPACE, table, index, "IndexMetrics"), 1);
+        waitForHistogramMeanBetween(objectName("MemtableIndexFlushCellsPerSecond", KEYSPACE, table, index, "IndexMetrics"), 1.0, 1000000.0);
 
         compact(KEYSPACE, table);
 
@@ -147,7 +148,8 @@ public class IndexMetricsTest extends AbstractMetricsTest
         assertTrue((Long)getMetricValue(objectName("DiskUsedBytes", KEYSPACE, table, index, "IndexMetrics")) > 0);
         assertEquals(1L, getMetricValue(objectName("CompactionCount", KEYSPACE, table, index, "IndexMetrics")));
 
-        waitForVerifyHistogram(objectName("CompactionSegmentCellsPerSecond", KEYSPACE, table, index, "IndexMetrics"), 1);
+        waitForHistogramCountEquals(objectName("CompactionSegmentCellsPerSecond", KEYSPACE, table, index, "IndexMetrics"), 1);
+        waitForHistogramMeanBetween(objectName("CompactionSegmentCellsPerSecond", KEYSPACE, table, index, "IndexMetrics"), 1.0, 1000000.0);
     }
 
     private void assertIndexQueryCount(String index, long expectedCount)
