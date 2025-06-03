@@ -73,6 +73,7 @@ import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.format.Version;
+import org.apache.cassandra.index.sai.disk.v1.SegmentBuilder;
 import org.apache.cassandra.index.sai.plan.QueryController;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.ResourceLeakDetector;
@@ -228,6 +229,14 @@ public class SAITester extends CQLTester
     {
         // Enable the optimizer by default. If there are any tests that need to disable it, they can do so explicitly.
         QueryController.QUERY_OPT_LEVEL = 1;
+
+    }
+
+    @Before
+    public void resetLastValidSegmentRowId() throws Throwable
+    {
+        // Don't want this setting to impact peer tests
+        SegmentBuilder.updateLastValidSegmentRowId(-1);
     }
 
     @After

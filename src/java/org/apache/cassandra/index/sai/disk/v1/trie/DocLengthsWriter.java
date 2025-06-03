@@ -23,6 +23,7 @@ import java.io.IOException;
 import org.agrona.collections.Int2IntHashMap;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.io.IndexOutputWriter;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 
@@ -33,10 +34,23 @@ public class DocLengthsWriter implements Closeable
 {
     private final IndexOutputWriter output;
 
+    private final long startOffset;
+
     public DocLengthsWriter(IndexComponents.ForWrite components) throws IOException
     {
         this.output = components.addOrGet(IndexComponentType.DOC_LENGTHS).openOutput(true);
-        SAICodecUtils.writeHeader(output);
+
+        // Version EC skipped the header in the doc lengths component metadata.
+        if (Version.EC.equals(components.version()))
+        {
+            SAICodecUtils.writeHeader(output);
+            startOffset = output.getFilePointer();
+        }
+        else
+        {
+            startOffset = output.getFilePointer();
+            SAICodecUtils.writeHeader(output);
+        }
     }
 
     public void writeDocLengths(Int2IntHashMap lengths) throws IOException
@@ -63,6 +77,14 @@ public class DocLengthsWriter implements Closeable
     public long getFilePointer()
     {
         return output.getFilePointer();
+    }
+
+    /**
+     * @return file pointer where index structure begins (before header)
+     */
+    public long getStartOffset()
+    {
+        return startOffset;
     }
 
     @Override
