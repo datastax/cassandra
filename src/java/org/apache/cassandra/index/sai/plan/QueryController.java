@@ -598,43 +598,9 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
                                                                       orderer.context.getIndexName()));
         }
 
-        List<CloseableIterator<PrimaryKeyWithSortKey>> memtableResults = new ArrayList<>();
-        try
-        {
-            QueryView view = getQueryView(orderer.context);
-            if (orderer.isBM25())
-            {
-                // Calculate counts on indexes
-                for (MemtableIndex index : view.memtableIndexes)
-                {
-                    index.addBm25DocsStats(orderer.bm25Stats);
-                }
-                for (var indexes : view.sstableIndexes)
-                {
-                    indexes.addBm25DocsStats(orderer.bm25Stats);
-                }
-            }
-            for (MemtableIndex index : view.memtableIndexes)
-                memtableResults.addAll(index.orderBy(queryContext, orderer, predicate, mergeRange, softLimit));
-
-            var totalRows = view.getTotalSStableRows();
-            SSTableSearcher searcher = index -> index.orderBy(orderer, predicate, mergeRange, queryContext, softLimit, totalRows);
-            var sstableResults = searchSSTables(view, searcher);
-            sstableResults.addAll(memtableResults);
-            return MergeIterator.getNonReducingCloseable(sstableResults, orderer.getComparator());
-        }
-        catch (QueryView.Builder.MissingIndexException e)
-        {
-            if (orderer.context.isDropped())
-                throw invalidRequest(TopKProcessor.INDEX_MAY_HAVE_BEEN_DROPPED);
-            else
-                throw new IllegalStateException("Index not found but hasn't been dropped", e);
-        }
-        catch (Throwable t)
-        {
-            FileUtils.closeQuietly(memtableResults);
-            throw t;
-        }
+        MemtableSearcher memtableSearcher = index -> index.orderBy(queryContext, orderer, predicate, mergeRange, softLimit);
+        SSTableSearcher ssTableSearcher = (index, totalRows) -> index.orderBy(orderer, predicate, mergeRange, queryContext, softLimit, totalRows);
+        return searchTopKRows(memtableSearcher, ssTableSearcher);
     }
 
     /**
@@ -694,7 +660,23 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     private CloseableIterator<PrimaryKeyWithSortKey> getTopKRows(List<PrimaryKey> sourceKeys, int softLimit)
     {
         Tracing.logAndTrace(logger, "SAI predicates produced {} keys", sourceKeys.size());
-        List<CloseableIterator<PrimaryKeyWithSortKey>> memtableResults = null;
+
+        MemtableSearcher memtableSearcher = index -> List.of(index.orderResultsBy(queryContext,
+                                                                                  sourceKeys,
+                                                                                  orderer,
+                                                                                  softLimit));
+        SSTableSearcher ssTableSearcher = (index, totalRows) -> index.orderResultsBy(queryContext,
+                                                                                     sourceKeys,
+                                                                                     orderer,
+                                                                                     softLimit,
+                                                                                     totalRows);
+        return searchTopKRows(memtableSearcher, ssTableSearcher);
+    }
+
+
+    private CloseableIterator<PrimaryKeyWithSortKey> searchTopKRows(MemtableSearcher memtableSearcher, SSTableSearcher ssTableSearcher)
+    {
+        List<CloseableIterator<PrimaryKeyWithSortKey>> memtableResults = new ArrayList<>();
         try
         {
             QueryView view = getQueryView(orderer.context);
@@ -705,25 +687,15 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
                 {
                     index.addBm25DocsStats(orderer.bm25Stats);
                 }
-                for (var index : view.sstableIndexes)
+                for (SSTableIndex index : view.sstableIndexes)
                 {
                     index.addBm25DocsStats(orderer.bm25Stats);
                 }
             }
 
-            memtableResults = view.memtableIndexes.stream()
-                                                  .map(index -> index.orderResultsBy(queryContext,
-                                                                                     sourceKeys,
-                                                                                     orderer,
-                                                                                     softLimit))
-                                                  .collect(Collectors.toList());
-            var totalRows = view.getTotalSStableRows();
-            SSTableSearcher ssTableSearcher = index -> index.orderResultsBy(queryContext,
-                                                                            sourceKeys,
-                                                                            orderer,
-                                                                            softLimit,
-                                                                            totalRows);
-            var sstableScoredPrimaryKeyIterators = searchSSTables(view, ssTableSearcher);
+            for (MemtableIndex index : view.memtableIndexes)
+                memtableResults.addAll(memtableSearcher.search(index));
+            List<CloseableIterator<PrimaryKeyWithSortKey>> sstableScoredPrimaryKeyIterators = searchSSTables(view, ssTableSearcher);
             sstableScoredPrimaryKeyIterators.addAll(memtableResults);
             return MergeIterator.getNonReducingCloseable(sstableScoredPrimaryKeyIterators, orderer.getComparator());
         }
@@ -736,18 +708,22 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         }
         catch (Throwable t)
         {
-            if (memtableResults != null)
+            if (!memtableResults.isEmpty())
                 FileUtils.closeQuietly(memtableResults);
             throw t;
         }
-
     }
-
 
     @FunctionalInterface
     interface SSTableSearcher
     {
-        List<CloseableIterator<PrimaryKeyWithSortKey>> search(SSTableIndex index) throws Exception;
+        List<CloseableIterator<PrimaryKeyWithSortKey>> search(SSTableIndex index, long totalRows) throws Exception;
+    }
+
+    @FunctionalInterface
+    interface MemtableSearcher
+    {
+        List<CloseableIterator<PrimaryKeyWithSortKey>> search(MemtableIndex index);
     }
 
     /**
@@ -762,7 +738,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         {
             try
             {
-                var iterators = searcher.search(index);
+                var iterators = searcher.search(index, queryView.getTotalSStableRows());
                 results.addAll(iterators);
             }
             catch (Throwable ex)
