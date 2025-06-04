@@ -353,10 +353,12 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
             List<KeyRangeIterator> termIterators = new ArrayList<>(queryTerms.size());
             for (ByteBuffer term : queryTerms)
             {
-                Expression expr = new Expression(indexContext);
-                expr.add(Operator.ANALYZER_MATCHES, term);
-                // Because this is an in memory, eager search, the max keys is exact and cumulative over all shards.
-                // Also, the key range is not eagerly applied, so the
+                Expression expr = new Expression(indexContext).add(Operator.ANALYZER_MATCHES, term);
+                // getMaxKeys() counts all rows that match the expressin for shards within the key range. The key
+                // range is not applied to the search results yet, so there is a small chance for overcounting if
+                // the key range filters within a shard. This is assumed to be acceptable because the on disk
+                // estimate also uses the key range to skip irrelevant sstable segments but does not apply the key
+                // range when getting the estimate within a segment.
                 KeyRangeIterator iterator = eagerSearch(expr, keyRange);
                 documentFrequencies.put(term, iterator.getMaxKeys());
                 termIterators.add(iterator);
