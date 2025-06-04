@@ -80,7 +80,6 @@ import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.RowWithSourceTable;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
-import org.apache.cassandra.index.sai.view.View;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.TableMetadata;
@@ -603,6 +602,18 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         try
         {
             QueryView view = getQueryView(orderer.context);
+            if (orderer.isBM25())
+            {
+                // Calculate counts on indexes
+                for (MemtableIndex index : view.memtableIndexes)
+                {
+                    index.addBm25DocsStats(orderer.bm25Stats);
+                }
+                for (var indexes : view.sstableIndexes)
+                {
+                    indexes.addBm25DocsStats(orderer.bm25Stats);
+                }
+            }
             for (MemtableIndex index : view.memtableIndexes)
                 memtableResults.addAll(index.orderBy(queryContext, orderer, predicate, mergeRange, softLimit));
 
@@ -687,6 +698,19 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         try
         {
             QueryView view = getQueryView(orderer.context);
+            if (orderer.isBM25())
+            {
+                // Calculate counts on indexes
+                for (MemtableIndex index : view.memtableIndexes)
+                {
+                    index.addBm25DocsStats(orderer.bm25Stats);
+                }
+                for (var index : view.sstableIndexes)
+                {
+                    index.addBm25DocsStats(orderer.bm25Stats);
+                }
+            }
+
             memtableResults = view.memtableIndexes.stream()
                                                   .map(index -> index.orderResultsBy(queryContext,
                                                                                      sourceKeys,
