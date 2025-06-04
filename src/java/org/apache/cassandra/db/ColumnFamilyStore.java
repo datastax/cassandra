@@ -2815,16 +2815,14 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
                 // run our task
                 try
                 {
-                    return Executors.newSingleThreadExecutor().submit(() -> {
-                        synchronized (this)
-                        {
-                            // doublecheck again now we've synched on _this_
-                            if (!allCompactionsFinished(toInterruptFor, sstablesPredicate))
-                                return null;
+                    synchronized (this)
+                    {
+                        // doublecheck again now we've synched on _this_
+                        if (!allCompactionsFinished(toInterruptFor, sstablesPredicate))
+                            return null;
 
-                            return callable.call();
-                        }
-                    }).get();
+                        return callable.call();
+                    }
                 }
                 catch (Exception e)
                 {
