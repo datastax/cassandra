@@ -23,12 +23,10 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.stream.Stream;
 import javax.annotation.Nullable;
@@ -40,16 +38,12 @@ import com.google.common.util.concurrent.Runnables;
 
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.Clustering;
-import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
-import org.apache.cassandra.db.RegularAndStaticColumns;
-import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.memtable.ShardBoundaries;
 import org.apache.cassandra.db.memtable.TrieMemtable;
-import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.index.sai.IndexContext;
@@ -292,7 +286,7 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
     public KeyRangeIterator search(QueryContext queryContext, Expression expression, AbstractBounds<PartitionPosition> keyRange, int limit)
     {
         int startShard = boundaries.getShardForToken(keyRange.left.getToken());
-        int endShard = keyRange.right.isMinimum() ? boundaries.shardCount() - 1 : boundaries.getShardForToken(keyRange.right.getToken());
+        int endShard = getEndShardForBounds(keyRange);
 
         KeyRangeConcatIterator.Builder builder = KeyRangeConcatIterator.builder(endShard - startShard + 1);
 
@@ -325,7 +319,7 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
     public KeyRangeIterator eagerSearch(Expression expression, AbstractBounds<PartitionPosition> keyRange)
     {
         int startShard = boundaries.getShardForToken(keyRange.left.getToken());
-        int endShard = keyRange.right.isMinimum() ? boundaries.shardCount() - 1 : boundaries.getShardForToken(keyRange.right.getToken());
+        int endShard = getEndShardForBounds(keyRange);
 
         KeyRangeConcatIterator.Builder builder = KeyRangeConcatIterator.builder(endShard - startShard + 1);
         for (int shard = startShard; shard <= endShard; ++shard)
@@ -344,7 +338,7 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
                                                                   int limit)
     {
         int startShard = boundaries.getShardForToken(keyRange.left.getToken());
-        int endShard = keyRange.right.isMinimum() ? boundaries.shardCount() - 1 : boundaries.getShardForToken(keyRange.right.getToken());
+        int endShard = getEndShardForBounds(keyRange);
 
         if (orderer.isBM25())
         {
@@ -384,7 +378,7 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
     public long estimateMatchingRowsCount(Expression expression, AbstractBounds<PartitionPosition> keyRange)
     {
         int startShard = boundaries.getShardForToken(keyRange.left.getToken());
-        int endShard = keyRange.right.isMinimum() ? boundaries.shardCount() - 1 : boundaries.getShardForToken(keyRange.right.getToken());
+        int endShard = getEndShardForBounds(keyRange);
         return rangeIndexes[startShard].estimateMatchingRowsCount(expression, keyRange) * (endShard - startShard + 1);
     }
 
@@ -393,7 +387,7 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
     private long completeEstimateMatchingRowsCount(Expression expression, AbstractBounds<PartitionPosition> keyRange)
     {
         int startShard = boundaries.getShardForToken(keyRange.left.getToken());
-        int endShard = keyRange.right.isMinimum() ? boundaries.shardCount() - 1 : boundaries.getShardForToken(keyRange.right.getToken());
+        int endShard = getEndShardForBounds(keyRange);
         long count = 0;
         for (int shard = startShard; shard <= endShard; ++shard)
         {
@@ -481,6 +475,13 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
     private ByteComparable encode(ByteBuffer input)
     {
         return Version.current().onDiskFormat().encodeForTrie(input, indexContext.getValidator());
+    }
+
+    private int getEndShardForBounds(AbstractBounds<PartitionPosition> bounds)
+    {
+        var position = bounds.right;
+        return position.isMinimum() ? boundaries.shardCount() - 1
+                                    : boundaries.getShardForToken(position.getToken());
     }
 
     /**
