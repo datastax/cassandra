@@ -20,11 +20,6 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
 
-import org.apache.cassandra.exceptions.ReadFailureException;
-import org.apache.cassandra.exceptions.RequestFailureReason;
-import org.apache.cassandra.index.sai.SAIUtil;
-import org.apache.cassandra.index.sai.analyzer.AnalyzerEqOperatorSupport;
-
 import org.junit.Assume;
 import org.junit.Before;
 import org.junit.Test;
@@ -32,11 +27,16 @@ import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.cql3.restrictions.SingleColumnRestriction;
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.exceptions.ReadFailureException;
+import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.index.sai.SAITester;
+import org.apache.cassandra.index.sai.SAIUtil;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
+import org.apache.cassandra.index.sai.analyzer.AnalyzerEqOperatorSupport;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.plan.Plan;
 import org.apache.cassandra.inject.Injections;
@@ -157,10 +157,10 @@ public class PlanWithIndexHintsTest extends SAITester
                 assertThatPlanFor(format("SELECT * FROM %%s WHERE v1='common' OR v2='rare' ALLOW FILTERING WITH excluded_indexes={%s}", idx), numRows - 1).usesNone();
                 assertThatPlanFor(format("SELECT * FROM %%s WHERE v1='common' OR v2='common' ALLOW FILTERING WITH excluded_indexes={%s}", idx), numRows - 1).usesNone();
             }
-            assertOrderingNeedsIndex("SELECT * FROM %s ORDER BY v1 LIMIT 10 WITH excluded_indexes={idx1}", "v1");
+            assertANNOrderingNeedsIndex("SELECT * FROM %s ORDER BY v1 LIMIT 10 WITH excluded_indexes={idx1}", "v1");
             assertThatPlanFor("SELECT * FROM %s ORDER BY v2 LIMIT 10 WITH excluded_indexes={idx1}", 10).uses(idx2);
             assertThatPlanFor("SELECT * FROM %s ORDER BY v1 LIMIT 10 WITH excluded_indexes={idx2}", 10).uses(idx1);
-            assertOrderingNeedsIndex("SELECT * FROM %s ORDER BY v2 LIMIT 10 WITH excluded_indexes={idx2}", "v2");
+            assertANNOrderingNeedsIndex("SELECT * FROM %s ORDER BY v2 LIMIT 10 WITH excluded_indexes={idx2}", "v2");
 
             // excluding both idx1 and idx2
             assertThatPlanFor("SELECT * FROM %s WHERE v1='rare' ALLOW FILTERING WITH excluded_indexes = {idx1,idx2}", 2).usesNone();
@@ -173,8 +173,8 @@ public class PlanWithIndexHintsTest extends SAITester
             assertThatPlanFor("SELECT * FROM %s WHERE v1='rare' OR v2='common'ALLOW FILTERING WITH excluded_indexes={idx1,idx2}", numRows - 1).usesNone();
             assertThatPlanFor("SELECT * FROM %s WHERE v1='common' OR v2='rare' ALLOW FILTERING WITH excluded_indexes={idx1,idx2}", numRows - 1).usesNone();
             assertThatPlanFor("SELECT * FROM %s WHERE v1='common' OR v2='common' ALLOW FILTERING WITH excluded_indexes={idx1,idx2}", numRows - 1).usesNone();
-            assertOrderingNeedsIndex("SELECT * FROM %s ORDER BY v1 LIMIT 10 WITH excluded_indexes={idx1,idx2}", "v1");
-            assertOrderingNeedsIndex("SELECT * FROM %s ORDER BY v2 LIMIT 10 WITH excluded_indexes={idx1,idx2}", "v2");
+            assertANNOrderingNeedsIndex("SELECT * FROM %s ORDER BY v1 LIMIT 10 WITH excluded_indexes={idx1,idx2}", "v1");
+            assertANNOrderingNeedsIndex("SELECT * FROM %s ORDER BY v2 LIMIT 10 WITH excluded_indexes={idx1,idx2}", "v2");
         });
     }
 
@@ -518,7 +518,7 @@ public class PlanWithIndexHintsTest extends SAITester
             String query = "SELECT k FROM %s ORDER BY v ANN OF [0.1, 0.2] LIMIT 10";
             assertThatPlanFor(query, row(1)).uses(idx);
             assertThatPlanFor(query + " WITH included_indexes={idx}", row(1)).uses(idx);
-            assertOrderingNeedsIndex(query + " WITH excluded_indexes={idx}", "v");
+            assertANNOrderingNeedsIndex(query + " WITH excluded_indexes={idx}", "v");
 
             // with an unsupported eq query, that can be unshaded with excluded_indexes and ALLOW FILTERING
             query = "SELECT k FROM %s WHERE v = [0.1, 0.2] LIMIT 10";
@@ -575,6 +575,248 @@ public class PlanWithIndexHintsTest extends SAITester
         assertThatPlanFor(select, row1).uses(idx);
     }
 
+    /**
+     * Test that index hints can be used to query indexes for columns in all possible table positions: partition key
+     * components, clustering key components, static columns and regular columns.
+     */
+    @Test
+    public void columnPositionsTest()
+    {
+        createTable("CREATE TABLE %s (" +
+                    "k1 int, k2 text, k3 vector<float, 2>, " +
+                    "c1 int, c2 text, c3 vector<float, 2>, " +
+                    "s1 int static, s2 text static, s3 vector<float, 2> static," +
+                    "r1 int, r2 text, r3 vector<float, 2>, " +
+                    "PRIMARY KEY((k1, k2, k3), c1, c2, c3))");
+
+        boolean supportsANN = version.onOrAfter(Version.JVECTOR_EARLIEST);
+        boolean supportsBM25 = version.onOrAfter(Version.BM25_EARLIEST);
+
+        // create numeric indexes in all table positions
+        createIndex("CREATE CUSTOM INDEX partition_numeric ON %s(k1) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX clustering_numeric ON %s(c1) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX static_numeric ON %s(s1) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX regular_numeric ON %s(r1) USING 'StorageAttachedIndex'");
+
+        // create literal indexes in all table positions
+        createIndex("CREATE CUSTOM INDEX partition_literal ON %s(k2) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX clustering_literal ON %s(c2) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX static_literal ON %s(s2) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX regular_literal ON %s(r2) USING 'StorageAttachedIndex'");
+
+        // create analyzed indexes in all table positions
+        createIndex("CREATE CUSTOM INDEX partition_analyzed ON %s(k2) USING 'StorageAttachedIndex' " +
+                    "WITH OPTIONS = { 'equals_behaviour_when_analyzed': 'UNSUPPORTED', 'index_analyzer': 'standard' }");
+        createIndex("CREATE CUSTOM INDEX clustering_analyzed ON %s(c2) USING 'StorageAttachedIndex' " +
+                    "WITH OPTIONS = { 'equals_behaviour_when_analyzed': 'UNSUPPORTED', 'index_analyzer': 'standard' }");
+        createIndex("CREATE CUSTOM INDEX static_analyzed ON %s(s2) USING 'StorageAttachedIndex' " +
+                    "WITH OPTIONS = { 'equals_behaviour_when_analyzed': 'UNSUPPORTED', 'index_analyzer': 'standard' }");
+        createIndex("CREATE CUSTOM INDEX regular_analyzed ON %s(r2) USING 'StorageAttachedIndex' " +
+                    "WITH OPTIONS = { 'equals_behaviour_when_analyzed': 'UNSUPPORTED', 'index_analyzer': 'standard' }");
+
+        // create ANN indexes in all table positions
+        if (supportsANN)
+        {
+            createIndex("CREATE CUSTOM INDEX partition_ann ON %s(k3) USING 'StorageAttachedIndex'");
+            createIndex("CREATE CUSTOM INDEX clustering_ann ON %s(c3) USING 'StorageAttachedIndex'");
+            createIndex("CREATE CUSTOM INDEX static_ann ON %s(s3) USING 'StorageAttachedIndex'");
+            createIndex("CREATE CUSTOM INDEX regular_ann ON %s(r3) USING 'StorageAttachedIndex'");
+        }
+
+        // insert some data
+        String insert = "INSERT INTO %s (k1, k2, k3, c1, c2, c3, s1, s2, s3, r1, r2, r3) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+        Object[] row1 = row(1, "a", vector(0.1f, 0.1f), 10, "aa", vector(0.01f, 0.01f), 100, "aaa", vector(0.001f, 0.001f), 1000, "aaaa", vector(0.0001f, 0.0001f));
+        Object[] row2 = row(1, "a", vector(0.1f, 0.2f), 11, "ab", vector(0.01f, 0.02f), 100, "aaa", vector(0.001f, 0.002f), 1001, "aaab", vector(0.0001f, 0.0002f));
+        Object[] row3 = row(2, "b", vector(0.2f, 0.1f), 10, "aa", vector(0.02f, 0.01f), 200, "bbb", vector(0.002f, 0.001f), 1000, "aaaa", vector(0.0002f, 0.0001f));
+        Object[] row4 = row(2, "b", vector(0.2f, 0.2f), 11, "ab", vector(0.02f, 0.02f), 200, "bbb", vector(0.002f, 0.002f), 1001, "aaab", vector(0.0002f, 0.0002f));
+        execute(insert, row1);
+        execute(insert, row2);
+        execute(insert, row3);
+        execute(insert, row4);
+
+        String query = "SELECT k1, k2, k3, c1, c2, c3, s1, s2, s3, r1, r2, r3 FROM %s ";
+
+        // query partition key columns without hints
+        assertThatPlanFor(query + "WHERE k1=1", row1, row2).uses("partition_numeric");
+        assertThatPlanFor(query + "WHERE k1!=1", row3, row4).uses("partition_numeric");
+        assertThatPlanFor(query + "WHERE k1>1", row3, row4).uses("partition_numeric");
+        assertThatPlanFor(query + "WHERE k1<2", row1, row2).uses("partition_numeric");
+        assertThatPlanFor(query + "WHERE k1>=1", row1, row2, row3, row4).uses("partition_numeric");
+        assertThatPlanFor(query + "WHERE k1<=2", row1, row2, row3, row4).uses("partition_numeric");
+        assertThatPlanFor(query + "WHERE k2='a'", row1, row2).uses("partition_literal");
+        assertThatPlanFor(query + "WHERE k2:'a'", row1, row2).uses("partition_analyzed");
+        // TODO: this hits CNDB-14348, we should enable this when that is resolved
+        //  if (supportsBM25)
+        //      assertThatPlanFor(query + "ORDER BY k2 BM25 OF 'a' LIMIT 10", row1, row2).uses("partition_analyzed");
+        // TODO: this hits CNDB-14343, we should either enable this or remove the index creation when that is resolved
+        //  if (supportsANN)
+        //      assertThatPlanFor(query + "ORDER BY k3 ANN OF [0.1, 0.2] LIMIT 10", row1, row2).uses("partition_ann");
+
+        // query partition key columns with included index
+        assertThatPlanFor(query + "WHERE k1=1 WITH included_indexes={partition_numeric}", row1, row2).uses("partition_numeric");
+        assertThatPlanFor(query + "WHERE k1!=1 WITH included_indexes={partition_numeric}", row3, row4).uses("partition_numeric");
+        assertThatPlanFor(query + "WHERE k1>1 WITH included_indexes={partition_numeric}", row3, row4).uses("partition_numeric");
+        assertThatPlanFor(query + "WHERE k1<2 WITH included_indexes={partition_numeric}", row1, row2).uses("partition_numeric");
+        assertThatPlanFor(query + "WHERE k1>=1 WITH included_indexes={partition_numeric}" , row1, row2, row3, row4).uses("partition_numeric");
+        assertThatPlanFor(query + "WHERE k1<=2 WITH included_indexes={partition_numeric}" , row1, row2, row3, row4).uses("partition_numeric");
+        assertThatPlanFor(query + "WHERE k2='a' WITH included_indexes={partition_literal}", row1, row2).uses("partition_literal");
+        assertThatPlanFor(query + "WHERE k2:'a' WITH included_indexes={partition_analyzed}", row1, row2).uses("partition_analyzed");
+        // TODO: this hits CNDB-14348, we should enable this when that is resolved
+        //  if (supportsBM25)
+        //      assertThatPlanFor(query + "ORDER BY k2 BM25 OF 'a' LIMIT 10 WITH included_indexes={partition_analyzed}", row1, row2).uses("partition_analyzed");
+        // TODO: this hits CNDB-14343, we should either enable this or remove the index creation when that is resolved
+        //  if (supportsANN)
+        //      assertThatPlanFor(query + "ORDER BY k3 ANN OF [0.1, 0.2] LIMIT 10 WITH included_indexes={partition_ann}", row1, row2).uses("partition_ann");
+
+        // query partition key columns with excluded index
+        assertThatPlanFor(query + "WHERE k1=1 ALLOW FILTERING WITH excluded_indexes={partition_numeric}", row1, row2).usesNone();
+        assertThatPlanFor(query + "WHERE k1!=1 ALLOW FILTERING WITH excluded_indexes={partition_numeric}", row3, row4).usesNone();
+        assertThatPlanFor(query + "WHERE k1>1 ALLOW FILTERING WITH excluded_indexes={partition_numeric}", row3, row4).usesNone();
+        assertThatPlanFor(query + "WHERE k1<2 ALLOW FILTERING WITH excluded_indexes={partition_numeric}", row1, row2).usesNone();
+        assertThatPlanFor(query + "WHERE k1>=1 ALLOW FILTERING WITH excluded_indexes={partition_numeric}", row1, row2, row3, row4).usesNone();
+        assertThatPlanFor(query + "WHERE k1<=2 ALLOW FILTERING WITH excluded_indexes={partition_numeric}", row1, row2, row3, row4).usesNone();
+        assertThatPlanFor(query + "WHERE k2='a' ALLOW FILTERING WITH excluded_indexes={partition_literal}", row1, row2).usesNone();
+        assertIndexDoesNotSupportAnalyzerMatches(query + "WHERE k2:'a' ALLOW FILTERING WITH excluded_indexes={partition_analyzed}", "k2");
+        if (supportsBM25)
+            assertBM25RequiresAnAnalyzedIndex(query + "ORDER BY k2 BM25 OF 'a' LIMIT 10 WITH excluded_indexes={partition_analyzed}", "k2");
+        if (supportsANN)
+            assertANNOrderingNeedsIndex(query + "ORDER BY k3 ANN OF [0.1, 0.2] LIMIT 10 WITH excluded_indexes={partition_ann}", "k3");
+
+        // query clustering key columns without hints
+        assertThatPlanFor(query + "WHERE c1=10", row1, row3).uses("clustering_numeric");
+        assertThatPlanFor(query + "WHERE c1!=10", row2, row4).uses("clustering_numeric");
+        assertThatPlanFor(query + "WHERE c1>10", row2, row4).uses("clustering_numeric");
+        assertThatPlanFor(query + "WHERE c1<11", row1, row3).uses("clustering_numeric");
+        assertThatPlanFor(query + "WHERE c1>=10", row1, row2, row3, row4).uses("clustering_numeric");
+        assertThatPlanFor(query + "WHERE c1<=11", row1, row2, row3, row4).uses("clustering_numeric");
+        assertThatPlanFor(query + "WHERE c2='aa'", row1, row3).uses("clustering_literal");
+        assertCannotBeRestrictedByClustering(query + "WHERE c2:'aa'", "c2");
+        // TODO: this hits CNDB-14348, we should enable this when that is resolved
+        //  if (supportsBM25)
+        //      assertThatPlanFor(query + "ORDER BY c2 BM25 OF 'aa' LIMIT 10", row1, row3).uses("clustering_analyzed");
+        // TODO: this hits CNDB-14343, we should either enable this or remove the index creation when that is resolved
+        //  if (supportsANN)
+        //      assertThatPlanFor(query + "ORDER BY c3 ANN OF [0.1, 0.2] LIMIT 10", row1, row2).uses("clustering_ann");
+
+        // query clustering key columns with included index
+        assertThatPlanFor(query + "WHERE c1=10 WITH included_indexes={clustering_numeric}", row1, row3).uses("clustering_numeric");
+        assertThatPlanFor(query + "WHERE c1!=10 WITH included_indexes={clustering_numeric}", row2, row4).uses("clustering_numeric");
+        assertThatPlanFor(query + "WHERE c1>10 WITH included_indexes={clustering_numeric}", row2, row4).uses("clustering_numeric");
+        assertThatPlanFor(query + "WHERE c1<11 WITH included_indexes={clustering_numeric}", row1, row3).uses("clustering_numeric");
+        assertThatPlanFor(query + "WHERE c1>=10 WITH included_indexes={clustering_numeric}", row1, row2, row3, row4).uses("clustering_numeric");
+        assertThatPlanFor(query + "WHERE c1<=11 WITH included_indexes={clustering_numeric}", row1, row2, row3, row4).uses("clustering_numeric");
+        assertThatPlanFor(query + "WHERE c2='aa' WITH included_indexes={clustering_literal}", row1, row3).uses("clustering_literal");
+        assertCannotBeRestrictedByClustering(query + "WHERE c2:'aa' WITH included_indexes={clustering_analyzed}", "c2");
+        // TODO: this hits CNDB-14348, we should enable this when that is resolved
+        //  if (supportsBM25)
+        //      assertThatPlanFor(query + "ORDER BY c2 BM25 OF 'aa' LIMIT 10 WITH included_indexes={clustering_analyzed}", row1, row3).uses("clustering_analyzed");
+        // TODO: this hits CNDB-14343, we should either enable this or remove the index creation when that is resolved
+        //  if (supportsANN)
+        //      assertThatPlanFor(query + "ORDER BY c3 ANN OF [0.1, 0.2] LIMIT 10 WITH included_indexes={clustering_ann}", row1, row2).uses("clustering_ann");
+
+        // query clustering key columns with excluded index
+        assertThatPlanFor(query + "WHERE c1=10 ALLOW FILTERING WITH excluded_indexes={clustering_numeric}", row1, row3).usesNone();
+        assertThatPlanFor(query + "WHERE c1!=10 ALLOW FILTERING WITH excluded_indexes={clustering_numeric}", row2, row4).usesNone();
+        assertThatPlanFor(query + "WHERE c1>10 ALLOW FILTERING WITH excluded_indexes={clustering_numeric}", row2, row4).usesNone();
+        assertThatPlanFor(query + "WHERE c1<11 ALLOW FILTERING WITH excluded_indexes={clustering_numeric}", row1, row3).usesNone();
+        assertThatPlanFor(query + "WHERE c1>=10 ALLOW FILTERING WITH excluded_indexes={clustering_numeric}", row1, row2, row3, row4).usesNone();
+        assertThatPlanFor(query + "WHERE c1<=11 ALLOW FILTERING WITH excluded_indexes={clustering_numeric}", row1, row2, row3, row4).usesNone();
+        assertThatPlanFor(query + "WHERE c2='aa' ALLOW FILTERING WITH excluded_indexes={clustering_literal}", row1, row3).usesNone();
+        assertCannotBeRestrictedByClustering(query + "WHERE c2:'aa' ALLOW FILTERING WITH excluded_indexes={clustering_analyzed}", "c2");
+        if (supportsBM25)
+            assertBM25RequiresAnAnalyzedIndex(query + "ORDER BY c2 BM25 OF 'aa' LIMIT 10 WITH excluded_indexes={clustering_analyzed}", "c2");
+        if (supportsANN)
+            assertANNOrderingNeedsIndex(query + "ORDER BY c3 ANN OF [0.1, 0.2] LIMIT 10 WITH excluded_indexes={clustering_ann}", "c3");
+
+        // query static columns without hints
+        assertThatPlanFor(query + "WHERE s1=100", row1, row2).uses("static_numeric");
+        assertThatPlanFor(query + "WHERE s1!=100", row3, row4).uses("static_numeric");
+        assertThatPlanFor(query + "WHERE s1>100", row3, row4).uses("static_numeric");
+        assertThatPlanFor(query + "WHERE s1<200", row1, row2).uses("static_numeric");
+        assertThatPlanFor(query + "WHERE s1>=100", row1, row2, row3, row4).uses("static_numeric");
+        assertThatPlanFor(query + "WHERE s1<=200", row1, row2, row3, row4).uses("static_numeric");
+        assertThatPlanFor(query + "WHERE s2='aaa'", row1, row2).uses("static_literal");
+        assertThatPlanFor(query + "WHERE s2:'aaa'", row1, row2).uses("static_analyzed");
+        // TODO: this hits CNDB-14348, we should enable this when that is resolved
+        //  if (supportsBM25)
+        //      assertThatPlanFor(query + "ORDER BY s2 BM25 OF 'aa' LIMIT 10", row1, row2).uses("static_analyzed");
+        // TODO: this hits CNDB-14343, we should either enable this or remove the index creation when that is resolved
+        //  if (supportsANN)
+        //      assertThatPlanFor(query + "ORDER BY s3 ANN OF [0.1, 0.2] LIMIT 10", row1, row2).uses("static_ann");
+
+        // query static columns with included index
+        assertThatPlanFor(query + "WHERE s1=100 WITH included_indexes={static_numeric}", row1, row2).uses("static_numeric");
+        assertThatPlanFor(query + "WHERE s1!=100 WITH included_indexes={static_numeric}", row3, row4).uses("static_numeric");
+        assertThatPlanFor(query + "WHERE s1>100 WITH included_indexes={static_numeric}", row3, row4).uses("static_numeric");
+        assertThatPlanFor(query + "WHERE s1<200 WITH included_indexes={static_numeric}", row1, row2).uses("static_numeric");
+        assertThatPlanFor(query + "WHERE s1>=100 WITH included_indexes={static_numeric}", row1, row2, row3, row4).uses("static_numeric");
+        assertThatPlanFor(query + "WHERE s1<=200 WITH included_indexes={static_numeric}", row1, row2, row3, row4).uses("static_numeric");
+        assertThatPlanFor(query + "WHERE s2='aaa' WITH included_indexes={static_literal}", row1, row2).uses("static_literal");
+        assertThatPlanFor(query + "WHERE s2:'aaa' WITH included_indexes={static_analyzed}", row1, row2).uses("static_analyzed");
+        // TODO: this hits CNDB-14348, we should enable this when that is resolved
+        //  if (supportsBM25)
+        //    assertThatPlanFor(query + "ORDER BY s2 BM25 OF 'aa' LIMIT 10 WITH included_indexes={static_analyzed}", row1, row2).uses("static_analyzed");
+        // TODO: this hits CNDB-14343, we should either enable this or remove the index creation when that is resolved
+        //  if (supportsANN)
+        //      assertThatPlanFor(query + "ORDER BY s3 ANN OF [0.1, 0.2] LIMIT 10 WITH included_indexes={static_ann}", row1, row2).uses("static_ann");
+
+        // query static columns with excluded index
+        assertThatPlanFor(query + "WHERE s1=100 ALLOW FILTERING WITH excluded_indexes={static_numeric}", row1, row2).usesNone();
+        assertThatPlanFor(query + "WHERE s1!=100 ALLOW FILTERING WITH excluded_indexes={static_numeric}", row3, row4).usesNone();
+        assertThatPlanFor(query + "WHERE s1>100 ALLOW FILTERING WITH excluded_indexes={static_numeric}", row3, row4).usesNone();
+        assertThatPlanFor(query + "WHERE s1<200 ALLOW FILTERING WITH excluded_indexes={static_numeric}", row1, row2).usesNone();
+        assertThatPlanFor(query + "WHERE s1>=100 ALLOW FILTERING WITH excluded_indexes={static_numeric}", row1, row2, row3, row4).usesNone();
+        assertThatPlanFor(query + "WHERE s1<=200 ALLOW FILTERING WITH excluded_indexes={static_numeric}", row1, row2, row3, row4).usesNone();
+        assertThatPlanFor(query + "WHERE s2='aaa' ALLOW FILTERING WITH excluded_indexes={static_literal}", row1, row2).usesNone();
+        assertIndexDoesNotSupportAnalyzerMatches(query + "WHERE s2:'aaa' ALLOW FILTERING WITH excluded_indexes={static_analyzed}", "s2");
+        if (supportsBM25)
+            assertBM25RequiresAnAnalyzedIndex(query + "ORDER BY s2 BM25 OF 'aa' LIMIT 10 WITH excluded_indexes={static_analyzed}", "s2");
+        if (supportsANN)
+            assertANNOrderingNeedsIndex(query + "ORDER BY s3 ANN OF [0.1, 0.2] LIMIT 10 WITH excluded_indexes={static_ann}", "s3");
+
+        // query regular columns without hints
+        assertThatPlanFor(query + "WHERE r1=1000", row1, row3).uses("regular_numeric");
+        assertThatPlanFor(query + "WHERE r1!=1000", row2, row4).uses("regular_numeric");
+        assertThatPlanFor(query + "WHERE r1>1000", row2, row4).uses("regular_numeric");
+        assertThatPlanFor(query + "WHERE r1<1001", row1, row3).uses("regular_numeric");
+        assertThatPlanFor(query + "WHERE r1>=1000", row1, row2, row3, row4).uses("regular_numeric");
+        assertThatPlanFor(query + "WHERE r1<=1001", row1, row2, row3, row4).uses("regular_numeric");
+        assertThatPlanFor(query + "WHERE r2='aaaa'", row1, row3).uses("regular_literal");
+        assertThatPlanFor(query + "WHERE r2:'aaaa'", row1, row3).uses("regular_analyzed");
+        if (supportsBM25)
+            assertThatPlanFor(query + "ORDER BY r2 BM25 OF 'aaaa' LIMIT 10", row1, row3).uses("regular_analyzed");
+        if (supportsANN)
+            assertThatPlanFor(query + "ORDER BY r3 ANN OF [0.1, 0.2] LIMIT 10", row1, row2, row3, row4).uses("regular_ann");
+
+        // query regular columns with included indexes
+        assertThatPlanFor(query + "WHERE r1=1000 WITH included_indexes={regular_numeric}", row1, row3).uses("regular_numeric");
+        assertThatPlanFor(query + "WHERE r1!=1000 WITH included_indexes={regular_numeric}", row2, row4).uses("regular_numeric");
+        assertThatPlanFor(query + "WHERE r1>1000 WITH included_indexes={regular_numeric}", row2, row4).uses("regular_numeric");
+        assertThatPlanFor(query + "WHERE r1<1001 WITH included_indexes={regular_numeric}", row1, row3).uses("regular_numeric");
+        assertThatPlanFor(query + "WHERE r1>=1000 WITH included_indexes={regular_numeric}", row1, row2, row3, row4).uses("regular_numeric");
+        assertThatPlanFor(query + "WHERE r1<=1001 WITH included_indexes={regular_numeric}", row1, row2, row3, row4).uses("regular_numeric");
+        assertThatPlanFor(query + "WHERE r2='aaaa' WITH included_indexes={regular_literal}", row1, row3).uses("regular_literal");
+        assertThatPlanFor(query + "WHERE r2:'aaaa' WITH included_indexes={regular_analyzed}", row1, row3).uses("regular_analyzed");
+        if (supportsBM25)
+            assertThatPlanFor(query + "ORDER BY r2 BM25 OF 'aaaa' LIMIT 10 WITH included_indexes={regular_analyzed}", row1, row3).uses("regular_analyzed");
+        if (supportsANN)
+            assertThatPlanFor(query + "ORDER BY r3 ANN OF [0.1, 0.2] LIMIT 10 WITH included_indexes={regular_ann}", row1, row2, row3, row4).uses("regular_ann");
+
+        // query regular columns with excluded indexes
+        assertThatPlanFor(query + "WHERE r1=1000 ALLOW FILTERING WITH excluded_indexes={regular_numeric}", row1, row3).usesNone();
+        assertThatPlanFor(query + "WHERE r1!=1000 ALLOW FILTERING WITH excluded_indexes={regular_numeric}", row2, row4).usesNone();
+        assertThatPlanFor(query + "WHERE r1>1000 ALLOW FILTERING WITH excluded_indexes={regular_numeric}", row2, row4).usesNone();
+        assertThatPlanFor(query + "WHERE r1<1001 ALLOW FILTERING WITH excluded_indexes={regular_numeric}", row1, row3).usesNone();
+        assertThatPlanFor(query + "WHERE r1>=1000 ALLOW FILTERING WITH excluded_indexes={regular_numeric}", row1, row2, row3, row4).usesNone();
+        assertThatPlanFor(query + "WHERE r1<=1001 ALLOW FILTERING WITH excluded_indexes={regular_numeric}", row1, row2, row3, row4).usesNone();
+        assertThatPlanFor(query + "WHERE r2='aaaa' ALLOW FILTERING WITH excluded_indexes={regular_literal}", row1, row3).usesNone();
+        assertIndexDoesNotSupportAnalyzerMatches(query + "WHERE r2:'aaaa' ALLOW FILTERING WITH excluded_indexes={regular_analyzed}", "r2");
+        if (supportsBM25)
+            assertBM25RequiresAnAnalyzedIndex(query + "ORDER BY r2 BM25 OF 'aaaa' LIMIT 10 WITH excluded_indexes={regular_analyzed}", "r2");
+        if (supportsANN)
+            assertANNOrderingNeedsIndex(query + "ORDER BY r3 ANN OF [0.1, 0.2] LIMIT 10 WITH excluded_indexes={regular_ann}", "r3");
+    }
+
     private void assertNeedsAllowFiltering(String query)
     {
         Assertions.assertThatThrownBy(() -> execute(query))
@@ -598,7 +840,7 @@ public class PlanWithIndexHintsTest extends SAITester
                   .hasMessage(IndexHints.NON_INCLUDABLE_INDEXES_ERROR);
     }
 
-    private void assertOrderingNeedsIndex(String query, String column)
+    private void assertANNOrderingNeedsIndex(String query, String column)
     {
         Assertions.assertThatThrownBy(() -> execute(query))
                   .isInstanceOf(InvalidRequestException.class)
@@ -626,5 +868,19 @@ public class PlanWithIndexHintsTest extends SAITester
         Assertions.assertThatThrownBy(() -> execute(query))
                   .isInstanceOf(InvalidRequestException.class)
                   .hasMessage(format(StatementRestrictions.BM25_ORDERING_REQUIRES_ANALYZED_INDEX_MESSAGE, column));
+    }
+
+    private void assertIndexDoesNotSupportAnalyzerMatches(String query, String column)
+    {
+        Assertions.assertThatThrownBy(() -> execute(query))
+                  .isInstanceOf(InvalidRequestException.class)
+                  .hasMessage(format(StatementRestrictions.INDEX_DOES_NOT_SUPPORT_ANALYZER_MATCHES_MESSAGE, column));
+    }
+
+    private void assertCannotBeRestrictedByClustering(String query, String column)
+    {
+        Assertions.assertThatThrownBy(() -> execute(query))
+                  .isInstanceOf(InvalidRequestException.class)
+                  .hasMessage(format(SingleColumnRestriction.AnalyzerMatchesRestriction.CANNOT_BE_RESTRICTED_BY_CLUSTERING_ERROR, column));
     }
 }
