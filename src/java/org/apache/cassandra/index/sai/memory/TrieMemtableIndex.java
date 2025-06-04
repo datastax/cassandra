@@ -51,6 +51,7 @@ import org.apache.cassandra.db.memtable.ShardBoundaries;
 import org.apache.cassandra.db.memtable.TrieMemtable;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.dht.AbstractBounds;
+import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
@@ -411,12 +412,13 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
         if (orderer.isBM25())
         {
             HashMap<ByteBuffer, Long> documentFrequencies = new HashMap<>();
-            // We don't want to filter the document frequencies, so we use the whole range
-            DataRange dataRange = DataRange.allData(memtable.metadata().partitioner);
+            // We only need to get the document frequencies for the shards that contain the keys.
+            Range<PartitionPosition> range = Range.makeRowRange(keys.get(0).partitionKey().getToken(),
+                                                                keys.get(keys.size() - 1).partitionKey().getToken());
             for (ByteBuffer term : orderer.getQueryTerms())
             {
                 Expression expression = new Expression(indexContext).add(Operator.ANALYZER_MATCHES, term);
-                documentFrequencies.put(term, completeEstimateMatchingRowsCount(expression, dataRange.keyRange()));
+                documentFrequencies.put(term, completeEstimateMatchingRowsCount(expression, range));
             }
             return orderByBM25(keys.stream(), documentFrequencies, orderer);
         }
