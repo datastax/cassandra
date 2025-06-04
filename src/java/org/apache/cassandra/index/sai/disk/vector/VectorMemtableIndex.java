@@ -58,6 +58,7 @@ import org.apache.cassandra.index.sai.memory.MemoryIndex;
 import org.apache.cassandra.index.sai.metrics.ColumnQueryMetrics;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.plan.Orderer;
+import org.apache.cassandra.index.sai.utils.BM25Utils;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyListUtil;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithScore;
@@ -221,6 +222,12 @@ public class VectorMemtableIndex extends AbstractMemtableIndex
     {
         // For BOUNDED_ANN we use the old way of estimating cardinality - by running the search.
         throw new UnsupportedOperationException("Cardinality estimation not supported by vector indexes");
+    }
+
+    @Override
+    public void addBm25DocsStats(BM25Utils.AggDocsStats docsStats)
+    {
+        throw new UnsupportedOperationException("Calculating BM25 document aggregates not supported by vector indexes");
     }
 
     @Override

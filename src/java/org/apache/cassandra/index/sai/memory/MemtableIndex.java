@@ -33,6 +33,7 @@ import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.plan.Expression;
+import org.apache.cassandra.index.sai.utils.BM25Utils;
 import org.apache.cassandra.index.sai.utils.MemtableOrdering;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
@@ -76,6 +77,8 @@ public interface MemtableIndex extends MemtableOrdering
     KeyRangeIterator search(QueryContext queryContext, Expression expression, AbstractBounds<PartitionPosition> keyRange, int limit);
 
     long estimateMatchingRowsCount(Expression expression, AbstractBounds<PartitionPosition> keyRange);
+
+    void addBm25DocsStats(BM25Utils.AggDocsStats docsStats);
 
     Iterator<Pair<ByteComparable.Preencoded, List<MemoryIndex.PkWithFrequency>>> iterator(DecoratedKey min, DecoratedKey max);
 

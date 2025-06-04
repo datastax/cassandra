@@ -52,6 +52,8 @@ public interface SearchableIndex extends Closeable
 
     public long getRowCount();
 
+    long getApproximateTermCount();
+
     public long minSSTableRowId();
 
     public long maxSSTableRowId();

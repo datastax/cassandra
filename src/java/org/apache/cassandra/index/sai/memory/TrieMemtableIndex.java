@@ -448,7 +448,7 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
         assert orderer.isBM25();
         List<ByteBuffer> queryTerms = orderer.getQueryTerms();
         AbstractAnalyzer analyzer = indexContext.getAnalyzerFactory().create();
-        BM25Utils.DocStats docStats = new BM25Utils.DocStats(documentFrequencies, indexedRows(), approximateTotalTermCount());
+        BM25Utils.DocStats docStats = new BM25Utils.DocStats(documentFrequencies, orderer.bm25Stats);
         Iterator<BM25Utils.DocTF> it = stream
                                        .map(pk -> BM25Utils.EagerDocTF.createFromDocument(pk, getCellForKey(pk), analyzer, queryTerms))
                                        .filter(Objects::nonNull)
