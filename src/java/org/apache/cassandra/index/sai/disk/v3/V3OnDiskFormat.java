@@ -54,7 +54,7 @@ public class V3OnDiskFormat extends V2OnDiskFormat
     // We allow the version to be configured via a system property because of some legacy use cases, but it is
     // generally not recommended to change this directly. Instead, use the cassandra.sai.latest.version system property
     // to control the on-disk format version.
-    private final static int JVECTOR_VERSION = Integer.getInteger("cassandra.sai.jvector_version", 2);
+    private final static int JVECTOR_VERSION = Integer.getInteger("cassandra.sai.jvector_version", 4);
     static
     {
         // JVector 3 is not compatible with the latest jvector changes, so we fail fast if the config is enabled.
