@@ -60,6 +60,7 @@ import com.google.common.primitives.Longs;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.ListenableFutureTask;
+import com.google.common.util.concurrent.MoreExecutors;
 import com.google.common.util.concurrent.RateLimiter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -103,7 +104,6 @@ import org.apache.cassandra.db.memtable.ShardBoundaries;
 import org.apache.cassandra.db.partitions.CachedPartition;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.repair.CassandraTableRepairManager;
-import org.apache.cassandra.db.rows.CellPath;
 import org.apache.cassandra.db.streaming.CassandraStreamManager;
 import org.apache.cassandra.db.view.TableViews;
 import org.apache.cassandra.dht.AbstractBounds;
@@ -141,7 +141,6 @@ import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.nodes.Nodes;
 import org.apache.cassandra.repair.TableRepairManager;
 import org.apache.cassandra.repair.consistent.admin.PendingStat;
-import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.CompactionParams;
 import org.apache.cassandra.schema.CompactionParams.TombstoneOption;
 import org.apache.cassandra.schema.CompressionParams;
@@ -374,7 +373,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
 
     private final RequestTracker requestTracker = RequestTracker.instance;
 
-    private final ReentrantLock rwcdLock = new ReentrantLock();
+    private final ReentrantLock longRunningSerializedOperationsLock = new ReentrantLock();
 
     public static void shutdownPostFlushExecutor() throws InterruptedException
     {
@@ -2795,7 +2794,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     {
         // synchronize so that concurrent invocations don't re-enable compactions partway through unexpectedly,
         // and so we only run one major compaction at a time
-        rwcdLock.lock();
+        longRunningSerializedOperationsLock.lock();
         try
         {
             logger.trace("Cancelling in-progress compactions for {}", metadata.name);
@@ -2808,36 +2807,24 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
                 CompactionManager.instance.waitForCessation(toInterruptFor, sstablesPredicate);
 
                 // doublecheck that we finished, instead of timing out
-                for (ColumnFamilyStore cfs : toInterruptFor)
-                {
-                    if (cfs.getTracker().getCompacting().stream().anyMatch(sstablesPredicate))
-                    {
-                        logger.warn("Unable to cancel in-progress compactions for {}.{}.  Perhaps there is an unusually " +
-                                    "large row in progress somewhere, or the system is simply overloaded.", metadata.keyspace, metadata.name);
-                        logger.debug("In-flight compactions: {}", Arrays.toString(cfs.getTracker().getCompacting().toArray()));
-                        return null;
-                    }
-                }
+                if (!allCompactionsFinished(toInterruptFor, sstablesPredicate))
+                    return null;
+
                 logger.trace("Compactions successfully cancelled");
 
                 // run our task
                 try
                 {
-                    synchronized (this)
-                    {
-                        // doublecheck that we finished, instead of timing out
-                        for (ColumnFamilyStore cfs : toInterruptFor)
+                    return Executors.newSingleThreadExecutor().submit(() -> {
+                        synchronized (this)
                         {
-                            if (cfs.getTracker().getCompacting().stream().anyMatch(sstablesPredicate))
-                            {
-                                logger.warn("Unable to cancel in-progress compactions for {}.{}.  Perhaps there is an unusually " +
-                                            "large row in progress somewhere, or the system is simply overloaded.", metadata.keyspace, metadata.name);
-                                logger.debug("In-flight compactions: {}", Arrays.toString(cfs.getTracker().getCompacting().toArray()));
+                            // doublecheck again now we've synched on _this_
+                            if (!allCompactionsFinished(toInterruptFor, sstablesPredicate))
                                 return null;
-                            }
+
+                            return callable.call();
                         }
-                        return callable.call();
-                    }
+                    }).get();
                 }
                 catch (Exception e)
                 {
@@ -2847,8 +2834,24 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         }
         finally
         {
-            rwcdLock.unlock();
+            longRunningSerializedOperationsLock.unlock();
         }
+    }
+
+    private boolean allCompactionsFinished( Iterable<ColumnFamilyStore> cfss, Predicate<SSTableReader> sstablesPredicate)
+    {
+        for (ColumnFamilyStore cfs : cfss)
+        {
+            if (cfs.getTracker().getCompacting().stream().anyMatch(sstablesPredicate))
+            {
+                logger.warn("Unable to cancel in-progress compactions for {}.{}.  Perhaps there is an unusually " +
+                            "large row in progress somewhere, or the system is simply overloaded.", metadata.keyspace, metadata.name);
+                logger.debug("In-flight compactions: {}", Arrays.toString(cfs.getTracker().getCompacting().toArray()));
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static CompactionManager.CompactionPauser pauseCompactionStrategies(Iterable<ColumnFamilyStore> toPause)
