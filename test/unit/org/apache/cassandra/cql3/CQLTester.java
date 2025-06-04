@@ -789,6 +789,11 @@ public abstract class CQLTester
         return indexes.get(i);
     }
 
+    protected Index getIndex(String indexName)
+    {
+        return getCurrentColumnFamilyStore().indexManager.getIndexByName(indexName);
+    }
+
     protected Collection<String> currentTables()
     {
         if (tables == null || tables.isEmpty())

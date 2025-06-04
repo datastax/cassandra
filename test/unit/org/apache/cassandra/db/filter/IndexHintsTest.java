@@ -278,10 +278,10 @@ public class IndexHintsTest extends CQLTester
         createIndex(String.format("CREATE CUSTOM INDEX idx2 ON %%s(b) USING '%s'", GroupedIndex.class.getName()));
         createIndex(String.format("CREATE CUSTOM INDEX idx3 ON %%s(c) USING '%s'", GroupedIndex.class.getName()));
         createIndex(String.format("CREATE CUSTOM INDEX idx4 ON %%s(d) USING '%s'", GroupedIndex.class.getName()));
-        IndexMetadata idx1 = getCurrentColumnFamilyStore().indexManager.getIndexByName("idx1").getIndexMetadata();
-        IndexMetadata idx2 = getCurrentColumnFamilyStore().indexManager.getIndexByName("idx2").getIndexMetadata();
-        IndexMetadata idx3 = getCurrentColumnFamilyStore().indexManager.getIndexByName("idx3").getIndexMetadata();
-        IndexMetadata idx4 = getCurrentColumnFamilyStore().indexManager.getIndexByName("idx4").getIndexMetadata();
+        IndexMetadata idx1 = getIndex("idx1").getIndexMetadata();
+        IndexMetadata idx2 = getIndex("idx2").getIndexMetadata();
+        IndexMetadata idx3 = getIndex("idx3").getIndexMetadata();
+        IndexMetadata idx4 = getIndex("idx4").getIndexMetadata();
         String query = "SELECT * FROM %s WHERE a = 1 AND b = 2 AND c = 3 AND d = 4 ALLOW FILTERING ";
 
         // unspecified hints should be mapped to NONE
