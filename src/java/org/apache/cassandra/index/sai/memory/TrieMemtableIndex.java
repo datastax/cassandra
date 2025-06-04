@@ -126,7 +126,9 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
 
     /**
      * Approximate total count of terms in the memory index.
-     * The count is approximate because range deletions are not accounted for.
+     * The count is approximate because some deletions are not accounted for. For example, given a table with the
+     * following schema: CREATE TABLE %s (k int PRIMARY KEY, v text), DELETE FROM %s WHERE k=2 does not update the SAI
+     * index, but DELETE v FROM %s WHERE k = 2 does.
      *
      * @return total count of terms for indexes rows.
      */
