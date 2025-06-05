@@ -21,17 +21,14 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.EnumMap;
 import java.util.EnumSet;
-import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.function.UnaryOperator;
 import java.util.zip.CRC32;
 
 import com.google.common.base.Throwables;
-import com.google.common.collect.Lists;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -85,7 +82,7 @@ public class MetadataSerializer implements IMetadataSerializer
         updateChecksumInt(crc, componentsCount);
         maybeWriteChecksum(crc, out, version);
 
-        ICompressor encryptor = getEncryptor(descriptor);
+        ICompressor encryptor = getEncryptor(descriptor, true);
         ByteBuffer[] componentsSerializations = new ByteBuffer[componentsCount];
 
         // serialize and possibly encrypt components
@@ -216,7 +213,7 @@ public class MetadataSerializer implements IMetadataSerializer
         MetadataType[] allMetadataTypes = MetadataType.values();
 
         Map<MetadataType, MetadataComponent> components = new EnumMap<>(MetadataType.class);
-        ICompressor encryptor = getEncryptor(descriptor);
+        ICompressor encryptor = getEncryptor(descriptor, false);
 
         for (int i = 0; i < count; i++)
         {
@@ -337,7 +334,7 @@ public class MetadataSerializer implements IMetadataSerializer
      * Returns null if no encryption applies (version doesn't support it, compression is not applied, or the applicable
      * compression does not include encryption).
      */
-    private ICompressor getEncryptor(Descriptor desc)
+    private ICompressor getEncryptor(Descriptor desc,  boolean writeTime)
     {
         if (!desc.version.metadataAreEncrypted())
             return null;
@@ -345,7 +342,7 @@ public class MetadataSerializer implements IMetadataSerializer
         if (!compressionFile.exists())
             return null;
 
-        try (CompressionMetadata cm = CompressionMetadata.read(compressionFile, true))
+        try (CompressionMetadata cm = writeTime ? CompressionMetadata.readDuringWriteTime(compressionFile, true) : CompressionMetadata.read(compressionFile, true))
         {
             // Note: we use only the encryption component, without any compression. The reason for doing this is to
             // avoid having to allocate (and save the size of) an additional buffer to hold the larger uncompressed

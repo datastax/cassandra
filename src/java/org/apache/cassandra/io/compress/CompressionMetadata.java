@@ -21,6 +21,7 @@ import java.io.DataOutput;
 import java.io.EOFException;
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.nio.channels.FileChannel;
 import java.nio.file.NoSuchFileException;
 import java.util.Collection;
 import java.util.HashMap;
@@ -43,6 +44,7 @@ import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.io.util.File;
@@ -114,14 +116,25 @@ public class CompressionMetadata implements AutoCloseable
         return read(dataFilePath, SliceDescriptor.NONE, skipOffsets);
     }
 
+    public static CompressionMetadata readDuringWriteTime(File dataFilePath, boolean skipOffsets)
+    {
+        return read(dataFilePath, SliceDescriptor.NONE, skipOffsets, true);
+    }
+
     public static CompressionMetadata read(File dataFilePath, SliceDescriptor sliceDescription, boolean skipOffsets)
+    {
+        return read(dataFilePath, sliceDescription, skipOffsets, false);
+    }
+
+    public static CompressionMetadata read(File dataFilePath, SliceDescriptor sliceDescription, boolean skipOffsets, boolean writeTime)
     {
         Descriptor descriptor = Descriptor.fromFilename(dataFilePath);
         return new CompressionMetadata(descriptor.fileFor(Component.COMPRESSION_INFO),
                                        dataFilePath.length(),
                                        descriptor.version.hasMaxCompressedLength(),
                                        sliceDescription,
-                                       skipOffsets);
+                                       skipOffsets,
+                                       writeTime);
     }
 
     @VisibleForTesting
@@ -130,18 +143,27 @@ public class CompressionMetadata implements AutoCloseable
         this(indexFilePath, compressedLength, hasMaxCompressedSize, SliceDescriptor.NONE, false);
     }
 
+    CompressionMetadata(File indexFilePath, long compressedLength, boolean hasMaxCompressedSize, SliceDescriptor sliceDescriptor, boolean skipOffsets)
+    {
+        this(indexFilePath, compressedLength, hasMaxCompressedSize, sliceDescriptor, skipOffsets, false);
+    }
+
     /*
      * If zero copy metadata is present, the compression metadata represents information about chunks in the original
      * data file rather than the partial file it deals.
      */
     @VisibleForTesting
-    public CompressionMetadata(File indexFilePath, long compressedLength, boolean hasMaxCompressedSize, SliceDescriptor sliceDescriptor, boolean skipOffsets)
+    CompressionMetadata(File indexFilePath, long compressedLength, boolean hasMaxCompressedSize, SliceDescriptor sliceDescriptor, boolean skipOffsets, boolean writeTime)
     {
         this.indexFilePath = indexFilePath;
         long uncompressedOffset = sliceDescriptor.exists() ? sliceDescriptor.sliceStart : 0;
         long uncompressedLength = sliceDescriptor.exists() ? sliceDescriptor.dataEnd - sliceDescriptor.sliceStart : -1;
 
-        try (FileInputStreamPlus stream = indexFilePath.newInputStream())
+
+
+        try (FileInputStreamPlus stream =
+             writeTime ? new FileInputStreamPlus(StorageProvider.instance.writeTimeReadFileChannelFor(indexFilePath), indexFilePath.toPath()) :
+             indexFilePath.newInputStream())
         {
             String compressorName = stream.readUTF();
             int optionCount = stream.readInt();

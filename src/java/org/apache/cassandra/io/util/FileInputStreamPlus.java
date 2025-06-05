@@ -49,7 +49,7 @@ public class FileInputStreamPlus extends RebufferingInputStream
         this(PathUtils.newReadChannel(path), bufferSize, path);
     }
 
-    private FileInputStreamPlus(FileChannel channel, Path path)
+    public FileInputStreamPlus(FileChannel channel, Path path)
     {
         this(channel, 1 << 14, path);
     }
