@@ -24,7 +24,9 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Stream;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.MoreObjects;
 import com.google.common.base.Objects;
 
@@ -37,12 +39,18 @@ import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.virtual.SimpleDataSet;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.disk.EmptyIndex;
+import org.apache.cassandra.index.sai.disk.V1MetadataOnlySearchableIndex;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMapIterator;
 import org.apache.cassandra.index.sai.disk.SearchableIndex;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
 import org.apache.cassandra.index.sai.disk.format.Version;
+import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
 import org.apache.cassandra.index.sai.disk.v1.Segment;
+import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
+import org.apache.cassandra.index.sai.disk.v1.V1SearchableIndex;
+import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
+import org.apache.cassandra.index.sai.disk.vector.ProductQuantizationFetcher;
 import org.apache.cassandra.index.sai.iterators.KeyRangeAntiJoinIterator;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.plan.Expression;
@@ -92,8 +100,20 @@ public class SSTableIndex
     {
         if (CassandraRelevantProperties.SAI_INDEX_READS_DISABLED.getBoolean())
         {
-            logger.info("Creating dummy (empty) index searcher for sstable {} as SAI index reads are disabled", sstableContext.sstable.descriptor);
-            return new EmptyIndex();
+            var context = perIndexComponents.context();
+            if (!perIndexComponents.isEmpty()
+                && context != null
+                && context.isVector()
+                && CassandraRelevantProperties.SAI_INDEX_LOAD_SEGMENT_METADATA.getBoolean())
+            {
+                logger.info("Creating a V1MetadataOnlySearchableIndex for sstable {} as SAI index reads are disabled, but this is a vector index", sstableContext.sstable.descriptor.id);
+                return new V1MetadataOnlySearchableIndex(sstableContext, perIndexComponents);
+            }
+            else
+            {
+                logger.info("Creating dummy (empty) index searcher for sstable {} as SAI index reads are disabled", sstableContext.sstable.descriptor);
+                return new EmptyIndex();
+            }
         }
 
         return perIndexComponents.onDiskFormat().newSearchableIndex(sstableContext, perIndexComponents);
@@ -120,6 +140,22 @@ public class SSTableIndex
     public List<Segment> getSegments()
     {
         return searchableIndex.getSegments();
+    }
+
+    public List<SegmentMetadata> getSegmentMetadatas()
+    {
+        return searchableIndex.getSegmentMetadatas();
+    }
+
+    @VisibleForTesting
+    public boolean areSegmentsLoaded()
+    {
+        return searchableIndex instanceof V1SearchableIndex;
+    }
+
+    public ProductQuantizationFetcher.PqInfo getPqInfo(int segmentPosition)
+    {
+        return searchableIndex.getPqInfo(segmentPosition);
     }
 
     public long indexFileCacheSize()
@@ -255,6 +291,11 @@ public class SSTableIndex
     public Version getVersion()
     {
         return perIndexComponents.version();
+    }
+
+    public Stream<V5VectorPostingsWriter.Structure> getPostingsStructures()
+    {
+        return searchableIndex.getPostingsStructures();
     }
 
     public IndexFeatureSet indexFeatureSet()

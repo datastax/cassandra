@@ -41,6 +41,7 @@ import org.apache.cassandra.index.sai.disk.v1.IndexSearcher;
 import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.v1.V1OnDiskFormat;
+import org.apache.cassandra.index.sai.disk.vector.OnDiskOrdinalsMap;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 
@@ -106,6 +107,13 @@ public class V2OnDiskFormat extends V1OnDiskFormat
     public PrimaryKeyMap.Factory newPrimaryKeyMapFactory(IndexComponents.ForRead perSSTableComponents, PrimaryKey.Factory primaryKeyFactory, SSTableReader sstable)
     {
         return new RowAwarePrimaryKeyMap.RowAwarePrimaryKeyMapFactory(perSSTableComponents, primaryKeyFactory, sstable);
+    }
+
+    @Override
+    public OnDiskOrdinalsMap newOnDiskOrdinalsMap(PerIndexFiles indexFiles, SegmentMetadata segmentMetadata)
+    {
+        var postingListsMetadata = segmentMetadata.componentMetadatas.get(IndexComponentType.POSTING_LISTS);
+        return new V2OnDiskOrdinalsMap(indexFiles.postingLists(), postingListsMetadata.offset, postingListsMetadata.length);
     }
 
     @Override
