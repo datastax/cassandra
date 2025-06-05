@@ -460,6 +460,12 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
                                        memtable);
     }
 
+    @Override
+    public void addBm25DocsStats(BM25Utils.AggDocsStats docsStats)
+    {
+        docsStats.add(indexedRows(), approximateTotalTermCount());
+    }
+
     @Nullable
     private org.apache.cassandra.db.rows.Cell<?> getCellForKey(PrimaryKey key)
     {
