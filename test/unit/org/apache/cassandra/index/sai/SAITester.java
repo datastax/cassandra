@@ -132,13 +132,13 @@ public class SAITester extends CQLTester
 
     protected static final Injections.Counter perSSTableValidationCounter = addConditions(Injections.newCounter("PerSSTableValidationCounter")
                                                                                       .add(newInvokePoint().onClass("IndexDescriptor$IndexComponentsImpl")
-                                                                                                           .onMethod("validateComponents")),
+                                                                                                           .onMethod("isValid")),
                                                                                           b -> b.not().when(expr(Expression.THIS).method("isPerIndexGroup").args()).and().not().when(expr("$validateChecksum"))
     ).build();
 
     protected static final Injections.Counter perColumnValidationCounter = addConditions(Injections.newCounter("PerColumnValidationCounter")
                                                                                      .add(newInvokePoint().onClass("IndexDescriptor$IndexComponentsImpl")
-                                                                                                          .onMethod("validateComponents")),
+                                                                                                          .onMethod("isValid")),
                                                                                          b -> b.when(expr(Expression.THIS).method("isPerIndexGroup").args()).and().not().when(expr("$validateChecksum"))
     ).build();
 
