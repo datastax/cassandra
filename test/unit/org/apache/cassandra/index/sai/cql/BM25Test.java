@@ -24,6 +24,7 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import org.apache.cassandra.cql3.restrictions.SingleColumnRestriction;
+import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.assertj.core.api.Assertions;
 
 import org.junit.Before;
@@ -861,7 +862,7 @@ public class BM25Test extends SAITester
         execute(insert, row4);
 
         assertRows(execute("SELECT * FROM %s WHERE k2:'orange' LIMIT 10"), row2, row1, row3);
-        assertRows(execute("SELECT * FROM %s ORDER BY k2 BM25 OF 'orange' LIMIT 10"), row3, row2, row1); // no rows returned!
+        assertRejectsBM25OnNonRegularColumn("SELECT * FROM %s ORDER BY k2 BM25 OF 'orange' LIMIT 10", "partition key", "k2");
     }
 
     @Test
@@ -881,7 +882,7 @@ public class BM25Test extends SAITester
         execute(insert, row4);
 
         assertCannotBeRestrictedByClustering("SELECT * FROM %s WHERE c:'orange' LIMIT 10", "c");
-        assertRows(execute("SELECT * FROM %s ORDER BY c BM25 OF 'orange' LIMIT 10"), row3, row2, row1); // no rows returned!
+        assertRejectsBM25OnNonRegularColumn("SELECT * FROM %s ORDER BY c BM25 OF 'orange' LIMIT 10", "clustering", "c");
     }
 
     @Test
@@ -901,7 +902,7 @@ public class BM25Test extends SAITester
         execute(insert, row4);
 
         assertCannotBeRestrictedByClustering("SELECT * FROM %s WHERE c2:'orange' LIMIT 10", "c2");
-        assertRows(execute("SELECT * FROM %s ORDER BY c2 BM25 OF 'orange' LIMIT 10"), row3, row2, row1); // no rows returned!
+        assertRejectsBM25OnNonRegularColumn("SELECT * FROM %s ORDER BY c2 BM25 OF 'orange' LIMIT 10", "clustering", "c2");
     }
 
     @Test
@@ -921,7 +922,7 @@ public class BM25Test extends SAITester
         execute(insert, row4);
 
         assertRows(execute("SELECT k, c, s FROM %s WHERE s:'orange' LIMIT 10"), row1, row2, row3);
-        assertRows(execute("SELECT k, c, s FROM %s ORDER BY s BM25 OF 'orange' LIMIT 10"), row3, row2, row1); // NPE!
+        assertRejectsBM25OnNonRegularColumn("SELECT k, c, s FROM %s ORDER BY s BM25 OF 'orange' LIMIT 10", "static", "s");
     }
 
     @Test
@@ -1018,6 +1019,13 @@ public class BM25Test extends SAITester
         Assertions.assertThatThrownBy(() -> execute(query))
                   .isInstanceOf(InvalidRequestException.class)
                   .hasMessage(format(SingleColumnRestriction.AnalyzerMatchesRestriction.CANNOT_BE_RESTRICTED_BY_CLUSTERING_ERROR, column));
+    }
+
+    private void assertRejectsBM25OnNonRegularColumn(String query, String columnType, String column)
+    {
+        Assertions.assertThatThrownBy(() -> execute(query))
+                  .isInstanceOf(InvalidRequestException.class)
+                  .hasMessage(format(StatementRestrictions.BM25_ORDERING_REQUIRES_REGULAR_COLUMN_MESSAGE, columnType, column));
     }
 
     public final static Object[][] DATASET =
