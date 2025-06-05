@@ -264,11 +264,6 @@ public abstract class CassandraIndex implements Index
                && supportsOperator(indexedColumn, operator);
     }
 
-    private boolean supportsExpression(RowFilter.Expression expression)
-    {
-        return supportsExpression(expression.column(), expression.operator());
-    }
-
     public AbstractType<?> customExpressionValueType()
     {
         return null;

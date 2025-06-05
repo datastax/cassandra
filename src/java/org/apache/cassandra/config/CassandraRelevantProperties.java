@@ -372,6 +372,9 @@ public enum CassandraRelevantProperties
     /** Whether to optimize query plans */
     SAI_QUERY_OPTIMIZATION_LEVEL("cassandra.sai.query_optimization_level", "1"),
 
+    /** Controls the maximum number of index range iterators that will be used in a SAI intersection operation. */
+    SAI_INTERSECTION_CLAUSE_LIMIT("cassandra.sai.intersection.clause.limit", "2"),
+
     /** Whether vector type only allows float vectors. True by default. **/
     VECTOR_FLOAT_ONLY("cassandra.float_only_vectors", "true"),
     /** Enables use of vector type. True by default. **/
@@ -604,7 +607,7 @@ public enum CassandraRelevantProperties
      * The current messaging version. This is used when we add new messaging versions without adopting them immediately,
      * or to force the node to use a specific version for testing purposes.
      */
-    DS_CURRENT_MESSAGING_VERSION("ds.current_messaging_version", Integer.toString(MessagingService.VERSION_DS_11)),
+    DS_CURRENT_MESSAGING_VERSION("ds.current_messaging_version", Integer.toString(MessagingService.VERSION_DS_12)),
 
     /**
      * Which compression algorithm to use for SSTable compression when not specified explicitly in the sstable options.
