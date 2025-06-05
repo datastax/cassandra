@@ -641,7 +641,13 @@ public enum CassandraRelevantProperties
      * Allows custom implementation of {@link OperationContext.Factory} to optionally create and configure custom
      * {@link OperationContext} instances.
      */
-    OPERATION_CONTEXT_FACTORY("cassandra.operation_context_factory_class");
+    OPERATION_CONTEXT_FACTORY("cassandra.operation_context_factory_class"),
+
+    /**
+     * Allows custom implementation of {@link EncryptorExtractor}.
+     * To be overridden by CNDB where the callstack allows reading only data files at time.
+     */
+    ENCRYPTOR_EXTRACTOR_CLASS("cassandra.metadata_encryptor_extractor_class");
 
     CassandraRelevantProperties(String key, String defaultVal)
     {

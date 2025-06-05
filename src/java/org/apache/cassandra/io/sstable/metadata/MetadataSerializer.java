@@ -21,17 +21,14 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.EnumMap;
 import java.util.EnumSet;
-import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.function.UnaryOperator;
 import java.util.zip.CRC32;
 
 import com.google.common.base.Throwables;
-import com.google.common.collect.Lists;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -85,7 +82,7 @@ public class MetadataSerializer implements IMetadataSerializer
         updateChecksumInt(crc, componentsCount);
         maybeWriteChecksum(crc, out, version);
 
-        ICompressor encryptor = getEncryptor(descriptor);
+        ICompressor encryptor = EncryptorExtractor.INSTANCE.getEncryptor(descriptor);
         ByteBuffer[] componentsSerializations = new ByteBuffer[componentsCount];
 
         // serialize and possibly encrypt components
@@ -216,7 +213,7 @@ public class MetadataSerializer implements IMetadataSerializer
         MetadataType[] allMetadataTypes = MetadataType.values();
 
         Map<MetadataType, MetadataComponent> components = new EnumMap<>(MetadataType.class);
-        ICompressor encryptor = getEncryptor(descriptor);
+        ICompressor encryptor = EncryptorExtractor.INSTANCE.getEncryptor(descriptor);
 
         for (int i = 0; i < count; i++)
         {
@@ -329,28 +326,5 @@ public class MetadataSerializer implements IMetadataSerializer
         Map<MetadataType, MetadataComponent> currentComponents = deserialize(descriptor, EnumSet.allOf(MetadataType.class));
         currentComponents.putAll(updatedComponents);
         rewriteSSTableMetadata(descriptor, currentComponents);
-    }
-
-    /**
-     * Read the compression info file pointed by the given descriptor and create the corresponding encryptor.
-     *
-     * Returns null if no encryption applies (version doesn't support it, compression is not applied, or the applicable
-     * compression does not include encryption).
-     */
-    private ICompressor getEncryptor(Descriptor desc)
-    {
-        if (!desc.version.metadataAreEncrypted())
-            return null;
-        File compressionFile = desc.fileFor(Component.COMPRESSION_INFO);
-        if (!compressionFile.exists())
-            return null;
-
-        try (CompressionMetadata cm = CompressionMetadata.read(compressionFile, true))
-        {
-            // Note: we use only the encryption component, without any compression. The reason for doing this is to
-            // avoid having to allocate (and save the size of) an additional buffer to hold the larger uncompressed
-            // serialization on reads.
-            return cm.parameters.getSstableCompressor().encryptionOnly();
-        }
     }
 }
