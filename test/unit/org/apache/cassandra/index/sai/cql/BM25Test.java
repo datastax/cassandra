@@ -958,6 +958,95 @@ public class BM25Test extends SAITester
         assertRows(execute("SELECT k, c, s FROM %s ORDER BY s BM25 OF 'orange' LIMIT 10"), row3, row2, row1); // NPE!
     }
 
+    @Test
+    public void testOrderByListColumn()
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, l list<text>)");
+        createIndex("CREATE CUSTOM INDEX ON %s(l) USING 'StorageAttachedIndex' WITH OPTIONS = { 'index_analyzer': 'standard' }");
+
+        String insert = "INSERT INTO %s (k, l) VALUES (?, ?)";
+        Object[] row1 = row(1, list("orange"));
+        Object[] row2 = row(2, list("orange apple"));
+        Object[] row3 = row(3, list("orange orange"));
+        Object[] row4 = row(4, list("banana apple"));
+        execute(insert, row1);
+        execute(insert, row2);
+        execute(insert, row3);
+        execute(insert, row4);
+
+        assertRows(execute("SELECT * FROM %s WHERE l CONTAINS 'orange' LIMIT 10"), row1, row2, row3);
+        assertInvalidMessage("Invalid STRING constant (orange) for \"l\" of type list<text>",
+                             "SELECT * FROM %s ORDER BY l BM25 OF 'orange' LIMIT 10");
+    }
+
+    @Test
+    public void testOrderByFrozenListColumn()
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, l frozen<list<text>>)");
+        assertInvalidMessage("Cannot use an analyzer on full(l) because it's a frozen collection.",
+                             "CREATE CUSTOM INDEX ON %s(FULL(l)) USING 'StorageAttachedIndex' WITH OPTIONS = { 'index_analyzer': 'standard' }");
+    }
+
+    @Test
+    public void testOrderBySetColumn()
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, s set<text>)");
+        createIndex("CREATE CUSTOM INDEX ON %s(s) USING 'StorageAttachedIndex' WITH OPTIONS = { 'index_analyzer': 'standard' }");
+
+        String insert = "INSERT INTO %s (k, s) VALUES (?, ?)";
+        Object[] row1 = row(1, set("orange"));
+        Object[] row2 = row(2, set("orange apple"));
+        Object[] row3 = row(3, set("orange orange"));
+        Object[] row4 = row(4, set("banana apple"));
+        execute(insert, row1);
+        execute(insert, row2);
+        execute(insert, row3);
+        execute(insert, row4);
+
+        assertRows(execute("SELECT * FROM %s WHERE s CONTAINS 'orange' LIMIT 10"), row1, row2, row3);
+        assertInvalidMessage("Invalid STRING constant (orange) for \"s\" of type set<text>",
+                             "SELECT * FROM %s ORDER BY s BM25 OF 'orange' LIMIT 10");
+    }
+
+    @Test
+    public void testOrderByFrozenSetColumn()
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, s frozen<set<text>>)");
+        assertInvalidMessage("Cannot use an analyzer on full(s) because it's a frozen collection.",
+                             "CREATE CUSTOM INDEX ON %s(FULL(s)) USING 'StorageAttachedIndex' WITH OPTIONS = { 'index_analyzer': 'standard' }");
+    }
+
+    @Test
+    public void testOrderByMapColumn()
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, m map<text,text>)");
+        createIndex("CREATE CUSTOM INDEX ON %s(KEYS(m)) USING 'StorageAttachedIndex' WITH OPTIONS = { 'index_analyzer': 'standard' }");
+        createIndex("CREATE CUSTOM INDEX ON %s(VALUES(m)) USING 'StorageAttachedIndex' WITH OPTIONS = { 'index_analyzer': 'standard' }");
+
+        String insert = "INSERT INTO %s (k, m) VALUES (?, ?)";
+        Object[] row1 = row(1, map("orange", "banana apple"));
+        Object[] row2 = row(2, map("orange apple", "orange orange"));
+        Object[] row3 = row(3, map("orange orange", "orange apple"));
+        Object[] row4 = row(4, map("banana apple", "orange"));
+        execute(insert, row1);
+        execute(insert, row2);
+        execute(insert, row3);
+        execute(insert, row4);
+
+        assertRows(execute("SELECT * FROM %s WHERE m CONTAINS KEY 'orange' LIMIT 10"), row1, row2, row3);
+        assertRows(execute("SELECT * FROM %s WHERE m CONTAINS 'orange' LIMIT 10"), row2, row4, row3);
+        assertInvalidMessage("Invalid STRING constant (orange) for \"m\" of type map<text, text>",
+                             "SELECT * FROM %s ORDER BY m BM25 OF 'orange' LIMIT 10");
+    }
+
+    @Test
+    public void testOrderByFrozenMapColumn()
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, m frozen<map<text, text>>)");
+        assertInvalidMessage("Cannot use an analyzer on full(m) because it's a frozen collection.",
+                             "CREATE CUSTOM INDEX ON %s(FULL(m)) USING 'StorageAttachedIndex' WITH OPTIONS = { 'index_analyzer': 'standard' }");
+    }
+
     private void assertCannotBeRestrictedByClustering(String query, String column)
     {
         Assertions.assertThatThrownBy(() -> execute(query))
