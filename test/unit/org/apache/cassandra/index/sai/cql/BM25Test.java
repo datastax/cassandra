@@ -23,6 +23,7 @@ import java.util.concurrent.Future;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+import org.apache.cassandra.cql3.restrictions.SingleColumnRestriction;
 import org.assertj.core.api.Assertions;
 
 import org.junit.Before;
@@ -40,6 +41,7 @@ import org.apache.cassandra.index.sai.plan.QueryController;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
+import static java.lang.String.format;
 import static org.apache.cassandra.index.sai.analyzer.AnalyzerEqOperatorSupport.EQ_AMBIGUOUS_ERROR;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.AssertionsForInterfaceTypes.assertThat;
@@ -866,6 +868,101 @@ public class BM25Test extends SAITester
                 "climate");
         executeQuery(Arrays.asList(10, 18, 0), "SELECT * FROM %s WHERE score = 5 ORDER BY body BM25 OF ? LIMIT 10",
                 "climate");
+    }
+
+    @Test
+    public void testOrderByPartitionKey()
+    {
+        createTable("CREATE TABLE %s (k text PRIMARY KEY)");
+        assertInvalidMessage("Cannot create secondary index on the only partition key column k",
+                             "CREATE CUSTOM INDEX ON %s(k) USING 'StorageAttachedIndex'");
+    }
+
+    @Test
+    public void testOrderByPartitionKeyComponent()
+    {
+        createTable("CREATE TABLE %s (k1 int, k2 text, PRIMARY KEY((k1, k2)))");
+        createIndex("CREATE CUSTOM INDEX ON %s(k2) USING 'StorageAttachedIndex' WITH OPTIONS = { 'index_analyzer': 'standard' }");
+
+        String insert = "INSERT INTO %s (k1, k2) VALUES (?, ?)";
+        Object[] row1 = row(1, "orange");
+        Object[] row2 = row(2, "orange apple");
+        Object[] row3 = row(3, "orange orange");
+        Object[] row4 = row(4, "banana apple");
+        execute(insert, row1);
+        execute(insert, row2);
+        execute(insert, row3);
+        execute(insert, row4);
+
+        assertRows(execute("SELECT * FROM %s WHERE k2:'orange' LIMIT 10"), row2, row1, row3);
+        assertRows(execute("SELECT * FROM %s ORDER BY k2 BM25 OF 'orange' LIMIT 10"), row3, row2, row1); // no rows returned!
+    }
+
+    @Test
+    public void testOrderByClusteringKey()
+    {
+        createTable("CREATE TABLE %s (k int, c text, PRIMARY KEY(k, c))");
+        createIndex("CREATE CUSTOM INDEX ON %s(c) USING 'StorageAttachedIndex' WITH OPTIONS = { 'index_analyzer': 'standard' }");
+
+        String insert = "INSERT INTO %s (k, c) VALUES (?, ?)";
+        Object[] row1 = row(1, "orange");
+        Object[] row2 = row(2, "orange apple");
+        Object[] row3 = row(3, "orange orange");
+        Object[] row4 = row(4, "banana apple");
+        execute(insert, row1);
+        execute(insert, row2);
+        execute(insert, row3);
+        execute(insert, row4);
+
+        assertCannotBeRestrictedByClustering("SELECT * FROM %s WHERE c:'orange' LIMIT 10", "c");
+        assertRows(execute("SELECT * FROM %s ORDER BY c BM25 OF 'orange' LIMIT 10"), row3, row2, row1); // no rows returned!
+    }
+
+    @Test
+    public void testOrderByClusteringKeyComponent()
+    {
+        createTable("CREATE TABLE %s (k int, c1 int, c2 text, PRIMARY KEY(k, c1, c2))");
+        createIndex("CREATE CUSTOM INDEX ON %s(c2) USING 'StorageAttachedIndex' WITH OPTIONS = { 'index_analyzer': 'standard' }");
+
+        String insert = "INSERT INTO %s (k, c1, c2) VALUES (?, ?, ?)";
+        Object[] row1 = row(1, 1, "orange");
+        Object[] row2 = row(1, 2, "orange apple");
+        Object[] row3 = row(2, 1, "orange orange");
+        Object[] row4 = row(2, 2, "banana apple");
+        execute(insert, row1);
+        execute(insert, row2);
+        execute(insert, row3);
+        execute(insert, row4);
+
+        assertCannotBeRestrictedByClustering("SELECT * FROM %s WHERE c2:'orange' LIMIT 10", "c2");
+        assertRows(execute("SELECT * FROM %s ORDER BY c2 BM25 OF 'orange' LIMIT 10"), row3, row2, row1); // no rows returned!
+    }
+
+    @Test
+    public void testOrderByStaticColumn()
+    {
+        createTable("CREATE TABLE %s (k int, c int, s text static, PRIMARY KEY(k, c))");
+        createIndex("CREATE CUSTOM INDEX ON %s(s) USING 'StorageAttachedIndex' WITH OPTIONS = { 'index_analyzer': 'standard' }");
+
+        String insert = "INSERT INTO %s (k, c, s) VALUES (?, ?, ?)";
+        Object[] row1 = row(1, 0, "orange");
+        Object[] row2 = row(2, 0, "orange apple");
+        Object[] row3 = row(3, 0, "orange orange");
+        Object[] row4 = row(4, 0, "banana apple");
+        execute(insert, row1);
+        execute(insert, row2);
+        execute(insert, row3);
+        execute(insert, row4);
+
+        assertRows(execute("SELECT k, c, s FROM %s WHERE s:'orange' LIMIT 10"), row1, row2, row3);
+        assertRows(execute("SELECT k, c, s FROM %s ORDER BY s BM25 OF 'orange' LIMIT 10"), row3, row2, row1); // NPE!
+    }
+
+    private void assertCannotBeRestrictedByClustering(String query, String column)
+    {
+        Assertions.assertThatThrownBy(() -> execute(query))
+                  .isInstanceOf(InvalidRequestException.class)
+                  .hasMessage(format(SingleColumnRestriction.AnalyzerMatchesRestriction.CANNOT_BE_RESTRICTED_BY_CLUSTERING_ERROR, column));
     }
 
     public final static Object[][] DATASET =
