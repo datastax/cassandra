@@ -60,7 +60,6 @@ import com.google.common.primitives.Longs;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.ListenableFutureTask;
-import com.google.common.util.concurrent.MoreExecutors;
 import com.google.common.util.concurrent.RateLimiter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -2815,14 +2814,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
                 // run our task
                 try
                 {
-                    synchronized (this)
-                    {
-                        // doublecheck again now we've synched on _this_
-                        if (!allCompactionsFinished(toInterruptFor, sstablesPredicate))
-                            return null;
-
                         return callable.call();
-                    }
                 }
                 catch (Exception e)
                 {
