@@ -410,7 +410,7 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
         assert orderer.isBM25();
         List<ByteBuffer> queryTerms = orderer.getQueryTerms();
         AbstractAnalyzer analyzer = indexContext.getAnalyzerFactory().create();
-        BM25Utils.DocStats docStats = computeDocumentFrequencies(queryTerms, analyzer);
+        BM25Utils.DocStats docStats = computeDocumentFrequencies(queryTerms, analyzer, orderer.bm25Stats);
         Iterator<BM25Utils.DocTF> it = stream
                                        .map(pk -> BM25Utils.EagerDocTF.createFromDocument(pk, getCellForKey(pk), analyzer, queryTerms))
                                        .filter(Objects::nonNull)
@@ -422,10 +422,16 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
                                        memtable);
     }
 
+    @Override
+    public void addBm25DocsStats(BM25Utils.AggDocsStats docsStats)
+    {
+        docsStats.add(indexedRows(), approximateTotalTermCount());
+    }
+
     /**
      * Count document frequencies for each term using brute force
      */
-    private BM25Utils.DocStats computeDocumentFrequencies(List<ByteBuffer> queryTerms, AbstractAnalyzer docAnalyzer)
+    private BM25Utils.DocStats computeDocumentFrequencies(List<ByteBuffer> queryTerms, AbstractAnalyzer docAnalyzer, BM25Utils.AggDocsStats bm25Stats)
     {
         var documentFrequencies = new HashMap<ByteBuffer, Long>();
 
@@ -467,7 +473,7 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
                 }
             }
         }
-        return new BM25Utils.DocStats(documentFrequencies, indexedRows(), approximateTotalTermCount());
+        return new BM25Utils.DocStats(documentFrequencies, bm25Stats);
     }
 
     @Nullable
