@@ -495,7 +495,8 @@ public class CompactionGraph implements Closeable, Accountable
         }
         catch (IllegalArgumentException e)
         {
-            logger.debug("Error serializing postings to disk, will reattempt with compression", e);
+            logger.debug("Error serializing postings to disk, will reattempt with compression. Vector {} had {} postings",
+                         key, value.size(), e);
             // This is an extreme edge case where there are many duplicate vectors. This naive approach
             // means that we might have a smaller vector graph than desired, but at least we will not
             // fail to build the index.
