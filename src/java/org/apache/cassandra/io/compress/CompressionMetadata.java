@@ -35,6 +35,9 @@ import com.google.common.base.Preconditions;
 import com.google.common.base.Throwables;
 import com.google.common.primitives.Longs;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.FSReadError;
@@ -63,6 +66,8 @@ import org.apache.cassandra.utils.concurrent.Transactional;
  */
 public class CompressionMetadata implements AutoCloseable
 {
+    private static Logger logger = LoggerFactory.getLogger(CompressionMetadata.class);
+
     private static final AtomicLong NATIVE_MEMORY_USAGE = new AtomicLong(0);
     /**
      * DataLength can represent either the true length of the file
@@ -143,7 +148,7 @@ public class CompressionMetadata implements AutoCloseable
         long uncompressedOffset = sliceDescriptor.exists() ? sliceDescriptor.sliceStart : 0;
         long uncompressedLength = sliceDescriptor.exists() ? sliceDescriptor.dataEnd - sliceDescriptor.sliceStart : -1;
 
-
+        logger.info("indexFilePath {} exists {}", indexFilePath.path(), indexFilePath.exists());
 
         try (FileChannel fc = StorageProvider.instance.writeTimeReadFileChannelFor(indexFilePath);
              FileInputStreamPlus stream = new FileInputStreamPlus(fc, indexFilePath.toPath()))
