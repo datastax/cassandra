@@ -42,6 +42,7 @@ import org.apache.cassandra.cql3.restrictions.Restrictions;
 import org.apache.cassandra.cql3.selection.SortedRowsBuilder;
 import org.apache.cassandra.db.marshal.FloatType;
 import org.apache.cassandra.guardrails.Guardrails;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.sensors.SensorsCustomParams;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.Schema;
@@ -110,7 +111,8 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
     // and the related code in
     //  - StatementRestrictions.addOrderingRestrictions
     //  - StorageAttachedIndexSearcher.PrimaryKeyIterator constructor
-    public static final boolean ANN_USE_SYNTHETIC_SCORE = Boolean.parseBoolean(System.getProperty("cassandra.sai.ann_use_synthetic_score", "false"));
+    public static final boolean ANN_USE_SYNTHETIC_SCORE = Boolean.parseBoolean(
+    System.getProperty("cassandra.sai.ann_use_synthetic_score", Version.current().after(Version.EC) ? "true" : "false"));
 
     private static final Logger logger = LoggerFactory.getLogger(SelectStatement.class);
     private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(SelectStatement.logger, 1, TimeUnit.MINUTES);
