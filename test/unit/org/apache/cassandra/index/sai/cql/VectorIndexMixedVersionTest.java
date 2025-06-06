@@ -20,8 +20,8 @@ package org.apache.cassandra.index.sai.cql;
 
 import java.util.Collections;
 import java.util.List;
+import java.util.stream.Collectors;
 
-import com.google.common.collect.Lists;
 import org.junit.Test;
 
 import org.apache.cassandra.index.sai.SAIUtil;
@@ -36,8 +36,11 @@ public class VectorIndexMixedVersionTest extends VectorTester
 
     private static List<Version> getVersions()
     {
-        var versions = Lists.newArrayList(Version.CA, Version.DC, Version.EB);
+        var versions = Version.ALL.stream()
+                          .filter(v -> v.onOrAfter(Version.JVECTOR_EARLIEST))
+                          .collect(Collectors.toList());
         Collections.shuffle(versions, getRandom().getRandom());
+        logger.info("Running mixed version test with versions: {}", versions);
         return versions;
     }
 
@@ -54,12 +57,18 @@ public class VectorIndexMixedVersionTest extends VectorTester
         for (var version : VERSIONS)
         {
             SAIUtil.setCurrentVersion(version);
-            for (int i = 0; i < CassandraOnHeapGraph.MIN_PQ_ROWS; i++)
+            // Insert 2x the minimum number of rows to ensure we have enough for PQ training, even if there are
+            // duplicate vectors.
+            for (int i = 0; i < CassandraOnHeapGraph.MIN_PQ_ROWS * 2; i++)
                 execute("INSERT INTO %s (pk, vec) VALUES (?, ?)", i, randomVectorBoxed(4));
             flush();
         }
 
         // Run basic query to confirm we can, no need to validate results
+        execute("SELECT pk FROM %s ORDER BY vec ANN OF [2.0, 2.0, 3.0, 4.0] LIMIT 2");
+
+        // Confirm we can compact them all and run a query too
+        compact();
         execute("SELECT pk FROM %s ORDER BY vec ANN OF [2.0, 2.0, 3.0, 4.0] LIMIT 2");
     }
 }

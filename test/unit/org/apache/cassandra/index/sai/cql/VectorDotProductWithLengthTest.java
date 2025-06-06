@@ -43,9 +43,12 @@ public class VectorDotProductWithLengthTest extends VectorTester
     @Parameterized.Parameters(name = "{0}")
     public static Collection<Object[]> data()
     {
-        // we are testing unit vector detection which is part of the EB jvector changes, and will continue in all
-        // subsequent versions
-        return Stream.of(Version.EB).map(v -> new Object[]{ v}).collect(Collectors.toList());
+        // we are testing unit vector detection which was introduced in jvector format 4
+        return Version.ALL.stream()
+                          .filter(v -> v.onOrAfter(Version.JVECTOR_EARLIEST))
+                          .filter(v -> v.onDiskFormat().jvectorFileFormatVersion() >= 4)
+                          .map(v -> new Object[]{ v})
+                          .collect(Collectors.toList());
     }
 
     @Before

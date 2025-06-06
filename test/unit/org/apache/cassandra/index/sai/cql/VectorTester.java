@@ -187,7 +187,7 @@ public class VectorTester extends SAITester
         public static Collection<Object[]> data()
         {
             // See Version file for explanation of changes associated with each version
-            return Stream.of(Version.CA, Version.DC, Version.EB).map(v -> new Object[]{ v }).collect(Collectors.toList());
+            return Stream.of(Version.CA, Version.DC, Version.EC).map(v -> new Object[]{ v }).collect(Collectors.toList());
         }
 
         @Before
