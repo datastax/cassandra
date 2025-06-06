@@ -21,6 +21,7 @@ import java.io.DataOutput;
 import java.io.EOFException;
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.nio.channels.FileChannel;
 import java.nio.file.NoSuchFileException;
 import java.util.Collection;
 import java.util.HashMap;
@@ -43,6 +44,7 @@ import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.io.util.File;
@@ -141,7 +143,10 @@ public class CompressionMetadata implements AutoCloseable
         long uncompressedOffset = sliceDescriptor.exists() ? sliceDescriptor.sliceStart : 0;
         long uncompressedLength = sliceDescriptor.exists() ? sliceDescriptor.dataEnd - sliceDescriptor.sliceStart : -1;
 
-        try (FileInputStreamPlus stream = indexFilePath.newInputStream())
+
+
+        try (FileChannel fc = StorageProvider.instance.writeTimeReadFileChannelFor(indexFilePath);
+             FileInputStreamPlus stream = new FileInputStreamPlus(fc, indexFilePath.toPath()))
         {
             String compressorName = stream.readUTF();
             int optionCount = stream.readInt();
