@@ -126,9 +126,7 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
 
     /**
      * Approximate total count of terms in the memory index.
-     * The count is approximate because some deletions are not accounted for. For example, given a table with the
-     * following schema: CREATE TABLE %s (k int PRIMARY KEY, v text), DELETE FROM %s WHERE k=2 does not update the SAI
-     * index, but DELETE v FROM %s WHERE k = 2 does.
+     * The count is approximate because some deletions are not accounted for in the current implementation.
      *
      * @return total count of terms for indexes rows.
      */
@@ -351,7 +349,7 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
             for (ByteBuffer term : queryTerms)
             {
                 Expression expr = new Expression(indexContext).add(Operator.ANALYZER_MATCHES, term);
-                // getMaxKeys() counts all rows that match the expressin for shards within the key range. The key
+                // getMaxKeys() counts all rows that match the expression for shards within the key range. The key
                 // range is not applied to the search results yet, so there is a small chance for overcounting if
                 // the key range filters within a shard. This is assumed to be acceptable because the on disk
                 // estimate also uses the key range to skip irrelevant sstable segments but does not apply the key
