@@ -2814,7 +2814,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
                 // run our task
                 try
                 {
-                        return callable.call();
+                    return callable.call();
                 }
                 catch (Exception e)
                 {
