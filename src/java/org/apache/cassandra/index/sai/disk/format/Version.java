@@ -52,7 +52,7 @@ public class Version implements Comparable<Version>
     public static final Version AA = new Version("aa", V1OnDiskFormat.instance, Version::aaFileNameFormat);
     // Stargazer
     public static final Version BA = new Version("ba", V2OnDiskFormat.instance, (c, i, g) -> stargazerFileNameFormat(c, i, g, "ba"));
-    // Converged Cassandra with JVector
+    // Converged Cassandra with JVector with file format version 2
     public static final Version CA = new Version("ca", V3OnDiskFormat.instance, (c, i, g) -> stargazerFileNameFormat(c, i, g, "ca"));
     // NOTE: use DB to prevent collisions with upstream file formats
     // Encode trie entries using their AbstractType to ensure trie entries are sorted for range queries and are prefix free.
@@ -61,7 +61,7 @@ public class Version implements Comparable<Version>
     public static final Version DC = new Version("dc", V5OnDiskFormat.instance, (c, i, g) -> stargazerFileNameFormat(c, i, g, "dc"));
     // histograms in index metadata
     public static final Version EB = new Version("eb", V6OnDiskFormat.instance, (c, i, g) -> stargazerFileNameFormat(c, i, g, "eb"));
-    // term frequencies index component (support for BM25)
+    // term frequencies index component (support for BM25); bump jvector file format version to 4
     public static final Version EC = new Version("ec", V7OnDiskFormat.instance, (c, i, g) -> stargazerFileNameFormat(c, i, g, "ec"));
     // total terms count serialization in index metadata
     public static final Version ED = new Version("ed", V7OnDiskFormat.instance, (c, i, g) -> stargazerFileNameFormat(c, i, g, "ed"));
