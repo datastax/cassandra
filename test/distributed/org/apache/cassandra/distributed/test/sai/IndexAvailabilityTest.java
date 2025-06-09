@@ -205,8 +205,7 @@ public class IndexAvailabilityTest extends TestBaseImpl
     public void testIndexExceptionsTwoIndexesOn3NodeCluster() throws Exception
     {
         try (Cluster cluster = init(Cluster.build(3)
-                .withConfig(config -> config.with(GOSSIP)
-                        .with(NETWORK))
+                .withConfig(config -> config.with(GOSSIP).with(NETWORK))
                 .start()))
         {
             String ks2 = "ks2";
@@ -232,17 +231,11 @@ public class IndexAvailabilityTest extends TestBaseImpl
 
             cluster.schemaChange(String.format(CREATE_INDEX, index1, ks2, cf1, "v1"));
             cluster.schemaChange(String.format(CREATE_INDEX, index2, ks2, cf1, "v2"));
-            cluster.forEach(node -> expectedNodeIndexQueryability.put(NodeIndex.create(ks2, index1, node), Index.Status.BUILD_SUCCEEDED));
-            for (IInvokableInstance node : cluster.get(2, 1, 3))
-                for (IInvokableInstance replica : cluster.get(1, 2, 3))
-                    waitForIndexingStatus(node, ks2, index1, replica, Index.Status.BUILD_SUCCEEDED);
+            waitForIndexQueryable(cluster, ks2);
 
             // Mark only index2 as building on node3, leave index1 in BUILD_SUCCEEDED state
             markIndexBuilding(cluster.get(3), ks2, cf1, index2);
-            cluster.forEach(node -> expectedNodeIndexQueryability.put(NodeIndex.create(ks2, index2, node), Index.Status.FULL_REBUILD_STARTED));
-            waitForIndexingStatus(cluster.get(2), ks2, index2, cluster.get(3), Index.Status.FULL_REBUILD_STARTED);
-            waitForIndexingStatus(cluster.get(1), ks2, index2, cluster.get(3), Index.Status.FULL_REBUILD_STARTED);
-            waitForIndexingStatus(cluster.get(3), ks2, index2, cluster.get(3), Index.Status.FULL_REBUILD_STARTED);
+            cluster.forEach(node -> waitForIndexingStatus(node, ks2, index2, cluster.get(3), Index.Status.FULL_REBUILD_STARTED));
 
             assertThatThrownBy(() ->
                     executeOnAllCoordinators(cluster,
@@ -251,9 +244,9 @@ public class IndexAvailabilityTest extends TestBaseImpl
                             0))
                     .hasMessageContaining("Operation failed - received 1 responses and 1 failures: INDEX_BUILD_IN_PROGRESS");
 
-            // Mark only index2 as failing on node2, leave index1 in BUILD_SUCCEEDED state
+            // Mark only index2 as failing/building on node2, leave index1 in BUILD_SUCCEEDED state
             markIndexBuilding(cluster.get(2), ks2, cf1, index2);
-            cluster.forEach(node -> expectedNodeIndexQueryability.put(NodeIndex.create(ks2, index2, node), Index.Status.BUILD_FAILED));
+            cluster.forEach(node -> waitForIndexingStatus(node, ks2, index2, cluster.get(2), Index.Status.FULL_REBUILD_STARTED));
 
             assertThatThrownBy(() ->
                     executeOnAllCoordinators(cluster,
@@ -264,10 +257,7 @@ public class IndexAvailabilityTest extends TestBaseImpl
 
             // Mark only index2 as failing on node1, leave index1 in BUILD_SUCCEEDED state
             markIndexNonQueryable(cluster.get(1), ks2, cf1, index2);
-            cluster.forEach(node -> expectedNodeIndexQueryability.put(NodeIndex.create(ks2, index2, node), Index.Status.BUILD_FAILED));
-            waitForIndexingStatus(cluster.get(2), ks2, index2, cluster.get(1), Index.Status.BUILD_FAILED);
-            waitForIndexingStatus(cluster.get(1), ks2, index2, cluster.get(1), Index.Status.BUILD_FAILED);
-            waitForIndexingStatus(cluster.get(3), ks2, index2, cluster.get(1), Index.Status.BUILD_FAILED);
+            cluster.forEach(node -> waitForIndexingStatus(node, ks2, index2, cluster.get(1), Index.Status.BUILD_FAILED));
 
             assertThatThrownBy(() ->
                     executeOnAllCoordinators(cluster,
