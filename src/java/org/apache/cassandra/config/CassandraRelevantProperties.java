@@ -544,6 +544,14 @@ public enum CassandraRelevantProperties
     SAI_INDEX_READS_DISABLED("cassandra.sai.disabled_reads", "false"),
 
     /**
+     * Only takes effect when SAI_INDEX_READS_DISABLED is true. If true, creates an index searcher that loads
+     * segment metadata and has the ability to load extra files, like the PQ file for vector indexes, but does not do
+     * so until it is actually needed. Currently only affects vector indexes. Other indexes fall back to the empty index
+     * searcher when SAI_INDEX_READS_DISABLED is true.
+     */
+    SAI_INDEX_LOAD_SEGMENT_METADATA("cassandra.sai.load_segment_metadata", "true"),
+
+    /**
      * Allows custom implementation of {@link SensorsFactory} to optionally create
      * and configure {@link org.apache.cassandra.sensors.RequestSensors} instances.
      */

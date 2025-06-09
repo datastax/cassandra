@@ -21,16 +21,12 @@ package org.apache.cassandra.index.sai.disk.vector;
 import java.io.DataOutput;
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
-import java.util.Comparator;
 import java.util.Map;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ConcurrentSkipListMap;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Function;
 import java.util.function.IntUnaryOperator;
 import java.util.function.ToIntFunction;
 import java.util.stream.IntStream;
@@ -65,19 +61,15 @@ import io.github.jbellis.jvector.vector.VectorizationProvider;
 import io.github.jbellis.jvector.vector.types.VectorFloat;
 import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
 import org.agrona.collections.IntHashSet;
-import org.apache.cassandra.db.compaction.CompactionSSTable;
 import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
-import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
-import org.apache.cassandra.index.sai.disk.v1.Segment;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
-import org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher;
 import org.apache.cassandra.index.sai.disk.v2.V2VectorPostingsWriter;
 import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.v5.V5OnDiskFormat;
@@ -499,58 +491,6 @@ public class CassandraOnHeapGraph<T> implements Accountable
         return metadataMap;
     }
 
-    /**
-     * Return the best previous CompressedVectors for this column that matches the `matcher` predicate.
-     * "Best" means the most recent one that hits the row count target of {@link ProductQuantization#MAX_PQ_TRAINING_SET_SIZE},
-     * or the one with the most rows if none are larger than that.
-     */
-    public static PqInfo getPqIfPresent(IndexContext indexContext, Function<VectorCompression, Boolean> matcher)
-    {
-        // Retrieve the first compressed vectors for a segment with at least MAX_PQ_TRAINING_SET_SIZE rows
-        // or the one with the most rows if none reach that size
-        var view = indexContext.getReferencedView(TimeUnit.SECONDS.toNanos(5));
-        if (view == null)
-        {
-            logger.warn("Unable to get view of already built indexes for {}", indexContext);
-            return null;
-        }
-
-        try
-        {
-            var indexes = new ArrayList<>(view.getIndexes());
-            indexes.sort(Comparator.comparing(SSTableIndex::getSSTable, CompactionSSTable.maxTimestampDescending));
-
-            PqInfo cvi = null;
-            long maxRows = 0;
-            for (SSTableIndex index : indexes)
-            {
-                for (Segment segment : index.getSegments())
-                {
-                    if (segment.metadata.numRows < maxRows)
-                        continue;
-
-                    var searcher = (V2VectorIndexSearcher) segment.getIndexSearcher();
-                    var cv = searcher.getCompression();
-                    if (matcher.apply(cv))
-                    {
-                        // We can exit now because we won't find a better candidate
-                        var candidate = new PqInfo(searcher.getPQ(), searcher.containsUnitVectors(), segment.metadata.numRows);
-                        if (segment.metadata.numRows >= ProductQuantization.MAX_PQ_TRAINING_SET_SIZE)
-                            return candidate;
-
-                        cvi = candidate;
-                        maxRows = segment.metadata.numRows;
-                    }
-                }
-            }
-            return cvi;
-        }
-        finally
-        {
-            view.release();
-        }
-    }
-
     private long writePQ(SequentialWriter writer, V5VectorPostingsWriter.RemappedPostings remapped, IndexContext indexContext) throws IOException
     {
         var preferredCompression = sourceModel.compressionProvider.apply(vectorValues.dimension());
@@ -566,7 +506,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
             // build encoder (expensive for PQ, cheaper for BQ)
             if (preferredCompression.type == CompressionType.PRODUCT_QUANTIZATION)
             {
-                var pqi = getPqIfPresent(indexContext, preferredCompression::equals);
+                var pqi = ProductQuantizationFetcher.getPqIfPresent(indexContext);
                 compressor = computeOrRefineFrom(pqi, preferredCompression);
             }
             else
@@ -610,7 +550,8 @@ public class CassandraOnHeapGraph<T> implements Accountable
         writer.writeByte(type.ordinal());
     }
 
-    ProductQuantization computeOrRefineFrom(PqInfo existingInfo, VectorCompression preferredCompression)
+    ProductQuantization computeOrRefineFrom(ProductQuantizationFetcher.PqInfo existingInfo,
+                                            VectorCompression preferredCompression)
     {
         if (existingInfo == null)
         {
@@ -647,21 +588,6 @@ public class CassandraOnHeapGraph<T> implements Accountable
     {
         IGNORE,
         FAIL
-    }
-
-    public static class PqInfo
-    {
-        public final ProductQuantization pq;
-        /** an empty Optional indicates that the index was written with an older version that did not record this information */
-        public final boolean unitVectors;
-        public final long rowCount;
-
-        public PqInfo(ProductQuantization pq, boolean unitVectors, long rowCount)
-        {
-            this.pq = pq;
-            this.unitVectors = unitVectors;
-            this.rowCount = rowCount;
-        }
     }
 
     /** ensures that the graph is connected -- normally not necessary but it can help tests reason about the state */

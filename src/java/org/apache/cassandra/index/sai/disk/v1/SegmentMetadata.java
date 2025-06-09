@@ -149,7 +149,7 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
     private static final Logger logger = LoggerFactory.getLogger(SegmentMetadata.class);
 
     @SuppressWarnings("resource")
-    private SegmentMetadata(IndexInput input, IndexContext context, Version version, SSTableContext sstableContext, boolean loadFullResolutionBounds) throws IOException
+    private SegmentMetadata(IndexInput input, IndexContext context, Version version, SSTableContext sstableContext, boolean loadTermsDistribution, boolean loadFullResolutionBounds) throws IOException
     {
         if (!loadFullResolutionBounds)
             logger.warn("Loading segment metadata without full primary key boundary resolution. Some ORDER BY queries" +
@@ -204,7 +204,8 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
             long fp = input.getFilePointer();
             if (len > 0)
             {
-                td = TermsDistribution.read(input, termsType);
+                if (loadTermsDistribution)
+                    td = TermsDistribution.read(input, termsType);
                 input.seek(fp + len);
             }
         }
@@ -217,10 +218,16 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
             this.totalTermCount = INVALID_TOTAL_TERM_COUNT;
     }
 
-    @SuppressWarnings("resource")
+
     public static List<SegmentMetadata> load(MetadataSource source, IndexContext context, SSTableContext sstableContext) throws IOException
     {
-        return load(source, context, sstableContext, true);
+        return load(source, context, sstableContext, true, true);
+    }
+
+    @SuppressWarnings("resource")
+    public static List<SegmentMetadata> load(MetadataSource source, IndexContext context, SSTableContext sstableContext, boolean loadTermsDistribution) throws IOException
+    {
+        return load(source, context, sstableContext, loadTermsDistribution, true);
     }
 
     /**
@@ -232,13 +239,11 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
     @SuppressWarnings("resource")
     public static List<SegmentMetadata> loadForTesting(MetadataSource source, IndexContext context) throws IOException
     {
-        return load(source, context, null, false);
+        return load(source, context, null, true, false);
     }
 
-    /**
-     * Only set loadFullResolutionBounds to false in tests when you are sure that is exactly what you want.
-     */
-    private static List<SegmentMetadata> load(MetadataSource source, IndexContext context, SSTableContext sstableContext, boolean loadFullResolutionBounds) throws IOException
+    @SuppressWarnings("resource")
+    public static List<SegmentMetadata> load(MetadataSource source, IndexContext context, SSTableContext sstableContext, boolean loadTermsDistribution, boolean loadFullResolutionBounds) throws IOException
     {
 
         IndexInput input = source.get(NAME);
@@ -249,7 +254,7 @@ public class SegmentMetadata implements Comparable<SegmentMetadata>
 
         for (int i = 0; i < segmentCount; i++)
         {
-            segmentMetadata.add(new SegmentMetadata(input, context, source.getVersion(), sstableContext, loadFullResolutionBounds));
+            segmentMetadata.add(new SegmentMetadata(input, context, source.getVersion(), sstableContext, loadTermsDistribution, loadFullResolutionBounds));
         }
 
         return segmentMetadata;

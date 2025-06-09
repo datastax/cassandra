@@ -16,15 +16,12 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.index.sai.disk.v1;
+package org.apache.cassandra.index.sai.disk;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Stream;
-
-import com.google.common.collect.ImmutableList;
 
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
@@ -34,19 +31,18 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SSTableContext;
-import org.apache.cassandra.index.sai.disk.SearchableIndex;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
-import org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher;
-import org.apache.cassandra.index.sai.disk.v5.V5VectorIndexSearcher;
+import org.apache.cassandra.index.sai.disk.format.Version;
+import org.apache.cassandra.index.sai.disk.v1.MetadataSource;
+import org.apache.cassandra.index.sai.disk.v1.PerIndexFiles;
+import org.apache.cassandra.index.sai.disk.v1.Segment;
+import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
 import org.apache.cassandra.index.sai.disk.vector.ProductQuantizationFetcher;
-import org.apache.cassandra.index.sai.disk.vector.VectorCompression;
-import org.apache.cassandra.index.sai.iterators.KeyRangeConcatIterator;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.plan.Orderer;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
-import org.apache.cassandra.index.sai.utils.PrimaryKeyListUtil;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
@@ -66,13 +62,11 @@ import static org.apache.cassandra.index.sai.virtual.SegmentsSystemView.START_TO
 import static org.apache.cassandra.index.sai.virtual.SegmentsSystemView.TABLE_NAME;
 
 /**
- * A version specific implementation of the {@link SearchableIndex} where the
- * index is segmented
+ * An index that eagerly loads segment metadata, can load index files on demand to provide insight into information
+ * about the index, but does not support searching.
  */
-public class V1SearchableIndex implements SearchableIndex
+public class V1MetadataOnlySearchableIndex implements SearchableIndex
 {
-    private final IndexContext indexContext;
-    private final ImmutableList<Segment> segments;
     private final List<SegmentMetadata> metadatas;
     private final DecoratedKey minKey;
     private final DecoratedKey maxKey; // in token order
@@ -80,28 +74,20 @@ public class V1SearchableIndex implements SearchableIndex
     private final ByteBuffer maxTerm;
     private final long minSSTableRowId, maxSSTableRowId;
     private final long numRows;
+    private final IndexContext indexContext;
     private PerIndexFiles indexFiles;
 
-    public V1SearchableIndex(SSTableContext sstableContext, IndexComponents.ForRead perIndexComponents)
+    public V1MetadataOnlySearchableIndex(SSTableContext sstableContext, IndexComponents.ForRead perIndexComponents)
     {
-        this.indexContext = perIndexComponents.context();
         try
         {
+            this.indexContext = perIndexComponents.context();
             this.indexFiles = new PerIndexFiles(perIndexComponents);
-
-            ImmutableList.Builder<Segment> segmentsBuilder = ImmutableList.builder();
 
             final MetadataSource source = MetadataSource.loadMetadata(perIndexComponents);
 
-            metadatas = SegmentMetadata.load(source, indexContext, sstableContext);
-
-            for (SegmentMetadata metadata : metadatas)
-            {
-                segmentsBuilder.add(new Segment(indexContext, sstableContext, indexFiles, metadata));
-            }
-
-            segments = segmentsBuilder.build();
-            assert !segments.isEmpty();
+            // We skip loading the terms distribution becuase this class doesn't use them for now.
+            metadatas = SegmentMetadata.load(source, indexContext, sstableContext, false);
 
             this.minKey = metadatas.get(0).minKey.partitionKey();
             this.maxKey = metadatas.get(metadatas.size() - 1).maxKey.partitionKey();
@@ -126,7 +112,8 @@ public class V1SearchableIndex implements SearchableIndex
     @Override
     public long indexFileCacheSize()
     {
-        return segments.stream().mapToLong(Segment::indexFileCacheSize).sum();
+        // In V1IndexSearcher we accumulate the index file cache size from the segments, so this is 0.
+        return 0;
     }
 
     @Override
@@ -140,7 +127,6 @@ public class V1SearchableIndex implements SearchableIndex
     {
         return minSSTableRowId;
     }
-
     @Override
     public long maxSSTableRowId()
     {
@@ -178,84 +164,26 @@ public class V1SearchableIndex implements SearchableIndex
                                    boolean defer,
                                    int limit) throws IOException
     {
-        KeyRangeConcatIterator.Builder rangeConcatIteratorBuilder = KeyRangeConcatIterator.builder(segments.size());
-
-        try
-        {
-            for (Segment segment : segments)
-            {
-                if (segment.intersects(keyRange))
-                {
-                    rangeConcatIteratorBuilder.add(segment.search(expression, keyRange, context, defer, limit));
-                }
-            }
-
-            return rangeConcatIteratorBuilder.build();
-        }
-        catch (Throwable t)
-        {
-            FileUtils.closeQuietly(rangeConcatIteratorBuilder.ranges());
-            throw t;
-        }
+        // This index is not meant for searching, only for accessing metadata and index files
+        throw new UnsupportedOperationException();
     }
 
     @Override
-    public List<CloseableIterator<PrimaryKeyWithSortKey>> orderBy(Orderer orderer, Expression slice,
+    public List<CloseableIterator<PrimaryKeyWithSortKey>> orderBy(Orderer orderer,
+                                                                  Expression slice,
                                                                   AbstractBounds<PartitionPosition> keyRange,
                                                                   QueryContext context,
                                                                   int limit,
                                                                   long totalRows) throws IOException
     {
-        var iterators = new ArrayList<CloseableIterator<PrimaryKeyWithSortKey>>(segments.size());
-        try
-        {
-            for (Segment segment : segments)
-            {
-                if (segment.intersects(keyRange))
-                {
-                    // Note that the proportionality is not used when the user supplies a rerank_k value in the
-                    // ANN_OPTIONS map.
-                    var segmentLimit = segment.proportionalAnnLimit(limit, totalRows);
-                    iterators.add(segment.orderBy(orderer, slice, keyRange, context, segmentLimit));
-                }
-            }
-
-            return iterators;
-        }
-        catch (Throwable t)
-        {
-            FileUtils.closeQuietly(iterators);
-            throw t;
-        }
-    }
-
-    @Override
-    public List<CloseableIterator<PrimaryKeyWithSortKey>> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Orderer orderer, int limit, long totalRows) throws IOException
-    {
-        var results = new ArrayList<CloseableIterator<PrimaryKeyWithSortKey>>(segments.size());
-        try
-        {
-            for (Segment segment : segments)
-            {
-                // Only pass the primary keys in a segment's range to the segment index.
-                var segmentKeys = PrimaryKeyListUtil.getKeysInRange(keys, segment.metadata.minKey, segment.metadata.maxKey);
-                var segmentLimit = segment.proportionalAnnLimit(limit, totalRows);
-                results.add(segment.orderResultsBy(context, segmentKeys, orderer, segmentLimit));
-            }
-
-            return results;
-        }
-        catch (Throwable t)
-        {
-            FileUtils.closeQuietly(results);
-            throw t;
-        }
+        // This index is not meant for searching, only for accessing metadata and index files
+        throw new UnsupportedOperationException();
     }
 
     @Override
     public List<Segment> getSegments()
     {
-        return segments;
+        throw new UnsupportedOperationException();
     }
 
     @Override
@@ -267,38 +195,38 @@ public class V1SearchableIndex implements SearchableIndex
     @Override
     public Stream<V5VectorPostingsWriter.Structure> getPostingsStructures()
     {
-        return segments.stream()
-                       // V2 doesn't know, so we skip it and err on the side of being optimistic.  See comments in CompactionGraph
-                       .filter(s -> s.getIndexSearcher() instanceof V5VectorIndexSearcher)
-                       .map(s -> (V5VectorIndexSearcher) s.getIndexSearcher())
-                       .map(V5VectorIndexSearcher::getPostingsStructure);
+        // May result in downloading file, but this metadata is valuable. We use a stream to avoid loading all the
+        // structures at once.
+        return metadatas.stream()
+                        // V2 doesn't know, so we skip it and err on the side of being optimistic.  See comments in CompactionGraph
+                        .filter(m -> m.version.onOrAfter(Version.DC))
+                        .map(m -> {
+                            try (var odm = m.version.onDiskFormat().newOnDiskOrdinalsMap(indexFiles, m))
+                            {
+                                return odm.getStructure();
+                            }
+                        });
     }
 
     @Override
     public ProductQuantizationFetcher.PqInfo getPqInfo(int segmentPosition)
     {
-        var segment = segments.get(segmentPosition);
-        assert segment.getIndexSearcher() instanceof V2VectorIndexSearcher : "Index searcher is not a V2VectorIndexSearcher. Found: " + segment.getIndexSearcher().getClass();
-        V2VectorIndexSearcher searcher = (V2VectorIndexSearcher) segment.getIndexSearcher();
-        // Skip segments that don't have PQ
-        if (VectorCompression.CompressionType.PRODUCT_QUANTIZATION != searcher.getCompression().type)
-            return null;
-
-        // Because we sorted based on size then timestamp, this is the best match
-        return new ProductQuantizationFetcher.PqInfo(searcher.getPQ(), searcher.containsUnitVectors(), segment.metadata.numRows);
+        // We have to load from disk here
+        try (var pq = indexFiles.pq())
+        {
+            // Returns null if segment does not use PQ compression.
+            return ProductQuantizationFetcher.maybeReadPqFromSegment(metadatas.get(segmentPosition), pq);
+        }
     }
 
     @Override
-    public void populateSystemView(SimpleDataSet dataset, SSTableReader sstable)
+    public void populateSystemView(SimpleDataSet dataSet, SSTableReader sstable)
     {
         Token.TokenFactory tokenFactory = sstable.metadata().partitioner.getTokenFactory();
 
         for (SegmentMetadata metadata : metadatas)
         {
-            String minTerm = indexContext.isVector() ? "N/A" : indexContext.getValidator().getSerializer().deserialize(metadata.minTerm).toString();
-            String maxTerm = indexContext.isVector() ? "N/A" : indexContext.getValidator().getSerializer().deserialize(metadata.maxTerm).toString();
-
-            dataset.row(sstable.metadata().keyspace, indexContext.getIndexName(), sstable.getFilename(), metadata.segmentRowIdOffset)
+            dataSet.row(sstable.metadata().keyspace, indexContext.getIndexName(), sstable.getFilename(), metadata.segmentRowIdOffset)
                    .column(TABLE_NAME, sstable.descriptor.cfname)
                    .column(COLUMN_NAME, indexContext.getColumnName())
                    .column(CELL_COUNT, metadata.numRows)
@@ -306,8 +234,8 @@ public class V1SearchableIndex implements SearchableIndex
                    .column(MAX_SSTABLE_ROW_ID, metadata.maxSSTableRowId)
                    .column(START_TOKEN, tokenFactory.toString(metadata.minKey.partitionKey().getToken()))
                    .column(END_TOKEN, tokenFactory.toString(metadata.maxKey.partitionKey().getToken()))
-                   .column(MIN_TERM, minTerm)
-                   .column(MAX_TERM, maxTerm)
+                   .column(MIN_TERM, "N/A")
+                   .column(MAX_TERM, "N/A")
                    .column(COMPONENT_METADATA, metadata.componentMetadatas.asMap());
         }
     }
@@ -315,20 +243,19 @@ public class V1SearchableIndex implements SearchableIndex
     @Override
     public long estimateMatchingRowsCount(Expression predicate, AbstractBounds<PartitionPosition> keyRange)
     {
-        long rowCount = 0;
-        for (Segment segment: segments)
-        {
-            long c = segment.estimateMatchingRowsCount(predicate, keyRange);
-            assert c >= 0 : "Estimated row count must not be negative: " + c + " (predicate: " + predicate + ')';
-            rowCount += c;
-        }
-        return rowCount;
+        throw new UnsupportedOperationException();
     }
 
     @Override
     public void close() throws IOException
     {
         FileUtils.closeQuietly(indexFiles);
-        FileUtils.closeQuietly(segments);
+    }
+
+    @Override
+    public List<CloseableIterator<PrimaryKeyWithSortKey>> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Orderer orderer, int limit, long totalRows) throws IOException
+    {
+        throw new UnsupportedOperationException();
     }
 }
+
