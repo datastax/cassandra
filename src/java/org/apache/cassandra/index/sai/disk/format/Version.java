@@ -177,6 +177,12 @@ public class Version implements Comparable<Version>
         return version;
     }
 
+    // Useful for handling features that need a two phase rollout.
+    public boolean after(Version other)
+    {
+        return version.compareTo(other.version) > 0;
+    }
+
     public boolean onOrAfter(Version other)
     {
         return version.compareTo(other.version) >= 0;
