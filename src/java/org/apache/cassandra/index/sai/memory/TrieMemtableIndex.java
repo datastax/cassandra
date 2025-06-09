@@ -479,7 +479,7 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
 
     private int getEndShardForBounds(AbstractBounds<PartitionPosition> bounds)
     {
-        var position = bounds.right;
+        PartitionPosition position = bounds.right;
         return position.isMinimum() ? boundaries.shardCount() - 1
                                     : boundaries.getShardForToken(position.getToken());
     }
