@@ -16,8 +16,14 @@
 
 package org.apache.cassandra.index.sai.cql;
 
+import java.util.Collection;
+import java.util.List;
+import java.util.Set;
+
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.apache.cassandra.index.sai.SAITester;
+import org.apache.cassandra.index.sai.SAIUtil;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.plan.QueryController;
 import org.apache.cassandra.index.sai.plan.TopKProcessor;
 import org.apache.cassandra.inject.ActionBuilder;
@@ -25,14 +31,33 @@ import org.apache.cassandra.inject.Injection;
 import org.apache.cassandra.inject.Injections;
 import org.apache.cassandra.inject.InvokePointBuilder;
 
+import org.junit.Before;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
 
 import static org.apache.cassandra.inject.InvokePointBuilder.newInvokePoint;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertTrue;
 
+@RunWith(Parameterized.class)
 public class DropIndexWhileQueryingTest extends SAITester
 {
+    @Parameterized.Parameter
+    public Version version;
+
+    @Parameterized.Parameters(name = "version={0}")
+    public static Collection<Object> data()
+    {
+        return Set.of(Version.CA, Version.EB);
+    }
+
+    @Before
+    public void setCurrentSAIVersion()
+    {
+        SAIUtil.setCurrentVersion(version);
+    }
+
     // See CNDB-10732
     @Test
     public void testDropIndexWhileQuerying() throws Throwable
@@ -53,7 +78,18 @@ public class DropIndexWhileQueryingTest extends SAITester
     }
 
     @Test
-    public void testFallbackToAnotherIndex() throws Throwable
+    public void testFallbackToAnotherIndexMemtable() throws Throwable
+    {
+        testFallbackToAnotherIndex(false);
+    }
+
+    @Test
+    public void testFallbackToAnotherIndexSSTable() throws Throwable
+    {
+        testFallbackToAnotherIndex(true);
+    }
+
+    public void testFallbackToAnotherIndex(boolean flush) throws Throwable
     {
         createTable("CREATE TABLE %s (k text PRIMARY KEY, x int, y text, z text)");
 
@@ -62,6 +98,9 @@ public class DropIndexWhileQueryingTest extends SAITester
         String indexName2 = createIndex("CREATE CUSTOM INDEX ON %s(z) USING 'StorageAttachedIndex'");
         waitForTableIndexesQueryable();
 
+        // TODO this isn't the right place to drop the iterator when we have the histograms. getQueryView
+        // might be better but it might get called at the wrong time and might not lead to the right
+        // coverage for the fallback logic this test is meant to cover.
         injectIndexDrop("drop_index_1", indexName1, "buildIterator", true);
         injectIndexDrop("drop_index_2", indexName2, "buildIterator", true);
 
@@ -69,6 +108,8 @@ public class DropIndexWhileQueryingTest extends SAITester
         execute("INSERT INTO %s (k, x, y, z) VALUES (?, ?, ?, ?)", "k2", 0, "y1", "z2"); // no match
         execute("INSERT INTO %s (k, x, y, z) VALUES (?, ?, ?, ?)", "k3", 5, "y2", "z0"); // no match
         String query = "SELECT * FROM %s WHERE x = 0 AND y = 'y0' AND z = 'z0'";
+        if (flush)
+            flush();
         assertRowCount(execute(query), 1);
     }
 
