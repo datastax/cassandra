@@ -24,6 +24,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 public class VersionTest
@@ -41,7 +42,12 @@ public class VersionTest
         for (Version version : Version.ALL)
         {
             if (previous != null)
+            {
                 assertTrue(previous.onOrAfter(version));
+                assertTrue(previous.after(version));
+                assertTrue(!version.onOrAfter(previous));
+                assertTrue(!version.after(previous));
+            }
             previous = version;
         }
     }
@@ -61,5 +67,34 @@ public class VersionTest
         assertThatThrownBy(() -> Version.parse("ab")).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> Version.parse("a")).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> Version.parse("abc")).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    public void testAfterMethod()
+    {
+        // Do some basic checks, doesn't need to be updated for each new format.
+        assertTrue(Version.ED.after(Version.EC));
+        assertTrue(Version.EC.after(Version.EB));
+        assertTrue(Version.EB.after(Version.DC));
+        assertTrue(Version.DC.after(Version.DB));
+        assertTrue(Version.DB.after(Version.CA));
+        assertTrue(Version.CA.after(Version.BA));
+        assertTrue(Version.BA.after(Version.AA));
+
+        assertFalse(Version.AA.after(Version.BA));
+        assertFalse(Version.AA.after(Version.AA));
+    }
+
+    @Test
+    public void testOnOrAfterMethod()
+    {
+        // Do some basic checks, doesn't need to be updated for each new format.
+        assertTrue(Version.ED.onOrAfter(Version.ED));
+        assertTrue(Version.ED.onOrAfter(Version.EC));
+        assertTrue(Version.CA.onOrAfter(Version.BA));
+        assertTrue(Version.BA.onOrAfter(Version.AA));
+
+        assertFalse(Version.AA.onOrAfter(Version.BA));
+        assertFalse(Version.BA.onOrAfter(Version.CA));
     }
 }
