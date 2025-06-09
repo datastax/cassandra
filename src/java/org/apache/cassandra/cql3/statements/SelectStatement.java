@@ -145,7 +145,8 @@ import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.NoSpamLogger;
 
 import static java.lang.String.format;
-import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_ANN_USE_SYNTHETIC_SCORE;
+import org.apache.cassandra.index.sai.disk.format.Version;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkFalse;
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkNotNull;
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkNull;
@@ -172,7 +173,8 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
     // and the related code in
     //  - StatementRestrictions.addOrderingRestrictions
     //  - StorageAttachedIndexSearcher.PrimaryKeyIterator constructor
-    public static final boolean ANN_USE_SYNTHETIC_SCORE = SAI_ANN_USE_SYNTHETIC_SCORE.getBoolean();
+    public static final boolean ANN_USE_SYNTHETIC_SCORE = CassandraRelevantProperties.SAI_ANN_USE_SYNTHETIC_SCORE
+        .getBoolean(Version.current().after(Version.EC));
 
     private static final Logger logger = LoggerFactory.getLogger(SelectStatement.class);
     private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(SelectStatement.logger, 1, TimeUnit.MINUTES);
