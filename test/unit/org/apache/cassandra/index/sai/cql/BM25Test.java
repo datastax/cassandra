@@ -136,6 +136,34 @@ public class BM25Test extends SAITester
     }
 
     @Test
+    public void testRangeRestrictedBM25OnlyQuery() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v text, n int)");
+        createIndex("CREATE CUSTOM INDEX ON %s(n) USING 'org.apache.cassandra.index.sai.StorageAttachedIndex'");
+        createAnalyzedIndex();
+        execute("INSERT INTO %s (k, v, n) VALUES (1, 'apple', 0)");
+        execute("INSERT INTO %s (k, v, n) VALUES (2, 'apple juice', 0)");
+        String select = "SELECT k FROM %s WHERE token(k) > token(1) AND token(k) < token(3) ORDER BY v BM25 OF 'apple' LIMIT 3";
+        beforeAndAfterFlush(() -> assertRows(execute(select), row(2)));
+    }
+
+    @Test
+    public void testRangeRestrictedHybridQuery() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v text, n int)");
+        createIndex("CREATE CUSTOM INDEX ON %s(n) USING 'org.apache.cassandra.index.sai.StorageAttachedIndex'");
+        createAnalyzedIndex();
+        execute("INSERT INTO %s (k, v, n) VALUES (1, 'apple', 0)");
+        execute("INSERT INTO %s (k, v, n) VALUES (2, 'apple juice', 0)");
+        // Insert many unrelated rows so we do search-then-sort
+        for (int i = 3; i < 100; i++)
+            execute("INSERT INTO %s (k, v, n) VALUES (?, 'apple juice', 1)", i);
+        String select = "SELECT k FROM %s WHERE token(k) > token(1) AND token(k) < token(3) " +
+                        "AND n = 0 ORDER BY v BM25 OF 'apple' LIMIT 3";
+        beforeAndAfterFlush(() -> assertRows(execute(select), row(2)));
+    }
+
+    @Test
     public void testTwoIndexesAmbiguousPredicate() throws Throwable
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v text)");
