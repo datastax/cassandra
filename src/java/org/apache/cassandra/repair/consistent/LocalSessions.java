@@ -55,7 +55,7 @@ import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.MoreExecutors;
 
-import org.apache.commons.lang.exception.ExceptionUtils;
+import org.apache.commons.lang3.exception.ExceptionUtils;
 
 import org.apache.cassandra.cql3.PageSize;
 import org.apache.cassandra.db.compaction.AbstractCompactionTask;

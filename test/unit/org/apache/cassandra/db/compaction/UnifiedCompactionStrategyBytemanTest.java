@@ -42,6 +42,7 @@ import static org.mockito.Mockito.when;
 public class UnifiedCompactionStrategyBytemanTest extends BaseCompactionStrategyTest
 {
     public static AtomicInteger txClosures = new AtomicInteger(0);
+
     @BeforeClass
     public static void setUpClass()
     {
@@ -101,7 +102,7 @@ public class UnifiedCompactionStrategyBytemanTest extends BaseCompactionStrategy
     targetMethod = "close",
     action = "org.apache.cassandra.db.compaction.UnifiedCompactionStrategyBytemanTest.txClosures.incrementAndGet()")
     })
-    public void testTransactionClosesTestGetMaximalTasks()
+    public void testTransactionClosesCreateAndAddTasks()
     {
         Set<SSTableReader> allSSTables = new HashSet<>(mockNonOverlappingSSTables(12, 0, 100 << 20));
         dataTracker.addInitialSSTables(allSSTables);
