@@ -303,7 +303,7 @@ public class TopKProcessor
     {
         ColumnMetadata column = indexContext.getDefinition();
 
-        if (column.isPrimaryKeyColumn() && key == null)
+        if (column.isPartitionKey() && key == null)
             return 0;
 
         if (column.isStatic() && !row.isStatic())
