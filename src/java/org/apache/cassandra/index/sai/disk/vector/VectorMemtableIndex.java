@@ -225,12 +225,6 @@ public class VectorMemtableIndex extends AbstractMemtableIndex
     }
 
     @Override
-    public void addBm25DocsStats(BM25Utils.AggDocsStats docsStats)
-    {
-        throw new UnsupportedOperationException("Calculating BM25 document aggregates not supported by vector indexes");
-    }
-
-    @Override
     public List<CloseableIterator<PrimaryKeyWithSortKey>> orderBy(QueryContext context,
                                                                   Orderer orderer,
                                                                   Expression slice,
@@ -464,9 +458,15 @@ public class VectorMemtableIndex extends AbstractMemtableIndex
     }
 
     @Override
-    public int indexedRows()
+    public int getRowCount()
     {
         return graph.size();
+    }
+
+    @Override
+    public long getApproximateTermCount()
+    {
+        throw new UnsupportedOperationException("Getting number of terms not supported by vector indexes");
     }
 
     public SegmentMetadata.ComponentMetadataMap writeData(IndexComponents.ForWrite perIndexComponents) throws IOException

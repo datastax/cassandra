@@ -104,11 +104,15 @@ public class BM25Test extends SAITester
     @Test
     public void testDeletedColumn() throws Throwable
     {
+        String select = "SELECT k FROM %s ORDER BY v BM25 OF 'apple' LIMIT 3";
+
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v text)");
         createAnalyzedIndex();
         execute("INSERT INTO %s (k, v) VALUES (1, 'apple')");
+        execute("DELETE v FROM %s WHERE k = 1");
+        assertRows(execute(select));
+        execute("INSERT INTO %s (k, v) VALUES (1, 'apple')");
         execute("INSERT INTO %s (k, v) VALUES (2, 'apple juice')");
-        String select = "SELECT k FROM %s ORDER BY v BM25 OF 'apple' LIMIT 3";
         assertRows(execute(select), row(1), row(2));
         execute("DELETE v FROM %s WHERE k = 2");
         beforeAndAfterFlush(() -> assertRows(execute(select), row(1)));
@@ -833,6 +837,8 @@ public class BM25Test extends SAITester
                     "title text, body text)");
         createAnalyzedIndex("body", true);
         createIndex("CREATE CUSTOM INDEX ON %s (score) USING 'StorageAttachedIndex'");
+        executeQuery(Collections.emptyList(), "SELECT * FROM %s  ORDER BY body BM25 OF ? LIMIT 10",
+                     "climate");
         insertPrimitiveData(0, 10);
         flush();
         insertPrimitiveData(10, 20);

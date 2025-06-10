@@ -316,8 +316,8 @@ public class FeaturesVersionSupportTest extends VectorTester
         {
             MemtableIndex memIndex = getIndexContext(indexName).getLiveMemtables().get(memtable);
             assert memIndex instanceof TrieMemtableIndex;
-            rowCount += ((TrieMemtableIndex) memIndex).indexedRows();
-            termCount += ((TrieMemtableIndex) memIndex).approximateTotalTermCount();
+            rowCount += ((TrieMemtableIndex) memIndex).getRowCount();
+            termCount += ((TrieMemtableIndex) memIndex).getApproximateTermCount();
         }
         assertEquals(expectedNumRows, rowCount);
         if (expectedTotalTermsCount >= 0)
@@ -334,9 +334,7 @@ public class FeaturesVersionSupportTest extends VectorTester
     {
         BM25Utils.AggDocsStats aggDocStats = new BM25Utils.AggDocsStats();
         for (SSTableIndex sstableIndex : getIndexContext(indexName).getView())
-        {
-            sstableIndex.addBm25DocsStats(aggDocStats);
-        }
+            aggDocStats.add(sstableIndex.getRowCount(), sstableIndex.getApproximateTermCount());
         assertEquals(expectedNumRows, aggDocStats.getDocCount());
         if (expectedTotalTermsCount > 0)
             assertEquals(expectedTotalTermsCount, aggDocStats.getTotalTermCount());

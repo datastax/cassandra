@@ -684,13 +684,12 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
             {
                 // Calculate counts on indexes
                 for (MemtableIndex index : view.memtableIndexes)
-                {
-                    index.addBm25DocsStats(orderer.bm25Stats);
-                }
+                    orderer.bm25Stats.add(index.getRowCount(), index.getApproximateTermCount());
                 for (SSTableIndex index : view.sstableIndexes)
-                {
-                    index.addBm25DocsStats(orderer.bm25Stats);
-                }
+                    orderer.bm25Stats.add(index.getRowCount(), index.getApproximateTermCount());
+                // No documents indexed, the iterator will be empty
+                if (orderer.bm25Stats.getDocCount() == 0)
+                    return CloseableIterator.emptyIterator();
             }
 
             for (MemtableIndex index : view.memtableIndexes)
@@ -734,11 +733,12 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     private List<CloseableIterator<PrimaryKeyWithSortKey>> searchSSTables(QueryView queryView, SSTableSearcher searcher)
     {
         List<CloseableIterator<PrimaryKeyWithSortKey>> results = new ArrayList<>();
+        long totalRows = queryView.getTotalSStableRows();
         for (var index : queryView.sstableIndexes)
         {
             try
             {
-                var iterators = searcher.search(index, queryView.getTotalSStableRows());
+                var iterators = searcher.search(index, totalRows);
                 results.addAll(iterators);
             }
             catch (Throwable ex)

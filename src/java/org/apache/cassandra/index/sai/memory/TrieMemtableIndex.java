@@ -46,7 +46,6 @@ import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.memtable.ShardBoundaries;
 import org.apache.cassandra.db.memtable.TrieMemtable;
 import org.apache.cassandra.dht.AbstractBounds;
-import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
@@ -117,7 +116,7 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
     }
 
     @Override
-    public int indexedRows()
+    public int getRowCount()
     {
         int size = 0;
         for (MemoryIndex memoryIndex : rangeIndexes)
@@ -131,7 +130,8 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
      *
      * @return total count of terms for indexes rows.
      */
-    public long approximateTotalTermCount()
+    @Override
+    public long getApproximateTermCount()
     {
         long count = 0;
         for (MemoryIndex memoryIndex : rangeIndexes)
@@ -458,12 +458,6 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
                                        docStats,
                                        indexContext,
                                        memtable);
-    }
-
-    @Override
-    public void addBm25DocsStats(BM25Utils.AggDocsStats docsStats)
-    {
-        docsStats.add(indexedRows(), approximateTotalTermCount());
     }
 
     @Nullable

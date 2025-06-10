@@ -33,7 +33,6 @@ import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.plan.Expression;
-import org.apache.cassandra.index.sai.utils.BM25Utils;
 import org.apache.cassandra.index.sai.utils.MemtableOrdering;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
@@ -78,12 +77,23 @@ public interface MemtableIndex extends MemtableOrdering
 
     long estimateMatchingRowsCount(Expression expression, AbstractBounds<PartitionPosition> keyRange);
 
-    void addBm25DocsStats(BM25Utils.AggDocsStats docsStats);
-
     Iterator<Pair<ByteComparable.Preencoded, List<MemoryIndex.PkWithFrequency>>> iterator(DecoratedKey min, DecoratedKey max);
 
     static MemtableIndex createIndex(IndexContext indexContext, Memtable mt)
     {
         return indexContext.isVector() ? new VectorMemtableIndex(indexContext, mt) : new TrieMemtableIndex(indexContext, mt);
     }
+
+    /**
+     * @return num of rows in the memtable index
+     */
+    int getRowCount();
+
+    /**
+     * Approximate total count of terms in the memtable index.
+     * The count is approximate because some deletions are not accounted for in the current implementation.
+     *
+     * @return total count of terms for indexes rows.
+     */
+    long getApproximateTermCount();
 }
