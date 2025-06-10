@@ -929,7 +929,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
 
         long rowCount = 0;
         for (MemtableIndex index : queryView.memtableIndexes)
-            rowCount += index.estimateMatchingRowsCount(predicate, mergeRange);
+            rowCount += index.approximateMatchingRowsCount(predicate, mergeRange);
 
         for (SSTableIndex index : queryView.sstableIndexes)
             rowCount += index.estimateMatchingRowsCount(predicate, mergeRange);
