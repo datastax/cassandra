@@ -137,6 +137,10 @@ public abstract class FeaturesVersionSupportTester extends TestBaseImpl
         }
         else
         {
+            // For older versions, BM25 queries will throw FeatureNeedsIndexRebuildException on the node with the old version
+            cluster.setUncaughtExceptionsFilter((i, t) -> i == 2 &&
+                                                          t.getClass().getName().contains(FeatureNeedsIndexRebuildException.class.getName()) &&
+                                                          t.getMessage().contains("does not support BM25 scoring"));
             Assertions.assertThatThrownBy(() -> coordinator.execute(query, ONE))
                       .hasMessageContaining(RequestFailureReason.FEATURE_NEEDS_INDEX_REBUILD.name());
         }
