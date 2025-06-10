@@ -28,6 +28,7 @@ import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.io.sstable.SSTableId;
+import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 
@@ -51,7 +52,7 @@ public abstract class PrimaryKeyWithSortKey implements PrimaryKey
         this.primaryKey = primaryKey;
     }
 
-    protected PrimaryKeyWithSortKey(IndexContext context, SSTableId sourceTable, PrimaryKey primaryKey)
+    protected PrimaryKeyWithSortKey(IndexContext context, SSTableId<?> sourceTable, PrimaryKey primaryKey)
     {
         this.context = context;
         this.sourceTable = sourceTable;
@@ -65,10 +66,14 @@ public abstract class PrimaryKeyWithSortKey implements PrimaryKey
 
     public boolean isIndexDataValid(Row row, int nowInSecs)
     {
-        assert context.getDefinition().isRegular() : "Only regular columns are supported, got " + context.getDefinition();
-        var cell = row.getCell(context.getDefinition());
+        ColumnMetadata column = context.getDefinition();
+        if (!column.isRegular())
+            return true;
+
+        var cell = row.getCell(column);
         if (!cell.isLive(nowInSecs))
             return false;
+
         assert cell instanceof CellWithSourceTable : "Expected CellWithSource, got " + cell.getClass();
         return sourceTable.equals(((CellWithSourceTable<?>) cell).sourceTable())
                && isIndexDataEqualToLiveData(cell.buffer());
