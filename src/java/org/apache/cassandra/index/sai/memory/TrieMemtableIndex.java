@@ -376,16 +376,16 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
     }
 
     @Override
-    public long approximateMatchingRowsCount(Expression expression, AbstractBounds<PartitionPosition> keyRange)
+    public long estimateMatchingRowsCount(Expression expression, AbstractBounds<PartitionPosition> keyRange)
     {
         int startShard = boundaries.getShardForToken(keyRange.left.getToken());
         int endShard = getEndShardForBounds(keyRange);
         return rangeIndexes[startShard].estimateMatchingRowsCount(expression, keyRange) * (endShard - startShard + 1);
     }
 
-    // In the BM25 logic, approximateMatchingRowsCount is not accurate enough because we use the result to compute the
+    // In the BM25 logic, estimateMatchingRowsCount is not accurate enough because we use the result to compute the
     // document score.
-    private long estimateMatchingRowsCount(Expression expression, AbstractBounds<PartitionPosition> keyRange)
+    private long completeEstimateMatchingRowsCount(Expression expression, AbstractBounds<PartitionPosition> keyRange)
     {
         int startShard = boundaries.getShardForToken(keyRange.left.getToken());
         int endShard = getEndShardForBounds(keyRange);
@@ -412,7 +412,7 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
             for (ByteBuffer term : orderer.getQueryTerms())
             {
                 Expression expression = new Expression(indexContext).add(Operator.ANALYZER_MATCHES, term);
-                documentFrequencies.put(term, estimateMatchingRowsCount(expression, range));
+                documentFrequencies.put(term, completeEstimateMatchingRowsCount(expression, range));
             }
             return orderByBM25(keys.stream(), documentFrequencies, orderer);
         }

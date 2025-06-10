@@ -75,7 +75,7 @@ public interface MemtableIndex extends MemtableOrdering
 
     KeyRangeIterator search(QueryContext queryContext, Expression expression, AbstractBounds<PartitionPosition> keyRange, int limit);
 
-    long approximateMatchingRowsCount(Expression expression, AbstractBounds<PartitionPosition> keyRange);
+    long estimateMatchingRowsCount(Expression expression, AbstractBounds<PartitionPosition> keyRange);
 
     Iterator<Pair<ByteComparable.Preencoded, List<MemoryIndex.PkWithFrequency>>> iterator(DecoratedKey min, DecoratedKey max);
 
