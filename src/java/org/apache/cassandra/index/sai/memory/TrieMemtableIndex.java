@@ -38,6 +38,7 @@ import com.google.common.util.concurrent.Runnables;
 
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.Clustering;
+import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.marshal.AbstractType;
@@ -406,9 +407,8 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
         if (orderer.isBM25())
         {
             HashMap<ByteBuffer, Long> documentFrequencies = new HashMap<>();
-            // We only need to get the document frequencies for the shards that contain the keys.
-            Range<PartitionPosition> range = Range.makeRowRange(keys.get(0).partitionKey().getToken(),
-                                                                keys.get(keys.size() - 1).partitionKey().getToken());
+            // Use full range, since no filter should be applied for the term frequencies.
+            AbstractBounds<PartitionPosition> range = DataRange.allData(memtable.metadata().partitioner).keyRange();
             for (ByteBuffer term : orderer.getQueryTerms())
             {
                 Expression expression = new Expression(indexContext).add(Operator.ANALYZER_MATCHES, term);
