@@ -348,11 +348,6 @@ public class SSTableIndex
         return searchableIndex.orderResultsBy(context, keys, orderer, limit, totalRows);
     }
 
-    public void addBm25DocsStats(BM25Utils.AggDocsStats docsStats)
-    {
-        docsStats.add(getRowCount(), getApproximateTermCount());
-    }
-
     public String toString()
     {
         return MoreObjects.toStringHelper(this)
