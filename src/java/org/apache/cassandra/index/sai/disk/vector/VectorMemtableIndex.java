@@ -457,9 +457,15 @@ public class VectorMemtableIndex extends AbstractMemtableIndex
     }
 
     @Override
-    public int indexedRows()
+    public int getRowCount()
     {
         return graph.size();
+    }
+
+    @Override
+    public long getApproximateTermCount()
+    {
+        throw new UnsupportedOperationException("Getting number of terms not supported by vector indexes");
     }
 
     public SegmentMetadata.ComponentMetadataMap writeData(IndexComponents.ForWrite perIndexComponents) throws IOException

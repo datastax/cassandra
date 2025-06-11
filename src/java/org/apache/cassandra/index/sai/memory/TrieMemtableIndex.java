@@ -38,6 +38,7 @@ import com.google.common.util.concurrent.Runnables;
 
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.Clustering;
+import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.marshal.AbstractType;
@@ -45,7 +46,6 @@ import org.apache.cassandra.db.memtable.AbstractShardedMemtable;
 import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.memtable.ShardBoundaries;
 import org.apache.cassandra.dht.AbstractBounds;
-import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
@@ -116,7 +116,7 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
     }
 
     @Override
-    public int indexedRows()
+    public int getRowCount()
     {
         int size = 0;
         for (MemoryIndex memoryIndex : rangeIndexes)
@@ -130,7 +130,8 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
      *
      * @return total count of terms for indexes rows.
      */
-    public long approximateTotalTermCount()
+    @Override
+    public long getApproximateTermCount()
     {
         long count = 0;
         for (MemoryIndex memoryIndex : rangeIndexes)
@@ -407,9 +408,8 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
         if (orderer.isBM25())
         {
             HashMap<ByteBuffer, Long> documentFrequencies = new HashMap<>();
-            // We only need to get the document frequencies for the shards that contain the keys.
-            Range<PartitionPosition> range = Range.makeRowRange(keys.get(0).partitionKey().getToken(),
-                                                                keys.get(keys.size() - 1).partitionKey().getToken());
+            // Use full range, since no filter should be applied for the term frequencies.
+            AbstractBounds<PartitionPosition> range = DataRange.allData(memtable.metadata().partitioner).keyRange();
             for (ByteBuffer term : orderer.getQueryTerms())
             {
                 Expression expression = new Expression(indexContext).add(Operator.ANALYZER_MATCHES, term);
@@ -449,7 +449,7 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
         assert orderer.isBM25();
         List<ByteBuffer> queryTerms = orderer.getQueryTerms();
         AbstractAnalyzer analyzer = indexContext.getAnalyzerFactory().create();
-        BM25Utils.DocStats docStats = new BM25Utils.DocStats(documentFrequencies, indexedRows(), approximateTotalTermCount());
+        BM25Utils.DocStats docStats = new BM25Utils.DocStats(documentFrequencies, orderer.bm25Stats);
         Iterator<BM25Utils.DocTF> it = stream
                                        .map(pk -> BM25Utils.EagerDocTF.createFromDocument(pk, getCellForKey(pk), analyzer, queryTerms))
                                        .filter(Objects::nonNull)
