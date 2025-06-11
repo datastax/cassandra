@@ -770,6 +770,16 @@ public class BM25Test extends SAITester
         executeQuery(Arrays.asList(1, 2), "SELECT * FROM %s ORDER BY body BM25 OF 'hi' LIMIT 4");
     }
 
+    // ID 10: total words = 12, climate occurrences = 4
+    // ID 18: total words = 13, climate occurrences = 4
+    // ID 0: total words = 16, climate occurrences = 3
+    // ID 15: total words = 11, climate occurrences = 2
+    // ID 5: total words = 13, climate occurrences = 2
+    // ID 11: total words = 12, climate occurrences = 1
+    // ID 17: total words = 14, climate occurrences = 1
+    private static final List<Integer> CLIMATE_QUERY_RESULTS = Arrays.asList(10, 18, 0, 15, 5, 11, 17);
+    private static final List<Integer> CLIMATE_QUERY_SCORE_5_RESULTS = Arrays.asList(10, 18, 0);
+
     @Test
     public void testCollections() throws Throwable
     {
@@ -789,26 +799,19 @@ public class BM25Test extends SAITester
 
         beforeAndAfterFlush(
         () -> {
-            // ID 10: total words = 12, climate occurrences = 4
-            // ID 18: total words = 13, climate occurrences = 4
-            // ID 0: total words = 16, climate occurrences = 3
-            // ID 15: total words = 11, climate occurrences = 2
-            // ID 5: total words = 13, climate occurrences = 2
-            // ID 11: total words = 12, climate occurrences = 1
-            // ID 17: total words = 14, climate occurrences = 1
-            executeQuery(Arrays.asList(10, 18, 0, 15, 5, 11, 17), "SELECT * FROM %s  ORDER BY body BM25 OF ? LIMIT 10",
+            executeQuery(CLIMATE_QUERY_RESULTS, "SELECT * FROM %s  ORDER BY body BM25 OF ? LIMIT 10",
                          "climate");
-            executeQuery(Arrays.asList(10, 18, 0), "SELECT * FROM %s WHERE score = 5 ORDER BY body BM25 OF ? LIMIT 10",
+            executeQuery(CLIMATE_QUERY_SCORE_5_RESULTS, "SELECT * FROM %s WHERE score = 5 ORDER BY body BM25 OF ? LIMIT 10",
                          "climate");
-            executeQuery(Arrays.asList(10, 18, 0, 15, 5, 11, 17), "SELECT * FROM %s WHERE bodyset CONTAINS 'climate' ORDER BY body BM25 OF ? LIMIT 10",
+            executeQuery(CLIMATE_QUERY_RESULTS, "SELECT * FROM %s WHERE bodyset CONTAINS 'climate' ORDER BY body BM25 OF ? LIMIT 10",
                          "climate");
             executeQuery(Arrays.asList(15, 5, 11, 17), "SELECT * FROM %s WHERE bodyset CONTAINS 'health' ORDER BY body BM25 OF ? LIMIT 10",
                          "climate");
-            executeQuery(Arrays.asList(10, 18, 0, 15, 5, 11, 17), "SELECT * FROM %s WHERE map_category CONTAINS 'Climate' ORDER BY body BM25 OF ? LIMIT 10",
+            executeQuery(CLIMATE_QUERY_RESULTS, "SELECT * FROM %s WHERE map_category CONTAINS 'Climate' ORDER BY body BM25 OF ? LIMIT 10",
                          "climate");
             executeQuery(Arrays.asList(18, 15, 5, 11, 17), "SELECT * FROM %s WHERE map_category CONTAINS 'Health' ORDER BY body BM25 OF ? LIMIT 10",
                          "climate");
-            executeQuery(Arrays.asList(10, 18, 0, 15, 5, 11, 17), "SELECT * FROM %s WHERE map_body CONTAINS 'Climate' ORDER BY body BM25 OF ? LIMIT 10",
+            executeQuery(CLIMATE_QUERY_RESULTS, "SELECT * FROM %s WHERE map_body CONTAINS 'Climate' ORDER BY body BM25 OF ? LIMIT 10",
                          "climate");
             executeQuery(Arrays.asList(10, 18, 15, 5, 11, 17), "SELECT * FROM %s WHERE map_body CONTAINS 'health' ORDER BY body BM25 OF ? LIMIT 10",
                          "climate");
@@ -847,21 +850,21 @@ public class BM25Test extends SAITester
         insertPrimitiveData(10, 20);
 
         // The same result as in testCollections above
-        executeQuery(Arrays.asList(10, 18, 0, 15, 5, 11, 17), "SELECT * FROM %s  ORDER BY body BM25 OF ? LIMIT 10",
+        executeQuery(CLIMATE_QUERY_RESULTS, "SELECT * FROM %s  ORDER BY body BM25 OF ? LIMIT 10",
                 "climate");
-        executeQuery(Arrays.asList(10, 18, 0), "SELECT * FROM %s WHERE score = 5 ORDER BY body BM25 OF ? LIMIT 10",
+        executeQuery(CLIMATE_QUERY_SCORE_5_RESULTS, "SELECT * FROM %s WHERE score = 5 ORDER BY body BM25 OF ? LIMIT 10",
                 "climate");
 
         flush();
-        executeQuery(Arrays.asList(10, 18, 0, 15, 5, 11, 17), "SELECT * FROM %s  ORDER BY body BM25 OF ? LIMIT 10",
+        executeQuery(CLIMATE_QUERY_RESULTS, "SELECT * FROM %s  ORDER BY body BM25 OF ? LIMIT 10",
                 "climate");
-        executeQuery(Arrays.asList(10, 18, 0), "SELECT * FROM %s WHERE score = 5 ORDER BY body BM25 OF ? LIMIT 10",
+        executeQuery(CLIMATE_QUERY_SCORE_5_RESULTS, "SELECT * FROM %s WHERE score = 5 ORDER BY body BM25 OF ? LIMIT 10",
                 "climate");
 
         compact();
-        executeQuery(Arrays.asList(10, 18, 0, 15, 5, 11, 17), "SELECT * FROM %s  ORDER BY body BM25 OF ? LIMIT 10",
+        executeQuery(CLIMATE_QUERY_RESULTS, "SELECT * FROM %s  ORDER BY body BM25 OF ? LIMIT 10",
                 "climate");
-        executeQuery(Arrays.asList(10, 18, 0), "SELECT * FROM %s WHERE score = 5 ORDER BY body BM25 OF ? LIMIT 10",
+        executeQuery(CLIMATE_QUERY_SCORE_5_RESULTS, "SELECT * FROM %s WHERE score = 5 ORDER BY body BM25 OF ? LIMIT 10",
                 "climate");
     }
 
