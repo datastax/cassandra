@@ -48,35 +48,37 @@ import org.apache.cassandra.utils.CloseableIterator;
  */
 public interface SearchableIndex extends Closeable
 {
-    public long indexFileCacheSize();
+    long indexFileCacheSize();
 
-    public long getRowCount();
+    long getRowCount();
 
-    public long minSSTableRowId();
+    long getApproximateTermCount();
 
-    public long maxSSTableRowId();
+    long minSSTableRowId();
 
-    public ByteBuffer minTerm();
+    long maxSSTableRowId();
 
-    public ByteBuffer maxTerm();
+    ByteBuffer minTerm();
 
-    public DecoratedKey minKey();
+    ByteBuffer maxTerm();
 
-    public DecoratedKey maxKey();
+    DecoratedKey minKey();
 
-    public KeyRangeIterator search(Expression expression,
+    DecoratedKey maxKey();
+
+    KeyRangeIterator search(Expression expression,
                                    AbstractBounds<PartitionPosition> keyRange,
                                    QueryContext context,
                                    boolean defer, int limit) throws IOException;
 
-    public List<CloseableIterator<PrimaryKeyWithSortKey>> orderBy(Orderer orderer,
+    List<CloseableIterator<PrimaryKeyWithSortKey>> orderBy(Orderer orderer,
                                                                   Expression slice,
                                                                   AbstractBounds<PartitionPosition> keyRange,
                                                                   QueryContext context,
                                                                   int limit,
                                                                   long totalRows) throws IOException;
 
-    public List<CloseableIterator<PrimaryKeyWithSortKey>> orderResultsBy(QueryContext context,
+    List<CloseableIterator<PrimaryKeyWithSortKey>> orderResultsBy(QueryContext context,
                                                                          List<PrimaryKey> keys,
                                                                          Orderer orderer,
                                                                          int limit,
@@ -84,7 +86,7 @@ public interface SearchableIndex extends Closeable
 
     List<Segment> getSegments();
 
-    public void populateSystemView(SimpleDataSet dataSet, SSTableReader sstable);
+    void populateSystemView(SimpleDataSet dataSet, SSTableReader sstable);
 
     long estimateMatchingRowsCount(Expression predicate, AbstractBounds<PartitionPosition> keyRange);
 }
