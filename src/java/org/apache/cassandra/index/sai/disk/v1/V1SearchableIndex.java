@@ -21,7 +21,6 @@ package org.apache.cassandra.index.sai.disk.v1;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 
 import com.google.common.collect.ImmutableList;
@@ -75,6 +74,7 @@ public class V1SearchableIndex implements SearchableIndex
     private final ByteBuffer maxTerm;
     private final long minSSTableRowId, maxSSTableRowId;
     private final long numRows;
+    private final long approximateTermCount;
     private PerIndexFiles indexFiles;
 
     public V1SearchableIndex(SSTableContext sstableContext, IndexComponents.ForRead perIndexComponents)
@@ -106,6 +106,7 @@ public class V1SearchableIndex implements SearchableIndex
             this.maxTerm = metadatas.stream().map(m -> m.maxTerm).max(TypeUtil.comparator(indexContext.getValidator(), version)).orElse(null);
 
             this.numRows = metadatas.stream().mapToLong(m -> m.numRows).sum();
+            this.approximateTermCount = metadatas.stream().mapToLong(m -> m.totalTermCount).sum();
 
             this.minSSTableRowId = metadatas.get(0).minSSTableRowId;
             this.maxSSTableRowId = metadatas.get(metadatas.size() - 1).maxSSTableRowId;
@@ -128,6 +129,12 @@ public class V1SearchableIndex implements SearchableIndex
     public long getRowCount()
     {
         return numRows;
+    }
+
+    @Override
+    public long getApproximateTermCount()
+    {
+        return approximateTermCount;
     }
 
     @Override

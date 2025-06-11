@@ -21,7 +21,6 @@ import java.util.Collection;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
-import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -35,6 +34,7 @@ import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.memory.MemtableIndex;
 import org.apache.cassandra.index.sai.memory.TrieMemtableIndex;
+import org.apache.cassandra.index.sai.utils.BM25Utils;
 import org.assertj.core.api.Assertions;
 
 import static org.apache.cassandra.index.sai.cql.BM25Test.*;
@@ -316,8 +316,8 @@ public class FeaturesVersionSupportTest extends VectorTester
         {
             MemtableIndex memIndex = getIndexContext(indexName).getLiveMemtables().get(memtable);
             assert memIndex instanceof TrieMemtableIndex;
-            rowCount += ((TrieMemtableIndex) memIndex).indexedRows();
-            termCount += ((TrieMemtableIndex) memIndex).approximateTotalTermCount();
+            rowCount += ((TrieMemtableIndex) memIndex).getRowCount();
+            termCount += ((TrieMemtableIndex) memIndex).getApproximateTermCount();
         }
         assertEquals(expectedNumRows, rowCount);
         if (expectedTotalTermsCount >= 0)
@@ -332,23 +332,11 @@ public class FeaturesVersionSupportTest extends VectorTester
     private void assertNumRowsAndTotalTermsSSTable(String indexName, int expectedNumRows, int expectedTotalTermsCount
     )
     {
-        long indexRowCount = 0;
-        long segmentRowCount = 0;
-        long totalTermCount = 0;
+        BM25Utils.AggDocsStats aggDocStats = new BM25Utils.AggDocsStats();
         for (SSTableIndex sstableIndex : getIndexContext(indexName).getView())
-        {
-            indexRowCount += sstableIndex.getRowCount();
-            for (var segment : sstableIndex.getSegments())
-            {
-                var metadata = segment.metadata;
-                Assert.assertNotNull(metadata);
-                segmentRowCount += metadata.numRows;
-                totalTermCount += metadata.totalTermCount;
-            }
-        }
-        assertEquals(indexRowCount, segmentRowCount);
-        assertEquals(expectedNumRows, indexRowCount);
-        if (expectedTotalTermsCount >= 0)
-            assertEquals(expectedTotalTermsCount, totalTermCount);
+            aggDocStats.add(sstableIndex.getRowCount(), sstableIndex.getApproximateTermCount());
+        assertEquals(expectedNumRows, aggDocStats.getDocCount());
+        if (expectedTotalTermsCount > 0)
+            assertEquals(expectedTotalTermsCount, aggDocStats.getTotalTermCount());
     }
 }

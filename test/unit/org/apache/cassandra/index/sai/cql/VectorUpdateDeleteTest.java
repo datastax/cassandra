@@ -18,7 +18,6 @@
 
 package org.apache.cassandra.index.sai.cql;
 
-import org.junit.Before;
 import org.junit.Test;
 
 import org.apache.cassandra.cql3.UntypedResultSet;
@@ -952,7 +951,7 @@ public class VectorUpdateDeleteTest extends VectorTester.VersionedWithChecksums
         var indexes = sai.getIndexContext().getLiveMemtables().values();
         assertEquals("Expect just one memtable index", 1, indexes.size());
         var vectorIndex = (VectorMemtableIndex) indexes.iterator().next();
-        assertEquals("We dont' remove vectors, so we're still stuck with it", 2, vectorIndex.indexedRows());
+        assertEquals("We dont' remove vectors, so we're still stuck with it", 2, vectorIndex.getRowCount());
 
         // Flush to build the on disk graph (before the fix, flush failed due to a row having two vectors)
         flush();
