@@ -244,19 +244,20 @@ public class InvertedIndexSearcher extends IndexSearcher
                 FileUtils.closeQuietly(pkm, merged, docLengthsReader);
             }
         };
-        return bm25Internal(it, queryTerms, documentFrequencies);
+        return bm25Internal(it, queryTerms, documentFrequencies, orderer.bm25Stats);
     }
 
     private CloseableIterator<PrimaryKeyWithSortKey> bm25Internal(CloseableIterator<BM25Utils.DocTF> keyIterator,
                                                                   List<ByteBuffer> queryTerms,
-                                                                  Map<ByteBuffer, Long> documentFrequencies)
+                                                                  Map<ByteBuffer, Long> documentFrequencies,
+                                                                  BM25Utils.AggDocsStats aggStats)
     {
         long totalRows = sstable.getTotalRows();
         // since doc frequencies can be an estimate from the index histogram, which does not have bounded error,
         // cap frequencies to total rows so that the IDF term doesn't turn negative
         Map<ByteBuffer, Long> cappedFrequencies = documentFrequencies.entrySet().stream()
                                                                      .collect(Collectors.toMap(Map.Entry::getKey, e -> Math.min(e.getValue(), totalRows)));
-        BM25Utils.DocStats docStats = new BM25Utils.DocStats(cappedFrequencies, totalRows, metadata.totalTermCount);
+        BM25Utils.DocStats docStats = new BM25Utils.DocStats(cappedFrequencies, aggStats);
         return BM25Utils.computeScores(keyIterator,
                                        queryTerms,
                                        docStats,
@@ -291,7 +292,7 @@ public class InvertedIndexSearcher extends IndexSearcher
                      .map(pk -> EagerDocTF.createFromDocument(pk, readColumn(sstable, pk), analyzer, queryTerms))
                      .filter(Objects::nonNull)
                      .iterator();
-        return bm25Internal(CloseableIterator.wrap(it), queryTerms, documentFrequencies);
+        return bm25Internal(CloseableIterator.wrap(it), queryTerms, documentFrequencies, orderer.bm25Stats);
     }
 
     @Override

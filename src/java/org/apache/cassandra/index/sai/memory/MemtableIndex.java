@@ -83,4 +83,17 @@ public interface MemtableIndex extends MemtableOrdering
     {
         return indexContext.isVector() ? new VectorMemtableIndex(indexContext, mt) : new TrieMemtableIndex(indexContext, mt);
     }
+
+    /**
+     * @return num of rows in the memtable index
+     */
+    int getRowCount();
+
+    /**
+     * Approximate total count of terms in the memtable index.
+     * The count is approximate because some deletions are not accounted for in the current implementation.
+     *
+     * @return total count of terms for indexes rows.
+     */
+    long getApproximateTermCount();
 }
