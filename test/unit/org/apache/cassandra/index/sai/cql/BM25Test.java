@@ -846,24 +846,18 @@ public class BM25Test extends SAITester
         flush();
         insertPrimitiveData(10, 20);
 
-        // One memtable, one sstable - different result from the reference in testCollections
-        // ID 0 and 5 contain 3 and 2 climate occurrences correspondingly,
-        // while ID 10 and 18 - 4 climate occurrences. However,
-        // since the segment with 0-9 IDs have only 2 rows with climate and 10-19 - 5,
-        // 0 and 5 win over 10 and 18.
-        executeQuery(Arrays.asList(0, 5, 10, 18, 15, 11, 17), "SELECT * FROM %s  ORDER BY body BM25 OF ? LIMIT 10",
+        // The same result as in testCollections above
+        executeQuery(Arrays.asList(10, 18, 0, 15, 5, 11, 17), "SELECT * FROM %s  ORDER BY body BM25 OF ? LIMIT 10",
                 "climate");
-        executeQuery(Arrays.asList(0, 10, 18), "SELECT * FROM %s WHERE score = 5 ORDER BY body BM25 OF ? LIMIT 10",
+        executeQuery(Arrays.asList(10, 18, 0), "SELECT * FROM %s WHERE score = 5 ORDER BY body BM25 OF ? LIMIT 10",
                 "climate");
 
-        // Flush into Two sstables - same result as the different above
         flush();
-        executeQuery(Arrays.asList(0, 5, 10, 18, 15, 11, 17), "SELECT * FROM %s  ORDER BY body BM25 OF ? LIMIT 10",
+        executeQuery(Arrays.asList(10, 18, 0, 15, 5, 11, 17), "SELECT * FROM %s  ORDER BY body BM25 OF ? LIMIT 10",
                 "climate");
-        executeQuery(Arrays.asList(0, 10, 18), "SELECT * FROM %s WHERE score = 5 ORDER BY body BM25 OF ? LIMIT 10",
+        executeQuery(Arrays.asList(10, 18, 0), "SELECT * FROM %s WHERE score = 5 ORDER BY body BM25 OF ? LIMIT 10",
                 "climate");
 
-        // Compact into one sstable - same as reference from testCollections
         compact();
         executeQuery(Arrays.asList(10, 18, 0, 15, 5, 11, 17), "SELECT * FROM %s  ORDER BY body BM25 OF ? LIMIT 10",
                 "climate");

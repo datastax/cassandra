@@ -77,11 +77,11 @@ public class BM25Utils
         private final long docCount;
         private double avgDocLength;
 
-        public DocStats(Map<ByteBuffer, Long> frequencies, AggDocsStats aggStats)
+        public DocStats(Map<ByteBuffer, Long> frequencies, long docCount, long totalTermCount)
         {
             this.frequencies = frequencies;
-            this.docCount = aggStats.docCount;
-            this.avgDocLength = (double) aggStats.totalTermCount / aggStats.docCount;
+            this.docCount = docCount;
+            this.avgDocLength = (double) totalTermCount / docCount;
         }
     }
 

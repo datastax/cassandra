@@ -204,8 +204,6 @@ public class InvertedIndexSearcher extends IndexSearcher
             var postings = reader.exactMatch(encodedTerm, listener, queryContext);
             return postings == null ? PostingList.EMPTY : postings;
         }));
-        // extract the match count for each
-        var documentFrequencies = postingLists.entrySet().stream().collect(Collectors.toMap(Map.Entry::getKey, e -> (long) e.getValue().size()));
 
         var pkm = primaryKeyMapFactory.newPerSSTablePrimaryKeyMap();
         var merged = IntersectingPostingList.intersect(postingLists);
@@ -244,23 +242,9 @@ public class InvertedIndexSearcher extends IndexSearcher
                 FileUtils.closeQuietly(pkm, merged, docLengthsReader);
             }
         };
-        return bm25Internal(it, queryTerms, documentFrequencies, orderer.bm25Stats);
-    }
-
-    private CloseableIterator<PrimaryKeyWithSortKey> bm25Internal(CloseableIterator<BM25Utils.DocTF> keyIterator,
-                                                                  List<ByteBuffer> queryTerms,
-                                                                  Map<ByteBuffer, Long> documentFrequencies,
-                                                                  BM25Utils.AggDocsStats aggStats)
-    {
-        long totalRows = sstable.getTotalRows();
-        // since doc frequencies can be an estimate from the index histogram, which does not have bounded error,
-        // cap frequencies to total rows so that the IDF term doesn't turn negative
-        Map<ByteBuffer, Long> cappedFrequencies = documentFrequencies.entrySet().stream()
-                                                                     .collect(Collectors.toMap(Map.Entry::getKey, e -> Math.min(e.getValue(), totalRows)));
-        BM25Utils.DocStats docStats = new BM25Utils.DocStats(cappedFrequencies, aggStats);
-        return BM25Utils.computeScores(keyIterator,
+        return BM25Utils.computeScores(it,
                                        queryTerms,
-                                       docStats,
+                                       orderer.getBm25stats(),
                                        indexContext,
                                        sstable.descriptor.id);
     }
@@ -292,7 +276,11 @@ public class InvertedIndexSearcher extends IndexSearcher
                      .map(pk -> EagerDocTF.createFromDocument(pk, readColumn(sstable, pk), analyzer, queryTerms))
                      .filter(Objects::nonNull)
                      .iterator();
-        return bm25Internal(CloseableIterator.wrap(it), queryTerms, documentFrequencies, orderer.bm25Stats);
+        return BM25Utils.computeScores(CloseableIterator.wrap(it),
+                                       queryTerms,
+                                       orderer.getBm25stats(),
+                                       indexContext,
+                                       sstable.descriptor.id);
     }
 
     @Override
