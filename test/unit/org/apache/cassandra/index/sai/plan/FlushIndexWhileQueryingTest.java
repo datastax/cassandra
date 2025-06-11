@@ -24,10 +24,7 @@ import org.apache.cassandra.inject.InvokePointBuilder;
 
 import org.junit.Test;
 
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
 
 /**
  * Test to cover edge cases related to memtable flush during query execution.
