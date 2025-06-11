@@ -135,6 +135,16 @@ public class SSTableIndex implements Comparable<SSTableIndex>
         return searchableIndex.getRowCount();
     }
 
+    /**
+     * Returns the total number of terms in all indexed rows of this index.
+     * This number is approximate because it does not account for any deletions
+     * that may have occurred since the index was built.
+     */
+    public long getApproximateTermCount()
+    {
+        return searchableIndex.getApproximateTermCount();
+    }
+
     public long estimateMatchingRowsCount(Expression predicate, AbstractBounds<PartitionPosition> keyRange)
     {
         return searchableIndex.estimateMatchingRowsCount(predicate, keyRange);
