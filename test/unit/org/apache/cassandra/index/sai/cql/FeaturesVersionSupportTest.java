@@ -316,8 +316,8 @@ public class FeaturesVersionSupportTest extends VectorTester
         {
             MemtableIndex memIndex = getIndexContext(indexName).getLiveMemtables().get(memtable);
             assert memIndex instanceof TrieMemtableIndex;
-            rowCount += ((TrieMemtableIndex) memIndex).indexedRows();
-            termCount += ((TrieMemtableIndex) memIndex).approximateTotalTermCount();
+            rowCount += ((TrieMemtableIndex) memIndex).getRowCount();
+            termCount += ((TrieMemtableIndex) memIndex).getApproximateTermCount();
         }
         assertEquals(expectedNumRows, rowCount);
         if (expectedTotalTermsCount >= 0)
