@@ -19,6 +19,7 @@ package org.apache.cassandra.index.sai.cql;
 import java.util.Collection;
 import java.util.List;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.apache.cassandra.index.sai.SAITester;
@@ -49,7 +50,10 @@ public class DropIndexWhileQueryingTest extends SAITester
     @Parameterized.Parameters(name = "version={0}")
     public static Collection<Object> data()
     {
-        return Set.of(Version.CA, Version.EB);
+        return Version.ALL.stream()
+                          .filter(v -> v.onOrAfter(Version.JVECTOR_EARLIEST))
+                          .map(v -> new Object[]{ v})
+                          .collect(Collectors.toList());
     }
 
     @Before
