@@ -36,6 +36,7 @@ import org.apache.cassandra.index.SecondaryIndexManager;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.disk.vector.VectorCompression;
+import org.apache.cassandra.index.sai.utils.BM25Utils;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 
@@ -62,6 +63,7 @@ public class Orderer
 
     // BM25 search parameter
     private List<ByteBuffer> queryTerms;
+    public final BM25Utils.AggDocsStats bm25Stats = new BM25Utils.AggDocsStats();
 
     /**
      * Create an orderer for the given index context, operator, and term.
