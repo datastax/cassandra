@@ -197,7 +197,7 @@ public abstract class TrieMemtableIndexTestBase extends SAITester
 
             Set<Integer> foundKeys = new HashSet<>();
 
-            try (KeyRangeIterator iterator = memtableIndex.search(new QueryContext(), expression, keyRange, 0))
+            try (KeyRangeIterator iterator = memtableIndex.search(new QueryContext(), expression, keyRange))
             {
                 while (iterator.hasNext())
                 {
@@ -320,7 +320,7 @@ public abstract class TrieMemtableIndexTestBase extends SAITester
         expression.add(Operator.EQ, Int32Type.instance.decompose(value));
         AbstractBounds<PartitionPosition> keyRange = new Range<>(partitioner.getMinimumToken().minKeyBound(),
                                                                  partitioner.getMinimumToken().minKeyBound());
-        var result = memtableIndex.search(new QueryContext(), expression, keyRange, 0);
+        var result = memtableIndex.search(new QueryContext(), expression, keyRange);
         // Confirm the partition keys are as expected in the provided order and that we have no more results
         for (int partitionKey : partitionKeys)
             assertEquals(makeKey(cfs.metadata(), partitionKey), result.next().partitionKey());

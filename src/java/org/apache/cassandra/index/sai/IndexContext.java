@@ -74,6 +74,7 @@ import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.iterators.KeyRangeUnionIterator;
 import org.apache.cassandra.index.sai.memory.MemtableIndex;
 import org.apache.cassandra.index.sai.memory.MemtableKeyRangeIterator;
+import org.apache.cassandra.index.sai.memory.TrieMemtableIndex;
 import org.apache.cassandra.index.sai.metrics.ColumnQueryMetrics;
 import org.apache.cassandra.index.sai.metrics.IndexMetrics;
 import org.apache.cassandra.index.sai.plan.Expression;
@@ -83,7 +84,6 @@ import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.index.sai.view.IndexViewManager;
 import org.apache.cassandra.index.sai.view.View;
-import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.ColumnMetadata;
@@ -506,7 +506,10 @@ public class IndexContext
         {
             for (MemtableIndex index : memtables)
             {
-                builder.add(index.search(context, expression, keyRange, limit));
+                if (index instanceof TrieMemtableIndex)
+                    builder.add(((TrieMemtableIndex)index).eagerSearch(expression, keyRange));
+                else
+                    builder.add(index.search(context, expression, keyRange));
             }
 
             return builder.build();
