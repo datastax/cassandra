@@ -40,16 +40,11 @@ public abstract class AbstractMemtableIndex implements MemtableIndex
     }
 
     /**
-     * @return num of rows in the memtable index
-     */
-    protected abstract int indexedRows();
-
-    /**
      * Called when index is updated
      */
     protected void onIndexUpdated()
     {
-        if (flushThresholdMaxRows > 0 && indexedRows() >= flushThresholdMaxRows)
+        if (flushThresholdMaxRows > 0 && getRowCount() >= flushThresholdMaxRows)
             memtable.signalFlushRequired(ColumnFamilyStore.FlushReason.INDEX_MEMTABLE_LIMIT, true);
     }
 }
