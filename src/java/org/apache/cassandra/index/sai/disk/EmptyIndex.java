@@ -51,6 +51,12 @@ public class EmptyIndex implements SearchableIndex
     }
 
     @Override
+    public long getApproximateTermCount()
+    {
+        return 0;
+    }
+
+    @Override
     public long minSSTableRowId()
     {
         return -1;

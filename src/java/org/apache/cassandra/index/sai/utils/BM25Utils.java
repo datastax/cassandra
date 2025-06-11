@@ -44,6 +44,28 @@ public class BM25Utils
     private static final float K1 = 1.2f;  // BM25 term frequency saturation parameter
     private static final float B = 0.75f;  // BM25 length normalization parameter
 
+    public static class AggDocsStats
+    {
+        private long docCount;
+        private long totalTermCount;
+
+        public void add(long docCount, long totalTermCount)
+        {
+            this.docCount += docCount;
+            this.totalTermCount += totalTermCount;
+        }
+
+        public long getDocCount()
+        {
+            return docCount;
+        }
+
+        public long getTotalTermCount()
+        {
+            return totalTermCount;
+        }
+    }
+
     /**
      * Term frequencies across all documents.  Each document is only counted once.
      */
@@ -55,11 +77,11 @@ public class BM25Utils
         private final long docCount;
         private double avgDocLength;
 
-        public DocStats(Map<ByteBuffer, Long> frequencies, long docCount, long totalTermCount)
+        public DocStats(Map<ByteBuffer, Long> frequencies, AggDocsStats aggStats)
         {
             this.frequencies = frequencies;
-            this.docCount = docCount;
-            this.avgDocLength = (double) totalTermCount / docCount;
+            this.docCount = aggStats.docCount;
+            this.avgDocLength = (double) aggStats.totalTermCount / aggStats.docCount;
         }
     }
 
