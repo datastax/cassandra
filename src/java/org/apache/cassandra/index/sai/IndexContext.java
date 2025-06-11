@@ -476,12 +476,12 @@ public class IndexContext
         else
         {
             Expression negExpression = expression.negated();
-            KeyRangeIterator matchedKeys = searchMemtable(context, memtables, negExpression, keyRange, Integer.MAX_VALUE);
+            KeyRangeIterator matchedKeys = searchMemtable(context, memtables, negExpression, keyRange);
             return KeyRangeAntiJoinIterator.create(allKeys, matchedKeys);
         }
     }
 
-    public KeyRangeIterator searchMemtable(QueryContext context, Collection<MemtableIndex> memtables, Expression expression, AbstractBounds<PartitionPosition> keyRange, int limit)
+    public KeyRangeIterator searchMemtable(QueryContext context, Collection<MemtableIndex> memtables, Expression expression, AbstractBounds<PartitionPosition> keyRange)
     {
         if (expression.getOp().isNonEquality())
         {

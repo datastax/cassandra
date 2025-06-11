@@ -177,8 +177,7 @@ public class V1SearchableIndex implements SearchableIndex
     public KeyRangeIterator search(Expression expression,
                                    AbstractBounds<PartitionPosition> keyRange,
                                    QueryContext context,
-                                   boolean defer,
-                                   int limit) throws IOException
+                                   boolean defer) throws IOException
     {
         KeyRangeConcatIterator.Builder rangeConcatIteratorBuilder = KeyRangeConcatIterator.builder(segments.size());
 
@@ -188,7 +187,7 @@ public class V1SearchableIndex implements SearchableIndex
             {
                 if (segment.intersects(keyRange))
                 {
-                    rangeConcatIteratorBuilder.add(segment.search(expression, keyRange, context, defer, limit));
+                    rangeConcatIteratorBuilder.add(segment.search(expression, keyRange, context, defer));
                 }
             }
 

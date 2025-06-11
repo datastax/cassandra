@@ -228,7 +228,7 @@ public class SSTableIndex
         else
         {
             Expression negExpression = expression.negated();
-            KeyRangeIterator matchedKeys = searchableIndex.search(negExpression, keyRange, context, defer, Integer.MAX_VALUE);
+            KeyRangeIterator matchedKeys = searchableIndex.search(negExpression, keyRange, context, defer);
             return KeyRangeAntiJoinIterator.create(allKeys, matchedKeys);
         }
     }
@@ -236,15 +236,14 @@ public class SSTableIndex
     public KeyRangeIterator search(Expression expression,
                                    AbstractBounds<PartitionPosition> keyRange,
                                    QueryContext context,
-                                   boolean defer,
-                                   int limit) throws IOException
+                                   boolean defer) throws IOException
     {
         if (expression.getOp().isNonEquality())
         {
             return getNonEqIterator(expression, keyRange, context, defer);
         }
 
-        return searchableIndex.search(expression, keyRange, context, defer, limit);
+        return searchableIndex.search(expression, keyRange, context, defer);
     }
 
     public List<CloseableIterator<PrimaryKeyWithSortKey>> orderBy(Orderer orderer,
