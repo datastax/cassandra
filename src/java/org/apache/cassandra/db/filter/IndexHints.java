@@ -414,7 +414,7 @@ public class IndexHints
     /**
      * Serializer for {@link IndexHints}.
      * </p>
-     * This serializer writes a short containing bit flags that indicate which types of hints are present, allowing the
+     * This serializer writes a byte containing bit flags that indicate which types of hints are present, allowing the
      * future addition of new types of hints without necessarily increasing the messaging version. We should be able to
      * create compatible messages in the future if we add new types of hints, and those are not explicitly set in the
      * user query. If we receive a message with unknown newer types of hints from a newer node, we will reject it.
@@ -444,8 +444,8 @@ public class IndexHints
                 return;
             }
 
-            short flags = flags(hints);
-            out.writeShort(flags);
+            byte flags = flags(hints);
+            out.writeByte(flags);
 
             indexSetSerializer.serialize(hints.included, out, version);
             indexSetSerializer.serialize(hints.excluded, out, version);
@@ -458,7 +458,7 @@ public class IndexHints
                 return IndexHints.NONE;
 
             // read the flags first to determine which types of hints are present
-            short flags = in.readShort();
+            byte flags = in.readByte();
 
             // Reject any flags for unknown hints that may have been written by a node running newer code.
             if ((flags & UNKNOWN_HINTS_MASK) != 0)
@@ -479,7 +479,7 @@ public class IndexHints
                 return 0;
 
             // size of flags
-            long size = TypeSizes.SHORT_SIZE;
+            long size = TypeSizes.BYTE_SIZE;
 
             // size of included and excluded indexes
             size += indexSetSerializer.serializedSize(hints.included, version);
@@ -488,9 +488,9 @@ public class IndexHints
             return size;
         }
 
-        private static short flags(IndexHints hints)
+        private static byte flags(IndexHints hints)
         {
-            short flags = 0;
+            byte flags = 0;
 
             if (hints == NONE)
                 return flags;
