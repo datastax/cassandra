@@ -21,6 +21,7 @@
 package org.apache.cassandra.index;
 
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
@@ -28,7 +29,6 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import java.util.TreeSet;
 import java.util.concurrent.Callable;
 import java.util.function.Function;
 import java.util.function.Predicate;
@@ -388,14 +388,23 @@ public interface Index
 
     /**
      * @param indexes the indexes to join
-     * @return a comma-separated list of sorted unqualified index names
+     * @return a comma-separated list of alphabetically sorted unqualified index names
      */
     static String joinNames(Iterable<Index> indexes)
     {
-        TreeSet<String> sortedNames = new TreeSet<>();
+        return IndexMetadata.joinNames(getMetadatas(indexes));
+    }
+
+    /**
+     * @param indexes the indexes to get the metadatas from
+     * @return the list of index metadatas
+     */
+    static List<IndexMetadata> getMetadatas(Iterable<Index> indexes)
+    {
+        List<IndexMetadata> metadatas = new ArrayList<>();
         for (Index index : indexes)
-            sortedNames.add(index.getIndexMetadata().name);
-        return String.join(",", sortedNames);
+            metadatas.add(index.getIndexMetadata());
+        return metadatas;
     }
 
     /*

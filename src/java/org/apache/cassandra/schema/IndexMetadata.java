@@ -282,7 +282,7 @@ public final class IndexMetadata
 
     /**
      * @param metadatas the index metadatas to join
-     * @return a comma-separated list of sorted unqualified index names
+     * @return a comma-separated list of alphabetically sorted unqualified index names
      */
     public static String joinNames(Iterable<IndexMetadata> metadatas)
     {
