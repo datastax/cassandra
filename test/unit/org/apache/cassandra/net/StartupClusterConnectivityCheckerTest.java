@@ -145,6 +145,19 @@ public class StartupClusterConnectivityCheckerTest
         available.clear();
         copyCount(peersAMinusLocal, available, NUM_PER_DC - 2);
         checkAvailable(localQuorumConnectivityChecker, available, true);
+
+    }
+
+    @Test
+    public void execute_LocalQuorum_legacy() throws UnknownHostException
+    {
+        // local peer plus 4 peers from same dc, with one on 3014, shouldn't pass (4/6)
+        Set<InetAddressAndPort> available = new HashSet<>();
+        copyCount(peersAMinusLocal, available, NUM_PER_DC - 2);
+        InetAddressAndPort legacyPeer = InetAddressAndPort.getByName("127.0.1.1");
+        MessagingService.instance().versions.set(legacyPeer, MessagingService.VERSION_3014);
+        checkAvailable(localQuorumConnectivityChecker, available, false);
+        MessagingService.instance().versions.reset(legacyPeer);
     }
 
     @Test
