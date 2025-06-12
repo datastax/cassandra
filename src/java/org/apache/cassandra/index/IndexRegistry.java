@@ -328,13 +328,7 @@ public interface IndexRegistry
      */
     default Collection<Index> listNotExcludedIndexes(IndexHints hints)
     {
-        Set<Index> indexes = new HashSet<>();
-        for (Index index : listIndexes())
-        {
-            if (!hints.excludes(index))
-                indexes.add(index);
-        }
-        return indexes;
+        return hints.notExcluded(listIndexes());
     }
 
     default Optional<Index.Analyzer> getAnalyzerFor(ColumnMetadata column, Operator operator, ByteBuffer value, IndexHints hints)
