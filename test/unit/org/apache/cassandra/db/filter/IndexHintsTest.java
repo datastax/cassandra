@@ -143,9 +143,7 @@ public class IndexHintsTest extends CQLTester
         assertInvalidThrowMessage(missingIndexError,
                                   InvalidRequestException.class,
                                   query + "WITH included_indexes={idx2} AND excluded_indexes={idx1}");
-        assertInvalidThrowMessage(CONFLICTING_INDEXES_ERROR + "idx1",
-                                  InvalidRequestException.class,
-                                  query + "WITH included_indexes={idx1} AND excluded_indexes={idx1}");
+        assertConflictingHints(query + "WITH included_indexes={idx1} AND excluded_indexes={idx1}", "idx1");
 
         // create a second index and test queries with both indexes
         createIndex(String.format("CREATE CUSTOM INDEX idx2 ON %%s(b) USING '%s'", GroupedIndex.class.getName()));
@@ -153,28 +151,20 @@ public class IndexHintsTest extends CQLTester
         execute(query + "WITH included_indexes={idx1}");
         execute(query + "WITH included_indexes={idx2}");
         execute(query + "WITH included_indexes={idx1,idx2}");
+        execute(query + "WITH included_indexes={idx1,idx1}");
         execute(query + "WITH excluded_indexes={}");
         execute(query + "WITH excluded_indexes={idx1}");
         execute(query + "WITH excluded_indexes={idx2}");
         execute(query + "WITH excluded_indexes={idx1,idx2}");
+        execute(query + "WITH excluded_indexes={idx1,idx1}");
         execute(query + "WITH included_indexes={} AND excluded_indexes={}");
         execute(query + "WITH included_indexes={idx1} AND excluded_indexes={idx2}");
         execute(query + "WITH included_indexes={idx2} AND excluded_indexes={idx1}");
-        assertInvalidThrowMessage(CONFLICTING_INDEXES_ERROR + "idx1",
-                                  InvalidRequestException.class,
-                                  query + "WITH included_indexes={idx1} AND excluded_indexes={idx1}");
-        assertInvalidThrowMessage(CONFLICTING_INDEXES_ERROR + "idx2",
-                                  InvalidRequestException.class,
-                                  query + "WITH included_indexes={idx2} AND excluded_indexes={idx2}");
-        assertInvalidThrowMessage(CONFLICTING_INDEXES_ERROR + "idx1",
-                                  InvalidRequestException.class,
-                                  query + "WITH included_indexes={idx1,idx2} AND excluded_indexes={idx1}");
-        assertInvalidThrowMessage(CONFLICTING_INDEXES_ERROR + "idx1",
-                                  InvalidRequestException.class,
-                                  query + "WITH included_indexes={idx1} AND excluded_indexes={idx1,idx2}");
-        assertInvalidThrowMessage(CONFLICTING_INDEXES_ERROR + "idx1,idx2",
-                                  InvalidRequestException.class,
-                                  query + "WITH included_indexes={idx1,idx2} AND excluded_indexes={idx1,idx2}");
+        assertConflictingHints(query + "WITH included_indexes={idx1} AND excluded_indexes={idx1}", "idx1");
+        assertConflictingHints(query + "WITH included_indexes={idx2} AND excluded_indexes={idx2}", "idx2");
+        assertConflictingHints(query + "WITH included_indexes={idx1,idx2} AND excluded_indexes={idx1}", "idx1");
+        assertConflictingHints(query + "WITH included_indexes={idx1} AND excluded_indexes={idx1,idx2}", "idx1");
+        assertConflictingHints(query + "WITH included_indexes={idx1,idx2} AND excluded_indexes={idx1,idx2}", "idx1,idx2");
 
         // invalid queries referencing other keyspaces
         String wrongKeyspaceError = String.format(WRONG_KEYSPACE_ERROR, "ks1.idx1");
@@ -1191,6 +1181,31 @@ public class IndexHintsTest extends CQLTester
         assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v NOT CONTAINS 'Debussy' WITH excluded_indexes={analyzed}", row1, row2).selects(literal).doesntWarn();
     }
 
+    @Test
+    public void testDuplicatedHints()
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v1 int, v2 int, v3 int)");
+        String idx1 = createIndex("CREATE INDEX idx1 ON %s(v1)");
+        String idx2 = createIndex("CREATE CUSTOM INDEX idx2 ON %s(v2) USING 'StorageAttachedIndex'");
+        String idx3 = createIndex("CREATE CUSTOM INDEX idx3 ON %s(v3) USING 'org.apache.cassandra.index.sasi.SASIIndex'");
+
+        assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v1=0 WITH included_indexes={idx1,idx1}").selects(idx1);
+        assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v2=0 WITH included_indexes={idx2,idx2}").selects(idx2);
+        assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v3=0 WITH included_indexes={idx3,idx3}").selects(idx3);
+
+        assertNeedsAllowFiltering("SELECT * FROM %s WHERE v1=0 WITH excluded_indexes={idx1,idx1}");
+        assertNeedsAllowFiltering("SELECT * FROM %s WHERE v2=0 WITH excluded_indexes={idx2,idx2}");
+        assertNeedsAllowFiltering("SELECT * FROM %s WHERE v3=0 WITH excluded_indexes={idx3,idx3}");
+
+        assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v1=0 ALLOW FILTERING WITH excluded_indexes={idx1,idx1}").selectsNone();
+        assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v2=0 ALLOW FILTERING WITH excluded_indexes={idx2,idx2}").selectsNone();
+        assertThatIndexQueryPlanFor("SELECT * FROM %s WHERE v3=0 ALLOW FILTERING WITH excluded_indexes={idx3,idx3}").selectsNone();
+
+        assertConflictingHints("SELECT * FROM %s WHERE v1=0 WITH included_indexes={idx1} AND excluded_indexes={idx1}", "idx1");
+        assertConflictingHints("SELECT * FROM %s WHERE v2=0 WITH included_indexes={idx2} AND excluded_indexes={idx2}", "idx2");
+        assertConflictingHints("SELECT * FROM %s WHERE v3=0 WITH included_indexes={idx3} AND excluded_indexes={idx3}", "idx3");
+    }
+
     private void assertNonIncludableIndexesError(String query)
     {
         Assertions.assertThatThrownBy(() -> execute(query))
@@ -1238,6 +1253,13 @@ public class IndexHintsTest extends CQLTester
         Assertions.assertThatThrownBy(() -> execute(query))
                   .isInstanceOf(InvalidRequestException.class)
                   .hasMessageContaining("equality predicate is ambiguous");
+    }
+
+    private void assertConflictingHints(String query, String indexName)
+    {
+        Assertions.assertThatThrownBy(() -> execute(query))
+                  .isInstanceOf(InvalidRequestException.class)
+                  .hasMessageContaining(CONFLICTING_INDEXES_ERROR + indexName);
     }
 
     private static Set<IndexMetadata> indexes(IndexMetadata... indexes)

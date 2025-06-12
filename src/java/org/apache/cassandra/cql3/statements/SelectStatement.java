@@ -1214,6 +1214,11 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             String ks = keyspaceMapper.apply(keyspace());
             TableMetadata table = Schema.instance.validateTable(ks, name());
 
+            // Besides actual restrictions (where clauses), prepareRestrictions will include the user-provided index hints,
+            // which are needed to determine what indexes to use for the query and to validate whether filtering is needed.
+            IndexHints indexHints = options.parseIndexHints(table, IndexRegistry.obtain(table));
+            indexHints.validate(ks);
+
             List<Selectable> selectables = RawSelector.toSelectables(selectClause, table);
             boolean containsOnlyStaticColumns = selectOnlyStaticColumns(table, selectables);
 
@@ -1221,10 +1226,6 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             // on indexed columns to allow pushing ORDER BY into the index; see StatementRestrictions::addOrderingRestrictions.
             // Therefore, we don't want to convert an ANN Ordering column into a +score column until after that.
             List<Ordering> orderings = getOrderings(table);
-
-            // Besides actual restrictions (where clauses), prepareRestrictions will include the user-provided index hints,
-            // which are needed to determine what indexes to use for the query and to validate whether filtering is needed.
-            IndexHints indexHints = options.parseIndexHints(table, IndexRegistry.obtain(table));
 
             StatementRestrictions restrictions = prepareRestrictions(
                     table, bindVariables, orderings, indexHints, containsOnlyStaticColumns, forView);
