@@ -65,7 +65,7 @@ public interface IndexRegistry
     /**
      * An empty {@code IndexRegistry}
      */
-    public static final IndexRegistry EMPTY = new IndexRegistry()
+    IndexRegistry EMPTY = new IndexRegistry()
     {
         @Override
         public void registerIndex(Index index, Index.Group.Key groupKey, Supplier<Index.Group> groupSupplier)
