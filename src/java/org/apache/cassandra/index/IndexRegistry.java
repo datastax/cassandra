@@ -326,7 +326,7 @@ public interface IndexRegistry
      * @param hints the index hints with the indexes to exclude.
      * @return the indexes in this registry that are not excluded by the hints.
      */
-    default Collection<Index> listIndexes(IndexHints hints)
+    default Collection<Index> listNotExcludedIndexes(IndexHints hints)
     {
         Set<Index> indexes = new HashSet<>();
         for (Index index : listIndexes())
@@ -421,7 +421,7 @@ public interface IndexRegistry
         Set<Index> eqOnlyIndexes = new HashSet<>();
         Set<Index> eqAndMatchIndexes = new HashSet<>();
 
-        for (Index index : listIndexes(hints))
+        for (Index index : listNotExcludedIndexes(hints))
         {
             boolean supportsEq = index.supportsExpression(cm, Operator.EQ);
             boolean supportsMatches = index.supportsExpression(cm, Operator.ANALYZER_MATCHES);

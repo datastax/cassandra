@@ -759,7 +759,7 @@ public abstract class SingleColumnRestriction implements SingleRestriction
             // This is done by the call to findSupportingIndex() above, but we also check it here to throw a client warning.
             boolean hasNotAnalyzedIndex = false;
             boolean hasAnalyzedIndex = false;
-            for (Index index : indexRegistry.listIndexes(indexHints))
+            for (Index index : indexRegistry.listNotExcludedIndexes(indexHints))
             {
                 if (isSupportedBy(index))
                 {

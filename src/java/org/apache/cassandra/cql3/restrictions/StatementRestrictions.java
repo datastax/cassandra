@@ -648,7 +648,7 @@ public class StatementRestrictions
                     if (vectorColumn.isPresent())
                     {
                         var vc = vectorColumn.get();
-                        var hasIndex = indexRegistry.listIndexes(indexHints).stream().anyMatch(i -> i.dependsOn(vc));
+                        var hasIndex = indexRegistry.listNotExcludedIndexes(indexHints).stream().anyMatch(i -> i.dependsOn(vc));
                         var isBoundedANN = nonPrimaryKeyRestrictions.restrictions().stream().anyMatch(SingleRestriction::isBoundedAnn);
                         if (hasIndex)
                             if (isBoundedANN)
@@ -1290,7 +1290,7 @@ public class StatementRestrictions
         {
             if (!restriction.hasSupportingIndex(indexRegistry, indexHints))
             {
-                for (Index index : indexRegistry.listIndexes(indexHints))
+                for (Index index : indexRegistry.listNotExcludedIndexes(indexHints))
                 {
                     // If a column restriction has an index which was not picked up by hasSupportingIndex, it means it's an unsupported restriction
                     for (ColumnMetadata column : restriction.getColumnDefs())

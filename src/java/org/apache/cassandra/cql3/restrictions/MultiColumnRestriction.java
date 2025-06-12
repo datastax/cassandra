@@ -129,7 +129,7 @@ public abstract class MultiColumnRestriction implements SingleRestriction
     @Override
     public final boolean hasSupportingIndex(IndexRegistry indexRegistry, IndexHints indexHints)
     {
-        for (Index index : indexRegistry.listIndexes(indexHints))
+        for (Index index : indexRegistry.listNotExcludedIndexes(indexHints))
             if (isSupportingIndex(index))
                 return true;
         return false;
