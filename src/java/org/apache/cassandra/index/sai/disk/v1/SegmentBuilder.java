@@ -78,10 +78,17 @@ public abstract class SegmentBuilder
 {
     private static final Logger logger = LoggerFactory.getLogger(SegmentBuilder.class);
 
+    private static final int COMPACTION_EXECUTOR_NUM_THREADS = Integer.getInteger("cassandra.sai.compaction.executor.threads",
+                                                                                  Runtime.getRuntime().availableProcessors() / 2);
+
+    static {
+        logger.debug("SAI compaction executor threads: {}", COMPACTION_EXECUTOR_NUM_THREADS);
+    }
+
     /** for parallelism within a single compaction
      *  see comments to JVector PhysicalCoreExecutor -- HT tends to cause contention for the SIMD units
      */
-    public static final ExecutorService compactionExecutor = new DebuggableThreadPoolExecutor(Runtime.getRuntime().availableProcessors() / 2,
+    public static final ExecutorService compactionExecutor = new DebuggableThreadPoolExecutor(COMPACTION_EXECUTOR_NUM_THREADS,
                                                                                               1,
                                                                                               TimeUnit.MINUTES,
                                                                                               new ArrayBlockingQueue<>(10 * Runtime.getRuntime().availableProcessors()),
