@@ -806,7 +806,7 @@ public interface Index
          * @param hints the index hints with the indexes to exclude.
          * @return the indexes that are members of this group that are not excluded by the hints.
          */
-        default Set<? extends Index> getIndexes(IndexHints hints)
+        default Set<? extends Index> getNotExcludedIndexes(IndexHints hints)
         {
             Set<Index> indexes = new HashSet<>();
             for (Index index : getIndexes())
