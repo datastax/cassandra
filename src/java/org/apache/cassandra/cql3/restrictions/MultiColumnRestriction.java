@@ -147,7 +147,7 @@ public abstract class MultiColumnRestriction implements SingleRestriction
 
     private boolean isSupportedBy(Index.Group indexGroup, IndexHints indexHints, ColumnMetadata column)
     {
-        for (Index index : indexGroup.getIndexes(indexHints))
+        for (Index index : indexGroup.getNotExcludedIndexes(indexHints))
             if (isSupportedBy(index, column))
                 return true;
 
