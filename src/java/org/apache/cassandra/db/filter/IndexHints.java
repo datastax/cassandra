@@ -324,6 +324,12 @@ public class IndexHints
                Objects.equals(excluded, that.excluded);
     }
 
+    @Override
+    public int hashCode()
+    {
+        return Objects.hash(included, excluded);
+    }
+
     /**
      * Returns the index hints represented by the specified sets of CQL names for the specified queried table.
      * </p>
