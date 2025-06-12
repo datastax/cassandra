@@ -49,14 +49,15 @@ import static java.lang.String.format;
  * that should be used (included) and a set of indexes that should not be used (excluded).
  * </p>
  * Queries will fail if it's not possible to use the included indexes. That might happen because the query doesn't have
- * a restriction for those indexes, or because there is a restriction that can use the index but is not compatible with
- * other restrictions, or because the underlying index implementation isn't able to use the index for whatever reason.
+ * a restriction for those indexes, or because there is a restriction that can use the index, but it is not compatible
+ * with other restrictions, or because the underlying index implementation isn't able to use the index for whatever
+ * reason.
  * </p>
- * Excluded indexes will never fail the query unless they reference an unexistent index, since it's always posible to
+ * Excluded indexes will never fail the query unless they reference a non-existent index, since it's always possible to
  * exclude an index regardless of the query expressions and index implementation capabilities. However, excluding
  * indexes might make necessary to add {@code ALLOW FILTERING} to the query.
  * </p>
- * Other than that, indexes that are applicable to the query and that are not mentioned on these two sets of included
+ * Other than that, indexes that are applicable to the query and that are not mentioned in these two sets of included
  * and excluded indexes might or might not be used depending on the index query planner.
  */
 public class IndexHints
@@ -409,7 +410,7 @@ public class IndexHints
      * </p>
      * This serializer writes a short containing bit flags that indicate which types of hints are present, allowing the
      * future addition of new types of hints without necessarily increasing the messaging version. We should be able to
-     * create compatible messages in the future if we add new types of hints and those are not explicitly set in the
+     * create compatible messages in the future if we add new types of hints, and those are not explicitly set in the
      * user query. If we receive a message with unknown newer types of hints from a newer node, we will reject it.
      * </p>
      * Also, the bit flags are used to skip writing empty sets of indexes, which is the common case.

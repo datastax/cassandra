@@ -41,7 +41,7 @@ public class KeyRangeIntersectionIterator extends KeyRangeIterator
 {
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
-    // The cassandra.sai.intersection.clause.limit (default: 2) controls the maximum number of range iterator that
+    // The cassandra.sai.intersection.clause.limit (default: 2) controls the maximum number of range iterators that
     // will be used in the final intersection of a query operation.
     public static final int INTERSECTION_CLAUSE_LIMIT = CassandraRelevantProperties.SAI_INTERSECTION_CLAUSE_LIMIT.getInt();
 
