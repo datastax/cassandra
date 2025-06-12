@@ -36,6 +36,8 @@ import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.codahale.metrics.Histogram;
+import com.codahale.metrics.UniformReservoir;
 import io.github.jbellis.jvector.quantization.VectorCompressor;
 import org.apache.cassandra.concurrent.DebuggableThreadPoolExecutor;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
@@ -255,6 +257,12 @@ public abstract class SegmentBuilder
     public static class VectorOffHeapSegmentBuilder extends SegmentBuilder
     {
         private final CompactionGraph graphIndex;
+        // Only using the no-sample reservoir to observe the behavior without sampling. Not for production use.
+        private final Histogram totalAddTimeHist = new Histogram(new UniformReservoir(10_000_000));
+        private final Histogram addGraphTimeHist = new Histogram(new UniformReservoir(10_000_000));
+        private long totalDuration = 0;
+        private long addGraphTimeDuration = 0;
+        private int totalAdds = 0;
 
         public VectorOffHeapSegmentBuilder(IndexComponents.ForWrite components,
                                            long rowIdOffset,
@@ -293,6 +301,7 @@ public abstract class SegmentBuilder
         protected long addInternalAsync(List<ByteBuffer> terms, int segmentRowId)
         {
             assert terms.size() == 1;
+            final long start = System.nanoTime();
 
             // CompactionGraph splits adding a node into two parts:
             // (1) maybeAddVector, which must be done serially because it writes to disk incrementally
@@ -311,6 +320,7 @@ public abstract class SegmentBuilder
 
             updatesInFlight.incrementAndGet();
             compactionExecutor.submit(() -> {
+                long beforeAddGraphNode = System.nanoTime();
                 try
                 {
                     long bytesAdded = result.bytesUsed + graphIndex.addGraphNode(result);
@@ -324,6 +334,14 @@ public abstract class SegmentBuilder
                 finally
                 {
                     updatesInFlight.decrementAndGet();
+                    long now = System.nanoTime();
+                    totalAdds++;
+                    long addInternalAsyncDuration = now - start;
+                    totalDuration += addInternalAsyncDuration;
+                    totalAddTimeHist.update(addInternalAsyncDuration / 1000);
+                    long addGraphNodeDuration = now - beforeAddGraphNode;
+                    addGraphTimeDuration += addGraphNodeDuration;
+                    addGraphTimeHist.update(addGraphNodeDuration / 1000);
                 }
             });
             // bytes allocated will be approximated immediately as the average of recently added terms,
@@ -342,7 +360,21 @@ public abstract class SegmentBuilder
         {
             if (graphIndex.isEmpty())
                 return;
+            // Print diagnostic info
+            if (totalAdds > 0)
+            {
+                logger.info("Add internal async: average time: {} us, total time: {} us, total adds: {}", (double) totalDuration / totalAdds / 1000, totalDuration / 1000, totalAdds);
+                var totalAddTimeHistSnapshot = totalAddTimeHist.getSnapshot();
+                logger.info("Add internal async time histogram: min: {} us, max: {} us, mean: {} us, median: {} us, 75th percentile: {} us, 95th percentile: {} us, 99th percentile: {} us, 99.9th percentile: {} us",
+                            totalAddTimeHistSnapshot.getMin(), totalAddTimeHistSnapshot.getMax(), totalAddTimeHistSnapshot.getMean(), totalAddTimeHistSnapshot.getMedian(), totalAddTimeHistSnapshot.get75thPercentile(), totalAddTimeHistSnapshot.get95thPercentile(), totalAddTimeHistSnapshot.get99thPercentile(), totalAddTimeHistSnapshot.get999thPercentile());
+                logger.info("Add graph node: average time {} us, total time: {} us, total adds: {}", (double) addGraphTimeDuration / totalAdds / 1000, addGraphTimeDuration / 1000, totalAdds);
+                var addGraphTimeHistSnapshot = addGraphTimeHist.getSnapshot();
+                logger.info("Add graph node time histogram: min: {} us, max: {} us, mean: {} us, median: {} us, 75th percentile: {} us, 95th percentile: {} us, 99th percentile: {} us, 99.9th percentile: {} us",
+                            addGraphTimeHistSnapshot.getMin(), addGraphTimeHistSnapshot.getMax(), addGraphTimeHistSnapshot.getMean(), addGraphTimeHistSnapshot.getMedian(), addGraphTimeHistSnapshot.get75thPercentile(), addGraphTimeHistSnapshot.get95thPercentile(), addGraphTimeHistSnapshot.get99thPercentile(), addGraphTimeHistSnapshot.get999thPercentile());
+            }
+            long start = System.nanoTime();
             var componentsMetadata = graphIndex.flush();
+            logger.info("Flushing graph took {}ms", (System.nanoTime() - start) / 1_000_000);
             metadataBuilder.setComponentsMetadata(componentsMetadata);
         }
 
