@@ -250,7 +250,7 @@ public class NumericTermsDistributionTest extends SAITester
         var view = index.getIndexContext().getView();
         var onDiskCount = 0L;
         for (var sstableIndex : view.getIndexes())
-            onDiskCount += sstableIndex.estimateMatchingRowsCount(expression, wholeRange);
+            onDiskCount += sstableIndex.approximateMatchingRowsCount(expression, wholeRange);
 
         assertEstimateCorrect(expectedCount, roundingValue, uncertainty, onDiskCount);
     }
