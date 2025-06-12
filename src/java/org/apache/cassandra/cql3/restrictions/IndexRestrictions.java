@@ -111,7 +111,8 @@ public final class IndexRestrictions
      * Returns whether these restrictions would need filtering if the specified index registry were used.
      *
      * @param indexRegistry an index registry
-     * @param indexHints the user-provided index hints, which might exclude some indexes
+     * @param indexHints the user-provided index hints, which might exclude some indexes or explicitly expect some
+     * indexes requested by the user
      * @param hasClusteringColumnRestrictions {@code true} if there are restricted clustering columns
      * @param hasMultipleContains {@code true} if there are multiple "contains" restrictions
      * @return {@code true} if this would need filtering if {@code indexRegistry} were used, {@code false} otherwise
