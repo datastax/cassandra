@@ -19,16 +19,7 @@
 package org.apache.cassandra.index.sai.plan;
 
 import java.io.IOError;
-import java.util.ArrayDeque;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
-import java.util.PriorityQueue;
-import java.util.Queue;
-import java.util.Set;
+import java.util.*;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import javax.annotation.Nonnull;
@@ -101,24 +92,6 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         return command;
     }
 
-    @VisibleForTesting
-    public final Set<String> plannedIndexes()
-    {
-        try
-        {
-            Plan plan = controller.buildPlan().optimize();
-            Set<String> indexes = new HashSet<>();
-            plan.nodesOfType(Plan.IndexScan.class)
-                .forEach(s -> indexes.add(s.getIndexName()));
-            return indexes;
-        }
-        finally
-        {
-            // we need to call this to clean up the resources opened by the plan
-            controller.abort();
-        }
-    }
-
     @Override
     @SuppressWarnings("unchecked")
     public UnfilteredPartitionIterator search(ReadExecutionController executionController) throws RequestTimeoutException
@@ -175,7 +148,6 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         }
     }
 
-
     /**
      * Converts expressions into filter tree (which is currently just a single AND).
      *
@@ -188,6 +160,35 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
     private FilterTree analyzeFilter()
     {
         return controller.buildFilter();
+    }
+
+    @VisibleForTesting
+    public final Set<String> plannedIndexes()
+    {
+        try
+        {
+            Plan plan = controller.buildPlan().optimize();
+            Set<String> indexes = new HashSet<>();
+            plan.forEach(node -> {
+                if (node instanceof Plan.IndexScan)
+                {
+                    Plan.IndexScan indexScan = (Plan.IndexScan) node;
+                    indexes.add(indexScan.getIndexName());
+                }
+                if (node instanceof Plan.ScoredIndexScan)
+                {
+                    Plan.ScoredIndexScan indexScan = (Plan.ScoredIndexScan) node;
+                    indexes.add(indexScan.getIndexName());
+                }
+                return Plan.ControlFlow.Continue;
+            });
+            return indexes;
+        }
+        finally
+        {
+            // we need to call this to clean up the resources opened by the plan
+            controller.abort();
+        }
     }
 
     private static class ResultRetriever extends AbstractIterator<UnfilteredRowIterator> implements UnfilteredPartitionIterator
