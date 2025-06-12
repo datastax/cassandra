@@ -498,12 +498,7 @@ public class IndexContext
         try
         {
             for (MemtableIndex index : memtables)
-            {
-                if (index instanceof TrieMemtableIndex)
-                    builder.add(((TrieMemtableIndex)index).eagerSearch(expression, keyRange));
-                else
-                    builder.add(index.search(context, expression, keyRange));
-            }
+                builder.add(index.search(context, expression, keyRange));
 
             return builder.build();
         }

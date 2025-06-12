@@ -366,11 +366,25 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
     }
 
     @Override
-    public long estimateMatchingRowsCount(Expression expression, AbstractBounds<PartitionPosition> keyRange)
+    public long approximateMatchingRowsCount(Expression expression, AbstractBounds<PartitionPosition> keyRange)
     {
         int startShard = boundaries.getShardForToken(keyRange.left.getToken());
         int endShard = getEndShardForBounds(keyRange);
         return rangeIndexes[startShard].estimateMatchingRowsCount(expression, keyRange) * (endShard - startShard + 1);
+    }
+
+    @Override
+    public long estimateMatchingRowsCount(Expression expression, AbstractBounds<PartitionPosition> keyRange)
+    {
+        int startShard = boundaries.getShardForToken(keyRange.left.getToken());
+        int endShard = getEndShardForBounds(keyRange);
+        long count = 0;
+        for (int shard = startShard; shard <= endShard; ++shard)
+        {
+            assert rangeIndexes[shard] != null;
+            count += rangeIndexes[shard].estimateMatchingRowsCount(expression, keyRange);
+        }
+        return count;
     }
 
     @Override

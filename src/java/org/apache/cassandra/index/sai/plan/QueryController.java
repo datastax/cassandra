@@ -680,27 +680,34 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
             {
                 long totalRowCount = 0;
                 long totalTermCount = 0;
+                Map<ByteBuffer, Long> documentFrequencies = new HashMap<>();
                 for (MemtableIndex index : view.memtableIndexes)
                 {
                     totalRowCount += index.getRowCount();
                     totalTermCount += index.getApproximateTermCount();
+                    for (ByteBuffer term : orderer.getQueryTerms())
+                    {
+                        Expression termExpression = new Expression(orderer.context)
+                                                    .add(Operator.ANALYZER_MATCHES, term);
+                        documentFrequencies.put(term, documentFrequencies.getOrDefault(term, 0L) + index.estimateMatchingRowsCount(termExpression, mergeRange));
+                    }
                 }
                 for (SSTableIndex index : view.sstableIndexes)
                 {
                     totalRowCount += index.getRowCount();
                     totalTermCount += index.getApproximateTermCount();
+                    for (ByteBuffer term : orderer.getQueryTerms())
+                    {
+                        Expression termExpression = new Expression(orderer.context)
+                                                    .add(Operator.ANALYZER_MATCHES, term);
+                        documentFrequencies.put(term, documentFrequencies.getOrDefault(term, 0L)
+                                                      + index.getMatchingRowsCount(termExpression, mergeRange, queryContext));
+                    }
                 }
                 // No documents indexed, the iterator will be empty
                 if (totalTermCount == 0)
                     return CloseableIterator.emptyIterator();
 
-                Map<ByteBuffer, Long> documentFrequencies = new HashMap<>();
-                for (ByteBuffer term : orderer.getQueryTerms())
-                {
-                    Expression termExpression = new Expression(orderer.context)
-                                                .add(Operator.ANALYZER_MATCHES, term);
-                    documentFrequencies.put(term, estimateMatchingRowCountUsingIndex(termExpression));
-                }
                 orderer.setBm25stats(new BM25Utils.DocStats(documentFrequencies, totalRowCount, totalTermCount));
             }
 
@@ -929,10 +936,10 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
 
         long rowCount = 0;
         for (MemtableIndex index : queryView.memtableIndexes)
-            rowCount += index.estimateMatchingRowsCount(predicate, mergeRange);
+            rowCount += index.approximateMatchingRowsCount(predicate, mergeRange);
 
         for (SSTableIndex index : queryView.sstableIndexes)
-            rowCount += index.estimateMatchingRowsCount(predicate, mergeRange);
+            rowCount += index.approximateMatchingRowsCount(predicate, mergeRange);
 
         return rowCount;
     }
