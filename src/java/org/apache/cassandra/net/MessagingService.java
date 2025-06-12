@@ -297,6 +297,7 @@ public class MessagingService extends MessagingServiceMBeanImpl implements Messa
     }
     static Map<Integer, Integer> versionOrdinalMap = Arrays.stream(Version.values()).collect(Collectors.toMap(v -> v.value, Enum::ordinal));
 
+    @Deprecated(since = "5.0") // remove when cndb no longer supports bdp/6.8-cndb
     private static int currentVersion()
     {
         int version = CassandraRelevantProperties.DS_CURRENT_MESSAGING_VERSION.getInt();
