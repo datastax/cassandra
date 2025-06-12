@@ -68,6 +68,68 @@ public class IndexHints
     public static final String NON_INCLUDABLE_INDEXES_ERROR = "It's not possible to use all the specified included indexes with this query.";
 
     public static final IndexHints NONE = new IndexHints(Collections.emptySet(), Collections.emptySet())
+    {
+        @Override
+        public boolean includes(Index index)
+        {
+            return false;
+        }
+
+        @Override
+        public boolean includes(String indexName)
+        {
+            return false;
+        }
+
+        @Override
+        public Set<Index> includedIn(Collection<Index> indexes)
+        {
+            return Collections.emptySet();
+        }
+
+        @Override
+        public boolean includesAnyOf(Collection<Index> indexes)
+        {
+            return false;
+        }
+
+        @Override
+        public boolean excludes(Index index)
+        {
+            return false;
+        }
+
+        @Override
+        public boolean excludes(String indexName)
+        {
+            return false;
+        }
+
+        @Override
+        public <T extends Index> Set<T> notExcluded(Iterable<T> indexes)
+        {
+            return Sets.newHashSet(indexes);
+        }
+
+        @Override
+        public void validate(String keyspace)
+        {
+            // nothing to validate
+        }
+
+        @Override
+        public void validate(@Nullable Index.QueryPlan queryPlan)
+        {
+            // nothing to validate
+        }
+
+        @Override
+        public Comparator<Index.QueryPlan> comparator()
+        {
+            // no index hints, so all plans are equal in that respect
+            return (x, y) -> 0;
+        }
+    };
 
     public static final Serializer serializer = new Serializer();
 
