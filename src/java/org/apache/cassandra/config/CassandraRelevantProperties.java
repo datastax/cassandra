@@ -371,7 +371,9 @@ public enum CassandraRelevantProperties
     /**
      * The current messaging version. This is used when we add new messaging versions without adopting them immediately,
      * or to force the node to use a specific version for testing purposes.
+     * @deprecated remove when cndb no longer supports bdp/6.8-cndb
      */
+    @Deprecated(since = "5.0")
     DS_CURRENT_MESSAGING_VERSION("ds.current_messaging_version", Integer.toString(MessagingService.VERSION_DS_20)),
     DTEST_API_LOG_TOPOLOGY("cassandra.dtest.api.log.topology"),
     /** This property indicates if the code is running under the in-jvm dtest framework */
