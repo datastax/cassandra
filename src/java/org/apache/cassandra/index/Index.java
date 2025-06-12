@@ -388,7 +388,7 @@ public interface Index
 
     /**
      * @param indexes the indexes to join
-     * @return a comma-separated list of sorted unqulified index names
+     * @return a comma-separated list of sorted unqualified index names
      */
     static String joinNames(Iterable<Index> indexes)
     {
