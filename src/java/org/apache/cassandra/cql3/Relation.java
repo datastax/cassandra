@@ -184,7 +184,10 @@ public abstract class Relation
     {
         switch (relationType)
         {
-            case EQ: return newEQRestriction(table, boundNames, indexHints); // EQ can behave like ANALYZER_MATCHES depending on indexes
+            case EQ:
+                // EQ can behave like ANALYZER_MATCHES depending on indexes and their configuration
+                // (see equals_behaviour_when_analyzed for SAI)
+                return newEQRestriction(table, boundNames, indexHints);
             case NEQ: return newNEQRestriction(table, boundNames);
             case LT: return newSliceRestriction(table, boundNames, Bound.END, false);
             case LTE: return newSliceRestriction(table, boundNames, Bound.END, true);
