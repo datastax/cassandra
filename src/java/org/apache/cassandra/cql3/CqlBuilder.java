@@ -200,11 +200,6 @@ public final class CqlBuilder
         return this;
     }
 
-    public CqlBuilder append(Set<String> set)
-    {
-        return append(set, true);
-    }
-
     public CqlBuilder append(Set<String> set, boolean quoteValue)
     {
         indentIfNeeded();
