@@ -411,7 +411,7 @@ public class StatementRestrictions
                     if (!forView)
                         throw invalidRequest("Unsupported restriction: %s", relation);
 
-                    notNullColumnsBuilder.addAll(relation.toRestriction(table, boundNames, this.indexHints).getColumnDefs());
+                    notNullColumnsBuilder.addAll(relation.toRestriction(table, boundNames, indexHints).getColumnDefs());
                 }
                 else
                 {
@@ -498,11 +498,11 @@ public class StatementRestrictions
                     filterRestrictionsBuilder.add(customExpression);
                 }
 
-                hasQueryableClusteringColumnIndex = clusteringColumnsRestrictions.hasSupportingIndex(indexRegistry, this.indexHints);
+                hasQueryableClusteringColumnIndex = clusteringColumnsRestrictions.hasSupportingIndex(indexRegistry, indexHints);
                 hasQueryableIndex = element.containsCustomExpressions()
                                     || hasQueryableClusteringColumnIndex
-                                    || partitionKeyRestrictions.hasSupportingIndex(indexRegistry, this.indexHints)
-                                    || nonPrimaryKeyRestrictions.hasSupportingIndex(indexRegistry, this.indexHints);
+                                    || partitionKeyRestrictions.hasSupportingIndex(indexRegistry, indexHints)
+                                    || nonPrimaryKeyRestrictions.hasSupportingIndex(indexRegistry, indexHints);
             }
 
             // At this point, the select statement if fully constructed, but we still have a few things to validate
@@ -662,7 +662,7 @@ public class StatementRestrictions
                     }
 
                     if (!allowFiltering)
-                        throwRequiresAllowFilteringError(table, this.indexHints, columnRestrictions);
+                        throwRequiresAllowFilteringError(table, indexHints, columnRestrictions);
                 }
 
                 filterRestrictionsBuilder.add(nonPrimaryKeyRestrictions);
