@@ -37,6 +37,7 @@ import org.apache.cassandra.utils.memory.BufferPools;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static org.apache.cassandra.locator.InetAddressAndPort.Serializer.inetAddressAndPortSerializer;
 import static org.apache.cassandra.net.MessagingService.VERSION_30;
+import static org.apache.cassandra.net.MessagingService.VERSION_3014;
 import static org.apache.cassandra.net.MessagingService.VERSION_40;
 import static org.apache.cassandra.net.Message.validateLegacyProtocolMagic;
 import static org.apache.cassandra.net.Crc.*;
@@ -222,7 +223,7 @@ class HandshakeProtocol
         @Override
         public String toString()
         {
-            return String.format("Initiate(request: %d, min: %d, max: %d, type: %s, framing: %b, from: %s)",
+            return String.format("Initiate(request: %d, min: %d, max: %d, type: %s, framing: %s, from: %s)",
                                  requestMessagingVersion,
                                  acceptVersions == null ? requestMessagingVersion : acceptVersions.min,
                                  acceptVersions == null ? requestMessagingVersion : acceptVersions.max,
@@ -285,6 +286,12 @@ class HandshakeProtocol
                 return null;
             int maxMessagingVersion = in.readInt();
             int useMessagingVersion = 0;
+
+            // if the other node is DSE 6.x then force version to 3014
+            // 256 is a magic number used in DSE 6.x's `ProtocolVersion`, DSE messaging versions are bit-shifted 8 left
+            // https://github.com/riptano/bdp/blob/6.8.58-rel/dse-db/src/java/org/apache/cassandra/net/ProtocolVersion.java#L41-L42
+            if (256 <= maxMessagingVersion && !MessagingService.current_version_override)
+                return new Accept(useMessagingVersion, VERSION_3014);
 
             // if the other node is pre-4.0, it will respond only with its maxMessagingVersion
             if (maxMessagingVersion < VERSION_40 || handshakeMessagingVersion < VERSION_40)
