@@ -67,7 +67,7 @@ public class IndexHints
     public static final String MISSING_INDEX_ERROR = "Table %s doesn't have an index named %s";
     public static final String NON_INCLUDABLE_INDEXES_ERROR = "It's not possible to use all the specified included indexes with this query.";
 
-    public static final IndexHints NONE = new IndexHints(Collections.emptySet(), Collections.emptySet());
+    public static final IndexHints NONE = new IndexHints(Collections.emptySet(), Collections.emptySet())
 
     public static final Serializer serializer = new Serializer();
 
@@ -165,6 +165,21 @@ public class IndexHints
                 return true;
         }
         return false;
+    }
+
+    /**
+     * @param indexes a set of indexes
+     * @return the indexes that are not excluded by these hints
+     */
+    public <T extends Index> Set<T> notExcluded(Iterable<T> indexes)
+    {
+        Set<T> result = new HashSet<>();
+        for (T index : indexes)
+        {
+            if (!excludes(index))
+                result.add(index);
+        }
+        return result;
     }
 
     /**

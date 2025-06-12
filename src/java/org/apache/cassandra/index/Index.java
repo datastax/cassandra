@@ -809,13 +809,7 @@ public interface Index
          */
         default Set<? extends Index> getNotExcludedIndexes(IndexHints hints)
         {
-            Set<Index> indexes = new HashSet<>();
-            for (Index index : getIndexes())
-            {
-                if (!hints.excludes(index))
-                    indexes.add(index);
-            }
-            return indexes;
+            return hints.notExcluded(getIndexes());
         }
 
         /**
