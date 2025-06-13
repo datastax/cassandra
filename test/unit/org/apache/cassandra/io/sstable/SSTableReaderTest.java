@@ -101,6 +101,7 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FilterFactory;
 import org.apache.cassandra.utils.IFilter;
 import org.apache.cassandra.utils.PageAware;
+import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.concurrent.Ref;
 import org.apache.cassandra.utils.concurrent.SelfRefCounted;
 
@@ -114,6 +115,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 public class SSTableReaderTest
 {
@@ -170,6 +172,24 @@ public class SSTableReaderTest
         Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD).truncateBlocking();
         Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD2).truncateBlocking();
         BloomFilter.recreateOnFPChanceChange = false;
+
+        Throwable exceptions = null;
+        for (Ref<?> ref : refsToRelease)
+        {
+            try
+            {
+                ref.release();
+            }
+            catch (Throwable exc)
+            {
+                exceptions = Throwables.merge(exceptions, exc);
+            }
+        }
+
+        if (exceptions != null)
+            fail("Unable to release all tracked references " + exceptions);
+
+        refsToRelease.clear();
     }
 
     @Test
