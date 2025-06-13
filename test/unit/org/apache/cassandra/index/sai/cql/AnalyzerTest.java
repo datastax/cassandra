@@ -30,6 +30,40 @@ import java.util.Arrays;
 public class AnalyzerTest extends SAITester
 {
     @Test
+    public void testEmptyOnInitialBuild()
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v text)");
+        execute("INSERT INTO %s (k, v) VALUES (1, '')");
+        flush();
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = {" +
+                    "'index_analyzer': 'standard'};");
+    }
+
+    @Test
+    public void testEmptyOnCompaction()
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v text)");
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = {" +
+                    "'index_analyzer': 'standard'};");
+        execute("INSERT INTO %s (k, v) VALUES (1, 'apple orange')");
+        flush();
+        execute("INSERT INTO %s (k, v) VALUES (1, '')");
+        flush();
+        compact();
+    }
+
+    @Test
+    public void testEmptyWithStopwords()
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v text)");
+        execute("INSERT INTO %s (k, v) VALUES (1, 'and then')");  // will yield no indexed terms
+        flush();
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = {" +
+                    "'index_analyzer': 'english'};");
+        assertEmpty(execute("SELECT * FROM %s WHERE v = 'and'"));
+    }
+
+    @Test
     public void createAnalyzerWrongTypeTest()
     {
         createTable("CREATE TABLE %s (pk1 int, pk2 text, val int, val2 int, PRIMARY KEY((pk1, pk2)))");
