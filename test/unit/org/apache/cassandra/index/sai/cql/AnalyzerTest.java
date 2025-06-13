@@ -50,6 +50,7 @@ public class AnalyzerTest extends SAITester
         execute("INSERT INTO %s (k, v) VALUES (1, '')");
         flush();
         compact();
+        assertRows(execute("SELECT * FROM %s WHERE v = 'apple'"));
     }
 
     @Test
