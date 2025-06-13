@@ -244,7 +244,8 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
         public void channelInactive(ChannelHandlerContext ctx) throws Exception
         {
             super.channelInactive(ctx);
-            resultPromise.tryFailure(new ClosedChannelException());
+            resultPromise.tryFailure(new ClosedOutboundConnectionException(String.format("channelInactive close, version = %s, framing = %s, encryption = %s",
+                                                                                         requestMessagingVersion, settings.framing, settings.encryption)));
         }
 
         /**
@@ -487,4 +488,20 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
         static <SuccessType extends Success> Result<SuccessType> incompatible(int closestSupportedVersion, int maxMessagingVersion) { return new Incompatible(closestSupportedVersion, maxMessagingVersion); }
     }
 
+    // helps logging wrt Handler.channelInactive() above
+    static class ClosedOutboundConnectionException extends ClosedChannelException
+    {
+        private final String message;
+
+        public ClosedOutboundConnectionException(String message)
+        {
+            this.message = message;
+        }
+
+        @Override
+        public String getMessage()
+        {
+            return message;
+        }
+    }
 }
