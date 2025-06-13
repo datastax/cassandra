@@ -36,6 +36,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
@@ -100,6 +101,8 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FilterFactory;
 import org.apache.cassandra.utils.IFilter;
 import org.apache.cassandra.utils.PageAware;
+import org.apache.cassandra.utils.concurrent.Ref;
+import org.apache.cassandra.utils.concurrent.SelfRefCounted;
 
 import static org.apache.cassandra.cql3.QueryProcessor.executeInternal;
 import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
@@ -125,6 +128,7 @@ public class SSTableReaderTest
     public static final String CF_STANDARD_SMALL_BLOOM_FILTER = "StandardSmallBloomFilter";
     public static final String CF_STANDARD_NO_BLOOM_FILTER = "StandardNoBloomFilter";
 
+    private final List<Ref<?>> refsToRelease = new ArrayList<>();
     private IPartitioner partitioner;
 
     Token t(int i)
@@ -486,9 +490,20 @@ public class SSTableReaderTest
     @Test
     public void testSpannedIndexPositions() throws IOException
     {
+        doTestSpannedIndexPositions(PageAware.PAGE_SIZE);
+    }
+
+    @Test
+    public void testSpannedIndexPositionsWithMaxSegmentSizeSmallerThanPageSize() throws IOException
+    {
+        doTestSpannedIndexPositions(PageAware.PAGE_SIZE - 1);
+    }
+
+    public void doTestSpannedIndexPositions(int maxSegmentSize) throws IOException
+    {
         // expect to create many regions - that is, the size of index must exceed the page size multiple times
         int originalMaxSegmentSize = MmappedRegions.MAX_SEGMENT_SIZE;
-        MmappedRegions.MAX_SEGMENT_SIZE = PageAware.PAGE_SIZE;
+        MmappedRegions.MAX_SEGMENT_SIZE = maxSegmentSize;
 
         try
         {
@@ -698,7 +713,7 @@ public class SSTableReaderTest
         store.forceBlockingFlush(UNIT_TESTS);
         CompactionManager.instance.performMaximal(store, false);
 
-        SSTableReader sstable = store.getLiveSSTables().iterator().next();
+        SSTableReader sstable = trackReleaseableRef(() -> store.getLiveSSTables().iterator().next());
         // the keys are specifically chosen to cover certain use cases
         // existing key is read from index
         sstable.getPosition(k(2), SSTableReader.Operator.EQ);
@@ -876,15 +891,14 @@ public class SSTableReaderTest
             assert sstable.first.getToken() instanceof LocalToken;
 
             SSTableReader.saveSummary(sstable.descriptor, sstable.first, sstable.last, sstable.indexSummary);
-            SSTableReader reopened = sstable.descriptor.getFormat().getReaderFactory().open(sstable.descriptor);
+            SSTableReader reopened = trackReleaseableRef(() -> sstable.descriptor.getFormat().getReaderFactory().open(sstable.descriptor));
             assert reopened.first.getToken() instanceof LocalToken;
-            reopened.selfRef().release();
         }
     }
 
     /** see CASSANDRA-5407 */
     @Test
-    public void testGetScannerForNoIntersectingRanges() throws Exception
+    public void testGetScannerForNoIntersectingRanges()
     {
         Keyspace keyspace = Keyspace.open(KEYSPACE1);
         ColumnFamilyStore store = keyspace.getColumnFamilyStore(CF_STANDARD3);
@@ -1053,7 +1067,7 @@ public class SSTableReaderTest
             txn.update(replacement, true);
             txn.finish();
         }
-        SSTableReader reopen = sstable.descriptor.formatType.info.getReaderFactory().open(sstable.descriptor);
+        SSTableReader reopen = trackReleaseableRef(() -> sstable.descriptor.formatType.info.getReaderFactory().open(sstable.descriptor));
         assert reopen.getIndexSummarySamplingLevel() == sstable.getIndexSummarySamplingLevel() + 1;
     }
 
@@ -1114,9 +1128,8 @@ public class SSTableReaderTest
     {
         Keyspace keyspace = Keyspace.open(KEYSPACE1);
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF_MOVE_AND_OPEN);
-        SSTableReader sstable = getNewSSTable(cfs);
+        SSTableReader sstable = trackReleaseableRef(() -> getNewSSTable(cfs));
         cfs.clearUnsafe();
-        sstable.selfRef().release();
         File tmpdir = new File(Files.createTempDirectory("testMoveAndOpen"));
         tmpdir.deleteOnExit();
         SSTableId id = SSTableIdFactory.instance.defaultBuilder().generator(Stream.empty()).get();
@@ -1128,7 +1141,7 @@ public class SSTableReaderTest
             assertFalse(f.exists());
             assertTrue(sstable.descriptor.fileFor(c).exists());
         }
-        notLiveDesc.getFormat().getReaderFactory().moveAndOpenSSTable(cfs, sstable.descriptor, notLiveDesc, sstable.components(), false);
+        trackReleaseableRef(() -> notLiveDesc.getFormat().getReaderFactory().moveAndOpenSSTable(cfs, sstable.descriptor, notLiveDesc, sstable.components(), false));
         // make sure the files were moved:
         for (Component c : sstable.components())
         {
@@ -1404,5 +1417,12 @@ public class SSTableReaderTest
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(cf);
         cfs.discardSSTables(System.currentTimeMillis());
         return cfs;
+    }
+
+    private <T extends SelfRefCounted<T>> T trackReleaseableRef(Supplier<T> refSupplier)
+    {
+        T ref = refSupplier.get();
+        refsToRelease.add(ref.selfRef());
+        return ref;
     }
 }
