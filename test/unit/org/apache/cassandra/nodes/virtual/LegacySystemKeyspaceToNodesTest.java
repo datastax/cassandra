@@ -223,7 +223,7 @@ public class LegacySystemKeyspaceToNodesTest extends CQLTester
         }
         finally
         {
-            nodes.shutdown();
+            nodes.shutdown(true);
         }
     }
 
@@ -303,7 +303,7 @@ public class LegacySystemKeyspaceToNodesTest extends CQLTester
         }
         finally
         {
-            nodes.shutdown();
+            nodes.shutdown(true);
         }
     }
 
