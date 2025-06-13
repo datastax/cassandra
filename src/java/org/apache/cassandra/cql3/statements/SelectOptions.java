@@ -19,6 +19,8 @@ import java.util.Collections;
 import java.util.Map;
 import java.util.Set;
 
+import javax.annotation.Nullable;
+
 import com.google.common.collect.ImmutableSet;
 
 import org.apache.cassandra.cql3.QualifiedName;
@@ -26,6 +28,7 @@ import org.apache.cassandra.db.filter.ANNOptions;
 import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.RequestValidationException;
+import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.IndexRegistry;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.QueryState;
@@ -46,15 +49,20 @@ public class SelectOptions extends PropertyDefinitions
      * Validates all the {@code SELECT} options.
      *
      * @param state the query state
-     * @param indexRegistry the index registry for the queried table
      * @param limit the {@code SELECT} query user-provided limit
+     * @param indexRegistry the index registry for the queried table
+     * @param indexQueryPlan the index query plan for the query, if any
      * @throws InvalidRequestException if any of the options are invalid
      */
-    public void validate(QueryState state, IndexRegistry indexRegistry, TableMetadata table, int limit) throws RequestValidationException
+    public void validate(QueryState state,
+                         TableMetadata table,
+                         int limit,
+                         IndexRegistry indexRegistry,
+                         @Nullable Index.QueryPlan indexQueryPlan) throws RequestValidationException
     {
         validate(keywords, Collections.emptySet());
         parseANNOptions().validate(state, table.keyspace, limit);
-        parseIndexHints(table, indexRegistry).validate(table.keyspace);
+        parseIndexHints(table, indexRegistry).validate(indexQueryPlan);
     }
 
     /**

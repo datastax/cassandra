@@ -440,7 +440,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             checkFalse(aggregationSpec != null, TOPK_AGGREGATION_ERROR);
         }
 
-        selectOptions.validate(queryState, indexRegistry, table, userLimit);
+        selectOptions.validate(queryState, table, userLimit, indexRegistry, query.indexQueryPlan());
 
         // If there's a secondary index that the command can use, have it validate the request parameters.
         query.maybeValidateIndexes();
@@ -1217,7 +1217,6 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             // Besides actual restrictions (where clauses), prepareRestrictions will include the user-provided index hints,
             // which are needed to determine what indexes to use for the query and to validate whether filtering is needed.
             IndexHints indexHints = options.parseIndexHints(table, IndexRegistry.obtain(table));
-            indexHints.validate(ks);
 
             List<Selectable> selectables = RawSelector.toSelectables(selectClause, table);
             boolean containsOnlyStaticColumns = selectOnlyStaticColumns(table, selectables);

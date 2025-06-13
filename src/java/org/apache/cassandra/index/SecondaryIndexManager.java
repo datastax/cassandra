@@ -1205,10 +1205,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         IndexHints hints = rowFilter.indexHints();
 
         if (indexes.isEmpty() || rowFilter.isEmpty())
-        {
-            hints.validate((Index.QueryPlan) null);
             return null;
-        }
 
         for (RowFilter.Expression expression : rowFilter.expressions())
         {
@@ -1232,7 +1229,6 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
 
         if (queryPlans.isEmpty())
         {
-            hints.validate((Index.QueryPlan) null);
             logger.trace("No applicable indexes found");
             Tracing.trace("No applicable indexes found");
             return null;
@@ -1265,8 +1261,6 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
                                     .collect(Collectors.joining(",")),
                           Index.joinNames(selected.getIndexes()));
         }
-
-        hints.validate(selected);
 
         return selected;
     }
