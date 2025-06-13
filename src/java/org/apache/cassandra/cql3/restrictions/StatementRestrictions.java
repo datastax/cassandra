@@ -1026,8 +1026,6 @@ public class StatementRestrictions
             if (hasAnnOptions)
                 throw new InvalidRequestException(ANN_OPTIONS_WITHOUT_ORDER_BY_ANN);
 
-            indexHints.validate((Index.QueryPlan) null);
-
             return RowFilter.NONE;
         }
 

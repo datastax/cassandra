@@ -112,12 +112,6 @@ public class IndexHints
         }
 
         @Override
-        public void validate(String keyspace)
-        {
-            // nothing to validate
-        }
-
-        @Override
         public void validate(@Nullable Index.QueryPlan queryPlan)
         {
             // nothing to validate
@@ -331,32 +325,6 @@ public class IndexHints
     }
 
     /**
-     * Validates these hints.
-     *
-     * @param keyspace the keyspace being queried
-     */
-    public void validate(String keyspace)
-    {
-        if (included.isEmpty() && excluded.isEmpty())
-            return;
-
-        // Ensure that no index is both included and excluded
-        Set<IndexMetadata> conflictingIndexes = Sets.intersection(included, excluded);
-        if (!conflictingIndexes.isEmpty())
-        {
-            throw new InvalidRequestException(CONFLICTING_INDEXES_ERROR + IndexMetadata.joinNames(conflictingIndexes));
-        }
-
-        // Ensure that all nodes in the cluster are in a version that supports index hints, including this one
-        assert keyspace != null;
-        Set<InetAddressAndPort> badNodes = MessagingService.instance().endpointsWithConnectionsOnVersionBelow(keyspace, MessagingService.VERSION_DS_12);
-        if (MessagingService.current_version < MessagingService.VERSION_DS_12)
-            badNodes.add(FBUtilities.getBroadcastAddressAndPort());
-        if (!badNodes.isEmpty())
-            throw new InvalidRequestException("Index hints are not supported in clusters below DS 12.");
-    }
-
-    /**
      * Validates these index hints for the specified index query plan, to verify that all the requested indexes can be
      * selected. This might happen if the query doesn't have any expressions for the included indexes, or if it has them
      * but the index implementation hasn't been able to use them for whatever reason.
@@ -425,8 +393,27 @@ public class IndexHints
                                           TableMetadata table,
                                           IndexRegistry indexRegistry)
     {
-        return IndexHints.create(fetchIndexes(included, table, indexRegistry),
-                                 fetchIndexes(excluded, table, indexRegistry));
+        IndexHints hints = IndexHints.create(fetchIndexes(included, table, indexRegistry),
+                                             fetchIndexes(excluded, table, indexRegistry));
+
+        if (hints == IndexHints.NONE)
+            return hints;
+
+        // Ensure that no index is both included and excluded
+        Set<IndexMetadata> conflictingIndexes = Sets.intersection(hints.included, hints.excluded);
+        if (!conflictingIndexes.isEmpty())
+        {
+            throw new InvalidRequestException(CONFLICTING_INDEXES_ERROR + IndexMetadata.joinNames(conflictingIndexes));
+        }
+
+        // Ensure that all nodes in the cluster are in a version that supports index hints, including this one
+        Set<InetAddressAndPort> badNodes = MessagingService.instance().endpointsWithConnectionsOnVersionBelow(table.keyspace, MessagingService.VERSION_DS_12);
+        if (MessagingService.current_version < MessagingService.VERSION_DS_12)
+            badNodes.add(FBUtilities.getBroadcastAddressAndPort());
+        if (!badNodes.isEmpty())
+            throw new InvalidRequestException("Index hints are not supported in clusters below DS 12.");
+
+        return hints;
     }
 
     private static Set<IndexMetadata> fetchIndexes(Set<QualifiedName> indexNames, TableMetadata table, IndexRegistry indexRegistry)
