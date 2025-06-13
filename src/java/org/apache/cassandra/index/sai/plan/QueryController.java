@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.index.sai.plan;
 
+import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -75,6 +76,7 @@ import org.apache.cassandra.index.sai.iterators.KeyRangeTermIterator;
 import org.apache.cassandra.index.sai.memory.MemtableIndex;
 import org.apache.cassandra.index.sai.metrics.TableQueryMetrics;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
+import org.apache.cassandra.index.sai.utils.BM25Utils;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.RowWithSourceTable;
@@ -192,7 +194,6 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     {
         return firstPrimaryKey;
     }
-
 
     public TableMetadata metadata()
     {
@@ -427,7 +428,6 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         return keysIterationPlan;
     }
 
-
     public Iterator<? extends PrimaryKey> buildIterator(Plan plan)
     {
         try
@@ -446,13 +446,13 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     }
 
     /**
-     * Creates an iterator over keys of rows that match given WHERE predicate.
+     * Creates an iterator over keys of rows that match the given WHERE predicate.
      * Does not cache the iterator!
      */
     private KeyRangeIterator buildIterator(Expression predicate)
     {
         QueryView view = getQueryView(predicate.context);
-        return KeyRangeTermIterator.build(predicate, view.sstableIndexes, mergeRange, queryContext, false, Integer.MAX_VALUE);
+        return KeyRangeTermIterator.build(predicate, view.sstableIndexes, mergeRange, queryContext, false);
     }
 
     /**
@@ -464,9 +464,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     {
         return queryViews.computeIfAbsent(context,
                                           c -> new QueryView.Builder(c, mergeRange).build());
-
     }
-
 
     private float avgCellsPerRow()
     {
@@ -491,7 +489,6 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         }
         return rows == 0 ? 0.0f : ((float) totalLength) / rows;
     }
-
 
     public FilterTree buildFilter()
     {
@@ -673,7 +670,6 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         return searchTopKRows(memtableSearcher, ssTableSearcher);
     }
 
-
     private CloseableIterator<PrimaryKeyWithSortKey> searchTopKRows(MemtableSearcher memtableSearcher, SSTableSearcher ssTableSearcher)
     {
         List<CloseableIterator<PrimaryKeyWithSortKey>> memtableResults = new ArrayList<>();
@@ -682,14 +678,37 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
             QueryView view = getQueryView(orderer.context);
             if (orderer.isBM25())
             {
-                // Calculate counts on indexes
+                long totalRowCount = 0;
+                long totalTermCount = 0;
+                Map<ByteBuffer, Long> documentFrequencies = new HashMap<>();
                 for (MemtableIndex index : view.memtableIndexes)
-                    orderer.bm25Stats.add(index.getRowCount(), index.getApproximateTermCount());
+                {
+                    totalRowCount += index.getRowCount();
+                    totalTermCount += index.getApproximateTermCount();
+                    for (ByteBuffer term : orderer.getQueryTerms())
+                    {
+                        Expression termExpression = new Expression(orderer.context)
+                                                    .add(Operator.ANALYZER_MATCHES, term);
+                        documentFrequencies.put(term, documentFrequencies.getOrDefault(term, 0L) + index.estimateMatchingRowsCount(termExpression, mergeRange));
+                    }
+                }
                 for (SSTableIndex index : view.sstableIndexes)
-                    orderer.bm25Stats.add(index.getRowCount(), index.getApproximateTermCount());
+                {
+                    totalRowCount += index.getRowCount();
+                    totalTermCount += index.getApproximateTermCount();
+                    for (ByteBuffer term : orderer.getQueryTerms())
+                    {
+                        Expression termExpression = new Expression(orderer.context)
+                                                    .add(Operator.ANALYZER_MATCHES, term);
+                        documentFrequencies.put(term, documentFrequencies.getOrDefault(term, 0L)
+                                                      + index.getMatchingRowsCount(termExpression, mergeRange, queryContext));
+                    }
+                }
                 // No documents indexed, the iterator will be empty
-                if (orderer.bm25Stats.getDocCount() == 0)
+                if (totalTermCount == 0)
                     return CloseableIterator.emptyIterator();
+
+                orderer.setBm25stats(new BM25Utils.DocStats(documentFrequencies, totalRowCount, totalTermCount));
             }
 
             for (MemtableIndex index : view.memtableIndexes)
@@ -711,18 +730,6 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
                 FileUtils.closeQuietly(memtableResults);
             throw t;
         }
-    }
-
-    @FunctionalInterface
-    interface SSTableSearcher
-    {
-        List<CloseableIterator<PrimaryKeyWithSortKey>> search(SSTableIndex index, long totalRows) throws Exception;
-    }
-
-    @FunctionalInterface
-    interface MemtableSearcher
-    {
-        List<CloseableIterator<PrimaryKeyWithSortKey>> search(MemtableIndex index);
     }
 
     /**
@@ -929,10 +936,10 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
 
         long rowCount = 0;
         for (MemtableIndex index : queryView.memtableIndexes)
-            rowCount += index.estimateMatchingRowsCount(predicate, mergeRange);
+            rowCount += index.approximateMatchingRowsCount(predicate, mergeRange);
 
         for (SSTableIndex index : queryView.sstableIndexes)
-            rowCount += index.estimateMatchingRowsCount(predicate, mergeRange);
+            rowCount += index.approximateMatchingRowsCount(predicate, mergeRange);
 
         return rowCount;
     }
@@ -940,7 +947,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     /**
      * Legacy way of estimating predicate selectivity.
      * Runs the search on the index and returns the size of the iterator.
-     * Caches the iterator for future use, to avoid doing search twice.
+     * Caches the iterator for future use to avoid doing search twice.
      */
     private long estimateMatchingRowCountUsingIndex(Expression predicate)
     {
@@ -953,7 +960,6 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         keyIterators.put(predicate, iterator);
         return iterator.getMaxKeys();
     }
-
 
     @Override
     public double estimateAnnSearchCost(Orderer orderer, int limit, long candidates)
@@ -987,5 +993,18 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
             }
         }
         return cost;
+    }
+
+    @FunctionalInterface
+    interface SSTableSearcher
+    {
+        List<CloseableIterator<PrimaryKeyWithSortKey>> search(SSTableIndex index, long totalRows) throws Exception;
+    }
+
+
+    @FunctionalInterface
+    interface MemtableSearcher
+    {
+        List<CloseableIterator<PrimaryKeyWithSortKey>> search(MemtableIndex index);
     }
 }

@@ -63,7 +63,9 @@ public class Orderer
 
     // BM25 search parameter
     private List<ByteBuffer> queryTerms;
-    public final BM25Utils.AggDocsStats bm25Stats = new BM25Utils.AggDocsStats();
+
+    // BM25 aggregated statistics
+    private BM25Utils.DocStats bm25stats;
 
     /**
      * Create an orderer for the given index context, operator, and term.
@@ -198,5 +200,15 @@ public class Orderer
         }
         queryTerms = new ArrayList<>(uniqueTerms);
         return queryTerms;
+    }
+
+    public BM25Utils.DocStats getBm25stats()
+    {
+        return bm25stats;
+    }
+
+    public void setBm25stats(BM25Utils.DocStats bm25stats)
+    {
+        this.bm25stats = bm25stats;
     }
 }
