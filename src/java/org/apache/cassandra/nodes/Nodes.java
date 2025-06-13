@@ -41,6 +41,7 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -156,10 +157,32 @@ public class Nodes
         return nodes().peers;
     }
 
+    /**
+     * FOR TESTING PURPOSES ONLY.
+     * <p/>
+     * Shuts down the instance. Unlike shutdown in normal operation, this exposes the ability to wait
+     * for the update executors to drain. This prevents test race conditions where transactional writes queued on the
+     * old instance may be intermingled with other test operations (such as cleaning up temporary directories).
+     *
+     * @param waitForUpdateExecutorDrain whether to wait for the update executors to drain before returning
+     */
+    @VisibleForTesting
+    public void shutdown(boolean waitForUpdateExecutorDrain)
+    {
+        try
+        {
+            local.close(waitForUpdateExecutorDrain);
+            peers.close(waitForUpdateExecutorDrain);
+        }
+        catch (InterruptedException e)
+        {
+            throw new RuntimeException(e);
+        }
+    }
+
     public void shutdown()
     {
-        local.close();
-        peers.close();
+        shutdown(false);
     }
 
     public void syncToDisk()
@@ -519,9 +542,16 @@ public class Nodes
             return lastLocalSave;
         }
 
-        private void close()
+        private void close(boolean waitForUpdateExecutorDrain) throws InterruptedException
         {
             closed = true;
+            if (waitForUpdateExecutorDrain)
+            {
+                updateExecutor.shutdown();
+                boolean terminated = updateExecutor.awaitTermination(1, TimeUnit.MINUTES);
+                if (!terminated)
+                    logger.warn("Failed to shutdown Local async executor in a timely manner");
+            }
         }
 
         private void syncToDisk()
@@ -749,9 +779,16 @@ public class Nodes
             return lastPeersSave;
         }
 
-        private void close()
+        private void close(boolean waitForUpdateExecutorDrain) throws InterruptedException
         {
             closed = true;
+            if (waitForUpdateExecutorDrain)
+            {
+                updateExecutor.shutdown();
+                boolean terminated = updateExecutor.awaitTermination(1, TimeUnit.MINUTES);
+                if (!terminated)
+                    logger.warn("Failed to shutdown Peers async executor in a timely manner");
+            }
         }
 
         private void syncToDisk()
@@ -951,11 +988,19 @@ public class Nodes
             return nodes;
         }
 
+        /**
+         * FOR TESTING PURPOSES ONLY.
+         * <p/>
+         * This method shuts down the existing instance (if any) and creates a new one. Unlike shutdown in normal
+         * operation, this waits for the update executors to drain on the existing instance. This prevents test race
+         * conditions where transactional writes queued on the old instance may be intermingled with transactional
+         * operations on the new instance.
+         */
         @VisibleForTesting
         public static void unsafeSetup(Path directory)
         {
             if (instance != null)
-                instance.shutdown();
+                instance.shutdown(true);
 
             instance = new Nodes(directory);
         }
