@@ -49,8 +49,8 @@ public class QueryView implements AutoCloseable
 {
     final View saiView;
     final ColumnFamilyStore.ViewFragment viewFragment;
-    final Set<SSTableIndex> sstableIndexes;
-    final Set<MemtableIndex> memtableIndexes;
+    public final Set<SSTableIndex> sstableIndexes;
+    public final Set<MemtableIndex> memtableIndexes;
 
     public QueryView(View saiView,
                      ColumnFamilyStore.ViewFragment viewFragment,
