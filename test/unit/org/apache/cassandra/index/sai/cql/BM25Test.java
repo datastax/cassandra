@@ -23,6 +23,11 @@ import java.util.concurrent.Future;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+import org.apache.cassandra.cql3.restrictions.SingleColumnRestriction;
+import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
+import org.apache.cassandra.index.sai.SSTableIndex;
+import org.apache.cassandra.index.sai.memory.MemtableIndex;
+import org.apache.cassandra.index.sai.memory.TrieMemtableIndex;
 import org.assertj.core.api.Assertions;
 
 import org.junit.Before;
@@ -40,6 +45,7 @@ import org.apache.cassandra.index.sai.plan.QueryController;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
+import static java.lang.String.format;
 import static org.apache.cassandra.index.sai.analyzer.AnalyzerEqOperatorSupport.EQ_AMBIGUOUS_ERROR;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.AssertionsForInterfaceTypes.assertThat;
@@ -972,5 +978,196 @@ public class BM25Test extends SAITester
                         .map(row -> row.getInt("id"))
                         .collect(Collectors.toList());
         Assertions.assertThat(ids).isEqualTo(expected);
+    }
+
+    @Test
+    public void testOrderByPartitionKey()
+    {
+        createTable("CREATE TABLE %s (k text PRIMARY KEY)");
+        assertInvalidMessage("Cannot create secondary index on the only partition key column k",
+                             "CREATE CUSTOM INDEX ON %s(k) USING 'StorageAttachedIndex'");
+    }
+
+    @Test
+    public void testOrderByPartitionKeyComponent()
+    {
+        createTable("CREATE TABLE %s (k1 int, k2 text, PRIMARY KEY((k1, k2)))");
+        createIndex("CREATE CUSTOM INDEX ON %s(k2) USING 'StorageAttachedIndex' WITH OPTIONS = { 'index_analyzer': 'standard' }");
+
+        String insert = "INSERT INTO %s (k1, k2) VALUES (?, ?)";
+        Object[] row1 = row(1, "orange");
+        Object[] row2 = row(2, "orange apple");
+        Object[] row3 = row(3, "orange orange");
+        Object[] row4 = row(4, "banana apple");
+        execute(insert, row1);
+        execute(insert, row2);
+        execute(insert, row3);
+        execute(insert, row4);
+
+        assertRows(execute("SELECT * FROM %s WHERE k2:'orange' LIMIT 10"), row2, row1, row3);
+        assertRejectsBM25OnNonRegularColumn("SELECT * FROM %s ORDER BY k2 BM25 OF 'orange' LIMIT 10", "partition key", "k2");
+    }
+
+    @Test
+    public void testOrderByClusteringKey()
+    {
+        createTable("CREATE TABLE %s (k int, c text, PRIMARY KEY(k, c))");
+        createIndex("CREATE CUSTOM INDEX ON %s(c) USING 'StorageAttachedIndex' WITH OPTIONS = { 'index_analyzer': 'standard' }");
+
+        String insert = "INSERT INTO %s (k, c) VALUES (?, ?)";
+        Object[] row1 = row(1, "orange");
+        Object[] row2 = row(2, "orange apple");
+        Object[] row3 = row(3, "orange orange");
+        Object[] row4 = row(4, "banana apple");
+        execute(insert, row1);
+        execute(insert, row2);
+        execute(insert, row3);
+        execute(insert, row4);
+
+        assertCannotBeRestrictedByClustering("SELECT * FROM %s WHERE c:'orange' LIMIT 10", "c");
+        assertRejectsBM25OnNonRegularColumn("SELECT * FROM %s ORDER BY c BM25 OF 'orange' LIMIT 10", "clustering", "c");
+    }
+
+    @Test
+    public void testOrderByClusteringKeyComponent()
+    {
+        createTable("CREATE TABLE %s (k int, c1 int, c2 text, PRIMARY KEY(k, c1, c2))");
+        createIndex("CREATE CUSTOM INDEX ON %s(c2) USING 'StorageAttachedIndex' WITH OPTIONS = { 'index_analyzer': 'standard' }");
+
+        String insert = "INSERT INTO %s (k, c1, c2) VALUES (?, ?, ?)";
+        Object[] row1 = row(1, 1, "orange");
+        Object[] row2 = row(1, 2, "orange apple");
+        Object[] row3 = row(2, 1, "orange orange");
+        Object[] row4 = row(2, 2, "banana apple");
+        execute(insert, row1);
+        execute(insert, row2);
+        execute(insert, row3);
+        execute(insert, row4);
+
+        assertCannotBeRestrictedByClustering("SELECT * FROM %s WHERE c2:'orange' LIMIT 10", "c2");
+        assertRejectsBM25OnNonRegularColumn("SELECT * FROM %s ORDER BY c2 BM25 OF 'orange' LIMIT 10", "clustering", "c2");
+    }
+
+    @Test
+    public void testOrderByStaticColumn()
+    {
+        createTable("CREATE TABLE %s (k int, c int, s text static, PRIMARY KEY(k, c))");
+        createIndex("CREATE CUSTOM INDEX ON %s(s) USING 'StorageAttachedIndex' WITH OPTIONS = { 'index_analyzer': 'standard' }");
+
+        String insert = "INSERT INTO %s (k, c, s) VALUES (?, ?, ?)";
+        Object[] row1 = row(1, 0, "orange");
+        Object[] row2 = row(2, 0, "orange apple");
+        Object[] row3 = row(3, 0, "orange orange");
+        Object[] row4 = row(4, 0, "banana apple");
+        execute(insert, row1);
+        execute(insert, row2);
+        execute(insert, row3);
+        execute(insert, row4);
+
+        assertRows(execute("SELECT k, c, s FROM %s WHERE s:'orange' LIMIT 10"), row1, row2, row3);
+        assertRejectsBM25OnNonRegularColumn("SELECT k, c, s FROM %s ORDER BY s BM25 OF 'orange' LIMIT 10", "static", "s");
+    }
+
+    @Test
+    public void testOrderByListColumn()
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, l list<text>)");
+        createIndex("CREATE CUSTOM INDEX ON %s(l) USING 'StorageAttachedIndex' WITH OPTIONS = { 'index_analyzer': 'standard' }");
+
+        String insert = "INSERT INTO %s (k, l) VALUES (?, ?)";
+        Object[] row1 = row(1, list("orange"));
+        Object[] row2 = row(2, list("orange apple"));
+        Object[] row3 = row(3, list("orange orange"));
+        Object[] row4 = row(4, list("banana apple"));
+        execute(insert, row1);
+        execute(insert, row2);
+        execute(insert, row3);
+        execute(insert, row4);
+
+        assertRows(execute("SELECT * FROM %s WHERE l CONTAINS 'orange' LIMIT 10"), row1, row2, row3);
+        assertInvalidMessage("Invalid STRING constant (orange) for \"l\" of type list<text>",
+                             "SELECT * FROM %s ORDER BY l BM25 OF 'orange' LIMIT 10");
+    }
+
+    @Test
+    public void testOrderByFrozenListColumn()
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, l frozen<list<text>>)");
+        assertInvalidMessage("Cannot use an analyzer on full(l) because it's a frozen collection.",
+                             "CREATE CUSTOM INDEX ON %s(FULL(l)) USING 'StorageAttachedIndex' WITH OPTIONS = { 'index_analyzer': 'standard' }");
+    }
+
+    @Test
+    public void testOrderBySetColumn()
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, s set<text>)");
+        createIndex("CREATE CUSTOM INDEX ON %s(s) USING 'StorageAttachedIndex' WITH OPTIONS = { 'index_analyzer': 'standard' }");
+
+        String insert = "INSERT INTO %s (k, s) VALUES (?, ?)";
+        Object[] row1 = row(1, set("orange"));
+        Object[] row2 = row(2, set("orange apple"));
+        Object[] row3 = row(3, set("orange orange"));
+        Object[] row4 = row(4, set("banana apple"));
+        execute(insert, row1);
+        execute(insert, row2);
+        execute(insert, row3);
+        execute(insert, row4);
+
+        assertRows(execute("SELECT * FROM %s WHERE s CONTAINS 'orange' LIMIT 10"), row1, row2, row3);
+        assertInvalidMessage("Invalid STRING constant (orange) for \"s\" of type set<text>",
+                             "SELECT * FROM %s ORDER BY s BM25 OF 'orange' LIMIT 10");
+    }
+
+    @Test
+    public void testOrderByFrozenSetColumn()
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, s frozen<set<text>>)");
+        assertInvalidMessage("Cannot use an analyzer on full(s) because it's a frozen collection.",
+                             "CREATE CUSTOM INDEX ON %s(FULL(s)) USING 'StorageAttachedIndex' WITH OPTIONS = { 'index_analyzer': 'standard' }");
+    }
+
+    @Test
+    public void testOrderByMapColumn()
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, m map<text,text>)");
+        createIndex("CREATE CUSTOM INDEX ON %s(KEYS(m)) USING 'StorageAttachedIndex' WITH OPTIONS = { 'index_analyzer': 'standard' }");
+        createIndex("CREATE CUSTOM INDEX ON %s(VALUES(m)) USING 'StorageAttachedIndex' WITH OPTIONS = { 'index_analyzer': 'standard' }");
+
+        String insert = "INSERT INTO %s (k, m) VALUES (?, ?)";
+        Object[] row1 = row(1, map("orange", "banana apple"));
+        Object[] row2 = row(2, map("orange apple", "orange orange"));
+        Object[] row3 = row(3, map("orange orange", "orange apple"));
+        Object[] row4 = row(4, map("banana apple", "orange"));
+        execute(insert, row1);
+        execute(insert, row2);
+        execute(insert, row3);
+        execute(insert, row4);
+
+        assertRows(execute("SELECT * FROM %s WHERE m CONTAINS KEY 'orange' LIMIT 10"), row1, row2, row3);
+        assertRows(execute("SELECT * FROM %s WHERE m CONTAINS 'orange' LIMIT 10"), row2, row4, row3);
+        assertInvalidMessage("Invalid STRING constant (orange) for \"m\" of type map<text, text>",
+                             "SELECT * FROM %s ORDER BY m BM25 OF 'orange' LIMIT 10");
+    }
+
+    @Test
+    public void testOrderByFrozenMapColumn()
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, m frozen<map<text, text>>)");
+        assertInvalidMessage("Cannot use an analyzer on full(m) because it's a frozen collection.",
+                             "CREATE CUSTOM INDEX ON %s(FULL(m)) USING 'StorageAttachedIndex' WITH OPTIONS = { 'index_analyzer': 'standard' }");
+    }
+
+    private void assertCannotBeRestrictedByClustering(String query, String column)
+    {
+        Assertions.assertThatThrownBy(() -> execute(query))
+                  .isInstanceOf(InvalidRequestException.class)
+                  .hasMessage(format(SingleColumnRestriction.AnalyzerMatchesRestriction.CANNOT_BE_RESTRICTED_BY_CLUSTERING_ERROR, column));
+    }
+
+    private void assertRejectsBM25OnNonRegularColumn(String query, String columnType, String column)
+    {
+        Assertions.assertThatThrownBy(() -> execute(query))
+                  .isInstanceOf(InvalidRequestException.class)
+                  .hasMessage(format(StatementRestrictions.BM25_ORDERING_REQUIRES_REGULAR_COLUMN_MESSAGE, columnType, column));
     }
 }
