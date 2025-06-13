@@ -21,6 +21,7 @@ import java.io.DataOutput;
 import java.io.EOFException;
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.nio.channels.FileChannel;
 import java.nio.file.NoSuchFileException;
 import java.util.Collection;
 import java.util.HashMap;
@@ -43,6 +44,7 @@ import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.io.util.File;
@@ -109,24 +111,41 @@ public class CompressionMetadata implements AutoCloseable
      *
      * @return metadata about given compressed file.
      */
-    public static CompressionMetadata create(File dataFilePath)
+    public static CompressionMetadata read(File dataFilePath, boolean skipOffsets)
     {
-        return create(dataFilePath, SliceDescriptor.NONE);
+        return read(dataFilePath, SliceDescriptor.NONE, skipOffsets);
     }
 
-    public static CompressionMetadata create(File dataFilePath, SliceDescriptor sliceDescription)
+    public static CompressionMetadata readDuringWriteTime(File dataFilePath, boolean skipOffsets)
+    {
+        return read(dataFilePath, SliceDescriptor.NONE, skipOffsets, true);
+    }
+
+    public static CompressionMetadata read(File dataFilePath, SliceDescriptor sliceDescription, boolean skipOffsets)
+    {
+        return read(dataFilePath, sliceDescription, skipOffsets, false);
+    }
+
+    public static CompressionMetadata read(File dataFilePath, SliceDescriptor sliceDescription, boolean skipOffsets, boolean writeTime)
     {
         Descriptor descriptor = Descriptor.fromFilename(dataFilePath);
         return new CompressionMetadata(descriptor.fileFor(Component.COMPRESSION_INFO),
                                        dataFilePath.length(),
                                        descriptor.version.hasMaxCompressedLength(),
-                                       sliceDescription);
+                                       sliceDescription,
+                                       skipOffsets,
+                                       writeTime);
     }
 
     @VisibleForTesting
     public CompressionMetadata(File indexFilePath, long compressedLength, boolean hasMaxCompressedSize)
     {
-        this(indexFilePath, compressedLength, hasMaxCompressedSize, SliceDescriptor.NONE);
+        this(indexFilePath, compressedLength, hasMaxCompressedSize, SliceDescriptor.NONE, false);
+    }
+
+    CompressionMetadata(File indexFilePath, long compressedLength, boolean hasMaxCompressedSize, SliceDescriptor sliceDescriptor, boolean skipOffsets)
+    {
+        this(indexFilePath, compressedLength, hasMaxCompressedSize, sliceDescriptor, skipOffsets, false);
     }
 
     /*
@@ -134,13 +153,17 @@ public class CompressionMetadata implements AutoCloseable
      * data file rather than the partial file it deals.
      */
     @VisibleForTesting
-    public CompressionMetadata(File indexFilePath, long compressedLength, boolean hasMaxCompressedSize, SliceDescriptor sliceDescriptor)
+    CompressionMetadata(File indexFilePath, long compressedLength, boolean hasMaxCompressedSize, SliceDescriptor sliceDescriptor, boolean skipOffsets, boolean writeTime)
     {
         this.indexFilePath = indexFilePath;
         long uncompressedOffset = sliceDescriptor.exists() ? sliceDescriptor.sliceStart : 0;
         long uncompressedLength = sliceDescriptor.exists() ? sliceDescriptor.dataEnd - sliceDescriptor.sliceStart : -1;
 
-        try (FileInputStreamPlus stream = indexFilePath.newInputStream())
+
+
+        try (FileInputStreamPlus stream =
+             writeTime ? new FileInputStreamPlus(StorageProvider.instance.writeTimeReadFileChannelFor(indexFilePath), indexFilePath.toPath()) :
+             indexFilePath.newInputStream())
         {
             String compressorName = stream.readUTF();
             int optionCount = stream.readInt();
@@ -170,17 +193,25 @@ public class CompressionMetadata implements AutoCloseable
             dataLength = uncompressedLength >= 0 ? uncompressedLength : readDataLength;
 
             startChunkIndex = Math.toIntExact(uncompressedOffset >> chunkLengthBits);
-            assert uncompressedOffset == (long) startChunkIndex << chunkLengthBits;
 
-            int endChunkIndex = Math.toIntExact((uncompressedOffset + dataLength - 1) >> chunkLengthBits) + 1;
 
-            Pair<Memory.LongArray, Long> offsetsAndLimit = readChunkOffsets(stream, startChunkIndex, endChunkIndex, compressedLength);
-            chunkOffsets = offsetsAndLimit.left;
-            // We adjust the compressed file length to store the position after the last chunk just to be able to
-            // calculate the offset of the chunk next to the last one (in order to calculate the length of the last chunk).
-            // Obvously, we could use the compressed file length for that purpose but unfortunately, sometimes there is
-            // an empty chunk added to the end of the file thus we cannot rely on the file length.
-            compressedFileLength = offsetsAndLimit.right;
+            if (skipOffsets)
+            {
+                chunkOffsets = null;
+                compressedFileLength = compressedLength;
+            }
+            else
+            {
+                assert uncompressedOffset == (long) startChunkIndex << chunkLengthBits;
+                int endChunkIndex = Math.toIntExact((uncompressedOffset + dataLength - 1) >> chunkLengthBits) + 1;
+                Pair<Memory.LongArray, Long> offsetsAndLimit = readChunkOffsets(stream, startChunkIndex, endChunkIndex, compressedLength);
+                chunkOffsets = offsetsAndLimit.left;
+                // We adjust the compressed file length to store the position after the last chunk just to be able to
+                // calculate the offset of the chunk next to the last one (in order to calculate the length of the last chunk).
+                // Obvously, we could use the compressed file length for that purpose but unfortunately, sometimes there is
+                // an empty chunk added to the end of the file thus we cannot rely on the file length.
+                compressedFileLength = offsetsAndLimit.right;
+            }
         }
         catch (FileNotFoundException | NoSuchFileException e)
         {
@@ -206,6 +237,23 @@ public class CompressionMetadata implements AutoCloseable
         this.chunkOffsets = offsets;
         this.dataLength = dataLength;
         this.startChunkIndex = 0;
+    }
+
+    private CompressionMetadata(File filePath, CompressionParams parameters, long dataLength, long compressedLength)
+    {
+        this.indexFilePath = filePath;
+        this.parameters = parameters;
+        assert Integer.bitCount(parameters.chunkLength()) == 1;
+        this.chunkLengthBits = Integer.numberOfTrailingZeros(parameters.chunkLength());
+        this.compressedFileLength = compressedLength;
+        this.chunkOffsets = null;
+        this.dataLength = dataLength;
+        this.startChunkIndex = 0;
+    }
+
+    static public CompressionMetadata encryptedOnly(CompressionParams parameters)
+    {
+        return new CompressionMetadata(null, parameters, 0, 0);
     }
 
     public static long nativeMemoryAllocated()
@@ -234,12 +282,18 @@ public class CompressionMetadata implements AutoCloseable
      */
     public long offHeapSize()
     {
-        return chunkOffsets.memory.size();
+        return hasOffsets() ? chunkOffsets.memory.size() : 0;
+    }
+
+    public boolean hasOffsets()
+    {
+        return chunkOffsets != null;
     }
 
     public void addTo(Ref.IdentityCollection identities)
     {
-        identities.add(chunkOffsets.memory);
+        if (hasOffsets())
+            identities.add(chunkOffsets.memory);
     }
 
     /**
@@ -260,13 +314,16 @@ public class CompressionMetadata implements AutoCloseable
         try
         {
             chunkCount = input.readInt();
-            if (chunkCount <= 0)
+            if (chunkCount < 0)
                 throw new IOException("Compressed file with 0 chunks encountered: " + input);
         }
         catch (IOException e)
         {
             throw new FSReadError(e, input.path);
         }
+
+        if (chunkCount == 0)
+            return Pair.create(null, 0L);
 
         Preconditions.checkState(startIndex < chunkCount, "The start index %s has to be < chunk count %s", startIndex, chunkCount);
         Preconditions.checkState(endIndex <= chunkCount, "The end index %s has to be <= chunk count %s", endIndex, chunkCount);
@@ -317,6 +374,8 @@ public class CompressionMetadata implements AutoCloseable
      */
     public Chunk chunkFor(long uncompressedDataPosition)
     {
+        assert hasOffsets();
+
         int chunkIdx = chunkIndex(uncompressedDataPosition);
         return chunk(chunkIdx);
     }
@@ -339,6 +398,8 @@ public class CompressionMetadata implements AutoCloseable
      */
     public long getTotalSizeForSections(Collection<SSTableReader.PartitionPositionBounds> sections)
     {
+        assert hasOffsets();
+
         long size = 0;
         int lastIncludedChunkIdx = -1;
         for (SSTableReader.PartitionPositionBounds section : sections)
@@ -372,6 +433,8 @@ public class CompressionMetadata implements AutoCloseable
      */
     public Chunk[] getChunksForSections(Collection<SSTableReader.PartitionPositionBounds> sections)
     {
+        assert hasOffsets();
+
         // use SortedSet to eliminate duplicates and sort by chunk offset
         SortedSet<Chunk> offsets = new TreeSet<>((o1, o2) -> Longs.compare(o1.offset, o2.offset));
 
@@ -402,8 +465,11 @@ public class CompressionMetadata implements AutoCloseable
 
     public void close()
     {
-        NATIVE_MEMORY_USAGE.addAndGet(-chunkOffsets.memoryUsed());
-        chunkOffsets.close();
+        if (hasOffsets())
+        {
+            NATIVE_MEMORY_USAGE.addAndGet(-chunkOffsets.memoryUsed());
+            chunkOffsets.close();
+        }
     }
 
     public static class Writer extends Transactional.AbstractTransactional implements Transactional
@@ -447,7 +513,7 @@ public class CompressionMetadata implements AutoCloseable
         {
             try
             {
-                out.writeUTF(parameters.getSstableCompressor().getClass().getSimpleName());
+                out.writeUTF(CompressionParams.prepareCompressorName(parameters.getSstableCompressor().getClass()));
                 out.writeInt(parameters.getOtherOptions().size());
                 for (Map.Entry<String, String> entry : parameters.getOtherOptions().entrySet())
                 {
@@ -485,8 +551,13 @@ public class CompressionMetadata implements AutoCloseable
             if (offsets.size() != count * 8L)
             {
                 SafeMemory tmp = offsets;
-                offsets = offsets.copy(count * 8L);
-                NATIVE_MEMORY_USAGE.addAndGet(offsets.size() - tmp.size());
+                if (count > 0)
+                {
+                    offsets = offsets.copy(count * 8L);
+                    NATIVE_MEMORY_USAGE.addAndGet(offsets.size() - tmp.size());
+                }
+                else
+                    offsets = null;
                 tmp.free();
             }
 
@@ -558,8 +629,13 @@ public class CompressionMetadata implements AutoCloseable
 
         protected Throwable doPostCleanup(Throwable failed)
         {
-            NATIVE_MEMORY_USAGE.addAndGet(-offsets.size());
-            return offsets.close(failed);
+            if (offsets != null)
+            {
+                NATIVE_MEMORY_USAGE.addAndGet(-offsets.size());
+                return offsets.close(failed);
+            }
+            else
+                return null;
         }
 
         protected Throwable doCommit(Throwable accumulate)
