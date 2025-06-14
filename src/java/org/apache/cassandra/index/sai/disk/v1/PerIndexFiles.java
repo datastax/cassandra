@@ -46,6 +46,10 @@ public class PerIndexFiles implements Closeable
         var toOpen = new HashSet<>(perIndexComponents.expectedComponentsForVersion());
         toOpen.remove(IndexComponentType.META);
         toOpen.remove(IndexComponentType.COLUMN_COMPLETION_MARKER);
+        toOpen.remove(IndexComponentType.TERMS_DATA_COMPRESSION_INFO);
+        toOpen.remove(IndexComponentType.POSTING_LISTS_COMPRESSION_INFO);
+        toOpen.remove(IndexComponentType.KD_TREE_COMPRESSION_INFO);
+        toOpen.remove(IndexComponentType.KD_TREE_POSTING_LISTS_COMPRESSION_INFO);
 
         var componentsPresent = new HashSet<IndexComponentType>();
         for (IndexComponentType component : toOpen)
