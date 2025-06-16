@@ -212,13 +212,20 @@ public class TrieMemtable extends AbstractShardedMemtable
         MemtableShard shard = shards[boundaries.getShardForKey(key)];
         long colUpdateTimeDelta = shard.put(update, indexer, opGroup);
 
-        if (shard.data.reachedAllocatedSizeThreshold() && !switchRequested.getAndSet(true))
-        {
-            logger.info("Scheduling flush due to trie size limit reached.");
-            owner.signalFlushRequired(this, ColumnFamilyStore.FlushReason.MEMTABLE_LIMIT);
-        }
+        if (shard.data.reachedAllocatedSizeThreshold())
+            signalFlushRequired(ColumnFamilyStore.FlushReason.TRIE_LIMIT, true);
 
         return colUpdateTimeDelta;
+    }
+
+    @Override
+    public void signalFlushRequired(ColumnFamilyStore.FlushReason flushReason, boolean skipIfSignaled)
+    {
+        if (!switchRequested.getAndSet(true) || !skipIfSignaled)
+        {
+            logger.info("Scheduling flush for table {} due to {}", this.metadata.get(), flushReason);
+            owner.signalFlushRequired(this, flushReason);
+        }
     }
 
     @Override

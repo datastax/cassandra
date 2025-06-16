@@ -92,6 +92,7 @@ extends SkipListMemtable        // to test framework
         case DRAIN: // Called to flush data before shutdown.
         case INTERNALLY_FORCED: // Called to ensure ordering and persistence of system table events.
         case MEMTABLE_PERIOD_EXPIRED: // The specified memtable expiration time elapsed.
+        case INDEX_MEMTABLE_PERIOD_EXPIRED: // The specified memtable expiration time elapsed.
         case INDEX_TABLE_FLUSH: // Flush requested on index table because main table is flushing.
         case STREAMS_RECEIVED: // Flush to save streamed data that was written to memtable.
             return false;   // do not do anything
@@ -131,6 +132,8 @@ extends SkipListMemtable        // to test framework
 
         case MEMTABLE_LIMIT: // The memtable size limit is reached, and this table was selected for flushing.
                              // Also passed if we call owner.signalLimitReached()
+        case TRIE_LIMIT:     // Trie size limt is reached
+        case INDEX_MEMTABLE_LIMIT: // Index memtable size limit is reached
         case COMMITLOG_DIRTY: // Commitlog thinks it needs to keep data from this table.
             // Neither of the above should happen as we specify writesAreDurable and don't use an allocator/cleaner.
             throw new AssertionError();

@@ -1531,6 +1531,7 @@ public class NativeIndexDDLTest extends SAITester
         assertEquals(Arrays.asList(2L, 1L), toSize.apply(iterator.next()));
     }
 
+
     @Test
     public void shouldRejectLargeStringTerms()
     {
