@@ -30,6 +30,7 @@ import com.google.common.collect.Iterators;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
@@ -180,6 +181,12 @@ public class ShardedSkipListMemtable extends AbstractShardedMemtable
         for (MemtableShard shard : shards)
             min = Long.min(min, shard.minLocalDeletionTime());
         return min;
+    }
+
+    @Override
+    public void signalFlushRequired(ColumnFamilyStore.FlushReason flushReason, boolean skipIfSignaled)
+    {
+        owner.signalFlushRequired(this, flushReason);
     }
 
     @Override

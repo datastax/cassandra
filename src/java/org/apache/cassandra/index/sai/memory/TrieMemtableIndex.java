@@ -52,6 +52,7 @@ import org.apache.cassandra.dht.Bounds;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.disk.format.Version;
+import org.apache.cassandra.index.sai.disk.vector.AbstractMemtableIndex;
 import org.apache.cassandra.index.sai.iterators.KeyRangeConcatIterator;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIntersectionIterator;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
@@ -78,7 +79,7 @@ import org.apache.cassandra.utils.concurrent.OpOrder;
 
 import static org.apache.cassandra.io.sstable.SSTableReadsListener.NOOP_LISTENER;
 
-public class TrieMemtableIndex implements MemtableIndex
+public class TrieMemtableIndex extends AbstractMemtableIndex
 {
     private final ShardBoundaries boundaries;
     private final MemoryIndex[] rangeIndexes;
@@ -88,7 +89,6 @@ public class TrieMemtableIndex implements MemtableIndex
     private final LongAdder estimatedOnHeapMemoryUsed = new LongAdder();
     private final LongAdder estimatedOffHeapMemoryUsed = new LongAdder();
 
-    private final Memtable memtable;
     private final Context sensorContext;
     private final RequestTracker requestTracker;
 
@@ -100,11 +100,11 @@ public class TrieMemtableIndex implements MemtableIndex
     @VisibleForTesting
     public TrieMemtableIndex(IndexContext indexContext, Memtable memtable, int shardCount)
     {
+        super(indexContext, memtable);
         this.boundaries = indexContext.columnFamilyStore().localRangeSplits(shardCount);
         this.rangeIndexes = new MemoryIndex[boundaries.shardCount()];
         this.indexContext = indexContext;
         this.validator = indexContext.getValidator();
-        this.memtable = memtable;
         for (int shard = 0; shard < boundaries.shardCount(); shard++)
         {
             this.rangeIndexes[shard] = new TrieMemoryIndex(indexContext, memtable, boundaries.getBounds(shard));
@@ -117,6 +117,15 @@ public class TrieMemtableIndex implements MemtableIndex
     public Memtable getMemtable()
     {
         return memtable;
+    }
+
+    @Override
+    public int indexedRows()
+    {
+        int size = 0;
+        for (MemoryIndex memoryIndex : rangeIndexes)
+            size += memoryIndex.indexedRows();
+        return size;
     }
 
     @VisibleForTesting
@@ -208,6 +217,7 @@ public class TrieMemtableIndex implements MemtableIndex
                                                                  sensors.incrementSensor(sensorContext, Type.INDEX_WRITE_BYTES, allocatedBytes);
                                                          });
         writeCount.increment();
+        onIndexUpdated();
     }
 
     @Override
@@ -236,6 +246,7 @@ public class TrieMemtableIndex implements MemtableIndex
                                                                 estimatedOffHeapMemoryUsed.add(allocatedBytes);
                                                             });
         writeCount.increment();
+        onIndexUpdated();
     }
 
     @Override

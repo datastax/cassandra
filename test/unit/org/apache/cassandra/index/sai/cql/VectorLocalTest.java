@@ -28,12 +28,14 @@ import java.util.stream.IntStream;
 
 import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.Multimap;
+import org.junit.After;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import io.github.jbellis.jvector.vector.VectorizationProvider;
 import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.marshal.FloatType;
 import org.apache.cassandra.db.marshal.Int32Type;
@@ -55,6 +57,13 @@ public class VectorLocalTest extends VectorTester.VersionedWithChecksums
     public static void loadModel() throws Throwable
     {
         word2vec = Glove.parse(VectorLocalTest.class.getClassLoader().getResourceAsStream("glove.3K.50d.txt"));
+    }
+
+    @After
+    public void cleanupConfigs()
+    {
+        CassandraRelevantProperties.SAI_VECTOR_FLUSH_PERIOD_IN_MILLIS.reset();
+        CassandraRelevantProperties.SAI_VECTOR_FLUSH_THRESHOLD_MAX_ROWS.reset();
     }
 
     @Test
