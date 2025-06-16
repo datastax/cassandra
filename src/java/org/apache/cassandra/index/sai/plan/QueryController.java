@@ -76,7 +76,6 @@ import org.apache.cassandra.index.sai.iterators.KeyRangeTermIterator;
 import org.apache.cassandra.index.sai.memory.MemtableIndex;
 import org.apache.cassandra.index.sai.metrics.TableQueryMetrics;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
-import org.apache.cassandra.index.sai.utils.BM25Utils;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.RowWithSourceTable;
@@ -89,6 +88,7 @@ import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.MergeIterator;
+import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.Throwables;
 
 import static java.lang.Math.max;
@@ -678,37 +678,28 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
             QueryView view = getQueryView(orderer.context);
             if (orderer.isBM25())
             {
-                long totalRowCount = 0;
-                long totalTermCount = 0;
-                Map<ByteBuffer, Long> documentFrequencies = new HashMap<>();
-                for (MemtableIndex index : view.memtableIndexes)
+                // Pre-calculate term expressions
+                List<Pair<ByteBuffer, Expression>> termAndExpressions = new ArrayList<>();
+                for (ByteBuffer term : orderer.getQueryTerms())
                 {
-                    totalRowCount += index.getRowCount();
-                    totalTermCount += index.getApproximateTermCount();
-                    for (ByteBuffer term : orderer.getQueryTerms())
-                    {
-                        Expression termExpression = new Expression(orderer.context)
-                                                    .add(Operator.ANALYZER_MATCHES, term);
-                        documentFrequencies.put(term, documentFrequencies.getOrDefault(term, 0L) + index.estimateMatchingRowsCount(termExpression, mergeRange));
-                    }
+                    Expression termExpression = new Expression(orderer.context)
+                                                .add(Operator.ANALYZER_MATCHES, term);
+                    termAndExpressions.add(Pair.create(term, termExpression));
                 }
-                for (SSTableIndex index : view.sstableIndexes)
-                {
-                    totalRowCount += index.getRowCount();
-                    totalTermCount += index.getApproximateTermCount();
-                    for (ByteBuffer term : orderer.getQueryTerms())
-                    {
-                        Expression termExpression = new Expression(orderer.context)
-                                                    .add(Operator.ANALYZER_MATCHES, term);
-                        documentFrequencies.put(term, documentFrequencies.getOrDefault(term, 0L)
-                                                      + index.getMatchingRowsCount(termExpression, mergeRange, queryContext));
-                    }
-                }
-                // No documents indexed, the iterator will be empty
-                if (totalTermCount == 0)
-                    return CloseableIterator.emptyIterator();
 
-                orderer.setBm25stats(new BM25Utils.DocStats(documentFrequencies, totalRowCount, totalTermCount));
+                for (MemtableIndex index : view.memtableIndexes)
+                    orderer.bm25stats.add(index.getRowCount(),
+                                          index.getApproximateTermCount(),
+                                          termAndExpressions,
+                                          termExpression -> index.estimateMatchingRowsCount(termExpression, mergeRange));
+                for (SSTableIndex index : view.sstableIndexes)
+                    orderer.bm25stats.add(index.getRowCount(),
+                                          index.getApproximateTermCount(),
+                                          termAndExpressions,
+                                          termExpression -> index.getMatchingRowsCount(termExpression, mergeRange, queryContext));
+                // No documents indexed, the iterator will be empty
+                if (orderer.bm25stats.getDocCount() == 0)
+                    return CloseableIterator.emptyIterator();
             }
 
             for (MemtableIndex index : view.memtableIndexes)

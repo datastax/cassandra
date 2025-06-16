@@ -22,7 +22,6 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.lang.invoke.MethodHandles;
 import java.nio.ByteBuffer;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -34,7 +33,6 @@ import org.apache.cassandra.index.sai.plan.QueryController;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.Slice;
 import org.apache.cassandra.db.Slices;
@@ -75,6 +73,7 @@ import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 import static org.apache.cassandra.index.sai.disk.PostingList.END_OF_STREAM;
+import static org.apache.cassandra.index.sai.disk.v1.SegmentMetadata.INVALID_TOTAL_TERM_COUNT;
 
 /**
  * Executes {@link Expression}s against the trie-based terms dictionary for an individual index segment.
@@ -244,9 +243,10 @@ public class InvertedIndexSearcher extends IndexSearcher
         };
         return BM25Utils.computeScores(it,
                                        queryTerms,
-                                       orderer.getBm25stats(),
+                                       orderer.bm25stats,
                                        indexContext,
-                                       sstable.descriptor.id);
+                                       sstable.descriptor.id,
+                                       metadata.totalTermCount == INVALID_TOTAL_TERM_COUNT);
     }
 
     @Override
@@ -262,15 +262,6 @@ public class InvertedIndexSearcher extends IndexSearcher
         }
 
         var queryTerms = orderer.getQueryTerms();
-        // compute documentFrequencies from either histogram or an index search
-        var documentFrequencies = new HashMap<ByteBuffer, Long>();
-        // any index new enough to support BM25 should also support histograms
-        assert metadata.version.onDiskFormat().indexFeatureSet().hasTermsHistogram();
-        for (ByteBuffer term : queryTerms)
-        {
-            long matches = metadata.estimateNumRowsMatching(new Expression(indexContext).add(Operator.ANALYZER_MATCHES, term));
-            documentFrequencies.put(term, matches);
-        }
         var analyzer = indexContext.getAnalyzerFactory().create();
         var it = keys.stream()
                      .map(pk -> EagerDocTF.createFromDocument(pk, readColumn(sstable, pk), analyzer, queryTerms))
@@ -278,9 +269,10 @@ public class InvertedIndexSearcher extends IndexSearcher
                      .iterator();
         return BM25Utils.computeScores(CloseableIterator.wrap(it),
                                        queryTerms,
-                                       orderer.getBm25stats(),
+                                       orderer.bm25stats,
                                        indexContext,
-                                       sstable.descriptor.id);
+                                       sstable.descriptor.id,
+                                       metadata.totalTermCount == INVALID_TOTAL_TERM_COUNT);
     }
 
     @Override
