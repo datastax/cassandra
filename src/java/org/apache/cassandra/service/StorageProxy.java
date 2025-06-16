@@ -3235,6 +3235,66 @@ public class StorageProxy implements StorageProxyMBean
         return String.format("Updating ideal consistency level new value: %s old value %s", newCL, original.toString());
     }
 
+    @Override
+    public int getNonIndexMemtableFlushPeriodInSeconds()
+    {
+        return CassandraRelevantProperties.FLUSH_PERIOD_IN_MILLIS.getInt();
+    }
+
+    @Override
+    public void setNonIndexMemtableFlushPeriodInSeconds(int flushPeriodInSeconds)
+    {
+        CassandraRelevantProperties.FLUSH_PERIOD_IN_MILLIS.setInt(flushPeriodInSeconds);
+    }
+
+    @Override
+    public int getVectorIndexMemtableFlushPeriodInSecond()
+    {
+        return CassandraRelevantProperties.SAI_VECTOR_FLUSH_PERIOD_IN_MILLIS.getInt();
+    }
+
+    @Override
+    public void setVectorMemtableFlushPeriodInSecond(int flushPeriodInSecond)
+    {
+        CassandraRelevantProperties.SAI_VECTOR_FLUSH_PERIOD_IN_MILLIS.setInt(flushPeriodInSecond);
+    }
+
+    @Override
+    public int getNonVectorIndexMemtableFlushPeriodInSecond()
+    {
+        return CassandraRelevantProperties.SAI_NON_VECTOR_FLUSH_PERIOD_IN_MILLIS.getInt();
+    }
+
+    @Override
+    public void setNonVectorMemtableFlushPeriodInSecond(int flushPeriodInSecond)
+    {
+        CassandraRelevantProperties.SAI_NON_VECTOR_FLUSH_PERIOD_IN_MILLIS.setInt(flushPeriodInSecond);
+    }
+
+    @Override
+    public int getVectorIndexMemtableFlushMaxRows()
+    {
+        return CassandraRelevantProperties.SAI_VECTOR_FLUSH_THRESHOLD_MAX_ROWS.getInt();
+    }
+
+    @Override
+    public void setVectorMemtableFlushMaxRows(int threshold)
+    {
+        CassandraRelevantProperties.SAI_VECTOR_FLUSH_THRESHOLD_MAX_ROWS.setInt(threshold);
+    }
+
+    @Override
+    public int getNonVectorIndexMemtableFlushMaxRows()
+    {
+        return CassandraRelevantProperties.SAI_NON_VECTOR_FLUSH_THRESHOLD_MAX_ROWS.getInt();
+    }
+
+    @Override
+    public void setNonVectorMemtableFlushPeriodMaxRows(int threshold)
+    {
+        CassandraRelevantProperties.SAI_NON_VECTOR_FLUSH_THRESHOLD_MAX_ROWS.setInt(threshold);
+    }
+
     /** @deprecated See CASSANDRA-15066 */
     @Deprecated(since = "4.0")
     public int getOtcBacklogExpirationInterval() {
