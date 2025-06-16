@@ -370,8 +370,7 @@ public class IndexWriterConfig
             }
         }
 
-        return new IndexWriterConfig(indexName, skip, minLeaves, maximumNodeConnections, queueSize,
-                                   similarityFunction, sourceModel, neighborhoodOverflow, alpha, enableHierarchy);
+        return new IndexWriterConfig(indexName, skip, minLeaves, maximumNodeConnections, queueSize, similarityFunction, sourceModel, neighborhoodOverflow, alpha, enableHierarchy);
     }
 
     public static IndexWriterConfig defaultConfig(String indexName)
