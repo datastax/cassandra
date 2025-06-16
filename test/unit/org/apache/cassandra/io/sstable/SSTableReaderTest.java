@@ -111,10 +111,10 @@ import org.apache.cassandra.service.CacheService;
 import org.apache.cassandra.utils.BloomCalculations;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Throwables;
-import org.apache.cassandra.utils.concurrent.Ref;
-import org.apache.cassandra.utils.concurrent.SelfRefCounted;
 import org.apache.cassandra.utils.FilterFactory;
 import org.apache.cassandra.utils.IFilter;
+import org.apache.cassandra.utils.concurrent.Ref;
+import org.apache.cassandra.utils.concurrent.SelfRefCounted;
 import org.mockito.Mockito;
 
 import static java.lang.String.format;
@@ -208,6 +208,24 @@ public class SSTableReaderTest
         Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD).truncateBlocking();
         Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD2).truncateBlocking();
         BF_RECREATE_ON_FP_CHANCE_CHANGE.setBoolean(false);
+
+        Throwable exceptions = null;
+        for (Ref<?> ref : refsToRelease)
+        {
+            try
+            {
+                ref.release();
+            }
+            catch (Throwable exc)
+            {
+                exceptions = Throwables.merge(exceptions, exc);
+            }
+        }
+
+        if (exceptions != null)
+            fail("Unable to release all tracked references " + exceptions);
+
+        refsToRelease.clear();
     }
 
     @Test
@@ -1510,7 +1528,6 @@ public class SSTableReaderTest
         Keyspace keyspace = Keyspace.open(KEYSPACE1);
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF_MOVE_AND_OPEN);
         SSTableReader sstable = trackReleaseableRef(() -> getNewSSTable(cfs));
-
         cfs.clearUnsafe();
         File tmpdir = new File(Files.createTempDirectory("testMoveAndOpen"));
         tmpdir.deleteOnExit();
