@@ -413,6 +413,8 @@ public enum CassandraRelevantProperties
     /** @deprecated See CASSANDRA-17797 */
     @Deprecated(since = "4.1")
     FILE_SYSTEM_CHECK_OWNERSHIP_TOKEN(FileSystemOwnershipCheck.FILE_SYSTEM_CHECK_OWNERSHIP_TOKEN),
+    // Use non-positive value to disable it. Period in millis to trigger a flush for memtable
+    FLUSH_PERIOD_IN_MILLIS("cassandra.flush_period_in_millis", "-1"),
     FORCE_DEFAULT_INDEXING_PAGE_SIZE("cassandra.force_default_indexing_page_size"),
     /** Used when running in Client mode and the system and schema keyspaces need to be initialized outside of their normal initialization path **/
     FORCE_LOAD_LOCAL_KEYSPACES("cassandra.schema.force_load_local_keyspaces"),
@@ -526,6 +528,7 @@ public enum CassandraRelevantProperties
      * will set it automatically to {@link CassandraRelevantProperties#LOG_DIR} + "/audit".
      */
     LOG_DIR_AUDIT("cassandra.logdir.audit"),
+
     /**
      * Factory to create instances used during log transaction processing
      */
@@ -679,8 +682,10 @@ public enum CassandraRelevantProperties
 
     /** Class used to discover/load the proper SAI index components file for a given sstable. */
     SAI_ANN_USE_SYNTHETIC_SCORE("cassandra.sai.ann_use_synthetic_score", "false"),
+    
     /** The current version of the SAI on-disk index format. */
     SAI_CURRENT_VERSION("cassandra.sai.latest.version", "dc"),
+    
     SAI_CUSTOM_COMPONENTS_DISCOVERY_CLASS("cassandra.sai.custom_components_discovery_class"),
     SAI_ENABLE_EDGES_CACHE("cassandra.sai.enable_edges_cache", "false"),
     SAI_ENABLE_GENERAL_ORDER_BY("cassandra.sai.general_order_by", "true"),
@@ -710,6 +715,10 @@ public enum CassandraRelevantProperties
     SAI_MAX_FROZEN_TERM_SIZE("cassandra.sai.max_frozen_term_size_kb", "8"),
     SAI_MAX_STRING_TERM_SIZE("cassandra.sai.max_string_term_size_kb", "8"),
     SAI_MAX_VECTOR_TERM_SIZE("cassandra.sai.max_vector_term_size_kb", "16"),
+    // Use non-positive value to disable it. Period in millis to trigger a flush for SAI non-vector memtable index.
+    SAI_NON_VECTOR_FLUSH_PERIOD_IN_MILLIS("cassandra.sai.non_vector_flush_period_in_millis", "-1"),
+    // Use non-positive value to disable it. When num of rows in SAI non-vector memtable index reaches the threshold, it triggers flush
+    SAI_NON_VECTOR_FLUSH_THRESHOLD_MAX_ROWS("cassandra.sai.non_vector_flush_threshold_max_rows", "-1"),
 
     SAI_NUMERIC_VALUES_BLOCK_SIZE("dse.sai.numeric_values.block_size", "128"),
     SAI_NUMERIC_VALUES_MONOTONIC_BLOCK_SIZE("dse.sai.numeric_values.monotonic_block_size", "16384"),
@@ -720,9 +729,15 @@ public enum CassandraRelevantProperties
     SAI_TEST_SEGMENT_BUILD_MEMORY_LIMIT("cassandra.test.sai.segment_build_memory_limit"),
 
     /** Whether to validate terms that will be SAI indexed at the coordinator */
-    SAI_VALIDATE_TERMS_AT_COORDINATOR("cassandra.sai.validate_terms_at_coordinator", "true"),
-    /** Whether to validate terms that will be SAI indexed at the coordinator */
     SAI_VALIDATE_MAX_TERM_SIZE_AT_COORDINATOR("cassandra.sai.validate_max_term_size_at_coordinator"),
+
+    /** Whether to validate terms that will be SAI indexed at the coordinator */
+    SAI_VALIDATE_TERMS_AT_COORDINATOR("cassandra.sai.validate_terms_at_coordinator", "true"),
+
+    // Use non-positive value to disable it. Period in millis to trigger a flush for SAI vector memtable index.
+    SAI_VECTOR_FLUSH_PERIOD_IN_MILLIS("cassandra.sai.vector_flush_period_in_millis", "-1"),
+    // Use non-positive value to disable it. When num of rows in SAI vector memtable index reaches the threshold, it triggers flush
+    SAI_VECTOR_FLUSH_THRESHOLD_MAX_ROWS("cassandra.sai.vector_flush_threshold_max_rows", "-1"),
 
     /**
      * The maximum number of primary keys that a WHERE clause may materialize before the query planner switches

@@ -250,6 +250,14 @@ public interface Index
     }
 
     /**
+     * @return Period in millis to trigger a flush for indexes in the group. Non-positive value to disable it.
+     */
+    default int getFlushPeriodInMs()
+    {
+        return -1;
+    }
+
+    /**
      * Returns true if index initialization should be skipped, false if it should run
      * (via {@link #getInitializationTask()}); defaults to skipping based on {@link IndexBuildDecider#onInitialBuild()}
      * decision.

@@ -195,6 +195,11 @@ public interface Memtable extends Comparable<Memtable>, UnfilteredSource, CellSo
          * Get the op-order primitive that protects data for the duration of reads.
          */
         public OpOrder readOrdering();
+
+        /**
+         * Get the memtable flush period in millis based on schema config or system configs
+         */
+        int getMemtableFlushPeriodInMs();
     }
 
     // Main write and read operations
@@ -348,6 +353,14 @@ public interface Memtable extends Comparable<Memtable>, UnfilteredSource, CellSo
                                  ownershipRatioOffHeap * 100);
         }
     }
+
+    /**
+     * Signal underlying memtable that flush is required for given reason
+     *
+     * @param flushReason reason to flush
+     * @param skipIfSignaled skip signaling if memtable is already requested to switch
+     */
+    void signalFlushRequired(ColumnFamilyStore.FlushReason flushReason, boolean skipIfSignaled);
 
     /**
      * Adjust the used on-heap space by the given size (e.g. to reflect memory used by a non-table-based index).
