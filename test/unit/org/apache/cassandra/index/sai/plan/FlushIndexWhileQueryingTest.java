@@ -37,7 +37,6 @@ public class FlushIndexWhileQueryingTest extends SAITester
         createTable("CREATE TABLE %s (k text PRIMARY KEY, x int)");
 
         createIndex("CREATE CUSTOM INDEX ON %s(x) USING 'StorageAttachedIndex'");
-        waitForTableIndexesQueryable();
 
         execute("INSERT INTO %s (k, x) VALUES (?, ?)", "a", 0);
         execute("INSERT INTO %s (k, x) VALUES (?, ?)", "b", 0);
@@ -52,7 +51,6 @@ public class FlushIndexWhileQueryingTest extends SAITester
         createTable("CREATE TABLE %s (k text PRIMARY KEY, x set<int>)");
 
         createIndex("CREATE CUSTOM INDEX ON %s(x) USING 'StorageAttachedIndex'");
-        waitForTableIndexesQueryable();
 
         execute("INSERT INTO %s (k, x) VALUES ('a', {1, 2, 3})");
         execute("INSERT INTO %s (k, x) VALUES ('b', {1, 2, 3})");
