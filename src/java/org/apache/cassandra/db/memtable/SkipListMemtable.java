@@ -18,6 +18,7 @@
 package org.apache.cassandra.db.memtable;
 
 import java.nio.ByteBuffer;
+import java.util.Collections;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.concurrent.ConcurrentNavigableMap;
@@ -31,6 +32,7 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.BufferDecoratedKey;
+import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
@@ -55,6 +57,7 @@ import org.apache.cassandra.io.sstable.SSTableReadsListener;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.ObjectSizes;
+import org.apache.cassandra.utils.concurrent.Future;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.utils.memory.Cloner;
 import org.apache.cassandra.utils.memory.MemtableAllocator;
@@ -99,6 +102,52 @@ public class SkipListMemtable extends AbstractAllocatorMemtable
         super(commitLogLowerBound, metadataRef, owner);
     }
 
+    // Only for testing
+    @VisibleForTesting
+    public SkipListMemtable(TableMetadataRef metadataRef)
+    {
+        this(null, metadataRef, new Owner()
+        {
+            @Override
+            public Future<CommitLogPosition> signalFlushRequired(Memtable memtable, ColumnFamilyStore.FlushReason reason)
+            {
+                return null;
+            }
+
+            @Override
+            public Memtable getCurrentMemtable()
+            {
+                return null;
+            }
+
+            @Override
+            public Iterable<Memtable> getIndexMemtables()
+            {
+                return Collections.emptyList();
+            }
+
+            public ShardBoundaries localRangeSplits(int shardCount)
+            {
+                return null; // not implemented
+            }
+
+            public OpOrder readOrdering()
+            {
+                return null;
+            }
+
+            @Override
+            public int getMemtableFlushPeriodInMs()
+            {
+                return -1;
+            }
+        });
+    }
+
+    protected Factory factory()
+    {
+        return FACTORY;
+    }
     @Override
     public void addMemoryUsageTo(MemoryUsage stats)
     {
@@ -106,6 +155,11 @@ public class SkipListMemtable extends AbstractAllocatorMemtable
     }
 
     @Override
+    public void signalFlushRequired(ColumnFamilyStore.FlushReason flushReason, boolean skipIfSignaled)
+    {
+        owner.signalFlushRequired(this, flushReason);
+    }
+
     public boolean isClean()
     {
         return partitions.isEmpty();
