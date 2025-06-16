@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.index.sai;
 
+import java.io.IOException;
 import java.lang.invoke.MethodHandles;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -59,6 +60,7 @@ import org.apache.cassandra.index.sai.metrics.TableStateMetrics;
 import org.apache.cassandra.index.sai.plan.StorageAttachedIndexQueryPlan;
 import org.apache.cassandra.index.transactions.IndexTransaction;
 import org.apache.cassandra.io.sstable.Component;
+import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTableWatcher;
 import org.apache.cassandra.io.sstable.format.SSTableFlushObserver;
@@ -305,6 +307,22 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
         }
 
         return components;
+    }
+
+    @Override
+    public void validateComponents(SSTableReader sstable, boolean validateChecksum)
+    {
+        IndexDescriptor indexDescriptor = descriptorFor(sstable);
+        if (!indexDescriptor.perSSTableComponents().validateComponents(sstable, baseCfs.getTracker(), validateChecksum))
+            throw new CorruptSSTableException(new IOException("Failed validation of per-SSTable components"), sstable.getFile());
+
+        for (StorageAttachedIndex index : indices)
+        {
+            IndexContext ctx = index.getIndexContext();
+            if (!indexDescriptor.perIndexComponents(ctx)
+                                .validateComponents(sstable, baseCfs.getTracker(), validateChecksum))
+                throw new CorruptSSTableException(new IOException("Failed validation of per-index components for " + ctx), sstable.getFile());
+        }
     }
 
     @Override

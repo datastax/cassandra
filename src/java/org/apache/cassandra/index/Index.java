@@ -860,6 +860,21 @@ public interface Index
         Set<Component> activeComponents(SSTableReader sstable);
 
         /**
+         * Validate the sstable-attached components belonging to the group that are currently "active" for the
+         * provided sstable.
+         * <p>
+         * The "active" components are the components that are currently in use, meaning that if a given component
+         * of the sstable exists with multiple versions or generation on disk, only the most recent version/generation
+         * is the active one.
+         *
+         * @param sstable          the sstable to validate components for.
+         * @param validateChecksum if {@code true}, the checksum of the components will be validated. Otherwise, only
+         *                         basic checks on the header and footers will be performed.
+         * @throws org.apache.cassandra.io.sstable.CorruptSSTableException if validation fails
+         */
+        void validateComponents(SSTableReader sstable, boolean validateChecksum);
+
+        /**
          * @return true if this index group is capable of supporting multiple contains restrictions, false otherwise
          */
         default boolean supportsMultipleContains()

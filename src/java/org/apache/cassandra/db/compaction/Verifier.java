@@ -64,6 +64,7 @@ import org.apache.cassandra.io.util.FileInputStreamPlus;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.io.util.ReadPattern;
+import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.service.StorageService;
@@ -237,6 +238,9 @@ public class Verifier implements Closeable
             }
         }
 
+        // Validate the secondary indexes. Only validate checksums if quick is disabled.
+        validateSecondaryIndexes(!options.quick);
+
         if (options.quick)
             return;
 
@@ -380,6 +384,37 @@ public class Verifier implements Closeable
         }
 
         outputHandler.output("Verify of " + sstable + " succeeded. All " + goodRows + " rows read successfully");
+    }
+
+    private void validateSecondaryIndexes(boolean validateChecksum)
+    {
+        if (realm == null)
+        {
+            outputHandler.output("Skipping secondary index component validation for " + sstable +
+                                 " because the compaction realm is not available");
+            return;
+        }
+
+        outputHandler.output(String.format("Checking secondary index components for %s, validateChecksum=%s", sstable, validateChecksum));
+        try
+        {
+            var indexManager = realm.getIndexManager();
+            if (indexManager == null && !sstable.metadata().indexes.isEmpty())
+                throw new IllegalStateException("Cannot verify index components for " + sstable + " because the index manager is not available");
+
+            for (IndexMetadata indexMetadata : sstable.metadata().indexes)
+            {
+                var index = indexManager.getIndexGroup(indexMetadata);
+                if (index == null)
+                    throw new IllegalStateException("Cannot verify index components for " + sstable + " because the index " + indexMetadata.name + " is not registered");
+                index.validateComponents(sstable, validateChecksum);
+            }
+        }
+        catch (Throwable t)
+        {
+            outputHandler.warn(t);
+            markAndThrow(t);
+        }
     }
 
     /**

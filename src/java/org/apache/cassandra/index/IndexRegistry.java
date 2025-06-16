@@ -256,6 +256,11 @@ public interface IndexRegistry
             {
                 return null;
             }
+
+            @Override
+            public void validateComponents(SSTableReader sstable, boolean validateChecksum)
+            {
+            }
         };
 
         public void registerIndex(Index index, Index.Group.Key groupKey, Supplier<Index.Group> groupSupplier)

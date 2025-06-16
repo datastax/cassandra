@@ -232,7 +232,7 @@ public class V1OnDiskFormat implements OnDiskFormat
     public boolean validateIndexComponent(IndexComponent.ForRead component, boolean checksum)
     {
         if (component.isCompletionMarker())
-            return true;
+            return component.file().exists();
 
         // starting with v3, vector components include proper headers and checksum; skip for earlier versions
         IndexContext context = component.parent().context();
