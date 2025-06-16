@@ -17,9 +17,11 @@ package org.apache.cassandra.crypto;
 
 import com.google.common.annotations.VisibleForTesting;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.SYSTEM_KEY_DIRECTORY;
+
 public class TDEConfigurationProvider
 {
-    private static String systemKeyDirectoryProperty = System.getProperty("cassandra.system_key_directory", "/etc/cassandra/conf");
+    private static String systemKeyDirectoryProperty = SYSTEM_KEY_DIRECTORY.getString();
 
     public static TDEConfiguration getConfiguration()
     {
