@@ -781,6 +781,16 @@ public class StorageAttachedIndex implements Index
         for (Row row : update.rows())
             indexContext.validate(key, row);
     }
+
+
+    @Override
+    public int getFlushPeriodInMs()
+    {
+        return indexContext.isVector()
+               ? CassandraRelevantProperties.SAI_VECTOR_FLUSH_PERIOD_IN_MILLIS.getInt()
+               : CassandraRelevantProperties.SAI_NON_VECTOR_FLUSH_PERIOD_IN_MILLIS.getInt();
+    }
+
     /**
      * This method is called by the startup tasks to find SSTables that don't have indexes. The method is
      * synchronized so that the view is unchanged between validation and the selection of non-indexed SSTables.
