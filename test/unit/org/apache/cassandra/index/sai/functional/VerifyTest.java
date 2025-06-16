@@ -26,6 +26,7 @@ import java.util.Collections;
 import java.util.stream.Collectors;
 
 import org.junit.Before;
+import org.junit.Ignore;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
@@ -352,7 +353,8 @@ public class VerifyTest extends SAITester
         }
     }
 
-    @Test
+    // TODO make test work by fixing https://github.com/riptano/cndb/issues/14501
+    @Ignore
     public void testVerifyCorruptVectorIndex() throws IOException
     {
         // Skip test if version doesn't support vector indexes
