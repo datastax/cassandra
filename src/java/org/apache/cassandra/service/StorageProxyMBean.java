@@ -99,6 +99,26 @@ public interface StorageProxyMBean
     public String getIdealConsistencyLevel();
     public String setIdealConsistencyLevel(String cl);
 
+    // Default memtable flush period for tables without indexes. New value will take effect when new memtable is created
+    public int getNonIndexMemtableFlushPeriodInSeconds();
+    public void setNonIndexMemtableFlushPeriodInSeconds(int flushPeriodInSeconds);
+
+    // Default memtable flush period for tables with vector SAI indexes. New value will take effect when new memtable is created
+    public int getVectorIndexMemtableFlushPeriodInSecond();
+    public void setVectorMemtableFlushPeriodInSecond(int flushPeriodInSecond);
+
+    // Default memtable flush period for tables with non-vector SAI indexes. New value will take effect when new index memtable is created
+    public int getNonVectorIndexMemtableFlushPeriodInSecond();
+    public void setNonVectorMemtableFlushPeriodInSecond(int flushPeriodInSecond);
+
+    // When num of rows in SAI vector memtable index reaches the threshold, it triggers flush. New value will take effect when new memtable index is created
+    public int getVectorIndexMemtableFlushMaxRows();
+    public void setVectorMemtableFlushMaxRows(int threshold);
+
+    // When num of rows in SAI non-vector memtable index reaches the threshold, it triggers flush. New value will take effect when new memtable index is created
+    public int getNonVectorIndexMemtableFlushMaxRows();
+    public void setNonVectorMemtableFlushPeriodMaxRows(int threshold);
+
     public void logBlockingReadRepairAttemptsForNSeconds(int seconds);
     public boolean isLoggingReadRepairs();
 

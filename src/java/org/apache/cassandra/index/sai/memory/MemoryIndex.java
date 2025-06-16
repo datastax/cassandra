@@ -85,9 +85,15 @@ public abstract class MemoryIndex
     public abstract ByteBuffer getMaxTerm();
 
     /**
+     * @return num of rows in the memory index
+     */
+    public abstract int indexedRows();
+
+    /**
      * Iterate all Term->PrimaryKeys mappings in sorted order
      */
     public abstract Iterator<Pair<ByteComparable.Preencoded, List<PkWithFrequency>>> iterator();
+
 
     public static class PkWithFrequency
     {
