@@ -224,6 +224,7 @@ public class LegacySystemKeyspaceToNodesTest extends CQLTester
         finally
         {
             nodes.shutdown();
+            nodes.awaitInflightUpdateCompletion();
         }
     }
 
@@ -304,6 +305,7 @@ public class LegacySystemKeyspaceToNodesTest extends CQLTester
         finally
         {
             nodes.shutdown();
+            nodes.awaitInflightUpdateCompletion();
         }
     }
 
