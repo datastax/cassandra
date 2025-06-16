@@ -431,9 +431,10 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
                                        .iterator();
         return BM25Utils.computeScores(CloseableIterator.wrap(it),
                                        queryTerms,
-                                       orderer.getBm25stats(),
+                                       orderer.bm25stats,
                                        indexContext,
-                                       memtable);
+                                       memtable,
+                                       false);
     }
 
     @Nullable

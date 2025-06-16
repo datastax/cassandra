@@ -1,13 +1,11 @@
 /*
- * Licensed to the Apache Software Foundation (ASF) under one
- * or more contributor license agreements.  See the NOTICE file
- * distributed with this work for additional information
- * regarding copyright ownership.  The ASF licenses this file
- * to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance
- * with the License.  You may obtain a copy of the License at
+ * Copyright DataStax, Inc.
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -43,47 +41,6 @@ public class BM25Utils
 {
     private static final float K1 = 1.2f;  // BM25 term frequency saturation parameter
     private static final float B = 0.75f;  // BM25 length normalization parameter
-
-    public static class AggDocsStats
-    {
-        private long docCount;
-        private long totalTermCount;
-
-        public void add(long docCount, long totalTermCount)
-        {
-            this.docCount += docCount;
-            this.totalTermCount += totalTermCount;
-        }
-
-        public long getDocCount()
-        {
-            return docCount;
-        }
-
-        public long getTotalTermCount()
-        {
-            return totalTermCount;
-        }
-    }
-
-    /**
-     * Term frequencies across all documents.  Each document is only counted once.
-     */
-    public static class DocStats
-    {
-        // Map of term -> count of docs containing that term
-        private final Map<ByteBuffer, Long> frequencies;
-        // total number of docs in the index
-        private final long docCount;
-        private double avgDocLength;
-
-        public DocStats(Map<ByteBuffer, Long> frequencies, long docCount, long totalTermCount)
-        {
-            this.frequencies = frequencies;
-            this.docCount = docCount;
-            this.avgDocLength = (double) totalTermCount / docCount;
-        }
-    }
 
     /**
      * Term frequencies within a single document.  All instances of a term are counted. Allows us to optimize for
@@ -171,9 +128,10 @@ public class BM25Utils
 
     public static CloseableIterator<PrimaryKeyWithSortKey> computeScores(CloseableIterator<DocTF> docIterator,
                                                                          List<ByteBuffer> queryTerms,
-                                                                         DocStats docStats,
+                                                                         DocBm25Stats docStats,
                                                                          IndexContext indexContext,
-                                                                         Object source)
+                                                                         Object source,
+                                                                         boolean isOldFormat)
     {
         assert source instanceof Memtable || source instanceof SSTableId : "Invalid source " + source.getClass();
 
@@ -186,18 +144,15 @@ public class BM25Utils
         {
             var tf = docIterator.next();
             documents.add(tf);
-            if (docStats.avgDocLength < 0)
+            if (isOldFormat)
                 totalTermCount += tf.termCount();
         }
 
-        // avgDocLength is unknown since an index format is before {@link Version#ED},
-        // which doesn't store the total term count on disk to read it back.
-        // In such a case the old way of computing avgDocLength is used.
-        if (docStats.avgDocLength < 0)
-        {
-            assert !Version.current().onOrAfter(Version.ED) : "on Version.ED avgDocLength must be known";
-            docStats.avgDocLength = totalTermCount / documents.size();
-        }
+        // An index format before {@link Version#ED} doesn't store the total term count
+        // on the disk to read it back. Thus, if the average document length is unknown
+        // due to the old format version, it is calculated in the old way.
+        if (isOldFormat && docStats.getAvgDocLength() == 0 && totalTermCount > 0)
+            docStats.setAvgDocLength(totalTermCount / documents.size());
 
         if (documents.isEmpty())
             return CloseableIterator.emptyIterator();
@@ -231,21 +186,21 @@ public class BM25Utils
         return new NodeQueueDocTFIterator(nodeQueue, documents, indexContext, source, docIterator);
     }
 
-    private static float scoreDoc(DocTF doc, DocStats docStats, List<ByteBuffer> queryTerms)
+    private static float scoreDoc(DocTF doc, DocBm25Stats docStats, List<ByteBuffer> queryTerms)
     {
         double score = 0.0;
         for (var queryTerm : queryTerms)
         {
             int tf = doc.getTermFrequency(queryTerm);
-            Long df = docStats.frequencies.get(queryTerm);
+            Long df = docStats.getFrequencies().get(queryTerm);
             // we shouldn't have more hits for a term than we counted total documents
-            assert df <= docStats.docCount : String.format("df=%d, totalDocs=%d", df, docStats.docCount);
+            assert df <= docStats.getDocCount() : String.format("df=%d, totalDocs=%d", df, docStats.getDocCount());
 
-            double normalizedTf = tf / (tf + K1 * (1 - B + B * doc.termCount() / docStats.avgDocLength));
-            double idf = Math.log(1 + (docStats.docCount - df + 0.5) / (df + 0.5));
+            double normalizedTf = tf / (tf + K1 * (1 - B + B * doc.termCount() / docStats.getAvgDocLength()));
+            double idf = Math.log(1 + (docStats.getDocCount() - df + 0.5) / (df + 0.5));
             double deltaScore = normalizedTf * idf;
             assert deltaScore >= 0 : String.format("BM25 score for tf=%d, df=%d, tc=%d, totalDocs=%d is %f",
-                                                   tf, df, doc.termCount(), docStats.docCount, deltaScore);
+                                                   tf, df, doc.termCount(), docStats.getDocCount(), deltaScore);
             score += deltaScore;
         }
         return (float) score;

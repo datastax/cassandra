@@ -48,6 +48,7 @@ import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.Throwables;
 
+import static org.apache.cassandra.index.sai.disk.v1.SegmentMetadata.INVALID_TOTAL_TERM_COUNT;
 import static org.apache.cassandra.index.sai.virtual.SegmentsSystemView.CELL_COUNT;
 import static org.apache.cassandra.index.sai.virtual.SegmentsSystemView.COLUMN_NAME;
 import static org.apache.cassandra.index.sai.virtual.SegmentsSystemView.COMPONENT_METADATA;
@@ -106,7 +107,9 @@ public class V1SearchableIndex implements SearchableIndex
             this.maxTerm = metadatas.stream().map(m -> m.maxTerm).max(TypeUtil.comparator(indexContext.getValidator(), version)).orElse(null);
 
             this.numRows = metadatas.stream().mapToLong(m -> m.numRows).sum();
-            this.approximateTermCount = metadatas.stream().mapToLong(m -> m.totalTermCount).sum();
+            this.approximateTermCount = metadatas.stream()
+                                                 .mapToLong(m -> m.totalTermCount == INVALID_TOTAL_TERM_COUNT ? 0 : m.totalTermCount)
+                                                 .sum();
 
             this.minSSTableRowId = metadatas.get(0).minSSTableRowId;
             this.maxSSTableRowId = metadatas.get(metadatas.size() - 1).maxSSTableRowId;
