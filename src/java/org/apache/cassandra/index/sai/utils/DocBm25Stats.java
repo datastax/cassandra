@@ -62,7 +62,7 @@ public class DocBm25Stats
             this.avgDocLength = (double) this.totalTermCount / this.docCount;
         for (Pair<ByteBuffer, Expression> pair : termAndExpressions)
             frequencies.merge(pair.left,
-                              estimator.estimate(pair.right),
+                              Math.min(estimator.estimate(pair.right), docCount),
                               Long::sum);
     }
 
