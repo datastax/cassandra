@@ -17,11 +17,10 @@
 package org.apache.cassandra.index.sai.cql;
 
 import java.util.Collection;
-import java.util.List;
-import java.util.Set;
 import java.util.stream.Collectors;
 
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
+import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.SAIUtil;
 import org.apache.cassandra.index.sai.disk.format.Version;
@@ -105,8 +104,8 @@ public class DropIndexWhileQueryingTest extends SAITester
         // TODO this isn't the right place to drop the iterator when we have the histograms. getQueryView
         // might be better but it might get called at the wrong time and might not lead to the right
         // coverage for the fallback logic this test is meant to cover.
-        injectIndexDrop("drop_index_1", indexName1, "buildIterator", true);
-        injectIndexDrop("drop_index_2", indexName2, "buildIterator", true);
+        injectIndexDropInGetQueryView("drop_index_1", indexName1);
+        injectIndexDropInGetQueryView("drop_index_2", indexName2);
 
         execute("INSERT INTO %s (k, x, y, z) VALUES (?, ?, ?, ?)", "k1", 0, "y0", "z0"); // match
         execute("INSERT INTO %s (k, x, y, z) VALUES (?, ?, ?, ?)", "k2", 0, "y1", "z2"); // no match
@@ -148,6 +147,32 @@ public class DropIndexWhileQueryingTest extends SAITester
         Injections.inject(injection);
         injection.enable();
         assertTrue("Injection should be enabled", injection.isEnabled());
+    }
+
+    private static void injectIndexDropInGetQueryView(String injectionName, String indexName) throws Throwable
+    {
+        // Inject a byteman rule that will drop the index when the getQueryView method is called only for that particular index.
+        InvokePointBuilder invokePoint = newInvokePoint().onClass(QueryController.class).onMethod("getQueryView");
+        Injection injection = Injections.newCustom(injectionName)
+                                        .add(invokePoint.atEntry())
+                                        .add(ActionBuilder
+                                             .newActionBuilder()
+                                             .actions()
+                                             .doAction("org.apache.cassandra.index.sai.cql.DropIndexWhileQueryingTest" +
+                                                       ".dropIndexForBytemanInjections(\"" + indexName + "\", $1);"))
+                                        .build();
+        Injections.inject(injection);
+        injection.enable();
+        assertTrue("Injection should be enabled", injection.isEnabled());
+    }
+
+
+    // the method is used by the byteman rule to drop the index conditionally when running with given context
+    @SuppressWarnings("unused")
+    public static void dropIndexForBytemanInjections(String indexName, IndexContext context)
+    {
+        if (context.getIndexName().equals(indexName))
+            dropIndexForBytemanInjections(indexName);
     }
 
     // the method is used by the byteman rule to drop the index
