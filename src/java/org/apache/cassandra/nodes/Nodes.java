@@ -250,6 +250,16 @@ public class Nodes
         return local;
     }
 
+    /**
+     * Wait for all in-flight updates to complete. Only used for testing to coordinate with other unsafe operations.
+     */
+    @VisibleForTesting
+    public void awaitInflightUpdateCompletion()
+    {
+        local.awaitInflightUpdateCompletion();
+        peers.awaitInflightUpdateCompletion();
+    }
+
     private Runnable wrapPersistenceTask(String name, Runnable task)
     {
         return () -> {
@@ -387,6 +397,11 @@ public class Nodes
                 FBUtilities.waitOnFuture(f);
         }
 
+        private void awaitInflightUpdateCompletion()
+        {
+            FBUtilities.waitOnFuture(updateExecutor.submit(() -> {}));
+        }
+
         private Peers load()
         {
             logger.trace("Loading peers...");
@@ -488,6 +503,11 @@ public class Nodes
 
             if (blocking)
                 FBUtilities.waitOnFuture(f);
+        }
+
+        private void awaitInflightUpdateCompletion()
+        {
+            FBUtilities.waitOnFuture(updateExecutor.submit(() -> {}));
         }
 
         private Local load()
