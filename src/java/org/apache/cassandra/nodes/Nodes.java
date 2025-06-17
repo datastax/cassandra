@@ -162,6 +162,16 @@ public class Nodes
         peers.close();
     }
 
+    /**
+     * Wait for all in-flight updates to complete. Only used for testing to coordinate with other unsafe operations.
+     */
+    @VisibleForTesting
+    public void awaitInflightUpdateCompletion()
+    {
+        local.awaitInflightUpdateCompletion();
+        peers.awaitInflightUpdateCompletion();
+    }
+
     public void syncToDisk()
     {
         local.syncToDisk();
@@ -524,6 +534,11 @@ public class Nodes
             closed = true;
         }
 
+        private void awaitInflightUpdateCompletion()
+        {
+            FBUtilities.waitOnFuture(updateExecutor.submit(() -> {}));
+        }
+
         private void syncToDisk()
         {
             if (localInfo.isDirty())
@@ -754,6 +769,11 @@ public class Nodes
             closed = true;
         }
 
+        private void awaitInflightUpdateCompletion()
+        {
+            FBUtilities.waitOnFuture(updateExecutor.submit(() -> {}));
+        }
+
         private void syncToDisk()
         {
             if (peers.values().stream().anyMatch(NodeInfo::isDirty))
@@ -955,7 +975,10 @@ public class Nodes
         public static void unsafeSetup(Path directory)
         {
             if (instance != null)
+            {
                 instance.shutdown();
+                instance.awaitInflightUpdateCompletion();
+            }
 
             instance = new Nodes(directory);
         }
