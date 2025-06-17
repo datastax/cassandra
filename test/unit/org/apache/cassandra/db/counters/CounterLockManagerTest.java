@@ -231,6 +231,9 @@ public class CounterLockManagerTest
 
         lockHandleHandles.forEach(CounterLockManager.LockHandle::release);
 
+        // other thread's finally block must finish releasing the locks for the following assert to be true
+        otherThread.join();
+
         if (manager.hasNumKeys())
             assertThat(manager.getNumKeys()).isZero();
     }
