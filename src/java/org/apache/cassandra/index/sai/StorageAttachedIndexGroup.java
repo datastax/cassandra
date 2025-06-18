@@ -314,14 +314,13 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
     public void validateComponents(SSTableReader sstable, boolean validateChecksum) throws CorruptIndexException
     {
         IndexDescriptor indexDescriptor = descriptorFor(sstable);
-        if (!indexDescriptor.perSSTableComponents().validateComponents(sstable, baseCfs.getTracker(), validateChecksum))
+        if (!indexDescriptor.perSSTableComponents().isValid(validateChecksum))
             throw new CorruptIndexException("Failed validation of per-SSTable components", sstable.getFilename());
 
         for (StorageAttachedIndex index : indices)
         {
             IndexContext ctx = index.getIndexContext();
-            if (!indexDescriptor.perIndexComponents(ctx)
-                                .validateComponents(sstable, baseCfs.getTracker(), validateChecksum))
+            if (!indexDescriptor.perIndexComponents(ctx).isValid(validateChecksum))
                 throw new CorruptIndexException("Failed validation of per-column components for " + ctx, sstable.getFilename());
         }
     }
