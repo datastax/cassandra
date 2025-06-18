@@ -100,6 +100,7 @@ public class NodesTest
     public void shutdownNodes() throws Throwable
     {
         Nodes.nodes().shutdown();
+        Nodes.nodes().awaitInflightUpdateCompletion();
     }
 
     @Test
@@ -196,7 +197,6 @@ public class NodesTest
         Nodes.peers().update(InetAddressAndPort.getByName("127.0.0.4"), NodesTest::fakePeer);
         assertNull(Nodes.peers().get(InetAddressAndPort.getByName("127.42.42.42")));
         Nodes.nodes().syncToDisk();
-        Nodes.nodes().shutdown();
 
         // Reopen the nodes to load the saved local and peer info
         Nodes.Instance.unsafeSetup(dir.toPath());
@@ -208,7 +208,6 @@ public class NodesTest
 
         Nodes.peers().remove(InetAddressAndPort.getByName("127.0.0.3"));
         Nodes.nodes().syncToDisk();
-        Nodes.nodes().shutdown();
 
         Nodes.Instance.unsafeSetup(dir.toPath());
 
