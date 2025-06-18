@@ -57,6 +57,7 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.lucene.index.CorruptIndexException;
 
 
 /**
@@ -870,9 +871,9 @@ public interface Index
          * @param sstable          the sstable to validate components for.
          * @param validateChecksum if {@code true}, the checksum of the components will be validated. Otherwise, only
          *                         basic checks on the header and footers will be performed.
-         * @throws org.apache.cassandra.io.sstable.CorruptSSTableException if validation fails
+         * @throws CorruptIndexException if the validation fails.
          */
-        void validateComponents(SSTableReader sstable, boolean validateChecksum);
+        void validateComponents(SSTableReader sstable, boolean validateChecksum) throws CorruptIndexException;
 
         /**
          * @return true if this index group is capable of supporting multiple contains restrictions, false otherwise
