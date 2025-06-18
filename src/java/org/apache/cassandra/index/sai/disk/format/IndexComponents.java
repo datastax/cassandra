@@ -22,9 +22,13 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.Collection;
 import java.util.Set;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 import javax.annotation.Nullable;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.lifecycle.Tracker;
@@ -80,6 +84,8 @@ import org.apache.cassandra.utils.bytecomparable.ByteComparable;
  */
 public interface IndexComponents
 {
+    Logger logger = LoggerFactory.getLogger(IndexComponents.class);
+
     /**
      * SSTable this is the group of.
      */
@@ -191,6 +197,12 @@ public interface IndexComponents
      */
     interface ForRead extends IndexComponents
     {
+        /**
+         * Get the component of the provided type if present.
+         *
+         * @param component the type of the component to retrieve.
+         * @return the component, or {@code null} if the group has no such component.
+         */
         IndexComponent.ForRead get(IndexComponentType component);
 
         /**
@@ -211,11 +223,38 @@ public interface IndexComponents
         /**
          * Validates this group and its components.
          * <p>
-         * This method both check that the group has all the components that it should have, and that the content of
-         * those components are, as far as this method can determine, valid.
+         * This is a shortcut for {@link #isValid(boolean, Consumer)} when nothing particular is done for
+         * invalid components.
+         *
+         * @param validateChecksum if {@code true}, the checksum of the components will be validated. Otherwise, only
+         *                         basic checks on the header and footers will be performed.
+         * @return whether the group is valid.
+         */
+        default boolean isValid(boolean validateChecksum)
+        {
+            return isValid(validateChecksum, c -> {});
+        }
+
+        /**
+         * Validates this group and its components.
          * <p>
-         * If the group is invalid, then it will be invalidated by calling {@link #invalidate}. Specifics about what
-         * failed validation is also be logged.
+         * This method checks that the group has all the components that it should have, and that the content of
+         * those components are, as far as this method can determine, valid. Specifics about what failed validation
+         * is also be logged.
+         *
+         * @param validateChecksum if {@code true}, the checksum of the components will be validated. Otherwise, only
+         *                         basic checks on the header and footers will be performed.
+         * @param onInvalidComponent called on any component that is present but whose content appears invalid/corrupted
+         *                           (what is checked depends on {@code validateChecksum}).
+         * @return whether the group is valid.
+         */
+        boolean isValid(boolean validateChecksum, Consumer<IndexComponent> onInvalidComponent);
+
+        /**
+         * Validate this group and its components, and invalidate the group if it is invalid.
+         * <p>
+         * This method is a shortcut for a call to {@link #isValid(boolean, Consumer)} that deletes corrupted components
+         * if this is the configured behavior, followed by a call {@link #invalidate} if the validation fails.
          *
          * @param sstable the sstable object for which the component are validated (which should correspond to
          *               {@code this.descriptor()}). This must be provided so if some components are invalid, they
@@ -227,7 +266,30 @@ public interface IndexComponents
          * @param rethrow whether to throw an {@link UncheckedIOException} if the group is invalid
          * @return whether the group is valid.
          */
-        boolean validateComponents(SSTable sstable, Tracker tracker, boolean validateChecksum, boolean rethrow);
+        default boolean validateComponents(SSTable sstable, Tracker tracker, boolean validateChecksum, boolean rethrow)
+        {
+            boolean isValid = isValid(validateChecksum, invalid -> {
+                if (CassandraRelevantProperties.DELETE_CORRUPT_SAI_COMPONENTS.getBoolean())
+                {
+                    // We delete the corrupted file. Yes, this may break ongoing reads to that component, but
+                    // if something is wrong with the file, we're rather fail loudly from that point on than
+                    // risking reading and returning corrupted data.
+                    forWrite().getForWrite(invalid.componentType()).delete();
+                    // Note that invalidation will also delete the completion marker
+                }
+                else
+                {
+                    logger.debug("Leaving believed-corrupt component {} of SSTable {} in place because {} is false", invalid.componentType(), descriptor(), CassandraRelevantProperties.DELETE_CORRUPT_SAI_COMPONENTS.getKey());
+                }
+            });
+            if (!isValid)
+            {
+                invalidate(sstable, tracker);
+                if (rethrow)
+                    throw new UncheckedIOException(new IOException("Invalid SAI components for " + descriptor()));
+            }
+            return isValid;
+        }
 
         /**
          * Marks the group as invalid/broken.
@@ -267,6 +329,16 @@ public interface IndexComponents
          * been added.
          */
         IndexComponent.ForWrite addOrGet(IndexComponentType component);
+
+        /**
+         * Get the component of the provided type if present.
+         * <p>
+         * This is the same as {@link #get}, except that it preserve the type information that is a "for write" object.
+         *
+         * @param component the type of the component to retrieve.
+         * @return the component, or {@code null} if the group has no such component.
+         */
+        IndexComponent.ForWrite getForWrite(IndexComponentType component);
 
         /**
          * Delete the files of all the components in this writer (and remove them so that the group will be empty
