@@ -32,6 +32,7 @@ import java.util.stream.Collectors;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -491,21 +492,31 @@ public abstract class SegmentBuilder
 
     private long add(List<ByteBuffer> terms, PrimaryKey key, long sstableRowId)
     {
-        assert !flushed : "Cannot add to flushed segment.";
-        assert sstableRowId >= maxSSTableRowId;
+        if (terms.isEmpty())
+            return 0;
+
+        Preconditions.checkState(!flushed, "Cannot add to flushed segment");
+        Preconditions.checkArgument(sstableRowId >= maxSSTableRowId,
+                                    "rowId must be greater than or equal to the last rowId added: %s < %s", sstableRowId, maxSSTableRowId);
+        Preconditions.checkArgument(maxKey == null || key.compareTo(maxKey) >= 0,
+                                    "Key must be greater than or equal to the last key added: %s < %s", key, maxKey);
+
         minSSTableRowId = minSSTableRowId < 0 ? sstableRowId : minSSTableRowId;
         maxSSTableRowId = sstableRowId;
 
-        assert maxKey == null || maxKey.compareTo(key) <= 0;
         minKey = minKey == null ? key : minKey;
         maxKey = key;
 
         // Update term boundaries for all terms in this row
         for (ByteBuffer term : terms)
         {
+            assert term != null : "term must not be null";
             minTerm = TypeUtil.min(term, minTerm, termComparator, Version.current());
             maxTerm = TypeUtil.max(term, maxTerm, termComparator, Version.current());
         }
+
+        assert minTerm != null : "minTerm should not be null at this point";
+        assert maxTerm != null : "maxTerm should not be null at this point";
 
         // segmentRowIdOffset should encode sstableRowId into Integer
         int segmentRowId = Math.toIntExact(sstableRowId - segmentRowIdOffset);
