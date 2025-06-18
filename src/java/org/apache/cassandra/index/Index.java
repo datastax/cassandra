@@ -864,9 +864,7 @@ public interface Index
          * Validate the sstable-attached components belonging to the group that are currently "active" for the
          * provided sstable.
          * <p>
-         * The "active" components are the components that are currently in use, meaning that if a given component
-         * of the sstable exists with multiple versions or generation on disk, only the most recent version/generation
-         * is the active one.
+         * The "active" components are those returned by {@link #activeComponents}.
          *
          * @param sstable          the sstable to validate components for.
          * @param validateChecksum if {@code true}, the checksum of the components will be validated. Otherwise, only
