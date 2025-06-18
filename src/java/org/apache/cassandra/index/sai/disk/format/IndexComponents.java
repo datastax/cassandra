@@ -20,6 +20,8 @@ package org.apache.cassandra.index.sai.disk.format;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+
+import org.apache.lucene.index.CorruptIndexException;
 import java.util.Collection;
 import java.util.Set;
 import java.util.function.Consumer;
@@ -286,7 +288,7 @@ public interface IndexComponents
             {
                 invalidate(sstable, tracker);
                 if (rethrow)
-                    throw new UncheckedIOException(new IOException("Invalid SAI components for " + descriptor()));
+                    throw new UncheckedIOException(new CorruptIndexException("Invalid SAI components for " + descriptor(), descriptor().toString()));
             }
             return isValid;
         }
