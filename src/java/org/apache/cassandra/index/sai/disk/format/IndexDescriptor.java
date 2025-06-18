@@ -30,6 +30,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 
 import javax.annotation.Nullable;
 
@@ -340,19 +341,6 @@ public class IndexDescriptor
                              message);
     }
 
-    private static void deleteComponentFile(File file)
-    {
-        logger.debug("Deleting storage attached index component file {}", file);
-        try
-        {
-            IOUtils.deleteFilesIfExist(file.toPath());
-        }
-        catch (IOException e)
-        {
-            logger.warn("Unable to delete storage attached index component file {} due to {}.", file, e.getMessage(), e);
-        }
-    }
-
     private class IndexComponentsImpl implements IndexComponents.ForWrite
     {
         private final @Nullable IndexContext context;
@@ -419,7 +407,7 @@ public class IndexDescriptor
         }
 
         @Override
-        public boolean validateComponents(SSTable sstable, Tracker tracker, boolean validateChecksum, boolean rethrow)
+        public boolean isValid(boolean validateChecksum, Consumer<IndexComponent> onInvalidComponent)
         {
             if (isEmpty())
                 return true;
@@ -442,30 +430,11 @@ public class IndexDescriptor
                     catch (UncheckedIOException e)
                     {
                         logger.warn(logMessage("Invalid/corrupted component {} for SSTable {}"), expected, descriptor);
-
-                        if (rethrow)
-                            throw e;
-
-                        if (CassandraRelevantProperties.DELETE_CORRUPT_SAI_COMPONENTS.getBoolean())
-                        {
-                            // We delete the corrupted file. Yes, this may break ongoing reads to that component, but
-                            // if something is wrong with the file, we're rather fail loudly from that point on than
-                            // risking reading and returning corrupted data.
-                            deleteComponentFile(component.file());
-                            // Note that invalidation will also delete the completion marker
-                        }
-                        else
-                        {
-                            logger.debug("Leaving believed-corrupt component {} of SSTable {} in place because {} is false",
-                                         expected, descriptor, CassandraRelevantProperties.DELETE_CORRUPT_SAI_COMPONENTS.getKey());
-                        }
-
+                        onInvalidComponent.accept(component);
                         isValid = false;
                     }
                 }
             }
-            if (!isValid)
-                invalidate(sstable, tracker);
             return isValid;
         }
 
@@ -489,7 +458,7 @@ public class IndexDescriptor
             // break ongoing operations here.
             var marker = components.remove(completionMarkerComponent());
             if (marker != null)
-                deleteComponentFile(marker.file());
+                marker.delete();
 
             // Keeping legacy behavior if immutable components is disabled.
             if (!buildId.version().useImmutableComponentFiles() && CassandraRelevantProperties.DELETE_CORRUPT_SAI_COMPONENTS.getBoolean())
@@ -542,12 +511,17 @@ public class IndexDescriptor
         }
 
         @Override
+        public IndexComponent.ForWrite getForWrite(IndexComponentType component)
+        {
+            IndexComponentImpl info = components.get(component);
+            Preconditions.checkNotNull(info, "SSTable %s has no %s component for build %s (context: %s)", descriptor, component, buildId, context);
+            return info;
+        }
+
+        @Override
         public void forceDeleteAllComponents()
         {
-            components.values()
-                      .stream()
-                      .map(IndexComponentImpl::file)
-                      .forEach(IndexDescriptor::deleteComponentFile);
+            components.values().forEach(IndexComponentImpl::delete);
             components.clear();
         }
 
@@ -704,6 +678,21 @@ public class IndexDescriptor
             public void createEmpty() throws IOException
             {
                 com.google.common.io.Files.touch(file().toJavaIOFile());
+            }
+
+            @Override
+            public void delete()
+            {
+                File file = file();
+                logger.debug("Deleting storage attached index component file {}", file);
+                try
+                {
+                    IOUtils.deleteFilesIfExist(file.toPath());
+                }
+                catch (IOException e)
+                {
+                    logger.warn("Unable to delete storage attached index component file {} due to {}.", file, e.getMessage(), e);
+                }
             }
 
             @Override
