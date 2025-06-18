@@ -261,22 +261,20 @@ public interface ShardManager
     {
         if (coveredShards <= maxParallelism)
             return splitSSTablesInShards(sstables, operationRange, numShardsForDensity, maker);
-        // We may be in a simple case where we can reduce the number of shards by some power of 2.
-        int multiple = Integer.highestOneBit(coveredShards / maxParallelism);
-        if (maxParallelism * multiple == coveredShards)
-            return splitSSTablesInShards(sstables, operationRange, numShardsForDensity / multiple, maker);
 
         var shards = splitSSTablesInShards(sstables,
                                            operationRange,
                                            numShardsForDensity,
                                            (rangeSSTables, range) -> Pair.create(Set.copyOf(rangeSSTables), range));
+
         return applyMaxParallelism(maxParallelism, maker, shards);
     }
 
-    private static <T, R extends CompactionSSTable> List<T> applyMaxParallelism(int maxParallelism, BiFunction<Collection<R>, Range<Token>, T> maker, List<Pair<Set<R>, Range<Token>>> shards)
+    private static <T, R extends CompactionSSTable> List<T> applyMaxParallelism(int maxParallelism,
+                                                                                BiFunction<Collection<R>, Range<Token>, T> maker,
+                                                                                List<Pair<Set<R>, Range<Token>>> shards)
     {
-        int actualParallelism = shards.size();
-        if (maxParallelism >= actualParallelism)
+        if (maxParallelism >= shards.size())
         {
             // We can fit within the parallelism limit without grouping, because some ranges are empty.
             // This is not expected to happen often, but if it does, take advantage.
@@ -286,43 +284,50 @@ public interface ShardManager
             return tasks;
         }
 
-        // Otherwise we have to group shards together. Define a target token span per task and greedily group
-        // to be as close to it as possible.
-        double spanPerTask = shards.stream().map(Pair::right).mapToDouble(t -> t.left.size(t.right)).sum() / maxParallelism;
-        double currentSpan = 0;
+        double totalSpan = shards.stream().map(Pair::right).mapToDouble(r -> r.left.size(r.right)).sum();
+        double spanPerTask = totalSpan / maxParallelism;
+
+        List<T> tasks = new ArrayList<>();
         Set<R> currentSSTables = new HashSet<>();
         Token rangeStart = null;
-        Token prevEnd = null;
-        List<T> tasks = new ArrayList<>(maxParallelism);
-        for (var pair : shards)
+        double currentSpan = 0;
+        int shardsRemaining = shards.size();
+        int tasksRemaining = maxParallelism;
+
+        for (Pair<Set<R>, Range<Token>> pair : shards)
         {
-            final Token currentEnd = pair.right.right;
-            final Token currentStart = pair.right.left;
+            Token currentStart = pair.right.left;
+            Token currentEnd = pair.right.right;
             double span = currentStart.size(currentEnd);
+
             if (rangeStart == null)
                 rangeStart = currentStart;
-            if (currentSpan + span >= spanPerTask - 0.001) // rounding error safety
-            {
-                boolean includeCurrent = currentSpan + span - spanPerTask <= spanPerTask - currentSpan;
-                if (includeCurrent)
-                    currentSSTables.addAll(pair.left);
-                tasks.add(maker.apply(currentSSTables, new Range<>(rangeStart, includeCurrent ? currentEnd : prevEnd)));
-                currentSpan -= spanPerTask;
-                rangeStart = null;
-                currentSSTables.clear();
-                if (!includeCurrent)
-                {
-                    currentSSTables.addAll(pair.left);
-                    rangeStart = currentStart;
-                }
-            }
-            else
-                currentSSTables.addAll(pair.left);
 
+            currentSSTables.addAll(pair.left);
             currentSpan += span;
-            prevEnd = currentEnd;
+            shardsRemaining--;
+
+            boolean isLastTask = tasksRemaining == 1;
+            boolean shouldEmit = !isLastTask &&
+                                 (currentSpan >= spanPerTask || shardsRemaining + tasks.size() + 1 == maxParallelism);
+
+            if (shouldEmit)
+            {
+                tasks.add(maker.apply(currentSSTables, new Range<>(rangeStart, currentEnd)));
+                currentSSTables = new HashSet<>();
+                rangeStart = null;
+                currentSpan = 0;
+                tasksRemaining--;
+            }
         }
-        assert currentSSTables.isEmpty();
+
+        if (!currentSSTables.isEmpty())
+        {
+            Token finalEnd = shards.get(shards.size() - 1).right.right;
+            tasks.add(maker.apply(currentSSTables, new Range<>(rangeStart, finalEnd)));
+        }
+
+        assert tasks.size() == maxParallelism : tasks.size() + " != " + maxParallelism;
         return tasks;
     }
 
