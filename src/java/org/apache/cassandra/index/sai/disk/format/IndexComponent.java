@@ -80,5 +80,8 @@ public interface IndexComponent
         IndexOutputWriter openOutput(boolean append) throws IOException;
 
         void createEmpty() throws IOException;
+
+        /** Deletes the underlying component file if it exists. */
+        void delete();
     }
 }
