@@ -862,7 +862,7 @@ public interface Index
 
         /**
          * Validate the sstable-attached components belonging to the group that are currently "active" for the
-         * provided sstable.
+         * provided sstable. Method is side effect free.
          * <p>
          * The "active" components are those returned by {@link #activeComponents}.
          *
