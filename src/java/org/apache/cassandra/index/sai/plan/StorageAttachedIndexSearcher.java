@@ -671,12 +671,31 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                 if (clusters == null)
                     return null;
 
+                var now = FBUtilities.nowInSeconds();
+                var staticRow = partition.staticRow();
+                boolean isStaticValid = false;
+
+                // Each of the primary keys are equal, but they have different source tables.
+                // Therefore, we check to see if the static row is valid for any of them.
+                for (PrimaryKeyWithSortKey sourceKey : sourceKeys)
+                {
+                    if (sourceKey.isIndexDataValid(staticRow, now))
+                    {
+                        processedKeys.add(pk);
+                        isStaticValid = true;
+                        break;
+                    }
+                }
+
+                // If the static row isn't valid, we can skip the partition.
+                if (!isStaticValid)
+                    return null;
+
+                // If there are no regular rows, return the static row only, knowing that it's valid for some key
                 if (!clusters.hasNext())
-                    throw new UnsupportedOperationException("Static columns are not supported");
+                    return new PrimaryKeyIterator(partition, staticRow, null, sourceKeys, syntheticScoreColumn);
 
                 var row = clusters.next();
-                var staticRow = partition.staticRow();
-                var now = FBUtilities.nowInSeconds();
                 boolean isRowValid = false;
 
                 if (!row.isRangeTombstoneMarker())
@@ -715,9 +734,15 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         public static class PrimaryKeyIterator extends AbstractUnfilteredRowIterator
         {
             private boolean consumed = false;
+
+            @Nullable
             private final Unfiltered row;
 
-            public PrimaryKeyIterator(UnfilteredRowIterator partition, Row staticRow, Unfiltered content, List<PrimaryKeyWithSortKey> primaryKeysWithScore, ColumnMetadata syntheticScoreColumn)
+            public PrimaryKeyIterator(UnfilteredRowIterator partition,
+                                      Row staticRow,
+                                      @Nullable Unfiltered content,
+                                      List<PrimaryKeyWithSortKey> primaryKeysWithScore,
+                                      ColumnMetadata syntheticScoreColumn)
             {
                 super(partition.metadata(),
                       partition.partitionKey(),
@@ -729,12 +754,11 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
 
                 assert !primaryKeysWithScore.isEmpty();
                 var isScoredRow = primaryKeysWithScore.get(0) instanceof PrimaryKeyWithScore;
-                if (!content.isRow() || !isScoredRow)
+                if (content == null || !content.isRow() || !isScoredRow)
                 {
                     this.row = content;
                     return;
                 }
-
 
                 if (syntheticScoreColumn == null)
                 {
@@ -765,7 +789,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             @Override
             protected Unfiltered computeNext()
             {
-                if (consumed)
+                if (consumed || row == null)
                     return endOfData();
                 consumed = true;
                 return row;

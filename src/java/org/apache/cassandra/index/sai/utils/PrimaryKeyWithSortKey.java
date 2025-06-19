@@ -67,7 +67,11 @@ public abstract class PrimaryKeyWithSortKey implements PrimaryKey
     public boolean isIndexDataValid(Row row, int nowInSecs)
     {
         ColumnMetadata column = context.getDefinition();
-        if (!column.isRegular())
+
+        if (row.isStatic() && !column.isStatic())
+            return true;
+
+        if (!row.isStatic() && !column.isRegular())
             return true;
 
         var cell = row.getCell(column);
