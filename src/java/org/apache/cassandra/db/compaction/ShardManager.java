@@ -21,6 +21,7 @@ package org.apache.cassandra.db.compaction;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.PriorityQueue;
 import java.util.Set;
@@ -274,60 +275,74 @@ public interface ShardManager
                                                                                 BiFunction<Collection<R>, Range<Token>, T> maker,
                                                                                 List<Pair<Set<R>, Range<Token>>> shards)
     {
-        if (maxParallelism >= shards.size())
-        {
-            // We can fit within the parallelism limit without grouping, because some ranges are empty.
-            // This is not expected to happen often, but if it does, take advantage.
-            List<T> tasks = new ArrayList<>();
-            for (Pair<Set<R>, Range<Token>> pair : shards)
-                tasks.add(maker.apply(pair.left, pair.right));
-            return tasks;
-        }
-
-        double totalSpan = shards.stream().map(Pair::right).mapToDouble(r -> r.left.size(r.right)).sum();
-        double spanPerTask = totalSpan / maxParallelism;
-
-        List<T> tasks = new ArrayList<>();
-        Set<R> currentSSTables = new HashSet<>();
-        Token rangeStart = null;
-        double currentSpan = 0;
+        Iterator<Pair<Set<R>, Range<Token>>> iter = shards.iterator();
+        List<T> tasks = new ArrayList<>(maxParallelism);
         int shardsRemaining = shards.size();
         int tasksRemaining = maxParallelism;
 
-        for (Pair<Set<R>, Range<Token>> pair : shards)
+        if (shardsRemaining > tasksRemaining)
         {
-            Token currentStart = pair.right.left;
-            Token currentEnd = pair.right.right;
-            double span = currentStart.size(currentEnd);
+            double totalSpan = shards.stream().map(Pair::right).mapToDouble(r -> r.left.size(r.right)).sum();
+            double spanPerTask = totalSpan / maxParallelism;
 
-            if (rangeStart == null)
-                rangeStart = currentStart;
+            Set<R> currentSSTables = new HashSet<>();
+            Token rangeStart = null;
+            double currentSpan = 0;
 
-            currentSSTables.addAll(pair.left);
-            currentSpan += span;
-            shardsRemaining--;
-
-            boolean isLastTask = tasksRemaining == 1;
-            boolean shouldEmit = !isLastTask &&
-                                 (currentSpan >= spanPerTask || shardsRemaining + tasks.size() + 1 == maxParallelism);
-
-            if (shouldEmit)
+            // While we have more shards to process than there are tasks, we need to bunch shards up into tasks.
+            while (shardsRemaining > tasksRemaining)
             {
-                tasks.add(maker.apply(currentSSTables, new Range<>(rangeStart, currentEnd)));
-                currentSSTables = new HashSet<>();
-                rangeStart = null;
-                currentSpan = 0;
-                tasksRemaining--;
+                Pair<Set<R>, Range<Token>> pair = iter.next(); // shardsRemaining counts the shards so iter can't be exhausted at this point
+                Token currentStart = pair.right.left;
+                Token currentEnd = pair.right.right;
+                double span = currentStart.size(currentEnd);
+
+                if (rangeStart == null)
+                    rangeStart = currentStart;
+
+                currentSSTables.addAll(pair.left);
+                currentSpan += span;
+
+                // If there is only one task remaining, we should not issue it until we are processing the last shard.
+                if (currentSpan >= spanPerTask && tasksRemaining > 0)
+                {
+                    tasks.add(maker.apply(currentSSTables, new Range<>(rangeStart, currentEnd)));
+                    --tasksRemaining;
+                    currentSSTables = new HashSet<>();
+                    rangeStart = null;
+                    currentSpan = 0;
+                }
+                --shardsRemaining;
             }
+
+            // At this point there are as many tasks remaining as there are shards
+            // (this includes the case of issuing a task for the last shard when only one task remains).
+
+            // Add any already collected sstables to the next task.
+            if (!currentSSTables.isEmpty())
+            {
+                assert shardsRemaining > 0;
+                Pair<Set<R>, Range<Token>> pair = iter.next(); // shardsRemaining counts the shards so iter can't be exhausted at this point
+                currentSSTables.addAll(pair.left);
+                Token currentEnd = pair.right.right;
+                tasks.add(maker.apply(currentSSTables, new Range<>(rangeStart, currentEnd)));
+                --tasksRemaining;
+                --shardsRemaining;
+            }
+            assert shardsRemaining == tasksRemaining : shardsRemaining + " != " + tasksRemaining;
         }
 
-        if (!currentSSTables.isEmpty())
+        // If we still have tasks and shards to process, produce one task for each shard.
+        while (iter.hasNext())
         {
-            Token finalEnd = shards.get(shards.size() - 1).right.right;
-            tasks.add(maker.apply(currentSSTables, new Range<>(rangeStart, finalEnd)));
+            Pair<Set<R>, Range<Token>> pair = iter.next(); // shardsRemaining counts the shards so iter can't be exhausted at this point
+            tasks.add(maker.apply(pair.left, pair.right));
+            --tasksRemaining;
+            --shardsRemaining;
         }
 
-        assert tasks.size() == maxParallelism : tasks.size() + " != " + maxParallelism;
+        assert tasks.size() == Math.min(maxParallelism, shards.size()) : tasks.size() + " != " + maxParallelism;
+        assert shardsRemaining == 0 : shardsRemaining + " != 0";
         return tasks;
     }
 
