@@ -63,6 +63,7 @@ import org.apache.cassandra.index.sai.SAIUtil;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.StorageAttachedIndexBuilder;
 import org.apache.cassandra.index.sai.StorageAttachedIndexGroup;
+import org.apache.cassandra.index.sai.disk.StorageAttachedIndexWriter;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.bitpack.NumericValuesWriter;
@@ -127,6 +128,10 @@ public class NativeIndexDDLTest extends SAITester
                                                                                                 .onMethod("<init>"))
                                                                          .add(ActionBuilder.newActionBuilder().actions().doThrow(RuntimeException.class, Expression.quote("Injected failure!")))
                                                                          .build();
+
+    private static final Injection pauseSAIWriterComplete = Injections.newPause("pause_sai_writer_complete", 10_000)
+                                                                      .add(InvokePointBuilder.newInvokePoint().onClass(StorageAttachedIndexWriter.class).onMethod("complete"))
+                                                                      .build();
 
     @BeforeClass
     public static void init()
@@ -958,6 +963,124 @@ public class NativeIndexDDLTest extends SAITester
         // index is still queryable
         rows = executeNet("SELECT id1 FROM %s WHERE v1>=0");
         assertEquals(4, rows.all().size());
+    }
+
+    @Test
+    public void testIndexCompactionWhenIndexIsDropped() throws Throwable
+    {
+        // prepare schema and data
+        createTable(CREATE_TABLE_TEMPLATE);
+        String indexName1 = createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
+        createIndex(String.format(CREATE_INDEX_TEMPLATE, "v2"));
+
+        execute("INSERT INTO %s (id1, v1, v2) VALUES ('0', 0, '0');");
+        execute("INSERT INTO %s (id1, v1, v2) VALUES ('1', 1, '0');");
+        flush();
+
+        execute("INSERT INTO %s (id1, v1, v2) VALUES ('2', 0, '0');");
+        execute("INSERT INTO %s (id1, v1, v2) VALUES ('3', 1, '0');");
+        flush();
+
+        ResultSet rows = executeNet("SELECT id1 FROM %s WHERE v1>=0");
+        assertEquals(4, rows.all().size());
+
+        // pause index writer completion
+        Injections.inject(pauseSAIWriterComplete);
+        pauseSAIWriterComplete.enable();
+
+        try
+        {
+
+            ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
+            assertThat(cfs.getLiveSSTables()).hasSize(2);
+
+            new TestWithConcurrentVerification(
+            () -> cfs.forceMajorCompaction(),
+            () -> {
+                try
+                {
+                    // wait for compaction paused
+                    FBUtilities.sleepQuietly(5000);
+
+                    dropIndex("DROP INDEX %s." + indexName1);
+                }
+                catch (Exception e)
+                {
+                    throw new RuntimeException(e);
+                }
+            }, -1 // run verification task once
+            ).start();
+
+            // compaction completed
+            assertThat(cfs.getLiveSSTables()).hasSize(1);
+
+            StorageAttachedIndexGroup saiGroup = StorageAttachedIndexGroup.getIndexGroup(cfs);
+            assertThat(saiGroup.sstableContextManager().size()).isEqualTo(1);
+        }
+        finally
+        {
+            pauseSAIWriterComplete.disable();
+        }
+    }
+
+    @Test
+    public void testIndexCompactionWhenIndexIsUnloaded() throws Throwable
+    {
+        // prepare schema and data
+        createTable(CREATE_TABLE_TEMPLATE);
+        createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
+        createIndex(String.format(CREATE_INDEX_TEMPLATE, "v2"));
+
+        execute("INSERT INTO %s (id1, v1, v2) VALUES ('0', 0, '0');");
+        execute("INSERT INTO %s (id1, v1, v2) VALUES ('1', 1, '0');");
+        flush();
+
+        execute("INSERT INTO %s (id1, v1, v2) VALUES ('2', 0, '0');");
+        execute("INSERT INTO %s (id1, v1, v2) VALUES ('3', 1, '0');");
+        flush();
+
+        ResultSet rows = executeNet("SELECT id1 FROM %s WHERE v1>=0");
+        assertEquals(4, rows.all().size());
+
+        // pause index writer completion
+        Injections.inject(pauseSAIWriterComplete);
+        pauseSAIWriterComplete.enable();
+
+        try
+        {
+            ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
+            assertThat(cfs.getLiveSSTables()).hasSize(2);
+            TestWithConcurrentVerification compactionTask = new TestWithConcurrentVerification(
+            () -> cfs.forceMajorCompaction(),
+            () -> {
+                try
+                {
+                    // wait for compaction paused
+                    FBUtilities.sleepQuietly(5000);
+
+                    SecondaryIndexManager sim = cfs.getIndexManager();
+                    sim.unloadAllIndexes();
+                }
+                catch (Exception e)
+                {
+                    throw new RuntimeException(e);
+                }
+            }, -1 // run verification task once
+            );
+
+            assertThatThrownBy(compactionTask::start).hasMessageContaining("is unloaded");
+
+            // compaction is aborted
+            assertThat(cfs.getLiveSSTables()).hasSize(2);
+
+            // indexes are unloaded
+            StorageAttachedIndexGroup saiGroup = StorageAttachedIndexGroup.getIndexGroup(cfs);
+            assertThat(saiGroup.sstableContextManager().size()).isEqualTo(0);
+        }
+        finally
+        {
+            pauseSAIWriterComplete.disable();
+        }
     }
 
     @Test
