@@ -1687,6 +1687,11 @@ public class CustomIndexTest extends CQLTester
             {
                 return Collections.emptySet();
             }
+
+            @Override
+            public void validateComponents(SSTableReader sstable, boolean validateChecksum)
+            {
+            }
         }
     }
 }

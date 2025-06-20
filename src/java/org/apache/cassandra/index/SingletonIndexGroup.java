@@ -147,4 +147,10 @@ public class SingletonIndexGroup implements Index.Group
         // Same rermarks as for `componentsForNewBuid`.
         return Collections.emptySet();
     }
+
+    @Override
+    public void validateComponents(SSTableReader sstable, boolean validateChecksum)
+    {
+        // Same remarks as for `componentsForNewBuid`.
+    }
 }

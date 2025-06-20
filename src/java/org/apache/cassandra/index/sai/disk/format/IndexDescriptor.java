@@ -414,7 +414,7 @@ public class IndexDescriptor
             for (IndexComponentType expected : expectedComponentsForVersion())
             {
                 var component = components.get(expected);
-                if (component == null)
+                if (component == null || !component.file().exists())
                 {
                     logger.warn(logMessage("Missing index component {} from SSTable {}"), expected, descriptor);
                     isValid = false;

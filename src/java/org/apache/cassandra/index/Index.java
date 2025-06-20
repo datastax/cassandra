@@ -57,6 +57,7 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.lucene.index.CorruptIndexException;
 
 
 /**
@@ -858,6 +859,19 @@ public interface Index
          * @return the set of the sstable-attached components of the provided sstable for this group.
          */
         Set<Component> activeComponents(SSTableReader sstable);
+
+        /**
+         * Validate the sstable-attached components belonging to the group that are currently "active" for the
+         * provided sstable. Method is side effect free.
+         * <p>
+         * The "active" components are those returned by {@link #activeComponents}.
+         *
+         * @param sstable          the sstable to validate components for.
+         * @param validateChecksum if {@code true}, the checksum of the components will be validated. Otherwise, only
+         *                         basic checks on the header and footers will be performed.
+         * @throws CorruptIndexException if the validation fails.
+         */
+        void validateComponents(SSTableReader sstable, boolean validateChecksum) throws CorruptIndexException;
 
         /**
          * @return true if this index group is capable of supporting multiple contains restrictions, false otherwise
