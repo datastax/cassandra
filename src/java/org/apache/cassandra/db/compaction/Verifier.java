@@ -399,9 +399,6 @@ public class Verifier implements Closeable
         try
         {
             var indexManager = realm.getIndexManager();
-            if (indexManager == null && !sstable.metadata().indexes.isEmpty())
-                throw new IllegalStateException("Cannot verify index components for " + sstable + " because the index manager is not available");
-
             for (IndexMetadata indexMetadata : sstable.metadata().indexes)
             {
                 var index = indexManager.getIndexGroup(indexMetadata);
