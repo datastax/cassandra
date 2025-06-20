@@ -19,11 +19,9 @@
 package org.apache.cassandra.index.sai;
 
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Iterator;
-import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -77,9 +75,7 @@ import org.apache.cassandra.index.sai.memory.MemtableKeyRangeIterator;
 import org.apache.cassandra.index.sai.metrics.ColumnQueryMetrics;
 import org.apache.cassandra.index.sai.metrics.IndexMetrics;
 import org.apache.cassandra.index.sai.plan.Expression;
-import org.apache.cassandra.index.sai.plan.Orderer;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
-import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.index.sai.view.IndexViewManager;
 import org.apache.cassandra.index.sai.view.View;
@@ -88,7 +84,6 @@ import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.TableId;
-import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.MonotonicClock;
 import org.apache.cassandra.utils.NoSpamLogger;
@@ -474,9 +469,9 @@ public class IndexContext
     // but they are not a problem as post-filtering would get rid of them.
     // The keys matched in other indexes cannot be safely subtracted
     // as indexes may contain false positives caused by deletes and updates.
-    private KeyRangeIterator getNonEqIterator(QueryContext context, Expression expression, AbstractBounds<PartitionPosition> keyRange)
+    private KeyRangeIterator getNonEqIterator(QueryContext context, Collection<MemtableIndex> memtables, Expression expression, AbstractBounds<PartitionPosition> keyRange)
     {
-        KeyRangeIterator allKeys = scanMemtable(keyRange);
+        KeyRangeIterator allKeys = scanMemtable(keyRange, memtables);
         if (TypeUtil.supportsRounding(expression.validator))
         {
             return allKeys;
@@ -484,19 +479,17 @@ public class IndexContext
         else
         {
             Expression negExpression = expression.negated();
-            KeyRangeIterator matchedKeys = searchMemtable(context, negExpression, keyRange, Integer.MAX_VALUE);
+            KeyRangeIterator matchedKeys = searchMemtable(context, memtables, negExpression, keyRange, Integer.MAX_VALUE);
             return KeyRangeAntiJoinIterator.create(allKeys, matchedKeys);
         }
     }
 
-    public KeyRangeIterator searchMemtable(QueryContext context, Expression expression, AbstractBounds<PartitionPosition> keyRange, int limit)
+    public KeyRangeIterator searchMemtable(QueryContext context, Collection<MemtableIndex> memtables, Expression expression, AbstractBounds<PartitionPosition> keyRange, int limit)
     {
         if (expression.getOp().isNonEquality())
         {
-            return getNonEqIterator(context, expression, keyRange);
+            return getNonEqIterator(context, memtables, expression, keyRange);
         }
-
-        Collection<MemtableIndex> memtables = liveMemtables.values();
 
         if (memtables.isEmpty())
         {
@@ -521,9 +514,8 @@ public class IndexContext
         }
     }
 
-    private KeyRangeIterator scanMemtable(AbstractBounds<PartitionPosition> keyRange)
+    private KeyRangeIterator scanMemtable(AbstractBounds<PartitionPosition> keyRange, Collection<MemtableIndex> memtables)
     {
-        Collection<Memtable> memtables = liveMemtables.keySet();
         if (memtables.isEmpty())
         {
             return KeyRangeIterator.empty();
@@ -533,8 +525,9 @@ public class IndexContext
 
         try
         {
-            for (Memtable memtable : memtables)
+            for (MemtableIndex memtableIndex : memtables)
             {
+                Memtable memtable = memtableIndex.getMemtable();
                 KeyRangeIterator memtableIterator = new MemtableKeyRangeIterator(memtable, primaryKeyFactory, keyRange);
                 builder.add(memtableIterator);
             }
@@ -548,28 +541,6 @@ public class IndexContext
         }
     }
 
-    // Search all memtables for all PrimaryKeys in list.
-    public List<CloseableIterator<PrimaryKeyWithSortKey>> orderResultsBy(QueryContext context, List<PrimaryKey> source, Orderer orderer, int limit)
-    {
-        Collection<MemtableIndex> memtables = liveMemtables.values();
-
-        if (memtables.isEmpty())
-            return List.of();
-
-        List<CloseableIterator<PrimaryKeyWithSortKey>> result = new ArrayList<>(memtables.size());
-        try
-        {
-            for (MemtableIndex index : memtables)
-                result.add(index.orderResultsBy(context, source, orderer, limit));
-
-            return result;
-        }
-        catch (Exception ex)
-        {
-            FileUtils.closeQuietly(result);
-            throw ex;
-        }
-    }
 
     public long liveMemtableWriteCount()
     {
