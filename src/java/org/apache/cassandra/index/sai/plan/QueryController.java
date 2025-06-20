@@ -455,7 +455,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     private KeyRangeIterator buildIterator(Expression predicate)
     {
         QueryView view = getQueryView(predicate.context);
-        return KeyRangeTermIterator.build(predicate, view.sstableIndexes, mergeRange, queryContext, false, Integer.MAX_VALUE);
+        return KeyRangeTermIterator.build(predicate, view, mergeRange, queryContext, false, Integer.MAX_VALUE);
     }
 
     /**
