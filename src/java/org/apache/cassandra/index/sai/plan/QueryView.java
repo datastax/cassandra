@@ -55,8 +55,8 @@ import org.apache.cassandra.utils.NoSpamLogger;
 public class QueryView implements AutoCloseable
 {
     final ColumnFamilyStore.RefViewFragment viewFragment;
-    final Set<SSTableIndex> sstableIndexes;
-    final Set<MemtableIndex> memtableIndexes;
+    public final Set<SSTableIndex> sstableIndexes;
+    public final Set<MemtableIndex> memtableIndexes;
     final IndexContext indexContext;
 
     public QueryView(ColumnFamilyStore.RefViewFragment viewFragment,

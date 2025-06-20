@@ -29,6 +29,7 @@ import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.plan.Expression;
+import org.apache.cassandra.index.sai.plan.QueryView;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.util.FileUtils;
@@ -65,21 +66,21 @@ public class KeyRangeTermIterator extends KeyRangeIterator
 
 
     @SuppressWarnings("resource")
-    public static KeyRangeTermIterator build(final Expression e, Set<SSTableIndex> perSSTableIndexes, AbstractBounds<PartitionPosition> keyRange, QueryContext queryContext, boolean defer, int limit)
+    public static KeyRangeTermIterator build(final Expression e, QueryView view, AbstractBounds<PartitionPosition> keyRange, QueryContext queryContext, boolean defer, int limit)
     {
-        KeyRangeIterator rangeIterator = buildRangeIterator(e, perSSTableIndexes, keyRange, queryContext, defer, limit);
-        return new KeyRangeTermIterator(rangeIterator, perSSTableIndexes, queryContext);
+        KeyRangeIterator rangeIterator = buildRangeIterator(e, view, keyRange, queryContext, defer, limit);
+        return new KeyRangeTermIterator(rangeIterator, view.sstableIndexes, queryContext);
     }
 
-    private static KeyRangeIterator buildRangeIterator(final Expression e, Set<SSTableIndex> perSSTableIndexes, AbstractBounds<PartitionPosition> keyRange, QueryContext queryContext, boolean defer, int limit)
+    private static KeyRangeIterator buildRangeIterator(final Expression e, QueryView view, AbstractBounds<PartitionPosition> keyRange, QueryContext queryContext, boolean defer, int limit)
     {
-        final List<KeyRangeIterator> tokens = new ArrayList<>(1 + perSSTableIndexes.size());
+        final List<KeyRangeIterator> tokens = new ArrayList<>(1 + view.sstableIndexes.size());
 
-        KeyRangeIterator memtableIterator = e.context.searchMemtable(queryContext, e, keyRange, limit);
+        KeyRangeIterator memtableIterator = e.context.searchMemtable(queryContext, view.memtableIndexes, e, keyRange, limit);
         if (memtableIterator != null)
             tokens.add(memtableIterator);
 
-        for (final SSTableIndex index : perSSTableIndexes)
+        for (final SSTableIndex index : view.sstableIndexes)
         {
             try
             {
