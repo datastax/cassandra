@@ -344,6 +344,7 @@ public class Verb
 
     Verb toPre40Verb()
     {
+        assert isResponse() || id < 38 : "unsupported pre40 request verb " + id;
         if (!isResponse())
             return this;
         if (priority == P0)
