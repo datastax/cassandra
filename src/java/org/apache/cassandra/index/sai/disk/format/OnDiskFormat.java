@@ -40,6 +40,7 @@ import org.apache.cassandra.index.sai.memory.RowMapping;
 import org.apache.cassandra.index.sai.memory.TrieMemtableIndex;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 /**
@@ -114,10 +115,11 @@ public interface OnDiskFormat
      * Create a new writer for the per-SSTable on-disk components of an index.
      *
      * @param indexDescriptor The {@link IndexDescriptor} for the SSTable
+     * @param compression compression to use for per-sstable components
      * @return The {@link PerSSTableWriter} to write the per-SSTable on-disk components
      * @throws IOException
      */
-    public PerSSTableWriter newPerSSTableWriter(IndexDescriptor indexDescriptor) throws IOException;
+    PerSSTableWriter newPerSSTableWriter(IndexDescriptor indexDescriptor, CompressionParams compression) throws IOException;
 
     /**
      * Create a new writer for the per-index on-disk components of an index. The {@link LifecycleNewTracker}
@@ -214,5 +216,5 @@ public interface OnDiskFormat
     ByteBuffer decodeFromTrie(ByteComparable value, AbstractType<?> type);
 
 
-
+    Set<IndexComponentType> compressionInfoComponentTypes();
 }

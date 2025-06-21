@@ -26,6 +26,7 @@ import org.apache.cassandra.index.sai.disk.io.IndexOutputWriter;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.schema.CompressionParams;
 import org.apache.lucene.store.ChecksumIndexInput;
 
 public interface IndexComponent
@@ -38,7 +39,14 @@ public interface IndexComponent
 
     String fileNamePart();
     Component asCustomComponent();
+
     File file();
+
+    /**
+     * Returns the compression metadata component associated with this component.
+     * Compression information is needed to decompress this component.
+     */
+    IndexComponent compressionMetadataComponent();
 
     default boolean isCompletionMarker()
     {
@@ -77,7 +85,18 @@ public interface IndexComponent
             return openOutput(false);
         }
 
-        IndexOutputWriter openOutput(boolean append) throws IOException;
+        default IndexOutputWriter openOutput(boolean append) throws IOException
+        {
+            return openOutput(append, CompressionParams.noCompression());
+        }
+
+        default IndexOutputWriter openOutput(CompressionParams compression) throws IOException
+        {
+            return openOutput(false, compression);
+        }
+
+        IndexOutputWriter openOutput(boolean append, CompressionParams compression) throws IOException;
+
 
         void createEmpty() throws IOException;
 

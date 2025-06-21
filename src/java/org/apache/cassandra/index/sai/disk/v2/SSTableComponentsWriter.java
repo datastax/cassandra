@@ -32,6 +32,7 @@ import org.apache.cassandra.index.sai.disk.v1.MetadataWriter;
 import org.apache.cassandra.index.sai.disk.v1.bitpack.NumericValuesWriter;
 import org.apache.cassandra.index.sai.disk.v2.sortedterms.SortedTermsWriter;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
+import org.apache.cassandra.schema.CompressionParams;
 import org.apache.lucene.util.IOUtils;
 
 public class SSTableComponentsWriter implements PerSSTableWriter
@@ -44,7 +45,7 @@ public class SSTableComponentsWriter implements PerSSTableWriter
     private final NumericValuesWriter blockFPWriter;
     private final SortedTermsWriter sortedTermsWriter;
 
-    public SSTableComponentsWriter(IndexComponents.ForWrite perSSTableComponents) throws IOException
+    public SSTableComponentsWriter(IndexComponents.ForWrite perSSTableComponents, CompressionParams compression) throws IOException
     {
         this.perSSTableComponents = perSSTableComponents;
         this.metadataWriter = new MetadataWriter(perSSTableComponents);
@@ -56,7 +57,8 @@ public class SSTableComponentsWriter implements PerSSTableWriter
         this.sortedTermsWriter = new SortedTermsWriter(perSSTableComponents.addOrGet(IndexComponentType.PRIMARY_KEY_BLOCKS),
                                                        metadataWriter,
                                                        blockFPWriter,
-                                                       perSSTableComponents.addOrGet(IndexComponentType.PRIMARY_KEY_TRIE));
+                                                       perSSTableComponents.addOrGet(IndexComponentType.PRIMARY_KEY_TRIE),
+                                                       compression);
     }
 
     @Override
