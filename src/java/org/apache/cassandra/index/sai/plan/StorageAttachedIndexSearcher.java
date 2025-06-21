@@ -666,19 +666,19 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             {
                 queryContext.addPartitionsRead(1);
                 queryContext.checkpoint();
-                var staticRow = partition.staticRow();
                 UnfilteredRowIterator clusters = applyIndexFilter(partition, filterTree, queryContext);
 
-                if (clusters == null || !clusters.hasNext())
-                {
-                    processedKeys.add(pk);
+                if (clusters == null)
                     return null;
-                }
 
+                if (!clusters.hasNext())
+                    throw new UnsupportedOperationException("Static columns are not supported");
+
+                var row = clusters.next();
+                var staticRow = partition.staticRow();
                 var now = FBUtilities.nowInSeconds();
                 boolean isRowValid = false;
-                var row = clusters.next();
-                assert !clusters.hasNext() : "Expected only one row per partition";
+
                 if (!row.isRangeTombstoneMarker())
                 {
                     for (PrimaryKeyWithSortKey sourceKey : sourceKeys)
