@@ -625,7 +625,7 @@ public class ScrubTest
 
         if (compression)
         { // overwrite with garbage the compression chunks from key1 to key2
-            CompressionMetadata compData = CompressionMetadata.create(sstable.getDataFile());
+            CompressionMetadata compData = CompressionMetadata.read(sstable.getDataFile(), false);
 
             CompressionMetadata.Chunk chunk1 = compData.chunkFor(
             sstable.getPosition(PartitionPosition.ForKey.get(key1, sstable.getPartitioner()), SSTableReader.Operator.EQ).position);
