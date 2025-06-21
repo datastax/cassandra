@@ -45,4 +45,12 @@ public class V7OnDiskFormat extends V6OnDiskFormat
             return LITERAL_COMPONENTS;
         return super.perIndexComponentTypes(validator);
     }
+
+    @Override
+    public int jvectorFileFormatVersion()
+    {
+        // Before version EC, we used JVector format 2. Version EB introduced format 4, so we can safely start using it
+        // for versions EC and later to ensure proper backward compatibility.
+        return 4;
+    }
 }

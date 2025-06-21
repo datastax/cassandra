@@ -23,7 +23,6 @@ import java.lang.invoke.MethodHandles;
 import java.util.EnumSet;
 import java.util.Set;
 
-import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -52,8 +51,10 @@ public class V3OnDiskFormat extends V2OnDiskFormat
     // JVector doesn't give us a way to access its default, so we set it here, but allow it to be overridden.
     public static boolean JVECTOR_USE_PRUNING_DEFAULT = Boolean.parseBoolean(System.getProperty("cassandra.sai.jvector.use_pruning_default", "true"));
 
-    // These are built to be backwards and forwards compatible. Not final only for testing.
-    public static int JVECTOR_VERSION = Integer.parseInt(System.getProperty("cassandra.sai.jvector_version", "2"));
+    // We allow the version to be configured via a system property because of some legacy use cases, but it is
+    // generally not recommended to change this directly. Instead, use the cassandra.sai.latest.version system property
+    // to control the on-disk format version.
+    private final static int JVECTOR_VERSION = Integer.getInteger("cassandra.sai.jvector_version", 2);
     static
     {
         // JVector 3 is not compatible with the latest jvector changes, so we fail fast if the config is enabled.
@@ -118,5 +119,11 @@ public class V3OnDiskFormat extends V2OnDiskFormat
         if (validator.isVector())
             return VECTOR_COMPONENTS_V3;
         return super.perIndexComponentTypes(validator);
+    }
+
+    @Override
+    public int jvectorFileFormatVersion()
+    {
+        return JVECTOR_VERSION;
     }
 }
