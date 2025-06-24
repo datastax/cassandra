@@ -49,6 +49,7 @@ import com.google.common.util.concurrent.ListeningExecutorService;
 import com.google.common.util.concurrent.MoreExecutors;
 import org.junit.Assert;
 import org.junit.Test;
+import org.awaitility.Awaitility;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -115,6 +116,18 @@ public class PendingAntiCompactionTest extends AbstractPendingAntiCompactionTest
         }
     }
 
+    private void waitForExecutorShutdown(ExecutorService es)
+    {
+        es.shutdown();
+        try {
+            if (!es.awaitTermination(10, TimeUnit.SECONDS)) {
+                logger.warn("Executor did not terminate in time, forcing shutdown");
+                es.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
     /**
      * verify the pending anti compaction happy path
      */
@@ -155,7 +168,7 @@ public class PendingAntiCompactionTest extends AbstractPendingAntiCompactionTest
         }
         finally
         {
-            executor.shutdown();
+            waitForExecutorShutdown(executor);
         }
 
         assertEquals(3, cfs.getLiveSSTables().size());
@@ -488,7 +501,7 @@ public class PendingAntiCompactionTest extends AbstractPendingAntiCompactionTest
         }
         finally
         {
-            es.shutdown();
+            waitForExecutorShutdown(es);
             ISSTableScanner.closeAllAndPropagate(scanners, null);
         }
     }
@@ -565,44 +578,55 @@ public class PendingAntiCompactionTest extends AbstractPendingAntiCompactionTest
         }
         finally
         {
-            es.shutdown();
+            waitForExecutorShutdown(es);
         }
     }
 
     @Test
-    public void testSSTablePredicateOngoingAntiCompaction()
+    public void testSSTablePredicateOngoingAntiCompaction() throws InterruptedException
     {
         ColumnFamilyStore cfs = MockSchema.newCFS();
-        cfs.disableAutoCompaction();
-        List<SSTableReader> sstables = new ArrayList<>();
-        List<SSTableReader> repairedSSTables = new ArrayList<>();
-        List<SSTableReader> pendingSSTables = new ArrayList<>();
-        for (int i = 1; i <= 10; i++)
+        try
         {
-            SSTableReader sstable = MockSchema.sstable(i, i * 10, i * 10 + 9, cfs);
-            sstables.add(sstable);
-        }
-        for (int i = 1; i <= 10; i++)
-        {
-            SSTableReader sstable = MockSchema.sstable(i + 10, i * 10, i * 10 + 9, cfs);
-            AbstractPendingRepairTest.mutateRepaired(sstable, System.currentTimeMillis());
-            repairedSSTables.add(sstable);
-        }
-        for (int i = 1; i <= 10; i++)
-        {
-            SSTableReader sstable = MockSchema.sstable(i + 20, i * 10, i * 10 + 9, cfs);
-            AbstractPendingRepairTest.mutateRepaired(sstable, UUID.randomUUID(), false);
-            pendingSSTables.add(sstable);
-        }
+            cfs.disableAutoCompaction();
+            List<SSTableReader> sstables = new ArrayList<>();
+            List<SSTableReader> repairedSSTables = new ArrayList<>();
+            List<SSTableReader> pendingSSTables = new ArrayList<>();
+            for (int i = 1; i <= 10; i++)
+            {
+                SSTableReader sstable = MockSchema.sstable(i, i * 10, i * 10 + 9, cfs);
+                sstables.add(sstable);
+            }
+            for (int i = 1; i <= 10; i++)
+            {
+                SSTableReader sstable = MockSchema.sstable(i + 10, i * 10, i * 10 + 9, cfs);
+                AbstractPendingRepairTest.mutateRepaired(sstable, System.currentTimeMillis());
+                repairedSSTables.add(sstable);
+            }
+            for (int i = 1; i <= 10; i++)
+            {
+                SSTableReader sstable = MockSchema.sstable(i + 20, i * 10, i * 10 + 9, cfs);
+                AbstractPendingRepairTest.mutateRepaired(sstable, UUID.randomUUID(), false);
+                pendingSSTables.add(sstable);
+            }
 
-        cfs.addSSTables(sstables);
-        cfs.addSSTables(repairedSSTables);
+            cfs.addSSTables(sstables);
+            cfs.addSSTables(repairedSSTables);
 
-        // if we are compacting the non-repaired non-pending sstables, we should get an error
-        tryPredicate(cfs, sstables, null, true);
-        // make sure we don't try to grab pending or repaired sstables;
-        tryPredicate(cfs, repairedSSTables, sstables, false);
-        tryPredicate(cfs, pendingSSTables, sstables, false);
+            // if we are compacting the non-repaired non-pending sstables, we should get an error
+            tryPredicate(cfs, sstables, null, true);
+            // make sure we don't try to grab pending or repaired sstables;
+            tryPredicate(cfs, repairedSSTables, sstables, false);
+            tryPredicate(cfs, pendingSSTables, sstables, false);
+        }
+        finally
+        {
+            // Wait for any ongoing operations to complete
+            Awaitility.await()
+                    .atMost(10, TimeUnit.SECONDS)
+                    .pollInterval(100, TimeUnit.MILLISECONDS)
+                    .until(() -> getCompactionsFor(cfs).isEmpty());
+        }
     }
 
     private void tryPredicate(ColumnFamilyStore cfs, List<SSTableReader> compacting, List<SSTableReader> expectedLive, boolean shouldFail)
@@ -639,8 +663,8 @@ public class PendingAntiCompactionTest extends AbstractPendingAntiCompactionTest
     @Test
     public void testRetries() throws InterruptedException, ExecutionException, TimeoutException
     {
-        ColumnFamilyStore cfs = MockSchema.newCFS();
-        cfs.addSSTable(MockSchema.sstable(1, true, cfs));
+        makeSSTables(1);
+        
         CountDownLatch cdl = new CountDownLatch(5);
         ExecutorService es = Executors.newFixedThreadPool(1);
         AbstractTableOperation operation = new AbstractTableOperation()
@@ -679,15 +703,15 @@ public class PendingAntiCompactionTest extends AbstractPendingAntiCompactionTest
         }
         finally
         {
-            es.shutdown();
+            waitForExecutorShutdown(es);
         }
     }
 
     @Test
     public void testRetriesTimeout() throws InterruptedException, ExecutionException, IOException, TimeoutException
     {
-        ColumnFamilyStore cfs = MockSchema.newCFS();
-        cfs.addSSTable(MockSchema.sstable(1, true, cfs));
+        makeSSTables(1);
+        
         ExecutorService es = Executors.newFixedThreadPool(1);
         TableOperation operation = new AbstractTableOperation()
         {
@@ -717,7 +741,7 @@ public class PendingAntiCompactionTest extends AbstractPendingAntiCompactionTest
         }
         finally
         {
-            es.shutdown();
+            waitForExecutorShutdown(es);
         }
     }
 
@@ -746,7 +770,7 @@ public class PendingAntiCompactionTest extends AbstractPendingAntiCompactionTest
         }
         finally
         {
-            es.shutdown();
+            waitForExecutorShutdown(es);
         }
     }
 
