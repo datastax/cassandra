@@ -75,11 +75,11 @@ import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.Segment;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher;
 import org.apache.cassandra.index.sai.disk.v2.V2VectorPostingsWriter;
-import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.v5.V5OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter.Structure;
@@ -95,7 +95,6 @@ import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.lucene.util.StringHelper;
 
 import static org.apache.cassandra.utils.Clock.Global.nanoTime;
-import static org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat.JVECTOR_VERSION;
 
 public class CassandraOnHeapGraph<T> implements Accountable
 {
@@ -158,10 +157,11 @@ public class CassandraOnHeapGraph<T> implements Accountable
         vectorsByKey = forSearching ? new NonBlockingHashMap<>() : null;
         invalidVectorBehavior = forSearching ? InvalidVectorBehavior.FAIL : InvalidVectorBehavior.IGNORE;
 
+        int jvectorVersion = Version.current().onDiskFormat().jvectorFileFormatVersion();
         // This is only a warning since it's not a fatal error to write without hierarchy
-        if (indexConfig.isHierarchyEnabled() && V3OnDiskFormat.JVECTOR_VERSION < 4)
+        if (indexConfig.isHierarchyEnabled() && jvectorVersion < 4)
             logger.warn("Hierarchical graphs configured but node configured with V3OnDiskFormat.JVECTOR_VERSION {}. " +
-                        "Skipping setting for {}", V3OnDiskFormat.JVECTOR_VERSION, indexConfig.getIndexName());
+                        "Skipping setting for {}", jvectorVersion, indexConfig.getIndexName());
 
         builder = new GraphIndexBuilder(vectorValues,
                                         similarityFunction,
@@ -169,7 +169,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
                                         indexConfig.getConstructionBeamWidth(),
                                         indexConfig.getNeighborhoodOverflow(1.0f), // no overflow means add will be a bit slower but flush will be faster
                                         indexConfig.getAlpha(dimension > 3 ? 1.2f : 2.0f),
-                                        indexConfig.isHierarchyEnabled() && V3OnDiskFormat.JVECTOR_VERSION >= 4);
+                                        indexConfig.isHierarchyEnabled() && jvectorVersion >= 4);
         searchers = ThreadLocal.withInitial(() -> new GraphSearcherAccessManager(new GraphSearcher(builder.getGraph())));
     }
 
@@ -440,7 +440,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
         try (var pqOutput = perIndexComponents.addOrGet(IndexComponentType.PQ).openOutput(true);
              var postingsOutput = perIndexComponents.addOrGet(IndexComponentType.POSTING_LISTS).openOutput(true);
              var indexWriter = new OnDiskGraphIndexWriter.Builder(builder.getGraph(), indexFile.toPath())
-                               .withVersion(JVECTOR_VERSION)
+                               .withVersion(Version.current().onDiskFormat().jvectorFileFormatVersion())
                                .withMapper(ordinalMapper)
                                .with(new InlineVectors(vectorValues.dimension()))
                                .withStartOffset(termsOffset)
@@ -593,14 +593,14 @@ public class CassandraOnHeapGraph<T> implements Accountable
             return writer.position();
 
         // save (outside the synchronized block, this is io-bound not CPU)
-        cv.write(writer, JVECTOR_VERSION);
+        cv.write(writer, Version.current().onDiskFormat().jvectorFileFormatVersion());
         return writer.position();
     }
 
     static void writePqHeader(DataOutput writer, boolean unitVectors, CompressionType type)
     throws IOException
     {
-        if (V3OnDiskFormat.JVECTOR_VERSION >= 3)
+        if (Version.current().onDiskFormat().jvectorFileFormatVersion() >= 3)
         {
             // version and optional fields
             writer.writeInt(CassandraDiskAnn.PQ_MAGIC);
