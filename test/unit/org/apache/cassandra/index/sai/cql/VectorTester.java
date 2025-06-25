@@ -174,7 +174,7 @@ public class VectorTester extends SAITester
     }
 
     /**
-     * {@link VectorTester} parameterized for {@link Version#CA} and {@link Version#DC}.
+     * {@link VectorTester} parameterized for {@link Version#CA}, {@link Version#DC}, and {@link Version#EB}.
      */
     @Ignore
     @RunWith(Parameterized.class)
@@ -186,14 +186,13 @@ public class VectorTester extends SAITester
         @Parameterized.Parameters(name = "{0}")
         public static Collection<Object[]> data()
         {
-            return Stream.of(Version.CA, Version.DC).map(v -> new Object[]{ v }).collect(Collectors.toList());
+            // See Version file for explanation of changes associated with each version
+            return Stream.of(Version.CA, Version.DC, Version.EC).map(v -> new Object[]{ v }).collect(Collectors.toList());
         }
 
         @Before
-        @Override
-        public void setup() throws Throwable
+        public void setCurrentVersion() throws Throwable
         {
-            super.setup();
             SAIUtil.setCurrentVersion(version);
         }
     }
