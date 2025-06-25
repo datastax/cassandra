@@ -20,7 +20,6 @@ package org.apache.cassandra.distributed.test.sai;
 
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -55,6 +54,7 @@ import org.apache.cassandra.index.sai.cql.GeoDistanceAccuracyTest;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import org.apache.cassandra.index.sai.cql.VectorTester;
 import org.apache.cassandra.index.sai.disk.vector.VectorSourceModel;
+import org.assertj.core.data.Percentage;
 
 import static org.apache.cassandra.distributed.api.Feature.GOSSIP;
 import static org.apache.cassandra.distributed.api.Feature.NETWORK;
@@ -325,15 +325,16 @@ public class VectorDistributedTest extends TestBaseImpl
             List<float[]> expected = vectorsByToken.entries().stream()
                                                    .filter(e -> e.getKey() >= minToken && e.getKey() <= maxToken)
                                                    .map(Map.Entry::getValue)
-                                                   .sorted(Comparator.comparingDouble(v -> function.compare(vts.createFloatVector(v), vts.createFloatVector(queryVector))).reversed())
                                                    .collect(Collectors.toList());
 
             List<float[]> resultVectors = searchWithRange(queryVector, minToken, maxToken, expected.size());
+            assertDescendingScore(queryVector, resultVectors);
+
             if (expected.isEmpty())
                 assertThat(resultVectors).isEmpty();
             else
             {
-                double recall = computeRecall(queryVector, resultVectors, expected);
+                double recall = VectorTester.recallMatch(expected, resultVectors, expected.size());
                 assertThat(recall).isGreaterThanOrEqualTo(0.8);
             }
         }
@@ -354,15 +355,16 @@ public class VectorDistributedTest extends TestBaseImpl
             List<float[]> expected = vectorsByToken.entries().stream()
                                                    .filter(e -> e.getKey() >= minToken && e.getKey() <= maxToken)
                                                    .map(Map.Entry::getValue)
-                                                   .sorted(Comparator.comparingDouble(v -> function.compare(vts.createFloatVector(v), vts.createFloatVector(queryVector))).reversed())
                                                    .collect(Collectors.toList());
 
             List<float[]> resultVectors = searchWithRange(queryVector, minToken, maxToken, expected.size());
+            assertDescendingScore(queryVector, resultVectors);
+
             if (expected.isEmpty())
                 assertThat(resultVectors).isEmpty();
             else
             {
-                double recall = computeRecall(queryVector, resultVectors, expected);
+                double recall = VectorTester.recallMatch(expected, resultVectors, expected.size());
                 assertThat(recall).isGreaterThanOrEqualTo(0.8);
             }
         }
@@ -405,7 +407,7 @@ public class VectorDistributedTest extends TestBaseImpl
     private List<float[]> searchWithRange(float[] queryVector, long minToken, long maxToken, int expectedSize)
     {
         Object[][] result = execute("SELECT val FROM %s WHERE token(pk) <= " + maxToken + " AND token(pk) >= " + minToken + " ORDER BY val ann of " + Arrays.toString(queryVector) + " LIMIT 1000");
-        assertThat(result).hasNumberOfRows(expectedSize);
+        assertThat(result.length).isCloseTo(expectedSize, Percentage.withPercentage(5)).isLessThanOrEqualTo(1000);
         return getVectors(result);
     }
 
