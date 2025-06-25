@@ -58,6 +58,7 @@ import org.apache.cassandra.index.sai.memory.MemoryIndex;
 import org.apache.cassandra.index.sai.metrics.ColumnQueryMetrics;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.plan.Orderer;
+import org.apache.cassandra.index.sai.utils.BM25Utils;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyListUtil;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithScore;
@@ -457,9 +458,15 @@ public class VectorMemtableIndex extends AbstractMemtableIndex
     }
 
     @Override
-    public int indexedRows()
+    public int getRowCount()
     {
         return graph.size();
+    }
+
+    @Override
+    public long getApproximateTermCount()
+    {
+        throw new UnsupportedOperationException("Getting number of terms not supported by vector indexes");
     }
 
     public SegmentMetadata.ComponentMetadataMap writeData(IndexComponents.ForWrite perIndexComponents) throws IOException

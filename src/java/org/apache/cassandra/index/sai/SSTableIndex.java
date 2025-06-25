@@ -47,6 +47,7 @@ import org.apache.cassandra.index.sai.iterators.KeyRangeAntiJoinIterator;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.plan.Orderer;
+import org.apache.cassandra.index.sai.utils.BM25Utils;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
@@ -133,6 +134,16 @@ public class SSTableIndex
     public long getRowCount()
     {
         return searchableIndex.getRowCount();
+    }
+
+    /**
+     * Returns the total number of terms in all indexed rows of this index.
+     * This number is approximate because it does not account for any deletions
+     * that may have occurred since the index was built.
+     */
+    public long getApproximateTermCount()
+    {
+        return searchableIndex.getApproximateTermCount();
     }
 
     public long estimateMatchingRowsCount(Expression predicate, AbstractBounds<PartitionPosition> keyRange)

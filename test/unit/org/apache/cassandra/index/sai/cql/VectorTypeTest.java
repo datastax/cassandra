@@ -27,14 +27,10 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 import org.junit.Assert;
-import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.junit.runners.Parameterized;
 
 import io.github.jbellis.jvector.graph.GraphSearcher;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
@@ -43,12 +39,9 @@ import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.dht.Token;
-import org.apache.cassandra.index.sai.SAIUtil;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
-import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
 import org.apache.cassandra.index.sai.disk.v1.SegmentBuilder;
-import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
 import org.apache.cassandra.index.sai.disk.vector.VectorSourceModel;
 import org.apache.cassandra.index.sai.plan.QueryController;
@@ -1149,5 +1142,36 @@ public class VectorTypeTest extends VectorTester.Versioned
         assertEquals(40,    config.getAnnMaxDegree());
         assertEquals(300,   config.getConstructionBeamWidth());
         assertEquals(VectorSimilarityFunction.EUCLIDEAN, config.getSimilarityFunction());
+    }
+
+    @Test
+    public void testMemtableInsertSearchInsertSearchHandling()
+    {
+        createTable("CREATE TABLE %s (id text PRIMARY KEY, embedding vector<float, 5>)");
+        createIndex("CREATE CUSTOM INDEX ON %s(embedding) USING 'StorageAttachedIndex' " +
+                    "WITH OPTIONS = {'similarity_function': 'dot_product', 'source_model': 'OTHER'}");
+
+        // Insert initial data
+        execute("INSERT INTO %s (id, embedding) VALUES ('row1', [0.1, 0.1, 0.1, 0.1, 0.1])");
+        execute("INSERT INTO %s (id, embedding) VALUES ('row2', [0.9, 0.9, 0.9, 0.9, 0.9])");
+
+        // Query 100 times to try to guarantee all graph searchers are initialized
+        for (int i = 0; i < 100; i++)
+        {
+            // Initial vector search
+            UntypedResultSet initialSearch = execute("SELECT * FROM %s ORDER BY embedding ANN OF [0.8, 0.8, 0.8, 0.8, 0.8] LIMIT 1");
+            assertThat(initialSearch).hasSize(1);
+        }
+
+        // Update one of the rows (this update wasn't observed due to state leaked between queries previously)
+        execute("INSERT INTO %s (id, embedding) VALUES ('row3', [0.7, 0.7, 0.7, 0.7, 0.7])");
+
+        // Query 100 times to make sure it works as expected
+        for (int j = 0; j < 100; j++)
+        {
+            // Get all data to verify we have 2 rows
+            UntypedResultSet allData = execute("SELECT * FROM %s ORDER BY embedding ANN OF [0.8, 0.8, 0.8, 0.8, 0.8] LIMIT 1000");
+            assertThat(allData).hasSize(3);
+        }
     }
 }

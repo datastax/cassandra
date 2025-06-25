@@ -30,6 +30,8 @@ import java.util.Objects;
 import javax.annotation.Nonnull;
 import javax.annotation.concurrent.NotThreadSafe;
 
+import com.google.common.base.Preconditions;
+
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.index.sai.disk.TermsIterator;
@@ -99,14 +101,16 @@ public class SegmentMetadataBuilder
 
     public void setKeyRange(@Nonnull PrimaryKey minKey, @Nonnull PrimaryKey maxKey)
     {
-        assert minKey.compareTo(maxKey) <= 0: "minKey (" + minKey + ") must not be greater than (" + maxKey + ')';
+        Preconditions.checkNotNull(minKey, "minKey must not be null");
+        Preconditions.checkNotNull(maxKey, "maxKey must not be null");
+        Preconditions.checkArgument(minKey.compareTo(maxKey) <= 0, "minKey (" + minKey + ") must not be greater than (" + maxKey + ')');
         this.minKey = minKey;
         this.maxKey = maxKey;
     }
 
     public void setRowIdRange(long minRowId, long maxRowId)
     {
-        assert minRowId <= maxRowId: "minRowId (" + minRowId + ") must not be greater than (" + maxRowId + ')';
+        Preconditions.checkArgument(minRowId <= maxRowId, "minRowId (" + minRowId + ") must not be greater than (" + maxRowId + ')');
         this.minRowId = minRowId;
         this.maxRowId = maxRowId;
     }
@@ -120,6 +124,8 @@ public class SegmentMetadataBuilder
      */
     public void setTermRange(@Nonnull ByteBuffer minTerm, @Nonnull ByteBuffer maxTerm)
     {
+        Preconditions.checkNotNull(minTerm, "minTerm must not be null");
+        Preconditions.checkNotNull(maxTerm, "maxTerm must not be null");
         this.minTerm = minTerm;
         this.maxTerm = maxTerm;
     }

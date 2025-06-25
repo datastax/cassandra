@@ -74,7 +74,7 @@ public class Version implements Comparable<Version>
     public static final Version VECTOR_EARLIEST = BA;
     public static final Version JVECTOR_EARLIEST = CA;
     public static final Version BM25_EARLIEST = EC;
-    public static final Version LATEST = EC;
+    public static final Version LATEST = ALL.get(0);
     // The current version can be configured to be an earlier version to support partial upgrades that don't
     // write newer versions of the on-disk formats. This is volatile rather than final so that tests may
     // use reflection to change it and safely publish across threads.
@@ -176,6 +176,12 @@ public class Version implements Comparable<Version>
     public String toString()
     {
         return version;
+    }
+
+    // Useful for handling features that need a two phase rollout.
+    public boolean after(Version other)
+    {
+        return version.compareTo(other.version) > 0;
     }
 
     public boolean onOrAfter(Version other)
