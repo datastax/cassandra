@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.index.sai;
 
+import java.io.IOException;
 import java.lang.invoke.MethodHandles;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -59,6 +60,7 @@ import org.apache.cassandra.index.sai.metrics.TableStateMetrics;
 import org.apache.cassandra.index.sai.plan.StorageAttachedIndexQueryPlan;
 import org.apache.cassandra.index.transactions.IndexTransaction;
 import org.apache.cassandra.io.sstable.Component;
+import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTableWatcher;
 import org.apache.cassandra.io.sstable.format.SSTableFlushObserver;
@@ -71,6 +73,7 @@ import org.apache.cassandra.notifications.SSTableAddedNotification;
 import org.apache.cassandra.notifications.SSTableListChangedNotification;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.Throwables;
+import org.apache.lucene.index.CorruptIndexException;
 
 /**
  * Orchestrates building of storage-attached indices, and manages lifecycle of resources shared between them.
@@ -305,6 +308,21 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
         }
 
         return components;
+    }
+
+    @Override
+    public void validateComponents(SSTableReader sstable, boolean validateChecksum) throws CorruptIndexException
+    {
+        IndexDescriptor indexDescriptor = descriptorFor(sstable);
+        if (!indexDescriptor.perSSTableComponents().isValid(validateChecksum))
+            throw new CorruptIndexException("Failed validation of per-SSTable components", sstable.getFilename());
+
+        for (StorageAttachedIndex index : indices)
+        {
+            IndexContext ctx = index.getIndexContext();
+            if (!indexDescriptor.perIndexComponents(ctx).isValid(validateChecksum))
+                throw new CorruptIndexException("Failed validation of per-column components for " + ctx, sstable.getFilename());
+        }
     }
 
     @Override
