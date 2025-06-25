@@ -73,6 +73,7 @@ import org.apache.cassandra.notifications.SSTableAddedNotification;
 import org.apache.cassandra.notifications.SSTableListChangedNotification;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.Throwables;
+import org.apache.lucene.index.CorruptIndexException;
 
 /**
  * Orchestrates building of storage-attached indices, and manages lifecycle of resources shared between them.
@@ -387,6 +388,20 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
             }
         }
         return incomplete;
+    }
+
+    public void validateComponents(SSTableReader sstable, boolean validateChecksum) throws CorruptIndexException
+    {
+        IndexDescriptor indexDescriptor = descriptorFor(sstable);
+        if (!indexDescriptor.perSSTableComponents().isValid(validateChecksum))
+            throw new CorruptIndexException("Failed validation of per-SSTable components", sstable.getFilename());
+
+        for (StorageAttachedIndex index : indices)
+        {
+            IndexContext ctx = index.getIndexContext();
+            if (!indexDescriptor.perIndexComponents(ctx).isValid(validateChecksum))
+                throw new CorruptIndexException("Failed validation of per-column components for " + ctx, sstable.getFilename());
+        }
     }
 
     @Override
