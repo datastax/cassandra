@@ -28,6 +28,8 @@ import java.util.Optional;
 import java.util.zip.CRC32;
 import java.util.zip.CheckedInputStream;
 
+import javax.annotation.Nullable;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -63,7 +65,7 @@ public class CompressedSequentialWriter extends SequentialWriter
     // holds a number of already written chunks
     private int chunkCount = 0;
 
-    private final MetadataCollector sstableMetadataCollector;
+    private final @Nullable MetadataCollector sstableMetadataCollector;
 
     private final ByteBuffer crcCheckBuffer = ByteBuffer.allocate(4);
     private final Optional<File> digestFile;
@@ -91,7 +93,7 @@ public class CompressedSequentialWriter extends SequentialWriter
                                       File digestFile,
                                       SequentialWriterOption option,
                                       CompressionParams parameters,
-                                      MetadataCollector sstableMetadataCollector)
+                                      @Nullable MetadataCollector sstableMetadataCollector)
     {
         super(file, SequentialWriterOption.newBuilder()
                                           .bufferSize(option.bufferSize())
@@ -429,7 +431,8 @@ public class CompressedSequentialWriter extends SequentialWriter
             syncInternal();
             maybeWriteChecksum();
 
-            sstableMetadataCollector.addCompressionRatio(chunkOffset, lastFlushOffset);
+            if (sstableMetadataCollector != null)
+                sstableMetadataCollector.addCompressionRatio(chunkOffset, lastFlushOffset);
             metadataWriter.finalizeLength(current(), chunkCount).prepareToCommit();
         }
 

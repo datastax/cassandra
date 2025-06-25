@@ -26,24 +26,27 @@ import java.nio.channels.FileChannel;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.zip.CRC32;
 
+import javax.annotation.Nullable;
+
 import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
-import io.github.jbellis.jvector.disk.BufferedRandomAccessWriter;
 import net.nicoulaj.compilecommand.annotations.DontInline;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.index.sai.disk.io.IndexInputReader;
 import org.apache.cassandra.index.sai.disk.io.IndexOutputWriter;
 import org.apache.cassandra.io.compress.BufferType;
+import org.apache.cassandra.io.compress.CompressedSequentialWriter;
 import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.io.util.SequentialWriter;
 import org.apache.cassandra.io.util.SequentialWriterOption;
+import org.apache.cassandra.schema.CompressionParams;
 import org.apache.lucene.codecs.CodecUtil;
 
 public class IndexFileUtils
@@ -77,22 +80,41 @@ public class IndexFileUtils
         this.writerOption = writerOption;
     }
 
-    public IndexOutputWriter openOutput(File file, ByteOrder order, boolean append) throws IOException
+    public IndexOutputWriter openOutput(File file, ByteOrder order, boolean append, @Nullable File compressionMetaFile, @Nullable CompressionParams compression) throws IOException
     {
         assert writerOption.finishOnClose() : "IndexOutputWriter relies on close() to sync with disk.";
+        assert compression == null || !compression.isEnabled() || compressionMetaFile != null : "compressionMetaFile must be provided if compression is enabled";
+        return (compression != null && compression.isEnabled())
+            ? openCompressedOutput(file, order, compressionMetaFile, compression)
+            : openChecksummedOutput(file, order, append);
+    }
+
+    private IndexOutputWriter openChecksummedOutput(File file, ByteOrder order, boolean append) throws IOException
+    {
         var checksumWriter = new IncrementalChecksumSequentialWriter(file, writerOption, append);
         return new IndexOutputWriter(checksumWriter, order);
     }
 
-    public BufferedRandomAccessWriter openRandomAccessOutput(File file, boolean append) throws IOException
+    private IndexOutputWriter openCompressedOutput(File file, ByteOrder order, File compressionMetaFile, CompressionParams compression)
     {
-        assert writerOption.finishOnClose() : "IndexOutputWriter relies on close() to sync with disk.";
+        var options = SequentialWriterOption.newBuilder()
+                                            .bufferSize(compression.chunkLength())
+                                            .finishOnClose(true)
+                                            .build();
+        var writer = new CompressedSequentialWriter(file, compressionMetaFile, null, options, compression, null);
+        return new IndexOutputWriter(writer, order);
+    }
 
-        var out = new BufferedRandomAccessWriter(file.toPath());
-        if (append)
-            out.seek(file.length());
+    public static File addSuffix(File file, String suffix) {
+        if (file == null || suffix == null)
+            throw new IllegalArgumentException("File and suffix cannot be null.");
 
-        return out;
+        String fileName = file.name();
+        int lastDotIndex = fileName.lastIndexOf('.');
+        String baseName = (lastDotIndex == -1) ? fileName : fileName.substring(0, lastDotIndex);
+        String extension = (lastDotIndex == -1) ? "" : fileName.substring(lastDotIndex);
+        String newFileName = baseName + suffix + extension;
+        return new File(file.parent(), newFileName);
     }
 
     public IndexInputReader openInput(FileHandle handle)

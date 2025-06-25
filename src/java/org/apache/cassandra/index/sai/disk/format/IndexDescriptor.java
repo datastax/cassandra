@@ -46,6 +46,7 @@ import org.apache.cassandra.index.sai.disk.io.IndexInput;
 import org.apache.cassandra.index.sai.disk.io.IndexOutputWriter;
 import org.apache.cassandra.index.sai.disk.oldlucene.EndiannessReverserChecksumIndexInput;
 import org.apache.cassandra.index.sai.utils.IndexFileUtils;
+import org.apache.cassandra.io.compress.CompressionMetadata;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTable;
@@ -53,6 +54,7 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.lucene.store.BufferedChecksumIndexInput;
 import org.apache.lucene.store.ChecksumIndexInput;
@@ -413,6 +415,10 @@ public class IndexDescriptor
             boolean isValid = true;
             for (IndexComponentType expected : expectedComponentsForVersion())
             {
+                // Compression components may not exist when compression is not used
+                if (onDiskFormat().compressionInfoComponentTypes().contains(expected))
+                    continue;
+
                 var component = components.get(expected);
                 if (component == null || !component.file().exists())
                 {
@@ -498,7 +504,12 @@ public class IndexDescriptor
             Preconditions.checkArgument(!sealed, "Should not add components for SSTable %s at this point; the completion marker has already been written", descriptor);
             // When a sstable doesn't have any complete group, we use a marker empty one with a generation of -1:
             Preconditions.checkArgument(buildId != EMPTY_GROUP_MARKER, "Should not be adding component to empty components");
-            return components.computeIfAbsent(component, IndexComponentImpl::new);
+
+            var result =  components.computeIfAbsent(component, IndexComponentImpl::new);
+            if (result.isCompressed())
+                components.computeIfAbsent(component.compressionMetadata, IndexComponentImpl::new);
+
+            return result;
         }
 
         @Override
@@ -606,13 +617,57 @@ public class IndexDescriptor
                 return file;
             }
 
+            private CompressionMetadata compressionMetadata(boolean forIndexBuildTime)
+            {
+                var compressionMetaFile = forIndexBuildTime
+                        ? indexBuildTimeCompressionMetadataFile()
+                        : compressionMetadataFile();
+
+                return (compressionMetaFile != null && compressionMetaFile.exists())
+                       ? new CompressionMetadata(compressionMetaFile, file().length(), true)
+                       : null;
+            }
+
+            private File compressionMetadataFile()
+            {
+                var compressionComponent = compressionMetadataComponent();
+                return compressionComponent != null
+                       ? descriptor.fileFor(compressionComponent.asCustomComponent())
+                       : null;
+            }
+
+            private File indexBuildTimeCompressionMetadataFile()
+            {
+                if (!getCompressionParams().isEnabled())
+                    return null;
+
+                var compressionComponent = compressionMetadataComponent();
+                if (compressionComponent == null)
+                    return null;
+
+                // Compression metadata must exist here
+                try (FileHandle fh = compressionComponent.createIndexBuildTimeFileHandle())
+                {
+                    return new File(fh.path());
+                }
+            }
+
+            @Override
+            public IndexComponentImpl compressionMetadataComponent()
+            {
+                return component.compressionMetadata != null
+                       ? new IndexComponentImpl(component.compressionMetadata)
+                       : null;
+            }
+
             @Override
             public FileHandle createFileHandle()
             {
                 try (var builder = StorageProvider.instance.fileHandleBuilderFor(this))
                 {
-                    var b = builder.order(byteOrder());
-                    return b.complete();
+                    return builder.order(byteOrder())
+                                  .withCompressionMetadata(compressionMetadata(false))
+                                  .complete();
                 }
             }
 
@@ -621,7 +676,9 @@ public class IndexDescriptor
             {
                 try (final FileHandle.Builder builder = StorageProvider.instance.indexBuildTimeFileHandleBuilderFor(this))
                 {
-                    return builder.order(byteOrder()).complete();
+                    return builder.order(byteOrder())
+                                  .withCompressionMetadata(compressionMetadata(true))
+                                  .complete();
                 }
             }
 
@@ -659,6 +716,23 @@ public class IndexDescriptor
             @Override
             public IndexOutputWriter openOutput(boolean append) throws IOException
             {
+                CompressionParams compression = getCompressionParams();
+                return openOutput(append, compression);
+            }
+
+            private CompressionParams getCompressionParams()
+            {
+                CompressionParams compression = context() != null
+                                                ? context().getValueCompression()
+                                                : CompressionParams.noCompression();
+                if (!component.isCompressed())
+                    compression = CompressionParams.noCompression();
+                return compression;
+            }
+
+            @Override
+            public IndexOutputWriter openOutput(boolean append, CompressionParams compression) throws IOException
+            {
                 File file = file();
 
                 if (logger.isTraceEnabled())
@@ -666,7 +740,19 @@ public class IndexDescriptor
                                  component,
                                  file);
 
-                return IndexFileUtils.instance.openOutput(file, byteOrder(), append);
+                File compressionMetaFile = compressionMetadataFile();
+                return IndexFileUtils.instance.openOutput(file, byteOrder(), append, compressionMetaFile, compression);
+            }
+
+            public boolean isCompressed()
+            {
+                if (file().exists())
+                {
+                    var compressionMetadataFile = compressionMetadataFile();
+                    return compressionMetadataFile != null && compressionMetadataFile.exists();
+                }
+
+                return getCompressionParams().isEnabled();
             }
 
             @Override

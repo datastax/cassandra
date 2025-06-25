@@ -39,8 +39,10 @@ public enum IndexComponentType
      *
      * V1
      */
-    KD_TREE("KDTree"),
-    KD_TREE_POSTING_LISTS("KDTreePostingLists"),
+    KD_TREE_COMPRESSION_INFO("KDTreeCompressionInfo"),
+    KD_TREE("KDTree", KD_TREE_COMPRESSION_INFO),
+    KD_TREE_POSTING_LISTS_COMPRESSION_INFO("KDTreePostingListsCompressionInfo"),
+    KD_TREE_POSTING_LISTS("KDTreePostingLists", KD_TREE_POSTING_LISTS_COMPRESSION_INFO),
 
     /**
      * Vector index components
@@ -54,13 +56,16 @@ public enum IndexComponentType
      *
      * V1
      */
-    TERMS_DATA("TermsData"),
+    TERMS_DATA_COMPRESSION_INFO("TermsDataCompressionInfo"),
+    TERMS_DATA("TermsData", TERMS_DATA_COMPRESSION_INFO),
+
     /**
      * Stores postings written by {@code PostingsWriter}
      *
      * V1
      */
-    POSTING_LISTS("PostingLists"),
+    POSTING_LISTS_COMPRESSION_INFO("PostingListsCompressionInfo"),
+    POSTING_LISTS("PostingLists", POSTING_LISTS_COMPRESSION_INFO),
     /**
      * If present indicates that the column index build completed successfully
      *
@@ -87,13 +92,15 @@ public enum IndexComponentType
      *
      * V2
      */
-    PRIMARY_KEY_TRIE("PrimaryKeyTrie"),
+    PRIMARY_KEY_TRIE_COMPRESSION_INFO("PrimaryKeyTrieCompressionInfo"),
+    PRIMARY_KEY_TRIE("PrimaryKeyTrie", PRIMARY_KEY_TRIE_COMPRESSION_INFO),
     /**
      * Prefix-compressed blocks of primary keys used for rowId to partition key lookups
      *
      * V2
      */
-    PRIMARY_KEY_BLOCKS("PrimaryKeyBlocks"),
+    PRIMARY_KEY_BLOCKS_COMPRESSION_INFO("PrimaryKeyBlocksCompressionInfo"),
+    PRIMARY_KEY_BLOCKS("PrimaryKeyBlocks", PRIMARY_KEY_BLOCKS_COMPRESSION_INFO),
     /**
      * Encoded sequence of offsets to primary key blocks
      *
@@ -112,17 +119,24 @@ public enum IndexComponentType
      * V1 V2
      */
     GROUP_COMPLETION_MARKER("GroupComplete"),
-    
+
     /**
      * Stores document length information for BM25 scoring
      */
     DOC_LENGTHS("DocLengths");
 
     public final String representation;
+    public final IndexComponentType compressionMetadata;
 
     IndexComponentType(String representation)
     {
+        this(representation, null);
+    }
+
+    IndexComponentType(String representation, IndexComponentType compressionMetadata)
+    {
         this.representation = representation;
+        this.compressionMetadata = compressionMetadata;
     }
 
     static final Map<String, IndexComponentType> byRepresentation = new HashMap<>();
@@ -135,5 +149,10 @@ public enum IndexComponentType
     public static @Nullable IndexComponentType fromRepresentation(String representation)
     {
         return byRepresentation.get(representation);
+    }
+
+    public boolean isCompressed()
+    {
+        return compressionMetadata != null;
     }
 }
