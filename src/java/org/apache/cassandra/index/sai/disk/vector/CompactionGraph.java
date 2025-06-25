@@ -72,9 +72,9 @@ import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.v2.V2VectorPostingsWriter;
-import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.v5.V5OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter.Structure;
@@ -91,7 +91,6 @@ import org.apache.cassandra.service.StorageService;
 import static org.apache.cassandra.utils.Clock.Global.nanoTime;
 import static java.lang.Math.max;
 import static java.lang.Math.min;
-import static org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat.JVECTOR_VERSION;
 
 public class CompactionGraph implements Closeable, Accountable
 {
@@ -200,9 +199,10 @@ public class CompactionGraph implements Closeable, Accountable
         {
             throw new IllegalArgumentException("Unsupported compressor: " + compressor);
         }
-        if (indexConfig.isHierarchyEnabled() && V3OnDiskFormat.JVECTOR_VERSION < 4)
+        int jvectorVersion = Version.current().onDiskFormat().jvectorFileFormatVersion();
+        if (indexConfig.isHierarchyEnabled() && jvectorVersion < 4)
             logger.warn("Hierarchical graphs configured but node configured with V3OnDiskFormat.JVECTOR_VERSION {}. " +
-                        "Skipping setting for {}", V3OnDiskFormat.JVECTOR_VERSION, indexConfig.getIndexName());
+                        "Skipping setting for {}", jvectorVersion, indexConfig.getIndexName());
 
         builder = new GraphIndexBuilder(bsp,
                                         dimension,
@@ -210,7 +210,7 @@ public class CompactionGraph implements Closeable, Accountable
                                         indexConfig.getConstructionBeamWidth(),
                                         indexConfig.getNeighborhoodOverflow(1.2f),
                                         indexConfig.getAlpha(dimension > 3 ? 1.2f : 1.4f),
-                                        indexConfig.isHierarchyEnabled() && V3OnDiskFormat.JVECTOR_VERSION >= 4,
+                                        indexConfig.isHierarchyEnabled() && jvectorVersion >= 4,
                                         compactionSimdPool, compactionFjp);
 
         termsFile = perIndexComponents.addOrGet(IndexComponentType.TERMS_DATA).file();
@@ -227,7 +227,7 @@ public class CompactionGraph implements Closeable, Accountable
         return new OnDiskGraphIndexWriter.Builder(builder.getGraph(), termsFile.toPath())
                .withStartOffset(termsOffset)
                .with(new InlineVectors(dimension))
-               .withVersion(JVECTOR_VERSION);
+               .withVersion(Version.current().onDiskFormat().jvectorFileFormatVersion());
     }
 
     @Override
@@ -396,7 +396,7 @@ public class CompactionGraph implements Closeable, Accountable
             // write PQ (time to do this is negligible, don't bother doing it async)
             long pqOffset = pqOutput.getFilePointer();
             CassandraOnHeapGraph.writePqHeader(pqOutput.asSequentialWriter(), unitVectors, VectorCompression.CompressionType.PRODUCT_QUANTIZATION);
-            compressedVectors.write(pqOutput.asSequentialWriter(), JVECTOR_VERSION); // VSTODO old version until we add APQ
+            compressedVectors.write(pqOutput.asSequentialWriter(), Version.current().onDiskFormat().jvectorFileFormatVersion());
             long pqLength = pqOutput.getFilePointer() - pqOffset;
 
             // write postings asynchronously while we run cleanup()
