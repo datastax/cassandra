@@ -984,4 +984,35 @@ public class VectorUpdateDeleteTest extends VectorTester.VersionedWithChecksums
             assertRows(execute("SELECT ck FROM %s ORDER BY val ANN OF [1.0, 2.0, 3.0] LIMIT 2"), row(1));
         });
     }
+
+    @Test
+    public void testMemtableInsertSearchUpdateSearchHandling()
+    {
+        createTable("CREATE TABLE %s (id text PRIMARY KEY, embedding vector<float, 5>)");
+        createIndex("CREATE CUSTOM INDEX ON %s(embedding) USING 'StorageAttachedIndex' " +
+                    "WITH OPTIONS = {'similarity_function': 'dot_product', 'source_model': 'OTHER'}");
+
+        // Insert initial data
+        execute("INSERT INTO %s (id, embedding) VALUES ('row1', [0.1, 0.1, 0.1, 0.1, 0.1])");
+        execute("INSERT INTO %s (id, embedding) VALUES ('row2', [0.9, 0.9, 0.9, 0.9, 0.9])");
+
+        // Query 100 times to try to guarantee all graph searchers are initialized
+        for (int i = 0; i < 100; i++)
+        {
+            // Initial vector search
+            UntypedResultSet initialSearch = execute("SELECT * FROM %s ORDER BY embedding ANN OF [0.8, 0.8, 0.8, 0.8, 0.8] LIMIT 1");
+            assertThat(initialSearch).hasSize(1);
+        }
+
+        // Update one of the rows (this update wasn't observed due to state leaked between queries previously)
+        execute("UPDATE %s SET embedding = [0.7, 0.7, 0.7, 0.7, 0.7] WHERE id = 'row1'");
+
+        // Query 100 times to make sure it works as expected
+        for (int j = 0; j < 100; j++)
+        {
+            // Get all data to verify we have 2 rows
+            UntypedResultSet allData = execute("SELECT * FROM %s ORDER BY embedding ANN OF [0.8, 0.8, 0.8, 0.8, 0.8] LIMIT 1000");
+            assertThat(allData).hasSize(2);
+        }
+    }
 }
