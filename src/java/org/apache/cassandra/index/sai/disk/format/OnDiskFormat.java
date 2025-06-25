@@ -214,6 +214,9 @@ public interface OnDiskFormat
      */
     ByteBuffer decodeFromTrie(ByteComparable value, AbstractType<?> type);
 
-
+    /**
+     * @return the JVector file format version that this on-disk format uses.
+     */
+    int jvectorFileFormatVersion();
 
 }
