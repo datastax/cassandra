@@ -324,4 +324,10 @@ public class V1OnDiskFormat implements OnDiskFormat
                indexComponentType == IndexComponentType.TERMS_DATA ||
                indexComponentType == IndexComponentType.POSTING_LISTS;
     }
+
+    @Override
+    public int jvectorFileFormatVersion()
+    {
+        throw new UnsupportedOperationException("JVector is not supported in V2OnDiskFormat");
+    }
 }

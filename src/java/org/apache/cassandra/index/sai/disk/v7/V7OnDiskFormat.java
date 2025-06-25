@@ -23,8 +23,6 @@ import java.util.Set;
 
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
-import org.apache.cassandra.index.sai.disk.v1.V1OnDiskFormat;
-import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.v6.V6OnDiskFormat;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 
@@ -44,5 +42,14 @@ public class V7OnDiskFormat extends V6OnDiskFormat
         if (TypeUtil.isLiteral(validator))
             return LITERAL_COMPONENTS;
         return super.perIndexComponentTypes(validator);
+    }
+
+    @Override
+    public int jvectorFileFormatVersion()
+    {
+        // Before version EC, we write JVector format 2. Version EB introduced the ability for jvector to read format 4,
+        // so we can safely start writing it for versions EC (V7) and later while maintaining proper backward
+        // compatibility.
+        return 4;
     }
 }
