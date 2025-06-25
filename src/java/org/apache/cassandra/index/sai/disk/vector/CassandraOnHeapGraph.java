@@ -339,6 +339,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
         var graphAccessManager = searchers.get();
         var searcher = graphAccessManager.get();
         searcher.usePruning(usePruning);
+        searcher.setView(builder.getGraph().getView());
         try
         {
             var ssf = SearchScoreProvider.exact(queryVector, similarityFunction, vectorValues);
