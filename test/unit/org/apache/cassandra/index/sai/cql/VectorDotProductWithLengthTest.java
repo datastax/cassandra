@@ -19,23 +19,40 @@
 package org.apache.cassandra.index.sai.cql;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.stream.Collectors;
 
+import org.junit.Before;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
 
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import org.apache.cassandra.db.marshal.FloatType;
-import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
+import org.apache.cassandra.index.sai.SAIUtil;
+import org.apache.cassandra.index.sai.disk.format.Version;
 
+@RunWith(Parameterized.class)
 public class VectorDotProductWithLengthTest extends VectorTester
 {
-    @Override
-    public void setup() throws Throwable
+    @Parameterized.Parameter
+    public Version version;
+
+    @Parameterized.Parameters(name = "{0}")
+    public static Collection<Object[]> data()
     {
-        super.setup();
-        // we are testing unit vector detection which is part of the v3 changes, but continues in all subsequent versions
-        if (V3OnDiskFormat.JVECTOR_VERSION < 4)
-            V3OnDiskFormat.JVECTOR_VERSION = 4;
+        // we are testing unit vector detection which was introduced in jvector format 4
+        return Version.ALL.stream()
+                          .filter(v -> v.onOrAfter(Version.JVECTOR_EARLIEST))
+                          .filter(v -> v.onDiskFormat().jvectorFileFormatVersion() >= 4)
+                          .map(v -> new Object[]{ v})
+                          .collect(Collectors.toList());
+    }
+
+    @Before
+    public void setVersion()
+    {
+        SAIUtil.setCurrentVersion(version);
     }
 
     // This tests our detection of unit-length vectors used with dot product and PQ.
