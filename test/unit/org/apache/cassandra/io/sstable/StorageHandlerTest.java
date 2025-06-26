@@ -88,9 +88,10 @@ public class StorageHandlerTest
 
     @Test
     @BMRules(rules = {
-        @BMRule(name = "Fail reading partition index",
-                targetClass = "PartitionIndex",
-                targetMethod = "load",
+        @BMRule(name = "Fail opening reader",
+                isOverriding = true,
+                targetClass = "SortedTableWriter",
+                targetMethod = "openReader",
                 action = "throw new RuntimeException(\"Problem reading\")")
         }
     )
