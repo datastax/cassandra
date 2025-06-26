@@ -34,15 +34,28 @@ import org.junit.Test;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.io.sstable.format.bti.BtiFormat;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataOutputBuffer;
+import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.MessagingService;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 public class EndpointStateTest
 {
+
+    // the following are dse-6.x legacy applicationState ordinals
+    private static final ApplicationState DSE__STATUS = ApplicationState.values()[0];
+    private static final ApplicationState DSE__INTERNAL_IP = ApplicationState.values()[7];
+    private static final ApplicationState DSE__NATIVE_TRANSPORT_PORT = ApplicationState.values()[15];
+    private static final ApplicationState DSE__NATIVE_TRANSPORT_PORT_SSL = ApplicationState.values()[16];
+    private static final ApplicationState DSE__STORAGE_PORT = ApplicationState.values()[17];
+    private static final ApplicationState DSE__SCHEMA_COMPATIBILITY_VERSION = ApplicationState.values()[20];
+    private static final ApplicationState DSE__DISK_USAGE = ApplicationState.values()[21];
+
     public volatile VersionedValue.VersionedValueFactory valueFactory =
         new VersionedValue.VersionedValueFactory(DatabaseDescriptor.getPartitioner());
 
@@ -177,8 +190,13 @@ public class EndpointStateTest
         String c3safeVersionString = "4.0.11.0";
         VersionedValue releaseVersion = valueFactory.releaseVersion(versionString);
 
-        assertEquals(versionString, EndpointStateSerializer.filterValue(ApplicationState.RELEASE_VERSION, releaseVersion, MessagingService.VERSION_40).value);
-        assertEquals(c3safeVersionString, EndpointStateSerializer.filterValue(ApplicationState.RELEASE_VERSION, releaseVersion, MessagingService.VERSION_3014).value);
+        Map.Entry<ApplicationState, VersionedValue> entry = Map.entry(ApplicationState.RELEASE_VERSION, releaseVersion);
+        Set<Map.Entry<ApplicationState, VersionedValue>> filtered40 = EndpointStateSerializer.filterOutgoingStates(Set.of(entry), MessagingService.VERSION_40);
+        assertEquals(ApplicationState.RELEASE_VERSION, filtered40.stream().findFirst().get().getKey());
+        assertEquals(versionString, filtered40.stream().findFirst().get().getValue().value);
+        Set<Map.Entry<ApplicationState, VersionedValue>> filtered3014 = EndpointStateSerializer.filterOutgoingStates(Set.of(entry), MessagingService.VERSION_3014);
+        assertEquals(ApplicationState.RELEASE_VERSION, filtered3014.stream().findFirst().get().getKey());
+        assertEquals(c3safeVersionString, filtered3014.stream().findFirst().get().getValue().value);
 
         HeartBeatState hb = new HeartBeatState(0);
         EndpointState state = new EndpointState(hb);
@@ -198,5 +216,78 @@ public class EndpointStateTest
         input = new DataInputBuffer(buffer.buffer(), false);
         EndpointState deserializedOld = EndpointState.serializer.deserialize(input, MessagingService.VERSION_3014);
         assertEquals(c3safeVersionString, deserializedOld.getApplicationState(ApplicationState.RELEASE_VERSION).value);
+    }
+
+    @Test
+    public void testFilterOutgoingStates_30() throws UnknownHostException
+    {
+        Map<ApplicationState, VersionedValue> states = new EnumMap<>(ApplicationState.class);
+        states.put(ApplicationState.INTERNAL_ADDRESS_AND_PORT, valueFactory.internalAddressAndPort(InetAddressAndPort.getByName("10.0.0.1:7000")));
+        states.put(ApplicationState.NATIVE_ADDRESS_AND_PORT, valueFactory.nativeaddressAndPort(InetAddressAndPort.getByName("127.0.0.1:9042")));
+        Token token = DatabaseDescriptor.getPartitioner().getTokenFactory().fromString("1");
+        states.put(ApplicationState.STATUS_WITH_PORT, valueFactory.normal(Collections.singleton(token)));
+        states.put(ApplicationState.SSTABLE_VERSIONS, valueFactory.sstableVersions(Collections.singleton(BtiFormat.getInstance().getVersion("na"))));
+        states.put(ApplicationState.INDEX_STATUS, valueFactory.indexStatus("test_index_status"));
+        states.put(ApplicationState.DC, valueFactory.datacenter("datacenter1"));
+        states.put(ApplicationState.DISK_USAGE, valueFactory.diskUsage("u:0.5"));
+
+        Map<ApplicationState, VersionedValue> filtered = new EnumMap<>(ApplicationState.class);
+        for (Map.Entry<ApplicationState, VersionedValue> entry : EndpointStateSerializer.filterOutgoingStates(states.entrySet(), MessagingService.VERSION_30))
+            filtered.put(entry.getKey(), entry.getValue());
+
+        assertEquals("10.0.0.1", filtered.get(DSE__INTERNAL_IP).value);
+        assertEquals("7000", filtered.get(DSE__STORAGE_PORT).value);
+        assertEquals("9042", filtered.get(DSE__NATIVE_TRANSPORT_PORT).value);
+        assertEquals("NORMAL", filtered.get(DSE__STATUS).value);
+        assertFalse(filtered.containsKey(ApplicationState.SSTABLE_VERSIONS));
+        assertFalse(filtered.containsKey(ApplicationState.INDEX_STATUS));
+        assertEquals("datacenter1", filtered.get(ApplicationState.DC).value);
+        assertEquals("u:0.5", filtered.get(DSE__DISK_USAGE).value);
+        assertEquals(6, filtered.size());
+    }
+
+    @Test
+    public void testFilterOutgoingStates_40() throws UnknownHostException
+    {
+        Map<ApplicationState, VersionedValue> states = new EnumMap<>(ApplicationState.class);
+        states.put(ApplicationState.INTERNAL_ADDRESS_AND_PORT, valueFactory.internalAddressAndPort(InetAddressAndPort.getByName("10.0.0.1:7000")));
+
+        Map<ApplicationState, VersionedValue> filtered = new EnumMap<>(ApplicationState.class);
+        for (Map.Entry<ApplicationState, VersionedValue> entry : EndpointStateSerializer.filterOutgoingStates(states.entrySet(), MessagingService.VERSION_40))
+            filtered.put(entry.getKey(), entry.getValue());
+
+        assertEquals("10.0.0.1:7000", filtered.get(ApplicationState.INTERNAL_ADDRESS_AND_PORT).value);
+        assertEquals(1, filtered.size());
+    }
+
+    @Test
+    public void testFilterIncomingStates_30()
+    {
+        Map<ApplicationState, VersionedValue> states = new EnumMap<>(ApplicationState.class);
+        states.put(DSE__NATIVE_TRANSPORT_PORT, VersionedValue.unsafeMakeVersionedValue("9042", 1));
+        states.put(DSE__STORAGE_PORT, VersionedValue.unsafeMakeVersionedValue("7000", 1));
+        states.put(DSE__DISK_USAGE, VersionedValue.unsafeMakeVersionedValue("u:0.5", 1));
+        states.put(DSE__SCHEMA_COMPATIBILITY_VERSION, VersionedValue.unsafeMakeVersionedValue("SCHEMA_COMPATIBILITY_VERSION", 1));
+        states.put(DSE__NATIVE_TRANSPORT_PORT_SSL, VersionedValue.unsafeMakeVersionedValue("NATIVE_TRANSPORT_PORT_SSL", 1));
+
+        Map<ApplicationState, VersionedValue> filtered = EndpointStateSerializer.filterIncomingStates(states, MessagingService.VERSION_30);
+
+        assertEquals("9042", filtered.get(ApplicationState.NATIVE_ADDRESS_AND_PORT).value);
+        assertEquals("7000", filtered.get(ApplicationState.INTERNAL_ADDRESS_AND_PORT).value);
+        assertEquals("u:0.5", filtered.get(ApplicationState.DISK_USAGE).value);
+        assertEquals(3, filtered.size());
+    }
+
+    @Test
+    public void testFilterIncomingStates_40()
+    {
+        Map<ApplicationState, VersionedValue> states = new EnumMap<>(ApplicationState.class);
+        states.put(ApplicationState.RACK, valueFactory.rack("rack1"));
+
+        Map<ApplicationState, VersionedValue> filtered = new EnumMap<>(ApplicationState.class);
+        for (Map.Entry<ApplicationState, VersionedValue> entry : EndpointStateSerializer.filterOutgoingStates(states.entrySet(), MessagingService.VERSION_40))
+            filtered.put(entry.getKey(), entry.getValue());
+
+        assertEquals("rack1", filtered.get(ApplicationState.RACK).value);
     }
 }
