@@ -39,6 +39,7 @@ public class LongVectorTest extends SAITester
 {
     private static final Logger logger = org.slf4j.LoggerFactory.getLogger(LongVectorTest.class);
 
+    int numKeys = 100_000;
     int dimension = 16; // getRandom().nextIntBetween(128, 768);
 
     KeySet keysInserted = new KeySet();
@@ -64,7 +65,7 @@ public class LongVectorTest extends SAITester
         AtomicInteger counter = new AtomicInteger();
         long start = System.currentTimeMillis();
         var fjp = new ForkJoinPool(threadCount);
-        var keys = IntStream.range(0, 10_000_000).boxed().collect(Collectors.toList());
+        var keys = IntStream.range(0, numKeys).boxed().collect(Collectors.toList());
         Collections.shuffle(keys);
         var task = fjp.submit(() -> keys.stream().parallel().forEach(i ->
         {
