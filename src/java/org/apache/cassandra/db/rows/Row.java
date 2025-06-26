@@ -315,7 +315,7 @@ public interface Row extends Unfiltered, Iterable<ColumnData>
      *
      * @return the original data size of this row in bytes before purging
      */
-    int originalDataSize();
+    int dataSizeBeforePurge();
 
     public long unsharedHeapSizeExcludingData();
 
