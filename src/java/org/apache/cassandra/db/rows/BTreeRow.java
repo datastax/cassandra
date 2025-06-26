@@ -91,14 +91,14 @@ public class BTreeRow extends AbstractRow
     /**
      * The original data size of this row before purging it, or -1 if it hasn't been purged.
      */
-    private final int originalDataSize;
+    private final int dataSizeBeforePurge;
 
     private BTreeRow(Clustering<?> clustering,
                      LivenessInfo primaryKeyLivenessInfo,
                      Deletion deletion,
                      Object[] btree,
                      int minLocalDeletionTime,
-                     int originalDataSize)
+                     int dataSizeBeforePurge)
     {
         assert !deletion.isShadowedBy(primaryKeyLivenessInfo);
         this.clustering = clustering;
@@ -106,7 +106,7 @@ public class BTreeRow extends AbstractRow
         this.deletion = deletion;
         this.btree = btree;
         this.minLocalDeletionTime = minLocalDeletionTime;
-        this.originalDataSize = originalDataSize;
+        this.dataSizeBeforePurge = dataSizeBeforePurge;
     }
 
     private BTreeRow(Clustering<?> clustering,
@@ -144,9 +144,9 @@ public class BTreeRow extends AbstractRow
                                   Deletion deletion,
                                   Object[] btree,
                                   int minDeletionTime,
-                                  int originalDataSize)
+                                  int dataSizeBeforePurge)
     {
-        return new BTreeRow(clustering, primaryKeyLivenessInfo, deletion, btree, minDeletionTime, originalDataSize);
+        return new BTreeRow(clustering, primaryKeyLivenessInfo, deletion, btree, minDeletionTime, dataSizeBeforePurge);
     }
 
     public static BTreeRow create(Clustering<?> clustering,
@@ -508,6 +508,7 @@ public class BTreeRow extends AbstractRow
              : new BTreeRow(clustering, primaryKeyLivenessInfo, Deletion.regular(newDeletion), btree, Integer.MIN_VALUE);
     }
 
+    @Override
     public Row purge(DeletionPurger purger, int nowInSec, boolean enforceStrictLiveness)
     {
         if (!hasDeletion(nowInSec))
@@ -520,16 +521,17 @@ public class BTreeRow extends AbstractRow
         if (enforceStrictLiveness && newDeletion.isLive() && newInfo.isEmpty())
             return null;
 
-        return transformAndFilter(newInfo, newDeletion, (cd) -> cd.purge(purger, nowInSec));
+        Function<ColumnData, ColumnData> columnDataPurger = (cd) -> cd.purge(purger, nowInSec);
+        return update(newInfo, newDeletion, BTree.transformAndFilter(btree, columnDataPurger), true);
     }
 
     @Override
     public Row transformAndFilter(LivenessInfo info, Deletion deletion, Function<ColumnData, ColumnData> function)
     {
-        return update(info, deletion, BTree.transformAndFilter(btree, function));
+        return update(info, deletion, BTree.transformAndFilter(btree, function), false);
     }
 
-    private Row update(LivenessInfo info, Deletion deletion, Object[] newTree)
+    private Row update(LivenessInfo info, Deletion deletion, Object[] newTree, boolean preserveOriginalDataSize)
     {
         if (btree == newTree && info == this.primaryKeyLivenessInfo && deletion == this.deletion)
             return this;
@@ -538,7 +540,9 @@ public class BTreeRow extends AbstractRow
             return null;
 
         int minDeletionTime = minDeletionTime(newTree, info, deletion.time());
-        return BTreeRow.create(clustering, info, deletion, newTree, minDeletionTime, originalDataSize());
+
+        int dataSizeBeforePurge = preserveOriginalDataSize ? dataSizeBeforePurge() : -1;
+        return BTreeRow.create(clustering, info, deletion, newTree, minDeletionTime, dataSizeBeforePurge);
     }
 
     @Override
@@ -549,7 +553,7 @@ public class BTreeRow extends AbstractRow
 
     public Row transform(Function<ColumnData, ColumnData> function)
     {
-        return update(primaryKeyLivenessInfo, deletion, BTree.transform(btree, function));
+        return update(primaryKeyLivenessInfo, deletion, BTree.transform(btree, function), false);
     }
 
     @Override
@@ -569,9 +573,9 @@ public class BTreeRow extends AbstractRow
     }
 
     @Override
-    public int originalDataSize()
+    public int dataSizeBeforePurge()
     {
-        return originalDataSize >= 0 ? originalDataSize : dataSize();
+        return dataSizeBeforePurge >= 0 ? dataSizeBeforePurge : dataSize();
     }
 
     public long unsharedHeapSizeExcludingData()
