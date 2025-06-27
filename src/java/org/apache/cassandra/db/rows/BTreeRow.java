@@ -531,7 +531,7 @@ public class BTreeRow extends AbstractRow
         return update(info, deletion, BTree.transformAndFilter(btree, function), false);
     }
 
-    private Row update(LivenessInfo info, Deletion deletion, Object[] newTree, boolean preserveOriginalDataSize)
+    private Row update(LivenessInfo info, Deletion deletion, Object[] newTree, boolean preserveDataSizeBeforePurge)
     {
         if (btree == newTree && info == this.primaryKeyLivenessInfo && deletion == this.deletion)
             return this;
@@ -541,7 +541,7 @@ public class BTreeRow extends AbstractRow
 
         int minDeletionTime = minDeletionTime(newTree, info, deletion.time());
 
-        int dataSizeBeforePurge = preserveOriginalDataSize ? dataSizeBeforePurge() : -1;
+        int dataSizeBeforePurge = preserveDataSizeBeforePurge ? dataSizeBeforePurge() : -1;
         return BTreeRow.create(clustering, info, deletion, newTree, minDeletionTime, dataSizeBeforePurge);
     }
 
