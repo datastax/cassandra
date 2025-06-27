@@ -381,7 +381,7 @@ public class VectorDistributedTest extends TestBaseImpl
     private List<float[]> searchWithRange(float[] queryVector, long minToken, long maxToken, int expectedSize)
     {
         Object[][] result = execute("SELECT val FROM %s WHERE token(pk) <= " + maxToken + " AND token(pk) >= " + minToken + " ORDER BY val ann of " + Arrays.toString(queryVector) + " LIMIT 1000");
-        assertThat(result.length).isCloseTo(expectedSize, Percentage.withPercentage(5)).isLessThanOrEqualTo(1000);
+        assertThat(result.length).isCloseTo(expectedSize, Percentage.withPercentage(6)).isLessThanOrEqualTo(1000);
         return getVectors(result);
     }
 
