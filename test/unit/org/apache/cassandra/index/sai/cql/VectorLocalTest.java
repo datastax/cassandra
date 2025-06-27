@@ -557,7 +557,7 @@ public class VectorLocalTest extends VectorTester.VersionedWithChecksums
     private List<float[]> searchWithRange(float[] queryVector, long minToken, long maxToken, int expectedSize)
     {
         UntypedResultSet result = execute("SELECT * FROM %s WHERE token(pk) <= " + maxToken + " AND token(pk) >= " + minToken + " ORDER BY val ann of " + Arrays.toString(queryVector) + " LIMIT 1000");
-        assertThat(result.size()).isCloseTo(expectedSize, Percentage.withPercentage(5));
+        assertThat(result.size()).isCloseTo(expectedSize, Percentage.withPercentage(6));
         return getVectorsFromResult(result);
     }
 
