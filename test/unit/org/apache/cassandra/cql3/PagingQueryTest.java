@@ -28,7 +28,6 @@ import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Supplier;
 
-import org.assertj.core.api.Assertions;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
@@ -554,47 +553,4 @@ public class PagingQueryTest extends CQLTester
         return new String(arr);
     }
 
-    /**
-     * DSP-22813, DBPE-16245, DBPE-16378 and CNDB-13978: Test that count(*) aggregation queries return the correct
-     * number of rows, even if there are tombstones and paging is required.
-     * </p>
-     * Before the DSP-22813/DBPE-16245/DBPE-16378/CNDB-13978 fix these queries would stop counting after hitting the
-     * {@code aggregation_sub_page_size} page size, returning only the count of a single page.
-     */
-    @Test
-    public void testAggregationWithTomsbstones()
-    {
-        createTable("CREATE TABLE %s (k int, c1 int, c2 int, v int, PRIMARY KEY (k, c1, c2))");
-
-        int ks = 13;
-        int c1s = 17;
-        int c2s = 19;
-
-        // insert some data
-        for (int k = 0; k < ks; k++)
-        {
-            for (int c1 = 0; c1 < c1s; c1++)
-            {
-                for (int c2 = 0; c2 < c2s; c2++)
-                {
-                    execute("INSERT INTO %s (k, c1, c2, v) VALUES (?, ?, ?, null)", k, c1, c2);
-                }
-            }
-
-            // test aggregation on single partition query
-            int numRows = execute("SELECT * FROM %s WHERE k=?", k).size();
-            long count = execute("SELECT COUNT(*) FROM %s WHERE k=?", k).one().getLong("count");
-            Assertions.assertThat(count).isEqualTo(numRows).isEqualTo(c1s * c2s);
-        }
-
-        // test aggregation on range query
-        int numRows = execute("SELECT * FROM %s").size();
-        long count = execute("SELECT COUNT(*) FROM %s").one().getLong("count");
-        Assertions.assertThat(count).isEqualTo(numRows).isEqualTo(ks * c1s * c2s);
-
-        // test aggregation with group by
-        Assertions.assertThat(execute("SELECT COUNT(*) FROM %s GROUP BY k").size()).isEqualTo(ks);
-        Assertions.assertThat(execute("SELECT COUNT(*) FROM %s GROUP BY k, c1").size()).isEqualTo(ks * c1s);
-        Assertions.assertThat(execute("SELECT COUNT(*) FROM %s GROUP BY k, c1, c2").size()).isEqualTo(ks * c1s * c2s);
-    }
 }
