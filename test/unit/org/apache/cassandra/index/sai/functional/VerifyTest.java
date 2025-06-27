@@ -353,8 +353,7 @@ public class VerifyTest extends SAITester
         }
     }
 
-    // TODO make test work by fixing https://github.com/riptano/cndb/issues/14501
-    @Ignore
+    @Test
     public void testVerifyCorruptVectorIndex() throws IOException
     {
         // Skip test if version doesn't support vector indexes
