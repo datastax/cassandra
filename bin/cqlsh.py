@@ -1849,9 +1849,9 @@ class Shell(cmd.Cmd):
         switch = switch.upper()
         if switch in ['ON', 'OFF', 'FULL', 'COMPACT']:
             self.tracing_style = {'ON': 'full',
-                                    'FULL': 'full',
-                                    'OFF': 'off',
-                                    'COMPACT': 'compact'}[switch]
+                                  'FULL': 'full',
+                                  'OFF': 'off',
+                                  'COMPACT': 'compact'}[switch]
             print(f"Tracing set to {self.tracing_style.upper()}.")
         else:
             self.printerr(f"Invalid tracing option: {switch}. Use TRACING [OFF|FULL|COMPACT].")
