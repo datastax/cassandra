@@ -34,15 +34,17 @@ import org.apache.cassandra.io.util.DataOutputPlus;
 public interface IMetadataSerializer
 {
     /**
-     * Serialize given metadata components
+     * Serialize given metadata components. This should be called after all other components have been written.
+     * In particular, the method uses the COMPRESSION_INFO component to retrieve the encryptor that must be used for
+     * the metadata to avoid leaking sensitive data in e.g. min/max clusterings.
      *
      *
      * @param components Metadata components to serialize
      * @param out
-     * @param version
+     * @param descriptor
      * @throws IOException
      */
-    void serialize(Map<MetadataType, MetadataComponent> components, DataOutputPlus out, Version version) throws IOException;
+    void serialize(Map<MetadataType, MetadataComponent> components, DataOutputPlus out, Descriptor descriptor) throws IOException;
 
     /**
      * Deserialize specified metadata components from given descriptor.

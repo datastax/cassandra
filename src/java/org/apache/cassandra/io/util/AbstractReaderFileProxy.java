@@ -42,6 +42,12 @@ public abstract class AbstractReaderFileProxy implements ReaderFileProxy
     }
 
     @Override
+    public long adjustPosition(long position)
+    {
+        return position;
+    }
+
+    @Override
     public String toString()
     {
         return getClass().getSimpleName() + "(filePath='" + channel + "')";
