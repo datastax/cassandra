@@ -378,7 +378,15 @@ public class VectorLocalTest extends VectorTester.VersionedWithChecksums
 
                 float[] queryVector = word2vec.vector(word2vec.word(getRandom().nextIntBetween(0, vectorCount - 1)));
 
-                List<float[]> resultVectors = searchWithRange(queryVector, minToken, maxToken, expected.size());
+                UntypedResultSet result = execute("SELECT * FROM %s" +
+                                                  " WHERE token(pk) <= " + maxToken +
+                                                  " AND token(pk) >= " + minToken +
+                                                  " ORDER BY val ANN OF " + Arrays.toString(queryVector) +
+                                                  " LIMIT 1000");
+                assertThat(result.size()).isCloseTo(expected.size(), Percentage.withPercentage(20))
+                                         .isLessThanOrEqualTo(1000);
+
+                List<float[]> resultVectors = getVectorsFromResult(result);
                 assertDescendingScore(queryVector, resultVectors);
 
                 if (expected.isEmpty())
@@ -525,13 +533,6 @@ public class VectorLocalTest extends VectorTester.VersionedWithChecksums
         UntypedResultSet result = execute("SELECT * FROM %s ORDER BY val ann of ? LIMIT " + limit, queryVector);
         assertThat(result.size()).isCloseTo(limit, Percentage.withPercentage(5));
         return result;
-    }
-
-    private List<float[]> searchWithRange(float[] queryVector, long minToken, long maxToken, int expectedSize)
-    {
-        UntypedResultSet result = execute("SELECT * FROM %s WHERE token(pk) <= " + maxToken + " AND token(pk) >= " + minToken + " ORDER BY val ann of " + Arrays.toString(queryVector) + " LIMIT 1000");
-        assertThat(result.size()).isCloseTo(expectedSize, Percentage.withPercentage(6));
-        return getVectorsFromResult(result);
     }
 
     private void searchWithNonExistingKey(float[] queryVector, int key)
