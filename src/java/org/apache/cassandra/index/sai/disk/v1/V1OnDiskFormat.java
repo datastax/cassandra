@@ -228,15 +228,15 @@ public class V1OnDiskFormat implements OnDiskFormat
         if (component.isCompletionMarker())
             return true;
 
-        // starting with v3, vector components include proper headers and checksum; skip for earlier versions
+        // We do not validate vector components until V7, so we skip for earlier versions
         IndexContext context = component.parent().context();
+        if (isVectorDataComponent(context, component.componentType()))
+            return true;
+
         Version earliest = getExpectedEarliestVersion(context, component.componentType());
         try (IndexInput input = component.openInput())
         {
-            if (isVectorDataComponent(context, component.componentType())
-                && component.componentType() == IndexComponentType.TERMS_DATA)
-                SAICodecUtils.validateChecksumSkippingHeaderAndFooter(input);
-            else if (checksum)
+            if (checksum)
                 SAICodecUtils.validateChecksum(input);
             else
                 SAICodecUtils.validate(input, earliest);
