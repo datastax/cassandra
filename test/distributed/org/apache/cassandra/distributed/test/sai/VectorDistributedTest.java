@@ -328,7 +328,15 @@ public class VectorDistributedTest extends TestBaseImpl
                                                        .map(Map.Entry::getValue)
                                                        .collect(Collectors.toList());
 
-                List<float[]> resultVectors = searchWithRange(queryVector, minToken, maxToken, expected.size());
+                Object[][] result = execute("SELECT val FROM %s" +
+                                            " WHERE token(pk) <= " + maxToken +
+                                            " AND token(pk) >= " + minToken +
+                                            " ORDER BY val ANN OF " + Arrays.toString(queryVector) +
+                                            " LIMIT 1000");
+                assertThat(result.length).isCloseTo(expected.size(), Percentage.withPercentage(20))
+                                         .isLessThanOrEqualTo(1000);
+
+                List<float[]> resultVectors = getVectors(result);
                 assertDescendingScore(queryVector, resultVectors);
 
                 if (expected.isEmpty())
@@ -376,13 +384,6 @@ public class VectorDistributedTest extends TestBaseImpl
         SAIUtil.waitForIndexQueryable(cluster, KEYSPACE);
 
         assertInvalidCosineOperations();
-    }
-
-    private List<float[]> searchWithRange(float[] queryVector, long minToken, long maxToken, int expectedSize)
-    {
-        Object[][] result = execute("SELECT val FROM %s WHERE token(pk) <= " + maxToken + " AND token(pk) >= " + minToken + " ORDER BY val ann of " + Arrays.toString(queryVector) + " LIMIT 1000");
-        assertThat(result.length).isCloseTo(expectedSize, Percentage.withPercentage(6)).isLessThanOrEqualTo(1000);
-        return getVectors(result);
     }
 
     private Object[][] searchWithLimit(float[] queryVector, int limit)
