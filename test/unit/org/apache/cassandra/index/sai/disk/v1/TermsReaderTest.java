@@ -25,6 +25,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import org.junit.Before;
 import org.junit.Test;
 
 import com.carrotsearch.randomizedtesting.annotations.ParametersFactory;
@@ -63,6 +64,8 @@ public class TermsReaderTest extends SaiRandomizedTest
 {
     public static final ByteComparable.Version VERSION = TypeUtil.BYTE_COMPARABLE_VERSION;
 
+    private final Version version;
+
     @ParametersFactory()
     public static Collection<Object[]> data()
     {
@@ -72,7 +75,11 @@ public class TermsReaderTest extends SaiRandomizedTest
         return Version.ALL.stream().map(v -> new Object[]{v}).collect(Collectors.toList());
     }
 
-    private final Version version;
+    @Before
+    public void setCurrentSAIVersion()
+    {
+        SAIUtil.setCurrentVersion(version);
+    }
 
     public TermsReaderTest(Version version)
     {
