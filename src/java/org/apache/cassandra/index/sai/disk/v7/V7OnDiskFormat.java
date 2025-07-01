@@ -66,6 +66,9 @@ public class V7OnDiskFormat extends V6OnDiskFormat
     @Override
     public boolean validateIndexComponent(IndexComponent.ForRead component, boolean checksum)
     {
+        if (component.isCompletionMarker())
+            return true;
+
         IndexContext context = component.parent().context();
         if (context != null && context.isVector())
         {
