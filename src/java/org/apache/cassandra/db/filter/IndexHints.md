@@ -21,9 +21,10 @@ They consist of a set of indexes that should be used (included) and a set of ind
 The CQL syntax is:
 ```
 SELECT ... FROM ... WHERE ...
-  WITH included_indexes = { ... } AND excluded_indexes = { ... };
+  WITH included_indexes = { ... } 
+  AND excluded_indexes = { ... };
 ```
-So, for example:
+So, for example, given the following schema:
 ```
 CREATE TABLE users (
   username text PRIMARY KEY,
@@ -44,48 +45,48 @@ SELECT * FROM users
   WITH included_indexes = {birth_year_idx}
   AND excluded_indexes = {country_idx, phone_idx};
 ```
-Please note that the query requires ALLOW FILTERING because there is a restriction on the country column, 
-but we are explicitly excluding that index. 
-Note also that excluding the index on phone is a no-op because there isn’t any restriction on it.
+Please note that the query requires `ALLOW FILTERING` because there is a restriction on the `country` column, 
+and we are explicitly excluding the index on that column.
+Note also that excluding the index on `phone` is a no-op because there isn’t any restriction on it.
 
-It’s guaranteed that the queries will utilize all the included indexes or fail if it’s not possible to do so. 
-It will never happen that the query succeeds without using the included indexes. 
+It’s guaranteed that the queries will utilize all the included indexes, or fail if it’s not possible to do so. 
+It will never happen that a query succeeds without using all the included indexes. 
 Queries might fail because the query doesn't have a restriction for those indexes, 
 because there is a restriction that could use the index but is not compatible with other restrictions, 
 or because the underlying index implementation isn't able to use the index for some reason.
 
-Excluded indexes will never cause the query to fail unless they reference a non-existent index, 
-since it’s always possible to exclude an index regardless of the query expressions and index implementation capabilities. 
-However, excluding indexes might make it necessary to add ALLOW FILTERING to the query.
+Excluded indexes will never make the query fail, unless they reference a non-existent index. 
+That's because it’s always possible to exclude an index regardless of the query expressions 
+and index implementation capabilities. 
+However, excluding indexes might make it necessary to add `ALLOW FILTERING` to the query.
 
-Other than these two sets of included and excluded indexes, 
-indexes that are applicable to the query and that are not mentioned in these two sets might or might not be used, 
-depending on the index query planner.
+Indexes that are applicable to the query and that are not mentioned in these two sets of included and excluded indexes
+might or might not be used, depending on the index query planner.
 
 ## Disambiguating queries
 
 Index hints can also be used to disambiguate queries where a restricted column has multiple indexes that return 
 different results. For example, we can have analyzed and not-analyzed indexes in the same column. An equality query on
-that columns would throw an exception due to the ambiguity:
+that column would throw an exception due to the ambiguity:
 ```
 CREATE TABLE t(k int PRIMARY KEY, v text);
 CREATE CUSTOM INDEX not_analyzed_idx ON t(v) USING 'StorageAttachedIndex';
 CREATE CUSTOM INDEX analyzed_idx ON t(v) USING 'StorageAttachedIndex' WITH OPTIONS = { 'index_analyzer': 'standard' };
 SELECT * FROM t WHERE v = '...'; # rejected query due to ambiguity
 ```
-But if we add hints to prefer or exclude one of the indexes the query will work:
+But the query will work if we add hints to include or exclude one of the indexes:
 ```
 SELECT * FROM t WHERE v = '...' WITH included_indexes = {not_analyzed_idx};
 SELECT * FROM t WHERE v = '...' WITH included_indexes = {analyzed_idx};
 ```
+
 ## Unshading queries
 
-The presence of indexes can shade queries that used to have a different behaviour without indexes. 
-The hints can be used to access the previous behaviour. 
+The presence of indexes can shade queries that used to have a different behaviour without indexes.
 For example, an analyzed index will shade `ALLOW FILTERING`'s full-value equality:
 ```
 CREATE TABLE t(k int PRIMARY KEY, v text);
-SELECT * FROM t WHERE v = '...' ALLOW FILTERING; # exact equality mathc
+SELECT * FROM t WHERE v = '...' ALLOW FILTERING; # exact equality match
 CREATE CUSTOM INDEX idx ON t(v) USING 'StorageAttachedIndex' WITH OPTIONS = { 'index_analyzer': 'standard' };
 SELECT * FROM t WHERE v = '...' ALLOW FILTERING; # uses the analyzed index, shading the previous query
 ```
@@ -98,7 +99,6 @@ The same type of shading happens with `[NOT] CONTAINS [KEY]`.
 ## Choosing between index implementations
 
 Columns can have multiple indexes with different implementations.
-The hints can be used to prefer or exclude specific implementations. 
 For example, we can have a legacy index and a SAI index on the same column:
 ```
 CREATE TABLE t(k int PRIMARY KEY, v text);
