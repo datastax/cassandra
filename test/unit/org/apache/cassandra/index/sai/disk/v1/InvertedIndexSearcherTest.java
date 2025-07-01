@@ -218,7 +218,7 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
 
     private List<InvertedIndexBuilder.TermsEnum> buildTermsEnum(Version version, int terms, int postings)
     {
-        return InvertedIndexBuilder.buildStringTermsEnum(version, terms, postings, () -> randomSimpleString(3, 5), () -> nextInt(0, Integer.MAX_VALUE));
+        return InvertedIndexBuilder.buildStringTermsEnum(version, terms, postings, () -> randomSimpleString(3, 5), () -> nextInt(0, terms * postings * 2));
     }
 
     private Int2IntHashMap createMockDocLengths(List<InvertedIndexBuilder.TermsEnum> termsEnum)

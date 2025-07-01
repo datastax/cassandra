@@ -18,11 +18,8 @@
 package org.apache.cassandra.index.sai.disk.v1;
 
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.Collection;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.stream.Collectors;
 
 import org.junit.Before;
@@ -38,7 +35,6 @@ import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.SAIUtil;
 import org.apache.cassandra.index.sai.disk.MemtableTermsIterator;
 import org.apache.cassandra.index.sai.disk.PostingList;
-import org.apache.cassandra.index.sai.disk.RAMStringIndexer;
 import org.apache.cassandra.index.sai.disk.TermsIterator;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
@@ -51,11 +47,9 @@ import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.index.sai.utils.SaiRandomizedTest;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.util.FileHandle;
-import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
-import org.apache.lucene.util.BytesRef;
 
 import static org.apache.cassandra.index.sai.disk.v1.InvertedIndexBuilder.buildStringTermsEnum;
 import static org.apache.cassandra.index.sai.metrics.QueryEventListeners.NO_OP_TRIE_LISTENER;
@@ -246,6 +240,8 @@ public class TermsReaderTest extends SaiRandomizedTest
 
     private List<InvertedIndexBuilder.TermsEnum> buildTermsEnum(Version version, int terms, int postings)
     {
-        return buildStringTermsEnum(version, terms, postings, () -> randomSimpleString(4, 10), () -> nextInt(0, Integer.MAX_VALUE));
+        // We use terms * postings * 2 as the upper bound on row ids used in the postings list to allow for a somewhat
+        // sparse mapping but not one that is too sparse.
+        return buildStringTermsEnum(version, terms, postings, () -> randomSimpleString(4, 10), () -> nextInt(0, terms * postings * 2));
     }
 }
