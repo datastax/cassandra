@@ -691,7 +691,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
                     orderer.bm25stats.add(index.getRowCount(),
                                           index.getApproximateTermCount(),
                                           termAndExpressions,
-                                          termExpression -> index.estimateMatchingRowsCount(termExpression, mergeRange));
+                                          termExpression -> index.estimateMatchingRowsCountUsingAllShards(termExpression, mergeRange));
                 for (SSTableIndex index : view.sstableIndexes)
                     orderer.bm25stats.add(index.getRowCount(),
                                           index.getApproximateTermCount(),
@@ -927,10 +927,10 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
 
         long rowCount = 0;
         for (MemtableIndex index : queryView.memtableIndexes)
-            rowCount += index.approximateMatchingRowsCount(predicate, mergeRange);
+            rowCount += index.estimateMatchingRowsCountUsingFirstShard(predicate, mergeRange);
 
         for (SSTableIndex index : queryView.sstableIndexes)
-            rowCount += index.approximateMatchingRowsCount(predicate, mergeRange);
+            rowCount += index.estimateMatchingRowsCount(predicate, mergeRange);
 
         return rowCount;
     }
