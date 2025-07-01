@@ -27,6 +27,7 @@ import java.util.List;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.PartitionPosition;
+import org.apache.cassandra.db.compaction.CompactionSSTable;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.utils.Interval;
 import org.apache.cassandra.utils.IntervalTree;
@@ -65,23 +66,23 @@ public class SSTableIntervalTree extends IntervalTree<PartitionPosition, SSTable
         return new SSTableIntervalTree(buildIntervals(sstables));
     }
 
-    public static List<Interval<PartitionPosition, SSTableReader>> buildIntervals(Collection<SSTableReader> sstables)
+    public static <S extends CompactionSSTable> List<Interval<PartitionPosition, S>> buildIntervals(Collection<S> sstables)
     {
         if (sstables == null || sstables.isEmpty())
             return Collections.emptyList();
         return Arrays.asList(buildIntervalsArray(sstables));
     }
 
-    public static Interval<PartitionPosition, SSTableReader>[] buildIntervalsArray(Collection<SSTableReader> sstables)
+    public static <S extends CompactionSSTable> Interval<PartitionPosition, S>[] buildIntervalsArray(Collection<S> sstables)
     {
         if (sstables == null || sstables.isEmpty())
             return IntervalTree.EMPTY_ARRAY;
-        Interval<PartitionPosition, SSTableReader>[] intervals = new Interval[sstables.size()];
+        Interval<PartitionPosition, S>[] intervals = new Interval[sstables.size()];
         int i = 0;
         int missingIntervals = 0;
-        for (SSTableReader sstable : sstables)
+        for (S sstable : sstables)
         {
-            Interval<PartitionPosition, SSTableReader> interval = sstable.getInterval();
+            Interval<PartitionPosition, S> interval = sstable.getInterval();
             if (interval == null)
             {
                 missingIntervals++;
@@ -95,7 +96,7 @@ public class SSTableIntervalTree extends IntervalTree<PartitionPosition, SSTable
         if (missingIntervals > 0)
         {
             checkState(DatabaseDescriptor.isToolInitialized(), "Can only safely build an interval tree on sstables with missing first and last for offline tools");
-            Interval<PartitionPosition, SSTableReader>[] replacementIntervals = new Interval[intervals.length - missingIntervals];
+            Interval<PartitionPosition, S>[] replacementIntervals = new Interval[intervals.length - missingIntervals];
             System.arraycopy(intervals, 0, replacementIntervals, 0, replacementIntervals.length);
             return replacementIntervals;
         }
