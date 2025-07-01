@@ -46,19 +46,45 @@ import static java.lang.String.format;
 
 /**
  * User-provided directives about what indexes should be used by a {@code SELECT} query. It consists of a set of indexes
- * that should be used (included) and a set of indexes that should not be used (excluded).
- * </p>
+ * that should be used (included) and a set of indexes that should not be used (excluded). The CQL syntax is:
+ * <pre>
+ * {@code
+ * SELECT ... FROM ... WHERE ... WITH included_indexes = { ... } AND excluded_indexes = { ... };
+ * }
+ * </pre>
+ * So, for example:
+ * <pre>
+ * {@code
+ * CREATE TABLE users (
+ *   username text PRIMARY KEY,
+ *   birth_year int,
+ *   country text,
+ *   phone text,
+ * );
+ * CREATE INDEX birth_year_idx ON users (birth_year);
+ * CREATE INDEX country_idx ON users (country);
+ * CREATE INDEX phone_idx ON users (phone);
+ *
+ * SELECT * FROM users
+ *   WHERE birth_year = 1981 AND country = 'FR'
+ *   WITH included_indexes = {birth_year_idx}
+ *   AND excluded_indexes = {country_idx, phone_idx};
+ * }
+ * </pre><p>
+ * The above query will use the index on {@code birth_year} and will not use the indexes on {@code country} and {@code phone}.
+ * </p><p>
  * Queries will fail if it's not possible to use the included indexes. That might happen because the query doesn't have
  * a restriction for those indexes, or because there is a restriction that can use the index, but it is not compatible
  * with other restrictions, or because the underlying index implementation isn't able to use the index for whatever
  * reason.
- * </p>
+ * </p><p>
  * Excluded indexes will never fail the query unless they reference a non-existent index, since it's always possible to
  * exclude an index regardless of the query expressions and index implementation capabilities. However, excluding
  * indexes might make necessary to add {@code ALLOW FILTERING} to the query.
- * </p>
+ * </p><p>
  * Other than that, indexes that are applicable to the query and that are not mentioned in these two sets of included
  * and excluded indexes might or might not be used depending on the index query planner.
+ * </p>
  */
 public class IndexHints
 {
