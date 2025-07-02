@@ -665,7 +665,7 @@ public class LuceneUpdateDeleteTest extends SAITester
         var builder = KeyRangeUnionIterator.builder();
         // Because there are many
         for (var memtableIndex : sai.getIndexContext().getLiveMemtables().values())
-            builder.add(memtableIndex.search(queryContext, expression, range, 10));
+            builder.add(memtableIndex.search(queryContext, expression, range));
         try (var rangeIterator = builder.build())
         {
             for (Integer expectedResult : expectedResults)
