@@ -16,13 +16,42 @@
 
 package org.apache.cassandra.index.sai.cql;
 
+import java.util.Collection;
+import java.util.stream.Collectors;
+
+import org.junit.Before;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
+
+import org.apache.cassandra.index.sai.SAIUtil;
+import org.apache.cassandra.index.sai.disk.format.Version;
 
 /**
  * Tests vector indexes in different column positions (partition key, clustering key, static and regular columns).
  */
+@RunWith(Parameterized.class)
 public class VectorColumnPositionsTest extends VectorTester
 {
+    @Parameterized.Parameter
+    public Version version;
+
+    @Parameterized.Parameters(name = "{0}")
+    public static Collection<Object[]> data()
+    {
+        return Version.ALL.stream()
+                          .filter(v -> v.onOrAfter(Version.JVECTOR_EARLIEST))
+                          .sorted()
+                          .map(v -> new Object[]{ v})
+                          .collect(Collectors.toList());
+    }
+
+    @Before
+    public void setupVersion()
+    {
+        SAIUtil.setCurrentVersion(version);
+    }
+
     @Test
     public void testPartitionKey()
     {
