@@ -34,6 +34,7 @@ import javax.annotation.concurrent.ThreadSafe;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Lists;
+import com.google.common.collect.Sets;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -411,9 +412,18 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
 
         for (SSTableReader sstable : sstables)
         {
-            IndexDescriptor indexDescriptor = contextManager.getOrLoadIndexDescriptor(sstable, indices);
+            logger.debug("Validating {} SAI indices for {}", indices.size(), sstable.getFilename());
+            if (indices.isEmpty())
+            {
+                logger.debug("No SAI indices to validate for {}", sstable.getFilename());
+                return true;
+            }
+            
+            // For validation, we need to load a fresh descriptor to ensure we see the current state of files
+            IndexDescriptor indexDescriptor = IndexDescriptor.load(sstable, contexts());
             IndexComponents.ForRead perSSTableComponents = indexDescriptor.perSSTableComponents();
 
+            logger.debug("Per-SSTable components complete: {}", indexDescriptor.perSSTableComponents().isComplete());
             if (indexDescriptor.perSSTableComponents().isComplete())
             {
                 perSSTableComponents.validateComponents(sstable, baseCfs.getTracker(), validateChecksum, true);
@@ -422,6 +432,7 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
                 {
                     IndexComponents.ForRead perIndexComponents = indexDescriptor.perIndexComponents(index.getIndexContext());
 
+                    logger.debug("Per-index components complete for {}: {}", index.getIndexContext().getIndexName(), perIndexComponents.isComplete());
                     if (perIndexComponents.isComplete())
                         perIndexComponents.validateComponents(sstable, baseCfs.getTracker(), validateChecksum, true);
                     else if (throwOnIncomplete)
@@ -554,5 +565,13 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
         contextManager.clear();
         indices.forEach(index -> index.makeIndexNonQueryable());
         onSSTableChanged(baseCfs.getLiveSSTables(), Collections.emptySet(), indices, false);
+    }
+
+    private Set<IndexContext> contexts()
+    {
+        Set<IndexContext> contexts = Sets.newHashSetWithExpectedSize(indices.size());
+        for (StorageAttachedIndex index : indices)
+            contexts.add(index.getIndexContext());
+        return contexts;
     }
 }
