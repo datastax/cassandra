@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.index.sai.plan;
 
+import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -87,6 +88,7 @@ import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.MergeIterator;
+import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.Throwables;
 
 import static java.lang.Math.max;
@@ -192,7 +194,6 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     {
         return firstPrimaryKey;
     }
-
 
     public TableMetadata metadata()
     {
@@ -427,7 +428,6 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         return keysIterationPlan;
     }
 
-
     public Iterator<? extends PrimaryKey> buildIterator(Plan plan)
     {
         try
@@ -446,13 +446,13 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     }
 
     /**
-     * Creates an iterator over keys of rows that match given WHERE predicate.
+     * Creates an iterator over keys of rows that match the given WHERE predicate.
      * Does not cache the iterator!
      */
     private KeyRangeIterator buildIterator(Expression predicate)
     {
         QueryView view = getQueryView(predicate.context);
-        return KeyRangeTermIterator.build(predicate, view, mergeRange, queryContext, false, Integer.MAX_VALUE);
+        return KeyRangeTermIterator.build(predicate, view, mergeRange, queryContext, false);
     }
 
     /**
@@ -464,9 +464,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     {
         return queryViews.computeIfAbsent(context,
                                           c -> new QueryView.Builder(c, mergeRange).build());
-
     }
-
 
     private float avgCellsPerRow()
     {
@@ -491,7 +489,6 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         }
         return rows == 0 ? 0.0f : ((float) totalLength) / rows;
     }
-
 
     public FilterTree buildFilter()
     {
@@ -673,7 +670,6 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         return searchTopKRows(memtableSearcher, ssTableSearcher);
     }
 
-
     private CloseableIterator<PrimaryKeyWithSortKey> searchTopKRows(MemtableSearcher memtableSearcher, SSTableSearcher ssTableSearcher)
     {
         List<CloseableIterator<PrimaryKeyWithSortKey>> memtableResults = new ArrayList<>();
@@ -682,13 +678,27 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
             QueryView view = getQueryView(orderer.context);
             if (orderer.isBM25())
             {
-                // Calculate counts on indexes
+                // Pre-calculate term expressions
+                List<Pair<ByteBuffer, Expression>> termAndExpressions = new ArrayList<>();
+                for (ByteBuffer term : orderer.getQueryTerms())
+                {
+                    Expression termExpression = new Expression(orderer.context)
+                                                .add(Operator.ANALYZER_MATCHES, term);
+                    termAndExpressions.add(Pair.create(term, termExpression));
+                }
+
                 for (MemtableIndex index : view.memtableIndexes)
-                    orderer.bm25Stats.add(index.getRowCount(), index.getApproximateTermCount());
+                    orderer.bm25stats.add(index.getRowCount(),
+                                          index.getApproximateTermCount(),
+                                          termAndExpressions,
+                                          termExpression -> index.estimateMatchingRowsCountUsingAllShards(termExpression, mergeRange));
                 for (SSTableIndex index : view.sstableIndexes)
-                    orderer.bm25Stats.add(index.getRowCount(), index.getApproximateTermCount());
+                    orderer.bm25stats.add(index.getRowCount(),
+                                          index.getApproximateTermCount(),
+                                          termAndExpressions,
+                                          termExpression -> index.getMatchingRowsCount(termExpression, mergeRange, queryContext));
                 // No documents indexed, the iterator will be empty
-                if (orderer.bm25Stats.getDocCount() == 0)
+                if (orderer.bm25stats.getDocCount() == 0)
                     return CloseableIterator.emptyIterator();
             }
 
@@ -711,18 +721,6 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
                 FileUtils.closeQuietly(memtableResults);
             throw t;
         }
-    }
-
-    @FunctionalInterface
-    interface SSTableSearcher
-    {
-        List<CloseableIterator<PrimaryKeyWithSortKey>> search(SSTableIndex index, long totalRows) throws Exception;
-    }
-
-    @FunctionalInterface
-    interface MemtableSearcher
-    {
-        List<CloseableIterator<PrimaryKeyWithSortKey>> search(MemtableIndex index);
     }
 
     /**
@@ -929,7 +927,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
 
         long rowCount = 0;
         for (MemtableIndex index : queryView.memtableIndexes)
-            rowCount += index.estimateMatchingRowsCount(predicate, mergeRange);
+            rowCount += index.estimateMatchingRowsCountUsingFirstShard(predicate, mergeRange);
 
         for (SSTableIndex index : queryView.sstableIndexes)
             rowCount += index.estimateMatchingRowsCount(predicate, mergeRange);
@@ -940,7 +938,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     /**
      * Legacy way of estimating predicate selectivity.
      * Runs the search on the index and returns the size of the iterator.
-     * Caches the iterator for future use, to avoid doing search twice.
+     * Caches the iterator for future use to avoid doing search twice.
      */
     private long estimateMatchingRowCountUsingIndex(Expression predicate)
     {
@@ -953,7 +951,6 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         keyIterators.put(predicate, iterator);
         return iterator.getMaxKeys();
     }
-
 
     @Override
     public double estimateAnnSearchCost(Orderer orderer, int limit, long candidates)
@@ -987,5 +984,18 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
             }
         }
         return cost;
+    }
+
+    @FunctionalInterface
+    interface SSTableSearcher
+    {
+        List<CloseableIterator<PrimaryKeyWithSortKey>> search(SSTableIndex index, long totalRows) throws Exception;
+    }
+
+
+    @FunctionalInterface
+    interface MemtableSearcher
+    {
+        List<CloseableIterator<PrimaryKeyWithSortKey>> search(MemtableIndex index);
     }
 }

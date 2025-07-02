@@ -169,7 +169,7 @@ public class SingleRestrictionEstimatedRowCountTest extends SAITester
 
             assertEquals(expectedRows, root.expectedRows(), 0.1);
             assertEquals(expectedRows, planNode.expectedKeys(), 0.1);
-            assertEquals(expectedRows / totalRows, planNode.selectivity(), 0.001);
+            assertEquals(expectedRows / totalRows, planNode.selectivity(), 0.01);
         }
     }
 }

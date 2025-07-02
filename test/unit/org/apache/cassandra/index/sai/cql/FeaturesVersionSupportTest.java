@@ -18,6 +18,7 @@ package org.apache.cassandra.index.sai.cql;
 
 
 import java.util.Collection;
+import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -35,6 +36,7 @@ import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.memory.MemtableIndex;
 import org.apache.cassandra.index.sai.memory.TrieMemtableIndex;
 import org.apache.cassandra.index.sai.utils.BM25Utils;
+import org.apache.cassandra.index.sai.utils.DocBm25Stats;
 import org.assertj.core.api.Assertions;
 
 import static org.apache.cassandra.index.sai.cql.BM25Test.*;
@@ -332,11 +334,15 @@ public class FeaturesVersionSupportTest extends VectorTester
     private void assertNumRowsAndTotalTermsSSTable(String indexName, int expectedNumRows, int expectedTotalTermsCount
     )
     {
-        BM25Utils.AggDocsStats aggDocStats = new BM25Utils.AggDocsStats();
+        long rowCount = 0;
+        long termCount = 0;
         for (SSTableIndex sstableIndex : getIndexContext(indexName).getView())
-            aggDocStats.add(sstableIndex.getRowCount(), sstableIndex.getApproximateTermCount());
-        assertEquals(expectedNumRows, aggDocStats.getDocCount());
+        {
+            rowCount += sstableIndex.getRowCount();
+            termCount += sstableIndex.getApproximateTermCount();
+        }
+        assertEquals(expectedNumRows, rowCount);
         if (expectedTotalTermsCount > 0)
-            assertEquals(expectedTotalTermsCount, aggDocStats.getTotalTermCount());
+            assertEquals(expectedTotalTermsCount, termCount);
     }
 }

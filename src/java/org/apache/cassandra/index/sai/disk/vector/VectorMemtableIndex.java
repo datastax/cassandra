@@ -58,7 +58,6 @@ import org.apache.cassandra.index.sai.memory.MemoryIndex;
 import org.apache.cassandra.index.sai.metrics.ColumnQueryMetrics;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.plan.Orderer;
-import org.apache.cassandra.index.sai.utils.BM25Utils;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyListUtil;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithScore;
@@ -196,7 +195,7 @@ public class VectorMemtableIndex extends AbstractMemtableIndex
     }
 
     @Override
-    public KeyRangeIterator search(QueryContext context, Expression expr, AbstractBounds<PartitionPosition> keyRange, int limit)
+    public KeyRangeIterator search(QueryContext context, Expression expr, AbstractBounds<PartitionPosition> keyRange)
     {
         if (expr.getOp() != Expression.Op.BOUNDED_ANN)
             throw new IllegalArgumentException(indexContext.logMessage("Only BOUNDED_ANN is supported, received: " + expr));
@@ -218,9 +217,15 @@ public class VectorMemtableIndex extends AbstractMemtableIndex
     }
 
     @Override
-    public long estimateMatchingRowsCount(Expression expression, AbstractBounds<PartitionPosition> keyRange)
+    public long estimateMatchingRowsCountUsingFirstShard(Expression expression, AbstractBounds<PartitionPosition> keyRange)
     {
         // For BOUNDED_ANN we use the old way of estimating cardinality - by running the search.
+        throw new UnsupportedOperationException("Cardinality estimation not supported by vector indexes");
+    }
+
+    @Override
+    public long estimateMatchingRowsCountUsingAllShards(Expression expression, AbstractBounds<PartitionPosition> keyRange)
+    {
         throw new UnsupportedOperationException("Cardinality estimation not supported by vector indexes");
     }
 
