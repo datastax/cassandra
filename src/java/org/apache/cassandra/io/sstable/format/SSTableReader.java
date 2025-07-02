@@ -538,9 +538,9 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
     }
 
     @Override
-    public Interval<PartitionPosition, SSTableReader> getInterval()
+    public <S extends CompactionSSTable> Interval<PartitionPosition, S> getInterval()
     {
-        return interval;
+        return (Interval<PartitionPosition, S>) interval;
     }
 
     @Override
