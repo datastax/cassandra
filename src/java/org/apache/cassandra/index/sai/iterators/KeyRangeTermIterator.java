@@ -66,17 +66,17 @@ public class KeyRangeTermIterator extends KeyRangeIterator
 
 
     @SuppressWarnings("resource")
-    public static KeyRangeTermIterator build(final Expression e, QueryView view, AbstractBounds<PartitionPosition> keyRange, QueryContext queryContext, boolean defer, int limit)
+    public static KeyRangeTermIterator build(final Expression e, QueryView view, AbstractBounds<PartitionPosition> keyRange, QueryContext queryContext, boolean defer)
     {
-        KeyRangeIterator rangeIterator = buildRangeIterator(e, view, keyRange, queryContext, defer, limit);
+        KeyRangeIterator rangeIterator = buildRangeIterator(e, view, keyRange, queryContext, defer);
         return new KeyRangeTermIterator(rangeIterator, view.sstableIndexes, queryContext);
     }
 
-    private static KeyRangeIterator buildRangeIterator(final Expression e, QueryView view, AbstractBounds<PartitionPosition> keyRange, QueryContext queryContext, boolean defer, int limit)
+    private static KeyRangeIterator buildRangeIterator(final Expression e, QueryView view, AbstractBounds<PartitionPosition> keyRange, QueryContext queryContext, boolean defer)
     {
         final List<KeyRangeIterator> tokens = new ArrayList<>(1 + view.sstableIndexes.size());
 
-        KeyRangeIterator memtableIterator = e.context.searchMemtable(queryContext, view.memtableIndexes, e, keyRange, limit);
+        KeyRangeIterator memtableIterator = e.context.searchMemtable(queryContext, view.memtableIndexes, e, keyRange);
         if (memtableIterator != null)
             tokens.add(memtableIterator);
 
@@ -88,7 +88,7 @@ public class KeyRangeTermIterator extends KeyRangeIterator
                 queryContext.addSstablesHit(1);
                 assert !index.isReleased();
 
-                KeyRangeIterator keyIterator = index.search(e, keyRange, queryContext, defer, limit);
+                KeyRangeIterator keyIterator = index.search(e, keyRange, queryContext, defer);
 
                 if (keyIterator == null || !keyIterator.hasNext())
                     continue;
