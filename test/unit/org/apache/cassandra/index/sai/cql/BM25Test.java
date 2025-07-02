@@ -856,7 +856,7 @@ public class BM25Test extends SAITester
                 "climate");
 
         flush();
-        executeQuery(CLIMATE_QUERY_RESULTS, "SELECT * FROM %s  ORDER BY body BM25 OF ? LIMIT 10",
+        executeQuery(CLIMATE_QUERY_RESULTS, Arrays.asList(10, 18, 0, 5, 15, 11, 17), "SELECT * FROM %s  ORDER BY body BM25 OF ? LIMIT 10",
                 "climate");
         executeQuery(CLIMATE_QUERY_SCORE_5_RESULTS, "SELECT * FROM %s WHERE score = 5 ORDER BY body BM25 OF ? LIMIT 10",
                 "climate");
@@ -1160,6 +1160,14 @@ public class BM25Test extends SAITester
         assertResult(execute(query, values), expected);
         prepare(query);
         assertResult(execute(query, values), expected);
+    }
+
+    private void executeQuery(List<Integer> expected, List<Integer> expectedEC, String query, Object... values) throws Throwable
+    {
+        if (testVersion == Version.EC)
+            executeQuery(expectedEC, query, values);
+        else
+            executeQuery(expected, query, values);
     }
 
     private void assertResult(UntypedResultSet result, List<Integer> expected)

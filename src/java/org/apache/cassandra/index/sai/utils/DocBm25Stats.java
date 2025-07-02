@@ -49,11 +49,6 @@ public class DocBm25Stats
         return avgDocLength;
     }
 
-    public void setAvgDocLength(double avgDocLength)
-    {
-        this.avgDocLength = avgDocLength;
-    }
-
     public void add(long docCount, long totalTermCount, List<Pair<ByteBuffer, Expression>> termAndExpressions, DocumentFrequencyEstimator estimator)
     {
         this.docCount += docCount;

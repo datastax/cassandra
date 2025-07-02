@@ -31,7 +31,6 @@ import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
-import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.io.sstable.SSTableId;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.AbstractIterator;
@@ -151,8 +150,11 @@ public class BM25Utils
         // An index format before {@link Version#ED} doesn't store the total term count
         // on the disk to read it back. Thus, if the average document length is unknown
         // due to the old format version, it is calculated in the old way.
-        if (isOldFormat && docStats.getAvgDocLength() == 0 && totalTermCount > 0)
-            docStats.setAvgDocLength(totalTermCount / documents.size());
+        double oldAvgDocLength;
+        if (isOldFormat && docStats.getAvgDocLength() == 0 && !documents.isEmpty())
+            oldAvgDocLength = totalTermCount / documents.size();
+        else
+            oldAvgDocLength = 0;
 
         if (documents.isEmpty())
             return CloseableIterator.emptyIterator();
@@ -177,7 +179,7 @@ public class BM25Utils
             @Override
             public float topScore() {
                 // Compute BM25 for the current document
-                return scoreDoc(documents.get(current), docStats, queryTerms);
+                return scoreDoc(documents.get(current), docStats, queryTerms, oldAvgDocLength);
             }
         };
         // pushMany is an O(n) operation where n is the final size of the queue. Iterative calls to push is O(n log n).
@@ -186,9 +188,10 @@ public class BM25Utils
         return new NodeQueueDocTFIterator(nodeQueue, documents, indexContext, source, docIterator);
     }
 
-    private static float scoreDoc(DocTF doc, DocBm25Stats docStats, List<ByteBuffer> queryTerms)
+    private static float scoreDoc(DocTF doc, DocBm25Stats docStats, List<ByteBuffer> queryTerms, double oldAvgDocLength)
     {
         double score = 0.0;
+        double avgDocLength = oldAvgDocLength == 0 ? docStats.getAvgDocLength() : oldAvgDocLength;
         for (var queryTerm : queryTerms)
         {
             int tf = doc.getTermFrequency(queryTerm);
@@ -196,7 +199,7 @@ public class BM25Utils
             // we shouldn't have more hits for a term than we counted total documents
             assert df <= docStats.getDocCount() : String.format("df=%d, totalDocs=%d", df, docStats.getDocCount());
 
-            double normalizedTf = tf / (tf + K1 * (1 - B + B * doc.termCount() / docStats.getAvgDocLength()));
+            double normalizedTf = tf / (tf + K1 * (1 - B + B * doc.termCount() / avgDocLength));
             double idf = Math.log(1 + (docStats.getDocCount() - df + 0.5) / (df + 0.5));
             double deltaScore = normalizedTf * idf;
             assert deltaScore >= 0 : String.format("BM25 score for tf=%d, df=%d, tc=%d, totalDocs=%d is %f",
