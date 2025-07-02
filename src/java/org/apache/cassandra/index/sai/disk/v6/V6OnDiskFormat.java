@@ -34,12 +34,6 @@ public class V6OnDiskFormat extends V5OnDiskFormat
         }
 
         @Override
-        public boolean hasVectorIndexChecksum()
-        {
-            return false;
-        }
-
-        @Override
         public boolean hasTermsHistogram()
         {
             return true;
