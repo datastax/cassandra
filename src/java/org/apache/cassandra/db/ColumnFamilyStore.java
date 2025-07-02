@@ -42,6 +42,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
@@ -434,6 +435,8 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     private final BloomFilterTracker bloomFilterTracker = BloomFilterTracker.createMeterTracker();
 
     private final RequestTracker requestTracker = RequestTracker.instance;
+
+    private final ReentrantLock longRunningSerializedOperationsLock = new ReentrantLock();
 
     public static void shutdownPostFlushExecutor() throws InterruptedException
     {
@@ -3126,7 +3129,8 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     {
         // synchronize so that concurrent invocations don't re-enable compactions partway through unexpectedly,
         // and so we only run one major compaction at a time
-        synchronized (this)
+        longRunningSerializedOperationsLock.lock();
+        try
         {
             logger.debug("Cancelling in-progress compactions for {}", metadata.name);
             Iterable<ColumnFamilyStore> toInterruptFor = concatWith(interruptIndexes, interruptViews);
@@ -3154,16 +3158,9 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
                 CompactionManager.instance.waitForCessation(toInterruptFor, sstablesPredicate);
 
                 // doublecheck that we finished, instead of timing out
-                for (ColumnFamilyStore cfs : toInterruptFor)
-                {
-                    if (cfs.getTracker().getCompacting().stream().anyMatch(sstablesPredicate))
-                    {
-                        logger.warn("Unable to cancel in-progress compactions for {}. " +
-                                    "Perhaps there is an unusually large row in progress somewhere, or the system is simply overloaded.",
-                                    metadata.name);
-                        return null;
-                    }
-                }
+                if (!allCompactionsFinished(toInterruptFor, sstablesPredicate))
+                    return null;
+
                 logger.trace("Compactions successfully cancelled");
 
                 // run our task
@@ -3177,6 +3174,26 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
                 }
             }
         }
+        finally
+        {
+            longRunningSerializedOperationsLock.unlock();
+        }
+    }
+
+    private boolean allCompactionsFinished( Iterable<ColumnFamilyStore> cfss, Predicate<SSTableReader> sstablesPredicate)
+    {
+        for (ColumnFamilyStore cfs : cfss)
+        {
+            if (cfs.getTracker().getCompacting().stream().anyMatch(sstablesPredicate))
+            {
+                logger.warn("Unable to cancel in-progress compactions for {}.{}.  Perhaps there is an unusually " +
+                            "large row in progress somewhere, or the system is simply overloaded.", metadata.keyspace, metadata.name);
+                logger.debug("In-flight compactions: {}", Arrays.toString(cfs.getTracker().getCompacting().toArray()));
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static CompactionManager.CompactionPauser pauseCompactionStrategies(Iterable<ColumnFamilyStore> toPause)
