@@ -38,11 +38,6 @@ public interface IndexFeatureSet
     boolean isRowAware();
 
     /**
-     * @return true if vector index files include a checksum at the end
-     */
-    boolean hasVectorIndexChecksum();
-
-    /**
      * @return true if index metadata contains term histograms for fast cardinality estimation
      */
     boolean hasTermsHistogram();
@@ -64,7 +59,6 @@ public interface IndexFeatureSet
     class Accumulator
     {
         boolean isRowAware = true;
-        boolean hasVectorIndexChecksum = true;
         boolean hasTermsHistogram = true;
         boolean complete = false;
 
@@ -83,8 +77,6 @@ public interface IndexFeatureSet
             assert !complete : "Cannot accumulate after complete has been called";
             if (!indexFeatureSet.isRowAware())
                 isRowAware = false;
-            if (!indexFeatureSet.hasVectorIndexChecksum())
-                hasVectorIndexChecksum = false;
             if (!indexFeatureSet.hasTermsHistogram())
                 hasTermsHistogram = false;
         }
@@ -104,12 +96,6 @@ public interface IndexFeatureSet
                 public boolean isRowAware()
                 {
                     return isRowAware;
-                }
-
-                @Override
-                public boolean hasVectorIndexChecksum()
-                {
-                    return hasVectorIndexChecksum;
                 }
 
                 @Override

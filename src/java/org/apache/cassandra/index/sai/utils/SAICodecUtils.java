@@ -75,6 +75,8 @@ public class SAICodecUtils
         writeChecksum(out);
     }
 
+    // Warning: this method produces an incomplete checksum when using other Lucene tooling because it computes
+    // the checksum without including the FOOTER_MAGIC and 0. See https://github.com/riptano/cndb/issues/14501.
     public static void writeFooter(RandomAccessWriter braw, long checksum) throws IOException
     {
         var out = toLuceneOutput(braw);
