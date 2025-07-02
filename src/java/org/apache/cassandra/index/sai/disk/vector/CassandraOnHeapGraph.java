@@ -618,7 +618,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
             if (vectorValues.size() < MIN_PQ_ROWS)
                 return null;
             else
-                return ProductQuantization.compute(vectorValues, preferredCompression.getCompressedSize(), 256, false);
+                return ProductQuantization.compute(vectorValues, preferredCompression.getCompressedSize(), 128, false);
         }
 
         // use the existing one unmodified if we either don't have enough rows to fine-tune, or

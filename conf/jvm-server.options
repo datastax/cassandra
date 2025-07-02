@@ -115,7 +115,7 @@
 -XX:+UseNUMA
 
 # http://www.evanjones.ca/jvm-mmap-pause.html
--XX:+PerfDisableSharedMem
+#-XX:+PerfDisableSharedMem
 
 # Prefer binding to IPv4 network intefaces (when net.ipv6.bindv6only=1). See
 # http://bugs.sun.com/bugdatabase/view_bug.do?bug_id=6342561 (short version:
@@ -125,6 +125,12 @@
 # Disable chronicle analytics. See CASSANDRA-19656
 -Dchronicle.analytics.disable=true
 
+-Dunified_compaction.vector_sstable_growth=1 
+-Dunified_compaction.override_ucs_config_for_vector_tables=true
+
+-Dcassandra.sai.latest.version=ec
+-Dcassandra.sai.jvector_version=4
+-Dcassandra.sai_segment_builder_cores=96
 ### Debug options
 
 # uncomment to enable flight recorder
@@ -157,8 +163,8 @@
 # the same value to avoid stop-the-world GC pauses during resize, and
 # so that we can lock the heap in memory on startup to prevent any
 # of it from being swapped out.
-#-Xms4G
-#-Xmx4G
+-Xms128G
+-Xmx128G
 
 # Young generation size is automatically calculated by cassandra-env
 # based on this formula: min(100 * num_cores, 1/4 * heap size)
