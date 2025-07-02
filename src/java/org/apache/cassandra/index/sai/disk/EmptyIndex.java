@@ -96,8 +96,7 @@ public class EmptyIndex implements SearchableIndex
     public KeyRangeIterator search(Expression expression,
                                    AbstractBounds<PartitionPosition> keyRange,
                                    QueryContext context,
-                                   boolean defer,
-                                   int limit) throws IOException
+                                   boolean defer) throws IOException
     {
         return KeyRangeIterator.empty();
     }

@@ -47,6 +47,7 @@ import org.apache.cassandra.index.sai.iterators.KeyRangeAntiJoinIterator;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.plan.Orderer;
+import org.apache.cassandra.index.sai.utils.AbortedOperationException;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
@@ -55,6 +56,7 @@ import org.apache.cassandra.io.sstable.SSTableWatcher;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.CloseableIterator;
+import org.apache.cassandra.utils.Throwables;
 
 /**
  * SSTableIndex is created for each column index on individual sstable to track per-column indexer.
@@ -145,9 +147,39 @@ public class SSTableIndex implements Comparable<SSTableIndex>
         return searchableIndex.getApproximateTermCount();
     }
 
+    /**
+     * Estimates the number of rows that would be returned by this index given the predicate using the index
+     * histogram.
+     * Note that this is not a guarantee of the number of rows that will actually be returned.
+     *
+     * @return an approximate number of the matching rows
+     */
     public long estimateMatchingRowsCount(Expression predicate, AbstractBounds<PartitionPosition> keyRange)
     {
         return searchableIndex.estimateMatchingRowsCount(predicate, keyRange);
+    }
+
+    /**
+     * Counts the number of rows that would be returned by this index given the predicate.
+     *
+     * @return the row count
+     */
+    public long getMatchingRowsCount(Expression predicate, AbstractBounds<PartitionPosition> keyRange, QueryContext queryContext)
+    {
+        queryContext.checkpoint();
+        queryContext.addSstablesHit(1);
+        assert !isReleased();
+
+        try (KeyRangeIterator keyIterator = search(predicate, keyRange, queryContext, false))
+        {
+            return keyIterator.getMaxKeys();
+        }
+        catch (Throwable e)
+        {
+            if (logger.isDebugEnabled() && !(e instanceof AbortedOperationException))
+                logger.debug(String.format("Failed search an index %s.", getSSTable()), e);
+            throw Throwables.cleaned(e);
+        }
     }
 
     /**
@@ -228,7 +260,7 @@ public class SSTableIndex implements Comparable<SSTableIndex>
         else
         {
             Expression negExpression = expression.negated();
-            KeyRangeIterator matchedKeys = searchableIndex.search(negExpression, keyRange, context, defer, Integer.MAX_VALUE);
+            KeyRangeIterator matchedKeys = searchableIndex.search(negExpression, keyRange, context, defer);
             return KeyRangeAntiJoinIterator.create(allKeys, matchedKeys);
         }
     }
@@ -236,15 +268,14 @@ public class SSTableIndex implements Comparable<SSTableIndex>
     public KeyRangeIterator search(Expression expression,
                                    AbstractBounds<PartitionPosition> keyRange,
                                    QueryContext context,
-                                   boolean defer,
-                                   int limit) throws IOException
+                                   boolean defer) throws IOException
     {
         if (expression.getOp().isNonEquality())
         {
             return getNonEqIterator(expression, keyRange, context, defer);
         }
 
-        return searchableIndex.search(expression, keyRange, context, defer, limit);
+        return searchableIndex.search(expression, keyRange, context, defer);
     }
 
     public List<CloseableIterator<PrimaryKeyWithSortKey>> orderBy(Orderer orderer,
