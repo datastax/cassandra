@@ -149,11 +149,9 @@ public class BM25Utils
 
         // An index format before {@link Version#ED} doesn't store the total term count
         // on the disk to read it back. Thus, for the old format version it is calculated in the old way.
-        double oldAvgDocLength;
-        if (isOldFormat && !documents.isEmpty())
-            oldAvgDocLength = totalTermCount / documents.size();
-        else
-            oldAvgDocLength = 0;
+        double avgDocLength = (isOldFormat && !documents.isEmpty())
+                              ? totalTermCount / documents.size()
+                              : docStats.getAvgDocLength();
 
         if (documents.isEmpty())
             return CloseableIterator.emptyIterator();
@@ -178,7 +176,9 @@ public class BM25Utils
             @Override
             public float topScore() {
                 // Compute BM25 for the current document
-                return scoreDoc(documents.get(current), docStats, queryTerms, oldAvgDocLength);
+                return scoreDoc(documents.get(current),
+                                docStats.getFrequencies(), docStats.getDocCount(), avgDocLength,
+                                queryTerms);
             }
         };
         // pushMany is an O(n) operation where n is the final size of the queue. Iterative calls to push is O(n log n).
@@ -187,22 +187,21 @@ public class BM25Utils
         return new NodeQueueDocTFIterator(nodeQueue, documents, indexContext, source, docIterator);
     }
 
-    private static float scoreDoc(DocTF doc, DocBm25Stats docStats, List<ByteBuffer> queryTerms, double oldAvgDocLength)
+    private static float scoreDoc(DocTF doc, Map<ByteBuffer, Long> frequencies, long docCount, double avgDocLength, List<ByteBuffer> queryTerms)
     {
         double score = 0.0;
-        double avgDocLength = oldAvgDocLength == 0 ? docStats.getAvgDocLength() : oldAvgDocLength;
         for (var queryTerm : queryTerms)
         {
             int tf = doc.getTermFrequency(queryTerm);
-            Long df = docStats.getFrequencies().get(queryTerm);
+            Long df = frequencies.get(queryTerm);
             // we shouldn't have more hits for a term than we counted total documents
-            assert df <= docStats.getDocCount() : String.format("df=%d, totalDocs=%d", df, docStats.getDocCount());
+            assert df <= docCount : String.format("df=%d, totalDocs=%d", df, docCount);
 
             double normalizedTf = tf / (tf + K1 * (1 - B + B * doc.termCount() / avgDocLength));
-            double idf = Math.log(1 + (docStats.getDocCount() - df + 0.5) / (df + 0.5));
+            double idf = Math.log(1 + (docCount - df + 0.5) / (df + 0.5));
             double deltaScore = normalizedTf * idf;
             assert deltaScore >= 0 : String.format("BM25 score for tf=%d, df=%d, tc=%d, totalDocs=%d is %f",
-                                                   tf, df, doc.termCount(), docStats.getDocCount(), deltaScore);
+                                                   tf, df, doc.termCount(), docCount, deltaScore);
             score += deltaScore;
         }
         return (float) score;
