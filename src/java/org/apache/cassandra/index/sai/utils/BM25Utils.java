@@ -148,10 +148,9 @@ public class BM25Utils
         }
 
         // An index format before {@link Version#ED} doesn't store the total term count
-        // on the disk to read it back. Thus, if the average document length is unknown
-        // due to the old format version, it is calculated in the old way.
+        // on the disk to read it back. Thus, for the old format version it is calculated in the old way.
         double oldAvgDocLength;
-        if (isOldFormat && docStats.getAvgDocLength() == 0 && !documents.isEmpty())
+        if (isOldFormat && !documents.isEmpty())
             oldAvgDocLength = totalTermCount / documents.size();
         else
             oldAvgDocLength = 0;

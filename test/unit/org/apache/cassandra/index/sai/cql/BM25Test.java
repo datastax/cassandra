@@ -850,22 +850,28 @@ public class BM25Test extends SAITester
         insertPrimitiveData(10, 20);
 
         // The same result as in testCollections above
-        executeQuery(CLIMATE_QUERY_RESULTS, "SELECT * FROM %s  ORDER BY body BM25 OF ? LIMIT 10",
-                "climate");
-        executeQuery(CLIMATE_QUERY_SCORE_5_RESULTS, "SELECT * FROM %s WHERE score = 5 ORDER BY body BM25 OF ? LIMIT 10",
-                "climate");
+        executeQuery(CLIMATE_QUERY_RESULTS,
+                     Arrays.asList(0, 10, 5, 18, 15, 11, 17),
+                     "SELECT * FROM %s  ORDER BY body BM25 OF ? LIMIT 10",
+                     "climate");
+        executeQuery(CLIMATE_QUERY_SCORE_5_RESULTS,
+                     Arrays.asList(0, 10, 18),
+                     "SELECT * FROM %s WHERE score = 5 ORDER BY body BM25 OF ? LIMIT 10",
+                     "climate");
 
         flush();
-        executeQuery(CLIMATE_QUERY_RESULTS, Arrays.asList(10, 18, 0, 5, 15, 11, 17), "SELECT * FROM %s  ORDER BY body BM25 OF ? LIMIT 10",
-                "climate");
+        executeQuery(CLIMATE_QUERY_RESULTS,
+                     Arrays.asList(10, 18, 0, 5, 15, 11, 17),
+                     "SELECT * FROM %s  ORDER BY body BM25 OF ? LIMIT 10",
+                     "climate");
         executeQuery(CLIMATE_QUERY_SCORE_5_RESULTS, "SELECT * FROM %s WHERE score = 5 ORDER BY body BM25 OF ? LIMIT 10",
-                "climate");
+                     "climate");
 
         compact();
         executeQuery(CLIMATE_QUERY_RESULTS, "SELECT * FROM %s  ORDER BY body BM25 OF ? LIMIT 10",
-                "climate");
+                     "climate");
         executeQuery(CLIMATE_QUERY_SCORE_5_RESULTS, "SELECT * FROM %s WHERE score = 5 ORDER BY body BM25 OF ? LIMIT 10",
-                "climate");
+                     "climate");
     }
 
     @Test
