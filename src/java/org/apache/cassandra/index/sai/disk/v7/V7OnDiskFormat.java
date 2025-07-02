@@ -74,10 +74,13 @@ public class V7OnDiskFormat extends V6OnDiskFormat
         {
             try (IndexInput input = component.openInput())
             {
-                if (!checksum)
+                // We can't validate TERMS_DATA with checksum because the checksum was computed incorrectly through
+                // V7. See https://github.com/riptano/cndb/issues/14656. We can still call the basic validate method
+                // which does not check the checksum. (The issue is in the way the checksum was computed. It didn't
+                // include the header/footer bytes, and for multi-segment builds, it didn't include the bytes from
+                // all previous segments, which is the design for all index components to date.)
+                if (!checksum || component.componentType() == IndexComponentType.TERMS_DATA)
                     SAICodecUtils.validate(input, getExpectedEarliestVersion(context, component.componentType()));
-                else if (component.componentType() == IndexComponentType.TERMS_DATA)
-                    SAICodecUtils.validateChecksumSkippingHeaderAndFooter(input);
                 else
                     SAICodecUtils.validateChecksum(input);
                 return true;

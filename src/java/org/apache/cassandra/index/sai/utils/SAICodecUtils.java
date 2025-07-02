@@ -171,32 +171,6 @@ public class SAICodecUtils
         in.seek(position);
     }
 
-    /**
-     * Validates the checksum of the file, without including the header or the footer in the checksum calculation.
-     * This is only used for legacy files where we computed the checksum without including the header.
-     */
-    public static void validateChecksumSkippingHeaderAndFooter(IndexInput input) throws IOException
-    {
-        IndexInput clone = input.clone();
-        clone.seek(0); // Mimics the call within checksumEntireFile below
-        checkHeader(clone); // Check header and don't include in checksum
-        ChecksumIndexInput in = new BufferedChecksumIndexInput(clone);
-
-        if (in.length() < CodecUtil.footerLength())
-            throw new CorruptIndexException("misplaced codec footer (file truncated?): length=" + in.length() + " but footerLength==" + CodecUtil.footerLength(), input);
-
-        // Seek to the footer to compute the checksum
-        in.seek(in.length() - CodecUtil.footerLength());
-
-        // Get the checksum before we validate the footer, so we can report the actual checksum
-        long actualChecksum = in.getChecksum();
-        // We can still validate the footer, even though we don't include its bytes in the checksum
-        validateFooter(in, false);
-        long expectedChecksum = readCRC(in);
-        if (expectedChecksum != actualChecksum)
-            throw new CorruptIndexException("checksum failed (hardware problem?) : expected=" + Long.toHexString(expectedChecksum) + " actual=" + Long.toHexString(actualChecksum), in);
-    }
-
     public static void validateChecksum(IndexInput input) throws IOException
     {
         long position = input.getFilePointer();
