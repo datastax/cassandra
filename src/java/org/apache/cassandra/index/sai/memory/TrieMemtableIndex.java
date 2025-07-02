@@ -22,10 +22,8 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.stream.Stream;
@@ -38,7 +36,6 @@ import com.google.common.util.concurrent.Runnables;
 
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.Clustering;
-import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.marshal.AbstractType;
@@ -284,7 +281,7 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
         writeCount.increment();
     }
 
-    public KeyRangeIterator search(QueryContext queryContext, Expression expression, AbstractBounds<PartitionPosition> keyRange, int limit)
+    public KeyRangeIterator search(QueryContext queryContext, Expression expression, AbstractBounds<PartitionPosition> keyRange)
     {
         int startShard = boundaries.getShardForToken(keyRange.left.getToken());
         int endShard = getEndShardForBounds(keyRange);
@@ -345,23 +342,16 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
         {
             // Intersect iterators to find documents containing all terms
             List<ByteBuffer> queryTerms = orderer.getQueryTerms();
-            Map<ByteBuffer, Long> documentFrequencies = new HashMap<>();
             List<KeyRangeIterator> termIterators = new ArrayList<>(queryTerms.size());
             for (ByteBuffer term : queryTerms)
             {
                 Expression expr = new Expression(indexContext).add(Operator.ANALYZER_MATCHES, term);
-                // getMaxKeys() counts all rows that match the expression for shards within the key range. The key
-                // range is not applied to the search results yet, so there is a small chance for overcounting if
-                // the key range filters within a shard. This is assumed to be acceptable because the on disk
-                // estimate also uses the key range to skip irrelevant sstable segments but does not apply the key
-                // range when getting the estimate within a segment.
                 KeyRangeIterator iterator = eagerSearch(expr, keyRange);
-                documentFrequencies.put(term, iterator.getMaxKeys());
                 termIterators.add(iterator);
             }
             KeyRangeIterator intersectedIterator = KeyRangeIntersectionIterator.builder(termIterators).build();
 
-            return List.of(orderByBM25(Streams.stream(intersectedIterator), documentFrequencies, orderer));
+            return List.of(orderByBM25(Streams.stream(intersectedIterator), orderer));
         }
         else
         {
@@ -375,18 +365,48 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
         }
     }
 
-
+    /**
+     * Estimates the number of matching rows by extrapolating from the first shard only.
+     * This method provides a fast approximation by calculating the matching row count for the first
+     * shard in the key range and then multiplying by the total number of shards involved.
+     *
+     * <p>This approach assumes that data is uniformly distributed across shards, which may not
+     * always be accurate but provides a quick estimate with minimal computational overhead.
+     * The estimate is particularly useful for query planning and optimization decisions where
+     * speed is more important than precision.</p>
+     *
+     * @param expression the search expression/predicate to match against indexed terms
+     * @param keyRange   the partition key range to search within, used to determine which shards to consider
+     * @return an estimated number of matching rows extrapolated from the first shard;
+     * @see #estimateMatchingRowsCountUsingAllShards(Expression, AbstractBounds) for a more accurate but slower alternative
+     */
     @Override
-    public long estimateMatchingRowsCount(Expression expression, AbstractBounds<PartitionPosition> keyRange)
+    public long estimateMatchingRowsCountUsingFirstShard(Expression expression, AbstractBounds<PartitionPosition> keyRange)
     {
         int startShard = boundaries.getShardForToken(keyRange.left.getToken());
         int endShard = getEndShardForBounds(keyRange);
         return rangeIndexes[startShard].estimateMatchingRowsCount(expression, keyRange) * (endShard - startShard + 1);
     }
 
-    // In the BM25 logic, estimateMatchingRowsCount is not accurate enough because we use the result to compute the
-    // document score.
-    private long completeEstimateMatchingRowsCount(Expression expression, AbstractBounds<PartitionPosition> keyRange)
+    /**
+     * Estimates the number of matching rows by querying all relevant shards individually.
+     * This method provides a more accurate estimate compared to the first-shard extrapolation
+     * approach by actually calculating the matching row count for each shard that intersects
+     * with the given key range and summing the results.
+     *
+     * <p>This approach accounts for non-uniform data distribution across shards and provides
+     * a more precise estimate at the cost of increased computational overhead. Each shard's
+     * memory index is consulted to determine how many rows would match the given expression
+     * within the specified key range.</p>
+     *
+     * @param expression the search expression/predicate to match against indexed terms
+     * @param keyRange the partition key range to search within, used to determine which shards to query
+     * @return the sum of estimated matching rows from all relevant shards;
+     *
+     * @see #estimateMatchingRowsCountUsingFirstShard(Expression, AbstractBounds) for a faster but less accurate alternative
+     */
+    @Override
+    public long estimateMatchingRowsCountUsingAllShards(Expression expression, AbstractBounds<PartitionPosition> keyRange)
     {
         int startShard = boundaries.getShardForToken(keyRange.left.getToken());
         int endShard = getEndShardForBounds(keyRange);
@@ -406,19 +426,8 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
             return CloseableIterator.emptyIterator();
 
         if (orderer.isBM25())
-        {
-            HashMap<ByteBuffer, Long> documentFrequencies = new HashMap<>();
-            // Use full range, since no filter should be applied for the term frequencies.
-            AbstractBounds<PartitionPosition> range = DataRange.allData(memtable.metadata().partitioner).keyRange();
-            for (ByteBuffer term : orderer.getQueryTerms())
-            {
-                Expression expression = new Expression(indexContext).add(Operator.ANALYZER_MATCHES, term);
-                documentFrequencies.put(term, completeEstimateMatchingRowsCount(expression, range));
-            }
-            return orderByBM25(keys.stream(), documentFrequencies, orderer);
-        }
+            return orderByBM25(keys.stream(), orderer);
         else
-        {
             return SortingIterator.createCloseable(
                 orderer.getComparator(),
                 keys,
@@ -441,24 +450,23 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
                 },
                 Runnables.doNothing()
             );
-        }
     }
 
-    private CloseableIterator<PrimaryKeyWithSortKey> orderByBM25(Stream<PrimaryKey> stream, Map<ByteBuffer, Long> documentFrequencies, Orderer orderer)
+    private CloseableIterator<PrimaryKeyWithSortKey> orderByBM25(Stream<PrimaryKey> stream, Orderer orderer)
     {
         assert orderer.isBM25();
         List<ByteBuffer> queryTerms = orderer.getQueryTerms();
         AbstractAnalyzer analyzer = indexContext.getAnalyzerFactory().create();
-        BM25Utils.DocStats docStats = new BM25Utils.DocStats(documentFrequencies, orderer.bm25Stats);
         Iterator<BM25Utils.DocTF> it = stream
                                        .map(pk -> BM25Utils.EagerDocTF.createFromDocument(pk, getCellForKey(pk), analyzer, queryTerms))
                                        .filter(Objects::nonNull)
                                        .iterator();
         return BM25Utils.computeScores(CloseableIterator.wrap(it),
                                        queryTerms,
-                                       docStats,
+                                       orderer.bm25stats,
                                        indexContext,
-                                       memtable);
+                                       memtable,
+                                       false);
     }
 
 
