@@ -83,12 +83,6 @@ public class V3OnDiskFormat extends V2OnDiskFormat
         }
 
         @Override
-        public boolean hasVectorIndexChecksum()
-        {
-            return false;
-        }
-
-        @Override
         public boolean hasTermsHistogram()
         {
             return false;
