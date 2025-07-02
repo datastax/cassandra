@@ -76,7 +76,7 @@ public interface CompactionSSTable
      */
     AbstractBounds<Token> getBounds();
 
-    Interval<PartitionPosition, SSTableReader> getInterval();
+    <S extends CompactionSSTable> Interval<PartitionPosition, S> getInterval();
 
     /**
      * @return the length in bytes of the all on-disk components' file size for this SSTable.
