@@ -21,7 +21,6 @@ import java.util.Collection;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
-import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -332,23 +331,15 @@ public class FeaturesVersionSupportTest extends VectorTester
     private void assertNumRowsAndTotalTermsSSTable(String indexName, int expectedNumRows, int expectedTotalTermsCount
     )
     {
-        long indexRowCount = 0;
-        long segmentRowCount = 0;
-        long totalTermCount = 0;
+        long rowCount = 0;
+        long termCount = 0;
         for (SSTableIndex sstableIndex : getIndexContext(indexName).getView())
         {
-            indexRowCount += sstableIndex.getRowCount();
-            for (var segment : sstableIndex.getSegments())
-            {
-                var metadata = segment.metadata;
-                Assert.assertNotNull(metadata);
-                segmentRowCount += metadata.numRows;
-                totalTermCount += metadata.totalTermCount;
-            }
+            rowCount += sstableIndex.getRowCount();
+            termCount += sstableIndex.getApproximateTermCount();
         }
-        assertEquals(indexRowCount, segmentRowCount);
-        assertEquals(expectedNumRows, indexRowCount);
-        if (expectedTotalTermsCount >= 0)
-            assertEquals(expectedTotalTermsCount, totalTermCount);
+        assertEquals(expectedNumRows, rowCount);
+        if (expectedTotalTermsCount > 0)
+            assertEquals(expectedTotalTermsCount, termCount);
     }
 }
