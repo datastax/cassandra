@@ -69,7 +69,7 @@ public interface SearchableIndex extends Closeable
     KeyRangeIterator search(Expression expression,
                                    AbstractBounds<PartitionPosition> keyRange,
                                    QueryContext context,
-                                   boolean defer, int limit) throws IOException;
+                                   boolean defer) throws IOException;
 
     List<CloseableIterator<PrimaryKeyWithSortKey>> orderBy(Orderer orderer,
                                                                   Expression slice,

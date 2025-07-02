@@ -139,10 +139,9 @@ public class Segment implements Closeable
      * @param keyRange   key range specific in read command, used by ANN index
      * @param context    to track per sstable cache and per query metrics
      * @param defer      create the iterator in a deferred state
-     * @param limit      the num of rows to returned, used by ANN index
      * @return range iterator of {@link PrimaryKey} that matches given expression
      */
-    public KeyRangeIterator search(Expression expression, AbstractBounds<PartitionPosition> keyRange, QueryContext context, boolean defer, int limit) throws IOException
+    public KeyRangeIterator search(Expression expression, AbstractBounds<PartitionPosition> keyRange, QueryContext context, boolean defer) throws IOException
     {
         return index.search(expression, keyRange, context, defer);
     }
