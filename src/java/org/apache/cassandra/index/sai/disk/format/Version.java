@@ -64,8 +64,8 @@ public class Version implements Comparable<Version>
     // histograms in index metadata
     public static final Version EB = new Version("eb", V6OnDiskFormat.instance, (c, i, g) -> stargazerFileNameFormat(c, i, g, "eb"));
     // term frequencies index component (support for BM25); bump jvector file format version to 4
-    // Start validating vector index component checksums. Note that the TERMS_FILE checksum is incomplete in that it
-    // does not include the header or the footer when computing the checksum.
+    // Start validating vector index component checksums, except for the TERMS_FILE because it's checksum is non-standard
+    // and isn't easily validated when an sstable index has multiple segments within the TERMS_FILE.
     public static final Version EC = new Version("ec", V7OnDiskFormat.instance, (c, i, g) -> stargazerFileNameFormat(c, i, g, "ec"));
     // total terms count serialization in index metadata
     public static final Version ED = new Version("ed", V7OnDiskFormat.instance, (c, i, g) -> stargazerFileNameFormat(c, i, g, "ed"));
