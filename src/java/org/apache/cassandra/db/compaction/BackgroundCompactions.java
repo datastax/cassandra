@@ -171,7 +171,7 @@ public class BackgroundCompactions
         if (id == null || aggregate == null)
             throw new IllegalArgumentException("arguments cannot be null");
 
-        logger.debug("Submitting background compaction {}", id);
+        logger.debug("Submitting background compaction {} for {}.{}", id, metadata.keyspace, metadata.name);
         CompactionPick compaction = aggregate.getSelected();
 
         CompactionPick prev = compactions.put(id, compaction);
