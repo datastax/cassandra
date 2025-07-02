@@ -391,16 +391,9 @@ public class SAITester extends CQLTester
                 if (indexDescriptor.isIndexEmpty(context))
                     continue;
                 
-                // For vector indexes, only validate checksums if the version supports it
-                boolean validateChecksum = true;
-                if (context.isVector() && !indexDescriptor.perSSTableComponents().onDiskFormat().indexFeatureSet().hasVectorIndexChecksum())
-                {
-                    // Vector components don't have checksums in versions prior to v7, so we skip checksum validation
-                    validateChecksum = false;
-                }
-                
-                if (!indexDescriptor.perSSTableComponents().validateComponents(sstable, cfs.getTracker(), validateChecksum, false)
-                    || !indexDescriptor.perIndexComponents(context).validateComponents(sstable, cfs.getTracker(), validateChecksum, false))
+                // Checksum validation is now handled internally by the OnDiskFormat's validateIndexComponent method
+                if (!indexDescriptor.perSSTableComponents().validateComponents(sstable, cfs.getTracker(), true, false)
+                    || !indexDescriptor.perIndexComponents(context).validateComponents(sstable, cfs.getTracker(), true, false))
                     return false;
             }
         }
