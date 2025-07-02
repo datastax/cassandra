@@ -353,8 +353,7 @@ public class VerifyTest extends SAITester
         }
     }
 
-    // TODO make test work by fixing https://github.com/riptano/cndb/issues/14501
-    @Ignore
+    @Test
     public void testVerifyCorruptVectorIndex() throws IOException
     {
         // Skip test if version doesn't support vector indexes
@@ -393,15 +392,19 @@ public class VerifyTest extends SAITester
             file.setLength(3);
         }
 
+        // We didn't start validating these files until version EC
+        boolean verifyShouldFail = version.onOrAfter(Version.EC);
         // Verify should detect the corruption
         try (Verifier verifier = new Verifier(cfs, sstable, false, Verifier.options().invokeDiskFailurePolicy(true).build()))
         {
             verifier.verify();
-            fail("Expected a CorruptSSTableException to be thrown");
+            if (verifyShouldFail)
+                fail("Expected a CorruptSSTableException to be thrown");
         }
         catch (CorruptSSTableException err)
         {
-            // Expected
+            if (!verifyShouldFail)
+                fail("Unexpected CorruptSSTableException: " + err.getMessage());
         }
     }
 

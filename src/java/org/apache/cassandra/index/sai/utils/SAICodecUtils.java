@@ -25,6 +25,7 @@ import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.io.compress.CorruptBlockException;
 import org.apache.lucene.codecs.CodecUtil;
 import org.apache.lucene.index.CorruptIndexException;
+import org.apache.lucene.store.BufferedChecksumIndexInput;
 import org.apache.lucene.store.ChecksumIndexInput;
 import org.apache.lucene.store.DataInput;
 import org.apache.lucene.store.DataOutput;
@@ -74,6 +75,8 @@ public class SAICodecUtils
         writeCRC(out);
     }
 
+    // Warning: this method produces an incomplete checksum when using other Lucene tooling because it computes
+    // the checksum without including the FOOTER_MAGIC and 0. See https://github.com/riptano/cndb/issues/14501.
     public static void writeFooter(RandomAccessWriter braw, long checksum) throws IOException
     {
         var out = toLuceneOutput(braw);

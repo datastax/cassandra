@@ -132,12 +132,6 @@ public class V1OnDiskFormat implements OnDiskFormat
         }
 
         @Override
-        public boolean hasVectorIndexChecksum()
-        {
-            return false;
-        }
-
-        @Override
         public boolean hasTermsHistogram()
         {
             return false;
@@ -234,13 +228,10 @@ public class V1OnDiskFormat implements OnDiskFormat
         if (component.isCompletionMarker())
             return true;
 
-        // starting with v3, vector components include proper headers and checksum; skip for earlier versions
+        // We do not validate vector components until V7, so we skip for earlier versions
         IndexContext context = component.parent().context();
-        if (isVectorDataComponent(context, component.componentType())
-            && !component.parent().onDiskFormat().indexFeatureSet().hasVectorIndexChecksum())
-        {
+        if (isVectorDataComponent(context, component.componentType()))
             return true;
-        }
 
         Version earliest = getExpectedEarliestVersion(context, component.componentType());
         try (IndexInput input = component.openInput())
