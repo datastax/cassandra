@@ -78,8 +78,10 @@ public abstract class SegmentBuilder
 {
     private static final Logger logger = LoggerFactory.getLogger(SegmentBuilder.class);
 
+    private static final int NUM_THREADS = Integer.getInteger("cassandra.sai_segment_builder_cores", Runtime.getRuntime().availableProcessors());
+
     /** for parallelism within a single compaction */
-    public static final ExecutorService compactionExecutor = new DebuggableThreadPoolExecutor(Runtime.getRuntime().availableProcessors(),
+    public static final ExecutorService compactionExecutor = new DebuggableThreadPoolExecutor(NUM_THREADS,
                                                                                               1,
                                                                                               TimeUnit.MINUTES,
                                                                                               new ArrayBlockingQueue<>(10 * Runtime.getRuntime().availableProcessors()),

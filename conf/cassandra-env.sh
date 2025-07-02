@@ -188,7 +188,7 @@ if [ "$JVM_ARCH" = "64-Bit" ] && [ $USING_CMS -eq 0 ]; then
 fi
 
 # provides hints to the JIT compiler
-JVM_OPTS="$JVM_OPTS -XX:CompileCommandFile=$CASSANDRA_CONF/hotspot_compiler"
+JVM_OPTS="$JVM_OPTS -XX:CompileCommandFile=$CASSANDRA_CONF/hotspot_compiler -XX:+UnlockDiagnosticVMOptions -XX:CompilerDirectivesFile=$CASSANDRA_CONF/vector_hotspot_compiler"
 
 # add the jamm javaagent
 JVM_OPTS="$JVM_OPTS -javaagent:$CASSANDRA_HOME/lib/jamm-0.3.2.jar"

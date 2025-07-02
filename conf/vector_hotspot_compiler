@@ -1,0 +1,10 @@
+[
+  {
+    match: ["*.*"],
+    "inline": [
+// Third party library used for Vector Search https://github.com/jbellis/jvector
+      "+io.github.jbellis.jvector.vector.VectorUtil::*",
+      "+io.github.jbellis.jvector.vector.SimdOps::*"
+    ]
+  }
+]

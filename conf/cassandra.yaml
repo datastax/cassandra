@@ -526,8 +526,8 @@ seed_provider:
 # On the other hand, since writes are almost never IO bound, the ideal
 # number of "concurrent_writes" is dependent on the number of cores in
 # your system; (8 * number_of_cores) is a good rule of thumb.
-concurrent_reads: 32
-concurrent_writes: 32
+concurrent_reads: 128
+concurrent_writes: 128
 concurrent_counter_writes: 32
 
 # For materialized view writes, as there is a read involved, so this should
@@ -573,8 +573,8 @@ concurrent_materialized_view_writes: 32
 # accepting writes when the limit is exceeded until a flush completes,
 # and will trigger a flush based on memtable_cleanup_threshold
 # If omitted, Cassandra will set both to 1/4 the size of the heap.
-# memtable_heap_space_in_mb: 2048
-# memtable_offheap_space_in_mb: 2048
+memtable_heap_space_in_mb: 8192
+memtable_offheap_space_in_mb: 32000
 
 # memtable_cleanup_threshold is deprecated. The default calculation
 # is the only reasonable choice. See the comments on  memtable_flush_writers
@@ -646,7 +646,7 @@ memtable_allocation_type: offheap_objects
 # The default value is the smaller of 8192, and 1/4 of the total space
 # of the commitlog volume.
 #
-# commitlog_total_space_in_mb: 8192
+commitlog_total_space_in_mb: 32000
 
 # This sets the number of memtable flush writer threads per disk
 # as well as the total number of memtables that can be flushed concurrently.
@@ -675,7 +675,7 @@ memtable_allocation_type: offheap_objects
 # and flush size and frequency. More is not better you just need enough flush writers
 # to never stall waiting for flushing to free memory.
 #
-#memtable_flush_writers: 2
+memtable_flush_writers: 8
 
 # Total space to use for change-data-capture logs on disk.
 #
@@ -918,7 +918,7 @@ column_index_cache_size_in_kb: 2
 #
 # If your data directories are backed by SSD, you should increase this
 # to the number of cores.
-#concurrent_compactors: 1
+concurrent_compactors: 64 
 
 # Number of simultaneous repair validations to allow. If not set or set to
 # a value less than 1, it defaults to the value of concurrent_compactors.
@@ -939,7 +939,7 @@ concurrent_materialized_view_builders: 1
 # Setting this to 0 disables throttling. Note that this accounts for all types
 # of compaction, including validation compaction (building Merkle trees
 # for repairs).
-compaction_throughput_mb_per_sec: 64
+compaction_throughput_mb_per_sec: 1000 
 
 # When compacting, the replacement sstable(s) can be opened before they
 # are completely written, and used in place of the prior sstables for
@@ -1498,6 +1498,9 @@ enable_drop_compact_storage: false
 #                 used DSE release. This is a best-effort emulation of said defaults. Further, all nodes must use the same
 #                 config value.
 # emulate_dbaas_defaults: false
+
+sai_options:
+  segment_write_buffer_space_mb: 1000
 
 # Guardrails settings.
 # guardrails:
