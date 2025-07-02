@@ -91,10 +91,13 @@ public class V1SearchableIndex implements SearchableIndex
 
             metadatas = SegmentMetadata.load(source, indexContext, sstableContext);
 
+            long termCount = 0;
             for (SegmentMetadata metadata : metadatas)
             {
                 segmentsBuilder.add(new Segment(indexContext, sstableContext, indexFiles, metadata));
+                termCount += metadata.totalTermCount == INVALID_TOTAL_TERM_COUNT ? 0 : metadata.totalTermCount;
             }
+            this.approximateTermCount = termCount;
 
             segments = segmentsBuilder.build();
             assert !segments.isEmpty();
@@ -107,9 +110,6 @@ public class V1SearchableIndex implements SearchableIndex
             this.maxTerm = metadatas.stream().map(m -> m.maxTerm).max(TypeUtil.comparator(indexContext.getValidator(), version)).orElse(null);
 
             this.numRows = metadatas.stream().mapToLong(m -> m.numRows).sum();
-            this.approximateTermCount = metadatas.stream()
-                                                 .mapToLong(m -> m.totalTermCount == INVALID_TOTAL_TERM_COUNT ? 0 : m.totalTermCount)
-                                                 .sum();
 
             this.minSSTableRowId = metadatas.get(0).minSSTableRowId;
             this.maxSSTableRowId = metadatas.get(metadatas.size() - 1).maxSSTableRowId;
