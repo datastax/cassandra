@@ -19,6 +19,7 @@
 package org.apache.cassandra.io.sstable.format;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.util.Collection;
 import java.util.Collections;
@@ -48,6 +49,7 @@ import org.apache.cassandra.db.rows.UnfilteredRowIterators;
 import org.apache.cassandra.dht.LocalPartitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.index.SecondaryIndexManager;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.sstable.IVerifier;
 import org.apache.cassandra.io.sstable.KeyIterator;
@@ -156,6 +158,8 @@ public abstract class SortedTableVerifier<R extends SSTableReaderWithFilter> imp
 
         verifyBloomFilter();
 
+        verifyStorageAttachedIndexes();
+
         if (options.checkOwnsTokens && !isOffline && !(sstable.getPartitioner() instanceof LocalPartitioner))
         {
             if (verifyOwnedRanges() == 0)
@@ -179,6 +183,52 @@ public abstract class SortedTableVerifier<R extends SSTableReaderWithFilter> imp
         {
             outputHandler.debug("Deserializing bloom filter for %s", sstable);
             deserializeBloomFilter(sstable);
+        }
+        catch (Throwable t)
+        {
+            outputHandler.warn(t);
+            markAndThrow(t);
+        }
+    }
+
+    protected void verifyStorageAttachedIndexes()
+    {
+        if (realm == null || isOffline)
+            return;
+
+        try
+        {
+            SecondaryIndexManager indexManager = realm.getIndexManager();
+            if (indexManager != null)
+            {
+                // Quick verification skips checksum validation
+                boolean validateChecksum = !options.quick;
+                outputHandler.debug("Validating storage attached indexes for %s", sstable);
+                logger.debug("SortedTableVerifier: Validating SAI for {}", sstable.getFilename());
+                // Pass true for throwOnIncomplete to ensure incomplete indexes throw exceptions
+                boolean complete = indexManager.validateSSTableAttachedIndexes(Collections.singleton(sstable), true, validateChecksum);
+                if (!complete)
+                {
+                    // This shouldn't happen since we're throwing on incomplete, but just in case
+                    throw new IOException("SAI validation failed for " + sstable.getFilename());
+                }
+            }
+            else
+            {
+                logger.debug("SortedTableVerifier: No index manager for {}", sstable.getFilename());
+            }
+        }
+        catch (IllegalStateException e)
+        {
+            // Convert IllegalStateException from incomplete indexes to CorruptSSTableException
+            outputHandler.warn(e);
+            markAndThrow(new CorruptSSTableException(e, sstable.getFilename()));
+        }
+        catch (UncheckedIOException e)
+        {
+            // Convert UncheckedIOException from SAI validation to CorruptSSTableException
+            outputHandler.warn(e);
+            markAndThrow(new CorruptSSTableException(e.getCause(), sstable.getFilename()));
         }
         catch (Throwable t)
         {
