@@ -17,11 +17,15 @@ package org.apache.cassandra.db.filter;
 
 import java.io.IOException;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Set;
 
 import org.apache.cassandra.cql3.restrictions.SingleColumnRestriction;
 import org.apache.cassandra.index.sai.analyzer.AnalyzerEqOperatorSupport;
+
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -198,6 +202,83 @@ public class IndexHintsTest extends CQLTester
         execute(query + "WITH included_indexes={\"idx1\"} AND excluded_indexes={\"idx2\"}");
         execute(query + "WITH excluded_indexes={\"idx1\"} AND included_indexes={idx2}");
         execute(query + "WITH excluded_indexes={\"idx1\"} AND included_indexes={\"idx2\"}");
+    }
+
+    @Test
+    public void testEqualsAndHashCode()
+    {
+        testEqualsAndHashCode(Pair.create(indexMetadatas(), indexMetadatas()),
+                              Pair.create(indexMetadatas("idx1"), indexMetadatas()),
+                              Pair.create(indexMetadatas(), indexMetadatas("idx1")),
+                              Pair.create(indexMetadatas("idx1"), indexMetadatas("idx2")),
+                              Pair.create(indexMetadatas("idx1", "idx2"), indexMetadatas()),
+                              Pair.create(indexMetadatas(), indexMetadatas("idx1", "idx2")),
+                              Pair.create(indexMetadatas("idx1", "idx2"), indexMetadatas("idx3", "idx4")));
+    }
+
+    @SafeVarargs
+    private static void testEqualsAndHashCode(Pair<Set<IndexMetadata>, Set<IndexMetadata>>... dataset)
+    {
+        for (int i = 0; i < dataset.length; i++)
+        {
+            for (int j = 0; j < dataset.length; j++)
+            {
+                if (i != j)
+                     assertEqualsAndHashCode(dataset[i], dataset[j]);
+            }
+        }
+    }
+
+    private static void assertEqualsAndHashCode(Pair<Set<IndexMetadata>, Set<IndexMetadata>> one,
+                                                Pair<Set<IndexMetadata>, Set<IndexMetadata>> other)
+    {
+        IndexHints hints = IndexHints.create(one.left, one.right);
+        Assertions.assertThat(hints)
+                  .isEqualTo(hints)
+                  .isNotEqualTo(null)
+                  .isNotEqualTo(1);
+
+        IndexHints sameHints = IndexHints.create(one.left, one.right);
+        Assertions.assertThat(hints).isEqualTo(sameHints);
+        Assertions.assertThat(sameHints).isEqualTo(hints);
+        Assertions.assertThat(hints.hashCode()).isEqualTo(sameHints.hashCode());
+
+        IndexHints otherHints = IndexHints.create(other.left, other.right);
+        Assertions.assertThat(hints).isNotEqualTo(otherHints);
+        Assertions.assertThat(otherHints).isNotEqualTo(hints);
+        Assertions.assertThat(hints.hashCode()).isNotEqualTo(otherHints.hashCode());
+
+        Map<IndexHints, Integer> map = new HashMap<>();
+        map.put(hints, 1);
+        map.put(otherHints, 2);
+        Assertions.assertThat(map.get(hints)).isEqualTo(1);
+        Assertions.assertThat(map.get(sameHints)).isEqualTo(1);
+        Assertions.assertThat(map.get(otherHints)).isEqualTo(2);
+    }
+
+    @Test
+    public void testToString()
+    {
+        assertToString(Collections.emptySet(), Collections.emptySet(), "IndexHints{included=, excluded=}");
+        assertToString(indexMetadatas("idx1"), indexMetadatas(), "IndexHints{included=idx1, excluded=}");
+        assertToString(indexMetadatas(), indexMetadatas("idx1"), "IndexHints{included=, excluded=idx1}");
+        assertToString(indexMetadatas("idx1", "idx2"), indexMetadatas(), "IndexHints{included=idx1,idx2, excluded=}");
+        assertToString(indexMetadatas(), indexMetadatas("idx1", "idx2"), "IndexHints{included=, excluded=idx1,idx2}");
+        assertToString(indexMetadatas("idx1", "idx2"), indexMetadatas("idx3", "idx4"), "IndexHints{included=idx1,idx2, excluded=idx3,idx4}");
+    }
+
+    private static void assertToString(Set<IndexMetadata> included, Set<IndexMetadata> excluded, String expected)
+    {
+        IndexHints hints = IndexHints.create(included, excluded);
+        Assertions.assertThat(hints.toString()).isEqualTo(expected);
+    }
+
+    private static Set<IndexMetadata> indexMetadatas(String... names)
+    {
+        Set<IndexMetadata> indexes = new HashSet<>(names.length);
+        for (String name : names)
+            indexes.add(IndexMetadata.fromSchemaMetadata(name, IndexMetadata.Kind.CUSTOM, Collections.emptyMap()));
+        return indexes;
     }
 
     /**
@@ -1003,7 +1084,7 @@ public class IndexHintsTest extends CQLTester
         String legacy = createIndex("CREATE INDEX legacy ON %s(v)");
         String literal = createIndex("CREATE CUSTOM INDEX literal ON %s(v) USING 'StorageAttachedIndex'");
         String analyzed = createIndex("CREATE CUSTOM INDEX analyzed ON %s(v) USING 'StorageAttachedIndex' " +
-                                  "WITH OPTIONS = { 'equals_behaviour_when_analyzed': 'MATCH', 'index_analyzer': 'standard' }");
+                                      "WITH OPTIONS = { 'equals_behaviour_when_analyzed': 'MATCH', 'index_analyzer': 'standard' }");
 
         String insert = "INSERT INTO %s (k, v) VALUES (?, ?)";
         Object[] row1 = new Object[]{ 1, "Richard Strauss" };
