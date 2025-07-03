@@ -263,13 +263,12 @@ class EndpointStateSerializer implements IVersionedSerializer<EndpointState>
         HeartBeatState.serializer.serialize(hbState, out, version);
 
         /* serialize the map of ApplicationState objects */
-        Set<Map.Entry<ApplicationState, VersionedValue>> states = epState.states();
+        Set<Map.Entry<ApplicationState, VersionedValue>> states = filterOutgoingStates(epState.states(), version);
         out.writeInt(states.size());
         for (Map.Entry<ApplicationState, VersionedValue> state : states)
         {
-            VersionedValue value = filterValue(state.getKey(), state.getValue(), version);
             out.writeInt(state.getKey().ordinal());
-            VersionedValue.serializer.serialize(value, out, version);
+            VersionedValue.serializer.serialize(state.getValue(), out, version);
         }
     }
 
@@ -286,29 +285,97 @@ class EndpointStateSerializer implements IVersionedSerializer<EndpointState>
             states.put(Gossiper.STATES[key], value);
         }
 
-        return new EndpointState(hbState, states);
+        return new EndpointState(hbState, filterIncomingStates(states, version));
     }
 
     public long serializedSize(EndpointState epState, int version)
     {
         long size = HeartBeatState.serializer.serializedSize(epState.getHeartBeatState(), version);
-        Set<Map.Entry<ApplicationState, VersionedValue>> states = epState.states();
+        Set<Map.Entry<ApplicationState, VersionedValue>> states = filterOutgoingStates(epState.states(), version);
         size += TypeSizes.sizeof(states.size());
         for (Map.Entry<ApplicationState, VersionedValue> state : states)
         {
-            VersionedValue value = filterValue(state.getKey(), state.getValue(), version);
             size += TypeSizes.sizeof(state.getKey().ordinal());
-            size += VersionedValue.serializer.serializedSize(value, version);
+            size += VersionedValue.serializer.serializedSize(state.getValue(), version);
         }
         return size;
     }
 
     @VisibleForTesting
-    static VersionedValue filterValue(ApplicationState state, VersionedValue value, int version)
+    static Set<Map.Entry<ApplicationState, VersionedValue>> filterOutgoingStates(Set<Map.Entry<ApplicationState, VersionedValue>> states, int version)
     {
-        // CC versions come with a sha suffix that C* 3.x nodes cannot parse
-        return version < MessagingService.VERSION_40 && ApplicationState.RELEASE_VERSION == state
-                ? VersionedValue.unsafeMakeVersionedValue(value.value.replaceFirst("-[0-9a-f]{7,40}$", ""), value.version)
-                : value;
+        if (version < MessagingService.VERSION_40 && !MessagingService.current_version_override)
+        {
+            Set<Map.Entry<ApplicationState, VersionedValue>> filteredStates = new HashSet<>();
+            for (Map.Entry<ApplicationState, VersionedValue> state : states)
+                filteredStates.addAll(filterOutgoingState(state, version).entrySet());
+            return filteredStates;
+        }
+        return states;
+    }
+
+    private static Map<ApplicationState, VersionedValue> filterOutgoingState(Map.Entry<ApplicationState, VersionedValue> state, int version)
+    {
+        assert version < MessagingService.VERSION_40 && !MessagingService.current_version_override;
+        VersionedValue vv = state.getValue();
+        switch (state.getKey())
+        {
+            case INTERNAL_ADDRESS_AND_PORT:
+                return Map.of(
+                        ApplicationState.values()[7], VersionedValue.unsafeMakeVersionedValue(vv.value.split(":")[0], vv.version),
+                        ApplicationState.values()[17], VersionedValue.unsafeMakeVersionedValue(vv.value.split(":")[1], vv.version));
+            case NATIVE_ADDRESS_AND_PORT:
+                return Map.of(ApplicationState.values()[15], VersionedValue.unsafeMakeVersionedValue(vv.value.split(":")[1], vv.version));
+            case STATUS_WITH_PORT:
+                return Map.of(ApplicationState.values()[0], VersionedValue.unsafeMakeVersionedValue(vv.value.split("[:,]")[0], vv.version));
+            case DISK_USAGE:
+                return Map.of(ApplicationState.values()[21], state.getValue());
+            case SSTABLE_VERSIONS:
+                // has it as 18 but DSE doesn't have it at all (dse's 18 is STORAGE_PORT_SSL)
+                //  as schema changes must not be performed during a major upgrade, just ignore sending this state to the legacy peers
+                return Map.of();
+            case INDEX_STATUS:
+                return Map.of();
+            case RELEASE_VERSION:
+                // CC versions add a sha suffix that C* 3.x nodes cannot parse
+                return Map.of(ApplicationState.RELEASE_VERSION, VersionedValue.unsafeMakeVersionedValue(vv.value.replaceFirst("-[0-9a-f]{7,40}$", ""), vv.version));
+            default:
+                return Map.of(state.getKey(), state.getValue());
+        }
+    }
+
+    @VisibleForTesting
+    static Map<ApplicationState, VersionedValue> filterIncomingStates(Map<ApplicationState, VersionedValue> states, int version)
+    {
+        if (version < MessagingService.VERSION_40 && !MessagingService.current_version_override)
+        {
+            Map<ApplicationState, VersionedValue> filteredStates = new EnumMap<>(ApplicationState.class);
+            for (Map.Entry<ApplicationState, VersionedValue> state : states.entrySet())
+            {
+                VersionedValue vv = state.getValue();
+                switch (state.getKey().ordinal())
+                {
+                    case 15: // NATIVE_TRANSPORT_PORT --> NATIVE_ADDRESS_AND_PORT
+                        filteredStates.put(ApplicationState.NATIVE_ADDRESS_AND_PORT, vv);
+                        break;
+                    case 16: // NATIVE_TRANSPORT_PORT_SSL
+                        break;
+                    case 17: // STORAGE_PORT --> INTERNAL_ADDRESS_AND_PORT
+                        filteredStates.put(ApplicationState.INTERNAL_ADDRESS_AND_PORT, vv);
+                        break;
+                    case 18: // STORAGE_PORT_SSL
+                    case 19: // JMX_PORT
+                    case 20: // SCHEMA_COMPATIBILITY_VERSION
+                        break;
+                    case 21:
+                        filteredStates.put(ApplicationState.DISK_USAGE, vv);
+                        break;
+                    default:
+                        filteredStates.put(state.getKey(), vv);
+                }
+            }
+            return filteredStates;
+        }
+        return states;
     }
 }
