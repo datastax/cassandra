@@ -158,6 +158,7 @@ import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.Throwables;
 import org.assertj.core.api.Assertions;
 import org.awaitility.Awaitility;
+import org.awaitility.core.ThrowingRunnable;
 import org.hamcrest.Matcher;
 import org.mockito.Mockito;
 import org.mockito.internal.stubbing.defaultanswers.ForwardsInvocations;
@@ -754,6 +755,18 @@ public class Util
                   .pollDelay(0, TimeUnit.MILLISECONDS)
                   .atMost(timeout, timeUnit)
                   .untilAsserted(() -> assertThat(message, actualSupplier.get(), matcher));
+    }
+
+    public static void spinAssert(String message, ThrowingRunnable assertion, long timeout, TimeUnit timeUnit) {
+        Awaitility.await()
+                  .pollInterval(Duration.ofMillis(100))
+                  .pollDelay(0, TimeUnit.MILLISECONDS)
+                  .atMost(timeout, timeUnit)
+                  .untilAsserted(assertion);
+    }
+
+    public static void spinAssert(ThrowingRunnable assertion, int timeoutInSeconds) {
+        spinAssert(null, assertion, timeoutInSeconds, TimeUnit.SECONDS);
     }
 
     public static void joinThread(Thread thread) throws InterruptedException
