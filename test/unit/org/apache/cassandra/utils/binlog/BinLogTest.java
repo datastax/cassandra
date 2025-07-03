@@ -22,6 +22,7 @@ import java.nio.file.Path;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
@@ -29,6 +30,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.inject.Injections;
+import org.apache.cassandra.inject.InvokePointBuilder;
 import org.apache.cassandra.io.util.File;
 import org.junit.After;
 import org.junit.Before;
@@ -37,15 +40,18 @@ import org.junit.Test;
 
 import net.openhft.chronicle.queue.ChronicleQueue;
 import net.openhft.chronicle.queue.ExcerptTailer;
-import net.openhft.chronicle.queue.RollCycles;
+import net.openhft.chronicle.queue.rollcycles.TestRollCycles;
 import net.openhft.chronicle.queue.impl.single.SingleChronicleQueueBuilder;
 import net.openhft.chronicle.wire.WireOut;
 import org.apache.cassandra.Util;
 
+import static org.apache.cassandra.Util.spinAssert;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.apache.cassandra.utils.Clock.Global.nanoTime;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotEquals;
+import static org.junit.Assert.assertNotSame;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -57,10 +63,15 @@ public class BinLogTest
     }
 
     private static final String testString = "ry@nlikestheyankees";
-    private static final String testString2 = testString + "1";
+    private static final String testString2 = testString + '1';
 
     private BinLog binLog;
     private Path path;
+
+    static
+    {
+        DatabaseDescriptor.daemonInitialization();  // needed for Injections to work
+    }
 
     @BeforeClass
     public static void setup()
@@ -74,7 +85,7 @@ public class BinLogTest
     {
         path = tempDir();
         binLog = new BinLog.Builder().path(path)
-                                     .rollCycle(RollCycles.TEST_SECONDLY.toString())
+                                     .rollCycle(TestRollCycles.TEST_SECONDLY.toString())
                                      .maxQueueWeight(10)
                                      .maxLogSize(1024 * 1024 * 128)
                                      .blocking(false)
@@ -109,13 +120,13 @@ public class BinLogTest
     @Test(expected = IllegalArgumentException.class)
     public void testConstructorZeroWeight() throws Exception
     {
-        new BinLog.Builder().path(tempDir()).rollCycle(RollCycles.TEST_SECONDLY.toString()).maxQueueWeight(0).build(false);
+        new BinLog.Builder().path(tempDir()).rollCycle(TestRollCycles.TEST_SECONDLY.toString()).maxQueueWeight(0).build(false);
     }
 
     @Test(expected = IllegalArgumentException.class)
     public void testConstructorLogSize() throws Exception
     {
-        new BinLog.Builder().path(tempDir()).rollCycle(RollCycles.TEST_SECONDLY.toString()).maxLogSize(0).build(false);
+        new BinLog.Builder().path(tempDir()).rollCycle(TestRollCycles.TEST_SECONDLY.toString()).maxLogSize(0).build(false);
     }
 
     /**
@@ -166,7 +177,7 @@ public class BinLogTest
         });
         t.start();
         t.join(60 * 1000);
-        assertEquals("BinLog should not take more than 1 minute to stop", t.getState(), Thread.State.TERMINATED);
+        assertEquals("BinLog should not take more than 1 minute to stop", Thread.State.TERMINATED, t.getState());
 
         Util.spinAssertEquals(2, releaseCount::get, 60);
         Util.spinAssertEquals(Thread.State.TERMINATED, binLog.binLogThread::getState, 60);
@@ -294,7 +305,7 @@ public class BinLogTest
             t.start();
             Thread.sleep(500);
             //If the thread is not terminated then it is probably blocked on the queue
-            assertTrue(t.getState() != Thread.State.TERMINATED);
+            assertNotSame(Thread.State.TERMINATED, t.getState());
         }
         finally
         {
@@ -382,7 +393,7 @@ public class BinLogTest
     public void testCleanupOnOversize() throws Exception
     {
         tearDown();
-        binLog = new BinLog.Builder().path(path).rollCycle(RollCycles.TEST_SECONDLY.toString()).maxQueueWeight(1).maxLogSize(10000).blocking(false).build(false);
+        binLog = new BinLog.Builder().path(path).rollCycle(TestRollCycles.TEST_SECONDLY.toString()).maxQueueWeight(1).maxLogSize(10000).blocking(false).build(false);
         for (int ii = 0; ii < 5; ii++)
         {
             binLog.put(record(String.valueOf(ii)));
@@ -422,48 +433,56 @@ public class BinLogTest
 
     /**
      * Test for a bug where files were deleted but the space was not reclaimed when tracking so
-     * all log segemnts were incorrectly deleted when rolled.
-     *
-     * Due to some internal state in ChronicleQueue this test is occasionally
-     * flaky when run in the suite with testPut or testOffer.
+     * all log segments were incorrectly deleted when rolled.
      */
     @Test
-    public void testTruncationReleasesLogSpace() throws Exception
+    public void testTruncationReleasesLogSpace() throws Throwable
     {
-        Util.flakyTest(this::flakyTestTruncationReleasesLogSpace, 2, "Fails occasionally due to Chronicle internal state, see CASSANDRA-16526");
-    }
-
-
-    private void flakyTestTruncationReleasesLogSpace()
-    {
-        StringBuilder sb = new StringBuilder();
         try
         {
-            for (int ii = 0; ii < 1024 * 1024 * 2; ii++)
-            {
-                sb.append('a');
-            }
+            Injections.Counter deletionCounter = Injections.newCounter("binlogSegmentDeletion")
+                                                           .add(InvokePointBuilder.newInvokePoint()
+                                                                                  .onClass("org.apache.cassandra.utils.binlog.DeletingArchiver")
+                                                                                  .onMethod("onReleased")
+                                                                                  .atExit())
+                                                           .build();
+            Injections.inject(deletionCounter);
+            deletionCounter.reset();
+            deletionCounter.enable();
 
-            String queryString = sb.toString();
+            String queryString = "a".repeat(1024 * 1024 * 2);
 
-            //This should fill up the log so when it rolls in the future it will always delete the rolled segment;
-            for (int ii = 0; ii < 129; ii++)
+            int maxFileCount = 0;
+
+            // This should fill up the log so when it rolls in the future it will always delete the rolled segment;
+            // Make sure we don't delete more than one segment.
+            // This loop should complete in less than 3 seconds as we're rolling the log every second.
+            long startTime = System.currentTimeMillis();
+            while (deletionCounter.get() <= 1 && System.currentTimeMillis() - startTime < 10 * 1000)
             {
                 binLog.put(record(queryString));
+
+                int fileCount  = getFileCount(path);
+                assertThat(fileCount).isGreaterThanOrEqualTo(maxFileCount - 1);
+                assertThat(fileCount).isLessThanOrEqualTo(3);
+                maxFileCount = Math.max(maxFileCount, fileCount);
+
+                spinAssert(() -> assertThat(readBinLogRecords(path).size()).isGreaterThanOrEqualTo(1), 10);
             }
 
-            for (int ii = 0; ii < 2; ii++)
-            {
-                Thread.sleep(2000);
-                binLog.put(record(queryString));
-            }
+            assertThat(deletionCounter.get()).isGreaterThan(0);
+            assertThat(getFileCount(path)).isGreaterThanOrEqualTo(maxFileCount - 1);
+            spinAssert(() -> assertThat(readBinLogRecords(path).size()).isGreaterThanOrEqualTo(1), 10);
         }
         catch (InterruptedException e)
         {
             throw new RuntimeException(e);
         }
+    }
 
-        Util.spinAssertEquals(2, () -> readBinLogRecords(path).size(), 60);
+    static int getFileCount(Path path)
+    {
+        return Objects.requireNonNull(path.toFile().listFiles()).length;
     }
 
     static BinLog.ReleaseableWriteMarshallable record(String text)
@@ -495,7 +514,7 @@ public class BinLogTest
     List<String> readBinLogRecords(Path path)
     {
         List<String> records = new ArrayList<String>();
-        try (ChronicleQueue queue = SingleChronicleQueueBuilder.single(path.toFile()).rollCycle(RollCycles.TEST_SECONDLY).build())
+        try (ChronicleQueue queue = SingleChronicleQueueBuilder.single(path.toFile()).rollCycle(TestRollCycles.TEST_SECONDLY).build())
         {
             ExcerptTailer tailer = queue.createTailer();
             while (true)
