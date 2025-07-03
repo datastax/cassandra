@@ -177,7 +177,7 @@ public class IndexHints
      */
     public boolean includes(Index index)
     {
-        return included.contains(index.getIndexMetadata());
+        return includes(index.getIndexMetadata().name);
     }
 
     /**
@@ -202,9 +202,6 @@ public class IndexHints
      */
     public Set<Index> includedIn(Collection<Index> indexes)
     {
-        if (indexes.isEmpty())
-            return Collections.emptySet();
-
         Set<Index> result = new HashSet<>();
         for (Index index : indexes)
         {
@@ -234,7 +231,7 @@ public class IndexHints
      */
     public boolean excludes(Index index)
     {
-        return excluded.contains(index.getIndexMetadata());
+        return excludes(index.getIndexMetadata().name);
     }
 
     /**
@@ -278,9 +275,6 @@ public class IndexHints
      */
     public <T extends Index> Optional<T> getBestIndexFor(Collection<T> indexes, Predicate<T> filter, boolean isContains)
     {
-        if (indexes.isEmpty())
-            return Optional.empty();
-
         // filter excluded and filtered indexes
         Collection<T> candidates = filter(indexes, index -> !excludes(index) && filter.test(index));
 
@@ -370,10 +364,13 @@ public class IndexHints
      */
     public static IndexHints create(Set<IndexMetadata> included, Set<IndexMetadata> excluded)
     {
-        assert included != null && excluded != null;
-
-        if (included.isEmpty() && excluded.isEmpty())
+        if ((included == null || included.isEmpty()) && (excluded == null || excluded.isEmpty()))
             return NONE;
+
+        if (included == null)
+            included = Collections.emptySet();
+        if (excluded == null)
+            excluded = Collections.emptySet();
 
         return new IndexHints(included, excluded);
     }

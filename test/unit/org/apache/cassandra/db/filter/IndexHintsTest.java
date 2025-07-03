@@ -205,6 +205,65 @@ public class IndexHintsTest extends CQLTester
     }
 
     @Test
+    public void testCreate()
+    {
+        Assertions.assertThat(IndexHints.create(null, null))
+                  .isEqualTo(IndexHints.create(indexMetadatas(), indexMetadatas()))
+                  .isSameAs(IndexHints.NONE)
+                  .matches(i -> i.included.isEmpty())
+                  .matches(i -> i.excluded.isEmpty())
+                  .matches(i -> !i.includes("idx1"))
+                  .matches(i -> !i.includes("idx2"))
+                  .matches(i -> !i.includes("idx3"))
+                  .matches(i -> !i.includes("idx4"))
+                  .matches(i -> !i.excludes("idx1"))
+                  .matches(i -> !i.excludes("idx2"))
+                  .matches(i -> !i.excludes("idx3"))
+                  .matches(i -> !i.excludes("idx4"));
+
+        Assertions.assertThat(IndexHints.create(indexMetadatas("idx1", "idx2"), null))
+                  .isEqualTo(IndexHints.create(indexMetadatas("idx1", "idx2"), indexMetadatas()))
+                  .isNotEqualTo(IndexHints.NONE)
+                  .matches(i -> i.included.size() == 2)
+                  .matches(i -> i.excluded.isEmpty())
+                  .matches(i -> i.includes("idx1"))
+                  .matches(i -> i.includes("idx2"))
+                  .matches(i -> !i.includes("idx3"))
+                  .matches(i -> !i.includes("idx4"))
+                  .matches(i -> !i.excludes("idx1"))
+                  .matches(i -> !i.excludes("idx2"))
+                  .matches(i -> !i.excludes("idx3"))
+                  .matches(i -> !i.excludes("idx4"));
+
+        Assertions.assertThat(IndexHints.create(null, indexMetadatas("idx3", "idx4")))
+                  .isEqualTo(IndexHints.create(indexMetadatas(), indexMetadatas("idx3", "idx4")))
+                  .isNotEqualTo(IndexHints.NONE)
+                  .matches(i -> i.included.isEmpty())
+                  .matches(i -> i.excluded.size() == 2)
+                  .matches(i -> !i.includes("idx1"))
+                  .matches(i -> !i.includes("idx2"))
+                  .matches(i -> !i.includes("idx3"))
+                  .matches(i -> !i.includes("idx4"))
+                  .matches(i -> !i.excludes("idx1"))
+                  .matches(i -> !i.excludes("idx2"))
+                  .matches(i -> i.excludes("idx3"))
+                  .matches(i -> i.excludes("idx4"));
+
+        Assertions.assertThat(IndexHints.create(indexMetadatas("idx1", "idx2"), indexMetadatas("idx3", "idx4")))
+                  .isNotEqualTo(IndexHints.NONE)
+                  .matches(i -> i.included.size() == 2)
+                  .matches(i -> i.excluded.size() == 2)
+                  .matches(i -> i.includes("idx1"))
+                  .matches(i -> i.includes("idx2"))
+                  .matches(i -> !i.includes("idx3"))
+                  .matches(i -> !i.includes("idx4"))
+                  .matches(i -> !i.excludes("idx1"))
+                  .matches(i -> !i.excludes("idx2"))
+                  .matches(i -> i.excludes("idx3"))
+                  .matches(i -> i.excludes("idx4"));
+    }
+
+    @Test
     public void testEqualsAndHashCode()
     {
         testEqualsAndHashCode(Pair.create(indexMetadatas(), indexMetadatas()),
