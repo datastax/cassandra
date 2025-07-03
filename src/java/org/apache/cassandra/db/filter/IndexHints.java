@@ -27,6 +27,7 @@ import java.util.function.Predicate;
 
 import javax.annotation.Nullable;
 
+import com.google.common.collect.Iterables;
 import com.google.common.collect.Sets;
 
 import org.apache.cassandra.cql3.QualifiedName;
@@ -273,56 +274,82 @@ public class IndexHints
      * @param filter a filter to apply to the indexes
      * @param isContains whether the calling operation is a {@code [NOT] CONTAINS [KEY]} operation, in which case we
      * prefer not-analyzed indexes (see CNDB-13925).
-     * @return the best of the specified indexes that satisfies the specified filter
+     * @return the best of the specified indexes that satisfies these index hints and the specified filter
      */
     public <T extends Index> Optional<T> getBestIndexFor(Collection<T> indexes, Predicate<T> filter, boolean isContains)
     {
         if (indexes.isEmpty())
             return Optional.empty();
 
-        // filter excluded indexes
-        Set<T> candidates = new HashSet<>(indexes.size());
-        for (T index : indexes)
-        {
-            if (!excludes(index) && filter.test(index))
-                candidates.add(index);
-        }
+        // filter excluded and filtered indexes
+        Collection<T> candidates = filter(indexes, index -> !excludes(index) && filter.test(index));
 
-        // if all indexes are excluded, return empty
-        if (candidates.isEmpty())
-            return Optional.empty();
-
-        // if there is only one candidate index, return it
-        if (candidates.size() == 1)
-            return Optional.of(candidates.iterator().next());
-
-        // try to find an included index
-        for (T index : candidates)
-        {
-            if (includes(index))
-                return Optional.of(index);
-        }
+        // prefer included indexes
+        candidates = prefer(candidates, this::includes);
 
         // if we are using a contains operator, we prefer indexes without an analyzer (see CNDB-13925)
         if (isContains)
-        {
-            boolean hasAnalyzed = false;
-            Set<T> nonAnalyzed = new HashSet<>();
-            for (T index : candidates)
-            {
-                if (index.isAnalyzed())
-                    hasAnalyzed = true;
-                else
-                    nonAnalyzed.add(index);
-            }
-            if (hasAnalyzed && !nonAnalyzed.isEmpty())
-                candidates = nonAnalyzed;
-        }
+            candidates = prefer(candidates, index -> !index.isAnalyzed());
 
         // return the candidate with the best selectivity
+        return bestSelectivityIndex(candidates);
+    }
+
+    /**
+     * Returns the indexes in the specified collection of indexes that are applicable to the specified filter.
+     *
+     * @param indexes a collection of indexes
+     * @param filter a filter to apply to the indexes
+     * @return the indexes that are applicable to the specified filter
+     */
+    private static <T extends Index> Collection<T> filter(Collection<T> indexes, Predicate<T> filter)
+    {
+        if (indexes.isEmpty())
+            return indexes;
+
+        Set<T> candidates = new HashSet<>(indexes.size());
+        for (T index : indexes)
+        {
+            if (filter.test(index))
+                candidates.add(index);
+        }
+        return candidates;
+    }
+
+    /**
+     * Returns the indexes in the specified collection that are preferred by the specified predicate, or the unmodified
+     * collection if there are no preferred indexes.
+     *
+     * @param indexes a collection of indexes
+     * @param predicate a predicate that returns {@code true} for preferred indexes
+     * @return the preferred indexes, or the unmodified collection if there are no preferred indexes
+     */
+    private static <T extends Index> Collection<T> prefer(Collection<T> indexes, Predicate<T> predicate)
+    {
+        if (indexes.isEmpty() || indexes.size() == 1)
+            return indexes;
+
+        Collection<T> preferred = filter(indexes, predicate);
+        return preferred.isEmpty() ? indexes : preferred;
+    }
+
+    /**
+     * Returns the index with the best selectivity from the specified collection of indexes.
+     *
+     * @param indexes a collection of indexes
+     * @return the index with the best selectivity, according to {@link Index#getEstimatedResultRows()}
+     */
+    private static <T extends Index> Optional<T> bestSelectivityIndex(Collection<T> indexes)
+    {
+        if (indexes.isEmpty())
+            return Optional.empty();
+
+        if (indexes.size() == 1)
+            return Optional.of(Iterables.getOnlyElement(indexes));
+
         T bestIndex = null;
         long bestSelectivity = Long.MAX_VALUE;
-        for (T index : candidates)
+        for (T index : indexes)
         {
             long selectivity = index.getEstimatedResultRows();
             if (bestIndex == null || selectivity < bestSelectivity)
