@@ -152,6 +152,7 @@ import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.Throwables;
 import org.assertj.core.api.Assertions;
 import org.awaitility.Awaitility;
+import org.awaitility.core.ThrowingRunnable;
 
 import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
 import static org.hamcrest.MatcherAssert.assertThat;
@@ -721,6 +722,18 @@ public class Util
             IPartitioner p = StorageService.instance.setPartitionerUnsafe(oldP);
             assert p == newP;
         }
+    }
+
+    public static void spinAssert(String message, ThrowingRunnable assertion, long timeout, TimeUnit timeUnit) {
+        Awaitility.await()
+                  .pollInterval(Duration.ofMillis(100))
+                  .pollDelay(0, TimeUnit.MILLISECONDS)
+                  .atMost(timeout, timeUnit)
+                  .untilAsserted(assertion);
+    }
+
+    public static void spinAssert(ThrowingRunnable assertion, int timeoutInSeconds) {
+        spinAssert(null, assertion, timeoutInSeconds, TimeUnit.SECONDS);
     }
 
     public static void spinAssertEquals(Object expected, Supplier<Object> actualSupplier, int timeoutInSeconds)
