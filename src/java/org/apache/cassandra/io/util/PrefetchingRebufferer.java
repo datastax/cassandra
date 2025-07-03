@@ -324,6 +324,12 @@ public class PrefetchingRebufferer implements Rebufferer
     }
 
     @Override
+    public long adjustPosition(long position)
+    {
+        return position;
+    }
+
+    @Override
     public double getCrcCheckChance()
     {
         return source.getCrcCheckChance();

@@ -37,6 +37,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.marshal.BytesType;
 import org.apache.cassandra.db.marshal.UTF8Type;
+import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.io.util.DataPosition;
 import org.apache.cassandra.io.util.File;
@@ -328,6 +329,32 @@ public class CompressedSequentialWriterTest extends SequentialWriterTest
         }
     }
 
+    @Test
+    public void emptyFileTest()
+    {
+        File tempFile = new File(Files.createTempDir(), "empty.txt");
+        File offsetsFile = FileUtils.createDeletableTempFile("compressedsequentialwriter.offset", "test");
+        try (SequentialWriter writer = new CompressedSequentialWriter(tempFile, offsetsFile,
+                                                                      null, SequentialWriterOption.DEFAULT,
+                                                                      CompressionParams.lz4(4096),
+                                                                      new MetadataCollector(new ClusteringComparator(UTF8Type.instance))))
+        {
+            // do not write anything, but finalize to do a sync
+            writer.finish();
+        }
+
+        try (FileHandle.Builder builder = new FileHandle.Builder(tempFile)
+                                                        .withCompressionMetadata(new CompressionMetadata(offsetsFile, tempFile.length(),
+                                                                                 SSTableFormat.Type.current().info.getLatestVersion().hasMaxCompressedLength()));
+             FileHandle fh = builder.complete();
+             RandomAccessReader reader = fh.createReader())
+        {
+            assertTrue(reader.isEOF());
+            assertEquals(0, reader.length());
+        }
+        assertEquals(0, tempFile.length());
+    }
+
     protected TestableTransaction newTest() throws IOException
     {
         TestableCSW sw = new TestableCSW();
@@ -338,7 +365,7 @@ public class CompressedSequentialWriterTest extends SequentialWriterTest
     private static class TestableCSW extends TestableSW
     {
         final File offsetsFile;
-        static final int MAX_COMPRESSED = BUFFER_SIZE * 10;     // Always compress for this test.
+        static final int MAX_COMPRESSED = DEFAULT_BUFFER_SIZE * 10;     // Always compress for this test.
 
         private TestableCSW() throws IOException
         {
@@ -350,14 +377,14 @@ public class CompressedSequentialWriterTest extends SequentialWriterTest
         {
             this(file, offsetsFile, new CompressedSequentialWriter(file, offsetsFile,
                                                                    null, SequentialWriterOption.DEFAULT,
-                                                                   CompressionParams.lz4(BUFFER_SIZE, MAX_COMPRESSED),
+                                                                   CompressionParams.lz4(DEFAULT_BUFFER_SIZE, MAX_COMPRESSED),
                                                                    new MetadataCollector(new ClusteringComparator(UTF8Type.instance))));
 
         }
 
         private TestableCSW(File file, File offsetsFile, CompressedSequentialWriter sw) throws IOException
         {
-            super(file, sw);
+            super(file, sw, DEFAULT_BUFFER_SIZE);
             this.offsetsFile = offsetsFile;
         }
 
@@ -378,7 +405,7 @@ public class CompressedSequentialWriterTest extends SequentialWriterTest
             DataInputStream offsets = new DataInputStream(new ByteArrayInputStream(readFileToByteArray(offsetsFile.toJavaIOFile())));
             Assert.assertTrue(offsets.readUTF().endsWith("LZ4Compressor"));
             Assert.assertEquals(0, offsets.readInt());
-            Assert.assertEquals(BUFFER_SIZE, offsets.readInt());
+            Assert.assertEquals(DEFAULT_BUFFER_SIZE, offsets.readInt());
             Assert.assertEquals(MAX_COMPRESSED, offsets.readInt());
             Assert.assertEquals(fullContents.length, offsets.readLong());
             Assert.assertEquals(2, offsets.readInt());
