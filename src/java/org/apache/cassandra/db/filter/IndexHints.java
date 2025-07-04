@@ -232,9 +232,6 @@ public class IndexHints
      *     <li>If it's a contains restriction, then a non-analyzed index is better.</li>
      *     <li>An index more selective according to {@link Index#getEstimatedResultRows()} is better.</li>
      * </ol>
-     * Please note that SAI and SASI will always return -1 for that method, to force their selection. They will later
-     * use their own internal planning when queried. The index selectivity will still be used for legacy indexes, and
-     * potentially for 3rd party implementations.
      *
      * @param indexes a collection of indexes
      * @param filter a filter to apply to the indexes
@@ -298,6 +295,11 @@ public class IndexHints
 
     /**
      * Returns the index with the best selectivity from the specified collection of indexes.
+     * </p>
+     * The selectivity is determined by the {@link Index#getEstimatedResultRows()} method. Please note that SAI and SASI
+     * will always return -1 for that method, to force their selection. They will later use their own internal planning
+     * when queried. The index selectivity will still be used for legacy indexes, and potentially for 3rd party
+     * implementations.
      *
      * @param indexes a collection of indexes
      * @return the index with the best selectivity, according to {@link Index#getEstimatedResultRows()}
@@ -311,14 +313,14 @@ public class IndexHints
             return Optional.of(Iterables.getOnlyElement(indexes));
 
         T bestIndex = null;
-        long bestSelectivity = Long.MAX_VALUE;
+        long bestCardinality = Long.MAX_VALUE;
         for (T index : indexes)
         {
-            long selectivity = index.getEstimatedResultRows();
-            if (bestIndex == null || selectivity < bestSelectivity)
+            long cardinality = index.getEstimatedResultRows();
+            if (bestIndex == null || cardinality < bestCardinality)
             {
                 bestIndex = index;
-                bestSelectivity = selectivity;
+                bestCardinality = cardinality;
             }
         }
         return Optional.of(bestIndex);
