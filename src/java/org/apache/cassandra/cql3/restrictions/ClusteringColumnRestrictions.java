@@ -56,11 +56,9 @@ final class ClusteringColumnRestrictions extends RestrictionSetWrapper
     public NavigableSet<Clustering<?>> valuesAsClustering(QueryOptions options, QueryState queryState) throws InvalidRequestException
     {
         MultiClusteringBuilder builder = MultiClusteringBuilder.create(comparator);
-        List<SingleRestriction> restrictions = restrictions();
-        for (int i = 0; i < restrictions.size(); i++)
+        for (SingleRestriction restriction : restrictions())
         {
-            SingleRestriction r = restrictions.get(i);
-            r.appendTo(builder, options);
+            restriction.appendTo(builder, options);
 
             if (hasIN() && Guardrails.inSelectCartesianProduct.enabled(queryState))
                 Guardrails.inSelectCartesianProduct.guard(builder.buildSize(), "IN Select", false, queryState);
@@ -73,28 +71,25 @@ final class ClusteringColumnRestrictions extends RestrictionSetWrapper
 
     public NavigableSet<ClusteringBound<?>> boundsAsClustering(Bound bound, QueryOptions options) throws InvalidRequestException
     {
-        List<SingleRestriction> restrictionsList = restrictions();
-
         MultiClusteringBuilder builder = MultiClusteringBuilder.create(comparator);
         int keyPosition = 0;
 
-        for (int i = 0; i < restrictionsList.size(); i++)
+        for (SingleRestriction restriction : restrictions())
         {
-            SingleRestriction r = restrictionsList.get(i);
-            if (handleInFilter(r, keyPosition))
+            if (handleInFilter(restriction, keyPosition))
                 break;
 
-            r.appendBoundTo(builder, bound, options);
+            restriction.appendBoundTo(builder, bound, options);
 
             if (builder.buildIsEmpty())
                 return BTreeSet.empty(comparator);
 
             // We allow slice restriction only on the last clustering column restricted by the query.
             // Any further column restrictions must be handled by indexes or filtering.
-            if (r.isSlice())
+            if (restriction.isSlice())
                 break;
 
-            keyPosition = r.getLastColumn().position() + 1;
+            keyPosition = restriction.getLastColumn().position() + 1;
         }
 
         return builder.buildBound(bound.isStart());
@@ -110,10 +105,8 @@ final class ClusteringColumnRestrictions extends RestrictionSetWrapper
     {
         int position = 0;
 
-        List<SingleRestriction> restrictions = restrictions();
-        for (int i = 0; i < restrictions.size(); i++)
+        for (SingleRestriction restriction : restrictions())
         {
-            SingleRestriction restriction = restrictions.get(i);
             if (handleInFilter(restriction, position))
                 return true;
 
@@ -132,10 +125,8 @@ final class ClusteringColumnRestrictions extends RestrictionSetWrapper
     {
         int position = 0;
 
-        List<SingleRestriction> restrictions = restrictions();
-        for (int i = 0; i < restrictions.size(); i++)
+        for (SingleRestriction restriction : restrictions())
         {
-            SingleRestriction restriction = restrictions.get(i);
             // We ignore all the clustering columns that can be handled by slices.
             if (handleInFilter(restriction, position) || restriction.hasSupportingIndex(indexRegistry, indexHints))
             {
