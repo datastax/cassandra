@@ -265,7 +265,8 @@ public final class CqlBuilder
 
     /**
      * Builds a `WITH option1 = ... AND option2 = ... AND option3 = ... clause
-     * @param builder a receiver to receive a builder allowing to add each option
+     *
+     * @param builder a consumer to receive a builder for the options to append
      */
     public CqlBuilder appendOptions(Consumer<OptionsBuilder> builder)
     {
