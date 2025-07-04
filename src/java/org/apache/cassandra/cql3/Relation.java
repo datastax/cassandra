@@ -219,8 +219,9 @@ public abstract class Relation
     /**
      * Creates a new EQ restriction instance.
      *
-     * @param table the table meta data
+     * @param table the table metadata
      * @param boundNames the variables specification where to collect the bind variables
+     * @param indexHints the user-provided index hints, used to choose behaviour on analyzed columns
      * @return a new EQ restriction instance.
      * @throws InvalidRequestException if the relation cannot be converted into an EQ restriction.
      */
@@ -229,7 +230,7 @@ public abstract class Relation
     /**
      * Creates a new NEQ restriction instance.
      *
-     * @param table the table meta data
+     * @param table the table metadata
      * @param boundNames the variables specification where to collect the bind variables
      * @return a new NEQ restriction instance.
      * @throws InvalidRequestException if the relation cannot be converted into an NEQ restriction.
@@ -240,7 +241,7 @@ public abstract class Relation
     /**
      * Creates a new IN restriction instance.
      *
-     * @param table the table meta data
+     * @param table the table metadata
      * @param boundNames the variables specification where to collect the bind variables
      * @return a new IN restriction instance
      * @throws InvalidRequestException if the relation cannot be converted into an IN restriction.
@@ -251,7 +252,7 @@ public abstract class Relation
     /**
      * Creates a new NOT IN restriction instance.
      *
-     * @param table the table meta data
+     * @param table the table metadata
      * @param boundNames the variables specification where to collect the bind variables
      * @return a new NOT IN restriction instance
      * @throws InvalidRequestException if the relation cannot be converted into an NOT IN restriction.
@@ -261,7 +262,7 @@ public abstract class Relation
     /**
      * Creates a new Slice restriction instance.
      *
-     * @param table the table meta data
+     * @param table the table metadata
      * @param boundNames the variables specification where to collect the bind variables
      * @param bound the slice bound
      * @param inclusive <code>true</code> if the bound is included.
@@ -276,7 +277,7 @@ public abstract class Relation
     /**
      * Creates a new Contains restriction instance.
      *
-     * @param table the table meta data
+     * @param table the table metadata
      * @param boundNames the variables specification where to collect the bind variables
      * @param isKey <code>true</code> if the restriction to create is a CONTAINS KEY
      * @return a new Contains <code>Restriction</code> instance
@@ -287,7 +288,7 @@ public abstract class Relation
     /**
      * Creates a new Contains restriction instance representing a NOT CONTAINS operation.
      *
-     * @param table the table meta data
+     * @param table the table metadata
      * @param boundNames the variables specification where to collect the bind variables
      * @param isKey <code>true</code> if the restriction to create is a NOT CONTAINS KEY
      * @return a new Contains <code>Restriction</code> instance
