@@ -755,8 +755,11 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         public Index findSupportingIndex(IndexRegistry indexRegistry, IndexHints indexHints)
         {
             Index bestIndex = super.findSupportingIndex(indexRegistry, indexHints);
-            if (bestIndex == null)
-                return null;
+
+            // If there is no index, or the best index is explicitly included by the user-provided hints,
+            // we don't need to do anything but return the best index.
+            if (bestIndex == null || indexHints.includes(bestIndex))
+                return bestIndex;
 
             // If there are multiple supporting indexes, we prefer those without an analyzer (see CNDB-13925).
             // This is done by the call to findSupportingIndex() above, but we also check it here to throw a client warning.
@@ -766,9 +769,6 @@ public abstract class SingleColumnRestriction implements SingleRestriction
             {
                 if (isSupportedBy(index))
                 {
-                    if (indexHints.includes(index))
-                        return bestIndex;
-
                     if (index.isAnalyzed())
                         hasAnalyzedIndex = true;
                     else
