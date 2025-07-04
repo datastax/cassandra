@@ -30,6 +30,10 @@ import java.util.concurrent.RejectedExecutionException;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
+import org.apache.cassandra.config.Config;
+import org.apache.cassandra.utils.JVMKiller;
+import org.apache.cassandra.utils.JVMStabilityInspector;
+import org.apache.cassandra.utils.KillerForTests;
 import org.junit.After;
 import org.junit.AfterClass;
 import org.junit.Before;
@@ -49,8 +53,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.ArgumentMatchers;
 import org.mockito.Mockito;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
+import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.notNull;
@@ -505,6 +508,25 @@ public class BackgroundCompactionRunnerTest
         verifyCFSWasMarkedForCompaction();
     }
 
+    @Test
+    public void handleOOMError()
+    {
+        JVMKiller originalKiller = JVMStabilityInspector.replaceKiller(new KillerForTests());
+        Config.DiskFailurePolicy originalPolicy = DatabaseDescriptor.getDiskFailurePolicy();
+        try
+        {
+            DatabaseDescriptor.setDiskFailurePolicy(Config.DiskFailurePolicy.die);
+
+            OutOfMemoryError oomError = new OutOfMemoryError("oom");
+            assertThatThrownBy(() -> BackgroundCompactionRunner.handleCompactionError(oomError, cfs))
+                    .isInstanceOf(OutOfMemoryError.class);
+        }
+        finally
+        {
+            DatabaseDescriptor.setDiskFailurePolicy(originalPolicy);
+            JVMStabilityInspector.replaceKiller(originalKiller);
+        }
+    }
 
     private void verifyTaskScheduled(Executor executor)
     {
