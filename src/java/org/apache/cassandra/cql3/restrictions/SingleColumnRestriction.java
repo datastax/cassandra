@@ -24,6 +24,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import javax.annotation.Nullable;
+
 import org.apache.cassandra.cql3.MarkerOrTerms;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.cql3.QueryOptions;
@@ -86,6 +88,7 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         return findSupportingIndex(indexRegistry, indexHints) != null;
     }
 
+    @Nullable
     public Index findSupportingIndex(IndexRegistry indexRegistry, IndexHints indexHints)
     {
         return indexHints.getBestIndexFor(indexRegistry.listIndexes(), this::isSupportedBy, isContains()).orElse(null);
