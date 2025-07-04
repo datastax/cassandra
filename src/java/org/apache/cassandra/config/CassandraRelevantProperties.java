@@ -372,7 +372,7 @@ public enum CassandraRelevantProperties
     /** Whether to optimize query plans */
     SAI_QUERY_OPTIMIZATION_LEVEL("cassandra.sai.query_optimization_level", "1"),
 
-    /** Controls the maximum number of index range iterators that will be used in a SAI intersection operation. */
+    /** Controls the maximum number of expressions that will be used in a SAI intersection operation. */
     SAI_INTERSECTION_CLAUSE_LIMIT("cassandra.sai.intersection.clause.limit", "2"),
 
     /** Whether vector type only allows float vectors. True by default. **/
