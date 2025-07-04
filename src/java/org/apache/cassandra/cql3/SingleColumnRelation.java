@@ -198,7 +198,7 @@ public final class SingleColumnRelation extends Relation
         {
             Term term = toTerm(toReceivers(columnDef), value, table.keyspace, boundNames);
             // Leave the restriction as EQ if no analyzed index in backwards compatibility mode is present
-            var ebi = IndexRegistry.obtain(table).getEqBehavior(columnDef, indexHints);
+            IndexRegistry.EqBehaviorIndexes ebi = IndexRegistry.obtain(table).getEqBehavior(columnDef, indexHints);
             // The primary key always has ambiguous EQ behavior and we have to defer to later logic to decide
             // whether the EQ is analayzed or not. This is a legacy behavior that "does the right thing" when
             // there is a fully restricted partition key or not.
