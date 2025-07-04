@@ -225,13 +225,21 @@ public class IndexHints
     }
 
     /**
-     * Returns the best of the specified indexes that satisfies the specified filter, according to these hints first,
-     * and the index-provided selectivity second.
+     * Returns the best of the specified indexes that satisfies the specified filter and is not excluded.
+     * The order of preference to determine whether an index is better than another is:
+     * <ol>
+     *     <li>An index in the included hint is better than not in the included hint.</li>
+     *     <li>If it's a contains restriction, then a non-analyzed index is better.</li>
+     *     <li>An index more selective according to {@link Index#getEstimatedResultRows()} is better.</li>
+     * </ol>
+     * Please note that SAI and SASI will always return -1 for that method, to force their selection. They will later
+     * use their own internal planning when queried. The index selectivity will still be used for legacy indexes, and
+     * potentially for 3rd party implementations.
      *
      * @param indexes a collection of indexes
      * @param filter a filter to apply to the indexes
-     * @param isContains whether the calling operation is a {@code [NOT] CONTAINS [KEY]} operation, in which case we
-     * prefer not-analyzed indexes (see CNDB-13925).
+     * @param isContains whether the operator of the calling expression is {@code [NOT] CONTAINS [KEY]}, in which case
+     * we prefer not-analyzed indexes (see CNDB-13925).
      * @return the best of the specified indexes that satisfies these index hints and the specified filter
      */
     public <T extends Index> Optional<T> getBestIndexFor(Collection<T> indexes, Predicate<T> filter, boolean isContains)
@@ -251,11 +259,11 @@ public class IndexHints
     }
 
     /**
-     * Returns the indexes in the specified collection of indexes that are applicable to the specified filter.
+     * Returns the indexes in the specified collection of indexes that satisfy the specified filter.
      *
      * @param indexes a collection of indexes
      * @param filter a filter to apply to the indexes
-     * @return the indexes that are applicable to the specified filter
+     * @return the indexes that satisfy the specified filter
      */
     private static <T extends Index> Collection<T> filter(Collection<T> indexes, Predicate<T> filter)
     {
@@ -272,8 +280,8 @@ public class IndexHints
     }
 
     /**
-     * Returns the indexes in the specified collection that are preferred by the specified predicate, or the unmodified
-     * collection if there are no preferred indexes.
+     * Returns the indexes in the specified collection that satisfy the specified predicate, or the unmodified
+     * collection if there are no indexes satisfying the predicate.
      *
      * @param indexes a collection of indexes
      * @param predicate a predicate that returns {@code true} for preferred indexes
