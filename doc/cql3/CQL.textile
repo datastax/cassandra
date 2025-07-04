@@ -491,7 +491,7 @@ h3(#createIndexStmt). CREATE INDEX
 __Syntax:__
 
 bc(syntax).. 
-<create-index-stmt> ::= CREATE ( CUSTOM )? INDEX ( IF NOT EXISTS )? ( <indexname> )?
+<create-index-stmt> ::= CREATE ( CUSTOM )? INDEX ( IF NOT EXISTS )? ( <index-name> )?
                             ON <tablename> '(' <index-identifier> ')'
                             ( USING <string> ( WITH OPTIONS = <map-literal> )? )?
 
@@ -1107,9 +1107,9 @@ bc(syntax)..
 
 <select-options> ::= <select-option> ( AND <select-option> )*
 <select-option> ::= ann_options '=' <map-literal>
-                  | included_indexes  '=' <identifiers>
-                  | excluded_indexes  '=' <identifiers>
-<identifiers> ::= '{' <identifier> ( ',' <identifier> )* '}'
+                  | included_indexes  '=' <index_names>
+                  | excluded_indexes  '=' <index_names>
+<index_names> ::= '{' <identifier> ( ',' <identifier> )* '}'
 p. 
 __Sample:__
 
