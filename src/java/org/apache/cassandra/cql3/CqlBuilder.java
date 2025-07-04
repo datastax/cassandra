@@ -19,7 +19,6 @@ package org.apache.cassandra.cql3;
 
 import java.util.Iterator;
 import java.util.Map;
-import java.util.Map.Entry;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
@@ -177,49 +176,44 @@ public final class CqlBuilder
 
     public CqlBuilder append(Map<String, String> map, boolean quoteValue)
     {
-        indentIfNeeded();
-
-        builder.append('{');
-
-        Iterator<Entry<String, String>> iter = new TreeMap<>(map).entrySet()
-                                                                 .iterator();
-        while(iter.hasNext())
-        {
-            Entry<String, String> e = iter.next();
+        return append(new TreeMap<>(map).entrySet(), e -> {
             appendWithSingleQuotes(e.getKey());
             builder.append(": ");
-            if (quoteValue)
-                appendWithSingleQuotes(e.getValue());
-            else
-                builder.append(e.getValue());
-
-            if (iter.hasNext())
-                builder.append(", ");
-        }
-        builder.append('}');
-        return this;
+            appendCollectionValue(e.getValue(), quoteValue);
+        });
     }
 
     public CqlBuilder append(Set<String> set, boolean quoteValue)
+    {
+        return append(new TreeSet<>(set),
+                      value -> appendCollectionValue(value, quoteValue));
+    }
+
+    private <T> CqlBuilder append(Iterable<T> iterable, Consumer<T> appender)
     {
         indentIfNeeded();
 
         builder.append('{');
 
-        Iterator<String> iter = new TreeSet<>(set).iterator();
-        while(iter.hasNext())
+        Iterator<T> iterator = iterable.iterator();
+        while (iterator.hasNext())
         {
-            String value = iter.next();
-            if (quoteValue)
-                appendWithSingleQuotes(value);
-            else
-                builder.append(value);
+            appender.accept(iterator.next());
 
-            if (iter.hasNext())
+            if (iterator.hasNext())
                 builder.append(", ");
         }
+
         builder.append('}');
         return this;
+    }
+
+    private void appendCollectionValue(String value, boolean quote)
+    {
+        if (quote)
+            appendWithSingleQuotes(value);
+        else
+            builder.append(value);
     }
 
     public <T> CqlBuilder appendWithSeparators(Iterable<T> iterable, Appender<T> appender, String separator)
