@@ -73,11 +73,35 @@ CREATE CUSTOM INDEX not_analyzed_idx ON t(v) USING 'StorageAttachedIndex';
 CREATE CUSTOM INDEX analyzed_idx ON t(v) USING 'StorageAttachedIndex' WITH OPTIONS = { 'index_analyzer': 'standard' };
 SELECT * FROM t WHERE v = '...'; # rejected query due to ambiguity
 ```
-But the query will work if we add hints to include or exclude one of the indexes:
+But the query will work if we add hints to include or exclude one of the indexes. 
+The following will use non-analyzed index and restrict according the exact equality semantics:
 ```
 SELECT * FROM t WHERE v = '...' WITH included_indexes = {not_analyzed_idx};
-SELECT * FROM t WHERE v = '...' WITH included_indexes = {analyzed_idx};
+SELECT * FROM t WHERE v = '...' WITH excluded_indexes = {analyzed_idx};
 ```
+The following will use analyzed index and restrict according the analyzer-based matching semantics
+```
+SELECT * FROM t WHERE v = '...' WITH included_indexes = {analyzed_idx};
+SELECT * FROM t WHERE v = '...' WITH excluded_indexes = {not_analyzed_idx};
+```
+A similar disambiguation can be done for `CONTAINS` queries where the column has both analyzed and not-analyzed indexes:
+```
+CREATE TABLE t(k int PRIMARY KEY, v set<text>);
+CREATE CUSTOM INDEX not_analyzed_idx ON t(v) USING 'StorageAttachedIndex';
+CREATE CUSTOM INDEX analyzed_idx ON t(v) USING 'StorageAttachedIndex' WITH OPTIONS = { 'index_analyzer': 'standard' };
+INSERT INTO t(k, v) VALUES ( 0, {'apple banana'});
+INSERT INTO t(k, v) VALUES ( 1, {'apple'});
+```
+By default, `CONTAINS` queries will use the not-analyzed index:
+```
+SELECT * FROM t WHERE v CONTAINS 'apple';
+```
+This will use the not-analyzed index and return one row only.
+But we can use hints to force the use of the analyzed index:
+```
+SELECT * FROM t WHERE v CONTAINS 'apple' WITH included_indexes = {analyzed_idx};
+```
+This will use the analyzed index and return two rows instead.
 
 ## Unshading queries
 
@@ -93,7 +117,6 @@ But we can use hints to exclude that index and get access to the not-indexed beh
 ```
 SELECT * FROM t WHERE v = '...' ALLOW FILTERING WITH excluded_indexes = {idx}; # uses not-analyzed filtering
 ```
-The same type of shading happens with `[NOT] CONTAINS [KEY]`.
 
 ## Choosing between index implementations
 
