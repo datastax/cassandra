@@ -183,7 +183,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
                                                  avgCellsPerRow(),
                                                  avgRowSizeInBytes(),
                                                  cfs.getLiveSSTables().size());
-        this.planFactory = new Plan.Factory(tableMetrics, this, command.rowFilter().indexHints());
+        this.planFactory = new Plan.Factory(tableMetrics, this, command.rowFilter().indexHints);
     }
 
     public PrimaryKey.Factory primaryKeyFactory()
@@ -211,7 +211,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     {
         // NOTE: we cannot remove the order by filter expression here yet because it is used in the FilterTree class
         // to filter out shadowed rows.
-        return this.command.rowFilter().root();
+        return this.command.rowFilter().root;
     }
 
     /**
@@ -546,7 +546,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     void buildPlanForExpressions(Plan.Builder builder, Collection<Expression> expressions)
     {
         Operation.OperationType op = builder.type;
-        assert !expressions.isEmpty() : "expressions should not be empty for " + op + " in " + command.rowFilter().root();
+        assert !expressions.isEmpty() : "expressions should not be empty for " + op + " in " + command.rowFilter().root;
 
         assert !expressions.stream().anyMatch(e -> e.operation == Expression.Op.ORDER_BY);
 
@@ -557,7 +557,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
             return;
         }
 
-        IndexHints hints = command.rowFilter().indexHints();
+        IndexHints hints = command.rowFilter().indexHints;
 
         for (Expression expression : expressions)
         {
@@ -798,7 +798,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
 
     private StorageAttachedIndex getBestIndexFor(RowFilter.Expression expression)
     {
-        return cfs.indexManager.getBestIndexFor(expression, command.rowFilter().indexHints(), StorageAttachedIndex.class)
+        return cfs.indexManager.getBestIndexFor(expression, command.rowFilter().indexHints, StorageAttachedIndex.class)
                                .orElse(null);
     }
 

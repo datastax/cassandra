@@ -77,7 +77,7 @@ public class StorageAttachedIndexQueryPlan implements Index.QueryPlan
     {
         // collect the indexes that can be used with the provided row filter
         Set<StorageAttachedIndex> selectedIndexes = new HashSet<>();
-        if (!selectedIndexes(rowFilter.root(), allIndexes, selectedIndexes, rowFilter.indexHints()))
+        if (!selectedIndexes(rowFilter.root, allIndexes, selectedIndexes, rowFilter.indexHints))
             return null;
 
         // collect the features of the selected indexes

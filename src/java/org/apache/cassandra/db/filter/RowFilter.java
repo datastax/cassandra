@@ -81,23 +81,13 @@ public class RowFilter
     public static final Serializer serializer = new Serializer();
     public static final RowFilter NONE = new RowFilter(FilterElement.NONE, IndexHints.NONE);
 
-    private final FilterElement root;
-    private final IndexHints indexHints;
+    public final FilterElement root;
+    public final IndexHints indexHints;
 
     protected RowFilter(FilterElement root, IndexHints indexHints)
     {
         this.root = root;
         this.indexHints = indexHints;
-    }
-
-    public FilterElement root()
-    {
-        return root;
-    }
-
-    public IndexHints indexHints()
-    {
-        return indexHints;
     }
 
     /**

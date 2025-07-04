@@ -1202,7 +1202,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
      */
     public Index.QueryPlan getBestIndexQueryPlanFor(RowFilter rowFilter)
     {
-        IndexHints hints = rowFilter.indexHints();
+        IndexHints hints = rowFilter.indexHints;
 
         if (indexes.isEmpty() || rowFilter.isEmpty())
             return null;

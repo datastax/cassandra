@@ -91,7 +91,7 @@ public class QueryController
 
     public ColumnIndex getIndex(RowFilter.Expression expression)
     {
-        IndexHints hints = command.rowFilter().indexHints();
+        IndexHints hints = command.rowFilter().indexHints;
         Optional<SASIIndex> index = cfs.indexManager.getBestIndexFor(expression, hints, SASIIndex.class);
         return index.map(SASIIndex::getIndex).orElse(null);
     }

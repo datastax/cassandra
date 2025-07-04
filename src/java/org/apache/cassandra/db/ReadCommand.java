@@ -800,7 +800,7 @@ public abstract class ReadCommand extends AbstractReadQuery
 
         builder.appendOptions(b -> {
 
-            IndexHints indexHints = rowFilter().indexHints();
+            IndexHints indexHints = rowFilter().indexHints;
             Set<String> included = new HashSet<>();
             for (IndexMetadata i : indexHints.included)
                 included.add(i.name);

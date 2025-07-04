@@ -354,7 +354,7 @@ public class TopKProcessor
             return null;
         }
 
-        IndexHints hints = command.rowFilter().indexHints();
+        IndexHints hints = command.rowFilter().indexHints;
         return sim.getBestIndexFor(e, hints, StorageAttachedIndex.class).orElse(null);
     }
 }

@@ -439,7 +439,7 @@ public class IndexHintsTest extends CQLTester
         // verify that the hints are correctly parsed and stored in the ReadCommand
         String formattedQuery = formatQuery(query);
         ReadCommand command = parseReadCommand(formattedQuery);
-        IndexHints actualHints = command.rowFilter().indexHints();
+        IndexHints actualHints = command.rowFilter().indexHints;
         Assertions.assertThat(actualHints).isEqualTo(expectedHints);
 
         // serialize and deserialize the command to check if the hints are preserved...
@@ -452,7 +452,7 @@ public class IndexHintsTest extends CQLTester
                       .isEqualTo(out.buffer().remaining());
             DataInputBuffer in = new DataInputBuffer(out.buffer(), true);
             command = ReadCommand.serializer.deserialize(in, MessagingService.VERSION_DS_12);
-            actualHints = command.rowFilter().indexHints();
+            actualHints = command.rowFilter().indexHints;
             Assertions.assertThat(actualHints).isEqualTo(expectedHints);
 
             // ...with a version that doesn't support index hints
@@ -477,7 +477,7 @@ public class IndexHintsTest extends CQLTester
                           .isEqualTo(out.buffer().remaining());
                 in = new DataInputBuffer(out.buffer(), true);
                 command = ReadCommand.serializer.deserialize(in, MessagingService.VERSION_DS_11);
-                actualHints = command.rowFilter().indexHints();
+                actualHints = command.rowFilter().indexHints;
                 Assertions.assertThat(actualHints).isEqualTo(IndexHints.NONE);
             }
         }
@@ -1433,7 +1433,7 @@ public class IndexHintsTest extends CQLTester
         @Override
         public Searcher searcherFor(ReadCommand command)
         {
-            lastQueryIndexHints = command.rowFilter().indexHints();
+            lastQueryIndexHints = command.rowFilter().indexHints;
             return super.searcherFor(command);
         }
     }

@@ -109,7 +109,7 @@ public class SingletonIndexGroup implements Index.Group
     {
         Preconditions.checkNotNull(delegate);
 
-        if (rowFilter.indexHints().excludes(delegate))
+        if (rowFilter.indexHints.excludes(delegate))
             return null;
 
         // Indexes using a singleton group don't support disjunctions,
