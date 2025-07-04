@@ -131,11 +131,11 @@ final class ClusteringColumnRestrictions extends RestrictionSetWrapper
             if (handleInFilter(restriction, position) || restriction.hasSupportingIndex(indexRegistry, indexHints))
             {
                 restriction.addToRowFilter(filter, indexRegistry, options, annOptions, indexHints);
-                continue;
             }
-
-            if (!restriction.isSlice())
+            else if (!restriction.isSlice())
+            {
                 position = restriction.getLastColumn().position() + 1;
+            }
         }
     }
 
