@@ -67,10 +67,9 @@ import static java.lang.String.format;
  * CREATE INDEX phone_idx ON users (phone);
  *
  * SELECT * FROM users
- *   WHERE birth_year = 1981 AND country = 'FR'
- *   ALLOW FILTERING
+ *   WHERE birth_year = 1981 AND country = 'FR' ALLOW FILTERING
  *   WITH included_indexes = {birth_year_idx}
- *   AND excluded_indexes = {country_idx, phone_idx};
+ *     AND excluded_indexes = {country_idx, phone_idx};
  * }
  * </pre><p>
  * The above query will use the index on {@code birth_year} and will not use the indexes on {@code country} and {@code phone}.

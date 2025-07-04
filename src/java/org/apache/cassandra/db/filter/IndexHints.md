@@ -22,7 +22,7 @@ The CQL syntax is:
 ```
 SELECT ... FROM ... WHERE ...
   WITH included_indexes = { ... } 
-  AND excluded_indexes = { ... };
+    AND excluded_indexes = { ... };
 ```
 So, for example, given the following schema:
 ```
@@ -40,10 +40,9 @@ CREATE INDEX phone_idx ON users (phone);
 The following query will use the index on `birth_year` and will not use the indexes on `country` and `phone`:
 ```
 SELECT * FROM users
-  WHERE birth_year = 1981 AND country = 'FR'
-  ALLOW FILTERING
+  WHERE birth_year = 1981 AND country = 'FR' ALLOW FILTERING
   WITH included_indexes = {birth_year_idx}
-  AND excluded_indexes = {country_idx, phone_idx};
+    AND excluded_indexes = {country_idx, phone_idx};
 ```
 Please note that the query requires `ALLOW FILTERING` because there is a restriction on the `country` column, 
 and we are explicitly excluding the index on that column.
