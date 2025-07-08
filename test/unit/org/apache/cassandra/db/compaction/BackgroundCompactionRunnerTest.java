@@ -28,6 +28,10 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import org.apache.cassandra.concurrent.ScheduledExecutorPlus;
 import org.apache.cassandra.concurrent.WrappedExecutorPlus;
+import org.apache.cassandra.config.Config;
+import org.apache.cassandra.utils.JVMKiller;
+import org.apache.cassandra.utils.JVMStabilityInspector;
+import org.apache.cassandra.utils.KillerForTests;
 import org.apache.cassandra.utils.concurrent.Promise;
 import org.junit.After;
 import org.junit.AfterClass;
@@ -515,6 +519,25 @@ public class BackgroundCompactionRunnerTest
         verifyCFSWasMarkedForCompaction();
     }
 
+    @Test
+    public void handleOOMError()
+    {
+        JVMKiller originalKiller = JVMStabilityInspector.replaceKiller(new KillerForTests());
+        Config.DiskFailurePolicy originalPolicy = DatabaseDescriptor.getDiskFailurePolicy();
+        try
+        {
+            DatabaseDescriptor.setDiskFailurePolicy(Config.DiskFailurePolicy.die);
+
+            OutOfMemoryError oomError = new OutOfMemoryError("oom");
+            assertThatThrownBy(() -> BackgroundCompactionRunner.handleCompactionError(oomError, cfs))
+                    .isInstanceOf(OutOfMemoryError.class);
+        }
+        finally
+        {
+            DatabaseDescriptor.setDiskFailurePolicy(originalPolicy);
+            JVMStabilityInspector.replaceKiller(originalKiller);
+        }
+    }
 
     private void verifyTaskScheduled(Executor executor)
     {

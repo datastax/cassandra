@@ -487,6 +487,11 @@ public class BackgroundCompactionRunner implements Runnable
             t = t instanceof FSError ? t : new FSWriteError(t);
             JVMStabilityInspector.inspectThrowable(t);
         }
+        else if (Throwables.isCausedBy(t, OutOfMemoryError.class))
+        {
+            logger.error("Encountered out of memory error on {}", cfs, t);
+            JVMStabilityInspector.inspectThrowable(t);
+        }
         else if (t instanceof CompactionInterruptedException)
         {
             logger.warn(String.format("Aborting background compaction of %s due to interruption", cfs), Throwables.unwrapped(t));
