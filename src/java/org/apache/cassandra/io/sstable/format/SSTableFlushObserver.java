@@ -107,6 +107,14 @@ public interface SSTableFlushObserver
     void complete(SSTable sstable);
 
     /**
+     * Called when current sstable writer is switched during sharded compaction to free any in-memory resources associated
+     * with the sstable without waiting for full transaction to complete
+     */
+    default void onSSTableWriterSwitched()
+    {
+    }
+
+    /**
      * Clean up resources on error. There should be no side effects if called multiple times.
      */
     default void abort(Throwable accumulator) {}
