@@ -186,21 +186,6 @@ abstract public class Plan
         return result;
     }
 
-    @VisibleForTesting
-    public final Set<String> scannedIndexes()
-    {
-        Set<String> indexes = new HashSet<>();
-        forEach(node -> {
-            if (node instanceof IndexScan)
-            {
-                IndexScan indexScan = (IndexScan) node;
-                indexes.add(indexScan.getIndexName());
-            }
-            return ControlFlow.Continue;
-        });
-        return indexes;
-    }
-
     /**
      * Returns a new list of nodes of given type.
      * The tree is traversed in depth-first order.
