@@ -26,6 +26,8 @@ import java.util.UUID;
 
 import com.google.common.base.Preconditions;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
+
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Range;
@@ -41,6 +43,8 @@ import org.apache.cassandra.utils.UUIDSerializer;
 
 public class PrepareMessage extends RepairMessage
 {
+    private static final boolean ALLOW_MIXED_REPAIR = CassandraRelevantProperties.ALLOW_MIXED_REPAIR.getBoolean();
+    
     public final List<TableId> tableIds;
     public final Collection<Range<Token>> ranges;
 
@@ -84,13 +88,15 @@ public class PrepareMessage extends RepairMessage
     }
 
     private static final String MIXED_MODE_ERROR = "Some nodes involved in repair are on an incompatible major version. " +
-                                                   "Repair is not supported in mixed major version clusters.";
+                                                   "Repair is not supported in mixed major version clusters. " +
+                                                   "To allow repair during rolling upgrades, set -Dcassandra.allow_mixed_repair=true";
 
     public static final IVersionedSerializer<PrepareMessage> serializer = new IVersionedSerializer<PrepareMessage>()
     {
         public void serialize(PrepareMessage message, DataOutputPlus out, int version) throws IOException
         {
-            Preconditions.checkArgument(version == MessagingService.current_version, MIXED_MODE_ERROR);
+            if (!ALLOW_MIXED_REPAIR)
+                Preconditions.checkArgument(version == MessagingService.current_version, MIXED_MODE_ERROR);
 
             out.writeInt(message.tableIds.size());
             for (TableId tableId : message.tableIds)
@@ -110,7 +116,8 @@ public class PrepareMessage extends RepairMessage
 
         public PrepareMessage deserialize(DataInputPlus in, int version) throws IOException
         {
-            Preconditions.checkArgument(version == MessagingService.current_version, MIXED_MODE_ERROR);
+            if (!ALLOW_MIXED_REPAIR)
+                Preconditions.checkArgument(version == MessagingService.current_version, MIXED_MODE_ERROR);
 
             int tableIdCount = in.readInt();
             List<TableId> tableIds = new ArrayList<>(tableIdCount);
