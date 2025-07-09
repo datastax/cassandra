@@ -281,14 +281,14 @@ public final class IndexMetadata
     }
 
     /**
-     * @param metadatas the index metadatas to join
+     * @param metadata the index metadata to join
      * @return a comma-separated list of alphabetically sorted unqualified index names
      */
-    public static String joinNames(Iterable<IndexMetadata> metadatas)
+    public static String joinNames(Iterable<IndexMetadata> metadata)
     {
         TreeSet<String> sortedNames = new TreeSet<>();
-        for (IndexMetadata metadata : metadatas)
-            sortedNames.add(metadata.name);
+        for (IndexMetadata indexMetadata : metadata)
+            sortedNames.add(indexMetadata.name);
         return String.join(",", sortedNames);
     }
 

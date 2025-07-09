@@ -24,7 +24,6 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -392,19 +391,19 @@ public interface Index
      */
     static String joinNames(Iterable<Index> indexes)
     {
-        return IndexMetadata.joinNames(getMetadatas(indexes));
+        return IndexMetadata.joinNames(getMetadata(indexes));
     }
 
     /**
      * @param indexes the indexes to get the metadata from
      * @return the list of index metadata
      */
-    static List<IndexMetadata> getMetadatas(Iterable<Index> indexes)
+    static List<IndexMetadata> getMetadata(Iterable<Index> indexes)
     {
-        List<IndexMetadata> metadatas = new ArrayList<>();
+        List<IndexMetadata> metadata = new ArrayList<>();
         for (Index index : indexes)
-            metadatas.add(index.getIndexMetadata());
-        return metadatas;
+            metadata.add(index.getIndexMetadata());
+        return metadata;
     }
 
     /*

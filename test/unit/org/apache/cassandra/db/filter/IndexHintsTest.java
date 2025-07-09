@@ -210,7 +210,7 @@ public class IndexHintsTest extends CQLTester
     public void testCreate()
     {
         Assertions.assertThat(IndexHints.create(null, null))
-                  .isEqualTo(IndexHints.create(indexMetadatas(), indexMetadatas()))
+                  .isEqualTo(IndexHints.create(indexMetadata(), indexMetadata()))
                   .isSameAs(IndexHints.NONE)
                   .matches(i -> i.included.isEmpty())
                   .matches(i -> i.excluded.isEmpty())
@@ -223,8 +223,8 @@ public class IndexHintsTest extends CQLTester
                   .matches(i -> !i.excludes("idx3"))
                   .matches(i -> !i.excludes("idx4"));
 
-        Assertions.assertThat(IndexHints.create(indexMetadatas("idx1", "idx2"), null))
-                  .isEqualTo(IndexHints.create(indexMetadatas("idx1", "idx2"), indexMetadatas()))
+        Assertions.assertThat(IndexHints.create(indexMetadata("idx1", "idx2"), null))
+                  .isEqualTo(IndexHints.create(indexMetadata("idx1", "idx2"), indexMetadata()))
                   .isNotEqualTo(IndexHints.NONE)
                   .matches(i -> i.included.size() == 2)
                   .matches(i -> i.excluded.isEmpty())
@@ -237,8 +237,8 @@ public class IndexHintsTest extends CQLTester
                   .matches(i -> !i.excludes("idx3"))
                   .matches(i -> !i.excludes("idx4"));
 
-        Assertions.assertThat(IndexHints.create(null, indexMetadatas("idx3", "idx4")))
-                  .isEqualTo(IndexHints.create(indexMetadatas(), indexMetadatas("idx3", "idx4")))
+        Assertions.assertThat(IndexHints.create(null, indexMetadata("idx3", "idx4")))
+                  .isEqualTo(IndexHints.create(indexMetadata(), indexMetadata("idx3", "idx4")))
                   .isNotEqualTo(IndexHints.NONE)
                   .matches(i -> i.included.isEmpty())
                   .matches(i -> i.excluded.size() == 2)
@@ -251,7 +251,7 @@ public class IndexHintsTest extends CQLTester
                   .matches(i -> i.excludes("idx3"))
                   .matches(i -> i.excludes("idx4"));
 
-        Assertions.assertThat(IndexHints.create(indexMetadatas("idx1", "idx2"), indexMetadatas("idx3", "idx4")))
+        Assertions.assertThat(IndexHints.create(indexMetadata("idx1", "idx2"), indexMetadata("idx3", "idx4")))
                   .isNotEqualTo(IndexHints.NONE)
                   .matches(i -> i.included.size() == 2)
                   .matches(i -> i.excluded.size() == 2)
@@ -268,13 +268,13 @@ public class IndexHintsTest extends CQLTester
     @Test
     public void testEqualsAndHashCode()
     {
-        testEqualsAndHashCode(Pair.create(indexMetadatas(), indexMetadatas()),
-                              Pair.create(indexMetadatas("idx1"), indexMetadatas()),
-                              Pair.create(indexMetadatas(), indexMetadatas("idx1")),
-                              Pair.create(indexMetadatas("idx1"), indexMetadatas("idx2")),
-                              Pair.create(indexMetadatas("idx1", "idx2"), indexMetadatas()),
-                              Pair.create(indexMetadatas(), indexMetadatas("idx1", "idx2")),
-                              Pair.create(indexMetadatas("idx1", "idx2"), indexMetadatas("idx3", "idx4")));
+        testEqualsAndHashCode(Pair.create(indexMetadata(), indexMetadata()),
+                              Pair.create(indexMetadata("idx1"), indexMetadata()),
+                              Pair.create(indexMetadata(), indexMetadata("idx1")),
+                              Pair.create(indexMetadata("idx1"), indexMetadata("idx2")),
+                              Pair.create(indexMetadata("idx1", "idx2"), indexMetadata()),
+                              Pair.create(indexMetadata(), indexMetadata("idx1", "idx2")),
+                              Pair.create(indexMetadata("idx1", "idx2"), indexMetadata("idx3", "idx4")));
     }
 
     @SafeVarargs
@@ -321,11 +321,11 @@ public class IndexHintsTest extends CQLTester
     public void testToString()
     {
         assertToString(Collections.emptySet(), Collections.emptySet(), "IndexHints{included=, excluded=}");
-        assertToString(indexMetadatas("idx1"), indexMetadatas(), "IndexHints{included=idx1, excluded=}");
-        assertToString(indexMetadatas(), indexMetadatas("idx1"), "IndexHints{included=, excluded=idx1}");
-        assertToString(indexMetadatas("idx1", "idx2"), indexMetadatas(), "IndexHints{included=idx1,idx2, excluded=}");
-        assertToString(indexMetadatas(), indexMetadatas("idx1", "idx2"), "IndexHints{included=, excluded=idx1,idx2}");
-        assertToString(indexMetadatas("idx1", "idx2"), indexMetadatas("idx3", "idx4"), "IndexHints{included=idx1,idx2, excluded=idx3,idx4}");
+        assertToString(indexMetadata("idx1"), indexMetadata(), "IndexHints{included=idx1, excluded=}");
+        assertToString(indexMetadata(), indexMetadata("idx1"), "IndexHints{included=, excluded=idx1}");
+        assertToString(indexMetadata("idx1", "idx2"), indexMetadata(), "IndexHints{included=idx1,idx2, excluded=}");
+        assertToString(indexMetadata(), indexMetadata("idx1", "idx2"), "IndexHints{included=, excluded=idx1,idx2}");
+        assertToString(indexMetadata("idx1", "idx2"), indexMetadata("idx3", "idx4"), "IndexHints{included=idx1,idx2, excluded=idx3,idx4}");
     }
 
     private static void assertToString(Set<IndexMetadata> included, Set<IndexMetadata> excluded, String expected)
@@ -334,7 +334,7 @@ public class IndexHintsTest extends CQLTester
         Assertions.assertThat(hints.toString()).isEqualTo(expected);
     }
 
-    private static Set<IndexMetadata> indexMetadatas(String... names)
+    private static Set<IndexMetadata> indexMetadata(String... names)
     {
         Set<IndexMetadata> indexes = new HashSet<>(names.length);
         for (String name : names)

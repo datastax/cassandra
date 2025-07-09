@@ -477,7 +477,7 @@ public class IndexHints
      */
     public Comparator<Index.QueryPlan> comparator()
     {
-        return Comparator.comparing(plan -> Sets.intersection(included, metadatas(plan.getIndexes())).size());
+        return Comparator.comparing(plan -> Sets.intersection(included, metadata(plan.getIndexes())).size());
     }
 
     @Override
@@ -489,12 +489,12 @@ public class IndexHints
                '}';
     }
 
-    private static Set<IndexMetadata> metadatas(Collection<Index> indexes)
+    private static Set<IndexMetadata> metadata(Collection<Index> indexes)
     {
-        Set<IndexMetadata> metadatas = new HashSet<>(indexes.size());
+        Set<IndexMetadata> metadata = new HashSet<>(indexes.size());
         for (Index index : indexes)
-            metadatas.add(index.getIndexMetadata());
-        return metadatas;
+            metadata.add(index.getIndexMetadata());
+        return metadata;
     }
 
     /**
