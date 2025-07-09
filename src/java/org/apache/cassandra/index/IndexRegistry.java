@@ -411,8 +411,10 @@ public interface IndexRegistry
 
     /**
      * @return
-     * - AMBIGUOUS if an index supports EQ and a different one supports both EQ and ANALYZER_MATCHES
-     * - MATCHES if an index supports both EQ and ANALYZER_MATCHES
+     * - AMBIGUOUS if an index that is not excluded by the hints supports EQ and a different one, also not exluded by
+     *   the hints, supports both EQ and ANALYZER_MATCHES. If any of the indexes is included by the hints, the behavior
+     *   is not AMBIGUOUS.
+     * - MATCHES if it's not AMBIGUOUS and an index supports both EQ and ANALYZER_MATCHES
      * - otherwise EQ
      */
     default EqBehaviorIndexes getEqBehavior(ColumnMetadata cm, IndexHints hints)
