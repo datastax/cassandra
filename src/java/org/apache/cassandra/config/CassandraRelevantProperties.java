@@ -53,6 +53,14 @@ public enum CassandraRelevantProperties
     ALLOW_CURSOR_COMPACTION("cassandra.allow_cursor_compaction", "true"),
     /** If we should allow having duplicate keys in the config file, default to true for legacy reasons */
     ALLOW_DUPLICATE_CONFIG_KEYS("cassandra.allow_duplicate_config_keys", "true"),
+
+    /**
+     * Allow repair in mixed major version clusters. When false (default), repair operations
+     * will fail in clusters with mixed major versions unless explicitly allowed.
+     * Set to true to allow repair during rolling upgrades.
+     */
+    ALLOW_MIXED_REPAIR("cassandra.allow_mixed_repair", "false"),
+
     /** If we should allow having both new (post CASSANDRA-15234) and old config keys for the same config item in the yaml */
     ALLOW_NEW_OLD_CONFIG_KEYS("cassandra.allow_new_old_config_keys"),
     ALLOW_UNLIMITED_CONCURRENT_VALIDATIONS("cassandra.allow_unlimited_concurrent_validations"),
