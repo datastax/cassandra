@@ -34,6 +34,9 @@ import static org.apache.cassandra.distributed.api.Feature.GOSSIP;
 import static org.apache.cassandra.distributed.api.Feature.NATIVE_PROTOCOL;
 import static org.apache.cassandra.distributed.api.Feature.NETWORK;
 
+import static org.apache.cassandra.distributed.shared.AssertUtils.assertRows;
+import static org.apache.cassandra.distributed.shared.AssertUtils.row;
+
 /**
  * Distributed tests for {@link org.apache.cassandra.db.filter.IndexHints}.
  */
@@ -95,17 +98,39 @@ public class IndexHintsDistributedTest extends TestBaseImpl
 
     private static void testSelectWithIndexHints(Cluster cluster, String expectedErrorMessage)
     {
-        cluster.schemaChange(withKeyspace("CREATE TABLE %s.t (k int PRIMARY KEY, v int)"));
-        cluster.schemaChange(withKeyspace("CREATE CUSTOM INDEX idx ON %s.t(v) USING 'StorageAttachedIndex'"));
+        // create a schema with various indexes in the same column, so we can provide hints to select between them
+        cluster.schemaChange(withKeyspace("CREATE TABLE %s.t (k int PRIMARY KEY, v text)"));
+        cluster.schemaChange(withKeyspace("CREATE INDEX legacy_idx ON %s.t(v)"));
+        cluster.schemaChange(withKeyspace("CREATE CUSTOM INDEX non_analyzed_sai_idx ON %s.t(v) USING 'StorageAttachedIndex'"));
+        cluster.schemaChange(withKeyspace("CREATE CUSTOM INDEX analyzed_sai_idx ON %s.t(v) USING 'StorageAttachedIndex' WITH OPTIONS = { 'index_analyzer': 'standard' }"));
         SAIUtil.waitForIndexQueryable(cluster, KEYSPACE);
 
-        String select = withKeyspace("SELECT * FROM %s.t WHERE v = 0 WITH included_indexes = {idx}");
+        // insert some data
+        cluster.coordinator(1).execute(withKeyspace("INSERT INTO %s.t (k, v) VALUES (0, 'apple banana')"), ConsistencyLevel.ALL);
+        cluster.coordinator(1).execute(withKeyspace("INSERT INTO %s.t (k, v) VALUES (1, 'apple')"), ConsistencyLevel.ALL);
+        cluster.coordinator(1).execute(withKeyspace("INSERT INTO %s.t (k, v) VALUES (2, 'orange')"), ConsistencyLevel.ALL);
 
+        // prepare a template query that will behave differently depending on index hints
+        String select = withKeyspace("SELECT * FROM %s.t WHERE v = 'apple'");
+        Object[][] eqRows = new Object[][]{ row(1, "apple") }; // without analyzer
+        Object[][] matchRows = new Object[][]{ row(1, "apple"), row(0, "apple banana") }; // with analyzer
+
+        // test included indexes
+        assertSelect(cluster, expectedErrorMessage, select + " WITH included_indexes = {legacy_idx}", eqRows);
+        assertSelect(cluster, expectedErrorMessage, select + " WITH included_indexes = {non_analyzed_sai_idx}", eqRows);
+        assertSelect(cluster, expectedErrorMessage, select + " WITH included_indexes = {analyzed_sai_idx}", matchRows);
+
+        // test excluded indexes
+        assertSelect(cluster, expectedErrorMessage, select + " WITH excluded_indexes = {legacy_idx, non_analyzed_sai_idx}", matchRows);
+    }
+
+    private static void assertSelect(Cluster cluster, String expectedErrorMessage, String select, Object[]... expectedRows)
+    {
         for (int i = 1; i <= cluster.size(); i++)
         {
             ICoordinator coordinator = cluster.coordinator(i);
             if (expectedErrorMessage == null)
-                coordinator.execute(select, ConsistencyLevel.ONE);
+                assertRows(coordinator.execute(select, ConsistencyLevel.ONE), expectedRows);
             else
                 Assertions.assertThatThrownBy(() -> coordinator.execute(select, ConsistencyLevel.ONE))
                           .hasMessageContaining(expectedErrorMessage);
