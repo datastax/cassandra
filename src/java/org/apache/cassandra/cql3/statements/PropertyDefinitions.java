@@ -30,6 +30,7 @@ import org.apache.cassandra.exceptions.SyntaxException;
 
 public class PropertyDefinitions
 {
+    public static final String MULTIPLE_DEFINITIONS_ERROR = "Multiple definitions for property '%s'";
     private static final Pattern POSITIVE_PATTERN = Pattern.compile("(1|true|yes)");
     private static final Pattern NEGATIVE_PATTERN = Pattern.compile("(0|false|no)");
     
@@ -40,19 +41,19 @@ public class PropertyDefinitions
     public void addProperty(String name, String value) throws SyntaxException
     {
         if (properties.put(name, value) != null)
-            throw new SyntaxException(String.format("Multiple definition for property '%s'", name));
+            throw new SyntaxException(String.format(MULTIPLE_DEFINITIONS_ERROR, name));
     }
 
     public void addProperty(String name, Map<String, String> value) throws SyntaxException
     {
         if (properties.put(name, value) != null)
-            throw new SyntaxException(String.format("Multiple definition for property '%s'", name));
+            throw new SyntaxException(String.format(MULTIPLE_DEFINITIONS_ERROR, name));
     }
 
     public void addProperty(String name, Set<QualifiedName> value) throws SyntaxException
     {
         if (properties.put(name, value) != null)
-            throw new SyntaxException(String.format("Multiple definition for property '%s'", name));
+            throw new SyntaxException(String.format(MULTIPLE_DEFINITIONS_ERROR, name));
     }
 
     public void validate(Set<String> keywords, Set<String> obsolete) throws SyntaxException

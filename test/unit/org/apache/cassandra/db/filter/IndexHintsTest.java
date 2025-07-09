@@ -24,6 +24,8 @@ import java.util.Map;
 import java.util.Set;
 
 import org.apache.cassandra.cql3.restrictions.SingleColumnRestriction;
+import org.apache.cassandra.cql3.statements.PropertyDefinitions;
+import org.apache.cassandra.cql3.statements.SelectOptions;
 import org.apache.cassandra.index.sai.analyzer.AnalyzerEqOperatorSupport;
 
 import org.junit.BeforeClass;
@@ -114,16 +116,16 @@ public class IndexHintsTest extends CQLTester
                                   query + "WITH included_indexes={idx1} AND excluded_indexes={idx2}");
 
         // invalid queries with repeated included or excluded indexes
-        assertInvalidThrowMessage("Multiple definition for property 'included_indexes'",
+        assertInvalidThrowMessage(String.format(PropertyDefinitions.MULTIPLE_DEFINITIONS_ERROR, SelectOptions.INCLUDED_INDEXES),
                                   SyntaxException.class,
                                   query + "WITH included_indexes={idx1} AND included_indexes={idx2}");
-        assertInvalidThrowMessage("Multiple definition for property 'excluded_indexes'",
+        assertInvalidThrowMessage(String.format(PropertyDefinitions.MULTIPLE_DEFINITIONS_ERROR, SelectOptions.EXCLUDED_INDEXES),
                                   SyntaxException.class,
                                   query + "WITH excluded_indexes={idx1} AND excluded_indexes={idx2}");
-        assertInvalidThrowMessage("Multiple definition for property 'included_indexes'",
+        assertInvalidThrowMessage(String.format(PropertyDefinitions.MULTIPLE_DEFINITIONS_ERROR, SelectOptions.INCLUDED_INDEXES),
                                   SyntaxException.class,
                                   query + "WITH included_indexes={idx1} AND included_indexes={idx2} AND excluded_indexes={idx3}");
-        assertInvalidThrowMessage("Multiple definition for property 'excluded_indexes'",
+        assertInvalidThrowMessage(String.format(PropertyDefinitions.MULTIPLE_DEFINITIONS_ERROR, SelectOptions.EXCLUDED_INDEXES),
                                   SyntaxException.class,
                                   query + "WITH included_indexes={idx1} AND excluded_indexes={idx2} AND excluded_indexes={idx3}");
 

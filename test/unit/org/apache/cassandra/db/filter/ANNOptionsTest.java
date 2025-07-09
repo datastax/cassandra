@@ -29,6 +29,8 @@ import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
+import org.apache.cassandra.cql3.statements.PropertyDefinitions;
+import org.apache.cassandra.cql3.statements.SelectOptions;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.ReadCommand;
@@ -128,7 +130,7 @@ public class ANNOptionsTest extends CQLTester
                                   baseQuery + " WITH ann_options = {'rerank_k': 0} AND unknown_options = {}");
 
         // duplicated SELECT options
-        assertInvalidThrowMessage("Multiple definition for property 'ann_options'",
+        assertInvalidThrowMessage(String.format(PropertyDefinitions.MULTIPLE_DEFINITIONS_ERROR, SelectOptions.ANN_OPTIONS),
                                   SyntaxException.class,
                                   baseQuery + " WITH ann_options = {'rerank_k': 0} AND ann_options = {'rerank_k': 0}");
 
