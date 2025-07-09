@@ -1233,7 +1233,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         }
 
         // Prepare a plan comparator based first on the user-provided hints, which will prefer the plan closest to
-        // satisfying the index hints, then on rules about peferral of non-analyzed indexes over analyzed indexes for
+        // satisfying the index hints, then on rules about peference of non-analyzed indexes over analyzed indexes for
         // CONTAINS operators as described by CNDB-13925, and finally on the index-provided selectivity, which will
         // prefer the most selective index.
         // We let pass plans that don't satisfy the index hints so we can provide a better error message later,
@@ -1248,7 +1248,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
                                    ? Iterables.getOnlyElement(queryPlans)
                                    : queryPlans.stream()
                                                .max(planComparator)
-                                               .orElseThrow(() -> new AssertionError("Could not select the most adequate index plan"));
+                                               .orElseThrow(() -> new AssertionError("Could not select an index plan."));
 
         // pay for an additional threadlocal get() rather than build the strings unnecessarily
         if (Tracing.isTracing())
