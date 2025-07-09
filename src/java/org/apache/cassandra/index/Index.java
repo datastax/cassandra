@@ -396,8 +396,8 @@ public interface Index
     }
 
     /**
-     * @param indexes the indexes to get the metadatas from
-     * @return the list of index metadatas
+     * @param indexes the indexes to get the metadata from
+     * @return the list of index metadata
      */
     static List<IndexMetadata> getMetadatas(Iterable<Index> indexes)
     {
