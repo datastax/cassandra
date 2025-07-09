@@ -753,7 +753,7 @@ public class StorageAttachedIndex implements Index
             return;
 
         Set<Index> includedIndexes = command.rowFilter().indexHints.includedIn(indexQueryPlan.getIndexes());
-        checkHintsDoesntExceedIntersectionClauseLimit(command.rowFilter().root, includedIndexes);
+        throwOnHintsExceedIntersectionClauseLimit(command.rowFilter().root, includedIndexes);
 
         if (!indexQueryPlan.isTopK())
             return;
@@ -767,9 +767,12 @@ public class StorageAttachedIndex implements Index
     }
 
     /**
-     * Rejects queries with index hints including indexes enough to exceed the intersection clause limit.
+     * Rejects queries with index hints including indexes enough to exceed the intersection clause limit,
+     * defined by {@link CassandraRelevantProperties#SAI_INTERSECTION_CLAUSE_LIMIT}.
+     *
+     * @throws InvalidRequestException if the query exceeds the intersection clause limit
      */
-    private static void checkHintsDoesntExceedIntersectionClauseLimit(RowFilter.FilterElement element, Set<Index> includedIndexes)
+    private static void throwOnHintsExceedIntersectionClauseLimit(RowFilter.FilterElement element, Set<Index> includedIndexes)
     {
         if (includedIndexes.isEmpty())
             return;
@@ -797,7 +800,7 @@ public class StorageAttachedIndex implements Index
 
         for (RowFilter.FilterElement child : element.children())
         {
-            checkHintsDoesntExceedIntersectionClauseLimit(child, includedIndexes);
+            throwOnHintsExceedIntersectionClauseLimit(child, includedIndexes);
         }
     }
 
@@ -805,7 +808,7 @@ public class StorageAttachedIndex implements Index
     public long getEstimatedResultRows()
     {
         // this is temporary (until proper QueryPlan is integrated into Cassandra)
-        // and allows us to priority storage-attached indexes if any in the query since they
+        // and allows us to prioritize storage-attached indexes if any in the query since they
         // are going to be more efficient, to query and intersect, than built-in indexes.
         return Long.MIN_VALUE;
     }

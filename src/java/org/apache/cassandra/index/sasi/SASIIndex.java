@@ -261,7 +261,7 @@ public class SASIIndex implements Index, INotificationConsumer
     public long getEstimatedResultRows()
     {
         // this is temporary (until proper QueryPlan is integrated into Cassandra)
-        // and allows us to priority SASI indexes if any in the query since they
+        // and allows us to prioritize SASI indexes if any in the query since they
         // are going to be more efficient, to query and intersect, than built-in indexes.
         return Long.MIN_VALUE;
     }
