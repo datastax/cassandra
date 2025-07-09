@@ -1202,8 +1202,6 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
      */
     public Index.QueryPlan getBestIndexQueryPlanFor(RowFilter rowFilter)
     {
-        IndexHints hints = rowFilter.indexHints;
-
         if (indexes.isEmpty() || rowFilter.isEmpty())
             return null;
 
@@ -1241,9 +1239,9 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         // We let pass plans that don't satisfy the index hints so we can provide a better error message later,
         // at the validation at the end of this method. That validation will be done over the plan that is closest to
         // satisfying the index hints, so the error message will only complain about the missing parts.
-        Comparator<Index.QueryPlan> planComparator = hints.comparator()
-                                                          .thenComparing((Index.QueryPlan plan) -> !hasAnalyzerOnContains(plan, rowFilter))
-                                                          .thenComparing(Comparator.<Index.QueryPlan>naturalOrder().reversed());
+        Comparator<Index.QueryPlan> planComparator = rowFilter.indexHints.comparator()
+                                                              .thenComparing((Index.QueryPlan plan) -> !hasAnalyzerOnContains(plan, rowFilter))
+                                                              .thenComparing(Comparator.<Index.QueryPlan>naturalOrder().reversed());
 
         // find the best plan
         Index.QueryPlan selected = queryPlans.size() == 1
