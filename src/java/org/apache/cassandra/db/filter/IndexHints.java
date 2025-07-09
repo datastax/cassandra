@@ -347,9 +347,9 @@ public class IndexHints
     }
 
     /**
-     * Validates these index hints for the specified index query plan, to verify that all the requested indexes can be
-     * selected. This might happen if the query doesn't have any expressions for the included indexes, or if it has them
-     * but the index implementation hasn't been able to use them for whatever reason.
+     * Validates these index hints for the specified index query plan, to verify that all the included indexes can be
+     * selected. This might happen if the query doesn't have expressions for each of the included indexes, or if it has
+     * them but the index implementation hasn't been able to use them for whatever reason.
      *
      * @param queryPlan the index query plan, which should have been built accordingly to these hints
      */
