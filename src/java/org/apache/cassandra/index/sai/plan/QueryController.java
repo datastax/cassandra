@@ -22,6 +22,8 @@ import java.util.*;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import javax.annotation.Nullable;
+
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ArrayListMultimap;
@@ -794,6 +796,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
                command.clusteringIndexFilter(key.partitionKey()).selects(key.clustering());
     }
 
+    @Nullable
     private StorageAttachedIndex getBestIndexFor(RowFilter.Expression expression)
     {
         return cfs.indexManager.getBestIndexFor(expression, command.rowFilter().indexHints, StorageAttachedIndex.class)
