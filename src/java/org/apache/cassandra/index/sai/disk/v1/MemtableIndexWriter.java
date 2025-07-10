@@ -102,6 +102,13 @@ public class MemtableIndexWriter implements PerIndexWriter
     }
 
     @Override
+    public void onSSTableWriterSwitched(Stopwatch stopwatch) throws IOException
+    {
+        // no-op for memtable index where all terms are already inside memory index, we can't get rid of memory index
+        // until full flush are completed
+    }
+
+    @Override
     public void complete(Stopwatch stopwatch) throws IOException
     {
         long start = stopwatch.elapsed(TimeUnit.MILLISECONDS);

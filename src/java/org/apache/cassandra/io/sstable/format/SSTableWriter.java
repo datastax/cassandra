@@ -337,6 +337,12 @@ public abstract class SSTableWriter extends SSTable implements Transactional, SS
         }
     }
 
+    // notify sstable flush observer about sstable writer switched
+    public final void onSSTableWriterSwitched()
+    {
+        observers.forEach(SSTableFlushObserver::onSSTableWriterSwitched);
+    }
+
     protected Map<MetadataType, MetadataComponent> finalizeMetadata()
     {
         return metadataCollector.finalizeMetadata(getPartitioner().getClass().getCanonicalName(),
