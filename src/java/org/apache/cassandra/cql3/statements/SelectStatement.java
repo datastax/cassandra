@@ -779,11 +779,11 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
     /**
      * The {@code RowFilter} for this SELECT, assuming an internal call (no bound values in particular).
      */
-    public RowFilter rowFilterForInternalCalls(IndexRegistry indexRegistry)
+    public RowFilter rowFilterForInternalCalls()
     {
         return getRowFilter(QueryOptions.forInternalCalls(Collections.emptyList()),
                             QueryState.forInternalCalls(),
-                            indexRegistry);
+                            IndexRegistry.EMPTY);
     }
 
     private ReadQuery getRangeCommand(QueryOptions options,
