@@ -177,7 +177,7 @@ public class SSTableFlushObserverTest
             {
                 FileUtils.closeQuietly(writer);
             }
-            
+
             Assert.assertTrue(observer.isWriterSwitched);
             Assert.assertTrue(observer.isComplete);
             Assert.assertEquals(expected.size(), observer.rows.size());
