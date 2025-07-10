@@ -192,6 +192,29 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
     }
 
     @Override
+    public void onSSTableWriterSwitched()
+    {
+        if (aborted) return;
+
+        try
+        {
+            long start = ApproximateTime.nanoTime();
+            for (PerIndexWriter w : perIndexWriters)
+            {
+                w.onSSTableWriterSwitched(stopwatch);
+            }
+            totalTimeSpent += (ApproximateTime.nanoTime() - start);
+        }
+        catch (Throwable t)
+        {
+            logger.error(indexDescriptor.logMessage("Failed to flush segment on sstable writer switched"), t);
+            abort(t, true);
+            // fail compaction task or index build task if SAI failed
+            throw Throwables.unchecked(t);
+        }
+    }
+
+    @Override
     public void complete(SSTable sstable)
     {
         long startComplete = ApproximateTime.nanoTime();
