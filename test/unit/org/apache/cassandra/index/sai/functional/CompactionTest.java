@@ -22,6 +22,10 @@ package org.apache.cassandra.index.sai.functional;
 
 import java.util.Collection;
 import java.util.Collections;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import javax.management.InstanceNotFoundException;
 
@@ -46,6 +50,7 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.IndexNotAvailableException;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.disk.v1.SSTableIndexWriter;
+import org.apache.cassandra.index.sai.disk.v1.SegmentBuilder;
 import org.apache.cassandra.index.sai.metrics.AbstractMetricsTest;
 import org.apache.cassandra.inject.ActionBuilder;
 import org.apache.cassandra.inject.Expression;
@@ -65,12 +70,13 @@ import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.TimeUUID;
 import org.apache.cassandra.utils.concurrent.Refs;
 
-import static org.apache.cassandra.utils.TimeUUID.Generator.nextTimeUUID;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
+import static org.apache.cassandra.utils.TimeUUID.Generator.nextTimeUUID;
 
 public class CompactionTest extends AbstractMetricsTest
 {
@@ -402,5 +408,54 @@ public class CompactionTest extends AbstractMetricsTest
     protected long getDiskUsage()
     {
         return (long) getMetricValue(objectNameNoIndex("DiskUsedBytes", KEYSPACE, currentTable(), "IndexGroupMetrics"));
+    }
+
+    @Test
+    public void testSegmentBuilderFlushWithShardedCompaction() throws Throwable
+    {
+        int shards = 64;
+        String createTable = "CREATE TABLE %s (id1 TEXT PRIMARY KEY, v1 INT, v2 TEXT) WITH compaction = " +
+                             "{'class' : 'UnifiedCompactionStrategy', 'enabled' : false, 'base_shard_count': " + shards + ", 'min_sstable_size': '1KiB' }";
+        createTable(createTable);
+        createIndex(String.format(CREATE_INDEX_TEMPLATE, "v1"));
+        createIndex(String.format(CREATE_INDEX_TEMPLATE, "v2"));
+        disableCompaction(keyspace(), currentTable());
+
+        int rowsPerSSTable = 2000;
+        int numSSTables = 4;
+        int key = 0;
+        for (int s = 0; s < numSSTables; s++)
+        {
+            for (int i = 0; i < rowsPerSSTable; i++)
+            {
+                execute("INSERT INTO %s (id1, v1, v2) VALUES (?, 0, '01e2wefnewirui32e21e21wre')", Integer.toString(key++));
+            }
+            flush();
+        }
+
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try
+        {
+            Future<?> future = executor.submit(() -> {
+                getCurrentColumnFamilyStore().forceMajorCompaction(false, 1);
+                waitForCompactions();
+            });
+
+            // verify that it's not accumulating segment builders
+            while (!future.isDone())
+            {
+                // ACTIVE_BUILDER_COUNT starts from 1. There are 2 segments for 2 indexes
+                assertThat(SegmentBuilder.ACTIVE_BUILDER_COUNT.get()).isGreaterThanOrEqualTo(1).isLessThanOrEqualTo(3);
+            }
+            future.get(30, TimeUnit.SECONDS);
+
+            // verify results are sharded
+            assertThat(getCurrentColumnFamilyStore().getLiveSSTables()).hasSize(shards);
+        }
+        finally
+        {
+            executor.shutdown();
+            executor.awaitTermination(30, TimeUnit.SECONDS);
+        }
     }
 }
