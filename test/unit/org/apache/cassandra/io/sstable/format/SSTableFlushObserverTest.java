@@ -73,6 +73,7 @@ import static org.apache.cassandra.db.rows.RangeTombstoneBoundMarker.exclusiveOp
 import static org.apache.cassandra.db.rows.RangeTombstoneBoundaryMarker.exclusiveCloseInclusiveOpen;
 import static org.apache.cassandra.db.rows.RangeTombstoneBoundaryMarker.inclusiveCloseExclusiveOpen;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 public class SSTableFlushObserverTest
@@ -336,6 +337,7 @@ public class SSTableFlushObserverTest
         try
         {
             partitions.forEach((key, rows) -> writer.append(new RowIterator(metadata, key, rows)));
+            writer.onSSTableWriterSwitched();
             reader = writer.finish(true, null);
         }
         finally
@@ -343,6 +345,7 @@ public class SSTableFlushObserverTest
             FileUtils.closeQuietly(writer);
         }
 
+        assertTrue(observer.isWriterSwitched);
         assertTrue(observer.isComplete);
         assertEquals(partitions.size(), observer.headers.size());
         assertEquals(partitions.values().stream().mapToInt(List::size).sum(), observer.unfiltereds.size());
@@ -413,6 +416,7 @@ public class SSTableFlushObserverTest
         private Row currentStaticRow = Rows.EMPTY_STATIC_ROW;
         private long currentStaticRowPosition;
         private boolean isComplete;
+        private boolean isWriterSwitched;
 
         @Override
         public void begin()
@@ -449,6 +453,12 @@ public class SSTableFlushObserverTest
         public void nextUnfilteredCluster(Unfiltered unfiltered, long position)
         {
             unfiltereds.add(new UnfilteredEntry(unfiltered, position));
+        }
+
+        @Override
+        public void onSSTableWriterSwitched()
+        {
+            isWriterSwitched = true;
         }
 
         @Override
