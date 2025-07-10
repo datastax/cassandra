@@ -143,6 +143,18 @@ public class SSTableIndexWriter implements PerIndexWriter
     }
 
     @Override
+    public void onSSTableWriterSwitched(Stopwatch stopwatch) throws IOException
+    {
+        if (maybeAbort())
+            return;
+
+        boolean emptySegment = currentBuilder == null || currentBuilder.isEmpty();
+        logger.debug("Flushing index {} with {}buffered data on sstable writer switched...", indexContext.getIndexName(), emptySegment ? "no " : "");
+        if (!emptySegment)
+            flushSegment();
+    }
+
+    @Override
     public void complete(Stopwatch stopwatch) throws IOException
     {
         if (maybeAbort())
@@ -322,8 +334,9 @@ public class SSTableIndexWriter implements PerIndexWriter
                 if (indexContext.getIndexMetrics() != null)
                     indexContext.getIndexMetrics().compactionSegmentBytesPerSecond.update((long)(segmentBytes / flushMillis * 1000.0));
 
-                logger.debug("Flushed segment with {} cells for a total of {} in {} ms",
-                             (long) rowCount, FBUtilities.prettyPrintMemory((long) segmentBytes), flushMillis);
+                logger.debug("Flushed segment with {} cells for a total of {} in {} ms for index {} with starting row id {} for sstable {}",
+                             (long) rowCount, FBUtilities.prettyPrintMemory((long) segmentBytes), flushMillis, indexContext.getIndexName(),
+                             segmentMetadata.minSSTableRowId, perIndexComponents.descriptor());
             }
 
             // Builder memory is released against the limiter at the conclusion of a successful
@@ -402,9 +415,10 @@ public class SSTableIndexWriter implements PerIndexWriter
         }
 
         long globalBytesUsed = limiter.increment(builder.totalBytesAllocated());
-        logger.debug("Created new segment builder while flushing SSTable {}. Global segment memory usage now at {}",
+        logger.debug("Created new segment builder while flushing SSTable {}. Global segment memory usage now at {} with {} active segment builders",
                      perIndexComponents.descriptor(),
-                     FBUtilities.prettyPrintMemory(globalBytesUsed));
+                     FBUtilities.prettyPrintMemory(globalBytesUsed),
+                     SegmentBuilder.ACTIVE_BUILDER_COUNT.get() - 1);
 
         return builder;
     }
