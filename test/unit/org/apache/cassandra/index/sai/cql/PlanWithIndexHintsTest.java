@@ -39,6 +39,7 @@ import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.analyzer.AnalyzerEqOperatorSupport;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.plan.Plan;
+import org.apache.cassandra.index.sai.plan.QueryController;
 import org.apache.cassandra.inject.Injections;
 import org.apache.cassandra.inject.InvokePointBuilder;
 import org.assertj.core.api.Assertions;
@@ -452,18 +453,21 @@ public class PlanWithIndexHintsTest extends SAITester
         int defaultIntersectionClauseLimit = CassandraRelevantProperties.SAI_INTERSECTION_CLAUSE_LIMIT.getInt();
         try
         {
+            // disable query optimization so we can test the intersection clause limit in a more predictable way
+            QueryController.QUERY_OPT_LEVEL = 0;
+
             beforeAndAfterFlush(() -> {
                 String query = "SELECT * FROM %s WHERE v1=0 AND v2=0 AND v3 = 0";
 
                 CassandraRelevantProperties.SAI_INTERSECTION_CLAUSE_LIMIT.setInt(3);
                 assertThatPlanFor(query, row1).usesAnyOf(idx1, idx2, idx3);
-                assertThatPlanFor(query + " WITH included_indexes={idx1}", row1).uses(idx1);
-                assertThatPlanFor(query + " WITH included_indexes={idx1, idx2}", row1).uses(idx1, idx2);
+                assertThatPlanFor(query + " WITH included_indexes={idx1}", row1).usesAtLeast(idx1).uses(3);
+                assertThatPlanFor(query + " WITH included_indexes={idx1, idx2}", row1).usesAtLeast(idx1, idx2).uses(3);
                 assertThatPlanFor(query + " WITH included_indexes={idx1, idx2, idx3}", row1).uses(idx1, idx2, idx3);
 
                 CassandraRelevantProperties.SAI_INTERSECTION_CLAUSE_LIMIT.setInt(2);
                 assertThatPlanFor(query, row1).usesAnyOf(idx1, idx2, idx3);
-                assertThatPlanFor(query + " WITH included_indexes={idx1}", row1).uses(idx1);
+                assertThatPlanFor(query + " WITH included_indexes={idx1}", row1).usesAtLeast(idx1).uses(2);
                 assertThatPlanFor(query + " WITH included_indexes={idx1, idx2}", row1).uses(idx1, idx2);
                 assertHintsExceedIntersectionClauseLimit(query + " WITH included_indexes={idx1, idx2, idx3}");
 
@@ -477,14 +481,14 @@ public class PlanWithIndexHintsTest extends SAITester
                 query = "SELECT * FROM %s WHERE (v1=0 AND v2=0 AND v3 = 0) OR v4 = 0";
 
                 CassandraRelevantProperties.SAI_INTERSECTION_CLAUSE_LIMIT.setInt(3);
-                assertThatPlanFor(query, row1).usesAnyOf(idx1, idx2, idx3, idx4).usesAtLeast(idx4);
-                assertThatPlanFor(query + " WITH included_indexes={idx1}", row1).uses(idx1, idx4);
-                assertThatPlanFor(query + " WITH included_indexes={idx1, idx2}", row1).uses(idx1, idx2, idx4);
+                assertThatPlanFor(query, row1).uses(idx1, idx2, idx3, idx4);
+                assertThatPlanFor(query + " WITH included_indexes={idx1}", row1).uses(idx1, idx2, idx3, idx4);
+                assertThatPlanFor(query + " WITH included_indexes={idx1, idx2}", row1).uses(idx1, idx2, idx3, idx4);
                 assertThatPlanFor(query + " WITH included_indexes={idx1, idx2, idx3}", row1).uses(idx1, idx2, idx3, idx4);
 
                 CassandraRelevantProperties.SAI_INTERSECTION_CLAUSE_LIMIT.setInt(2);
-                assertThatPlanFor(query, row1).usesAnyOf(idx1, idx2, idx3, idx4).usesAtLeast(idx4);
-                assertThatPlanFor(query + " WITH included_indexes={idx1}", row1).uses(idx1, idx4);
+                assertThatPlanFor(query, row1).usesAtLeast(idx4).uses(3);
+                assertThatPlanFor(query + " WITH included_indexes={idx1}", row1).usesAtLeast(idx1, idx4).uses(3);
                 assertThatPlanFor(query + " WITH included_indexes={idx1, idx2}", row1).uses(idx1, idx2, idx4);
                 assertHintsExceedIntersectionClauseLimit(query + " WITH included_indexes={idx1, idx2, idx3}");
 
@@ -498,6 +502,7 @@ public class PlanWithIndexHintsTest extends SAITester
         finally
         {
             CassandraRelevantProperties.SAI_INTERSECTION_CLAUSE_LIMIT.setInt(defaultIntersectionClauseLimit);
+            QueryController.QUERY_OPT_LEVEL = 1;
         }
     }
 

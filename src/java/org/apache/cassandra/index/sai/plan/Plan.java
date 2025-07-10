@@ -1255,19 +1255,19 @@ abstract public class Plan
                 return withNewSubplans(new ArrayList<>(subplansSupplier.orig.subList(0, clauseLimit)));
 
             List<Plan.KeysIteration> newSubplans = new ArrayList<>(clauseLimit);
-            List<Plan.KeysIteration> optionalSubplans = new ArrayList<>(clauseLimit);
+            List<Plan.KeysIteration> optionalNewSubplans = new ArrayList<>(clauseLimit);
             for (KeysIteration keysIteration : subplansSupplier.orig)
             {
                 if (keysIteration.usesIncludedIndex())
                     newSubplans.add(keysIteration);
                 else
-                    optionalSubplans.add(keysIteration);
+                    optionalNewSubplans.add(keysIteration);
             }
-            for (KeysIteration keysIteration : optionalSubplans)
+            for (KeysIteration keysIteration : optionalNewSubplans)
             {
                 if (newSubplans.size() >= clauseLimit)
                     break;
-                optionalSubplans.add(keysIteration);
+                newSubplans.add(keysIteration);
             }
 
             return withNewSubplans(newSubplans);

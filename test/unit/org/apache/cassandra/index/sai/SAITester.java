@@ -1053,12 +1053,19 @@ public class SAITester extends CQLTester
             return this;
         }
 
-        public void usesAtLeast(String... indexes)
+        public PlanSelectionAssertion usesAtLeast(String... indexes)
         {
             Assertions.assertThat(selectedIndexes)
                       .isNotNull()
                       .as("Expected to select at least %s, but got: %s", indexes, selectedIndexes)
                       .containsAll(Set.of(indexes));
+            return this;
+        }
+
+        public PlanSelectionAssertion uses(int numIndexes)
+        {
+            Assertions.assertThat(selectedIndexes).hasSize(numIndexes);
+            return this;
         }
 
         public void doesntWarn()

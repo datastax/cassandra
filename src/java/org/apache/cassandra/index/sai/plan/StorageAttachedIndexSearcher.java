@@ -167,7 +167,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
     {
         try
         {
-            Plan plan = controller.buildPlan().optimize();
+            Plan plan = controller.buildPlan();
             Set<String> indexes = new HashSet<>();
             plan.forEach(node -> {
                 if (node instanceof Plan.IndexScan)

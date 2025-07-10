@@ -62,7 +62,6 @@ import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Bounds;
 import org.apache.cassandra.exceptions.InvalidRequestException;
-import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SSTableIndex;
@@ -71,7 +70,6 @@ import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
 import org.apache.cassandra.index.sai.disk.v1.Segment;
 import org.apache.cassandra.index.sai.disk.vector.VectorCompression;
 import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
-import org.apache.cassandra.index.sai.iterators.KeyRangeIntersectionIterator;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.iterators.KeyRangeTermIterator;
 import org.apache.cassandra.index.sai.memory.MemtableIndex;
@@ -81,7 +79,6 @@ import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.RowWithSourceTable;
 import org.apache.cassandra.index.sai.utils.RangeUtil;
-import org.apache.cassandra.index.sai.utils.TreeFormatter;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.FileUtils;
@@ -379,12 +376,13 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         // The limit here is higher than the final limit, so that the optimizer has a bit more freedom
         // in which predicates it leaves in the plan and the probability of accidentally removing a good branch
         // here is even lower.
-        Plan plan = rowsIteration.limitIntersectedClauses(KeyRangeIntersectionIterator.INTERSECTION_CLAUSE_LIMIT * 3);
+        int intersectionClauseLimit = CassandraRelevantProperties.SAI_INTERSECTION_CLAUSE_LIMIT.getInt();
+        Plan plan = rowsIteration.limitIntersectedClauses(intersectionClauseLimit * 3);
 
         if (QUERY_OPT_LEVEL > 0)
             plan = plan.optimize();
 
-        plan = plan.limitIntersectedClauses(KeyRangeIntersectionIterator.INTERSECTION_CLAUSE_LIMIT);
+        plan = plan.limitIntersectedClauses(intersectionClauseLimit);
 
         if (plan.contains(node -> node instanceof Plan.AnnIndexScan))
             queryContext.setFilterSortOrder(QueryContext.FilterSortOrder.SCAN_THEN_FILTER);
