@@ -228,9 +228,12 @@ public class IndexHints
      * Returns the best of the specified indexes that satisfies the specified filter and is not excluded.
      * The order of preference to determine whether an index is better than another is:
      * <ol>
-     *     <li>An index in the included hint is better than not in the included hint.</li>
-     *     <li>If it's a contains restriction, then a non-analyzed index is better.</li>
-     *     <li>An index more selective according to {@link Index#getEstimatedResultRows()} is better.</li>
+     *     <li>An index included by these hints is better than an index not included by these hints.</li>
+     *     <li>If it's a contains restriction, then a non-analyzed index is better. See CNDB-13925 for details.</li>
+     *     <li>An index more selective according to {@link Index#getEstimatedResultRows()} is better. This is done
+     *     accordingly to the {@link Index.QueryPlan#getEstimatedResultRows()} method. Please note that some index
+     *     implementations (SASI and SAI) will always return -1 for that method to prioritize themselves. Third party
+     *     implementations can also return similar fixed values. See CNDB-14764 for details.</li>
      * </ol>
      *
      * @param indexes a collection of indexes

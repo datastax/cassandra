@@ -1178,7 +1178,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
     /**
      * Called at query time to choose which (if any) of the registered index implementations to use for a given query.
      * <p>
-     * This is a two step processes, firstly compiling the set of searchable indexes then choosing the one which reduces
+     * This is a two-step processes, firstly compiling the set of searchable indexes then choosing the one which reduces
      * the search space the most.
      * <p>
      * In the first phase, if the command's RowFilter contains any custom index expressions, the indexes that they
@@ -1187,6 +1187,15 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
      * <p>
      * The filtered set then sorted by selectivity, as reported by the Index implementations' getEstimatedResultRows
      * method.
+     * Once we have the filtered set of indexes, one is selected as the best one according to the following rules:
+     * <ol>
+     *     <li>An index included by the query's index hints is better than an index not included by the hints.</li>
+     *     <li>If it's a contains restriction, then a non-analyzed index is better. See CNDB-13925 for details.</li>
+     *     <li>An index more selective according to {@link Index#getEstimatedResultRows()} is better. This is done
+     *     accordingly to the {@link Index.QueryPlan#getEstimatedResultRows()} method. Please note that some index
+     *     implementations (SASI and SAI) will always return -1 for that method to prioritize themselves. Third party
+     *     implementations can also return similar fixed values. See CNDB-14764 for details.</li>
+     * </ol>
      * <p>
      * Implementation specific validation of the target expression, either custom or standard, by the selected
      * index should be performed in the searcherFor method to ensure that we pick the right index regardless of
@@ -1236,6 +1245,9 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         // satisfying the index hints, then on rules about peference of non-analyzed indexes over analyzed indexes for
         // CONTAINS operators as described by CNDB-13925, and finally on the index-provided selectivity, which will
         // prefer the most selective index.
+        // Selectivity is determined by the Index#getEstimatedResultRows() method. Please note that some index
+        // implementations (SASI and SAI) will always return -1 for that method to prioritize themselves. Third party
+        // implementations can also return similar fixed values. See CNDB-14764 for details.
         // We let pass plans that don't satisfy the index hints so we can provide a better error message later,
         // at the validation at the end of this method. That validation will be done over the plan that is closest to
         // satisfying the index hints, so the error message will only complain about the missing parts.

@@ -989,7 +989,11 @@ public interface Index
          * that it can be used to answer. Used by  {@link SecondaryIndexManager#getBestIndexQueryPlanFor(RowFilter)}
          * to determine the {@link Group} with the most selective plan for a given {@link RowFilter}.
          * Additionally, this is also used by StorageProxy.estimateResultsPerRange to calculate the initial concurrency
-         * factor for range requests
+         * factor for range requests.
+         * </p>
+         * Please note that some index implementations (SASI and SAI) will always return -1 for that method to
+         * prioritize themselves. Third party implementations can also return similar fixed values. See CNDB-14764 for
+         * details.
          *
          * @return the estimated average number of results a Searcher may return for any given command
          */
