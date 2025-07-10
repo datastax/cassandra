@@ -168,7 +168,7 @@ public class SSTableFlushObserverTest
                                                    BufferCell.live(getColumn(cfm, "height"), now, LongType.instance.decompose(178L))));
 
                 writer.append(new RowIterator(cfm, key, Collections.singletonList(buildRow(expected.get(key)))));
-
+                writer.onSSTableWriterSwitched();
                 reader = writer.finish(true, null);
             }
             finally
@@ -176,6 +176,7 @@ public class SSTableFlushObserverTest
                 FileUtils.closeQuietly(writer);
             }
 
+            Assert.assertTrue(observer.isWriterSwitched);
             Assert.assertTrue(observer.isComplete);
             Assert.assertEquals(expected.size(), observer.rows.size());
 
@@ -269,6 +270,7 @@ public class SSTableFlushObserverTest
         private boolean beginCalled;
         private boolean failOnBegin;
         private boolean abortCalled;
+        private boolean isWriterSwitched;
 
         @Override
         public void begin()
@@ -301,6 +303,12 @@ public class SSTableFlushObserverTest
         public void staticRow(Row staticRow)
         {
             staticRow.forEach((c) -> staticRows.put(currentKey, (Cell<?>) c));
+        }
+
+        @Override
+        public void onSSTableWriterSwitched()
+        {
+            isWriterSwitched = true;
         }
 
         @Override
