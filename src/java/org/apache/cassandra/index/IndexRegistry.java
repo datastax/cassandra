@@ -411,8 +411,8 @@ public interface IndexRegistry
 
     /**
      * @return
-     * - AMBIGUOUS if an index that is not excluded by the hints supports EQ and a different one, also not exluded by
-     *   the hints, supports both EQ and ANALYZER_MATCHES. If any of the indexes is included by the hints, the behavior
+     * - AMBIGUOUS if an index that is not excluded by the hints supports EQ and a different one, also not excluded by
+     *   the hints, supports both EQ and ANALYZER_MATCHES. If one of the indexes is included by the hints, the behavior
      *   is not AMBIGUOUS.
      * - MATCHES if it's not AMBIGUOUS and an index supports both EQ and ANALYZER_MATCHES
      * - otherwise EQ

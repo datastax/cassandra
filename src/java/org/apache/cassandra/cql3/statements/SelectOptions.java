@@ -88,6 +88,13 @@ public class SelectOptions extends PropertyDefinitions
         return properties.containsKey(ANN_OPTIONS);
     }
 
+    /**
+     * Parse the {@link IndexHints}, performing query-independent validation. Query-dependent validation should be done
+     * later, when the query plan is built, by calling {@link IndexHints#validate(Index.QueryPlan)}.
+     *
+     * @return the parsed index hints, {@link IndexHints#NONE} if no hints are present, or they are empty
+     * @throws InvalidRequestException if the index hints are invalid
+     */
     public IndexHints parseIndexHints(TableMetadata table, IndexRegistry indexRegistry) throws RequestValidationException
     {
         Set<QualifiedName> included = getQualifiedNames(INCLUDED_INDEXES);
