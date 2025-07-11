@@ -684,7 +684,7 @@ public enum CassandraRelevantProperties
     SAI_ANN_USE_SYNTHETIC_SCORE("cassandra.sai.ann_use_synthetic_score", "false"),
     
     /** The current version of the SAI on-disk index format. */
-    SAI_CURRENT_VERSION("cassandra.sai.latest.version", "dc"),
+    SAI_CURRENT_VERSION("cassandra.sai.latest.version", "ec"),
     
     SAI_CUSTOM_COMPONENTS_DISCOVERY_CLASS("cassandra.sai.custom_components_discovery_class"),
     SAI_ENABLE_EDGES_CACHE("cassandra.sai.enable_edges_cache", "false"),
