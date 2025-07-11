@@ -40,6 +40,7 @@ import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.view.View;
 import org.apache.cassandra.exceptions.SyntaxException;
 import org.apache.cassandra.schema.SchemaConstants;
+import org.apache.cassandra.schema.SchemaKeyspace;
 import org.apache.cassandra.schema.SchemaKeyspaceTables;
 import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.utils.FBUtilities;
@@ -69,6 +70,19 @@ public class ViewTest extends ViewAbstractTest
     @SuppressWarnings("unused")
     private static final CountDownLatch blockViewBuild = new CountDownLatch(1);
     private static final AtomicInteger viewNameSeqNumber = new AtomicInteger();
+
+    @Test
+    public void testLocalSchemaCompaction() throws Throwable
+    {
+        int tables = 1000;
+        for (int i = 0; i < tables; i++)
+        {
+            createTable("CREATE TABLE %s (k int, c int, PRIMARY KEY(k,c))");
+            flush(SchemaConstants.SCHEMA_KEYSPACE_NAME, SchemaKeyspaceTables.KEYSPACES);
+        }
+
+        FBUtilities.sleepQuietly(30_000);
+    }
 
     @Test
     public void testNonExistingOnes() throws Throwable

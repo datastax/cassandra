@@ -28,9 +28,11 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.function.BiPredicate;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 import javax.annotation.Nullable;
 
@@ -70,6 +72,7 @@ import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Overlaps;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.UUIDGen;
+import org.apache.mina.util.ConcurrentHashSet;
 
 import static org.apache.cassandra.utils.Throwables.perform;
 
@@ -1181,7 +1184,22 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                                           ArenaSelector arenaSelector)
     {
         Map<CompactionSSTable, Arena> arenasBySSTables = new TreeMap<>(arenaSelector);
+        Set<? extends CompactionSSTable> compactingBefore = realm.getCompactingSSTables();;
+        FBUtilities.sleepQuietly(3_000);
+
         Set<? extends CompactionSSTable> compacting = realm.getCompactingSSTables();
+        String compactingAfter = compacting.stream().map(s -> s.getId().toString()).sorted().collect(Collectors.joining(","));
+
+        List<CompactionSSTable> selectedSSTableWasCompactingNowNotCompacting = compactingBefore.stream().filter(s -> sstables.contains(s)).filter(s -> compactionFilter.test(s, compacting.contains(s))).collect(Collectors.toList());
+
+        if (!selectedSSTableWasCompactingNowNotCompacting.isEmpty())
+        {
+            logger.debug("### selected   {}", sstables.stream().map(s -> s.getId().toString()).collect(Collectors.joining(",")));
+            logger.debug("### selected 'was-compacting' - 'now-not-compacting' {}", selectedSSTableWasCompactingNowNotCompacting.stream().map(s -> s.getId().toString()).collect(Collectors.joining(",")));
+            logger.debug("### compacting before {}", compactingBefore.stream().map(s -> s.getId().toString()).sorted().collect(Collectors.joining(",")));
+            logger.debug("### compacting after  {}", compactingAfter);
+        }
+
         for (CompactionSSTable sstable : sstables)
             if (compactionFilter.test(sstable, compacting.contains(sstable)))
                 arenasBySSTables.computeIfAbsent(sstable, t -> new Arena(arenaSelector))
@@ -1530,7 +1548,6 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                                                                       overlaps,
                                                                       this::makeBucket,
                                                                       unbucketed::addAll);
-
             List<CompactionAggregate.UnifiedAggregate> aggregates = new ArrayList<>();
             for (Bucket bucket : buckets)
                 aggregates.add(bucket.constructAggregate(controller, spaceAvailable, arena));
