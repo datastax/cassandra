@@ -24,6 +24,8 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 import org.agrona.collections.Int2IntHashMap;
+import org.apache.cassandra.index.sai.*;
+import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -32,10 +34,6 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.dht.Murmur3Partitioner;
-import org.apache.cassandra.index.sai.IndexContext;
-import org.apache.cassandra.index.sai.QueryContext;
-import org.apache.cassandra.index.sai.SAITester;
-import org.apache.cassandra.index.sai.SSTableContext;
 import org.apache.cassandra.index.sai.disk.MemtableTermsIterator;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
@@ -61,6 +59,8 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
     // Use a shared index context to prevent creating too many metrics unnecessarily
     private final IndexContext indexContext = SAITester.createIndexContext("meh", UTF8Type.instance);
 
+    private final Version version;
+
     @ParametersFactory()
     public static Collection<Object[]> data()
     {
@@ -70,7 +70,11 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
         return Version.ALL.stream().map(v -> new Object[]{v}).collect(Collectors.toList());
     }
 
-    private final Version version;
+    @Before
+    public void setCurrentSAIVersion()
+    {
+        SAIUtil.setCurrentVersion(version);
+    }
 
     public InvertedIndexSearcherTest(Version version)
     {
@@ -214,7 +218,7 @@ public class InvertedIndexSearcherTest extends SaiRandomizedTest
 
     private List<InvertedIndexBuilder.TermsEnum> buildTermsEnum(Version version, int terms, int postings)
     {
-        return InvertedIndexBuilder.buildStringTermsEnum(version, terms, postings, () -> randomSimpleString(3, 5), () -> nextInt(0, Integer.MAX_VALUE));
+        return InvertedIndexBuilder.buildStringTermsEnum(version, terms, postings, () -> randomSimpleString(3, 5), () -> nextInt(0, terms * postings * 2));
     }
 
     private Int2IntHashMap createMockDocLengths(List<InvertedIndexBuilder.TermsEnum> termsEnum)
