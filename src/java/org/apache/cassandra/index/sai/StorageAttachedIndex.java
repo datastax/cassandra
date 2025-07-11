@@ -118,6 +118,10 @@ public class StorageAttachedIndex implements Index
     "The large number of tokens can also have a negative impact in performance. " +
     "In most cases it's better to use a simpler query_analyzer such as the standard one.";
 
+    public static final String HINTS_EXCEED_INTERSECTION_CLAUSE_LIMIT_ERROR =
+    "The included indexes make the query exceed the intersection clause limit of %d clauses defined by %s. " +
+    "It's not possible to satisfy both.";
+
     private static final Logger logger = LoggerFactory.getLogger(StorageAttachedIndex.class);
 
     private static final boolean VALIDATE_TERMS_AT_COORDINATOR = SAI_VALIDATE_TERMS_AT_COORDINATOR.getBoolean();
@@ -685,6 +689,12 @@ public class StorageAttachedIndex implements Index
     }
 
     @Override
+    public boolean isAnalyzed()
+    {
+        return indexContext.isAnalyzed();
+    }
+
+    @Override
     public Optional<Analyzer> getAnalyzer(ByteBuffer queriedValue)
     {
         if (!indexContext.isAnalyzed())
@@ -739,7 +749,13 @@ public class StorageAttachedIndex implements Index
     public void validate(ReadCommand command) throws InvalidRequestException
     {
         var indexQueryPlan = command.indexQueryPlan();
-        if (indexQueryPlan == null || !indexQueryPlan.isTopK())
+        if (indexQueryPlan == null)
+            return;
+
+        Set<Index> includedIndexes = command.rowFilter().indexHints.includedIn(indexQueryPlan.getIndexes());
+        throwOnHintsExceedIntersectionClauseLimit(command.rowFilter().root, includedIndexes);
+
+        if (!indexQueryPlan.isTopK())
             return;
 
         // to avoid overflow HNSW internal data structure and avoid OOM when filtering top-k
@@ -750,10 +766,52 @@ public class StorageAttachedIndex implements Index
         indexContext.validate(command.rowFilter());
     }
 
+    /**
+     * Rejects queries with index hints including indexes enough to exceed the intersection clause limit,
+     * defined by {@link CassandraRelevantProperties#SAI_INTERSECTION_CLAUSE_LIMIT}.
+     *
+     * @throws InvalidRequestException if the query exceeds the intersection clause limit
+     */
+    private static void throwOnHintsExceedIntersectionClauseLimit(RowFilter.FilterElement element, Set<Index> includedIndexes)
+    {
+        if (includedIndexes.isEmpty())
+            return;
+
+        if (!element.isDisjunction())
+        {
+            int numClausesInIntersection = 0;
+            for (RowFilter.Expression expression : element.expressions())
+            {
+                for (Index index : includedIndexes)
+                {
+                    if (index.supportsExpression(expression))
+                    {
+                        numClausesInIntersection++;
+                    }
+                }
+            }
+            if (numClausesInIntersection > CassandraRelevantProperties.SAI_INTERSECTION_CLAUSE_LIMIT.getInt())
+            {
+                throw new InvalidRequestException(String.format(HINTS_EXCEED_INTERSECTION_CLAUSE_LIMIT_ERROR,
+                                                                CassandraRelevantProperties.SAI_INTERSECTION_CLAUSE_LIMIT.getInt(),
+                                                                CassandraRelevantProperties.SAI_INTERSECTION_CLAUSE_LIMIT.name()));
+            }
+        }
+
+        for (RowFilter.FilterElement child : element.children())
+        {
+            throwOnHintsExceedIntersectionClauseLimit(child, includedIndexes);
+        }
+    }
+
     @Override
     public long getEstimatedResultRows()
     {
-        throw new UnsupportedOperationException("Use StorageAttachedIndexQueryPlan#getEstimatedResultRows() instead.");
+        // This is temporary (until proper QueryPlan is integrated into Cassandra)
+        // and allows us to prioritize storage-attached indexes if any in the query since they
+        // are going to be more efficient, to query and intersect, than built-in indexes.
+        // See CNDB-14764 for details.
+        return Long.MIN_VALUE;
     }
 
     @Override
