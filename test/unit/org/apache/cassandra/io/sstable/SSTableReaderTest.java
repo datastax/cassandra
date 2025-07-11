@@ -109,6 +109,7 @@ import static org.apache.cassandra.cql3.QueryProcessor.executeInternal;
 import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
 import static org.apache.cassandra.io.sstable.format.SSTableReader.selectOnlyBigTableReaders;
 import static org.apache.cassandra.schema.CompressionParams.DEFAULT_CHUNK_LENGTH;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.hamcrest.Matchers.is;
 import static org.junit.Assert.assertEquals;
@@ -914,6 +915,39 @@ public class SSTableReaderTest
             SSTableReader reopened = trackReleaseableRef(() -> sstable.descriptor.getFormat().getReaderFactory().open(sstable.descriptor));
             assert reopened.first.getToken() instanceof LocalToken;
         }
+    }
+
+    @Test
+    public void testIsSuitableForCompaction()
+    {
+        ColumnFamilyStore store = discardSSTables(KEYSPACE1, CF_STANDARD);
+
+        new RowUpdateBuilder(store.metadata(), 1, "key")
+        .clustering("0")
+        .add("val", ByteBufferUtil.EMPTY_BYTE_BUFFER)
+        .build()
+        .applyUnsafe();
+
+        store.forceBlockingFlush(UNIT_TESTS);
+
+        Collection<SSTableReader> sstables = store.getLiveSSTables();
+        assertThat(sstables).allMatch(SSTableReader::isSuitableForCompaction);
+
+        try (LifecycleTransaction txn = store.getTracker().tryModify(sstables, OperationType.UNKNOWN))
+        {
+            txn.obsoleteOriginals();
+
+            // now that sstables are marked compacting, verify they exist in live sstable and are suitable for compacting
+            assertThat(store.getLiveSSTables()).isEqualTo(sstables);
+            assertThat(store.getCompactingSSTables()).isEqualTo(sstables);
+            assertThat(sstables).allMatch(SSTableReader::isSuitableForCompaction);
+
+            txn.finish();
+        }
+
+        // wait for sstable obsolection: now sstables are not suitable for compaction
+        LifecycleTransaction.waitForDeletions();
+        assertThat(sstables).noneMatch(SSTableReader::isSuitableForCompaction);
     }
 
     /** see CASSANDRA-5407 */
