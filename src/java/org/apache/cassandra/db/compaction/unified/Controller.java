@@ -38,6 +38,7 @@ import com.google.common.annotations.VisibleForTesting;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.db.compaction.CompactionSSTable;
 import org.apache.cassandra.io.FSError;
+import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -402,7 +403,20 @@ public abstract class Controller
 
     public static File getControllerConfigPath(String keyspaceName, String tableName)
     {
-        String fileName = keyspaceName + '.' + tableName + '-' + "controller-config.JSON";
+        String suffix = "-controller-config.JSON";
+        String fileName = keyspaceName + '.' + tableName + suffix;
+        if (fileName.length() > 255)
+        {
+            TableMetadata metadata = Schema.instance.getTableMetadata(keyspaceName, tableName);
+            if (metadata == null)
+                throw new IllegalArgumentException(String.format("Table %s.%s does not exist, cannot create controller config file", keyspaceName, tableName));
+
+            int spaceLeft = 255 - suffix.length() - 36 - 2; // 36 is the length of a UUID, 2 - for two separators
+            String keyspaceAbbrev = keyspaceName.substring(0, Math.min(keyspaceName.length(), spaceLeft / 2));
+            spaceLeft -= keyspaceAbbrev.length();
+            String tableAbbrev = tableName.substring(0, Math.min(tableName.length(), spaceLeft));
+            fileName = String.format("%s.%s.%s%s", keyspaceAbbrev, tableAbbrev, metadata.id.toHexString(), suffix);
+        }
         return new File(DatabaseDescriptor.getMetadataDirectory(), fileName);
     }
 
