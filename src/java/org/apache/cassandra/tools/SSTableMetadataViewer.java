@@ -326,7 +326,7 @@ public class SSTableMetadataViewer
         CompressionMetadata compression = null;
         File compressionFile = descriptor.fileFor(Component.COMPRESSION_INFO);
         if (compressionFile.exists())
-            compression = CompressionMetadata.create(dataFile, stats.zeroCopyMetadata);
+            compression = CompressionMetadata.read(dataFile, stats.zeroCopyMetadata, true);
         SerializationHeader.Component header = (SerializationHeader.Component) metadata
                 .get(MetadataType.HEADER);
 
