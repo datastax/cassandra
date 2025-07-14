@@ -16,9 +16,9 @@
 
 package org.apache.cassandra.db.compaction.unified;
 
+import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collections;
-import java.io.IOException;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -34,24 +34,21 @@ import java.util.stream.Collectors;
 import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
-
-import org.apache.cassandra.config.Config;
-import org.apache.cassandra.db.compaction.CompactionSSTable;
-import org.apache.cassandra.io.FSError;
-import org.apache.cassandra.schema.Schema;
-import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.codahale.metrics.Gauge;
+import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.compaction.CompactionAggregate;
 import org.apache.cassandra.db.compaction.CompactionPick;
 import org.apache.cassandra.db.compaction.CompactionRealm;
+import org.apache.cassandra.db.compaction.CompactionSSTable;
 import org.apache.cassandra.db.compaction.CompactionStrategy;
 import org.apache.cassandra.db.compaction.UnifiedCompactionStrategy;
 import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.io.FSError;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileWriter;
 import org.apache.cassandra.metrics.DefaultNameFactory;
@@ -59,6 +56,7 @@ import org.apache.cassandra.metrics.MetricNameFactory;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.MonotonicClock;
 import org.apache.cassandra.utils.Overlaps;
 import org.json.simple.JSONArray;
@@ -327,8 +325,7 @@ public abstract class Controller
     protected final long expiredSSTableCheckFrequency;
     protected final boolean ignoreOverlapsInExpirationCheck;
     protected final boolean parallelizeOutputShards;
-    protected String keyspaceName;
-    protected String tableName;
+    protected final TableMetadata metadata;
 
     protected final int baseShardCount;
     private final boolean isReplicaAware;
@@ -366,7 +363,8 @@ public abstract class Controller
                Reservations.Type reservationsType,
                Overlaps.InclusionMethod overlapInclusionMethod,
                boolean parallelizeOutputShards,
-               boolean hasVectorType)
+               boolean hasVectorType,
+               TableMetadata metadata)
     {
         this.clock = clock;
         this.env = env;
@@ -387,6 +385,7 @@ public abstract class Controller
         this.l0ShardsEnabled = Boolean.parseBoolean(getSystemProperty(L0_SHARDS_ENABLED_OPTION, "false")); // FIXME VECTOR-23
         this.parallelizeOutputShards = parallelizeOutputShards;
         this.hasVectorType = hasVectorType;
+        this.metadata = metadata;
 
         if (maxSSTablesToCompact <= 0)  // use half the maximum permitted compaction size as upper bound by default
             maxSSTablesToCompact = (int) (dataSetSize * this.maxSpaceOverhead * 0.5 / getMinSstableSizeBytes());
@@ -401,30 +400,26 @@ public abstract class Controller
         this.ignoreOverlapsInExpirationCheck = ALLOW_UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION && ignoreOverlapsInExpirationCheck;
     }
 
-    public static File getControllerConfigPath(String keyspaceName, String tableName)
+    public static File getControllerConfigPath(TableMetadata metadata)
     {
         String suffix = "-controller-config.JSON";
-        String fileName = keyspaceName + '.' + tableName + suffix;
+        String fileName = metadata.keyspace + '.' + metadata.name + suffix;
         if (fileName.length() > 255)
         {
-            TableMetadata metadata = Schema.instance.getTableMetadata(keyspaceName, tableName);
-            if (metadata == null)
-                throw new IllegalArgumentException(String.format("Table %s.%s does not exist, cannot create controller config file", keyspaceName, tableName));
-
             int spaceLeft = 255 - suffix.length() - 36 - 2; // 36 is the length of a UUID, 2 - for two separators
-            String keyspaceAbbrev = keyspaceName.substring(0, Math.min(keyspaceName.length(), spaceLeft / 2));
+            String keyspaceAbbrev = metadata.keyspace.substring(0, Math.min(metadata.keyspace.length(), spaceLeft / 2));
             spaceLeft -= keyspaceAbbrev.length();
-            String tableAbbrev = tableName.substring(0, Math.min(tableName.length(), spaceLeft));
+            String tableAbbrev = metadata.name.substring(0, Math.min(metadata.name.length(), spaceLeft));
             fileName = String.format("%s.%s.%s%s", keyspaceAbbrev, tableAbbrev, metadata.id.toHexString(), suffix);
         }
         return new File(DatabaseDescriptor.getMetadataDirectory(), fileName);
     }
 
-    public static void storeOptions(String keyspaceName, String tableName, int[] scalingParameters, long flushSizeBytes)
+    public static void storeOptions(TableMetadata metadata, int[] scalingParameters, long flushSizeBytes)
     {
-        if (SchemaConstants.isSystemKeyspace(keyspaceName))
+        if (SchemaConstants.isSystemKeyspace(metadata.keyspace))
             return;
-        File f = getControllerConfigPath(keyspaceName, tableName);
+        File f = getControllerConfigPath(metadata);
         try(FileWriter fileWriter = new FileWriter(f, File.WriteMode.OVERWRITE);)
         {
             JSONArray jsonArray = new JSONArray();
@@ -1068,8 +1063,7 @@ public abstract class Controller
                                                 overlapInclusionMethod,
                                                 parallelizeOutputShards,
                                                 hasVectorType,
-                                                realm.getKeyspaceName(),
-                                                realm.getTableName(),
+                                                realm.metadata(),
                                                 options)
                : StaticController.fromOptions(env,
                                               survivalFactors,
@@ -1089,8 +1083,7 @@ public abstract class Controller
                                               overlapInclusionMethod,
                                               parallelizeOutputShards,
                                               hasVectorType,
-                                              realm.getKeyspaceName(),
-                                              realm.getTableName(),
+                                              realm.metadata(),
                                               options,
                                               useVectorOptions);
     }
