@@ -1225,8 +1225,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
 
     Iterable<? extends CompactionSSTable> getFilteredSSTables(BiPredicate<CompactionSSTable, Boolean> predicate)
     {
-        Set<? extends CompactionSSTable> compacting = realm.getCompactingSSTables();
-        return Iterables.filter(realm.getLiveSSTables(), s -> predicate.test(s, compacting.contains(s)));
+        return Iterables.filter(realm.getSSTables(SSTableSet.NONCOMPACTING), s -> predicate.test(s, false));
     }
 
     /// Groups the sstables passed in into arenas and buckets. This is used by the strategy to determine
