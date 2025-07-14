@@ -1911,7 +1911,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
     @Override
     public boolean isSuitableForCompaction()
     {
-        return !isMarkedCompacted() && !isMarkedSuspect() && openReason != SSTableReader.OpenReason.EARLY;
+        return !isMarkedSuspect() && openReason != SSTableReader.OpenReason.EARLY;
     }
 
     /**
