@@ -76,7 +76,6 @@ import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.v2.V2VectorPostingsWriter;
-import org.apache.cassandra.index.sai.disk.v3.V3OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.v5.V5OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter.Structure;
@@ -211,23 +210,27 @@ public class CompactionGraph implements Closeable, Accountable
                                         indexConfig.getNeighborhoodOverflow(1.2f),
                                         indexConfig.getAlpha(dimension > 3 ? 1.2f : 1.4f),
                                         indexConfig.isHierarchyEnabled() && jvectorVersion >= 4,
-                                        compactionSimdPool, compactionFjp);
+                                        true, // We always refine during compaction
+                                        compactionSimdPool,
+                                        compactionFjp);
 
         termsFile = perIndexComponents.addOrGet(IndexComponentType.TERMS_DATA).file();
         termsOffset = (termsFile.exists() ? termsFile.length() : 0)
                       + SAICodecUtils.headerSize();
         // placeholder writer, will be replaced at flush time when we finalize the index contents
-        writer = createTermsWriterBuilder().withMapper(new OrdinalMapper.IdentityMapper(maxRowsInGraph)).build();
+        writer = createTermsWriter(new OrdinalMapper.IdentityMapper(maxRowsInGraph));
         writer.getOutput().seek(termsFile.length()); // position at the end of the previous segment before writing our own header
         SAICodecUtils.writeHeader(SAICodecUtils.toLuceneOutput(writer.getOutput()));
     }
 
-    private OnDiskGraphIndexWriter.Builder createTermsWriterBuilder() throws IOException
+    private OnDiskGraphIndexWriter createTermsWriter(OrdinalMapper ordinalMapper) throws IOException
     {
         return new OnDiskGraphIndexWriter.Builder(builder.getGraph(), termsFile.toPath())
                .withStartOffset(termsOffset)
                .with(new InlineVectors(dimension))
-               .withVersion(Version.current().onDiskFormat().jvectorFileFormatVersion());
+               .withVersion(Version.current().onDiskFormat().jvectorFileFormatVersion())
+               .withMapper(ordinalMapper)
+               .build();
     }
 
     @Override
@@ -446,7 +449,7 @@ public class CompactionGraph implements Closeable, Accountable
             }
 
             // Recreate the writer with the final ordinalMapper
-            writer = createTermsWriterBuilder().withMapper(ordinalMapper.get()).build();
+            writer = createTermsWriter(ordinalMapper.get());
 
             // write the graph edge lists and optionally fused adc features
             var start = System.nanoTime();
