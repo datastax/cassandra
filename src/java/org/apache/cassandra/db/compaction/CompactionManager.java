@@ -65,6 +65,7 @@ import com.google.common.util.concurrent.RateLimiter;
 import com.google.common.util.concurrent.Uninterruptibles;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
 import com.codahale.metrics.Meter;
 import io.netty.util.concurrent.FastThreadLocal;
 import org.apache.cassandra.cache.AutoSavingCache;
@@ -258,9 +259,9 @@ public class CompactionManager implements CompactionManagerMBean
                             file.delete();
                         }
                     }
-                    else if (names.length == 3)
+                    else if (names.length == 3) // if keyspace/table names are long, we include table id as a 3rd component while the keyspace and table names are abbreviated
                     {
-                        TableId tableId = TableId.fromString(names[2]);
+                        TableId tableId = TableId.fromHexString(names[2]);
                         //table exists so keep the file
                         if (Schema.instance.getTableMetadata(tableId) == null)
                         {

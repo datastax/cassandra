@@ -35,11 +35,16 @@ import org.apache.cassandra.schema.TableMetadata;
 
 import static org.apache.cassandra.SchemaLoader.standardCFMD;
 import static org.apache.cassandra.distributed.shared.FutureUtils.waitOn;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
 public class CompactionControllerConfigTest extends TestBaseImpl
 {
+
+    private static final String quiteLongkeyspaceName = "g38373639353166362d356631322d343864652d393063362d653862616534343165333764_tpch";
+    private static final String longTableName = "test_create_k8yq1r75bpzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz";
+
     @Test
     public void storedAdaptiveCompactionOptionsTest() throws Throwable
     {
@@ -155,6 +160,12 @@ public class CompactionControllerConfigTest extends TestBaseImpl
                                               "{'class': 'UnifiedCompactionStrategy', " +
                                               "'adaptive': 'false', " +
                                               "'scaling_parameters': '0'};"));
+            cluster.schemaChange(withKeyspace("CREATE KEYSPACE "+quiteLongkeyspaceName+" WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 2};"));
+            cluster.schemaChange(withKeyspace("CREATE TABLE "+quiteLongkeyspaceName+"."+longTableName+" (pk int, ck int, v int, PRIMARY KEY (pk, ck)) WITH compaction = " +
+                                              "{'class': 'UnifiedCompactionStrategy', " +
+                                              "'adaptive': 'false', " +
+                                              "'scaling_parameters': '0'};"));
+
 
             cluster.get(1).runOnInstance(() ->
                                          {
@@ -177,6 +188,8 @@ public class CompactionControllerConfigTest extends TestBaseImpl
                                              //verify that the file was deleted
                                              assert !Controller.getControllerConfigPath(metadata).exists();
 
+                                             assertThat(Controller.getControllerConfigPath(ColumnFamilyStore.getIfExists(quiteLongkeyspaceName, longTableName).metadata()).toJavaIOFile()).exists();
+
                                          });
 
         }
@@ -192,15 +205,17 @@ public class CompactionControllerConfigTest extends TestBaseImpl
                                              CompactionManager.storeControllerConfig();
 
                                              // try to store controller config for a table with a long name
-                                             String keyspaceName = "g38373639353166362d356631322d343864652d393063362d653862616534343165333764_tpch";
-                                             String longTableName = "test_create_k8yq1r75bpzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz";
-                                             TableMetadata metadata = standardCFMD(keyspaceName, longTableName).build();
+                                             TableMetadata metadata = standardCFMD(quiteLongkeyspaceName, longTableName).build();
                                              int[] scalingParameters = new int[32];
                                              Arrays.fill(scalingParameters, 5);
                                              AdaptiveController.storeOptions(metadata, scalingParameters, 10 << 20);
 
                                              // verify that the file WAS created (CNDB-12972)
                                              assert Controller.getControllerConfigPath(metadata).exists();
+
+                                             CompactionManager.cleanupControllerConfig();
+
+                                             assert !Controller.getControllerConfigPath(metadata).exists(); // table not really exists
                                          });
         }
     }
