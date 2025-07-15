@@ -49,7 +49,7 @@ import io.github.jbellis.jvector.graph.disk.OrdinalMapper;
 import io.github.jbellis.jvector.graph.disk.feature.Feature;
 import io.github.jbellis.jvector.graph.disk.feature.FeatureId;
 import io.github.jbellis.jvector.graph.disk.feature.InlineVectors;
-import io.github.jbellis.jvector.graph.similarity.SearchScoreProvider;
+import io.github.jbellis.jvector.graph.similarity.DefaultSearchScoreProvider;
 import io.github.jbellis.jvector.quantization.BinaryQuantization;
 import io.github.jbellis.jvector.quantization.CompressedVectors;
 import io.github.jbellis.jvector.quantization.ProductQuantization;
@@ -342,7 +342,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
         searcher.setView(builder.getGraph().getView());
         try
         {
-            var ssf = SearchScoreProvider.exact(queryVector, similarityFunction, vectorValues);
+            var ssf = DefaultSearchScoreProvider.exact(queryVector, similarityFunction, vectorValues);
             long start = nanoTime();
             var result = searcher.search(ssf, limit, rerankK, threshold, 0.0f, bits);
             long elapsed = nanoTime() - start;
@@ -440,10 +440,10 @@ public class CassandraOnHeapGraph<T> implements Accountable
         try (var pqOutput = perIndexComponents.addOrGet(IndexComponentType.PQ).openOutput(true);
              var postingsOutput = perIndexComponents.addOrGet(IndexComponentType.POSTING_LISTS).openOutput(true);
              var indexWriter = new OnDiskGraphIndexWriter.Builder(builder.getGraph(), indexFile.toPath())
+                               .withStartOffset(termsOffset)
                                .withVersion(Version.current().onDiskFormat().jvectorFileFormatVersion())
                                .withMapper(ordinalMapper)
                                .with(new InlineVectors(vectorValues.dimension()))
-                               .withStartOffset(termsOffset)
                                .build())
         {
             SAICodecUtils.writeHeader(pqOutput);
