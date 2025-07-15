@@ -1692,7 +1692,7 @@ public class LogTransactionTest extends AbstractTransactionalTest
         return ILogTransactionsFactory.instance.createLogAwareFileLister()
                                                .list(folder.toPath(), (file, type) -> match.contains(type), onTxnErr)
                                                .stream()
-                                               .map(File::toCanonical)
+                                               .flatMap(LogTransactionTest::toCanonicalIgnoringNotFound)
                                                .collect(Collectors.toSet());
     }
 
