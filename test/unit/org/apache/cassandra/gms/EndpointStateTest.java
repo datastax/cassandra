@@ -46,6 +46,16 @@ import static org.junit.Assert.assertTrue;
 
 public class EndpointStateTest
 {
+
+    // the following are dse-6.x legacy applicationState ordinals
+    private static final ApplicationState DSE__STATUS = ApplicationState.values()[0];
+    private static final ApplicationState DSE__INTERNAL_IP = ApplicationState.values()[7];
+    private static final ApplicationState DSE__NATIVE_TRANSPORT_PORT = ApplicationState.values()[15];
+    private static final ApplicationState DSE__NATIVE_TRANSPORT_PORT_SSL = ApplicationState.values()[16];
+    private static final ApplicationState DSE__STORAGE_PORT = ApplicationState.values()[17];
+    private static final ApplicationState DSE__SCHEMA_COMPATIBILITY_VERSION = ApplicationState.values()[20];
+    private static final ApplicationState DSE__DISK_USAGE = ApplicationState.values()[21];
+
     public volatile VersionedValue.VersionedValueFactory valueFactory =
         new VersionedValue.VersionedValueFactory(DatabaseDescriptor.getPartitioner());
 
@@ -225,14 +235,14 @@ public class EndpointStateTest
         for (Map.Entry<ApplicationState, VersionedValue> entry : EndpointStateSerializer.filterOutgoingStates(states.entrySet(), MessagingService.VERSION_30))
             filtered.put(entry.getKey(), entry.getValue());
 
-        assertEquals("10.0.0.1", filtered.get(ApplicationState.values()[7]).value);
-        assertEquals("7000", filtered.get(ApplicationState.values()[17]).value);
-        assertEquals("9042", filtered.get(ApplicationState.values()[15]).value);
-        assertEquals("NORMAL", filtered.get(ApplicationState.values()[0]).value);
+        assertEquals("10.0.0.1", filtered.get(DSE__INTERNAL_IP).value);
+        assertEquals("7000", filtered.get(DSE__STORAGE_PORT).value);
+        assertEquals("9042", filtered.get(DSE__NATIVE_TRANSPORT_PORT).value);
+        assertEquals("NORMAL", filtered.get(DSE__STATUS).value);
         assertFalse(filtered.containsKey(ApplicationState.SSTABLE_VERSIONS));
         assertFalse(filtered.containsKey(ApplicationState.INDEX_STATUS));
         assertEquals("datacenter1", filtered.get(ApplicationState.DC).value);
-        assertEquals("u:0.5", filtered.get(ApplicationState.values()[21]).value);
+        assertEquals("u:0.5", filtered.get(DSE__DISK_USAGE).value);
         assertEquals(6, filtered.size());
     }
 
@@ -254,11 +264,11 @@ public class EndpointStateTest
     public void testFilterIncomingStates_30()
     {
         Map<ApplicationState, VersionedValue> states = new EnumMap<>(ApplicationState.class);
-        states.put(ApplicationState.values()[15], VersionedValue.unsafeMakeVersionedValue("9042", 1));
-        states.put(ApplicationState.values()[17], VersionedValue.unsafeMakeVersionedValue("7000", 1));
-        states.put(ApplicationState.values()[21], VersionedValue.unsafeMakeVersionedValue("u:0.5", 1));
-        states.put(ApplicationState.values()[20], VersionedValue.unsafeMakeVersionedValue("SCHEMA_COMPATIBILITY_VERSION", 1));
-        states.put(ApplicationState.values()[16], VersionedValue.unsafeMakeVersionedValue("NATIVE_TRANSPORT_PORT_SSL", 1));
+        states.put(DSE__NATIVE_TRANSPORT_PORT, VersionedValue.unsafeMakeVersionedValue("9042", 1));
+        states.put(DSE__STORAGE_PORT, VersionedValue.unsafeMakeVersionedValue("7000", 1));
+        states.put(DSE__DISK_USAGE, VersionedValue.unsafeMakeVersionedValue("u:0.5", 1));
+        states.put(DSE__SCHEMA_COMPATIBILITY_VERSION, VersionedValue.unsafeMakeVersionedValue("SCHEMA_COMPATIBILITY_VERSION", 1));
+        states.put(DSE__NATIVE_TRANSPORT_PORT_SSL, VersionedValue.unsafeMakeVersionedValue("NATIVE_TRANSPORT_PORT_SSL", 1));
 
         Map<ApplicationState, VersionedValue> filtered = EndpointStateSerializer.filterIncomingStates(states, MessagingService.VERSION_30);
 

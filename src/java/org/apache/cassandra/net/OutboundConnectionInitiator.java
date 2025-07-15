@@ -317,6 +317,11 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
                         {
                             case CRC:
                             case UNPROTECTED:
+                                // note, Legacy (pre40) doesn't do crc:
+                                //  implemented in that,
+                                // HandshakeProtocol.Accept.maybeDecode(..) always returns before any read/check of crc,
+                                // and HandshakeProtocol.Accept.respondPre40(..) never computes/writes any crc.
+                                // ref: https://github.com/datastax/cassandra/pull/1801#discussion_r2173183200
                                 frameEncoder = FrameEncoderLegacy.instance;
                                 break;
                             case LZ4:

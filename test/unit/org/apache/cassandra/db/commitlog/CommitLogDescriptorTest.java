@@ -317,4 +317,34 @@ public class CommitLogDescriptorTest
         CommitLogDescriptor descriptor = new CommitLogDescriptor(680, 1, null, null);
         Assert.assertEquals(MessagingService.VERSION_DSE_68, descriptor.getMessagingVersion());
     }
+
+    @Test
+    public void testMessagingToCommitLogVersionSymmetry()
+    {
+        for (MessagingService.Version messagingVersion : MessagingService.Version.values())
+        {
+            int commitLogVersion = CommitLogDescriptor.currentVersion(messagingVersion.value);
+
+            // special case for MessagingService.VERSION_3014 and MessagingService.VERSION_41
+            int expectedMessagingVersion = messagingVersion.value;
+            if (MessagingService.Version.VERSION_3014 == messagingVersion)
+                expectedMessagingVersion = MessagingService.VERSION_30;
+            else if (MessagingService.Version.VERSION_41 == messagingVersion)
+                expectedMessagingVersion = MessagingService.VERSION_40;
+
+            Assert.assertEquals(expectedMessagingVersion, CommitLogDescriptor.getMessagingVersion(commitLogVersion));
+        }
+    }
+
+    @Test(expected = IllegalStateException.class)
+    public void testMessagingToCommitLogVersionFailure()
+    {
+        CommitLogDescriptor.currentVersion(1);
+    }
+
+    @Test(expected = IllegalStateException.class)
+    public void testCommitLogToMessagingVersionFailure()
+    {
+        CommitLogDescriptor.getMessagingVersion(1);
+    }
 }

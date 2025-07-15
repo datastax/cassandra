@@ -152,6 +152,7 @@ public class HandshakeTest
     {
         Result result = handshake(VERSION_30, VERSION_30, VERSION_3014, VERSION_30, VERSION_3014);
         Assert.assertEquals(Result.Outcome.RETRY, result.outcome);
+        // special case where VERSION_30 gets bumped to 3014 (so to avoid the column filter bug)
         Assert.assertEquals(VERSION_3014, result.retry().withMessagingVersion);
     }
 
@@ -187,6 +188,7 @@ public class HandshakeTest
         // This is how DSE 255 (0,4) intiaties the connection to CC (10,100)
         Result result = handshake(255, 0, 4, VERSION_30, 100);
         Assert.assertEquals(Result.Outcome.SUCCESS, result.outcome);
+        Assert.assertEquals(255, result.success().messagingVersion);
         result.success().channel.close();
     }
 
@@ -299,6 +301,7 @@ public class HandshakeTest
     {
         Result result = handshake(VERSION_30, VERSION_30, current_version, VERSION_30, current_version + 1);
         Assert.assertEquals(Result.Outcome.RETRY, result.outcome);
+        // special case where VERSION_30 gets bumped to 3014 (so to avoid the column filter bug)
         Assert.assertEquals(VERSION_3014, result.retry().withMessagingVersion);
     }
 
