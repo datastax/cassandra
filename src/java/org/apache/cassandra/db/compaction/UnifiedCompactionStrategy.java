@@ -56,6 +56,7 @@ import org.apache.cassandra.db.lifecycle.ILifecycleTransaction;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.lifecycle.PartialLifecycleTransaction;
+import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.ConfigurationException;
@@ -217,7 +218,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
     /// same effect as compacting all of the sstables in the arena together in one operation.
     public synchronized List<CompactionAggregate.UnifiedAggregate> getMaximalAggregates()
     {
-        return getMaximalAggregates(realm.getLiveSSTables());
+        return getMaximalAggregates(Sets.newHashSet(realm.getSSTables(SSTableSet.NONCOMPACTING)));
     }
 
     public synchronized List<CompactionAggregate.UnifiedAggregate> getMaximalAggregates(Collection<? extends CompactionSSTable> sstables)
@@ -1208,7 +1209,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
     @VisibleForTesting
     Map<Arena, List<Level>> getLevels()
     {
-        return getLevels(realm.getLiveSSTables(), UnifiedCompactionStrategy::isSuitableForCompaction);
+        return getLevels(Sets.newHashSet(realm.getSSTables(SSTableSet.NONCOMPACTING)), UnifiedCompactionStrategy::isSuitableForCompaction);
     }
 
     private static boolean isSuitableForCompaction(CompactionSSTable sstable, boolean isCompacting)
@@ -1223,8 +1224,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
 
     Iterable<? extends CompactionSSTable> getFilteredSSTables(BiPredicate<CompactionSSTable, Boolean> predicate)
     {
-        Set<? extends CompactionSSTable> compacting = realm.getCompactingSSTables();
-        return Iterables.filter(realm.getLiveSSTables(), s -> predicate.test(s, compacting.contains(s)));
+        return Iterables.filter(realm.getSSTables(SSTableSet.NONCOMPACTING), s -> predicate.test(s, false));
     }
 
     /// Groups the sstables passed in into arenas and buckets. This is used by the strategy to determine
@@ -1313,7 +1313,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
     @Override
     public Map<String, String> getMaxOverlapsMap()
     {
-        final Set<? extends CompactionSSTable> liveSSTables = realm.getLiveSSTables();
+        final Set<? extends CompactionSSTable> liveSSTables = Sets.newHashSet(realm.getSSTables(SSTableSet.NONCOMPACTING));
         Map<UnifiedCompactionStrategy.Arena, List<UnifiedCompactionStrategy.Level>> arenas =
                 getLevels(liveSSTables, (i1, i2) -> true); // take all sstables
 
