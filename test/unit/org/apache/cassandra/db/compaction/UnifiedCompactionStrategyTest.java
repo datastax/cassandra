@@ -402,6 +402,52 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         System.out.println(strategy.getMaxOverlapsMap());
     }
 
+    @Test
+    public void testGetLevelsWithCompactingSSTables()
+    {
+        final int m = 2; // minimal sorted run size in MB m
+        long minimalSizeBytes = m << 20;
+
+        Controller controller = Mockito.mock(Controller.class);
+        when(controller.getMinSstableSizeBytes()).thenReturn(minimalSizeBytes);
+        when(controller.getNumShards(anyDouble())).thenReturn(1);
+        when(controller.getBaseSstableSize(anyInt())).thenReturn((double) minimalSizeBytes);
+        when(controller.maxConcurrentCompactions()).thenReturn(1000); // let it generate as many candidates as it can
+        when(controller.maxThroughput()).thenReturn(Double.MAX_VALUE);
+        when(controller.maxSSTablesToCompact()).thenReturn(1000);
+        when(controller.prioritize(anyList())).thenAnswer(answ -> answ.getArgument(0));
+        when(controller.getReservedThreads()).thenReturn(Integer.MAX_VALUE);
+        when(controller.getReservationsType()).thenReturn(Reservations.Type.PER_LEVEL);
+        when(controller.parallelizeOutputShards()).thenReturn(true);
+        when(controller.getScalingParameter(anyInt())).thenReturn(2);
+        when(controller.getFanout(anyInt())).thenCallRealMethod();
+        when(controller.getThreshold(anyInt())).thenCallRealMethod();
+        when(controller.getMaxLevelDensity(anyInt(), anyDouble())).thenCallRealMethod();
+        when(controller.getSurvivalFactor(anyInt())).thenReturn(1.0);
+        when(controller.random()).thenCallRealMethod();
+
+        UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(strategyFactory, controller);
+
+        int sstableCount = 4;
+        List<SSTableReader> sstables = mockSSTables(sstableCount, 100, 0, System.currentTimeMillis(), 0, true, null);
+        dataTracker.addInitialSSTables(sstables);
+
+        // all sstables are non-compacting
+        assertEquals(sstableCount, strategy.getLevels().values().stream().flatMap(Collection::stream).mapToInt(l -> l.sstables.size()).sum());
+
+        // mark one sstable as compacting
+        try (LifecycleTransaction txn = dataTracker.tryModify(List.of(sstables.get(0)), OperationType.COMPACTION))
+        {
+            assertEquals(sstableCount - 1, strategy.getLevels().values().stream().flatMap(Collection::stream).mapToInt(l -> l.sstables.size()).sum());
+
+            txn.obsoleteOriginals();
+            txn.abort(); // unmark compacting
+        }
+
+        // all sstables are non-compacting
+        assertEquals(sstableCount, strategy.getLevels().values().stream().flatMap(Collection::stream).mapToInt(l -> l.sstables.size()).sum());
+    }
+
     private BufferDecoratedKey key(long token)
     {
         return new BufferDecoratedKey(new Murmur3Partitioner.LongToken(token), ByteBuffer.allocate(0));
