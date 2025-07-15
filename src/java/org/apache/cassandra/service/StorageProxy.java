@@ -117,6 +117,7 @@ import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessageFlag;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.RequestCallback;
+import org.apache.cassandra.net.UnknownEndpointException;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
@@ -2239,7 +2240,18 @@ public class StorageProxy implements StorageProxyMBean
         // set of replicas we sent messages to, speculatively send an additional messages to an un-contacted replica
         for (int i=0; i<cmdCount; i++)
         {
-            reads[i].maybeTryAdditionalReplicas();
+            try
+            {
+                reads[i].maybeTryAdditionalReplicas();
+            }
+            catch (UnknownEndpointException ex)
+            {
+                logger.debug("Failed to send speculative read retries; The target replica is not known: {}", ex.getMessage());
+            }
+            catch (Exception ex)
+            {
+                logger.warn("Caught exception during speculative read retry; This is unexpected, but we're ignoring it because spec retry is just a best-effort attempt;", ex);
+            }
         }
 
         // wait for enough responses to meet the consistency level. If there's a digest mismatch, begin the read
