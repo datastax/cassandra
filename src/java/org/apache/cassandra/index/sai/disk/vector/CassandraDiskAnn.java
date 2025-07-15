@@ -31,6 +31,7 @@ import io.github.jbellis.jvector.graph.GraphIndex;
 import io.github.jbellis.jvector.graph.GraphSearcher;
 import io.github.jbellis.jvector.graph.disk.feature.FeatureId;
 import io.github.jbellis.jvector.graph.disk.OnDiskGraphIndex;
+import io.github.jbellis.jvector.graph.similarity.DefaultSearchScoreProvider;
 import io.github.jbellis.jvector.graph.similarity.SearchScoreProvider;
 import io.github.jbellis.jvector.quantization.BQVectors;
 import io.github.jbellis.jvector.quantization.CompressedVectors;
@@ -240,12 +241,12 @@ public class CassandraDiskAnn
             {
                 var asf = view.approximateScoreFunctionFor(queryVector, similarityFunction);
                 var rr = isRerankless ? null : view.rerankerFor(queryVector, similarityFunction);
-                ssp = new SearchScoreProvider(asf, rr);
+                ssp = new DefaultSearchScoreProvider(asf, rr);
             }
             else if (compressedVectors == null)
             {
                 // no compression, so we ignore isRerankless (except for setting rerankK to limit)
-                ssp = new SearchScoreProvider(view.rerankerFor(queryVector, similarityFunction));
+                ssp = new DefaultSearchScoreProvider(view.rerankerFor(queryVector, similarityFunction));
             }
             else
             {
@@ -256,7 +257,7 @@ public class CassandraDiskAnn
                          : similarityFunction;
                 var asf = compressedVectors.precomputedScoreFunctionFor(queryVector, sf);
                 var rr = isRerankless ? null : view.rerankerFor(queryVector, similarityFunction);
-                ssp = new SearchScoreProvider(asf, rr);
+                ssp = new DefaultSearchScoreProvider(asf, rr);
             }
             long start = nanoTime();
             var result = searcher.search(ssp, limit, rerankK, threshold, context.getAnnRerankFloor(), ordinalsMap.ignoringDeleted(acceptBits));
