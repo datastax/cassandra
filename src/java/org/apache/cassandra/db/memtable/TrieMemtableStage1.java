@@ -75,26 +75,23 @@ import org.apache.cassandra.utils.memory.EnsureOnHeap;
 import org.apache.cassandra.utils.memory.MemtableAllocator;
 import org.github.jamm.Unmetered;
 
-/**
- * Previous TrieMemtable implementation, provided for two reasons:
- * <ul>
- * <li> to easily compare current and earlier implementations of the trie memtable
- * <li> to have an option to change a database back to the older implementation if we find a bug or a performance problem
- *   with the new code.
- *   </ul>
- * <p>
- * To switch a table to this version, use
- * <code><pre>
- *   ALTER TABLE ... WITH memtable = {'class': 'TrieMemtableStage1'}
- * </pre></code>
- * or add
- * <code><pre>
- *   memtable:
- *     class: TrieMemtableStage1
- * </pre></code>
- * in <code>cassandra.yaml</code> to switch a node to it as default.
- *
- */
+/// Previous TrieMemtable implementation, provided for two reasons:
+///
+///   -  to easily compare current and earlier implementations of the trie memtable
+///   -  to have an option to change a database back to the older implementation if we find a bug or a performance
+///      problem with the new code.
+///
+///
+/// To switch a table to this version, use
+/// ```
+///   ALTER TABLE ... WITH memtable = {'class': 'TrieMemtableStage1'}
+/// ```
+/// or add
+/// ```
+///   memtable:
+///     class: TrieMemtableStage1
+/// ```
+/// in `cassandra.yaml` to switch a node to it as default.
 public class TrieMemtableStage1 extends AbstractAllocatorMemtable
 {
     private static final Logger logger = LoggerFactory.getLogger(TrieMemtableStage1.class);
@@ -399,7 +396,7 @@ public class TrieMemtableStage1 extends AbstractAllocatorMemtable
 
     private static ByteComparable toComparableBound(PartitionPosition position, boolean before)
     {
-        return position.isMinimum() ? null : position.asComparableBound(before);
+        return position == null || position.isMinimum() ? null : position.asComparableBound(before);
     }
 
     public Partition getPartition(DecoratedKey key)
