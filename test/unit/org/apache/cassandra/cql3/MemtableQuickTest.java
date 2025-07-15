@@ -63,6 +63,7 @@ public class MemtableQuickTest extends CQLTester
         return ImmutableList.of("SkipListMemtable",
                                 "TrieMemtable",
                                 "TrieMemtableStage1",
+                                "TrieMemtableStage2",
                                 "PersistentMemoryMemtable");
     }
 
