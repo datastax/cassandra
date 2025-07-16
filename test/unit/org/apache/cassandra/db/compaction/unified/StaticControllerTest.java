@@ -210,8 +210,7 @@ public class StaticControllerTest extends ControllerTest
                                                            Controller.DEFAULT_OVERLAP_INCLUSION_METHOD,
                                                            true,
                                                            false,
-                                                           keyspaceName,
-                                                           tableName);
+                                                           metadata);
         super.testStartShutdown(controller);
     }
 
@@ -238,8 +237,7 @@ public class StaticControllerTest extends ControllerTest
                                                            Controller.DEFAULT_OVERLAP_INCLUSION_METHOD,
                                                            true,
                                                            false,
-                                                           keyspaceName,
-                                                           tableName);
+                                                           metadata);
         super.testShutdownNotStarted(controller);
     }
 
@@ -266,8 +264,7 @@ public class StaticControllerTest extends ControllerTest
                                                            Controller.DEFAULT_OVERLAP_INCLUSION_METHOD,
                                                            true,
                                                            false,
-                                                           keyspaceName,
-                                                           tableName);
+                                                           metadata);
         super.testStartAlreadyStarted(controller);
     }
 
