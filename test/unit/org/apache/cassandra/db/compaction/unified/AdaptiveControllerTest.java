@@ -93,8 +93,7 @@ public class AdaptiveControllerTest extends ControllerTest
                                       threshold,
                                       minCost,
                                       maxAdaptiveCompactions,
-                                      keyspaceName,
-                                      tableName);
+                                      metadata);
     }
 
     @Test
@@ -128,7 +127,7 @@ public class AdaptiveControllerTest extends ControllerTest
 
         int[] scalingParameters = new int[30];
         Arrays.fill(scalingParameters, 1);
-        AdaptiveController.storeOptions(keyspaceName, tableName, scalingParameters, 10 << 20);
+        AdaptiveController.storeOptions(metadata, scalingParameters, 10 << 20);
 
         Controller controller = testFromOptions(true, options);
         assertTrue(controller instanceof AdaptiveController);
@@ -139,7 +138,7 @@ public class AdaptiveControllerTest extends ControllerTest
             assertEquals(1, controller.getPreviousScalingParameter(i));
         }
         int[] emptyScalingParameters = {};
-        AdaptiveController.storeOptions(keyspaceName, tableName, emptyScalingParameters, 10 << 20);
+        AdaptiveController.storeOptions(metadata, emptyScalingParameters, 10 << 20);
 
         Controller controller2 = testFromOptions(true, options);
         assertTrue(controller2 instanceof AdaptiveController);
@@ -149,7 +148,7 @@ public class AdaptiveControllerTest extends ControllerTest
             assertEquals(3, controller2.getScalingParameter(i));
             assertEquals(3, controller2.getPreviousScalingParameter(i));
         }
-        AdaptiveController.getControllerConfigPath(keyspaceName, tableName).delete();
+        AdaptiveController.getControllerConfigPath(metadata).delete();
 
         Map<String, String> options2 = new HashMap<>();
         options2.put(AdaptiveController.MIN_SCALING_PARAMETER, "-10");
