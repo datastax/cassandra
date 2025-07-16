@@ -56,6 +56,7 @@ import static java.lang.Math.max;
 import static java.lang.Math.min;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static org.apache.cassandra.net.MessagingService.VERSION_30;
+import static org.apache.cassandra.net.MessagingService.VERSION_3014;
 import static org.apache.cassandra.net.MessagingService.VERSION_40;
 import static org.apache.cassandra.net.MessagingService.current_version;
 import static org.apache.cassandra.net.MessagingService.instance;
@@ -323,8 +324,11 @@ public class InboundConnectionInitiator
             else
             {
                 int version = initiate.requestMessagingVersion;
+
                 assert (version < VERSION_40 && version >= settings.acceptMessaging.min) ||
-                       (version == settings.acceptMessaging.min && settings.acceptMessaging.acceptsDse());
+                       (version >= settings.acceptMessaging.min && settings.acceptMessaging.acceptsDse())
+                        : String.format("failed assert: (%s < 12 && %1$s >= %s) || (%1$s >= %2$s && %s)", version, settings.acceptMessaging.min, settings.acceptMessaging.acceptsDse());
+
                 logger.trace("Connection version {} from {}", version, ctx.channel().remoteAddress());
 
                 if (initiate.type.isStreaming())
@@ -339,13 +343,22 @@ public class InboundConnectionInitiator
                 }
                 else
                 {
-                    // if this version is < the MS version the other node is trying
-                    // to connect with, the other node will disconnect
+                    // if this version is < the MS version the other node is trying to connect with, the other node will disconnect
                     ByteBuf response;
-                    if (version == settings.acceptMessaging.min && settings.acceptMessaging.acceptsDse())
+                    if (version >= settings.acceptMessaging.min && settings.acceptMessaging.acceptsDse())
                     {
+                        // `initiate.acceptVersions == null` from a dse legacy peer is the second/retry `(10,0,0)` connection (after we intentionally failed the first `(255,0,4)` attempt)
+                        //  background info: https://github.com/datastax/cassandra/pull/1801#discussion_r2173173862
+                        assert !MessagingService.current_version_override || version == settings.acceptMessaging.min
+                                : String.format("cndb-6.8 peer with bad requestMessagingVersion: %s == %s", version, settings.acceptMessaging.min);
+
                         // Min protocol is used for DSE CNDB compatibility
-                        response = HandshakeProtocol.Accept.respondPre40(version, ctx.alloc());
+                        // we bump it up to 3014 when possible (so to avoid the 'select *' column filter bug)
+                        int minProtocolVersion = MessagingService.current_version_override
+                                ? settings.acceptMessaging.min
+                                : Math.min(Math.max(settings.acceptMessaging.min, VERSION_3014), settings.acceptMessaging.max);
+
+                        response = HandshakeProtocol.Accept.respondPre40(minProtocolVersion, ctx.alloc());
                     }
                     else
                     {
