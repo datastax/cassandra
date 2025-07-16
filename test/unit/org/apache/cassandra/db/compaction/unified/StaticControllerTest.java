@@ -33,7 +33,6 @@ import org.apache.cassandra.schema.SchemaConstants;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 import static org.mockito.Mockito.when;
@@ -214,8 +213,7 @@ public class StaticControllerTest extends ControllerTest
                                                            Controller.DEFAULT_OVERLAP_INCLUSION_METHOD,
                                                            true,
                                                            false,
-                                                           keyspaceName,
-                                                           tableName);
+                                                           metadata);
         super.testStartShutdown(controller);
     }
 
@@ -242,8 +240,7 @@ public class StaticControllerTest extends ControllerTest
                                                            Controller.DEFAULT_OVERLAP_INCLUSION_METHOD,
                                                            true,
                                                            false,
-                                                           keyspaceName,
-                                                           tableName);
+                                                           metadata);
         super.testShutdownNotStarted(controller);
     }
 
@@ -270,8 +267,7 @@ public class StaticControllerTest extends ControllerTest
                                                            Controller.DEFAULT_OVERLAP_INCLUSION_METHOD,
                                                            true,
                                                            false,
-                                                           keyspaceName,
-                                                           tableName);
+                                                           metadata);
         super.testStartAlreadyStarted(controller);
     }
 

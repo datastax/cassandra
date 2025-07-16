@@ -31,13 +31,20 @@ import org.apache.cassandra.db.compaction.unified.AdaptiveController;
 import org.apache.cassandra.db.compaction.unified.Controller;
 import org.apache.cassandra.db.compaction.unified.StaticController;
 import org.apache.cassandra.distributed.Cluster;
+import org.apache.cassandra.schema.TableMetadata;
 
+import static org.apache.cassandra.SchemaLoader.standardCFMD;
 import static org.apache.cassandra.distributed.shared.FutureUtils.waitOn;
-import static org.junit.Assert.assertTrue;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 public class CompactionControllerConfigTest extends TestBaseImpl
 {
+
+    private static final String quiteLongkeyspaceName = "g38373639353166362d356631322d343864652d393063362d653862616534343165333764_tpch";
+    private static final String longTableName = "test_create_k8yq1r75bpzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz";
+
     @Test
     public void storedAdaptiveCompactionOptionsTest() throws Throwable
     {
@@ -53,6 +60,7 @@ public class CompactionControllerConfigTest extends TestBaseImpl
             cluster.get(1).runOnInstance(() ->
                                              {
                                                  ColumnFamilyStore cfs = Keyspace.open("ks").getColumnFamilyStore("tbl");
+                                                 ColumnFamilyStore cfs2 = Keyspace.open("ks").getColumnFamilyStore("tbl2");
                                                  UnifiedCompactionContainer container = (UnifiedCompactionContainer) cfs.getCompactionStrategy();
                                                  UnifiedCompactionStrategy ucs = (UnifiedCompactionStrategy) container.getStrategies().get(0);
                                                  Controller controller = ucs.getController();
@@ -63,12 +71,12 @@ public class CompactionControllerConfigTest extends TestBaseImpl
                                                  //manually write new scaling parameters and flushSizeBytes to see if they are picked up on restart
                                                  int[] scalingParameters = new int[32];
                                                  Arrays.fill(scalingParameters, 5);
-                                                 AdaptiveController.storeOptions("ks", "tbl", scalingParameters, 10 << 20);
+                                                 AdaptiveController.storeOptions(cfs.metadata(), scalingParameters, 10 << 20);
 
 
                                                  //write different scaling parameters to second table to make sure each table keeps its own configuration
                                                  Arrays.fill(scalingParameters, 8);
-                                                 AdaptiveController.storeOptions("ks", "tbl2", scalingParameters, 10 << 20);
+                                                 AdaptiveController.storeOptions(cfs2.metadata(), scalingParameters, 10 << 20);
                                              });
             waitOn(cluster.get(1).shutdown());
             cluster.get(1).startup();
@@ -119,7 +127,7 @@ public class CompactionControllerConfigTest extends TestBaseImpl
                                              //manually write new flushSizeBytes to see if it is picked up on restart
                                              int[] scalingParameters = new int[32];
                                              Arrays.fill(scalingParameters, 0);
-                                             AdaptiveController.storeOptions("ks", "tbl", scalingParameters, 10 << 20);
+                                             AdaptiveController.storeOptions(cfs.metadata(), scalingParameters, 10 << 20);
                                          });
             waitOn(cluster.get(1).shutdown());
             cluster.get(1).startup();
@@ -152,25 +160,35 @@ public class CompactionControllerConfigTest extends TestBaseImpl
                                               "{'class': 'UnifiedCompactionStrategy', " +
                                               "'adaptive': 'false', " +
                                               "'scaling_parameters': '0'};"));
+            cluster.schemaChange(withKeyspace("CREATE KEYSPACE "+quiteLongkeyspaceName+" WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 2};"));
+            cluster.schemaChange(withKeyspace("CREATE TABLE "+quiteLongkeyspaceName+"."+longTableName+" (pk int, ck int, v int, PRIMARY KEY (pk, ck)) WITH compaction = " +
+                                              "{'class': 'UnifiedCompactionStrategy', " +
+                                              "'adaptive': 'false', " +
+                                              "'scaling_parameters': '0'};"));
+
 
             cluster.get(1).runOnInstance(() ->
                                          {
                                              //logs should show that scaling parameters and flush size are written to a file for each table
                                              CompactionManager.storeControllerConfig();
+                                             TableMetadata metadata = standardCFMD("does_not", "exist").build();
 
                                              //store controller config for a table that does not exist to see if it is removed by the cleanup method
                                              int[] scalingParameters = new int[32];
                                              Arrays.fill(scalingParameters, 5);
-                                             AdaptiveController.storeOptions("does_not", "exist", scalingParameters, 10 << 20);
+
+                                             AdaptiveController.storeOptions(metadata, scalingParameters, 10 << 20);
 
                                              //verify that the file was created
-                                             assert Controller.getControllerConfigPath("does_not", "exist").exists();
+                                             assert Controller.getControllerConfigPath(metadata).exists();
 
                                              //cleanup method should remove the file corresponding to the table "does_not.exist"
                                              CompactionManager.cleanupControllerConfig();
 
                                              //verify that the file was deleted
-                                             assert !Controller.getControllerConfigPath("does_not", "exist").exists();
+                                             assert !Controller.getControllerConfigPath(metadata).exists();
+
+                                             assertThat(Controller.getControllerConfigPath(ColumnFamilyStore.getIfExists(quiteLongkeyspaceName, longTableName).metadata()).toJavaIOFile()).exists();
 
                                          });
 
@@ -187,14 +205,17 @@ public class CompactionControllerConfigTest extends TestBaseImpl
                                              CompactionManager.storeControllerConfig();
 
                                              // try to store controller config for a table with a long name
-                                             String keyspaceName = "g38373639353166362d356631322d343864652d393063362d653862616534343165333764_tpch";
-                                             String longTableName = "test_create_k8yq1r75bpzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz";
+                                             TableMetadata metadata = standardCFMD(quiteLongkeyspaceName, longTableName).build();
                                              int[] scalingParameters = new int[32];
                                              Arrays.fill(scalingParameters, 5);
-                                             AdaptiveController.storeOptions(keyspaceName, longTableName, scalingParameters, 10 << 20);
+                                             AdaptiveController.storeOptions(metadata, scalingParameters, 10 << 20);
 
-                                             // verify that the file wasn't created
-                                             assert !Controller.getControllerConfigPath(keyspaceName, longTableName).exists();
+                                             // verify that the file WAS created (CNDB-12972)
+                                             assert Controller.getControllerConfigPath(metadata).exists();
+
+                                             CompactionManager.cleanupControllerConfig();
+
+                                             assert !Controller.getControllerConfigPath(metadata).exists(); // table not really exists
                                          });
         }
     }

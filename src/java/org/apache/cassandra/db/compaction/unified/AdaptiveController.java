@@ -20,22 +20,21 @@ import java.io.IOException;
 import java.util.Arrays;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
-
 import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
-
-import org.apache.cassandra.io.FSError;
-import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.compaction.CompactionPick;
 import org.apache.cassandra.db.compaction.UnifiedCompactionStrategy;
 import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.io.FSError;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileReader;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.MonotonicClock;
 import org.apache.cassandra.utils.Overlaps;
 import org.json.simple.JSONArray;
@@ -129,8 +128,7 @@ public class AdaptiveController extends Controller
                               double threshold,
                               int minCost,
                               int maxAdaptiveCompactions,
-                              String keyspaceName,
-                              String tableName)
+                              TableMetadata metadata)
     {
         super(clock,
               env,
@@ -151,7 +149,8 @@ public class AdaptiveController extends Controller
               reservationsType,
               overlapInclusionMethod,
               parallelizeOutputShards,
-              hasVectorType);
+              hasVectorType,
+              metadata);
 
         this.scalingParameters = scalingParameters;
         this.previousScalingParameters = previousScalingParameters;
@@ -161,8 +160,6 @@ public class AdaptiveController extends Controller
         this.threshold = threshold;
         this.minCost = minCost;
         this.maxAdaptiveCompactions = maxAdaptiveCompactions;
-        this.keyspaceName = keyspaceName;
-        this.tableName = tableName;
     }
 
     static Controller fromOptions(Environment env,
@@ -183,14 +180,13 @@ public class AdaptiveController extends Controller
                                   Overlaps.InclusionMethod overlapInclusionMethod,
                                   boolean parallelizeOutputShards,
                                   boolean hasVectorType,
-                                  String keyspaceName,
-                                  String tableName,
+                                  TableMetadata metadata,
                                   Map<String, String> options)
     {
         int[] scalingParameters = null;
         long currentFlushSize = flushSizeOverride;
 
-        File f = getControllerConfigPath(keyspaceName, tableName);
+        File f = getControllerConfigPath(metadata);
         try
         {
             JSONParser jsonParser = new JSONParser();
@@ -298,8 +294,7 @@ public class AdaptiveController extends Controller
                                       threshold,
                                       minCost,
                                       maxAdaptiveCompactions,
-                                      keyspaceName,
-                                      tableName);
+                                      metadata);
     }
 
     private static int[] readStoredScalingParameters(JSONArray storedScalingParameters)
@@ -599,7 +594,7 @@ public class AdaptiveController extends Controller
     @Override
     public void storeControllerConfig()
     {
-        storeOptions(keyspaceName, tableName, scalingParameters, getFlushSizeBytes());
+        storeOptions(metadata, scalingParameters, getFlushSizeBytes());
     }
 
     @Override
