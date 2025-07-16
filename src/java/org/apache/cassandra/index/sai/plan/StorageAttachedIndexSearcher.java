@@ -39,6 +39,7 @@ import com.google.common.base.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.DecoratedKey;
@@ -451,6 +452,11 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             // filtered and considered as a result multiple times).
             // we need a non-null partitionKey here, as we want to construct a SinglePartitionReadCommand
             Preconditions.checkNotNull(key.partitionKey(), "Partition key must not be null");
+
+            // HACK! DO NOT MERGE THIS!
+            // This breals rowawareness on purpose
+            key = keyFactory.create(key.partitionKey(), Clustering.EMPTY);
+
             if (lastKey != null && key.partitionKey().equals(lastKey.partitionKey()) && key.clustering().equals(lastKey.clustering()))
                 return null;
             lastKey = key;
