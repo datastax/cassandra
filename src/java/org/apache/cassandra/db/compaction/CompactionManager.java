@@ -59,6 +59,7 @@ import com.google.common.util.concurrent.RateLimiter;
 import com.google.common.util.concurrent.Uninterruptibles;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
 import com.codahale.metrics.Meter;
 import io.netty.util.concurrent.FastThreadLocal;
 import org.apache.cassandra.cache.AutoSavingCache;
@@ -109,6 +110,7 @@ import org.apache.cassandra.repair.NoSuchRepairSessionException;
 import org.apache.cassandra.schema.CompactionParams.TombstoneOption;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
+import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.service.StorageService;
@@ -165,6 +167,7 @@ public class CompactionManager implements CompactionManagerMBean, ICompactionMan
         }
     };
     private static final int ACQUIRE_GRANULARITY = COMPACTION_RATE_LIMIT_GRANULARITY_IN_KB.getInt(128) * 1024;
+    private static final String CONTROLLER_CONFIG_JSON_SUFFIX = "-controller-config.JSON";
 
     static
     {
@@ -247,26 +250,40 @@ public class CompactionManager implements CompactionManagerMBean, ICompactionMan
     @VisibleForTesting
     public static void cleanupControllerConfig()
     {
-        Pattern fileNamePattern = Pattern.compile("-controller-config.JSON", Pattern.LITERAL);
+        Pattern fileNamePattern = Pattern.compile(CONTROLLER_CONFIG_JSON_SUFFIX, Pattern.LITERAL);
         Pattern keyspaceNameSeparator = Pattern.compile("\\.");
         File dir = DatabaseDescriptor.getMetadataDirectory();
         if (dir != null)
         {
             for (File file : dir.tryList())
             {
-                if (file.name().contains("-controller-config.JSON"))
+                if (file.name().contains(CONTROLLER_CONFIG_JSON_SUFFIX))
                 {
                     String[] names = keyspaceNameSeparator.split(fileNamePattern.matcher(file.name()).replaceAll(""));
-                    try
+                    if (names.length == 2)
                     {
-                        //table exists so keep the file
-                        Schema.instance.getKeyspaceInstance(names[0]).getColumnFamilyStore(names[1]);
+                        try
+                        {
+                            //table exists so keep the file
+                            Schema.instance.getKeyspaceInstance(names[0]).getColumnFamilyStore(names[1]);
+                        }
+                        catch (NullPointerException e)
+                        {
+                            //table does not exist so delete the file
+                            logger.debug("Removing " + file + " because it does not correspond to an existing table");
+                            file.delete();
+                        }
                     }
-                    catch(NullPointerException e)
+                    else if (names.length == 3) // if keyspace/table names are long, we include table id as a 3rd component while the keyspace and table names are abbreviated
                     {
-                        //table does not exist so delete the file
-                        logger.debug("Removing " + file + " because it does not correspond to an existing table");
-                        file.delete();
+                        TableId tableId = TableId.fromHexString(names[2]);
+                        //table exists so keep the file
+                        if (Schema.instance.getTableMetadata(tableId) == null)
+                        {
+                            //table does not exist so delete the file
+                            logger.debug("Removing " + file + " because it does not correspond to an existing table");
+                            file.delete();
+                        }
                     }
                 }
             }
