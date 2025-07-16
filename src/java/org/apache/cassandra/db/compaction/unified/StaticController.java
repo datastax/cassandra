@@ -28,6 +28,7 @@ import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.FSError;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileReader;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.MonotonicClock;
 import org.apache.cassandra.utils.Overlaps;
@@ -75,8 +76,7 @@ public class StaticController extends Controller
                             Overlaps.InclusionMethod overlapInclusionMethod,
                             boolean parallelizeOutputShards,
                             boolean hasVectorType,
-                            String keyspaceName,
-                            String tableName)
+                            TableMetadata metadata)
     {
         super(MonotonicClock.Global.preciseTime,
               env,
@@ -97,10 +97,9 @@ public class StaticController extends Controller
               reservationsType,
               overlapInclusionMethod,
               parallelizeOutputShards,
-              hasVectorType);
+              hasVectorType,
+              metadata);
         this.scalingParameters = scalingParameters;
-        this.keyspaceName = keyspaceName;
-        this.tableName = tableName;
     }
 
     static Controller fromOptions(Environment env,
@@ -121,8 +120,7 @@ public class StaticController extends Controller
                                   Overlaps.InclusionMethod overlapInclusionMethod,
                                   boolean parallelizeOutputShards,
                                   boolean hasVectorType,
-                                  String keyspaceName,
-                                  String tableName,
+                                  TableMetadata metadata,
                                   Map<String, String> options,
                                   boolean useVectorOptions)
     {
@@ -136,7 +134,7 @@ public class StaticController extends Controller
 
         long currentFlushSize = flushSizeOverride;
 
-        File f = getControllerConfigPath(keyspaceName, tableName);
+        File f = getControllerConfigPath(metadata);
         try
         {
             JSONParser jsonParser = new JSONParser();
@@ -184,8 +182,7 @@ public class StaticController extends Controller
                                     overlapInclusionMethod,
                                     parallelizeOutputShards,
                                     hasVectorType,
-                                    keyspaceName,
-                                    tableName);
+                                    metadata);
     }
 
     public static Map<String, String> validateOptions(Map<String, String> options) throws ConfigurationException
@@ -232,7 +229,7 @@ public class StaticController extends Controller
     @Override
     public void storeControllerConfig()
     {
-        storeOptions(keyspaceName, tableName, scalingParameters, getFlushSizeBytes());
+        storeOptions(metadata, scalingParameters, getFlushSizeBytes());
     }
 
     @Override
