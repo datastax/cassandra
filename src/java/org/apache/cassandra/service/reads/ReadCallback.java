@@ -42,6 +42,8 @@ import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.sensors.RequestTracker;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.concurrent.SimpleCondition;
+import org.apache.cassandra.metrics.ReplicaResponseSizeMetrics;
+import org.apache.cassandra.net.MessagingService;
 
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 
@@ -159,6 +161,11 @@ public class ReadCallback<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<
     public void onResponse(Message<ReadResponse> message)
     {
         assertWaitingFor(message.from());
+        
+        // Track the response size from replica to coordinator
+        int responseSize = message.payloadSize(MessagingService.current_version);
+        ReplicaResponseSizeMetrics.recordReplicaResponseSize(responseSize, true);
+        
         resolver.preprocess(message);
 
         /*
