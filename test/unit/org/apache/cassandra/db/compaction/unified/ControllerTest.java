@@ -44,11 +44,14 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.MovingAverage;
 import org.apache.cassandra.utils.Overlaps;
+import org.mockito.Answers;
 import org.mockito.Mock;
 import org.mockito.Mockito;
 import org.mockito.MockitoAnnotations;
+import org.mockito.internal.creation.MockSettingsImpl;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.UCS_OVERRIDE_UCS_CONFIG_FOR_VECTOR_TABLES;
+import static org.apache.cassandra.SchemaLoader.standardCFMD;
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -84,7 +87,6 @@ public abstract class ControllerTest
     @Mock
     ColumnFamilyStore cfs;
 
-    @Mock
     TableMetadata metadata;
 
     @Mock
@@ -122,11 +124,13 @@ public abstract class ControllerTest
     public void setUp()
     {
         MockitoAnnotations.initMocks(this);
+        metadata = Mockito.mock(TableMetadata.class, new MockSettingsImpl<>()
+                                                     .useConstructor(standardCFMD(keyspaceName, tableName))
+                                                     .defaultAnswer(Answers.RETURNS_SMART_NULLS));
 
         when(strategy.getMetadata()).thenReturn(metadata);
         when(strategy.getEstimatedRemainingTasks()).thenReturn(0);
 
-        when(metadata.toString()).thenReturn("");
         when(replicationStrategy.getReplicationFactor()).thenReturn(ReplicationFactor.fullOnly(3));
         when(cfs.makeUCSEnvironment()).thenAnswer(invocation -> new RealEnvironment(cfs));
         when(cfs.getKeyspaceReplicationStrategy()).thenReturn(replicationStrategy);

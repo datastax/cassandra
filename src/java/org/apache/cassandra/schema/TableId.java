@@ -66,6 +66,14 @@ public class TableId
         return new TableId(UUID.fromString(idString));
     }
 
+    public static TableId fromHexString(String nonDashUUID)
+    {
+        ByteBuffer bytes = ByteBufferUtil.hexToBytes(nonDashUUID);
+        long msb = bytes.getLong(0);
+        long lsb = bytes.getLong(8);
+        return fromUUID(new UUID(msb, lsb));
+    }
+
     @Nullable
     public static Pair<String, TableId> tableNameAndIdFromFilename(String filename)
     {
@@ -77,14 +85,6 @@ public class TableId
         String tableName = filename.substring(0, dash);
 
         return Pair.create(tableName, id);
-    }
-
-    private static TableId fromHexString(String nonDashUUID)
-    {
-        ByteBuffer bytes = ByteBufferUtil.hexToBytes(nonDashUUID);
-        long msb = bytes.getLong(0);
-        long lsb = bytes.getLong(8);
-        return fromUUID(new UUID(msb, lsb));
     }
 
     /**
