@@ -330,8 +330,7 @@ public abstract class Controller
     protected final long expiredSSTableCheckFrequency;
     protected final boolean ignoreOverlapsInExpirationCheck;
     protected final boolean parallelizeOutputShards;
-    protected String keyspaceName;
-    protected String tableName;
+    protected final TableMetadata metadata;
 
     protected final int baseShardCount;
     private final boolean isReplicaAware;
@@ -369,7 +368,8 @@ public abstract class Controller
                Reservations.Type reservationsType,
                Overlaps.InclusionMethod overlapInclusionMethod,
                boolean parallelizeOutputShards,
-               boolean hasVectorType)
+               boolean hasVectorType,
+               TableMetadata metadata)
     {
         this.clock = clock;
         this.env = env;
@@ -390,6 +390,7 @@ public abstract class Controller
         this.l0ShardsEnabled = UCS_L0_SHARDS_ENABLED.getBooleanWithLegacyFallback(false); // FIXME VECTOR-23
         this.parallelizeOutputShards = parallelizeOutputShards;
         this.hasVectorType = hasVectorType;
+        this.metadata = metadata;
 
         if (maxSSTablesToCompact <= 0)  // use half the maximum permitted compaction size as upper bound by default
             maxSSTablesToCompact = (int) (dataSetSize * this.maxSpaceOverhead * 0.5 / getMinSstableSizeBytes());
@@ -404,17 +405,26 @@ public abstract class Controller
         this.ignoreOverlapsInExpirationCheck = ALLOW_UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION && ignoreOverlapsInExpirationCheck;
     }
 
-    public static File getControllerConfigPath(String keyspaceName, String tableName)
+    public static File getControllerConfigPath(TableMetadata metadata)
     {
-        String fileName = keyspaceName + '.' + tableName + '-' + "controller-config.JSON";
+        String suffix = "-controller-config.JSON";
+        String fileName = metadata.keyspace + '.' + metadata.name + suffix;
+        if (fileName.length() > 255)
+        {
+            int spaceLeft = 255 - suffix.length() - 36 - 2; // 36 is the length of a UUID, 2 - for two separators
+            String keyspaceAbbrev = metadata.keyspace.substring(0, Math.min(metadata.keyspace.length(), spaceLeft / 2));
+            spaceLeft -= keyspaceAbbrev.length();
+            String tableAbbrev = metadata.name.substring(0, Math.min(metadata.name.length(), spaceLeft));
+            fileName = String.format("%s.%s.%s%s", keyspaceAbbrev, tableAbbrev, metadata.id.toHexString(), suffix);
+        }
         return new File(DatabaseDescriptor.getMetadataDirectory(), fileName);
     }
 
-    public static void storeOptions(String keyspaceName, String tableName, int[] scalingParameters, long flushSizeBytes)
+    public static void storeOptions(TableMetadata metadata, int[] scalingParameters, long flushSizeBytes)
     {
-        if (SchemaConstants.isSystemKeyspace(keyspaceName))
+        if (SchemaConstants.isSystemKeyspace(metadata.keyspace))
             return;
-        File f = getControllerConfigPath(keyspaceName, tableName);
+        File f = getControllerConfigPath(metadata);
         try(FileWriter fileWriter = new FileWriter(f, File.WriteMode.OVERWRITE);)
         {
             JSONArray jsonArray = new JSONArray();
@@ -1058,8 +1068,7 @@ public abstract class Controller
                                                 overlapInclusionMethod,
                                                 parallelizeOutputShards,
                                                 hasVectorType,
-                                                realm.getKeyspaceName(),
-                                                realm.getTableName(),
+                                                realm.metadata(),
                                                 options)
                : StaticController.fromOptions(env,
                                               survivalFactors,
@@ -1079,8 +1088,7 @@ public abstract class Controller
                                               overlapInclusionMethod,
                                               parallelizeOutputShards,
                                               hasVectorType,
-                                              realm.getKeyspaceName(),
-                                              realm.getTableName(),
+                                              realm.metadata(),
                                               options,
                                               useVectorOptions);
     }

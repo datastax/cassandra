@@ -77,6 +77,7 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.io.util.PageAware;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ExpMovingAverage;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.MonotonicClock;
@@ -86,6 +87,7 @@ import org.apache.cassandra.utils.TimeUUID;
 import org.mockito.Mockito;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.LOG_DIR;
+import static org.apache.cassandra.SchemaLoader.standardCFMD;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 import static org.mockito.Mockito.when;
@@ -389,6 +391,7 @@ public class CompactionSimulationTest extends BaseCompactionStrategyTest
         int[] Ws = new int[] { W };
         int[] previousWs = new int[] { W };
         double maxSpaceOverhead = 0.2;
+        TableMetadata metadata = standardCFMD(keyspace, table).build();
 
         Controller controller = adaptive
                                 ? new AdaptiveController(MonotonicClock.Global.preciseTime,
@@ -417,8 +420,7 @@ public class CompactionSimulationTest extends BaseCompactionStrategyTest
                                                          gain,
                                                          minCost,
                                                          maxAdaptiveCompactions,
-                                                         "ks",
-                                                         "tbl")
+                                                         metadata)
                                 : new StaticController(new SimulatedEnvironment(counters, valueSize),
                                                        Ws,
                                                        new double[] { o },
@@ -439,8 +441,7 @@ public class CompactionSimulationTest extends BaseCompactionStrategyTest
                                                        overlapInclusionMethod,
                                                        true,
                                                        false,
-                                                       "ks",
-                                                       "tbl");
+                                                       metadata);
 
         return new UnifiedCompactionStrategy(strategyFactory, controller);
     }
