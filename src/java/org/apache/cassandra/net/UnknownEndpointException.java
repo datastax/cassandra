@@ -20,7 +20,7 @@ package org.apache.cassandra.net;
 
 public class UnknownEndpointException extends RuntimeException
 {
-    UnknownEndpointException(String message)
+    public UnknownEndpointException(String message)
     {
         super(message);
     }
