@@ -197,12 +197,12 @@ public class StorageAttachedIndexQueryPlan implements Index.QueryPlan
     @Override
     public StorageAttachedIndexSearcher searcherFor(ReadCommand command)
     {
-        return new StorageAttachedIndexSearcher(cfs,
-                                                queryMetrics,
-                                                command,
-                                                orderer,
-                                                indexFeatureSet,
-                                                DatabaseDescriptor.getRangeRpcTimeout(TimeUnit.MILLISECONDS));
+        return StorageAttachedIndexSearcher.create(cfs,
+                                                   queryMetrics,
+                                                   command,
+                                                   orderer,
+                                                   indexFeatureSet,
+                                                   DatabaseDescriptor.getRangeRpcTimeout(TimeUnit.MILLISECONDS));
     }
 
     /**

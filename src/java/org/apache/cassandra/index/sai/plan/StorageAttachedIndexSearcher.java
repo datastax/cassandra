@@ -41,6 +41,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.netty.util.concurrent.FastThreadLocal;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.DecoratedKey;
@@ -86,6 +87,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
     private final ReadCommand command;
     private final QueryController controller;
     private final QueryContext queryContext;
+    private final Plan plan;
 
     private static final FastThreadLocal<List<PrimaryKey>> nextKeys = new FastThreadLocal<>()
     {
@@ -96,16 +98,35 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         }
     };
 
-    public StorageAttachedIndexSearcher(ColumnFamilyStore cfs,
-                                        TableQueryMetrics tableQueryMetrics,
-                                        ReadCommand command,
-                                        Orderer orderer,
-                                        IndexFeatureSet indexFeatureSet,
-                                        long executionQuotaMs)
+    @Nullable
+    public static StorageAttachedIndexSearcher create(ColumnFamilyStore cfs,
+                                                      TableQueryMetrics tableQueryMetrics,
+                                                      ReadCommand command,
+                                                      Orderer orderer,
+                                                      IndexFeatureSet indexFeatureSet,
+                                                      long executionQuotaMs)
+    {
+        QueryContext queryContext = new QueryContext(executionQuotaMs);
+        QueryController controller = new QueryController(cfs, command, orderer, indexFeatureSet, queryContext, tableQueryMetrics);
+
+        Plan plan = controller.buildPlan();
+        double selectivityThreshold = CassandraRelevantProperties.SAI_SELECTIVITY_THRESHOLD.getDouble();
+
+        // If the estimated selectivity is above the threshold, and we don't have an ordering, skip the index all
+        // together so the calling command can continue as if it was a query with ALLOW FILTERING and no indexes.
+        if (plan.ordering() == null &&
+            (selectivityThreshold <= 0 || plan.estimateSelectivity() > selectivityThreshold))
+            return null;
+
+        return new StorageAttachedIndexSearcher(command, controller, queryContext, plan);
+    }
+
+    private StorageAttachedIndexSearcher(ReadCommand command, QueryController controller, QueryContext queryContext, Plan plan)
     {
         this.command = command;
-        this.queryContext = new QueryContext(executionQuotaMs);
-        this.controller = new QueryController(cfs, command, orderer, indexFeatureSet, queryContext, tableQueryMetrics);
+        this.controller = controller;
+        this.queryContext = queryContext;
+        this.plan = plan;
     }
 
     @Override
@@ -119,7 +140,6 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
     {
         try
         {
-            Plan plan = controller.buildPlan().optimize();
             Set<String> indexes = new HashSet<>();
             plan.nodesOfType(Plan.IndexScan.class)
                 .forEach(s -> indexes.add(s.getIndexName()));
@@ -142,7 +162,6 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             try
             {
                 FilterTree filterTree = analyzeFilter();
-                Plan plan = controller.buildPlan();
                 Iterator<? extends PrimaryKey> keysIterator = controller.buildIterator(plan);
 
                 // Can't check for `command.isTopK()` because the planner could optimize sorting out

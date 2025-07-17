@@ -409,8 +409,11 @@ public abstract class ReadCommand extends AbstractReadQuery
         {
             cfs.indexManager.checkQueryability(indexQueryPlan);
             searcher = indexSearcher();
-            Index index = indexQueryPlan.getFirst();
-            Tracing.trace("Executing read on {}.{} using index {}", cfs.metadata.keyspace, cfs.metadata.name, index.getIndexMetadata().name);
+            if (searcher != null)
+            {
+                Index index = indexQueryPlan.getFirst();
+                Tracing.trace("Executing read on {}.{} using index {}", cfs.metadata.keyspace, cfs.metadata.name, index.getIndexMetadata().name);
+            }
         }
 
         Context context = Context.from(this);

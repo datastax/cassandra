@@ -360,6 +360,14 @@ public enum CassandraRelevantProperties
     /** The current version of the SAI on-disk index format. */
     SAI_CURRENT_VERSION("cassandra.sai.latest.version", "ec"),
 
+    /**
+     * Threshold value to skip SAI indexes if the estimated selectivity of the query is over this value.
+     * For example, if the threshold is 0.2, SAI won't be used for queries that are estimated to return more than 20% of
+     * the rows targeted by the primary key restrictions of the query.
+     * 0.0 means always skip, 1.0 means never skip.
+     */
+    SAI_SELECTIVITY_THRESHOLD("cassandra.sai.selectiviy_threshold", "0.2"),
+
     /** Controls the maximum top-k limit for vector search */
     SAI_VECTOR_SEARCH_MAX_TOP_K("cassandra.sai.vector_search.max_top_k", "1000"),
 
