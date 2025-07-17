@@ -390,37 +390,6 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         }
 
         /**
-         * Retrieves the next primary key that belongs to the given partition and is selected by the query controller.
-         * The underlying key iterator is advanced only if the key belongs to the same partition.
-         * <p>
-         * Returns null if:
-         * <ul>
-         *   <li>there are no more keys</li>
-         *   <li>the next key is beyond the upper bound</li>
-         *   <li>the next key belongs to a different partition</li>
-         * </ul>
-         * </p>
-         */
-        private @Nullable PrimaryKey nextSelectedKeyInPartition(DecoratedKey partitionKey)
-        {
-            PrimaryKey key;
-            do
-            {
-                if (!operation.hasNext())
-                    return null;
-                PrimaryKey minKey = operation.peek();
-                if (!minKey.token().equals(partitionKey.getToken()))
-                    return null;
-                if (minKey.partitionKey() != null && !minKey.partitionKey().equals(partitionKey))
-                    return null;
-
-                key = nextKey();
-            }
-            while (key != null && !controller.selects(key));
-            return key;
-        }
-
-        /**
          * Gets the next key from the underlying operation.
          * Returns null if there are no more keys <= lastPrimaryKey.
          */

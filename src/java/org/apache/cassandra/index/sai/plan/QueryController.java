@@ -307,7 +307,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     public UnfilteredRowIterator getPartition(List<PrimaryKey> keys, ReadExecutionController executionController)
     {
         if (keys == null)
-            throw new IllegalArgumentException("non-null key required");
+            throw new IllegalArgumentException("non-null keys required");
         if (keys.isEmpty())
             throw new IllegalArgumentException("At least one primary key is required!");
 
