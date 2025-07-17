@@ -39,6 +39,15 @@ public class RAMStringIndexer
 {
     @VisibleForTesting
     public static int MAX_BLOCK_BYTE_POOL_SIZE = Integer.MAX_VALUE;
+
+    /**
+     * Int2IntHashMap "docLengths" needs to resize when size reaches 348_966_081 (capacity * loadFactor). At that point, its capacity is 536870912.
+     * Its new capacity will be quadrupled and exceed Integer.MAX_VALUE.
+     *
+     * Pick 300_000_000 for simplicity to trigger segment flush.
+     */
+    private static final int MAX_DOC_LENGTHS = 300_000_000;
+
     private final BytesRefHash termsHash;
     private final RAMPostingSlices slices;
     // counters need to be separate so that we can trigger flushes if either ByteBlockPool hits maximum size
@@ -75,7 +84,9 @@ public class RAMStringIndexer
         // be triggered by an addition, and the rest of the space in the final chunk will be wasted, as the bytesUsed
         // counters track block allocation, not the size of additions. This means that we can't pass this check and then
         // fail to add a term.
-        return termsBytesUsed.get() >= MAX_BLOCK_BYTE_POOL_SIZE || slicesBytesUsed.get() >= MAX_BLOCK_BYTE_POOL_SIZE;
+        return termsBytesUsed.get() >= MAX_BLOCK_BYTE_POOL_SIZE || slicesBytesUsed.get() >= MAX_BLOCK_BYTE_POOL_SIZE
+               // to avoid Int2IntHashMap new capacity overflow
+               || docLengths.size() >= MAX_DOC_LENGTHS;
     }
 
     public boolean isEmpty()
