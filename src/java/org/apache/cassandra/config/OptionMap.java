@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.cassandra.io.compress;
+package org.apache.cassandra.config;
 
 import java.util.Map;
 

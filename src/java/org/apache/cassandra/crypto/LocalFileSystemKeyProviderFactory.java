@@ -25,7 +25,7 @@ import java.util.concurrent.ConcurrentMap;
 
 import com.google.common.collect.Maps;
 
-import org.apache.cassandra.io.compress.OptionMap;
+import org.apache.cassandra.config.OptionMap;
 
 
 public class LocalFileSystemKeyProviderFactory implements IKeyProviderFactory
