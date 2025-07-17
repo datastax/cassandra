@@ -21,7 +21,6 @@ import java.io.DataOutput;
 import java.io.EOFException;
 import java.io.FileNotFoundException;
 import java.io.IOException;
-import java.nio.channels.FileChannel;
 import java.nio.file.NoSuchFileException;
 import java.util.Collection;
 import java.util.HashMap;
@@ -116,17 +115,22 @@ public class CompressionMetadata implements AutoCloseable
         return read(dataFilePath, SliceDescriptor.NONE, skipOffsets);
     }
 
+    /**
+     * Same as <code>read</code> with the exception that it should be used during the sstable write phase,
+     * the reason behind it is that in CNDB we need to use a different file handle depending on whether the
+     * file has or has not been uploaded to remote storage yet.
+     */
     public static CompressionMetadata readDuringWriteTime(File dataFilePath, boolean skipOffsets)
     {
-        return read(dataFilePath, SliceDescriptor.NONE, skipOffsets, true);
+        return read(dataFilePath, SliceDescriptor.NONE, skipOffsets, CompressionMetadataReaderType.WRITE_TIME);
     }
 
     public static CompressionMetadata read(File dataFilePath, SliceDescriptor sliceDescription, boolean skipOffsets)
     {
-        return read(dataFilePath, sliceDescription, skipOffsets, false);
+        return read(dataFilePath, sliceDescription, skipOffsets, CompressionMetadataReaderType.READ_TIME);
     }
 
-    public static CompressionMetadata read(File dataFilePath, SliceDescriptor sliceDescription, boolean skipOffsets, boolean writeTime)
+    public static CompressionMetadata read(File dataFilePath, SliceDescriptor sliceDescription, boolean skipOffsets, CompressionMetadataReaderType readerType)
     {
         Descriptor descriptor = Descriptor.fromFilename(dataFilePath);
         return new CompressionMetadata(descriptor.fileFor(Component.COMPRESSION_INFO),
@@ -134,7 +138,7 @@ public class CompressionMetadata implements AutoCloseable
                                        descriptor.version.hasMaxCompressedLength(),
                                        sliceDescription,
                                        skipOffsets,
-                                       writeTime);
+                                       readerType);
     }
 
     @VisibleForTesting
@@ -145,7 +149,7 @@ public class CompressionMetadata implements AutoCloseable
 
     CompressionMetadata(File indexFilePath, long compressedLength, boolean hasMaxCompressedSize, SliceDescriptor sliceDescriptor, boolean skipOffsets)
     {
-        this(indexFilePath, compressedLength, hasMaxCompressedSize, sliceDescriptor, skipOffsets, false);
+        this(indexFilePath, compressedLength, hasMaxCompressedSize, sliceDescriptor, skipOffsets, CompressionMetadataReaderType.READ_TIME);
     }
 
     /*
@@ -153,7 +157,7 @@ public class CompressionMetadata implements AutoCloseable
      * data file rather than the partial file it deals.
      */
     @VisibleForTesting
-    CompressionMetadata(File indexFilePath, long compressedLength, boolean hasMaxCompressedSize, SliceDescriptor sliceDescriptor, boolean skipOffsets, boolean writeTime)
+    CompressionMetadata(File indexFilePath, long compressedLength, boolean hasMaxCompressedSize, SliceDescriptor sliceDescriptor, boolean skipOffsets, CompressionMetadataReaderType readerType)
     {
         this.indexFilePath = indexFilePath;
         long uncompressedOffset = sliceDescriptor.exists() ? sliceDescriptor.sliceStart : 0;
@@ -161,9 +165,9 @@ public class CompressionMetadata implements AutoCloseable
 
 
 
-        try (FileInputStreamPlus stream =
-             writeTime ? new FileInputStreamPlus(StorageProvider.instance.writeTimeReadFileChannelFor(indexFilePath), indexFilePath.toPath()) :
-             indexFilePath.newInputStream())
+        try (FileInputStreamPlus stream = readerType == CompressionMetadataReaderType.WRITE_TIME ?
+                                          new FileInputStreamPlus(StorageProvider.instance.writeTimeReadFileChannelFor(indexFilePath), indexFilePath.toPath()) :
+                                          indexFilePath.newInputStream())
         {
             String compressorName = stream.readUTF();
             int optionCount = stream.readInt();
