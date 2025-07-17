@@ -25,9 +25,6 @@ import java.util.stream.Collectors;
 
 import org.apache.cassandra.cql3.restrictions.SingleColumnRestriction;
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
-import org.apache.cassandra.index.sai.SSTableIndex;
-import org.apache.cassandra.index.sai.memory.MemtableIndex;
-import org.apache.cassandra.index.sai.memory.TrieMemtableIndex;
 import org.assertj.core.api.Assertions;
 
 import org.junit.Before;
