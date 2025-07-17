@@ -78,24 +78,24 @@ public class RAMStringIndexerTest extends SaiRandomizedTest
         }
     }
 
-    @Ignore // this is memory consuming and takes 2 minutes to run
     @Test
-    public void testLargeNumberOfDocs() throws Exception
+    public void testLargeNumberOfDocs()
     {
-        RAMStringIndexer indexer = new RAMStringIndexer(false);
+        int maxDocsSize = 1000;
+        RAMStringIndexer indexer = new RAMStringIndexer(false, maxDocsSize);
 
-        int rowsToAdd = 400_000_000;
-        // max doc size 348_966_081
         int startingRowId = 0;
         int i = 0;
-        while (i++ < rowsToAdd)
+        while (i++ < maxDocsSize)
         {
-            if (indexer.requiresFlush())
-                indexer = new RAMStringIndexer(false);
-
             int rowId = startingRowId + i;
             indexer.addAll(List.of(new BytesRef("0")), rowId);
+
+            if (i < maxDocsSize)
+                assertFalse(indexer.requiresFlush());
         }
+
+        assertTrue(indexer.requiresFlush());
     }
 
     @Test

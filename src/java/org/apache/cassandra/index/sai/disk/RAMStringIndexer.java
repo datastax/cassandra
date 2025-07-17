@@ -46,7 +46,7 @@ public class RAMStringIndexer
      *
      * Pick 300_000_000 for simplicity to trigger segment flush.
      */
-    private static final int MAX_DOC_LENGTHS = 300_000_000;
+    private static final int MAX_DOCS_SIZE = 300_000_000;
 
     private final BytesRefHash termsHash;
     private final RAMPostingSlices slices;
@@ -57,11 +57,19 @@ public class RAMStringIndexer
     private int[] lastSegmentRowID = new int[RAMPostingSlices.DEFAULT_TERM_DICT_SIZE];
 
     private final boolean writeFrequencies;
+    private final int maxDocSize;
     private final Int2IntHashMap docLengths = new Int2IntHashMap(Integer.MIN_VALUE);
 
     public RAMStringIndexer(boolean writeFrequencies)
     {
+        this(writeFrequencies, MAX_DOCS_SIZE);
+    }
+
+    @VisibleForTesting
+    RAMStringIndexer(boolean writeFrequencies, int maxDocSize)
+    {
         this.writeFrequencies = writeFrequencies;
+        this.maxDocSize = maxDocSize;
         termsBytesUsed = Counter.newCounter();
         slicesBytesUsed = Counter.newCounter();
 
@@ -90,7 +98,7 @@ public class RAMStringIndexer
         // fail to add a term.
         return termsBytesUsed.get() >= MAX_BLOCK_BYTE_POOL_SIZE || slicesBytesUsed.get() >= MAX_BLOCK_BYTE_POOL_SIZE
                // to avoid Int2IntHashMap new capacity overflow
-               || docLengths.size() >= MAX_DOC_LENGTHS;
+               || docLengths.size() >= maxDocSize;
     }
 
     public boolean isEmpty()
