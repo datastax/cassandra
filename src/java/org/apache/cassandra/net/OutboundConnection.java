@@ -94,7 +94,7 @@ import static org.apache.cassandra.utils.Throwables.isCausedBy;
 @SuppressWarnings({ "WeakerAccess", "FieldMayBeFinal", "NonAtomicOperationOnVolatileField", "SameParameterValue" })
 public class OutboundConnection
 {
-    static final Logger logger = LoggerFactory.getLogger(OutboundConnection.class);
+    private static final Logger logger = LoggerFactory.getLogger(OutboundConnection.class);
     private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(logger, 30L, TimeUnit.SECONDS);
 
     private static final AtomicLongFieldUpdater<OutboundConnection> submittedUpdater = AtomicLongFieldUpdater.newUpdater(OutboundConnection.class, "submittedCount");
@@ -106,6 +106,8 @@ public class OutboundConnection
 
     private final EventLoop eventLoop;
     private final Delivery delivery;
+
+    private final String id;
 
     private final OutboundMessageCallbacks callbacks;
     private final OutboundDebugCallbacks debug;
@@ -313,6 +315,7 @@ public class OutboundConnection
                         ? new LargeMessageDelivery(template.socketFactory.synchronousWorkExecutor)
                         : new EventLoopDelivery();
         setDisconnected();
+        this.id = computeId();
     }
 
     /**
@@ -485,7 +488,7 @@ public class OutboundConnection
      */
     private void onFailedSerialize(Message<?> message, int messagingVersion, int bytesWrittenToNetwork, Throwable t)
     {
-        logger.warn("{} dropping message of type {} due to error", id(), message.verb(), t);
+        noSpamLogger.warn("{} dropping message of type {} due to error", id(), message.verb(), t);
         JVMStabilityInspector.inspectThrowable(t);
         releaseCapacity(1, canonicalSize(message));
         errorCount += 1;
@@ -949,7 +952,7 @@ public class OutboundConnection
             try
             {
                 priorThreadName = Thread.currentThread().getName();
-                threadName = "Messaging-OUT-" + template.from() + "->" + template.to + '-' + type;
+                threadName = "Messaging-OUT-" + template.from + "->" + template.to + '-' + type;
                 Thread.currentThread().setName(threadName);
 
                 super.run();
@@ -1089,14 +1092,15 @@ public class OutboundConnection
             void onFailure(Throwable cause)
             {
                 if (cause instanceof ConnectException)
-                    noSpamLogger.info("{} failed to connect", id(), cause);
+                    logger.info("{} failed to connect", id(), cause);
                 else
-                    noSpamLogger.error("{} failed to connect", id(), cause);
+                    logger.error("{} failed to connect", id(), cause);
 
                 JVMStabilityInspector.inspectThrowable(cause);
 
                 if (hasPending())
                 {
+                    logger.info("{} scheduling reconnect to {}", id(), settings.connectToId());
                     Promise<Result<MessagingSuccess>> result = new AsyncPromise<>(eventLoop);
                     state = new Connecting(state.disconnected(), result, eventLoop.schedule(() -> attempt(result), max(100, retryRateMillis), MILLISECONDS));
                     retryRateMillis = min(1000, retryRateMillis * 2);
@@ -1104,6 +1108,7 @@ public class OutboundConnection
                 else
                 {
                     // this Initiate will be discarded
+                    logger.info("{} no more pending messages; not retrying connection to {}", id(), settings.connectToId());
                     state = Disconnected.dormant(state.disconnected().maintenance);
                 }
             }
@@ -1143,7 +1148,7 @@ public class OutboundConnection
                                 }
                                 catch (Throwable t)
                                 {
-                                    logger.error("Unexpected exception in {}.exceptionCaught", this.getClass().getSimpleName(), t);
+                                    noSpamLogger.error("Unexpected exception in {}.exceptionCaught", this.getClass().getSimpleName(), t);
                                 }
                             }
                         });
@@ -1191,6 +1196,7 @@ public class OutboundConnection
             private void attempt(Promise<Result<MessagingSuccess>> result)
             {
                 ++connectionAttempts;
+                logger.info("{} attempting to connect to {}; attempt {}", id(), template.connectToId(), connectionAttempts);
 
                 /*
                  * Re-evaluate messagingVersion before re-attempting the connection in case
@@ -1601,6 +1607,11 @@ public class OutboundConnection
     }
 
     private String id()
+    {
+        return id;
+    }
+
+    private String computeId()
     {
         State state = this.state;
         Channel channel = null;
