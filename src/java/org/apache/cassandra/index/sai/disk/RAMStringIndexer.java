@@ -74,7 +74,11 @@ public class RAMStringIndexer
 
     public long estimatedBytesUsed()
     {
-        return termsBytesUsed.get() + slicesBytesUsed.get();
+        // record the array memory usage from Int2IntHashMap docLengths:
+        //  * array size is capacity * 2
+        //  * 4 bytes per int
+        long docLengthsMemoryUsage = docLengths.capacity() * 2 * 4L;
+        return docLengthsMemoryUsage + termsBytesUsed.get() + slicesBytesUsed.get() + slices.arrayMemoryUsage();
     }
 
     public boolean requiresFlush()
