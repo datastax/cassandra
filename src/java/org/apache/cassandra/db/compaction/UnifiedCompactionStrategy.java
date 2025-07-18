@@ -86,6 +86,8 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
     public static final int MAX_LEVELS = 32;   // This is enough for a few petabytes of data (with the worst case fan factor
     // at W=0 this leaves room for 2^32 sstables, presumably of at least 1MB each).
 
+    private static final float LEVEL_MAX_SSTABLES_NUMBER_FACTOR = 10;
+
     private static final Pattern SCALING_PARAMETER_PATTERN = Pattern.compile("(N)|L(\\d+)|T(\\d+)|([+-]?\\d+)");
     private static final String SCALING_PARAMETER_PATTERN_SIMPLIFIED = SCALING_PARAMETER_PATTERN.pattern()
                                                                                                 .replaceAll("[()]", "")
@@ -236,31 +238,40 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
 
         for (Arena arena : compactionArenas)
         {
-            // If possible, we want to issue separate compactions for non-overlapping sets of sstables, to allow
-            // for smaller extra space requirements. However, if the sharding configuration has changed, a major
-            // compaction should combine non-overlapping sets if they are split on a boundary that is no longer
-            // in effect.
-            List<Set<CompactionSSTable>> groups =
-            getShardManager().splitSSTablesInShards(arena.sstables,
-                                                    makeShardingStats(arena.sstables).shardCountForDensity,
-                                                    (sstableShard, shardRange) -> Sets.newHashSet(sstableShard));
-
-            // Now combine all of these groups that share an sstable so that we have valid independent transactions.
-            groups = Overlaps.combineSetsWithCommonElement(groups);
-
-            for (Set<CompactionSSTable> group : groups)
-            {
-                aggregates.add(CompactionAggregate.createUnified(group,
-                                                                 Overlaps.maxOverlap(group,
-                                                                                     CompactionSSTable.startsAfter,
-                                                                                     CompactionSSTable.firstKeyComparator,
-                                                                                     CompactionSSTable.lastKeyComparator),
-                                                                 createPick(nextTimeUUID(), LEVEL_MAXIMAL.index, group),
-                                                                 Collections.emptyList(),
-                                                                 arena,
-                                                                 LEVEL_MAXIMAL));
-            }
+            aggregates.addAll(getMaximalAggregates(arena.sstables, arena, LEVEL_MAXIMAL, getShardManager(), controller));
         }
+        return aggregates;
+    }
+
+    static List<CompactionAggregate.UnifiedAggregate> getMaximalAggregates(Collection<CompactionSSTable> sstables, Arena arena, Level level, ShardManager shardManager, Controller controller)
+    {
+        List<CompactionAggregate.UnifiedAggregate> aggregates = new ArrayList<>();
+
+        // If possible, we want to issue separate compactions for non-overlapping sets of sstables, to allow
+        // for smaller extra space requirements. However, if the sharding configuration has changed, a major
+        // compaction should combine non-overlapping sets if they are split on a boundary that is no longer
+        // in effect.
+        List<Set<CompactionSSTable>> groups =
+        shardManager.splitSSTablesInShards(sstables,
+                                           new ShardingStats(sstables, shardManager, controller).shardCountForDensity,
+                                           (sstableShard, shardRange) -> Sets.newHashSet(sstableShard));
+
+        // Now combine all of these groups that share an sstable so that we have valid independent transactions.
+        groups = Overlaps.combineSetsWithCommonElement(groups);
+
+        for (Set<CompactionSSTable> group : groups)
+        {
+            aggregates.add(CompactionAggregate.createUnified(group,
+                                                             Overlaps.maxOverlap(group,
+                                                                                 CompactionSSTable.startsAfter,
+                                                                                 CompactionSSTable.firstKeyComparator,
+                                                                                 CompactionSSTable.lastKeyComparator),
+                                                             createPick(controller, nextTimeUUID(), level.index, group),
+                                                             Collections.emptyList(),
+                                                             arena,
+                                                             level));
+        }
+
         return aggregates;
     }
 
@@ -998,7 +1009,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
 
             for (Level level : entry.getValue())
             {
-                Collection<CompactionAggregate.UnifiedAggregate> aggregates = level.getCompactionAggregates(arena, controller, spaceAvailable);
+                Collection<CompactionAggregate.UnifiedAggregate> aggregates = level.getCompactionAggregates(arena, controller, getShardManager(), spaceAvailable);
                 // Note: We allow empty aggregates into the list of pending compactions. The pending compactions list
                 // is for progress tracking only, and it is helpful to see empty levels there.
                 pending.addAll(aggregates);
@@ -1377,11 +1388,6 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
         return realm.metadata();
     }
 
-    CompactionPick createPick(UUID id, long parent, Collection<? extends CompactionSSTable> sstables)
-    {
-        return createPick(controller, id, parent, sstables);
-    }
-
     static CompactionPick createPick(Controller controller, UUID id, long parent, Collection<? extends CompactionSSTable> sstables)
     {
         long totalDataSize = CompactionAggregate.getTotSizeBytes(sstables);
@@ -1507,9 +1513,17 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                 logger.trace("Level: {}", this);
         }
 
+        Collection<CompactionAggregate.UnifiedAggregate> getMaximalAggregates(Arena arena,
+                                                                              ShardManager shardManager,
+                                                                              Controller controller)
+        {
+            return UnifiedCompactionStrategy.getMaximalAggregates(sstables, arena, this, shardManager, controller);
+        }
+
         /// Return the compaction aggregate
         Collection<CompactionAggregate.UnifiedAggregate> getCompactionAggregates(Arena arena,
                                                                                  Controller controller,
+                                                                                 ShardManager shardManager,
                                                                                  long spaceAvailable)
         {
             if (logger.isTraceEnabled())
@@ -1530,6 +1544,10 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                                                                       overlaps,
                                                                       this::makeBucket,
                                                                       unbucketed::addAll);
+
+            int numShards = controller.getNumShards(max);
+            if (unbucketed.size() > numShards * threshold * LEVEL_MAX_SSTABLES_NUMBER_FACTOR)
+                return getMaximalAggregates(arena, shardManager, controller);
 
             List<CompactionAggregate.UnifiedAggregate> aggregates = new ArrayList<>();
             for (Bucket bucket : buckets)
