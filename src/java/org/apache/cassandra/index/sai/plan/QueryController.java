@@ -822,11 +822,11 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
 
         assert !indexFeatureSet.isRowAware() ||
                cfs.metadata().comparator.size() == 0 && firstKey.hasEmptyClustering() ||
-               cfs.metadata().comparator.size() > 0 && !firstKey.hasEmptyClustering() :
+               cfs.metadata().comparator.size() > 0 && (!firstKey.hasEmptyClustering() || cfs.metadata().hasStaticColumns()):
         "PrimaryKey " + firstKey + " clustering does not match table. There should be a clustering of size " + cfs.metadata().comparator.size();
 
         ClusteringIndexFilter clusteringIndexFilter = command.clusteringIndexFilter(firstKey.partitionKey());
-        if (cfs.metadata().comparator.size() == 0 || firstKey.clustering() == null || firstKey.clustering().isEmpty())
+        if (cfs.metadata().comparator.size() == 0 || firstKey.hasEmptyClustering())
         {
             return clusteringIndexFilter;
         }
