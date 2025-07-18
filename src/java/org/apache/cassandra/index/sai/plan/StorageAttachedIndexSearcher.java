@@ -81,7 +81,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
 {
     private static final Logger logger = LoggerFactory.getLogger(StorageAttachedIndexSearcher.class);
 
-    private static final int PARTITION_ROW_BATCH_SIZE = 100;
+    private static final int PARTITION_ROW_BATCH_SIZE = CassandraRelevantProperties.SAI_PARTITION_ROW_BATCH_SIZE.getInt();
 
     private final ReadCommand command;
     private final QueryController controller;
