@@ -20,8 +20,10 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
 
+import org.apache.cassandra.net.MessagingService;
 import org.junit.Assume;
 import org.junit.Before;
+import org.junit.BeforeClass;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
@@ -66,10 +68,18 @@ public class PlanWithIndexHintsTest extends SAITester
         return Version.ALL.stream().map(v -> new Object[]{v}).collect(Collectors.toList());
     }
 
+    @BeforeClass
+    public static void setUpClass()
+    {
+        CassandraRelevantProperties.DS_CURRENT_MESSAGING_VERSION.setInt(MessagingService.VERSION_DS_12);
+        SAITester.setUpClass();
+    }
+
     @Before
     public void setup() throws Throwable
     {
         SAIUtil.setCurrentVersion(version);
+        CassandraRelevantProperties.DS_CURRENT_MESSAGING_VERSION.setInt(MessagingService.VERSION_DS_12);
     }
 
     @Test
