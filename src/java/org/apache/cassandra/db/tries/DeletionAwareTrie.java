@@ -20,6 +20,7 @@ package org.apache.cassandra.db.tries;
 
 import java.util.Collection;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.function.BiFunction;
 import java.util.function.Function;
@@ -27,6 +28,7 @@ import java.util.function.Function;
 import com.google.common.collect.ImmutableList;
 
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
+import org.apache.cassandra.utils.bytecomparable.ByteSource;
 
 /// Deletion-aware trie interface that combines live data and deletion information in a unified structure.
 ///
@@ -320,6 +322,45 @@ extends BaseTrie<T, DeletionAwareCursor<T, D>, DeletionAwareTrie<T, D>>
         }
     }
 
+    static <T, D extends RangeState<D>> DeletionAwareTrie<T, D> mergeDistinct(List<DeletionAwareTrie<T, D>> tries)
+    {
+        return merge(tries, throwingResolver());
+    }
+
+    @SuppressWarnings("unchecked")
+    static <T, D extends RangeState<D>> CollectionMergeResolver<T, D> throwingResolver()
+    {
+        return THROWING_RESOLVER;
+    }
+
+    @SuppressWarnings("rawtypes")
+    static final CollectionMergeResolver THROWING_RESOLVER = new CollectionMergeResolver()
+    {
+        @Override
+        public Object resolve(Collection contents)
+        {
+            throw new AssertionError("Distinct tries expected");
+        }
+
+        @Override
+        public Object applyMarker(RangeState marker, Object content)
+        {
+            throw new AssertionError("Distinct tries expected");
+        }
+
+        @Override
+        public RangeState resolveMarkers(Collection markers)
+        {
+            throw new AssertionError("Distinct tries expected");
+        }
+
+        @Override
+        public boolean deletionsAtFixedPoints()
+        {
+            return true;
+        }
+    };
+
     /// Walker interface extended to also process deletion branches.
     interface DeletionAwareWalker<T, D, R> extends Cursor.Walker<T, R>
     {
@@ -354,6 +395,35 @@ extends BaseTrie<T, DeletionAwareCursor<T, D>, DeletionAwareTrie<T, D>>
     {
         return cursor(direction).process(walker);
     }
+
+
+    /// Returns the state that applies to the given key. This is either the precise state at the given position, or
+    /// the range that covers it (i.e. the `precedingState` of the next marker).
+    default D applicableDeletion(ByteComparable key)
+    {
+        DeletionAwareCursor<T, D> dac = cursor(Direction.FORWARD);
+        final ByteSource bytes = key.asComparableBytes(dac.byteComparableVersion());
+        int next;
+        int depth = dac.depth();
+        RangeCursor<D> rc;
+        while (true)
+        {
+            rc = dac.deletionBranchCursor(Direction.FORWARD);
+            if (rc != null)
+                break;
+            next = bytes.next();
+            if (next == ByteSource.END_OF_STREAM)
+                return null; // no deletion branch found
+            if (dac.skipTo(++depth, next) != depth || dac.incomingTransition() != next)
+                return null;
+        }
+
+        if (rc.descendAlong(bytes))
+            return rc.state();
+        else
+            return rc.precedingState();
+    }
+
 
     /// Returns a view of the live content in this trie as a regular [Trie].
     default Trie<T> contentOnlyTrie()

@@ -28,11 +28,8 @@ import org.apache.cassandra.db.DeletionPurger;
 import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.Digest;
 import org.apache.cassandra.db.LivenessInfo;
-import org.apache.cassandra.db.context.CounterContext;
 import org.apache.cassandra.db.filter.ColumnFilter;
-import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.ByteType;
-import org.apache.cassandra.db.marshal.CollectionType;
 import org.apache.cassandra.db.marshal.SetType;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.DroppedColumn;
@@ -213,6 +210,15 @@ public class ComplexColumnData extends ColumnData implements Iterable<Cell<?>>
             // between sstables and memtables data, i.e resulting in a digest mismatch.
             return isQueriedCell ? cell : cell.withSkippedValue();
         });
+    }
+
+    public ComplexColumnData delete(DeletionTime activeDeletion)
+    {
+        if (activeDeletion.isLive() || !activeDeletion.supersedes(complexDeletion))
+            return this;
+
+        DeletionTime newDeletion = activeDeletion.supersedes(complexDeletion) ? DeletionTime.LIVE : complexDeletion;
+        return transformAndFilter(newDeletion, (cell) -> activeDeletion.deletes(cell) ? null : cell);
     }
 
     public ComplexColumnData purge(DeletionPurger purger, int nowInSec)

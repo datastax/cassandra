@@ -114,11 +114,19 @@ public interface Row extends Unfiltered, Iterable<ColumnData>
     public boolean isEmpty();
 
     /**
+     * Whether the row has no live data. This means no PK liveness info, no cells
+     * and no complex deletion info.
+     *
+     * @return {@code true} if the row has no data, {@code false} otherwise.
+     */
+    public boolean isEmptyAfterDeletion();
+
+    /**
      * Whether the row has some live information (i.e. it's not just deletion informations).
      *
      * @param nowInSec the current time to decide what is deleted and what isn't
      * @param enforceStrictLiveness whether the row should be purged if there is no PK liveness info,
-     *                              normally retrieved from {@link CFMetaData#enforceStrictLiveness()}
+     *                              normally retrieved from {@link TableMetadata#enforceStrictLiveness()}
      * @return true if there is some live information
      */
     public boolean hasLiveData(int nowInSec, boolean enforceStrictLiveness);

@@ -119,7 +119,7 @@ public abstract class TrieMemtableIndexTestBase extends SAITester
     @Before
     public void setup() throws Throwable
     {
-        assertEquals(8, TrieMemtable.SHARD_COUNT);
+        assertEquals(8, TrieMemtable.shardCount());
 
         TokenMetadata metadata = StorageService.instance.getTokenMetadata();
         metadata.updateNormalTokens(BootStrapper.getRandomTokens(metadata, 10), FBUtilities.getBroadcastAddressAndPort());
@@ -144,9 +144,9 @@ public abstract class TrieMemtableIndexTestBase extends SAITester
     @Test
     public void allocation() throws Throwable
     {
-        assertEquals(8, TrieMemtable.SHARD_COUNT);
+        assertEquals(8, TrieMemtable.shardCount());
         memtableIndex = new TrieMemtableIndex(indexContext, memtable);
-        assertEquals(TrieMemtable.SHARD_COUNT, memtableIndex.shardCount());
+        assertEquals(TrieMemtable.shardCount(), memtableIndex.shardCount());
 
         assertEquals(0, memtable.getAllocator().onHeap().owns());
         assertEquals(0, memtable.getAllocator().offHeap().owns());
@@ -168,7 +168,7 @@ public abstract class TrieMemtableIndexTestBase extends SAITester
     public void randomQueryTest() throws Exception
     {
         memtableIndex = new TrieMemtableIndex(indexContext, memtable);
-        assertEquals(TrieMemtable.SHARD_COUNT, memtableIndex.shardCount());
+        assertEquals(TrieMemtable.shardCount(), memtableIndex.shardCount());
 
         for (int row = 0; row < getRandom().nextIntBetween(1000, 5000); row++)
         {
