@@ -84,6 +84,12 @@ public abstract class BufferManagingRebufferer implements Rebufferer, Rebufferer
     }
 
     @Override
+    public long adjustPosition(long position)
+    {
+        return source.adjustPosition(position);
+    }
+
+    @Override
     public BufferHolder rebuffer(long position)
     {
         offset = alignedPosition(position);

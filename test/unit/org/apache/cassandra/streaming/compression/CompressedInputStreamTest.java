@@ -142,7 +142,7 @@ public class CompressedInputStreamTest
             writer.finish();
         }
 
-        CompressionMetadata comp = CompressionMetadata.create(tmp);
+        CompressionMetadata comp = CompressionMetadata.read(tmp, false);
         List<SSTableReader.PartitionPositionBounds> sections = new ArrayList<>();
         for (long l : valuesToCheck)
         {
