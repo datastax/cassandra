@@ -477,17 +477,6 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
 
         public UnfilteredRowIterator apply(List<PrimaryKey> keys)
         {
-            // Key reads are lazy, delayed all the way to this point.
-            // We don't want key.equals(lastKey) because some PrimaryKey implementations consider more than just
-            // partition key and clustering for equality. This can break lastKey skipping, which is necessary for
-            // correctness when PrimaryKey doesn't have a clustering (as otherwise, the same partition may get
-            // filtered and considered as a result multiple times).
-            // we need a non-null partitionKey here, as we want to construct a SinglePartitionReadCommand
-//            Preconditions.checkNotNull(key.partitionKey(), "Partition key must not be null");
-//            if (lastKey != null && key.partitionKey().equals(lastKey.partitionKey()) && key.clustering().equals(lastKey.clustering()))
-//                return null;
-//            lastKey = key;
-
             UnfilteredRowIterator partition = controller.getPartition(keys, executionController);
             queryContext.addPartitionsRead(1);
             queryContext.checkpoint();
