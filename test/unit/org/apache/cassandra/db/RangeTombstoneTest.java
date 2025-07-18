@@ -26,6 +26,7 @@ import java.util.List;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterators;
@@ -43,8 +44,8 @@ import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.UTF8Type;
+import org.apache.cassandra.db.memtable.TrieMemtable;
 import org.apache.cassandra.db.partitions.FilteredPartition;
-import org.apache.cassandra.db.partitions.ImmutableBTreePartition;
 import org.apache.cassandra.db.partitions.Partition;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
@@ -61,6 +62,7 @@ import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.CompactionParams;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.KeyspaceParams;
+import org.apache.cassandra.schema.MemtableParams;
 import org.apache.cassandra.schema.SchemaTestUtil;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -81,11 +83,13 @@ public class RangeTombstoneTest
     private static final String CFNAME_INDEXED = "StandardIntegerIndexed";
     public static final int GC_GRACE = 5000;
 
-    @Parameterized.Parameters(name = "compaction={0}")
-    public static Iterable<CompactionParams> compactionParamSets()
+    @Parameterized.Parameters(name = "compaction={0} memtable={1}")
+    public static Iterable<Object[]> compactionParamSets()
     {
-        return ImmutableSet.of(CompactionParams.stcs(ImmutableMap.of()),
-                               CompactionParams.ucs(ImmutableMap.of()));
+        return ImmutableSet.of(new Object[] {CompactionParams.stcs(ImmutableMap.of()), "SkipListMemtable"},
+                               new Object[] {CompactionParams.lcs(ImmutableMap.of()), "TrieMemtableStage1"},
+                               new Object[] {CompactionParams.ucs(ImmutableMap.of()), "TrieMemtableStage2"},
+                               new Object[] {CompactionParams.ucs(ImmutableMap.of()), "TrieMemtable"});
     }
 
     @BeforeClass
@@ -98,14 +102,15 @@ public class RangeTombstoneTest
                                     standardCFMD(KSNAME, CFNAME_INDEXED, 1, UTF8Type.instance, Int32Type.instance, Int32Type.instance));
     }
 
-    public RangeTombstoneTest(CompactionParams compactionParams)
+    public RangeTombstoneTest(CompactionParams compactionParams, String memtableClass)
     {
+        MemtableParams memtableParams = MemtableParams.fromMap(ImmutableMap.of("class", memtableClass));
         Keyspace ks = Keyspace.open(KSNAME);
         ColumnFamilyStore cfs = ks.getColumnFamilyStore(CFNAME);
-        SchemaTestUtil.announceTableUpdate(cfs.metadata().unbuild().compaction(compactionParams).build());
+        SchemaTestUtil.announceTableUpdate(cfs.metadata().unbuild().compaction(compactionParams).memtable(memtableParams).build());
         cfs.disableAutoCompaction(); // don't trigger compaction at 4 sstables
         cfs = ks.getColumnFamilyStore(CFNAME_INDEXED);
-        SchemaTestUtil.announceTableUpdate(cfs.metadata().unbuild().compaction(compactionParams).build());
+        SchemaTestUtil.announceTableUpdate(cfs.metadata().unbuild().compaction(compactionParams).memtable(memtableParams).build());
         cfs.disableAutoCompaction(); // don't trigger compaction at 4 sstables
     }
 
@@ -193,11 +198,12 @@ public class RangeTombstoneTest
         Collection<RangeTombstone> rt = rangeTombstones(partition);
         assertEquals(0, rt.size());
 
-        partition = Util.getOnlyPartitionUnfiltered(Util.cmd(cfs, key).fromIncl(11).toIncl(15).build());
+        // Note: if the slice start matches the tombstone end, the result is transformed to deleted row.
+        partition = Util.getOnlyPartitionUnfiltered(Util.cmd(cfs, key).fromIncl(11).toIncl(16).build());
         rt = rangeTombstones(partition);
         assertEquals(1, rt.size());
 
-        partition = Util.getOnlyPartitionUnfiltered(Util.cmd(cfs, key).fromIncl(20).toIncl(25).build());
+        partition = Util.getOnlyPartitionUnfiltered(Util.cmd(cfs, key).fromIncl(19).toIncl(25).build());
         rt = rangeTombstones(partition);
         assertEquals(1, rt.size());
 
@@ -229,7 +235,7 @@ public class RangeTombstoneTest
         rt = rangeTombstones(partition);
         assertEquals(0, rt.size());
 
-        partition = Util.getOnlyPartitionUnfiltered(Util.cmd(cfs, key).fromIncl(1).toIncl(5).build());
+        partition = Util.getOnlyPartitionUnfiltered(Util.cmd(cfs, key).fromIncl(1).toIncl(6).build());
         rt = rangeTombstones(partition);
         assertEquals(1, rt.size());
 
@@ -237,7 +243,7 @@ public class RangeTombstoneTest
         rt = rangeTombstones(partition);
         assertEquals(1, rt.size());
 
-        partition = Util.getOnlyPartitionUnfiltered(Util.cmd(cfs, key).fromIncl(5).toIncl(6).build());
+        partition = Util.getOnlyPartitionUnfiltered(Util.cmd(cfs, key).fromIncl(4).toIncl(6).build());
         rt = rangeTombstones(partition);
         assertEquals(1, rt.size());
 
@@ -733,18 +739,28 @@ public class RangeTombstoneTest
 
         UpdateBuilder.create(cfs.metadata(), key).withTimestamp(0).newRow(1).add("val", 1).applyUnsafe();
 
-        // add a RT which hides the column we just inserted
+        // add a RT which hides the row we just inserted
         new RowUpdateBuilder(cfs.metadata(), 1, key).addRangeTombstone(0, 1).build().applyUnsafe();
 
-        // now re-insert that column
+        // now re-insert that row
         UpdateBuilder.create(cfs.metadata(), key).withTimestamp(2).newRow(1).add("val", 1).applyUnsafe();
 
         cfs.forceBlockingFlush(UNIT_TESTS);
 
-        // We should have 1 insert and 1 update to the indexed "1" column
-        // CASSANDRA-6640 changed index update to just update, not insert then delete
-        assertEquals(1, index.rowsInserted.size());
-        assertEquals(1, index.rowsUpdated.size());
+        if (cfs.getCurrentMemtable() instanceof TrieMemtable)
+        {
+            // TrieMemtable deletes the row on receiving the tombstone (issuing an update), and then insert it a second
+            // time.
+            assertEquals(2, index.rowsInserted.size());
+            assertEquals(1, index.rowsUpdated.size());
+        }
+        else
+        {
+            // Legacy memtables will keep the row shadowed and update it.
+            assertEquals(1, index.rowsInserted.size());
+            assertEquals(1, index.rowsUpdated.size());
+        }
+
     }
 
     private static ByteBuffer bb(int i)

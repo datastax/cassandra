@@ -91,7 +91,7 @@ public class TrieMemtableIndex implements MemtableIndex
 
     public TrieMemtableIndex(IndexContext indexContext, Memtable memtable)
     {
-        this.boundaries = indexContext.columnFamilyStore().localRangeSplits(TrieMemtable.SHARD_COUNT);
+        this.boundaries = indexContext.columnFamilyStore().localRangeSplits(TrieMemtable.shardCount());
         this.rangeIndexes = new MemoryIndex[boundaries.shardCount()];
         this.indexContext = indexContext;
         this.validator = indexContext.getValidator();
