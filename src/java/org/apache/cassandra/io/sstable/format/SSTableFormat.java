@@ -60,6 +60,8 @@ public interface SSTableFormat<R extends SSTableReader, W extends SSTableWriter>
     Set<Component> allComponents();
 
 
+    Set<Component> requiredComponents();
+
     Set<Component> primaryComponents();
 
     /**
