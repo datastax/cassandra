@@ -29,10 +29,10 @@ import org.apache.cassandra.db.PartitionRangeReadCommand;
 import org.apache.cassandra.db.ReadExecutionController;
 import org.apache.cassandra.db.SinglePartitionReadCommand;
 import org.apache.cassandra.db.filter.DataLimits;
+import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
-import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.sasi.SASIIndex;
 import org.apache.cassandra.index.sasi.SSTableIndex;
 import org.apache.cassandra.index.sasi.TermIterator;
@@ -91,8 +91,9 @@ public class QueryController
 
     public ColumnIndex getIndex(RowFilter.Expression expression)
     {
-        Optional<Index> index = cfs.indexManager.getBestIndexFor(expression);
-        return index.isPresent() ? ((SASIIndex) index.get()).getIndex() : null;
+        IndexHints hints = command.rowFilter().indexHints;
+        Optional<SASIIndex> index = cfs.indexManager.getBestIndexFor(expression, hints, SASIIndex.class);
+        return index.map(SASIIndex::getIndex).orElse(null);
     }
 
 
