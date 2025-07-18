@@ -397,7 +397,7 @@ public abstract class SSTable
         try
         {
             Set<Component> tocComponents = TOCComponent.loadTOC(descriptor);
-            Set<Component> requiredComponents = descriptor.getFormat().primaryComponents();
+            Set<Component> requiredComponents = descriptor.getFormat().requiredComponents();
             if (!tocComponents.containsAll(requiredComponents))
             {
                 logger.error("Cannot reload components from read TOC file for {}; the TOC does not contain all the required components for the sstable type and is like corrupted (components in TOC: {}, required by sstable format: {})",
