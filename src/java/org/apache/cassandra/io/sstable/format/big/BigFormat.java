@@ -97,6 +97,11 @@ public class BigFormat extends AbstractSSTableFormat<BigTableReader, BigTableWri
                                                                                FILTER,
                                                                                STATS);
 
+        // Used by CNDB, preserved from CC 4.0
+        private static final Set<Component> REQUIRED_COMPONENTS = ImmutableSet.of(DATA,
+                                                                                  PRIMARY_INDEX,
+                                                                                  STATS);
+
         private static final Set<Component> PRIMARY_COMPONENTS = ImmutableSet.of(DATA,
                                                                                  PRIMARY_INDEX);
 
@@ -169,6 +174,12 @@ public class BigFormat extends AbstractSSTableFormat<BigTableReader, BigTableWri
     public Set<Component> allComponents()
     {
         return Components.ALL_COMPONENTS;
+    }
+
+    @Override
+    public Set<Component> requiredComponents()
+    {
+        return Components.REQUIRED_COMPONENTS;
     }
 
     @Override

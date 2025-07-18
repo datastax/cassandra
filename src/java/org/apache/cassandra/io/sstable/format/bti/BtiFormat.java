@@ -82,6 +82,12 @@ public class BtiFormat extends AbstractSSTableFormat<BtiTableReader, BtiTableWri
 
         public final static Component ROW_INDEX = Types.ROW_INDEX.getSingleton();
 
+        // Used by CNDB, preserved from CC 4.0
+        private static final Set<Component> REQUIRED_COMPONENTS = ImmutableSet.of(DATA,
+                                                                                  PARTITION_INDEX,
+                                                                                  ROW_INDEX,
+                                                                                  STATS);
+
         private final static Set<Component> PRIMARY_COMPONENTS = ImmutableSet.of(DATA,
                                                                                  PARTITION_INDEX);
 
@@ -156,6 +162,12 @@ public class BtiFormat extends AbstractSSTableFormat<BtiTableReader, BtiTableWri
     public BtiTableReaderFactory getReaderFactory()
     {
         return readerFactory;
+    }
+
+    @Override
+    public Set<Component> requiredComponents()
+    {
+        return Components.REQUIRED_COMPONENTS;
     }
 
     @Override
