@@ -86,7 +86,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
     public static final int MAX_LEVELS = 32;   // This is enough for a few petabytes of data (with the worst case fan factor
     // at W=0 this leaves room for 2^32 sstables, presumably of at least 1MB each).
 
-    private static final float LEVEL_MAX_SSTABLES_NUMBER_FACTOR = 10;
+    private static final double LEVEL_MAX_SSTABLES_NUMBER_FACTOR = CassandraRelevantProperties.UCS_COMPACTION_LEVEL_MAX_SSTABLES_NUMBER_FACTOR.getDouble();
 
     private static final Pattern SCALING_PARAMETER_PATTERN = Pattern.compile("(N)|L(\\d+)|T(\\d+)|([+-]?\\d+)");
     private static final String SCALING_PARAMETER_PATTERN_SIMPLIFIED = SCALING_PARAMETER_PATTERN.pattern()
@@ -1545,8 +1545,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                                                                       this::makeBucket,
                                                                       unbucketed::addAll);
 
-            int numShards = controller.getNumShards(max);
-            if (unbucketed.size() > numShards * threshold * LEVEL_MAX_SSTABLES_NUMBER_FACTOR)
+            if (unbucketed.size() > controller.getNumShards(max) * threshold * LEVEL_MAX_SSTABLES_NUMBER_FACTOR)
                 return getMaximalAggregates(arena, shardManager, controller);
 
             List<CompactionAggregate.UnifiedAggregate> aggregates = new ArrayList<>();
