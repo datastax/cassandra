@@ -220,19 +220,10 @@ public final class SchemaConstants
                            .build();
     }
     
-//    /**
-//     * @return whether or not the keyspace is a virtual keyspace (system_virtual_schema, system_views)
-//     */
-//    public static boolean isVirtualKeyspace(String keyspaceName)
-//    {
-//        return VIRTUAL_KEYSPACE_NAMES.contains(keyspaceName.toLowerCase());
-//    }
-//
     public static boolean isInternalKeyspace(String keyspaceName)
     {
         return isLocalSystemKeyspace(keyspaceName)
                || isReplicatedSystemKeyspace(keyspaceName);
-//               || isVirtualSystemKeyspace(keyspaceName);
     }
     
     /**
