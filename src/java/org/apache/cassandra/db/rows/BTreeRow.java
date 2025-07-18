@@ -285,6 +285,11 @@ public class BTreeRow extends AbstractRow
                && BTree.isEmpty(btree);
     }
 
+    public boolean isEmptyAfterDeletion()
+    {
+        return primaryKeyLivenessInfo().isEmpty() && BTree.isEmpty(btree);
+    }
+
     public Deletion deletion()
     {
         return deletion;
