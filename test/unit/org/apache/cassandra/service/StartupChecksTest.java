@@ -31,6 +31,10 @@ import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.stream.Collectors;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import org.junit.After;
 import org.junit.AfterClass;
 import org.junit.Assert;
@@ -38,15 +42,20 @@ import org.junit.Assume;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
+import org.slf4j.LoggerFactory;
 
 import com.vdurmont.semver4j.Semver;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.config.Config.DiskAccessMode;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.StartupChecksOptions;
+import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.dht.IPartitioner;
+import org.apache.cassandra.dht.Murmur3Partitioner;
+import org.apache.cassandra.distributed.shared.WithProperties;
 import org.apache.cassandra.exceptions.StartupException;
 import org.apache.cassandra.io.filesystem.ForwardingFileSystem;
 import org.apache.cassandra.io.filesystem.ForwardingFileSystemProvider;
@@ -59,6 +68,7 @@ import org.apache.cassandra.utils.FBUtilities;
 
 import static java.util.Collections.singletonList;
 import static org.apache.cassandra.config.CassandraRelevantProperties.TEST_INVALID_LEGACY_SSTABLE_ROOT;
+import static org.apache.cassandra.config.CassandraRelevantProperties.TEST_CASSANDRA_TESTTAG;
 import static org.apache.cassandra.io.util.FileUtils.createTempFile;
 import static org.apache.cassandra.service.DataResurrectionCheck.HEARTBEAT_FILE_CONFIG_PROPERTY;
 import static org.apache.cassandra.service.StartupChecks.StartupCheckType.check_data_resurrection;
@@ -75,6 +85,7 @@ public class StartupChecksTest
     StartupChecks startupChecks;
     Path sstableDir;
     static File heartbeatFile;
+    private ListAppender<ILoggingEvent> testAppender;
 
     StartupChecksOptions options = new StartupChecksOptions();
 
@@ -102,6 +113,11 @@ public class StartupChecksTest
                .put(HEARTBEAT_FILE_CONFIG_PROPERTY, heartbeatFile.absolutePath());
 
         startupChecks = new StartupChecks();
+
+        // Create and attach an in-memory ListAppender to capture warnings logged
+        testAppender = new ListAppender<>();
+        testAppender.start();
+        ((Logger) LoggerFactory.getLogger(StartupChecks.class)).addAppender(testAppender);
     }
 
     @After
@@ -348,5 +364,146 @@ public class StartupChecksTest
         {
             assertTrue(e.getMessage().contains(message));
         }
+    }
+
+    @Test(expected = StartupException.class)
+    public void yamlConfigFail() throws Exception
+    {
+        // this is expected to fail because of ServerTestUtils.prepare() enabling enable_transient_replication
+        // hack unset `cassandra.test`
+        try (WithProperties properties = new WithProperties().clear(TEST_CASSANDRA_TESTTAG))
+        {
+            startupChecks = startupChecks.withTest(StartupChecks.checkYamlConfig);
+            startupChecks.verify(options);
+        }
+    }
+
+    @Test
+    public void yamlConfig() throws Exception
+    {
+        // this only works because checkYamlConfig detects this is a test and skips the check
+        startupChecks = startupChecks.withTest(StartupChecks.checkYamlConfig);
+        startupChecks.verify(options);
+    }
+
+    @Test
+    public void yamlConfigExplicit() throws Exception
+    {
+        boolean previous = DatabaseDescriptor.isTransientReplicationEnabled();
+        try
+        {
+            DatabaseDescriptor.setTransientReplicationEnabledUnsafe(false);
+            startupChecks = startupChecks.withTest(StartupChecks.checkYamlConfig);
+            startupChecks.verify(options);
+        }
+        finally
+        {
+            DatabaseDescriptor.setTransientReplicationEnabledUnsafe(previous);
+        }
+    }
+
+    @Test
+    public void yamlConfigWarn() throws Exception
+    {
+        // String sstableTypeProp = System.getProperty(SSTableFormat.FORMAT_DEFAULT_PROP, SSTableFormat.Type.BTI.name).toUpperCase();
+        int tokens = DatabaseDescriptor.getNumTokens();
+        int tombstone_failure_threshold = DatabaseDescriptor.getGuardrailsConfig().getTombstoneFailThreshold();
+        int batch_size_fail_threshold_in_kb = DatabaseDescriptor.getBatchSizeFailThresholdInKiB();
+        try
+        {
+            // System.setProperty(SSTableFormat.FORMAT_DEFAULT_PROP, SSTableFormat.Type.BIG.name);
+            DatabaseDescriptor.getRawConfig().num_tokens = 17;
+            DatabaseDescriptor.getGuardrailsConfig().setTombstonesThreshold(DatabaseDescriptor.getGuardrailsConfig().getTombstoneWarnThreshold(), 100001);
+            DatabaseDescriptor.setBatchSizeFailThresholdInKiB(641);
+            startupChecks = startupChecks.withTest(StartupChecks.checkYamlConfig);
+            startupChecks.verify(options);
+            assertWarningLogged("Not using murmur3 partitioner (org.apache.cassandra.dht.ByteOrderedPartitioner).");
+            assertWarningLogged("num_tokens 17 too high. Values over 16 poorly impact repairs and node bootstrapping/decommissioning.");
+            assertWarningLogged("Materialised Views should not be enabled.");
+            assertWarningLogged("SASI should not be enabled, use SAI instead.");
+            assertWarningLogged("Using `DROP COMPACT STORAGE` on tables should not be enabled.");
+            assertWarningLogged("Guardrails value 100001 for tombstone_failure_threshold is too high (>100000).");
+            assertWarningLogged("Guardrails value 641 for batch_size_fail_threshold_in_kb is too high (>640).");
+            
+            // Test SSTable format warning only if current format is not BTI
+            if (!"bti".equals(DatabaseDescriptor.getSelectedSSTableFormat().name()))
+                assertWarningLogged("Trie-based SSTables (bti) should always be the default (current is BIG).");
+        }
+        finally
+        {
+            // if (null == sstableTypeProp)
+            //     System.clearProperty(SSTableFormat.FORMAT_DEFAULT_PROP);
+            // else
+            //     System.setProperty(SSTableFormat.FORMAT_DEFAULT_PROP, SSTableFormat.Type.BIG.name);
+
+            DatabaseDescriptor.getRawConfig().num_tokens = tokens;
+            DatabaseDescriptor.getGuardrailsConfig().setTombstonesThreshold(DatabaseDescriptor.getGuardrailsConfig().getTombstoneWarnThreshold(), tombstone_failure_threshold);
+            DatabaseDescriptor.setBatchSizeFailThresholdInKiB(batch_size_fail_threshold_in_kb);
+        }
+    }
+
+    @Test
+    public void checkDataDirs() throws Exception
+    {
+        startupChecks = startupChecks.withTest(StartupChecks.checkDataDirs);
+        startupChecks.verify(options);
+    }
+
+    @Test
+    public void checkDataDirsWarn() throws Exception
+    {
+        startupChecks = startupChecks.withTest(StartupChecks.checkDataDirs);
+        startupChecks.verify(options);
+        File[] previous = DatabaseDescriptor.getNonLocalSystemKeyspacesDataFileLocations();
+        try
+        {
+            DatabaseDescriptor.setDataDirectories(new File[]{previous[0], new File(Files.createTempDirectory("StartupChecksTest.checkDataDirsFail"))});
+            startupChecks = startupChecks.withTest(StartupChecks.checkDataDirs);
+            startupChecks.verify(options);
+            assertWarningLogged("Multiple 2 data_dir configured.  Best practice is to use a (striped) LVM.");
+        }
+        finally
+        {
+            DatabaseDescriptor.setDataDirectories(previous);
+        }
+    }
+    @Test
+    public void checkTableSettings() throws Exception
+    {
+        QueryProcessor.executeInternal("CREATE KEYSPACE IF NOT EXISTS startupcheckstest WITH replication={ 'class' : 'SimpleStrategy', 'replication_factor' : 1 }");
+        QueryProcessor.executeInternal("CREATE TABLE startupcheckstest.c1(pk int, ck int, v int, PRIMARY KEY(pk, ck))");
+        startupChecks = startupChecks.withTest(StartupChecks.checkTableSettings);
+        startupChecks.verify(options);
+    }
+
+    @Test
+    public void checkTableSettingsWarn() throws Exception
+    {
+        IPartitioner previous = DatabaseDescriptor.getPartitioner();
+        try
+        {
+            DatabaseDescriptor.setPartitionerUnsafe(Murmur3Partitioner.instance);
+            QueryProcessor.executeInternal("CREATE KEYSPACE IF NOT EXISTS startupcheckstest WITH replication={ 'class' : 'SimpleStrategy', 'replication_factor' : 1 }");
+            QueryProcessor.executeInternal("CREATE TABLE startupcheckstest.c2(pk int, ck int, v int, PRIMARY KEY(pk, ck)) WITH compaction={'class': 'SizeTieredCompactionStrategy'}");
+            QueryProcessor.executeInternal("CREATE CUSTOM INDEX ON startupcheckstest.c2(v) USING 'org.apache.cassandra.index.sasi.SASIIndex'");
+            QueryProcessor.executeInternal("CREATE TABLE startupcheckstest.c3(pk int PRIMARY KEY, v int) WITH COMPACT STORAGE");
+            startupChecks = startupChecks.withTest(StartupChecks.checkTableSettings);
+            startupChecks.verify(options);
+            assertWarningLogged("The following tables using STCS and LCS should be altered to use UnifiedCompactionStrategy (UCS): startupcheckstest.c2");
+            assertWarningLogged("The following tables with non-SAI indexes should be altered to use SAI: startupcheckstest.c2");
+            assertWarningLogged("The following tables are `WITH COMPACT STORAGE` and need to be manually migrated to normal tables (Avoid using `DROP COMPACT STORAGE`): startupcheckstest.c3");
+        }
+        finally
+        {
+            DatabaseDescriptor.setPartitionerUnsafe(previous);
+        }
+    }
+
+    private void assertWarningLogged(String expectedMessage)
+    {
+        boolean found = testAppender.list.stream()
+                .anyMatch(event -> Level.WARN == event.getLevel() && event.getFormattedMessage().contains(expectedMessage));
+
+        assertTrue("Expected warning not logged: " + expectedMessage, found);
     }
 }
