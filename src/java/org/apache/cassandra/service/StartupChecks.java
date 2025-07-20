@@ -42,6 +42,7 @@ import com.google.common.base.Joiner;
 import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
+import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -53,14 +54,21 @@ import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.io.sstable.UUIDBasedSSTableId;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Directories;
-import org.apache.cassandra.db.SystemKeyspace;
+import org.apache.cassandra.db.compaction.LeveledCompactionStrategy;
+import org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy;
+import org.apache.cassandra.db.compaction.UnifiedCompactionStrategy;
+import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.StartupException;
+import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.io.sstable.Descriptor;
+import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.PathUtils;
 import org.apache.cassandra.nodes.Nodes;
+import org.apache.cassandra.schema.IndexMetadata;
+import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
@@ -110,12 +118,16 @@ public class StartupChecks
                                                                       checkNativeLibraryInitialization,
                                                                       initSigarLibrary,
                                                                       checkMaxMapCount,
+                                                                      checkYamlConfig,
                                                                       checkDataDirs,
                                                                       checkSSTablesFormat,
                                                                       checkSystemKeyspaceState,
                                                                       checkDatacenter,
                                                                       checkRack,
-                                                                      checkLegacyAuthTables);
+                                                                      checkLegacyAuthTables,
+                                                                      checkTableSettings);
+
+    private final static String WARN_SUFFIX = " This will impact your level of production support.";
 
     public StartupChecks withDefaultTests()
     {
@@ -256,7 +268,7 @@ public class StartupChecks
                 if (!jvmOptionsContainsOneOf("-XX:OnOutOfMemoryError="))
                     logger.warn("The JVM is not configured to stop on OutOfMemoryError which can cause data corruption."
                             + " Either upgrade your JRE to a version greater or equal to 8u92 and use -XX:+ExitOnOutOfMemoryError/-XX:+CrashOnOutOfMemoryError"
-                            + " or use -XX:OnOutOfMemoryError=\"<cmd args>;<cmd args>\" on your current JRE.");
+                            + " or use -XX:OnOutOfMemoryError=\"<cmd args>;<cmd args>\" on your current JRE." + WARN_SUFFIX);
             }
         }
 
@@ -339,8 +351,49 @@ public class StartupChecks
             long maxMapCount = getMaxMapCount();
             if (maxMapCount < EXPECTED_MAX_MAP_COUNT)
                 logger.warn("Maximum number of memory map areas per process (vm.max_map_count) {} " +
-                            "is too low, recommended value: {}, you can change it with sysctl.",
-                            maxMapCount, EXPECTED_MAX_MAP_COUNT);
+                            "is too low, recommended value: {}, you can change it with sysctl. {}",
+                            maxMapCount, EXPECTED_MAX_MAP_COUNT, WARN_SUFFIX);
+        }
+    };
+
+    public static final StartupCheck checkYamlConfig = new StartupCheck()
+    {
+        public void execute() throws StartupException
+        {
+            if (Murmur3Partitioner.instance != DatabaseDescriptor.getPartitioner())
+                logger.warn("Not using murmur3 partitioner ({}). {}", DatabaseDescriptor.getPartitioner().getClass().getName(), WARN_SUFFIX);
+
+            if (DatabaseDescriptor.getNumTokens() > 16)
+                logger.warn("num_tokens {} too high. Values over 16 poorly impact repairs and node bootstrapping/decommissioning. {}",
+                            DatabaseDescriptor.getNumTokens(), WARN_SUFFIX);
+
+            // ServerTestUtils.prepare() enables transient replication, so we have to skip this when we're inside a unit test
+            if(DatabaseDescriptor.isTransientReplicationEnabled() && null == System.getProperty("cassandra.testtag"))
+                throw new StartupException(StartupException.ERR_WRONG_CONFIG, "Transient Replication cannot not be used in HCD.");
+
+            if(DatabaseDescriptor.getEnableMaterializedViews())
+                logger.warn("Materialised Views should not be enabled. {}", WARN_SUFFIX);
+
+            if(DatabaseDescriptor.getEnableSASIIndexes())
+                logger.warn("SASI should not be enabled, use SAI instead. {}", WARN_SUFFIX);
+
+            if(DatabaseDescriptor.enableDropCompactStorage())
+                logger.warn("Using `DROP COMPACT STORAGE` on tables should not be enabled. {}", WARN_SUFFIX);
+
+            if(null != DatabaseDescriptor.getDefaultCompaction()
+                    && !UnifiedCompactionStrategy.class.getSimpleName().equals(DatabaseDescriptor.getDefaultCompaction().class_name))
+                logger.warn("UnifiedCompactionStrategy should always be the default. {}", WARN_SUFFIX);
+
+            if (DatabaseDescriptor.getGuardrailsConfig().tombstone_failure_threshold > 100000)
+                logger.warn("Guardrails value {} for tombstone_failure_threshold is too high (>100000). {}",
+                            DatabaseDescriptor.getGuardrailsConfig().tombstone_failure_threshold, WARN_SUFFIX);
+
+            if (DatabaseDescriptor.getGuardrailsConfig().batch_size_fail_threshold_in_kb > 640)
+                logger.warn("Guardrails value {} for batch_size_fail_threshold_in_kb is too high (>640). {}",
+                        DatabaseDescriptor.getGuardrailsConfig().batch_size_fail_threshold_in_kb, WARN_SUFFIX);
+
+            if(SSTableFormat.Type.BTI != SSTableFormat.Type.current())
+                logger.warn("Trie-based SSTables (bti) should always be the default (current is {}). {}", SSTableFormat.Type.current(), WARN_SUFFIX);
         }
     };
 
@@ -370,6 +423,9 @@ public class StartupChecks
                 throw new StartupException(StartupException.ERR_WRONG_DISK_STATE,
                                            "Insufficient permissions on directory " + dir);
         }
+        if (DatabaseDescriptor.getAllDataFileLocations().length > 1)
+            logger.warn("Multiple {} data_dir configured.  Best practice is to use a (striped) LVM. {}",
+                        DatabaseDescriptor.getAllDataFileLocations().length, WARN_SUFFIX);
     };
 
     public static final StartupCheck checkSSTablesFormat = new StartupCheck()
@@ -547,4 +603,38 @@ public class StartupChecks
         else
             return Optional.empty();
     };
+
+    public static final StartupCheck checkTableSettings = new StartupCheck()
+    {
+        public void execute()
+        {
+            List<String> stcsOrLcsTables = new ArrayList<>();
+            List<String> compactTables = new ArrayList<>();
+            List<String> nonSAITables = new ArrayList<>();
+            for (KeyspaceMetadata ks : Schema.instance.getUserKeyspaces())
+                for (TableMetadata t : ks.tables)
+                {
+                    if (SizeTieredCompactionStrategy.class == t.params.compaction.klass() || LeveledCompactionStrategy.class == t.params.compaction.klass())
+                        stcsOrLcsTables.add(t.keyspace + '.' + t.name);
+                    if (t.isCompactTable())
+                        compactTables.add(t.keyspace + '.' + t.name);
+                    for (IndexMetadata i : t.indexes)
+                        if (!StorageAttachedIndex.class.getName().equals(i.getIndexClassName()))
+                            nonSAITables.add(t.keyspace + '.' + t.name);
+                }
+
+            if (!stcsOrLcsTables.isEmpty())
+                logger.warn("The following tables using STCS and LCS should be altered to use UnifiedCompactionStrategy (UCS): {}. {}",
+                            StringUtils.join(stcsOrLcsTables, ','), WARN_SUFFIX);
+
+            if (!compactTables.isEmpty())
+                logger.warn("The following tables are `WITH COMPACT STORAGE` and need to be manually migrated to normal tables (Avoid using `DROP COMPACT STORAGE`): {}. {}",
+                        StringUtils.join(compactTables, ','), WARN_SUFFIX);
+
+            if (!nonSAITables.isEmpty())
+                logger.warn("The following tables with non-SAI indexes should be altered to use SAI: {}. {}",
+                        StringUtils.join(nonSAITables, ','), WARN_SUFFIX);
+        }
+    };
+
 }
