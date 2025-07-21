@@ -107,8 +107,6 @@ public class OutboundConnection
     private final EventLoop eventLoop;
     private final Delivery delivery;
 
-    private final String id;
-
     private final OutboundMessageCallbacks callbacks;
     private final OutboundDebugCallbacks debug;
     @VisibleForTesting
@@ -315,7 +313,6 @@ public class OutboundConnection
                         ? new LargeMessageDelivery(template.socketFactory.synchronousWorkExecutor)
                         : new EventLoopDelivery();
         setDisconnected();
-        this.id = computeId();
     }
 
     /**
@@ -1608,11 +1605,6 @@ public class OutboundConnection
 
     private String id()
     {
-        return id;
-    }
-
-    private String computeId()
-    {
         State state = this.state;
         Channel channel = null;
         OutboundConnectionSettings settings = template;
@@ -1622,7 +1614,7 @@ public class OutboundConnection
             settings = state.established().settings;
         }
         String channelId = channel != null ? channel.id().asShortText() : "[no-channel]";
-        return SocketFactory.channelId(settings.from(), settings.to, type, channelId);
+        return SocketFactory.channelId(settings.from, settings.to, type, channelId);
     }
 
     @Override
