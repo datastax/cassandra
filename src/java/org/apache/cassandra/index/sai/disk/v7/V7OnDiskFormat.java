@@ -39,6 +39,10 @@ public class V7OnDiskFormat extends V6OnDiskFormat
     @Override
     public Set<IndexComponentType> perIndexComponentTypes(AbstractType<?> validator)
     {
+        // Vector types are technically "literal" (frozen) but should not have DOC_LENGTHS
+        // which is only for text search BM25 functionality
+        if (validator.isVector())
+            return super.perIndexComponentTypes(validator);
         if (TypeUtil.isLiteral(validator))
             return LITERAL_COMPONENTS;
         return super.perIndexComponentTypes(validator);
