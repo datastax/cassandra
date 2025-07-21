@@ -42,6 +42,7 @@ import org.apache.cassandra.locator.EndpointsForToken;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.NoPayload;
+import org.apache.cassandra.net.UnknownEndpointException;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.service.QueryInfoTracker;
@@ -236,6 +237,24 @@ public class ReadExecutorTest
         }
     }
 
+    /**
+     * Test that exception thrown during speculation is not propagated so that it doesn't break
+     * user read
+     */
+    @Test
+    public void testExceptionInSpeculationAttemptDoesNotPropagate() throws Throwable
+    {
+        {
+            AbstractReadExecutor executor = new ThrowingSpeculatingExecutor(new RuntimeException("arbitrary exception"));
+            executor.maybeTryAdditionalReplicas();
+        }
+
+        {
+            AbstractReadExecutor executor = new ThrowingSpeculatingExecutor(new UnknownEndpointException("endpoint A.B.C.D is not known"));
+            executor.maybeTryAdditionalReplicas();
+        }
+    }
+
     public static class MockSinglePartitionReadCommand extends SinglePartitionReadCommand
     {
         private final long timeout;
@@ -261,6 +280,29 @@ public class ReadExecutorTest
         public Message createMessage(boolean trackRepairedData)
         {
             return Message.out(Verb.ECHO_REQ, NoPayload.noPayload);
+        }
+    }
+
+    private class ThrowingSpeculatingExecutor extends AbstractReadExecutor
+    {
+        private final RuntimeException exception;
+
+        ThrowingSpeculatingExecutor(RuntimeException exception)
+        {
+            super(ReadExecutorTest.cfs,
+                  new MockSinglePartitionReadCommand(),
+                  plan(ConsistencyLevel.LOCAL_QUORUM, targets, targets.subList(0, 2)),
+                  1,
+                  System.nanoTime(),
+                  noopReadTracker());
+
+            this.exception = exception;
+        }
+
+        @Override
+        protected void doMaybeTryAdditionalReplicas()
+        {
+            throw exception;
         }
     }
 
