@@ -49,6 +49,11 @@ class RAMPostingSlices
         this.includeFrequencies = includeFrequencies;
     }
 
+    long arrayMemoryUsage()
+    {
+        return postingStarts.length * 4L + postingUptos.length * 4L + sizes.length * 4L;
+    }
+
     /**
      * Creates and returns a PostingList for the given term ID.
      */
