@@ -724,6 +724,8 @@ public enum CassandraRelevantProperties
 
     SAI_NUMERIC_VALUES_BLOCK_SIZE("dse.sai.numeric_values.block_size", "128"),
     SAI_NUMERIC_VALUES_MONOTONIC_BLOCK_SIZE("dse.sai.numeric_values.monotonic_block_size", "16384"),
+    /** Controls the number of rows read in a single batch when fetching rows for a partition key */
+    SAI_PARTITION_ROW_BATCH_SIZE("cassandra.sai.partition_row_batch_size", "100"),
     SAI_QUERY_OPT_LEVEL("cassandra.sai.query.optimization.level", "1"),
     SAI_REDUCE_TOPK_ACROSS_SSTABLES("cassandra.sai.reduce_topk_across_sstables", "true"),
     SAI_TEST_DISABLE_TIMEOUT("cassandra.sai.test.timeout_disabled", "false"),
