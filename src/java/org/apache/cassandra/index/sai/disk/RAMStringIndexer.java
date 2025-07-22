@@ -39,6 +39,15 @@ public class RAMStringIndexer
 {
     @VisibleForTesting
     public static int MAX_BLOCK_BYTE_POOL_SIZE = Integer.MAX_VALUE;
+
+    /**
+     * Int2IntHashMap "docLengths" needs to resize when size reaches 348_966_081 (capacity * loadFactor). At that point, its capacity is 536870912.
+     * Its new capacity will be quadrupled and exceed Integer.MAX_VALUE.
+     *
+     * Pick 300_000_000 for simplicity to trigger segment flush.
+     */
+    private static final int MAX_DOCS_SIZE = 300_000_000;
+
     private final BytesRefHash termsHash;
     private final RAMPostingSlices slices;
     // counters need to be separate so that we can trigger flushes if either ByteBlockPool hits maximum size
@@ -48,11 +57,19 @@ public class RAMStringIndexer
     private int[] lastSegmentRowID = new int[RAMPostingSlices.DEFAULT_TERM_DICT_SIZE];
 
     private final boolean writeFrequencies;
+    private final int maxDocSize;
     private final Int2IntHashMap docLengths = new Int2IntHashMap(Integer.MIN_VALUE);
 
     public RAMStringIndexer(boolean writeFrequencies)
     {
+        this(writeFrequencies, MAX_DOCS_SIZE);
+    }
+
+    @VisibleForTesting
+    RAMStringIndexer(boolean writeFrequencies, int maxDocSize)
+    {
         this.writeFrequencies = writeFrequencies;
+        this.maxDocSize = maxDocSize;
         termsBytesUsed = Counter.newCounter();
         slicesBytesUsed = Counter.newCounter();
 
@@ -65,7 +82,11 @@ public class RAMStringIndexer
 
     public long estimatedBytesUsed()
     {
-        return termsBytesUsed.get() + slicesBytesUsed.get();
+        // record the array memory usage from Int2IntHashMap docLengths:
+        //  * array size is capacity * 2
+        //  * 4 bytes per int
+        long docLengthsMemoryUsage = docLengths.capacity() * 2 * 4L;
+        return docLengthsMemoryUsage + termsBytesUsed.get() + slicesBytesUsed.get() + slices.arrayMemoryUsage();
     }
 
     public boolean requiresFlush()
@@ -75,7 +96,9 @@ public class RAMStringIndexer
         // be triggered by an addition, and the rest of the space in the final chunk will be wasted, as the bytesUsed
         // counters track block allocation, not the size of additions. This means that we can't pass this check and then
         // fail to add a term.
-        return termsBytesUsed.get() >= MAX_BLOCK_BYTE_POOL_SIZE || slicesBytesUsed.get() >= MAX_BLOCK_BYTE_POOL_SIZE;
+        return termsBytesUsed.get() >= MAX_BLOCK_BYTE_POOL_SIZE || slicesBytesUsed.get() >= MAX_BLOCK_BYTE_POOL_SIZE
+               // to avoid Int2IntHashMap new capacity overflow
+               || docLengths.size() >= maxDocSize;
     }
 
     public boolean isEmpty()
