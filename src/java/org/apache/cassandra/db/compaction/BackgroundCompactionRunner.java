@@ -47,7 +47,10 @@ import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.io.FSDiskFullWriteError;
 import org.apache.cassandra.io.FSError;
 import org.apache.cassandra.io.FSWriteError;
+import org.apache.cassandra.io.compress.CorruptBlockException;
+import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.CorruptFileException;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.Throwables;
@@ -475,6 +478,13 @@ public class BackgroundCompactionRunner implements Runnable
         else if (Throwables.isCausedBy(t, OutOfMemoryError.class))
         {
             logger.error("Encountered out of memory error on {}", cfs, t);
+            JVMStabilityInspector.inspectThrowable(t);
+        }
+        else if (Throwables.anyCauseMatches(t, err -> err instanceof CorruptBlockException
+                                                      || err instanceof CorruptFileException
+                                                      || err instanceof CorruptSSTableException))
+        {
+            logger.error("Encountered corruption exception on {}", cfs, t);
             JVMStabilityInspector.inspectThrowable(t);
         }
         else if (t instanceof CompactionInterruptedException)
