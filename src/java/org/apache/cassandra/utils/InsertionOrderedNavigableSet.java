@@ -31,7 +31,7 @@ import java.util.SortedSet;
 import com.google.common.base.Preconditions;
 
 /**
- * A {@link NavigableSet} that enforces in-order insertion of elements. This is helpful when we 
+ * A {@link NavigableSet} that enforces in-order insertion of elements. This is helpful when we
  * have an already-ordered collection with no duplicates and want constant time insertion.
  * <p>
  * Note: Not all methods of {@link NavigableSet} are implemented.
@@ -78,7 +78,7 @@ public class InsertionOrderedNavigableSet<E> implements NavigableSet<E>
     {
         if (isEmpty())
             return null;
-        
+
         return elements.remove(0);
     }
 
