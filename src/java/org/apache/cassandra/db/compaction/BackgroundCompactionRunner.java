@@ -463,6 +463,7 @@ public class BackgroundCompactionRunner implements Runnable
             // we might have to rely on error message parsing...
             t = t instanceof FSError ? t : new FSWriteError(t);
             JVMStabilityInspector.inspectThrowable(t);
+            CompactionManager.instance.incrementAborted();
         }
         // No-Space-Left IO exception is thrown by JDK when disk has reached its capacity. The key difference between this
         // and the earlier case with `FSDiskFullWriteError` is that here we have definitively run out of disk space, and
@@ -474,11 +475,13 @@ public class BackgroundCompactionRunner implements Runnable
             // wrap it with FSWriteError so that JVMStabilityInspector can properly stop or die
             t = t instanceof FSError ? t : new FSWriteError(t);
             JVMStabilityInspector.inspectThrowable(t);
+            CompactionManager.instance.incrementFailed();
         }
         else if (Throwables.isCausedBy(t, OutOfMemoryError.class))
         {
             logger.error("Encountered out of memory error on {}", cfs, t);
             JVMStabilityInspector.inspectThrowable(t);
+            CompactionManager.instance.incrementFailed();
         }
         else if (Throwables.anyCauseMatches(t, err -> err instanceof CorruptBlockException
                                                       || err instanceof CorruptFileException
@@ -486,10 +489,12 @@ public class BackgroundCompactionRunner implements Runnable
         {
             logger.error("Encountered corruption exception on {}", cfs, t);
             JVMStabilityInspector.inspectThrowable(t);
+            CompactionManager.instance.incrementFailed();
         }
         else if (t instanceof CompactionInterruptedException)
         {
             logger.warn(String.format("Aborting background compaction of %s due to interruption", cfs), Throwables.unwrapped(t));
+            CompactionManager.instance.incrementAborted();
         }
         else
         {
