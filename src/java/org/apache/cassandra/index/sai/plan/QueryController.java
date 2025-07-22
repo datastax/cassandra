@@ -27,6 +27,7 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.NavigableSet;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -36,6 +37,7 @@ import com.google.common.base.Preconditions;
 import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Multimap;
+import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.index.FeatureNeedsIndexRebuildException;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.slf4j.Logger;
@@ -93,6 +95,7 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.InsertionOrderedNavigableSet;
 import org.apache.cassandra.utils.MergeIterator;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.Throwables;
@@ -127,6 +130,8 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
 
     private final PrimaryKey.Factory keyFactory;
     private final PrimaryKey firstPrimaryKey;
+
+    private final NavigableSet<Clustering<?>> nextClusterings;
 
     final Plan.Factory planFactory;
 
@@ -181,6 +186,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
 
         this.keyFactory = PrimaryKey.factory(cfs.metadata().comparator, indexFeatureSet);
         this.firstPrimaryKey = keyFactory.createTokenOnly(mergeRange.left.getToken());
+        this.nextClusterings = new InsertionOrderedNavigableSet<>(cfs.metadata().comparator);
         var tableMetrics = new Plan.TableMetrics(estimateTotalAvailableRows(ranges),
                                                  avgCellsPerRow(),
                                                  avgRowSizeInBytes(),
@@ -298,16 +304,24 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     /**
      * Get an iterator over the rows for this partition key. Builds a search view that includes all memtables and all
      * {@link SSTableSet#LIVE} sstables.
-     * @param key
+     * @param keys
      * @param executionController
      * @return
      */
-    public UnfilteredRowIterator getPartition(PrimaryKey key, ReadExecutionController executionController)
+    public UnfilteredRowIterator getPartition(List<PrimaryKey> keys, ReadExecutionController executionController)
     {
-        if (key == null)
+        if (keys == null)
+            throw new IllegalArgumentException("non-null keys required");
+        if (keys.isEmpty())
             throw new IllegalArgumentException("At least one primary key is required!");
 
-        SinglePartitionReadCommand partition = getPartitionReadCommand(key, executionController);
+        SinglePartitionReadCommand partition = SinglePartitionReadCommand.create(cfs.metadata(),
+                                                                                 command.nowInSec(),
+                                                                                 command.columnFilter(),
+                                                                                 RowFilter.NONE,
+                                                                                 DataLimits.NONE,
+                                                                                 keys.get(0).partitionKey(),
+                                                                                 makeFilter(keys));
         return partition.queryMemtableAndDisk(cfs, executionController);
     }
 
@@ -815,6 +829,29 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         else
             return new ClusteringIndexNamesFilter(FBUtilities.singleton(key.clustering(), cfs.metadata().comparator),
                                                   clusteringIndexFilter.isReversed());
+    }
+
+    private ClusteringIndexFilter makeFilter(List<PrimaryKey> keys)
+    {
+        PrimaryKey firstKey = keys.get(0);
+
+        assert !indexFeatureSet.isRowAware() ||
+               cfs.metadata().comparator.size() == 0 && firstKey.hasEmptyClustering() ||
+               cfs.metadata().comparator.size() > 0 && (!firstKey.hasEmptyClustering() || cfs.metadata().hasStaticColumns()):
+        "PrimaryKey " + firstKey + " clustering does not match table. There should be a clustering of size " + cfs.metadata().comparator.size();
+
+        ClusteringIndexFilter clusteringIndexFilter = command.clusteringIndexFilter(firstKey.partitionKey());
+        if (cfs.metadata().comparator.size() == 0 || firstKey.hasEmptyClustering())
+        {
+            return clusteringIndexFilter;
+        }
+        else
+        {
+            nextClusterings.clear();
+            for (PrimaryKey key : keys)
+                nextClusterings.add(key.clustering());
+            return new ClusteringIndexNamesFilter(nextClusterings, clusteringIndexFilter.isReversed());
+        }
     }
 
     /**
