@@ -137,7 +137,7 @@ public interface CQL3Type
         return toString(false, true);
     }
 
-    public enum Native implements CQL3Type
+    enum Native implements CQL3Type
     {
         ASCII       (AsciiType.instance),
         BIGINT      (LongType.instance),
@@ -393,7 +393,7 @@ public interface CQL3Type
 
     class UserDefined implements CQL3Type
     {
-        // Keeping this separatly from type just to simplify toString()
+        // Keeping this separately from type just to simplify toString()
         private final String name;
         private final UserType type;
 
@@ -608,7 +608,7 @@ public interface CQL3Type
         }
     }
 
-    public static class Vector implements CQL3Type
+    class Vector implements CQL3Type
     {
         private final VectorType<?> type;
 
@@ -697,6 +697,11 @@ public interface CQL3Type
         }
 
         public boolean isCounter()
+        {
+            return false;
+        }
+
+        public boolean isDateRange()
         {
             return false;
         }
@@ -914,6 +919,13 @@ public interface CQL3Type
             public void forEachUserType(Consumer<UTName> userTypeNameConsumer)
             {
                 // no-op
+            }
+
+            @Override
+            public boolean isDateRange()
+            {
+                return "DateRangeType".equals(className) ||
+                       "org.apache.cassandra.db.marshal.DateRangeType".equals(className);
             }
 
             @Override
