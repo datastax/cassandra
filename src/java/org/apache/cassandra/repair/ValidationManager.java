@@ -38,6 +38,7 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.metrics.CompactionMetrics;
 import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.MerkleTree;
 import org.apache.cassandra.utils.MerkleTrees;
 import org.apache.cassandra.utils.NonThrowingCloseable;
@@ -176,6 +177,7 @@ public class ValidationManager
                     // we need to inform the remote end of our failure, otherwise it will hang on repair forever
                     validator.fail();
                     logger.error("Validation failed.", e);
+                    JVMStabilityInspector.inspectThrowable(e);
                     throw e;
                 }
                 return this;
