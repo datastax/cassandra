@@ -21,11 +21,11 @@ package org.apache.cassandra.index.sai.plan;
 import java.io.IOError;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
 import java.util.Map;
 import java.util.PriorityQueue;
 import java.util.Queue;
@@ -36,10 +36,11 @@ import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.netty.util.concurrent.FastThreadLocal;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.DecoratedKey;
@@ -76,7 +77,6 @@ import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.AbstractIterator;
-import org.apache.cassandra.utils.Clock;
 import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.btree.BTree;
@@ -85,10 +85,21 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
 {
     protected static final Logger logger = LoggerFactory.getLogger(StorageAttachedIndexSearcher.class);
 
+    private static final int PARTITION_ROW_BATCH_SIZE = CassandraRelevantProperties.SAI_PARTITION_ROW_BATCH_SIZE.getInt();
+
     private final ReadCommand command;
     private final QueryController controller;
     private final QueryContext queryContext;
     private final TableQueryMetrics tableQueryMetrics;
+
+    private static final FastThreadLocal<List<PrimaryKey>> nextKeys = new FastThreadLocal<>()
+    {
+        @Override
+        protected List<PrimaryKey> initialValue()
+        {
+            return new ArrayList<>(PARTITION_ROW_BATCH_SIZE);
+        }
+    };
 
     public StorageAttachedIndexSearcher(ColumnFamilyStore cfs,
                                         TableQueryMetrics tableQueryMetrics,
@@ -233,6 +244,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         private final FilterTree filterTree;
         private final ReadExecutionController executionController;
         private final PrimaryKey.Factory keyFactory;
+        private final int partitionRowBatchSize;
 
         private PrimaryKey lastKey;
 
@@ -249,6 +261,9 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             this.keyFactory = controller.primaryKeyFactory();
 
             this.firstPrimaryKey = controller.firstPrimaryKey();
+
+            // Ensure we don't fetch larger batches than the provided LIMIT to avoid fetching keys we won't use:
+            this.partitionRowBatchSize = Math.min(PARTITION_ROW_BATCH_SIZE, command.limits().count());
         }
 
         @Override
@@ -274,7 +289,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             // saying this iterator must not return the same partition twice.
             skipToNextPartition();
 
-            UnfilteredRowIterator iterator = nextRowIterator(this::nextSelectedKeyInRange);
+            UnfilteredRowIterator iterator = nextRowIterator(this::nextSelectedKeysInRange);
             return iterator != null
                    ? iteratePartition(iterator)
                    : endOfData();
@@ -288,15 +303,15 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
          *
          * @return an iterator or null if all keys were tried with no success
          */
-        private @Nullable UnfilteredRowIterator nextRowIterator(@Nonnull Supplier<PrimaryKey> keySupplier)
+        private @Nullable UnfilteredRowIterator nextRowIterator(@Nonnull Supplier<List<PrimaryKey>> keySupplier)
         {
             UnfilteredRowIterator iterator = null;
             while (iterator == null)
             {
-                PrimaryKey key = keySupplier.get();
-                if (key == null)
+                List<PrimaryKey> keys = keySupplier.get();
+                if (keys.isEmpty())
                     return null;
-                iterator = apply(key);
+                iterator = apply(keys);
             }
             return iterator;
         }
@@ -336,51 +351,67 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             return key;
         }
 
-        /**
-         * Returns the next available key contained by one of the keyRanges and selected by the queryController.
-         * If the next key falls out of the current key range, it skips to the next key range, and so on.
-         * If no more keys acceptd by the controller are available, returns null.
-         */
-         private @Nullable PrimaryKey nextSelectedKeyInRange()
+        private void fillNextSelectedKeysInPartition(DecoratedKey partitionKey, List<PrimaryKey> nextPrimaryKeys)
         {
-            PrimaryKey key;
-            do
+            while (operation.hasNext()
+                   && operation.peek().partitionKey().equals(partitionKey)
+                   && nextPrimaryKeys.size() < partitionRowBatchSize)
             {
-                key = nextKeyInRange();
+                PrimaryKey key = nextKey();
+
+                if (key == null)
+                    break;
+
+                if (!controller.selects(key) || key.equals(lastKey))
+                    continue;
+
+                nextPrimaryKeys.add(key);
+                lastKey = key;
             }
-            while (key != null && !controller.selects(key));
-            return key;
         }
 
         /**
-         * Retrieves the next primary key that belongs to the given partition and is selected by the query controller.
-         * The underlying key iterator is advanced only if the key belongs to the same partition.
-         * <p>
-         * Returns null if:
-         * <ul>
-         *   <li>there are no more keys</li>
-         *   <li>the next key is beyond the upper bound</li>
-         *   <li>the next key belongs to a different partition</li>
-         * </ul>
-         * </p>
+         * Retrieves the next batch of primary keys (i.e. up to {@link #partitionRowBatchSize} of them) that are
+         * contained by one of the query key ranges and selected by the {@link QueryController}. If the next key falls
+         * out of the current key range, it skips to the next key range, and so on. If no more keys accepted by
+         * the controller are available, and empty list is returned.
+         *
+         * @return a list of up to {@link #partitionRowBatchSize} primary keys
          */
-        private @Nullable PrimaryKey nextSelectedKeyInPartition(DecoratedKey partitionKey)
+        private List<PrimaryKey> nextSelectedKeysInRange()
         {
-            PrimaryKey key;
+            List<PrimaryKey> threadLocalNextKeys = nextKeys.get();
+            threadLocalNextKeys.clear();
+            PrimaryKey firstKey;
+
             do
             {
-                if (!operation.hasNext())
-                    return null;
-                PrimaryKey minKey = operation.peek();
-                if (!minKey.token().equals(partitionKey.getToken()))
-                    return null;
-                if (minKey.partitionKey() != null && !minKey.partitionKey().equals(partitionKey))
-                    return null;
+                firstKey = nextKeyInRange();
 
-                key = nextKey();
+                if (firstKey == null)
+                    return Collections.emptyList();
             }
-            while (key != null && !controller.selects(key));
-            return key;
+            while (!controller.selects(firstKey) || firstKey.equals(lastKey));
+
+            lastKey = firstKey;
+            threadLocalNextKeys.add(firstKey);
+            fillNextSelectedKeysInPartition(firstKey.partitionKey(), threadLocalNextKeys);
+            return threadLocalNextKeys;
+        }
+
+        /**
+         * Retrieves the next batch of primary keys (i.e. up to {@link #partitionRowBatchSize} of them) that belong to
+         * the given partition and are selected by the query controller, advancing the underlying iterator only while
+         * the next key belongs to that partition.
+         *
+         * @return a list of up to {@link #partitionRowBatchSize} primary keys within the given partition
+         */
+        private List<PrimaryKey> nextSelectedKeysInPartition(DecoratedKey partitionKey)
+        {
+            List<PrimaryKey> threadLocalNextKeys = nextKeys.get();
+            threadLocalNextKeys.clear();
+            fillNextSelectedKeysInPartition(partitionKey, threadLocalNextKeys);
+            return threadLocalNextKeys;
         }
 
         /**
@@ -453,7 +484,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                     while (!currentIter.hasNext())
                     {
                         currentIter.close();
-                        currentIter = nextRowIterator(() -> nextSelectedKeyInPartition(partitionKey));
+                        currentIter = nextRowIterator(() -> nextSelectedKeysInPartition(partitionKey));
                         if (currentIter == null)
                             return endOfData();
                     }
@@ -469,29 +500,12 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             };
         }
 
-        public UnfilteredRowIterator apply(PrimaryKey key)
+        public UnfilteredRowIterator apply(List<PrimaryKey> keys)
         {
-            // Key reads are lazy, delayed all the way to this point.
-            // We don't want key.equals(lastKey) because some PrimaryKey implementations consider more than just
-            // partition key and clustering for equality. This can break lastKey skipping, which is necessary for
-            // correctness when PrimaryKey doesn't have a clustering (as otherwise, the same partition may get
-            // filtered and considered as a result multiple times).
-            // we need a non-null partitionKey here, as we want to construct a SinglePartitionReadCommand
-            Preconditions.checkNotNull(key.partitionKey(), "Partition key must not be null");
-            if (lastKey != null && key.partitionKey().equals(lastKey.partitionKey()) && key.clustering().equals(lastKey.clustering()))
-                return null;
-
-            lastKey = key;
-            long startTimeNanos = Clock.Global.nanoTime();
-
-            UnfilteredRowIterator partition = controller.getPartition(key, executionController);
+            UnfilteredRowIterator partition = controller.getPartition(keys, executionController);
             queryContext.addPartitionsRead(1);
             queryContext.checkpoint();
             UnfilteredRowIterator filtered = applyIndexFilter(partition, filterTree, queryContext);
-
-            // Note that we record the duration of the read after post-filtering, which actually
-            // materializes the rows from disk.
-            tableQueryMetrics.postFilteringReadLatency.update(Clock.Global.nanoTime() - startTimeNanos, TimeUnit.NANOSECONDS);
 
             return filtered;
         }
