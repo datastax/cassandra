@@ -78,6 +78,26 @@ public class RAMStringIndexerTest extends SaiRandomizedTest
     }
 
     @Test
+    public void testLargeNumberOfDocs()
+    {
+        int maxDocsSize = 1000;
+        RAMStringIndexer indexer = new RAMStringIndexer(false, maxDocsSize);
+
+        int startingRowId = 0;
+        int i = 0;
+        while (i++ < maxDocsSize)
+        {
+            int rowId = startingRowId + i;
+            indexer.addAll(List.of(new BytesRef("0")), rowId);
+
+            if (i < maxDocsSize)
+                assertFalse(indexer.requiresFlush());
+        }
+
+        assertTrue(indexer.requiresFlush());
+    }
+
+    @Test
     public void testWithFrequencies() throws Exception
     {
         RAMStringIndexer indexer = new RAMStringIndexer(true);
