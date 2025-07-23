@@ -33,4 +33,11 @@ public interface ReaderFileProxy extends AutoCloseable
      * Needed for tests. Returns the table's CRC check chance, which is only set for compressed tables.
      */
     double getCrcCheckChance();
+
+    /**
+     * Called before rebuffering to allow for position adjustments.
+     * This is used to enable files with holes (e.g. encryption data) where we still want to be able to write and read
+     * sequences of bytes (e.g. keys) that span over a hole.
+     */
+    long adjustPosition(long position);
 }

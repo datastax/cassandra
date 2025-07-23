@@ -32,6 +32,8 @@ import org.apache.cassandra.cache.ChunkCache;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.compress.CompressionMetadata;
+import org.apache.cassandra.io.compress.EncryptedSequentialWriter;
+import org.apache.cassandra.io.compress.Encryptor;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.concurrent.Ref;
 import org.apache.cassandra.utils.concurrent.RefCounted;
@@ -422,6 +424,13 @@ public class FileHandle extends SharedCloseableImpl
             return this;
         }
 
+        public Builder maybeEncrypted(boolean encrypted)
+        {
+            // For encrypted files, we need to ensure compressionMetadata is available
+            // This is needed because encrypted files use the compression framework
+            return this;
+        }
+
         /**
          * Complete building {@link FileHandle}.
          */
@@ -441,7 +450,16 @@ public class FileHandle extends SharedCloseableImpl
                 compressionMetadata = this.compressionMetadata != null ? this.compressionMetadata.sharedCopy() : null;
                 channel = channelProxyFactory.apply(file);
 
-                long fileLength = (compressionMetadata != null) ? compressionMetadata.compressedFileLength : channel.size();
+                long fileLength;
+                if (compressionMetadata != null && compressionMetadata.useActualFileSize)
+                {
+                    // For encrypted-only files, we need to use the actual file size
+                    fileLength = channel.size();
+                }
+                else
+                {
+                    fileLength = (compressionMetadata != null) ? compressionMetadata.compressedFileLength : channel.size();
+                }
                 long length = lengthOverride >= 0 ? lengthOverride : fileLength;
 
                 RebuffererFactory rebuffererFactory;
@@ -453,9 +471,27 @@ public class FileHandle extends SharedCloseableImpl
                 {
                     if (compressionMetadata != null)
                     {
-                        regions = mmappedRegionsCache != null ? mmappedRegionsCache.getOrCreate(channel, compressionMetadata, bufferSize, sliceDescriptor.sliceStart)
-                                                              : MmappedRegions.map(channel, compressionMetadata, sliceDescriptor.sliceStart, adviseRandom);
-                        rebuffererFactory = maybeCached(new CompressedChunkReader.Mmap(channel, compressionMetadata, regions, crcCheckChanceSupplier, sliceDescriptor.sliceStart));
+                        // Check if this is encryption rather than compression
+                        if (compressionMetadata.compressor() instanceof Encryptor)
+                        {
+                            // For encrypted files, we need to map the actual file size, not logical data length
+                            // MmappedRegions maps physical file regions, not logical data
+                            Encryptor encryptor = (Encryptor) compressionMetadata.compressor();
+                            
+                            // Map the actual file size, with chunks aligned to CHUNK_SIZE
+                            int chunkSize = EncryptedSequentialWriter.CHUNK_SIZE;
+                            regions = mmappedRegionsCache != null ? mmappedRegionsCache.getOrCreate(channel, fileLength, chunkSize, sliceDescriptor.sliceStart)
+                                                                  : MmappedRegions.map(channel, fileLength, chunkSize, sliceDescriptor.sliceStart, adviseRandom);
+                            // For encrypted files without explicit length override, pass -1 to let EncryptedChunkReader calculate the logical length
+                            long encryptedOverrideLength = (lengthOverride >= 0) ? length : -1;
+                            rebuffererFactory = EncryptedChunkReader.createMmap(channel, regions, encryptor, compressionMetadata.parameters, fileLength, encryptedOverrideLength);
+                        }
+                        else
+                        {
+                            regions = mmappedRegionsCache != null ? mmappedRegionsCache.getOrCreate(channel, compressionMetadata, bufferSize, sliceDescriptor.sliceStart)
+                                                                  : MmappedRegions.map(channel, compressionMetadata, sliceDescriptor.sliceStart, adviseRandom);
+                            rebuffererFactory = maybeCached(new CompressedChunkReader.Mmap(channel, compressionMetadata, regions, crcCheckChanceSupplier, sliceDescriptor.sliceStart));
+                        }
                     }
                     else
                     {
@@ -471,7 +507,18 @@ public class FileHandle extends SharedCloseableImpl
 
                     if (compressionMetadata != null)
                     {
-                        rebuffererFactory = maybeCached(new CompressedChunkReader.Standard(channel, compressionMetadata, crcCheckChanceSupplier, sliceDescriptor.sliceStart));
+                        // Check if this is encryption rather than compression
+                        if (compressionMetadata.compressor() instanceof Encryptor)
+                        {
+                            Encryptor encryptor = (Encryptor) compressionMetadata.compressor();
+                            // For encrypted files without explicit length override, pass -1 to let EncryptedChunkReader calculate the logical length
+                            long encryptedOverrideLength = (lengthOverride >= 0) ? length : -1;
+                            rebuffererFactory = EncryptedChunkReader.createStandard(channel, encryptor, compressionMetadata.parameters, fileLength, encryptedOverrideLength);
+                        }
+                        else
+                        {
+                            rebuffererFactory = maybeCached(new CompressedChunkReader.Standard(channel, compressionMetadata, crcCheckChanceSupplier, sliceDescriptor.sliceStart));
+                        }
                     }
                     else
                     {

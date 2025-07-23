@@ -517,6 +517,16 @@ public final class CompressionParams
         return String.valueOf(chunkLength() / 1024);
     }
 
+    /**
+     * Whether CRC checks should be performed during decompression
+     * @return true if CRC checks should be performed
+     */
+    public boolean shouldCheckCrc()
+    {
+        // CRC checks should be performed unless compression is disabled
+        return isEnabled();
+    }
+
     @Override
     public boolean equals(Object obj)
     {
