@@ -111,6 +111,12 @@ public class ChunkCacheInterceptingTest
         }
 
         @Override
+        public long adjustPosition(long position)
+        {
+            return wrapped.adjustPosition(position);
+        }
+
+        @Override
         public Rebufferer instantiateRebufferer(boolean isScan)
         {
             numInstantiations += 1;
