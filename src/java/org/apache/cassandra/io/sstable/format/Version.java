@@ -112,6 +112,16 @@ public abstract class Version
     public abstract boolean hasKeyRange();
 
     /**
+     * @return True if the indices (row and partition) can be encrypted.
+     */
+    public abstract boolean indicesAreEncrypted();
+
+    /**
+     * @return True if the metadata (statistics) can be encrypted.
+     */
+    public abstract boolean metadataIsEncrypted();
+
+    /**
      * @param ver SSTable version
      * @return True if the given version string matches the format.
      * @see #version
