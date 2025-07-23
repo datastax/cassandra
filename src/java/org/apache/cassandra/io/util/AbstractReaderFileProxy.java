@@ -58,4 +58,10 @@ public abstract class AbstractReaderFileProxy implements ReaderFileProxy
     {
         return 0; // Only valid for compressed files.
     }
+
+    @Override
+    public long adjustPosition(long position)
+    {
+        return position;
+    }
 }

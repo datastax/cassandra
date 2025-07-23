@@ -387,6 +387,8 @@ public class BigFormat extends AbstractSSTableFormat<BigTableReader, BigTableWri
         private final boolean hasKeyRange;
         private final boolean hasUintDeletionTime;
         private final boolean hasTokenSpaceCoverage;
+        private final boolean indicesAreEncrypted;
+        private final boolean metadataIsEncrypted;
 
         /**
          * CASSANDRA-9067: 4.0 bloom filter representation changed (two longs just swapped)
@@ -423,6 +425,9 @@ public class BigFormat extends AbstractSSTableFormat<BigTableReader, BigTableWri
             hasKeyRange = oOrLater;
             hasUintDeletionTime = oOrLater;
             hasTokenSpaceCoverage = oOrLater;
+            // Encryption is not supported in big format
+            indicesAreEncrypted = false;
+            metadataIsEncrypted = false;
         }
 
         @Override
@@ -531,6 +536,18 @@ public class BigFormat extends AbstractSSTableFormat<BigTableReader, BigTableWri
         public boolean hasKeyRange()
         {
             return hasKeyRange;
+        }
+
+        @Override
+        public boolean indicesAreEncrypted()
+        {
+            return indicesAreEncrypted;
+        }
+        
+        @Override
+        public boolean metadataIsEncrypted()
+        {
+            return metadataIsEncrypted;
         }
 
         @Override
