@@ -47,6 +47,7 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.Util;
 import org.apache.cassandra.cache.ChunkCache;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.DecoratedKey;
@@ -85,6 +86,7 @@ public class PartitionIndexTest
 
     static
     {
+        CassandraRelevantProperties.TRIE_INDEX_FORMAT_VERSION.setString("aa");
         DatabaseDescriptor.daemonInitialization();
     }
 

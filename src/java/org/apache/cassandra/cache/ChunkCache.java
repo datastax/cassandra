@@ -510,7 +510,12 @@ public class ChunkCache
             public ByteBuffer buffer()
             {
                 assert isReferenced() : "Already unreferenced";
-                return buffer.duplicate();
+                // Calculate the appropriate limit for this specific buffer based on its position
+                int bufferIndex = (int) ((offset - MultiRegionChunk.this.offset) / PageAware.PAGE_SIZE);
+                int startOfBuffer = bufferIndex * PageAware.PAGE_SIZE;
+                int endOfBuffer = Math.min(startOfBuffer + PageAware.PAGE_SIZE, bytesRead);
+                int bufferLimit = Math.max(0, endOfBuffer - startOfBuffer);
+                return buffer.duplicate().limit(bufferLimit);
             }
 
             @Override
@@ -720,6 +725,12 @@ public class ChunkCache
         public double getCrcCheckChance()
         {
             return source.getCrcCheckChance();
+        }
+
+        @Override
+        public long adjustPosition(long position)
+        {
+            return source.adjustPosition(position);
         }
 
         @Override

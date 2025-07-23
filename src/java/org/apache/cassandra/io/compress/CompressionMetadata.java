@@ -97,6 +97,12 @@ public class CompressionMetadata extends WrappedSharedCloseable
      * Length of the compressed file in bytes. This refers to the partial file length if zero copy metadata is present.
      */
     public final long compressedFileLength;
+    
+    /**
+     * If true, the actual file size should be used instead of compressedFileLength when reading.
+     * This is used for encryption-only files where the final size isn't known at write time.
+     */
+    public final boolean useActualFileSize;
 
     /**
      * Offsets of consecutive chunks in the (compressed) data file. The length of this array is equal to the number of
@@ -122,6 +128,43 @@ public class CompressionMetadata extends WrappedSharedCloseable
     public static CompressionMetadata open(File chunksIndexFile, long compressedLength, boolean hasMaxCompressedSize)
     {
         return open(chunksIndexFile, compressedLength, hasMaxCompressedSize, SliceDescriptor.NONE);
+    }
+
+    /**
+     * Create a CompressionMetadata for encryption-only (no compression) files.
+     * @param compressionParams The compression parameters containing the encryptor
+     * @return A CompressionMetadata instance suitable for encryption-only files
+     */
+    public static CompressionMetadata encryptedOnly(CompressionParams compressionParams)
+    {
+        // For encryption-only files, we create a CompressionMetadata that doesn't limit the file size
+        // We'll create dummy chunk offsets that allow the reader to work with large files
+        int maxChunks = 1000; // Support files up to ~4MB
+        ChunkOffsetMemory offsets = new ChunkOffsetMemory(maxChunks + 1);
+        
+        // Set chunk offsets - each chunk is CHUNK_SIZE + 4 bytes apart
+        long offset = 0;
+        for (int i = 0; i <= maxChunks; i++) {
+            offsets.set(i, offset);
+            offset += EncryptedSequentialWriter.CHUNK_SIZE + 4;
+        }
+        
+        int chunkLength = EncryptedSequentialWriter.CHUNK_SIZE;
+        int chunkLengthBits = Integer.numberOfTrailingZeros(chunkLength);
+        
+        // Set large values for data and compressed lengths to avoid limiting the reader
+        long dataLength = (long) maxChunks * chunkLength;
+        // Use a reasonable default compressed length (will be ignored due to useActualFileSize flag)
+        long compressedLength = dataLength;
+        
+        return new CompressionMetadata(null, // chunksIndexFile
+                compressionParams,
+                offsets,
+                dataLength,
+                compressedLength,
+                chunkLengthBits,
+                0, // startChunkIndex
+                true); // useActualFileSize = true for encryption-only files
     }
 
     @VisibleForTesting
@@ -198,6 +241,19 @@ public class CompressionMetadata extends WrappedSharedCloseable
                                int chunkLengthBits,
                                int startChunkIndex)
     {
+        this(chunksIndexFile, parameters, chunkOffsets, dataLength, compressedFileLength, chunkLengthBits, startChunkIndex, false);
+    }
+    
+    // Constructor with explicit useActualFileSize flag
+    private CompressionMetadata(File chunksIndexFile,
+                                CompressionParams parameters,
+                                ChunkOffsetMemory chunkOffsets,
+                                long dataLength,
+                                long compressedFileLength,
+                                int chunkLengthBits,
+                                int startChunkIndex,
+                                boolean useActualFileSize)
+    {
         super(chunkOffsets);
         this.chunksIndexFile = chunksIndexFile;
         this.parameters = parameters;
@@ -206,6 +262,7 @@ public class CompressionMetadata extends WrappedSharedCloseable
         this.chunkOffsets = chunkOffsets;
         this.chunkLengthBits = chunkLengthBits;
         this.startChunkIndex = startChunkIndex;
+        this.useActualFileSize = useActualFileSize;
     }
 
     private CompressionMetadata(CompressionMetadata copy)
@@ -218,6 +275,7 @@ public class CompressionMetadata extends WrappedSharedCloseable
         this.chunkOffsets = copy.chunkOffsets;
         this.chunkLengthBits = copy.chunkLengthBits;
         this.startChunkIndex = copy.startChunkIndex;
+        this.useActualFileSize = copy.useActualFileSize;
     }
 
     public static long nativeMemoryAllocated()

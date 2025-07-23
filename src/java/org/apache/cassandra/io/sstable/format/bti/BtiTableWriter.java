@@ -41,6 +41,7 @@ import org.apache.cassandra.io.sstable.format.DataComponent;
 import org.apache.cassandra.io.sstable.format.IndexComponent;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReader.OpenReason;
+import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SortedTableWriter;
 import org.apache.cassandra.io.sstable.format.bti.BtiFormat.Components;
 import org.apache.cassandra.io.util.DataPosition;
@@ -52,6 +53,11 @@ import org.apache.cassandra.utils.Clock;
 import org.apache.cassandra.utils.IFilter;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.Throwables;
+import org.apache.cassandra.io.compress.CompressionMetadata;
+import org.apache.cassandra.io.compress.EncryptedSequentialWriter;
+import org.apache.cassandra.io.compress.ICompressor;
+import org.apache.cassandra.schema.CompressionParams;
+import org.apache.cassandra.schema.TableMetadata;
 
 import static com.google.common.base.Preconditions.checkNotNull;
 import static com.google.common.base.Preconditions.checkState;
@@ -178,10 +184,43 @@ public class BtiTableWriter extends SortedTableWriter<BtiFormatPartitionWriter, 
         IndexWriter(Builder b, SequentialWriter dataWriter)
         {
             super(b);
-            rowIndexWriter = new SequentialWriter(descriptor.fileFor(Components.ROW_INDEX), b.getIOOptions().writerOptions);
-            rowIndexFHBuilder = IndexComponent.fileBuilder(Components.ROW_INDEX, b, b.operationType).withMmappedRegionsCache(b.getMmappedRegionsCache());
-            partitionIndexWriter = new SequentialWriter(descriptor.fileFor(Components.PARTITION_INDEX), b.getIOOptions().writerOptions);
-            partitionIndexFHBuilder = IndexComponent.fileBuilder(Components.PARTITION_INDEX, b, b.operationType).withMmappedRegionsCache(b.getMmappedRegionsCache());
+            
+            // Check if encryption is enabled (following trie-index pattern)
+            boolean compression = b.getComponents().contains(SSTableFormat.Components.COMPRESSION_INFO);
+            TableMetadata metadata = b.getTableMetadataRef().getLocal();
+            CompressionParams params = metadata.params.compression;
+            ICompressor encryptor = compression ? params.getSstableCompressor().encryptionOnly() : null;
+            
+            if (encryptor != null)
+            {
+                // Create encrypted writers and configure FileHandle builders for encryption
+                CompressionMetadata compressionMetadata = CompressionMetadata.encryptedOnly(params);
+                rowIndexWriter = new EncryptedSequentialWriter(descriptor.fileFor(Components.ROW_INDEX), 
+                                                               b.getIOOptions().writerOptions, 
+                                                               encryptor);
+                rowIndexFHBuilder = IndexComponent.fileBuilder(Components.ROW_INDEX, b, b.operationType)
+                                                  .withMmappedRegionsCache(b.getMmappedRegionsCache())
+                                                  .withCompressionMetadata(compressionMetadata)
+                                                  .maybeEncrypted(true);
+                
+                partitionIndexWriter = new EncryptedSequentialWriter(descriptor.fileFor(Components.PARTITION_INDEX), 
+                                                                    b.getIOOptions().writerOptions, 
+                                                                    encryptor);
+                partitionIndexFHBuilder = IndexComponent.fileBuilder(Components.PARTITION_INDEX, b, b.operationType)
+                                                        .withMmappedRegionsCache(b.getMmappedRegionsCache())
+                                                        .withCompressionMetadata(compressionMetadata)
+                                                        .maybeEncrypted(true);
+            }
+            else
+            {
+                // Create regular writers
+                rowIndexWriter = new SequentialWriter(descriptor.fileFor(Components.ROW_INDEX), b.getIOOptions().writerOptions);
+                rowIndexFHBuilder = IndexComponent.fileBuilder(Components.ROW_INDEX, b, b.operationType)
+                                                  .withMmappedRegionsCache(b.getMmappedRegionsCache());
+                partitionIndexWriter = new SequentialWriter(descriptor.fileFor(Components.PARTITION_INDEX), b.getIOOptions().writerOptions);
+                partitionIndexFHBuilder = IndexComponent.fileBuilder(Components.PARTITION_INDEX, b, b.operationType)
+                                                        .withMmappedRegionsCache(b.getMmappedRegionsCache());
+            }
             partitionIndex = new PartitionIndexBuilder(partitionIndexWriter, partitionIndexFHBuilder, descriptor.version.getByteComparableVersion());
             // register listeners to be alerted when the data files are flushed
             partitionIndexWriter.setPostFlushListener(partitionIndex::markPartitionIndexSynced);
@@ -252,7 +291,12 @@ public class BtiTableWriter extends SortedTableWriter<BtiFormatPartitionWriter, 
 
             // truncate index file
             rowIndexWriter.prepareToCommit();
-            rowIndexFHBuilder.withLengthOverride(rowIndexWriter.getLastFlushOffset());
+            
+            // For encrypted writers, we don't use getLastFlushOffset() as the length override
+            if (!(rowIndexWriter instanceof EncryptedSequentialWriter))
+            {
+                rowIndexFHBuilder.withLengthOverride(rowIndexWriter.getLastFlushOffset());
+            }
 
             complete();
         }
@@ -266,6 +310,16 @@ public class BtiTableWriter extends SortedTableWriter<BtiFormatPartitionWriter, 
             {
                 partitionIndex.complete();
                 partitionIndexCompleted = true;
+                
+                // Update FileHandle builders for encrypted writers
+                if (rowIndexWriter instanceof EncryptedSequentialWriter)
+                {
+                    ((EncryptedSequentialWriter) rowIndexWriter).updateFileHandle(rowIndexFHBuilder, rowIndexWriter.position());
+                }
+                if (partitionIndexWriter instanceof EncryptedSequentialWriter)
+                {
+                    ((EncryptedSequentialWriter) partitionIndexWriter).updateFileHandle(partitionIndexFHBuilder, partitionIndexWriter.position());
+                }
             }
             catch (IOException e)
             {
@@ -276,8 +330,16 @@ public class BtiTableWriter extends SortedTableWriter<BtiFormatPartitionWriter, 
         PartitionIndex completedPartitionIndex()
         {
             complete();
-            rowIndexFHBuilder.withLengthOverride(NO_LENGTH_OVERRIDE);
-            partitionIndexFHBuilder.withLengthOverride(NO_LENGTH_OVERRIDE);
+            // For encrypted writers, the length override has been set by updateFileHandle()
+            // Don't reset it to NO_LENGTH_OVERRIDE
+            if (!(rowIndexWriter instanceof EncryptedSequentialWriter))
+            {
+                rowIndexFHBuilder.withLengthOverride(NO_LENGTH_OVERRIDE);
+            }
+            if (!(partitionIndexWriter instanceof EncryptedSequentialWriter))
+            {
+                partitionIndexFHBuilder.withLengthOverride(NO_LENGTH_OVERRIDE);
+            }
             try
             {
                 return PartitionIndex.load(partitionIndexFHBuilder, metadata.getLocal().partitioner, false, descriptor.version.getByteComparableVersion());
