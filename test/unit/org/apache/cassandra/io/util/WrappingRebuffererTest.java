@@ -138,6 +138,11 @@ public class WrappingRebuffererTest
             released = true;
         }
 
+        public long adjustPosition(long position)
+        {
+            return position;
+        }
+
         public void close()
         {
             // nothing
