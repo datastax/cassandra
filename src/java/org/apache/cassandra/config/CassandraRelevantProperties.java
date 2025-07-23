@@ -659,7 +659,12 @@ public enum CassandraRelevantProperties
     /**
      * Whether to use fair locking for TrieMemtable shard locks. Defaults to false.
      */
-    TRIE_MEMTABLE_SHARD_LOCK_FAIRNESS("cassandra.trie.memtable.shard.lock.fairness", "false");
+    TRIE_MEMTABLE_SHARD_LOCK_FAIRNESS("cassandra.trie.memtable.shard.lock.fairness", "false"),
+
+    /**
+     * A directory to the default system key location - used by transparent data encryption
+     */
+    SYSTEM_KEY_DIRECTORY("cassandra.system_key_directory", "/etc/cassandra/conf");
 
     CassandraRelevantProperties(String key, String defaultVal)
     {
