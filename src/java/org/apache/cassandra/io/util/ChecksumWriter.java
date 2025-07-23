@@ -89,6 +89,25 @@ public class ChecksumWriter
         }
     }
 
+    /**
+    * Checksum the given buffer and append the partial checksum after its end.
+    * Full checksum is updated to reflect the checksum bytes.
+    *
+    * Assumes the buffer has enough capacity to fit the extra 4 bytes, and leaves the buffer ready
+    * for writing (i.e. setting position to 0 and limit to the input limit + 4).
+    */
+    public void appendToBuf(ByteBuffer bb)
+    {
+        incrementalChecksum.update(bb);
+        bb.limit(bb.capacity());
+        int incrementalChecksumValue = (int) incrementalChecksum.getValue();
+        bb.putInt(incrementalChecksumValue);
+        bb.flip();
+        fullChecksum.update(bb);
+        incrementalChecksum.reset();
+        bb.flip();
+    }
+
     public void writeFullChecksum(@Nonnull File digestFile)
     {
         writeFullChecksum(digestFile, fullChecksum.getValue());

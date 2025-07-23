@@ -323,6 +323,12 @@ public class PrefetchingRebufferer implements Rebufferer
     }
 
     @Override
+    public long adjustPosition(long position)
+    {
+        return position;
+    }
+
+    @Override
     public void close()
     {
         assert unusedRebufferers.isEmpty() : "buffers should have been released";
