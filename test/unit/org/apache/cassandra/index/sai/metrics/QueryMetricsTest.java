@@ -27,7 +27,6 @@ import org.junit.Test;
 import org.junit.rules.ExpectedException;
 
 import com.datastax.driver.core.ResultSet;
-import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.metrics.CassandraMetricsRegistry;
 
 import static org.apache.cassandra.index.sai.metrics.TableQueryMetrics.TABLE_QUERY_METRIC_TYPE;
@@ -351,8 +350,9 @@ public class QueryMetricsTest extends AbstractMetricsTest
         int actualRows = rows.all().size();
         assertEquals(3, actualRows);
 
-        //TODO This needs revisiting with STAR-903 because we are now reading rows one at a time
-        waitForEquals(objectNameNoIndex("TotalPartitionReads", keyspace, table, TABLE_QUERY_METRIC_TYPE), Version.current() == Version.AA ? 2 : 3);
+        // This is 2 due to partition read batching.
+        waitForEquals(objectNameNoIndex("TotalPartitionReads", keyspace, table, TABLE_QUERY_METRIC_TYPE), 2);
+
         waitForVerifyHistogram(objectNameNoIndex("RowsFiltered", keyspace, table, PER_QUERY_METRIC_TYPE), 1);
         waitForEquals(objectNameNoIndex("TotalRowsFiltered", keyspace, table, TABLE_QUERY_METRIC_TYPE), 3);
     }
