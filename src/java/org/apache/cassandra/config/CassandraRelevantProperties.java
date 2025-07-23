@@ -824,6 +824,10 @@ public enum CassandraRelevantProperties
     SYSTEM_DISTRIBUTED_DEFAULT_RF("cassandra.system_distributed.default_rf", "3"),
     SYSTEM_DISTRIBUTED_NTS_DC_OVERRIDE_PROPERTY("cassandra.system_distributed_replication_dc_names"),
     SYSTEM_DISTRIBUTED_NTS_RF_OVERRIDE_PROPERTY("cassandra.system_distributed_replication_per_dc"),
+    /**
+     * A directory to the default system key location - used by transparent data encryption
+     */
+    SYSTEM_KEY_DIRECTORY("cassandra.system_key_directory", "/etc/cassandra/conf"),
     SYSTEM_TRACES_DEFAULT_RF("cassandra.system_traces.default_rf", "2"),
     // Allows admin to include only some system views (see two below)
     SYSTEM_VIEWS_INCLUDE_ALL("cassandra.system_view.include_all", "true"),

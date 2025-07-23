@@ -51,6 +51,7 @@ import org.apache.cassandra.index.Index;
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.compress.CompressedSequentialWriter;
 import org.apache.cassandra.io.compress.CompressionMetadata;
+import org.apache.cassandra.io.compress.EncryptedSequentialWriter;
 import org.apache.cassandra.io.sstable.AbstractRowIndexEntry;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
@@ -424,16 +425,57 @@ public abstract class SortedTableWriter<P extends SortedTablePartitionWriter, I 
 
 
         FileHandle dataFile;
-        try (CompressionMetadata compressionMetadata = compression ? ((CompressedSequentialWriter) dataWriter).open(lengthOverride) : null)
+        CompressionMetadata compressionMetadata = null;
+        if (compression)
         {
-            dataFile = dataFileBuilder.mmapped(ioOptions.defaultDiskAccessMode)
-                                      .withMmappedRegionsCache(mmappedRegionsCache)
-                                      .withChunkCache(chunkCache)
-                                      .withCompressionMetadata(compressionMetadata)
-                                      .bufferSize(dataBufferSize)
-                                      .withCrcCheckChance(crcCheckChanceSupplier)
-                                      .withLengthOverride(lengthOverride)
-                                      .complete();
+            if (dataWriter instanceof CompressedSequentialWriter)
+            {
+                compressionMetadata = ((CompressedSequentialWriter) dataWriter).open(lengthOverride);
+            }
+            else if (dataWriter instanceof EncryptedSequentialWriter)
+            {
+                // For encrypted writers, we need to create encryption-specific compression metadata
+                compressionMetadata = CompressionMetadata.encryptedOnly(metadata.getLocal().params.compression);
+            }
+        }
+        
+        try
+        {
+            FileHandle.Builder builder = dataFileBuilder.mmapped(ioOptions.defaultDiskAccessMode)
+                                                        .withMmappedRegionsCache(mmappedRegionsCache)
+                                                        .withChunkCache(chunkCache)
+                                                        .bufferSize(dataBufferSize)
+                                                        .withCrcCheckChance(crcCheckChanceSupplier);
+            
+            if (compressionMetadata != null)
+            {
+                builder.withCompressionMetadata(compressionMetadata);
+            }
+            
+            if (dataWriter instanceof EncryptedSequentialWriter)
+            {
+                ((EncryptedSequentialWriter) dataWriter).updateFileHandle(builder, lengthOverride);
+            }
+            else
+            {
+                builder.withLengthOverride(lengthOverride);
+            }
+            
+            dataFile = builder.complete();
+        }
+        finally
+        {
+            if (compressionMetadata != null)
+            {
+                try
+                {
+                    compressionMetadata.close();
+                }
+                catch (Exception e)
+                {
+                    // ignore
+                }
+            }
         }
 
         try
