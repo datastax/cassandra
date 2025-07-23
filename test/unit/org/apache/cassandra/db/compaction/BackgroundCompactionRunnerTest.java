@@ -19,6 +19,7 @@
 package org.apache.cassandra.db.compaction;
 
 import java.io.IOError;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -27,10 +28,14 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import org.apache.cassandra.config.Config;
+import org.apache.cassandra.io.FSWriteError;
+import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.utils.JVMKiller;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.KillerForTests;
@@ -49,6 +54,7 @@ import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.lifecycle.Tracker;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.assertj.core.util.Lists;
+import org.assertj.core.util.Preconditions;
 import org.mockito.ArgumentCaptor;
 import org.mockito.ArgumentMatchers;
 import org.mockito.Mockito;
@@ -512,19 +518,115 @@ public class BackgroundCompactionRunnerTest
     public void handleOOMError()
     {
         JVMKiller originalKiller = JVMStabilityInspector.replaceKiller(new KillerForTests());
-        Config.DiskFailurePolicy originalPolicy = DatabaseDescriptor.getDiskFailurePolicy();
+        Consumer<Throwable> originalGlobalErrorHandler = JVMStabilityInspector.getGlobalErrorHandler();
         try
         {
-            DatabaseDescriptor.setDiskFailurePolicy(Config.DiskFailurePolicy.die);
+            AtomicReference<Throwable> globalErrorEncountered = new AtomicReference<>();
+            JVMStabilityInspector.setGlobalErrorHandler(err -> {
+                Preconditions.checkArgument(globalErrorEncountered.get() == null, "Expect only one exception");
+                globalErrorEncountered.set(err);
+            });
+
+            long before = CompactionManager.instance.getMetrics().totalCompactionsFailed.getCount();
 
             OutOfMemoryError oomError = new OutOfMemoryError("oom");
-            assertThatThrownBy(() -> BackgroundCompactionRunner.handleCompactionError(oomError, cfs))
-                    .isInstanceOf(OutOfMemoryError.class);
+            BackgroundCompactionRunner.handleCompactionError(oomError, cfs);
+
+            assertThat(globalErrorEncountered.get()).isSameAs(oomError);
+            assertThat(CompactionManager.instance.getMetrics().totalCompactionsFailed.getCount()).isEqualTo(before + 1);
+        }
+        finally
+        {
+            JVMStabilityInspector.replaceKiller(originalKiller);
+            JVMStabilityInspector.setGlobalErrorHandler(originalGlobalErrorHandler);
+        }
+    }
+
+    @Test
+    public void handleCorruptionException()
+    {
+        JVMKiller originalKiller = JVMStabilityInspector.replaceKiller(new KillerForTests());
+        Config.DiskFailurePolicy originalPolicy = DatabaseDescriptor.getDiskFailurePolicy();
+        Consumer<Throwable> originalDiskErrorHandler = JVMStabilityInspector.getDiskErrorHandler();
+        try
+        {
+            AtomicReference<Throwable> diskErrorEncountered = new AtomicReference<>();
+            JVMStabilityInspector.setDiskErrorHandler(err -> {
+                Preconditions.checkArgument(diskErrorEncountered.get() == null, "Expect only one exception");
+                diskErrorEncountered.set(err);
+            });
+
+            long before = CompactionManager.instance.getMetrics().totalCompactionsFailed.getCount();
+
+            CorruptSSTableException corruptSSTableException = new CorruptSSTableException(null, "corrupted");
+            BackgroundCompactionRunner.handleCompactionError(corruptSSTableException, cfs);
+
+            assertThat(diskErrorEncountered.get()).isSameAs(corruptSSTableException);
+            assertThat(CompactionManager.instance.getMetrics().totalCompactionsFailed.getCount()).isEqualTo(before + 1);
         }
         finally
         {
             DatabaseDescriptor.setDiskFailurePolicy(originalPolicy);
             JVMStabilityInspector.replaceKiller(originalKiller);
+            JVMStabilityInspector.setDiskErrorHandler(originalDiskErrorHandler);
+        }
+    }
+
+    @Test
+    public void handleFSWriteError()
+    {
+        JVMKiller originalKiller = JVMStabilityInspector.replaceKiller(new KillerForTests());
+        Config.DiskFailurePolicy originalPolicy = DatabaseDescriptor.getDiskFailurePolicy();
+        Consumer<Throwable> originalDiskErrorHandler = JVMStabilityInspector.getDiskErrorHandler();
+        try
+        {
+            AtomicReference<Throwable> diskErrorEncountered = new AtomicReference<>();
+            JVMStabilityInspector.setDiskErrorHandler(err -> {
+                Preconditions.checkArgument(diskErrorEncountered.get() == null, "Expect only one exception");
+                diskErrorEncountered.set(err);
+            });
+
+            long before = CompactionManager.instance.getMetrics().compactionsAborted.getCount();
+
+            FSWriteError fsWriteError = new FSWriteError(null, "file");
+            BackgroundCompactionRunner.handleCompactionError(fsWriteError, cfs);
+
+            assertThat(diskErrorEncountered.get()).isSameAs(fsWriteError);
+            assertThat(CompactionManager.instance.getMetrics().compactionsAborted.getCount()).isEqualTo(before + 1);
+        }
+        finally
+        {
+            DatabaseDescriptor.setDiskFailurePolicy(originalPolicy);
+            JVMStabilityInspector.replaceKiller(originalKiller);
+            JVMStabilityInspector.setDiskErrorHandler(originalDiskErrorHandler);
+        }
+    }
+
+    @Test
+    public void handleNoSpaceLeftException()
+    {
+        JVMKiller originalKiller = JVMStabilityInspector.replaceKiller(new KillerForTests());
+        Config.DiskFailurePolicy originalPolicy = DatabaseDescriptor.getDiskFailurePolicy();
+        Consumer<Throwable> originalDiskErrorHandler = JVMStabilityInspector.getDiskErrorHandler();
+        try
+        {
+            // it's wrapped in FSWriteError
+            AtomicReference<Throwable> diskErrorEncountered = new AtomicReference<>();
+            JVMStabilityInspector.setDiskErrorHandler(err -> diskErrorEncountered.set(err.getCause() != null ? err.getCause() : err));
+
+            long before = CompactionManager.instance.getMetrics().totalCompactionsFailed.getCount();
+
+            IOException noSpaceLeftException = new IOException("No space left on device");
+            BackgroundCompactionRunner.handleCompactionError(noSpaceLeftException, cfs);
+
+            assertThat(diskErrorEncountered.get()).isSameAs(noSpaceLeftException);
+            assertThat(CompactionManager.instance.getMetrics().totalCompactionsFailed.getCount()).isEqualTo(before + 1);
+        }
+        finally
+        {
+            DatabaseDescriptor.setDiskFailurePolicy(originalPolicy);
+            JVMStabilityInspector.replaceKiller(originalKiller);
+            JVMStabilityInspector.setDiskErrorHandler(originalDiskErrorHandler);
         }
     }
 
