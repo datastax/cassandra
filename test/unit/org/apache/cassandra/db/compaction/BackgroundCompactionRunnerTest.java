@@ -586,13 +586,13 @@ public class BackgroundCompactionRunnerTest
                 diskErrorEncountered.set(err);
             });
 
-            long before = CompactionManager.instance.getMetrics().compactionsAborted.getCount();
+            long before = CompactionManager.instance.getMetrics().totalCompactionsFailed.getCount();
 
             FSWriteError fsWriteError = new FSWriteError(null, "file");
             BackgroundCompactionRunner.handleCompactionError(fsWriteError, cfs);
 
             assertThat(diskErrorEncountered.get()).isSameAs(fsWriteError);
-            assertThat(CompactionManager.instance.getMetrics().compactionsAborted.getCount()).isEqualTo(before + 1);
+            assertThat(CompactionManager.instance.getMetrics().totalCompactionsFailed.getCount()).isEqualTo(before + 1);
         }
         finally
         {
