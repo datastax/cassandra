@@ -362,6 +362,8 @@ public class BtiFormat extends AbstractSSTableFormat<BtiTableReader, BtiTableWri
         private final boolean hasKeyRange;
         private final boolean hasUIntDeletionTime;
         private final boolean hasImplicitlyFrozenTuples;
+        private final boolean indicesAreEncrypted;
+        private final boolean metadataIsEncrypted;
 
         BtiVersion(BtiFormat format, String version)
         {
@@ -395,6 +397,10 @@ public class BtiFormat extends AbstractSSTableFormat<BtiTableReader, BtiTableWri
 
             // TODO figure out which versions support that
             hasImplicitlyFrozenTuples = version.compareTo("cc") < 0; // we don't know if what DA is going to be eventually, but it is almost certain it will not include explicitly frozen tuples
+            
+            // encryption support - enabled for DSE 6.8 (ba) and later, and for BTI format (da) and later
+            indicesAreEncrypted = (bOrLater && version.compareTo("ba") >= 0) || dOrLater;
+            metadataIsEncrypted = (bOrLater && version.compareTo("ba") >= 0) || dOrLater;
         }
 
         @Override
@@ -502,6 +508,18 @@ public class BtiFormat extends AbstractSSTableFormat<BtiTableReader, BtiTableWri
         public boolean hasKeyRange()
         {
             return hasKeyRange;
+        }
+
+        @Override
+        public boolean indicesAreEncrypted()
+        {
+            return indicesAreEncrypted;
+        }
+        
+        @Override
+        public boolean metadataIsEncrypted()
+        {
+            return metadataIsEncrypted;
         }
 
         @Override
