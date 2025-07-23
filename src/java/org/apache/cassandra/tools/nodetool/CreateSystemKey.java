@@ -70,7 +70,7 @@ public class CreateSystemKey extends NodeToolCmd
         {
             err.printf("System key (%s %s) was not created at %s%n", cipherName, keyStrength, keyLocation);
             err.println(e.getMessage());
-            err.println("Available algorithms are: AES, ARCFOUR, Blowfish, DES, DESede, HmacMD5, HmacSHA1, HmacSHA256, HmacSHA384, HmacSHA512, & RC2");
+            err.println("Available algorithms are: AES, ARCFOUR, Blowfish, DES, DESede, HmacMD5, HmacSHA1, HmacSHA256, HmacSHA384, HmacSHA512 and RC2");
             System.exit(1);
         }
         catch (InvalidParameterException | NoSuchPaddingException | IOException e)

@@ -195,7 +195,7 @@ public class NodeToolTest extends TestBaseImpl
         // then should fail creation
         result.asserts().failure();
         result.asserts().stderrContains("System key (INVALIDNAME 128) was not created");
-        result.asserts().stderrContains("Available algorithms are: AES, ARCFOUR, Blowfish, DES, DESede, HmacMD5, HmacSHA1, HmacSHA256, HmacSHA384, HmacSHA512, & RC2");
+        result.asserts().stderrContains("Available algorithms are: AES, ARCFOUR, Blowfish, DES, DESede, HmacMD5, HmacSHA1, HmacSHA256, HmacSHA384, HmacSHA512 and RC2");
 
         // given a command with incorrect algorithm strength
         result = NODE.nodetoolResult("createsystemkey", "AES", "99");
