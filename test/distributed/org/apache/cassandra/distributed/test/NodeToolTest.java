@@ -140,67 +140,81 @@ public class NodeToolTest extends TestBaseImpl
     @Test
     public void testSuccesfulSystemKeyCreation() throws Throwable
     {
-        // given a command with default key name and location
-        Path testDir1 = Files.createTempDirectory("test_1");
-        System.setProperty("cassandra.system_key_directory", testDir1.toString());
-        Path systemKey = Paths.get(TDEConfigurationProvider.getConfiguration().systemKeyDirectory).resolve("system_key");
-        assertFalse(Files.exists(systemKey));
-        // when
-        NodeToolResult result = NODE.nodetoolResult("createsystemkey", "AES/CBC/PKCS5Padding", "128");
-        // then should create a key
-        result.asserts().success();
-        result.asserts().stdoutContains("Successfully created key");
-        assertTrue(Files.exists(systemKey));
+        try
+        {
+            // given a command with default key name and location
+            Path testDir1 = Files.createTempDirectory("test_1");
+            System.setProperty("cassandra.system_key_directory", testDir1.toString());
+            Path systemKey = Paths.get(TDEConfigurationProvider.getConfiguration().systemKeyDirectory).resolve("system_key");
+            assertFalse(Files.exists(systemKey));
+            // when
+            NodeToolResult result = NODE.nodetoolResult("createsystemkey", "AES/CBC/PKCS5Padding", "128");
+            // then should create a key
+            result.asserts().success();
+            result.asserts().stdoutContains("Successfully created key");
+            assertTrue(Files.exists(systemKey));
 
-        // given a command with specified key name and default key location
-        Path testDir2 = Files.createTempDirectory("test_2");
-        System.setProperty("cassandra.system_key_directory", testDir2.toString());
-        systemKey = Paths.get(TDEConfigurationProvider.getConfiguration().systemKeyDirectory).resolve("system_key_2");
-        assertFalse(Files.exists(systemKey));
-        // when
-        result = NODE.nodetoolResult("createsystemkey", "AES/CBC/PKCS5Padding", "128", "system_key_2");
-        // then should create a key
-        result.asserts().success();
-        result.asserts().stdoutContains("Successfully created key");
-        assertTrue(Files.exists(systemKey));
+            // given a command with specified key name and default key location
+            Path testDir2 = Files.createTempDirectory("test_2");
+            System.setProperty("cassandra.system_key_directory", testDir2.toString());
+            systemKey = Paths.get(TDEConfigurationProvider.getConfiguration().systemKeyDirectory).resolve("system_key_2");
+            assertFalse(Files.exists(systemKey));
+            // when
+            result = NODE.nodetoolResult("createsystemkey", "AES/CBC/PKCS5Padding", "128", "system_key_2");
+            // then should create a key
+            result.asserts().success();
+            result.asserts().stdoutContains("Successfully created key");
+            assertTrue(Files.exists(systemKey));
 
-        // given a command with specified key location and default key name
-        Path testDir3 = Files.createTempDirectory("test_3");
-        assertFalse(Files.exists(testDir3.resolve("system_key")));
-        // when
-        result = NODE.nodetoolResult("createsystemkey", "AES/CBC/PKCS5Padding", "128", "-d", testDir3.toString());
-        // then should create a key
-        result.asserts().success();
-        result.asserts().stdoutContains("Successfully created key");
-        assertTrue(Files.exists(testDir3.resolve("system_key")));
+            // given a command with specified key location and default key name
+            Path testDir3 = Files.createTempDirectory("test_3");
+            assertFalse(Files.exists(testDir3.resolve("system_key")));
+            // when
+            result = NODE.nodetoolResult("createsystemkey", "AES/CBC/PKCS5Padding", "128", "-d", testDir3.toString());
+            // then should create a key
+            result.asserts().success();
+            result.asserts().stdoutContains("Successfully created key");
+            assertTrue(Files.exists(testDir3.resolve("system_key")));
+        }
+        finally
+        {
+            System.clearProperty("cassandra.system_key_directory");
+        }
     }
 
     @Test
     public void testUnsuccesfulSystemKeyCreation()
     {
-        // given a command without key type and strength
-        NodeToolResult result = NODE.nodetoolResult("createsystemkey");
-        // then should fail creation
-        result.asserts().failure();
-        result.asserts().stderrContains("Usage: nodetool createsystemkey <algorithm> <key strength> [<file>]");
+        try
+        {
+            // given a command without key type and strength
+            NodeToolResult result = NODE.nodetoolResult("createsystemkey");
+            // then should fail creation
+            result.asserts().failure();
+            result.asserts().stderrContains("Usage: nodetool createsystemkey <algorithm> <key strength> [<file>]");
 
-        // given a command without key strength
-        result = NODE.nodetoolResult("createsystemkey", "AES/CBC/PKCS5Padding");
-        // then should fail creation
-        result.asserts().failure();
-        result.asserts().stderrContains("Usage: nodetool createsystemkey <algorithm> <key strength> [<file>]");
+            // given a command without key strength
+            result = NODE.nodetoolResult("createsystemkey", "AES/CBC/PKCS5Padding");
+            // then should fail creation
+            result.asserts().failure();
+            result.asserts().stderrContains("Usage: nodetool createsystemkey <algorithm> <key strength> [<file>]");
 
-        // given a command with incorrect algorithm name
-        result = NODE.nodetoolResult("createsystemkey", "INVALIDNAME", "128");
-        // then should fail creation
-        result.asserts().failure();
-        result.asserts().stderrContains("System key (INVALIDNAME 128) was not created");
-        result.asserts().stderrContains("Available algorithms are: AES, ARCFOUR, Blowfish, DES, DESede, HmacMD5, HmacSHA1, HmacSHA256, HmacSHA384, HmacSHA512 and RC2");
+            // given a command with incorrect algorithm name
+            result = NODE.nodetoolResult("createsystemkey", "INVALIDNAME", "128");
+            // then should fail creation
+            result.asserts().failure();
+            result.asserts().stderrContains("System key (INVALIDNAME 128) was not created");
+            result.asserts().stderrContains("Available algorithms are: AES, ARCFOUR, Blowfish, DES, DESede, HmacMD5, HmacSHA1, HmacSHA256, HmacSHA384, HmacSHA512 and RC2");
 
-        // given a command with incorrect algorithm strength
-        result = NODE.nodetoolResult("createsystemkey", "AES", "99");
-        // then should fail creation
-        result.asserts().failure();
-        result.asserts().stderrContains("System key (AES 99) was not created");
+            // given a command with incorrect algorithm strength
+            result = NODE.nodetoolResult("createsystemkey", "AES", "99");
+            // then should fail creation
+            result.asserts().failure();
+            result.asserts().stderrContains("System key (AES 99) was not created");
+        }
+        finally
+        {
+            System.clearProperty("cassandra.system_key_directory");
+        }
     }
 }
