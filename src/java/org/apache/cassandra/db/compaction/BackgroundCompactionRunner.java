@@ -463,7 +463,7 @@ public class BackgroundCompactionRunner implements Runnable
             // we might have to rely on error message parsing...
             t = t instanceof FSError ? t : new FSWriteError(t);
             JVMStabilityInspector.inspectThrowable(t);
-            CompactionManager.instance.incrementAborted();
+            CompactionManager.instance.incrementFailed();
         }
         // No-Space-Left IO exception is thrown by JDK when disk has reached its capacity. The key difference between this
         // and the earlier case with `FSDiskFullWriteError` is that here we have definitively run out of disk space, and
