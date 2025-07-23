@@ -66,6 +66,15 @@ public class TailOverridingRebufferer extends WrappingRebufferer
     }
 
     @Override
+    public long adjustPosition(long position)
+    {
+        if (position < cutoff)
+            return super.adjustPosition(position);
+        else
+            return position;
+    }
+
+    @Override
     public String toString()
     {
         return String.format("%s[+%d@%d]:%s", getClass().getSimpleName(), tail.limit(), cutoff, wrapped.toString());

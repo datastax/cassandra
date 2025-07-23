@@ -798,7 +798,8 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
         if (!compression)
             return 0;
 
-        return getCompressionMetadata().offHeapSize();
+        CompressionMetadata metadata = dfile.compressionMetadata().orElse(null);
+        return metadata != null ? metadata.offHeapSize() : 0;
     }
 
     /**
@@ -931,23 +932,32 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
         }
         else
         {
-            final CompressionMetadata compressionMetadata = getCompressionMetadata();
-            long lastEnd = 0;
-            for (PartitionPositionBounds position : positionBounds)
+            CompressionMetadata compressionMetadata = dfile.compressionMetadata().orElse(null);
+            if (compressionMetadata != null)
             {
-                assert position.lowerPosition >= 0 : "the partition lower cannot be negative";
-                if (position.upperPosition == position.lowerPosition)
+                long lastEnd = 0;
+                for (PartitionPositionBounds position : positionBounds)
                 {
-                    continue;
-                }
-                assert position.upperPosition >= position.lowerPosition : "the partition upper position cannot be lower than lower position";
+                    assert position.lowerPosition >= 0 : "the partition lower cannot be negative";
+                    if (position.upperPosition == position.lowerPosition)
+                    {
+                        continue;
+                    }
+                    assert position.upperPosition >= position.lowerPosition : "the partition upper position cannot be lower than lower position";
 
-                long upperChunkEnd = compressionMetadata.chunkFor(position.upperPosition - 1).chunkEnd();
-                long lowerChunkStart = compressionMetadata.chunkFor(position.lowerPosition).offset;
-                if (lowerChunkStart < lastEnd)  // if regions include the same chunk, count it only once
-                    lowerChunkStart = lastEnd;
-                total += upperChunkEnd - lowerChunkStart;
-                lastEnd = upperChunkEnd;
+                    long upperChunkEnd = compressionMetadata.chunkFor(position.upperPosition - 1).chunkEnd();
+                    long lowerChunkStart = compressionMetadata.chunkFor(position.lowerPosition).offset;
+                    if (lowerChunkStart < lastEnd)  // if regions include the same chunk, count it only once
+                        lowerChunkStart = lastEnd;
+                    total += upperChunkEnd - lowerChunkStart;
+                    lastEnd = upperChunkEnd;
+                }
+            }
+            else
+            {
+                // For encrypted files without compression metadata, just sum the ranges
+                for (PartitionPositionBounds position : positionBounds)
+                    total += position.upperPosition - position.lowerPosition;
             }
         }
         return total;
@@ -2126,9 +2136,16 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
         for (Component component : components())
         {
             // Only the data file is compressable.
-            bytes += logical && component == Components.DATA && compression
-                     ? getCompressionMetadata().dataLength
-                     : descriptor.fileFor(component).length();
+            if (logical && component == Components.DATA && compression)
+            {
+                // For encrypted files, compression metadata may not exist
+                CompressionMetadata metadata = dfile.compressionMetadata().orElse(null);
+                bytes += metadata != null ? metadata.dataLength : dfile.dataLength();
+            }
+            else
+            {
+                bytes += descriptor.fileFor(component).length();
+            }
         }
         return bytes;
     }

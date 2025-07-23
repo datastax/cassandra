@@ -110,11 +110,11 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
         {
             if (file.exists())
             {
-                return FileChannel.open(file.toPath(), StandardOpenOption.WRITE);
+                return FileChannel.open(file.toPath(), StandardOpenOption.READ, StandardOpenOption.WRITE);
             }
             else
             {
-                FileChannel channel = FileChannel.open(file.toPath(), StandardOpenOption.WRITE, StandardOpenOption.CREATE_NEW);
+                FileChannel channel = FileChannel.open(file.toPath(), StandardOpenOption.READ, StandardOpenOption.WRITE, StandardOpenOption.CREATE_NEW);
                 try
                 {
                     SyncUtil.trySyncDir(file.parent());
@@ -212,15 +212,18 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
     @Override
     protected void doFlush(int count)
     {
-        flushData();
-
-        if (option.trickleFsync())
+        if (buffer.position() > 0)
         {
-            bytesSinceTrickleFsync += buffer.position();
-            if (bytesSinceTrickleFsync >= option.trickleFsyncByteInterval())
+            flushData();
+
+            if (option.trickleFsync())
             {
-                syncDataOnlyInternal();
-                bytesSinceTrickleFsync = 0;
+                bytesSinceTrickleFsync += buffer.position();
+                if (bytesSinceTrickleFsync >= option.trickleFsyncByteInterval())
+                {
+                    syncDataOnlyInternal();
+                    bytesSinceTrickleFsync = 0;
+                }
             }
         }
 
@@ -463,7 +466,7 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
      */
     protected static class BufferedFileWriterMark implements DataPosition
     {
-        final long pointer;
+        public final long pointer;
 
         public BufferedFileWriterMark(long pointer)
         {

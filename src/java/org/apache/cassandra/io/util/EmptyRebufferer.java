@@ -52,6 +52,12 @@ public class EmptyRebufferer implements Rebufferer, RebuffererFactory
     }
 
     @Override
+    public long adjustPosition(long position)
+    {
+        return position;
+    }
+
+    @Override
     public BufferHolder rebuffer(long position)
     {
         return EMPTY;
