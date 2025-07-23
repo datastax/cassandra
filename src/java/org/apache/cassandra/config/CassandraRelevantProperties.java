@@ -220,6 +220,11 @@ public enum CassandraRelevantProperties
     UCS_COMPACTION_INCLUDE_NON_DATA_FILES_SIZE("unified_compaction.include_non_data_files_size", "true"),
 
     /**
+     * The factor used to calculate the maximum number of non-overlapping sstables in a level in UCS.
+     */
+    UCS_COMPACTION_LEVEL_MAX_SSTABLES_NUMBER_FACTOR("unified_compaction.level_max_sstables_number_factor", "10"),
+
+    /**
      * The factory for handler of the storage of sstables
      */
     REMOTE_STORAGE_HANDLER_FACTORY("cassandra.remote_storage_handler_factory"),

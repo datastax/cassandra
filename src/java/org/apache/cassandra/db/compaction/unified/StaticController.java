@@ -73,6 +73,7 @@ public class StaticController extends Controller
                             Overlaps.InclusionMethod overlapInclusionMethod,
                             boolean parallelizeOutputShards,
                             boolean hasVectorType,
+                            double shardMaxSstablesFactor,
                             TableMetadata metadata)
     {
         super(MonotonicClock.preciseTime,
@@ -95,6 +96,7 @@ public class StaticController extends Controller
               overlapInclusionMethod,
               parallelizeOutputShards,
               hasVectorType,
+              shardMaxSstablesFactor,
               metadata);
         this.scalingParameters = scalingParameters;
     }
@@ -117,6 +119,7 @@ public class StaticController extends Controller
                                   Overlaps.InclusionMethod overlapInclusionMethod,
                                   boolean parallelizeOutputShards,
                                   boolean hasVectorType,
+                                  double shardMaxSstablesFactor,
                                   TableMetadata metadata,
                                   Map<String, String> options,
                                   boolean useVectorOptions)
@@ -179,6 +182,7 @@ public class StaticController extends Controller
                                     overlapInclusionMethod,
                                     parallelizeOutputShards,
                                     hasVectorType,
+                                    shardMaxSstablesFactor,
                                     metadata);
     }
 

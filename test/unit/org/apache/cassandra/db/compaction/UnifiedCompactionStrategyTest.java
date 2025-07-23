@@ -204,6 +204,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         long minimalSizeBytes = m << 20;
 
         Controller controller = Mockito.mock(Controller.class);
+        ShardManager shardManager = Mockito.mock(ShardManager.class);
         when(controller.getMinSstableSizeBytes()).thenReturn(minimalSizeBytes);
         when(controller.getNumShards(anyDouble())).thenReturn(1);
         when(controller.getBaseSstableSize(anyInt())).thenReturn((double) minimalSizeBytes);
@@ -264,7 +265,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
                 assertEquals(i, level.getIndex());
 
                 Collection<CompactionAggregate.UnifiedAggregate> compactionAggregates =
-                level.getCompactionAggregates(entry.getKey(), controller, dataSetSizeBytes);
+                level.getCompactionAggregates(entry.getKey(), controller, shardManager, dataSetSizeBytes);
 
                 long selectedCount = compactionAggregates.stream()
                                                          .filter(a -> !a.isEmpty())
@@ -322,8 +323,9 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         long minimalSizeBytes = m << 20;
 
         Controller controller = Mockito.mock(Controller.class);
+        ShardManager shardManager = Mockito.mock(ShardManager.class);
         when(controller.getMinSstableSizeBytes()).thenReturn(minimalSizeBytes);
-        when(controller.getNumShards(anyDouble())).thenReturn(1);
+        when(controller.getNumShards(anyDouble())).thenReturn(16);
         when(controller.getBaseSstableSize(anyInt())).thenReturn((double) minimalSizeBytes);
         when(controller.maxConcurrentCompactions()).thenReturn(1000); // let it generate as many candidates as it can
         when(controller.maxThroughput()).thenReturn(Double.MAX_VALUE);
@@ -378,7 +380,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
                 assertEquals(i, level.getIndex());
 
                 Collection<CompactionAggregate.UnifiedAggregate> compactionAggregates =
-                    level.getCompactionAggregates(entry.getKey(), controller, dataSetSizeBytes);
+                    level.getCompactionAggregates(entry.getKey(), controller, shardManager, dataSetSizeBytes);
 
                 Set<CompactionSSTable> selectedSSTables = new HashSet<>();
                 for (CompactionAggregate.UnifiedAggregate aggregate : compactionAggregates)
@@ -2071,6 +2073,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         when(controller.getFanout(anyInt())).thenCallRealMethod();
         when(controller.getThreshold(anyInt())).thenCallRealMethod();
         when(controller.getMaxLevelDensity(anyInt(), anyDouble())).thenCallRealMethod();
+        when(controller.getNumShards(anyDouble())).thenReturn(16);
         when(controller.getSurvivalFactor(anyInt())).thenReturn(1.0);
         when(controller.getBaseSstableSize(anyInt())).thenReturn((double) (90 << 20));
         when(controller.overlapInclusionMethod()).thenReturn(overlapInclusionMethod);
@@ -2128,7 +2131,6 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
             assertEquals(1.3333, pick.overheadToDataRatio(), 0.0001);
         }
 
-        Mockito.when(controller.getNumShards(anyDouble())).thenReturn(16);  // co-prime with counts to ensure multiple sstables fall in each shard
         // Make sure getMaxOverlapsMap does not fail.
         System.out.println(strategy.getMaxOverlapsMap());
 

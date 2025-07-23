@@ -313,6 +313,10 @@ public abstract class Controller
     @Deprecated
     static final String STATIC_SCALING_FACTORS_OPTION = "static_scaling_factors";
 
+    static final String SHARD_MAX_SSTABLES_FACTOR_OPTION = "shard_max_sstables_factor";
+    static final double DEFAULT_SHARD_MAX_SSTABLES_FACTOR = Double.parseDouble(getSystemProperty(SHARD_MAX_SSTABLES_FACTOR_OPTION, "10"));
+
+
     protected final MonotonicClock clock;
     protected final Environment env;
     protected final double[] survivalFactors;
@@ -344,6 +348,8 @@ public abstract class Controller
     final boolean l0ShardsEnabled;
     final boolean hasVectorType;
 
+    final double shardMaxSstablesFactor;
+
     Controller(MonotonicClock clock,
                Environment env,
                double[] survivalFactors,
@@ -364,6 +370,7 @@ public abstract class Controller
                Overlaps.InclusionMethod overlapInclusionMethod,
                boolean parallelizeOutputShards,
                boolean hasVectorType,
+               double shardMaxSstablesFactor,
                TableMetadata metadata)
     {
         this.clock = clock;
@@ -385,6 +392,7 @@ public abstract class Controller
         this.l0ShardsEnabled = Boolean.parseBoolean(getSystemProperty(L0_SHARDS_ENABLED_OPTION, "false")); // FIXME VECTOR-23
         this.parallelizeOutputShards = parallelizeOutputShards;
         this.hasVectorType = hasVectorType;
+        this.shardMaxSstablesFactor = shardMaxSstablesFactor;
         this.metadata = metadata;
 
         if (maxSSTablesToCompact <= 0)  // use half the maximum permitted compaction size as upper bound by default
@@ -795,6 +803,11 @@ public abstract class Controller
         return hasVectorType;
     }
 
+    public double getShardMaxSstablesFactor()
+    {
+        return shardMaxSstablesFactor;
+    }
+
     /**
      * @return true if the controller is running
      */
@@ -1044,6 +1057,10 @@ public abstract class Controller
                                           ? Boolean.parseBoolean(options.get(PARALLELIZE_OUTPUT_SHARDS_OPTION))
                                           : DEFAULT_PARALLELIZE_OUTPUT_SHARDS;
 
+        double shardMaxSstablesFactor = options.containsKey(SHARD_MAX_SSTABLES_FACTOR_OPTION)
+                                       ? Double.parseDouble(options.get(SHARD_MAX_SSTABLES_FACTOR_OPTION))
+                                       : DEFAULT_SHARD_MAX_SSTABLES_FACTOR;
+
         return adaptive
                ? AdaptiveController.fromOptions(env,
                                                 survivalFactors,
@@ -1063,6 +1080,7 @@ public abstract class Controller
                                                 overlapInclusionMethod,
                                                 parallelizeOutputShards,
                                                 hasVectorType,
+                                                shardMaxSstablesFactor,
                                                 realm.metadata(),
                                                 options)
                : StaticController.fromOptions(env,
@@ -1083,6 +1101,7 @@ public abstract class Controller
                                               overlapInclusionMethod,
                                               parallelizeOutputShards,
                                               hasVectorType,
+                                              shardMaxSstablesFactor,
                                               realm.metadata(),
                                               options,
                                               useVectorOptions);
@@ -1309,6 +1328,26 @@ public abstract class Controller
                 throw new ConfigurationException(String.format("Invalid overlap inclusion method %s. The valid options are %s.",
                                                                s,
                                                                Arrays.toString(Overlaps.InclusionMethod.values())));
+            }
+        }
+
+        s = options.remove(SHARD_MAX_SSTABLES_FACTOR_OPTION);
+        if (s != null)
+        {
+            try
+            {
+                double shardMaxSstablesFactor = Double.parseDouble(s);
+                if (shardMaxSstablesFactor < 1)
+                    throw new ConfigurationException(String.format("%s %s must be a float >= 1",
+                                                                   SHARD_MAX_SSTABLES_FACTOR_OPTION,
+                                                                   s));
+            }
+            catch (NumberFormatException e)
+            {
+                throw new ConfigurationException(String.format(floatParseErr,
+                                                               s,
+                                                               SHARD_MAX_SSTABLES_FACTOR_OPTION),
+                                                 e);
             }
         }
 

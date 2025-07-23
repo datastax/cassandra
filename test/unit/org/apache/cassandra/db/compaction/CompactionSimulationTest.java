@@ -223,6 +223,9 @@ public class CompactionSimulationTest extends BaseCompactionStrategyTest
     @Option(name= {"-overlap-inclusion-method"}, description = "Overlap inclusion method, NONE, SINGLE or TRANSITIVE")
     Overlaps.InclusionMethod overlapInclusionMethod = Overlaps.InclusionMethod.TRANSITIVE;
 
+    @Option(name= {"-shard-max-sstables-factor"}, description = "Factor used to determine the maximum number of sstables per level shard")
+    double shardMaxSstablesFactor = 10;
+
     @BeforeClass
     public static void setUpClass()
     {
@@ -413,6 +416,7 @@ public class CompactionSimulationTest extends BaseCompactionStrategyTest
                                                          overlapInclusionMethod,
                                                          true,
                                                          false,
+                                                         shardMaxSstablesFactor,
                                                          updateTimeSec,
                                                          minW,
                                                          maxW,
@@ -440,6 +444,7 @@ public class CompactionSimulationTest extends BaseCompactionStrategyTest
                                                        overlapInclusionMethod,
                                                        true,
                                                        false,
+                                                       shardMaxSstablesFactor,
                                                        metadata);
 
         return new UnifiedCompactionStrategy(strategyFactory, controller);
