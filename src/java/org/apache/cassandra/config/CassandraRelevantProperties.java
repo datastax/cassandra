@@ -372,6 +372,9 @@ public enum CassandraRelevantProperties
     /** Whether to optimize query plans */
     SAI_QUERY_OPTIMIZATION_LEVEL("cassandra.sai.query_optimization_level", "1"),
 
+    /** Controls the number of rows read in a single batch when fetching rows for a partition key */
+    SAI_PARTITION_ROW_BATCH_SIZE("cassandra.sai.partition_row_batch_size", "100"),
+
     /** Whether vector type only allows float vectors. True by default. **/
     VECTOR_FLOAT_ONLY("cassandra.float_only_vectors", "true"),
     /** Enables use of vector type. True by default. **/
