@@ -127,6 +127,11 @@ public class CachingRebuffererTest
                 // do nothing
             }
 
+            public long adjustPosition(long position)
+            {
+                return position;
+            }
+
             public void close()
             {
 
