@@ -87,7 +87,7 @@ public class AdaptiveControllerTest extends ControllerTest
                                       Controller.DEFAULT_OVERLAP_INCLUSION_METHOD,
                                       true,
                                       false,
-                                      Controller.DEFAULT_SHARD_MAX_SSTABLES_FACTOR,
+                                      Controller.DEFAULT_MAX_SSTABLES_PER_SHARD_FACTOR,
                                       interval,
                                       minW,
                                       maxW,

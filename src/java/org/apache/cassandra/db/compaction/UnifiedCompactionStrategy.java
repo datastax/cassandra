@@ -88,8 +88,6 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
     public static final int MAX_LEVELS = 32;   // This is enough for a few petabytes of data (with the worst case fan factor
     // at W=0 this leaves room for 2^32 sstables, presumably of at least 1MB each).
 
-    private static final double LEVEL_MAX_SSTABLES_NUMBER_FACTOR = CassandraRelevantProperties.UCS_COMPACTION_LEVEL_MAX_SSTABLES_NUMBER_FACTOR.getDouble();
-
     private static final Pattern SCALING_PARAMETER_PATTERN = Pattern.compile("(N)|L(\\d+)|T(\\d+)|([+-]?\\d+)");
     private static final String SCALING_PARAMETER_PATTERN_SIMPLIFIED = SCALING_PARAMETER_PATTERN.pattern()
                                                                                                 .replaceAll("[()]", "")
@@ -1552,42 +1550,65 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
             {
                 // If there are no overlaps, we look if some shards have too many SSTables.
                 // If that's the case, we perform a major compaction on those shards.
-                List<Set<CompactionSSTable>> groups =
-                shardManager.splitSSTablesInShards(sstables,
-                                                   new ShardingStats(sstables, shardManager, controller).shardCountForDensity,
-                                                   (sstableShard, shardRange) -> Sets.newHashSet(sstableShard));
-
-                List<Set<CompactionSSTable>> oversizeGroups =
-                groups.stream()
-                      .filter(group -> group.size() > threshold * controller.getShardMaxSstablesFactor())
-                      .collect(Collectors.toList());
-
-                if (!oversizeGroups.isEmpty())
+                double shardThreshold = fanout * controller.getMaxSstablesPerShardFactor();
+                if (sstables.size() > shardThreshold)
                 {
-                    // Now combine the groups that share an sstable so that we have valid independent transactions.
-                    // Only keep the groups that were combined with an oversize group.
-                    groups = Overlaps.combineSetsWithCommonElement(groups);
-                    unbucketed.clear();
+                    List<Set<CompactionSSTable>> groups = shardManager.splitSSTablesInShards(sstables,
+                                                                                             controller.getNumShards(max),
+                                                                                             (sstableShard, shardRange) -> Sets.newHashSet(sstableShard));
 
-                    for (Set<CompactionSSTable> group : groups)
+
+                    List<Set<CompactionSSTable>> oversizeGroups = new ArrayList<>();
+                    for (Set<CompactionSSTable> compactionSSTables : groups)
                     {
-                        if (group.stream().anyMatch(
-                        sstable -> oversizeGroups.stream().anyMatch(oversizeGroup -> oversizeGroup.contains(sstable))))
+                        if (compactionSSTables.size() > shardThreshold)
                         {
-                            aggregates.add(
-                            CompactionAggregate.createUnified(group,
-                                                              Overlaps.maxOverlap(group,
-                                                                                  CompactionSSTable.startsAfter,
-                                                                                  CompactionSSTable.firstKeyComparator,
-                                                                                  CompactionSSTable.lastKeyComparator),
-                                                              createPick(controller, nextTimeUUID(), index, group),
-                                                              Collections.emptyList(),
-                                                              arena,
-                                                              this));
+                            oversizeGroups.add(compactionSSTables);
                         }
-                        else
+                    }
+
+                    if (!oversizeGroups.isEmpty())
+                    {
+                        // Now combine the groups that share an sstable so that we have valid independent transactions.
+                        // Only keep the groups that were combined with an oversize group.
+                        groups = Overlaps.combineSetsWithCommonElement(groups);
+                        unbucketed.clear();
+
+                        for (Set<CompactionSSTable> group : groups)
                         {
-                            unbucketed.addAll(group);
+                            boolean inOverSizeGroup = false;
+                            for (CompactionSSTable sstable : group)
+                            {
+                                for (Set<CompactionSSTable> oversizeGroup : oversizeGroups)
+                                {
+                                    if (oversizeGroup.contains(sstable))
+                                    {
+                                        inOverSizeGroup = true;
+                                        break;
+                                    }
+                                }
+                                if (inOverSizeGroup)
+                                {
+                                    break;
+                                }
+                            }
+                            if (inOverSizeGroup)
+                            {
+                                aggregates.add(
+                                CompactionAggregate.createUnified(group,
+                                                                  Overlaps.maxOverlap(group,
+                                                                                      CompactionSSTable.startsAfter,
+                                                                                      CompactionSSTable.firstKeyComparator,
+                                                                                      CompactionSSTable.lastKeyComparator),
+                                                                  createPick(controller, nextTimeUUID(), index, group),
+                                                                  Collections.emptyList(),
+                                                                  arena,
+                                                                  this));
+                            }
+                            else
+                            {
+                                unbucketed.addAll(group);
+                            }
                         }
                     }
                 }

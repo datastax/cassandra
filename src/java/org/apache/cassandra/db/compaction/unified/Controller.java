@@ -313,8 +313,8 @@ public abstract class Controller
     @Deprecated
     static final String STATIC_SCALING_FACTORS_OPTION = "static_scaling_factors";
 
-    static final String SHARD_MAX_SSTABLES_FACTOR_OPTION = "shard_max_sstables_factor";
-    static final double DEFAULT_SHARD_MAX_SSTABLES_FACTOR = Double.parseDouble(getSystemProperty(SHARD_MAX_SSTABLES_FACTOR_OPTION, "10"));
+    static final String MAX_SSTABLES_PER_SHARD_FACTOR_OPTION = "max_sstables_per_shard_factor";
+    static final double DEFAULT_MAX_SSTABLES_PER_SHARD_FACTOR = Double.parseDouble(getSystemProperty(MAX_SSTABLES_PER_SHARD_FACTOR_OPTION, "10"));
 
 
     protected final MonotonicClock clock;
@@ -348,7 +348,7 @@ public abstract class Controller
     final boolean l0ShardsEnabled;
     final boolean hasVectorType;
 
-    final double shardMaxSstablesFactor;
+    final double maxSstablesPerShardFactor;
 
     Controller(MonotonicClock clock,
                Environment env,
@@ -370,7 +370,7 @@ public abstract class Controller
                Overlaps.InclusionMethod overlapInclusionMethod,
                boolean parallelizeOutputShards,
                boolean hasVectorType,
-               double shardMaxSstablesFactor,
+               double maxSstablesPerShardFactor,
                TableMetadata metadata)
     {
         this.clock = clock;
@@ -392,7 +392,7 @@ public abstract class Controller
         this.l0ShardsEnabled = Boolean.parseBoolean(getSystemProperty(L0_SHARDS_ENABLED_OPTION, "false")); // FIXME VECTOR-23
         this.parallelizeOutputShards = parallelizeOutputShards;
         this.hasVectorType = hasVectorType;
-        this.shardMaxSstablesFactor = shardMaxSstablesFactor;
+        this.maxSstablesPerShardFactor = maxSstablesPerShardFactor;
         this.metadata = metadata;
 
         if (maxSSTablesToCompact <= 0)  // use half the maximum permitted compaction size as upper bound by default
@@ -803,9 +803,9 @@ public abstract class Controller
         return hasVectorType;
     }
 
-    public double getShardMaxSstablesFactor()
+    public double getMaxSstablesPerShardFactor()
     {
-        return shardMaxSstablesFactor;
+        return maxSstablesPerShardFactor;
     }
 
     /**
@@ -1057,9 +1057,9 @@ public abstract class Controller
                                           ? Boolean.parseBoolean(options.get(PARALLELIZE_OUTPUT_SHARDS_OPTION))
                                           : DEFAULT_PARALLELIZE_OUTPUT_SHARDS;
 
-        double shardMaxSstablesFactor = options.containsKey(SHARD_MAX_SSTABLES_FACTOR_OPTION)
-                                       ? Double.parseDouble(options.get(SHARD_MAX_SSTABLES_FACTOR_OPTION))
-                                       : DEFAULT_SHARD_MAX_SSTABLES_FACTOR;
+        double maxSstablesPerShardFactor = options.containsKey(MAX_SSTABLES_PER_SHARD_FACTOR_OPTION)
+                                       ? Double.parseDouble(options.get(MAX_SSTABLES_PER_SHARD_FACTOR_OPTION))
+                                       : DEFAULT_MAX_SSTABLES_PER_SHARD_FACTOR;
 
         return adaptive
                ? AdaptiveController.fromOptions(env,
@@ -1080,7 +1080,7 @@ public abstract class Controller
                                                 overlapInclusionMethod,
                                                 parallelizeOutputShards,
                                                 hasVectorType,
-                                                shardMaxSstablesFactor,
+                                                maxSstablesPerShardFactor,
                                                 realm.metadata(),
                                                 options)
                : StaticController.fromOptions(env,
@@ -1101,7 +1101,7 @@ public abstract class Controller
                                               overlapInclusionMethod,
                                               parallelizeOutputShards,
                                               hasVectorType,
-                                              shardMaxSstablesFactor,
+                                              maxSstablesPerShardFactor,
                                               realm.metadata(),
                                               options,
                                               useVectorOptions);
@@ -1331,22 +1331,22 @@ public abstract class Controller
             }
         }
 
-        s = options.remove(SHARD_MAX_SSTABLES_FACTOR_OPTION);
+        s = options.remove(MAX_SSTABLES_PER_SHARD_FACTOR_OPTION);
         if (s != null)
         {
             try
             {
-                double shardMaxSstablesFactor = Double.parseDouble(s);
-                if (shardMaxSstablesFactor < 1)
+                double maxSstablesPerShardFactor = Double.parseDouble(s);
+                if (maxSstablesPerShardFactor < 1)
                     throw new ConfigurationException(String.format("%s %s must be a float >= 1",
-                                                                   SHARD_MAX_SSTABLES_FACTOR_OPTION,
+                                                                   MAX_SSTABLES_PER_SHARD_FACTOR_OPTION,
                                                                    s));
             }
             catch (NumberFormatException e)
             {
                 throw new ConfigurationException(String.format(floatParseErr,
                                                                s,
-                                                               SHARD_MAX_SSTABLES_FACTOR_OPTION),
+                                                               MAX_SSTABLES_PER_SHARD_FACTOR_OPTION),
                                                  e);
             }
         }
