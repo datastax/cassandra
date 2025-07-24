@@ -1,13 +1,11 @@
 /*
- * Licensed to the Apache Software Foundation (ASF) under one
- * or more contributor license agreements.  See the NOTICE file
- * distributed with this work for additional information
- * regarding copyright ownership.  The ASF licenses this file
- * to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance
- * with the License.  You may obtain a copy of the License at
+ * Copyright DataStax, Inc.
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -23,6 +21,7 @@ import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.security.NoSuchAlgorithmException;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -34,11 +33,13 @@ import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.crypto.LocalSystemKey;
 import org.apache.cassandra.crypto.TDEConfigurationProvider;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.distributed.api.ConsistencyLevel;
+import org.apache.cassandra.distributed.api.NodeToolResult;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.bti.BtiFormat;
@@ -60,22 +61,20 @@ public class SSTableEncryptionTest extends TestBaseImpl
     private static final String KEYSPACE_PREFIX = "ks";
     private static final String TABLE_PREFIX = "tbl";
     private static final String SENSITIVE_KEY = "Key with sensitive information";
-    private static final int ROWS_COUNT = 10000;
+    private static final int ROWS_COUNT = 20000;
 
-    private static String defaultSystemKeyDirectory;
 
     @BeforeClass
     public static void beforeAll() throws IOException
     {
-        defaultSystemKeyDirectory = TDEConfigurationProvider.getConfiguration().systemKeyDirectory;
         Path systemKeyDirectory = Files.createTempDirectory("system_key_directory");
-        TDEConfigurationProvider.setSystemKeyDirectoryProperty(systemKeyDirectory.toString());
+        CassandraRelevantProperties.SYSTEM_KEY_DIRECTORY.setString(systemKeyDirectory.toString());
     }
 
     @AfterClass
     public static void tearDown()
     {
-        TDEConfigurationProvider.setSystemKeyDirectoryProperty(defaultSystemKeyDirectory);
+        CassandraRelevantProperties.SYSTEM_KEY_DIRECTORY.reset();
     }
 
     @Test
@@ -87,7 +86,7 @@ public class SSTableEncryptionTest extends TestBaseImpl
         {
             // given a table with data encrypted using local key
             String keyspace = createKeyspace(cluster);
-            Path secretKey = createLocalSecretKey();
+            Path secretKey = createLocalSecretKey(cluster);
             String table = createEncryptedTable(cluster, keyspace, secretKey);
             int numberOfRows = 10;
 
@@ -141,7 +140,7 @@ public class SSTableEncryptionTest extends TestBaseImpl
             // given tables with and without encryption
             String keyspace = createKeyspace(cluster);
             TestTable nonEncryptedTable = createTableWithSampleData(cluster, keyspace, "");
-            Path secretKey = createLocalSecretKey();
+            Path secretKey = createLocalSecretKey(cluster);
             TestTable encryptedTable = createTableWithSampleData(cluster, keyspace, localSystemKeyEncryptionCompressionSuffix("Encryptor", secretKey.toAbsolutePath().toString()));
 
             // then
@@ -156,6 +155,7 @@ public class SSTableEncryptionTest extends TestBaseImpl
 
             // indexes with encryption should pass the checksum check
             assertThat(checkEncryptionCrc(encryptedTable.partitionIndexBytes)).isTrue();
+            assertThat(encryptedTable.rowIndexBytes.length).isGreaterThan(0);
             assertThat(checkEncryptionCrc(encryptedTable.rowIndexBytes)).isTrue();
             // indexes without encryption should fail the checksum check
             assertThat(checkEncryptionCrc(nonEncryptedTable.partitionIndexBytes)).isFalse();
@@ -193,7 +193,7 @@ public class SSTableEncryptionTest extends TestBaseImpl
 
             // given a table with data encrypted using local key
             String keyspace = createKeyspace(cluster);
-            Path secretKey = createLocalSecretKey();
+            Path secretKey = createLocalSecretKey(cluster);
             String encryptedTableName = createEncryptedTable(cluster, keyspace, secretKey);
             String nonEncryptedTableName = createTable(cluster, keyspace);
             int numberOfRows = 10;
@@ -230,7 +230,7 @@ public class SSTableEncryptionTest extends TestBaseImpl
 
             // given a table with data encrypted using local key
             String keyspace = createKeyspace(cluster);
-            Path secretKey = createLocalSecretKey();
+            Path secretKey = createLocalSecretKey(cluster);
             String encryptedTableName = createEncryptedTable(cluster, keyspace, secretKey);
             String nonEncryptedTableName = createTable(cluster, keyspace);
             int numberOfRows = 10;
@@ -342,10 +342,15 @@ public class SSTableEncryptionTest extends TestBaseImpl
         return randomKeyspaceName;
     }
 
-    private Path createLocalSecretKey() throws IOException, NoSuchAlgorithmException, NoSuchPaddingException
+    private Path createLocalSecretKey(Cluster cluster)
     {
         String keyPath = "system_key_" + RandomStringUtils.random(10, true, true);
-        return createLocalSecretKey(keyPath);
+        Path keyFullPath = Paths.get(TDEConfigurationProvider.getConfiguration().systemKeyDirectory).resolve(keyPath);
+        assertThat(Files.exists(keyFullPath)).isFalse();
+        NodeToolResult result = cluster.get(1).nodetoolResult("createsystemkey", "AES/CBC/PKCS5Padding", "256", keyPath);
+        result.asserts().success();
+        assertThat(Files.exists(keyFullPath)).isTrue();
+        return keyFullPath;
     }
 
     private Path createLocalSecretKey(String keyPath) throws IOException, NoSuchAlgorithmException, NoSuchPaddingException
