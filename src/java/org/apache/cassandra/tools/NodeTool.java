@@ -94,6 +94,7 @@ public class NodeTool
                 CassHelp.class,
                 Info.class,
                 Ring.class,
+                CreateSystemKey.class,
                 NetStats.class,
                 CfStats.class,
                 TableStats.class,
