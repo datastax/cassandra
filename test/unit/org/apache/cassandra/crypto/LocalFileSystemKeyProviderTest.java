@@ -27,6 +27,7 @@ import javax.crypto.SecretKey;
 import org.junit.Test;
 
 import org.apache.cassandra.io.util.FileUtils;
+import org.assertj.core.api.Assertions;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -233,5 +234,13 @@ public class LocalFileSystemKeyProviderTest
         {
             Files.deleteIfExists(secretKeyPath);
         }
+    }
+
+    @Test
+    public void shouldDisallowNonAbsoluteKeyPath()
+    {
+        Assertions.assertThatThrownBy(() -> new LocalFileSystemKeyProvider(Path.of("foobar")))
+                  .isInstanceOf(IllegalArgumentException.class)
+                  .hasMessage("The key path must be absolute");
     }
 }
