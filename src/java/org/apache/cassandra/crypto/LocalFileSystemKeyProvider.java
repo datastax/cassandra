@@ -47,6 +47,11 @@ public class LocalFileSystemKeyProvider implements IKeyProvider
 
     public LocalFileSystemKeyProvider(Path keyPath) throws IOException
     {
+        if (keyPath.getParent() == null)
+        {
+            throw new IllegalArgumentException("The key path must be absolute");
+        }
+
         if (Files.exists(keyPath))
         {
             this.keyPath = keyPath;
