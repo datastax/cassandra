@@ -106,6 +106,7 @@ public class NodeTool
                 Compact.class,
                 CompactionHistory.class,
                 CompactionStats.class,
+                CreateSystemKey.class,
                 DataPaths.class,
                 Decommission.class,
                 DescribeCluster.class,
