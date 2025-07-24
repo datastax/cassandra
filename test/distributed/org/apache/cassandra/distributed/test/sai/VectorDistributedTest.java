@@ -20,7 +20,6 @@ package org.apache.cassandra.distributed.test.sai;
 
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -55,6 +54,7 @@ import org.apache.cassandra.index.sai.cql.GeoDistanceAccuracyTest;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import org.apache.cassandra.index.sai.cql.VectorTester;
 import org.apache.cassandra.index.sai.disk.vector.VectorSourceModel;
+import org.assertj.core.data.Percentage;
 
 import static org.apache.cassandra.distributed.api.Feature.GOSSIP;
 import static org.apache.cassandra.distributed.api.Feature.NETWORK;
@@ -294,7 +294,7 @@ public class VectorDistributedTest extends TestBaseImpl
     }
 
     @Test
-    public void rangeRestrictedTest()
+    public void rangeRestrictedTest() throws Throwable
     {
         cluster.schemaChange(formatQuery(String.format(CREATE_TABLE, dimensionCount)));
         cluster.schemaChange(formatQuery(String.format(CREATE_INDEX, "val")));
@@ -311,61 +311,45 @@ public class VectorDistributedTest extends TestBaseImpl
             execute("INSERT INTO %s (pk, val) VALUES (" + (pk++) + ',' + vectorString(vector) + " )");
         }
 
-        // query memtable index
-        for (int executionCount = 0; executionCount < 50; executionCount++)
-        {
-            int key1 = getRandom().nextIntBetween(1, vectorCount * 2);
-            long token1 = Murmur3Partitioner.instance.getToken(Int32Type.instance.decompose(key1)).getLongValue();
-            int key2 = getRandom().nextIntBetween(1, vectorCount * 2);
-            long token2 = Murmur3Partitioner.instance.getToken(Int32Type.instance.decompose(key2)).getLongValue();
-
-            long minToken = Math.min(token1, token2);
-            long maxToken = Math.max(token1, token2);
-            float[] queryVector = randomVector();
-            List<float[]> expected = vectorsByToken.entries().stream()
-                                                   .filter(e -> e.getKey() >= minToken && e.getKey() <= maxToken)
-                                                   .map(Map.Entry::getValue)
-                                                   .sorted(Comparator.comparingDouble(v -> function.compare(vts.createFloatVector(v), vts.createFloatVector(queryVector))).reversed())
-                                                   .collect(Collectors.toList());
-
-            List<float[]> resultVectors = searchWithRange(queryVector, minToken, maxToken, expected.size());
-            if (expected.isEmpty())
-                assertThat(resultVectors).isEmpty();
-            else
+        // query memtable index first and then on-disk index
+        beforeAndAfterFlush(cluster, KEYSPACE, () -> {
+            for (int executionCount = 0; executionCount < 50; executionCount++)
             {
-                double recall = computeRecall(queryVector, resultVectors, expected);
-                assertThat(recall).isGreaterThanOrEqualTo(0.8);
+                int key1 = getRandom().nextIntBetween(1, vectorCount * 2);
+                long token1 = Murmur3Partitioner.instance.getToken(Int32Type.instance.decompose(key1)).getLongValue();
+                int key2 = getRandom().nextIntBetween(1, vectorCount * 2);
+                long token2 = Murmur3Partitioner.instance.getToken(Int32Type.instance.decompose(key2)).getLongValue();
+
+                long minToken = Math.min(token1, token2);
+                long maxToken = Math.max(token1, token2);
+                float[] queryVector = randomVector();
+                List<float[]> expected = vectorsByToken.entries().stream()
+                                                       .filter(e -> e.getKey() >= minToken && e.getKey() <= maxToken)
+                                                       .map(Map.Entry::getValue)
+                                                       .collect(Collectors.toList());
+
+                Object[][] result = execute("SELECT val FROM %s" +
+                                            " WHERE token(pk) <= " + maxToken +
+                                            " AND token(pk) >= " + minToken +
+                                            " ORDER BY val ANN OF " + Arrays.toString(queryVector) +
+                                            " LIMIT 1000");
+                assertThat(result.length).isCloseTo(expected.size(), Percentage.withPercentage(20))
+                                         .isLessThanOrEqualTo(1000);
+
+                List<float[]> resultVectors = getVectors(result);
+                assertDescendingScore(queryVector, resultVectors);
+
+                if (expected.isEmpty())
+                {
+                    assertThat(resultVectors).isEmpty();
+                }
+                else
+                {
+                    double recall = VectorTester.recallMatch(expected, resultVectors, expected.size());
+                    assertThat(recall).isGreaterThanOrEqualTo(0.8);
+                }
             }
-        }
-
-        cluster.forEach(n -> n.flush(KEYSPACE));
-
-        // query on-disk index with existing key:
-        for (int executionCount = 0; executionCount < 50; executionCount++)
-        {
-            int key1 = getRandom().nextIntBetween(1, vectorCount * 2);
-            long token1 = Murmur3Partitioner.instance.getToken(Int32Type.instance.decompose(key1)).getLongValue();
-            int key2 = getRandom().nextIntBetween(1, vectorCount * 2);
-            long token2 = Murmur3Partitioner.instance.getToken(Int32Type.instance.decompose(key2)).getLongValue();
-
-            long minToken = Math.min(token1, token2);
-            long maxToken = Math.max(token1, token2);
-            float[] queryVector = randomVector();
-            List<float[]> expected = vectorsByToken.entries().stream()
-                                                   .filter(e -> e.getKey() >= minToken && e.getKey() <= maxToken)
-                                                   .map(Map.Entry::getValue)
-                                                   .sorted(Comparator.comparingDouble(v -> function.compare(vts.createFloatVector(v), vts.createFloatVector(queryVector))).reversed())
-                                                   .collect(Collectors.toList());
-
-            List<float[]> resultVectors = searchWithRange(queryVector, minToken, maxToken, expected.size());
-            if (expected.isEmpty())
-                assertThat(resultVectors).isEmpty();
-            else
-            {
-                double recall = computeRecall(queryVector, resultVectors, expected);
-                assertThat(recall).isGreaterThanOrEqualTo(0.8);
-            }
-        }
+        });
     }
 
     @Test
@@ -402,12 +386,6 @@ public class VectorDistributedTest extends TestBaseImpl
         assertInvalidCosineOperations();
     }
 
-    private List<float[]> searchWithRange(float[] queryVector, long minToken, long maxToken, int expectedSize)
-    {
-        Object[][] result = execute("SELECT val FROM %s WHERE token(pk) <= " + maxToken + " AND token(pk) >= " + minToken + " ORDER BY val ann of " + Arrays.toString(queryVector) + " LIMIT 1000");
-        assertThat(result).hasNumberOfRows(expectedSize);
-        return getVectors(result);
-    }
 
     private Object[][] searchWithLimit(float[] queryVector, int limit)
     {
