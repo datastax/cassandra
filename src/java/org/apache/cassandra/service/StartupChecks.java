@@ -66,6 +66,7 @@ import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.PathUtils;
+import org.apache.cassandra.locator.SimpleSnitch;
 import org.apache.cassandra.nodes.Nodes;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.KeyspaceMetadata;
@@ -362,6 +363,9 @@ public class StartupChecks
         {
             if (Murmur3Partitioner.instance != DatabaseDescriptor.getPartitioner())
                 logger.warn("Not using murmur3 partitioner ({}). {}", DatabaseDescriptor.getPartitioner().getClass().getName(), WARN_SUFFIX);
+
+            if (DatabaseDescriptor.getEndpointSnitch() instanceof SimpleSnitch)
+                logger.warn("SimpleSnitch is only for dev/test environments. {}", WARN_SUFFIX);
 
             if (DatabaseDescriptor.getNumTokens() > 16)
                 logger.warn("num_tokens {} too high. Values over 16 poorly impact repairs and node bootstrapping/decommissioning. {}",
