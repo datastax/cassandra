@@ -47,6 +47,8 @@ import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.sensors.RequestTracker;
 import org.apache.cassandra.utils.concurrent.SimpleCondition;
+import org.apache.cassandra.metrics.ReplicaResponseSizeMetrics;
+import org.apache.cassandra.net.MessagingService;
 
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 import static org.apache.cassandra.locator.Replicas.countInOurDc;
@@ -262,6 +264,19 @@ public abstract class AbstractWriteResponseHandler<T> implements RequestCallback
      * null message means "response from local write"
      */
     public abstract void onResponse(Message<T> msg);
+    
+    /**
+     * Track the size of a response message from a replica
+     * @param msg the response message
+     */
+    protected void trackReplicaResponseSize(Message<T> msg)
+    {
+        if (msg != null)
+        {
+            int responseSize = msg.payloadSize(MessagingService.current_version);
+            ReplicaResponseSizeMetrics.recordReplicaResponseSize(responseSize, false);
+        }
+    }
 
     public void signal()
     {
