@@ -166,6 +166,7 @@ public class TableQueryMetrics extends AbstractMetrics
         {
             final long totalQueryTimeNs = queryContext.totalQueryTimeNs();
             queryLatency.update(totalQueryTimeNs, TimeUnit.NANOSECONDS);
+            postFilteringReadLatency.update(totalQueryTimeNs, TimeUnit.NANOSECONDS);
             final long queryLatencyMicros = TimeUnit.NANOSECONDS.toMicros(totalQueryTimeNs);
 
             final long ssTablesHit = queryContext.sstablesHit();
