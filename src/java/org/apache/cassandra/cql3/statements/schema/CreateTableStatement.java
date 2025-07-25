@@ -104,6 +104,17 @@ public final class CreateTableStatement extends AlterSchemaStatement
         return useCompactStorage;
     }
 
+    public boolean containsDateRangeTypeColumn()
+    {
+        for (CQL3Type.Raw columnType : rawColumns.values())
+        {
+            if (columnType.isDateRange())
+                return true;
+        }
+
+        return false;
+    }
+
     @Override
     public void validate(QueryState state)
     {
