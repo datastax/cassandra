@@ -340,6 +340,12 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         Function<Object, Transformation<BaseRowIterator<?>>> rowTransformer = (Object sourceTable) -> new Transformation<>()
         {
             @Override
+            protected Row applyToStatic(Row row)
+            {
+                return new RowWithSourceTable(row, sourceTable);
+            }
+
+            @Override
             protected Row applyToRow(Row row)
             {
                 return new RowWithSourceTable(row, sourceTable);
