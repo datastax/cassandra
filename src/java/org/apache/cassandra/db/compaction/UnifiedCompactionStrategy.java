@@ -1558,16 +1558,16 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                                                                                              (sstableShard, shardRange) -> Sets.newHashSet(sstableShard));
 
 
-                    List<Set<CompactionSSTable>> oversizeGroups = new ArrayList<>();
-                    for (Set<CompactionSSTable> compactionSSTables : groups)
+                    Set<CompactionSSTable> sstablesInOversizeGroup = new HashSet<>();
+                    for (Set<CompactionSSTable> ssTables : groups)
                     {
-                        if (compactionSSTables.size() > shardThreshold)
+                        if (ssTables.size() > shardThreshold)
                         {
-                            oversizeGroups.add(compactionSSTables);
+                            sstablesInOversizeGroup.addAll(ssTables);
                         }
                     }
 
-                    if (!oversizeGroups.isEmpty())
+                    if (!sstablesInOversizeGroup.isEmpty())
                     {
                         // Now combine the groups that share an sstable so that we have valid independent transactions.
                         // Only keep the groups that were combined with an oversize group.
@@ -1579,16 +1579,9 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                             boolean inOverSizeGroup = false;
                             for (CompactionSSTable sstable : group)
                             {
-                                for (Set<CompactionSSTable> oversizeGroup : oversizeGroups)
+                                if (sstablesInOversizeGroup.contains(sstable))
                                 {
-                                    if (oversizeGroup.contains(sstable))
-                                    {
-                                        inOverSizeGroup = true;
-                                        break;
-                                    }
-                                }
-                                if (inOverSizeGroup)
-                                {
+                                    inOverSizeGroup = true;
                                     break;
                                 }
                             }

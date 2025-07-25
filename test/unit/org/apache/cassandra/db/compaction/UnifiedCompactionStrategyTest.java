@@ -2021,6 +2021,30 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         testBucketSelection(repeats(4, arr(6, 3)), arr(6, 6), Overlaps.InclusionMethod.TRANSITIVE, 4, 2, 3);
     }
 
+    // We use a level with only non-overlapping SSTables, so there won't be any standard bucketing compaction.
+    // The per-shard threshold is fanout(3) * maxSstablesPerShardFactor(10) = 30.
+    // We use a number of SSTables per shard just superior to the per-shard threshold.
+    // We use a total number of SSTables just superior to numShards * sstablesPerShard so the SSTables are not aligned
+    // with the shard boundaries. This means that all shards will have an SSTable in common with the next shard.
+    // We drop the SSTables that cross the boundaries between the first and second shard, and between the second and
+    // third shard.
+    // In the end, we get 3 groups of shards with SSTables in common:
+    // - a group with the first shard which has perShardThreshold + 1 SSTables, so will get compacted.
+    // - a group with the second shard which has perShardThreshold SSTables, so will not get compacted.
+    // - a group with the rest of the shards, one of those shards having perShardThreshold + 1 SSTables, so will get compacted.
+    @Test
+    public void testBucketSelectionNonOverlapping()
+    {
+        int numShards = 16;
+        int perShardThreshold = 3 * 10;
+        int sstablesPerShard = perShardThreshold + 1;
+        testBucketSelection(arr(numShards * sstablesPerShard + 1),
+                            arr(sstablesPerShard, sstablesPerShard * (numShards - 2)),
+                            Overlaps.InclusionMethod.TRANSITIVE,
+                            perShardThreshold,
+                            sstablesPerShard, sstablesPerShard * 2);
+    }
+
 
     private int[] arr(int... values)
     {
