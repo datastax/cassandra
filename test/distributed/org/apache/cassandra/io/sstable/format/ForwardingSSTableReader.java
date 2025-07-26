@@ -69,7 +69,7 @@ public abstract class ForwardingSSTableReader extends SSTableReader
     public ForwardingSSTableReader(SSTableReader delegate)
     {
         super(delegate.descriptor, SSTable.componentsFor(delegate.descriptor),
-              TableMetadataRef.forOfflineTools(delegate.metadata()), delegate.maxDataAge, delegate.getSSTableMetadata(),
+              TableMetadataRef.forOfflineTools(delegate.metadata()), delegate.maxDataAge, delegate.getSSTableMetadata(), delegate.getCompactionMetadataNoLoad(),
               delegate.openReason, delegate.header, delegate.indexSummary, delegate.dfile, delegate.ifile, delegate.bf);
         this.delegate = delegate;
         this.first = delegate.first;

@@ -76,6 +76,6 @@ public class TrieIndexFormatUtil
                                                         .get(MetadataType.STATS);
         return TrieIndexSSTableReader.internalOpen(desc, components, metadata, ifile, dfile,
                                                    partitionIndex.sharedCopy(), FilterFactory.AlwaysPresent,
-                                                   1, sstableMetadata, OpenReason.NORMAL, header);
+                                                   1, sstableMetadata, null, OpenReason.NORMAL, header);
     }
 }

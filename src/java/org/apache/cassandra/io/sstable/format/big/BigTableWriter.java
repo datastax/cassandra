@@ -20,6 +20,7 @@ package org.apache.cassandra.io.sstable.format.big;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Collection;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Consumer;
@@ -46,6 +47,7 @@ import org.apache.cassandra.io.sstable.format.SSTableFlushObserver;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReaderBuilder;
 import org.apache.cassandra.io.sstable.format.SortedTableWriter;
+import org.apache.cassandra.io.sstable.metadata.CompactionMetadata;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.io.util.DataPosition;
@@ -192,6 +194,7 @@ public class BigTableWriter extends SortedTableWriter
             return false;
 
         StatsMetadata stats = statsMetadata();
+        CompactionMetadata compactionMetadata = compactionMetadata();
         assert boundary.indexLength > 0 && boundary.dataLength > 0;
         // open the reader early
         IndexSummary indexSummary = iwriter.summary.build(metadata().partitioner, boundary);
@@ -210,6 +213,7 @@ public class BigTableWriter extends SortedTableWriter
                                                            iwriter.bf.sharedCopy(),
                                                            maxDataAge,
                                                            stats,
+                                                           Optional.of(compactionMetadata), // never null here
                                                            SSTableReader.OpenReason.EARLY,
                                                            header);
 
@@ -231,7 +235,7 @@ public class BigTableWriter extends SortedTableWriter
 
     @SuppressWarnings("resource")
     @Override
-    protected SSTableReader openReader(SSTableReader.OpenReason reason, FileHandle dataFileHandle, StatsMetadata stats)
+    protected SSTableReader openReader(SSTableReader.OpenReason reason, FileHandle dataFileHandle, StatsMetadata stats, Optional<CompactionMetadata> compactionMetadata)
     {
         IndexSummary indexSummary = iwriter.summary.build(metadata().partitioner);
         long indexFileLength = descriptor.fileFor(Component.PRIMARY_INDEX).length();
@@ -247,6 +251,7 @@ public class BigTableWriter extends SortedTableWriter
                                           iwriter.bf.sharedCopy(),
                                           maxDataAge,
                                           stats,
+                                          compactionMetadata,
                                           reason,
                                           header);
     }

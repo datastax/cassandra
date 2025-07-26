@@ -29,6 +29,7 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
@@ -49,6 +50,8 @@ import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.sstable.format.PartitionIndexIterator;
+import org.apache.cassandra.io.sstable.metadata.CompactionMetadata;
+import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.util.DiskOptimizationStrategy;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileOutputStreamPlus;
@@ -92,6 +95,8 @@ public abstract class SSTable
 
     protected final DiskOptimizationStrategy optimizationStrategy;
     protected final TableMetadataRef metadata;
+    // This field is null if the compaction metadata is not loaded yet, it can be a empty optional if the compaction metadata is not available
+    protected Optional<CompactionMetadata> compactionMetadata;
     private static final int SAMPLES_CAP = 10000;
     private static final int BYTES_CAP = 10000000;
 
@@ -112,6 +117,17 @@ public abstract class SSTable
     public ImmutableSet<Component> components()
     {
         return components;
+    }
+
+    public Optional<CompactionMetadata> getCompactionMetadata() throws IOException
+    {
+        // if compaction metadata is not loaded yet, load it
+        if (compactionMetadata == null)
+        {
+            logger.debug("Loading compaction metadata for {}", descriptor);
+            compactionMetadata = Optional.ofNullable((CompactionMetadata) descriptor.getMetadataSerializer().deserialize(descriptor, MetadataType.COMPACTION));
+        }
+        return compactionMetadata;
     }
 
     /**

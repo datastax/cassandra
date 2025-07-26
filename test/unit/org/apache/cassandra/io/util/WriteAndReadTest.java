@@ -77,7 +77,7 @@ public class WriteAndReadTest
 
         protected MockSSTableReader(Descriptor desc, Set<Component> components, TableMetadataRef metadata, FileHandle dfile, FileHandle ifile)
         {
-            super(desc, components, metadata, 1000, null, OpenReason.NORMAL, null, null, dfile, ifile, null);
+            super(desc, components, metadata, 1000, null, null, OpenReason.NORMAL, null, null, dfile, ifile, null);
         }
 
         public void setup(boolean trackHotness)
