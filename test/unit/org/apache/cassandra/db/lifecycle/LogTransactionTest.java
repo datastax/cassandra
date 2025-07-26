@@ -1346,6 +1346,7 @@ public class LogTransactionTest extends AbstractTransactionalTest
                                                           new AlwaysPresentFilter(),
                                                           1L,
                                                           metadata,
+                                                          null,
                                                           SSTableReader.OpenReason.NORMAL,
                                                           header);
         reader.first = reader.last = MockSchema.readerBounds(generation);

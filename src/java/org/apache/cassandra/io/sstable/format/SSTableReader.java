@@ -551,7 +551,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
 
         try
         {
-            return new SSTableReaderBuilder.ForBatch(descriptor, metadata, components, statsMetadata, compactionMetadata, header.toHeader(descriptor, metadata.get())).build();
+            return new SSTableReaderBuilder.ForBatch(descriptor, metadata, components, statsMetadata, Optional.ofNullable(compactionMetadata), header.toHeader(descriptor, metadata.get())).build();
         }
         catch (UnknownColumnException e)
         {
@@ -625,7 +625,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
                                                        isOffline,
                                                        components,
                                                        statsMetadata,
-                                                       compactionMetadata,
+                                                       Optional.ofNullable(compactionMetadata),
                                                        header.toHeader(descriptor.toString(), metadata.get(), descriptor.version, isOffline)).build();
         }
         catch (UnknownColumnException e)
@@ -726,12 +726,13 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
                                              IFilter bf,
                                              long maxDataAge,
                                              StatsMetadata sstableMetadata,
+                                             Optional<CompactionMetadata> compactionMetadata,
                                              OpenReason openReason,
                                              SerializationHeader header)
     {
         assert desc != null && ifile != null && dfile != null && summary != null && bf != null && sstableMetadata != null;
 
-        return new SSTableReaderBuilder.ForWriter(desc, metadata, maxDataAge, components, sstableMetadata, openReason, header)
+        return new SSTableReaderBuilder.ForWriter(desc, metadata, maxDataAge, components, sstableMetadata, compactionMetadata, openReason, header)
                 .bf(bf).ifile(ifile).dfile(dfile).summary(summary).build();
     }
 
@@ -787,7 +788,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
                             TableMetadataRef metadata,
                             long maxDataAge,
                             StatsMetadata sstableMetadata,
-                            CompactionMetadata compactionMetadata,
+                            Optional<CompactionMetadata> compactionMetadata,
                             OpenReason openReason,
                             SerializationHeader header,
                             IndexSummary summary,
@@ -804,7 +805,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         this.bf = bf;
         this.maxDataAge = maxDataAge;
         this.openReason = openReason;
-        this.compactionMetadata = Optional.ofNullable(compactionMetadata);
+        this.compactionMetadata = compactionMetadata;
         tidy = new InstanceTidier(descriptor, metadata.id);
         selfRef = new Ref<>(this, tidy);
     }
@@ -1022,6 +1023,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
                                                  bf.sharedCopy(),
                                                  maxDataAge,
                                                  sstableMetadata,
+                                                 compactionMetadata,
                                                  reason,
                                                  header);
 
@@ -1050,6 +1052,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
                                                  newBloomFilter,
                                                  maxDataAge,
                                                  sstableMetadata,
+                                                 compactionMetadata,
                                                  openReason,
                                                  header);
 

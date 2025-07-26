@@ -50,6 +50,7 @@ import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.sstable.StorageHandler;
+import org.apache.cassandra.io.sstable.metadata.CompactionMetadata;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.io.sstable.metadata.MetadataComponent;
 import org.apache.cassandra.io.sstable.metadata.MetadataType;
@@ -348,6 +349,7 @@ public abstract class SortedTableWriter extends SSTableWriter
             maxDataAge = System.currentTimeMillis();
 
         StatsMetadata stats = statsMetadata();
+        CompactionMetadata compactionMetadata = compactionMetadata();
 
         int dataBufferSize = optimizationStrategy.bufferSize(stats.estimatedPartitionSize.percentile(DatabaseDescriptor.getDiskOptimizationEstimatePercentile()));
         // Note that creating the `CompressionMetadata` below does not read from disk: the compression metadata is
@@ -364,7 +366,7 @@ public abstract class SortedTableWriter extends SSTableWriter
         DecoratedKey lastMinimized = getMinimalKey(last);
         try
         {
-            SSTableReader reader = openReader(reason, dfile, stats);
+            SSTableReader reader = openReader(reason, dfile, stats, Optional.of(compactionMetadata));
             reader.first = firstMinimized;
             reader.last = lastMinimized;
             return reader;
@@ -380,7 +382,7 @@ public abstract class SortedTableWriter extends SSTableWriter
         }
     }
 
-    abstract protected SSTableReader openReader(SSTableReader.OpenReason reason, FileHandle dataFileHandle, StatsMetadata stats);
+    abstract protected SSTableReader openReader(SSTableReader.OpenReason reason, FileHandle dataFileHandle, StatsMetadata stats, Optional<CompactionMetadata> compactionMetadata);
 
     abstract protected SequentialWriterOption writerOption();
 
