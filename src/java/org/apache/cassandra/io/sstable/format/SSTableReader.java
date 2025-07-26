@@ -419,7 +419,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         {
             try
             {
-                ICardinality cardinality = sstable.getCompactionMetadata().map(CompactionMetadata::cardinalityEstimator).orElse(null);
+                ICardinality cardinality = sstable.getCompactionMetadata().map(c -> c.cardinalityEstimator).orElse(null);
                 if (cardinality != null)
                     cardinalities.add(cardinality);
                 else
