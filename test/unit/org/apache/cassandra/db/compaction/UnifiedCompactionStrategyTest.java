@@ -2036,15 +2036,33 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
     public void testBucketSelectionNonOverlapping()
     {
         int numShards = 16;
-        int perShardThreshold = 3 * 10;
+        double maxSstablesPerShardFactor = 10.0;
+        int perShardThreshold = (int) (3 * maxSstablesPerShardFactor);
         int sstablesPerShard = perShardThreshold + 1;
         testBucketSelection(arr(numShards * sstablesPerShard + 1),
                             arr(sstablesPerShard, sstablesPerShard * (numShards - 2)),
                             Overlaps.InclusionMethod.TRANSITIVE,
+                            numShards,
+                            maxSstablesPerShardFactor,
                             perShardThreshold,
                             sstablesPerShard, sstablesPerShard * 2);
     }
 
+    // Same as testBucketSelectionNonOverlapping, but with an infinite maxSstablesPerShardFactor
+    // to deactivate compaction of oversize shards.
+    @Test
+    public void testBucketSelectionNonOverlappingInfiniteFactor()
+    {
+        int numShards = 16;
+        int sstablesPerShard = (3 * 10) + 1;
+        testBucketSelection(arr(numShards * sstablesPerShard + 1),
+                            arr(),
+                            Overlaps.InclusionMethod.TRANSITIVE,
+                            numShards,
+                            Double.POSITIVE_INFINITY,
+                            numShards * sstablesPerShard - 1,
+                            sstablesPerShard, sstablesPerShard * 2);
+    }
 
     private int[] arr(int... values)
     {
@@ -2081,6 +2099,11 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
 
     public void testBucketSelection(int[] counts, int[] expecteds, Overlaps.InclusionMethod overlapInclusionMethod, int expectedRemaining, int... dropFromFirst)
     {
+        testBucketSelection(counts, expecteds, overlapInclusionMethod, 16, 10.0, expectedRemaining, dropFromFirst);
+    }
+
+    public void testBucketSelection(int[] counts, int[] expecteds, Overlaps.InclusionMethod overlapInclusionMethod, int numShards, double maxSstablesPerShardFactor, int expectedRemaining, int... dropFromFirst)
+    {
         Set<SSTableReader> allSSTables = new HashSet<>();
         int fanout = counts.length;
         for (int i = 0; i < fanout; ++i)
@@ -2099,8 +2122,8 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         when(controller.getFanout(anyInt())).thenCallRealMethod();
         when(controller.getThreshold(anyInt())).thenCallRealMethod();
         when(controller.getMaxLevelDensity(anyInt(), anyDouble())).thenCallRealMethod();
-        when(controller.getNumShards(anyDouble())).thenReturn(16);
-        when(controller.getMaxSstablesPerShardFactor()).thenReturn(10.0);
+        when(controller.getNumShards(anyDouble())).thenReturn(numShards);
+        when(controller.getMaxSstablesPerShardFactor()).thenReturn(maxSstablesPerShardFactor);
         when(controller.getSurvivalFactor(anyInt())).thenReturn(1.0);
         when(controller.getBaseSstableSize(anyInt())).thenReturn((double) (90 << 20));
         when(controller.overlapInclusionMethod()).thenReturn(overlapInclusionMethod);
