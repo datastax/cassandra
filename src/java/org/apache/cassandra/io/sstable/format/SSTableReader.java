@@ -344,7 +344,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
 
             try
             {
-                CompactionMetadata metadata = (CompactionMetadata) sstable.descriptor.getMetadataSerializer().deserialize(sstable.descriptor, MetadataType.COMPACTION);
+                CompactionMetadata metadata = sstable.getCompactionMetadata().orElse(null);
                 // If we can't load the CompactionMetadata, we are forced to estimate the keys using the index
                 // summary. (CASSANDRA-10676)
                 if (metadata == null)
@@ -399,8 +399,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
 
         try
         {
-            CompactionMetadata metadata = (CompactionMetadata) descriptor.getMetadataSerializer()
-                                                                         .deserialize(descriptor, MetadataType.COMPACTION);
+            CompactionMetadata metadata = getCompactionMetadata().orElse(null);
             return metadata == null ? null : metadata.cardinalityEstimator;
         }
         catch (IOException e)
@@ -420,7 +419,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         {
             try
             {
-                ICardinality cardinality = ((CompactionMetadata) sstable.descriptor.getMetadataSerializer().deserialize(sstable.descriptor, MetadataType.COMPACTION)).cardinalityEstimator;
+                ICardinality cardinality = sstable.getCompactionMetadata().map(CompactionMetadata::cardinalityEstimator).orElse(null);
                 if (cardinality != null)
                     cardinalities.add(cardinality);
                 else
