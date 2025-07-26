@@ -40,6 +40,7 @@ import org.apache.cassandra.io.sstable.IndexSummary;
 import org.apache.cassandra.io.sstable.IndexSummaryBuilder;
 import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.sstable.format.big.BigTableReader;
+import org.apache.cassandra.io.sstable.metadata.CompactionMetadata;
 import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.io.sstable.metadata.ValidationMetadata;
@@ -71,6 +72,7 @@ public abstract class SSTableReaderBuilder
     protected final long maxDataAge;
     protected final Set<Component> components;
     protected final StatsMetadata statsMetadata;
+    protected final CompactionMetadata compactionMetadata;
     protected final SSTableReader.OpenReason openReason;
     protected final SerializationHeader header;
 
@@ -86,6 +88,7 @@ public abstract class SSTableReaderBuilder
                                 long maxDataAge,
                                 Set<Component> components,
                                 StatsMetadata statsMetadata,
+                                CompactionMetadata compactionMetadata,
                                 SSTableReader.OpenReason openReason,
                                 SerializationHeader header)
     {
@@ -95,6 +98,7 @@ public abstract class SSTableReaderBuilder
         this.maxDataAge = maxDataAge;
         this.components = components;
         this.statsMetadata = statsMetadata;
+        this.compactionMetadata = compactionMetadata;
         this.openReason = openReason;
         this.header = header;
         this.readerFactory = descriptor.getFormat().getReaderFactory();
@@ -274,7 +278,7 @@ public abstract class SSTableReaderBuilder
                          SSTableReader.OpenReason openReason,
                          SerializationHeader header)
         {
-            super(descriptor, metadataRef, maxDataAge, components, statsMetadata, openReason, header);
+            super(descriptor, metadataRef, maxDataAge, components, statsMetadata, null, openReason, header);
         }
 
         public SSTableReaderBuilder.ForWriter dfile(FileHandle dfile)
@@ -317,9 +321,10 @@ public abstract class SSTableReaderBuilder
                         TableMetadataRef metadataRef,
                         Set<Component> components,
                         StatsMetadata statsMetadata,
+                        CompactionMetadata compactionMetadata,
                         SerializationHeader header)
         {
-            super(descriptor, metadataRef, System.currentTimeMillis(), components, statsMetadata, SSTableReader.OpenReason.NORMAL, header);
+            super(descriptor, metadataRef, System.currentTimeMillis(), components, statsMetadata, compactionMetadata, SSTableReader.OpenReason.NORMAL, header);
         }
 
         @Override
@@ -381,9 +386,10 @@ public abstract class SSTableReaderBuilder
                        boolean isOffline,
                        Set<Component> components,
                        StatsMetadata statsMetadata,
+                       CompactionMetadata compactionMetadata,
                        SerializationHeader header)
         {
-            super(descriptor, metadataRef, System.currentTimeMillis(), components, statsMetadata, SSTableReader.OpenReason.NORMAL, header);
+            super(descriptor, metadataRef, System.currentTimeMillis(), components, statsMetadata, compactionMetadata, SSTableReader.OpenReason.NORMAL, header);
             this.validationMetadata = validationMetadata;
             this.isOffline = isOffline;
         }

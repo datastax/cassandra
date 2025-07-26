@@ -522,7 +522,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         assert components.contains(Component.PRIMARY_INDEX) : "Primary index component is missing for sstable " + descriptor;
         verifyCompressionInfoExistenceIfApplicable(descriptor, components);
 
-        EnumSet<MetadataType> types = EnumSet.of(MetadataType.VALIDATION, MetadataType.STATS, MetadataType.HEADER);
+        EnumSet<MetadataType> types = EnumSet.of(MetadataType.VALIDATION, MetadataType.STATS, MetadataType.HEADER, MetadataType.COMPACTION);
         Map<MetadataType, MetadataComponent> sstableMetadata;
         try
         {
@@ -535,6 +535,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
 
         ValidationMetadata validationMetadata = (ValidationMetadata) sstableMetadata.get(MetadataType.VALIDATION);
         StatsMetadata statsMetadata = (StatsMetadata) sstableMetadata.get(MetadataType.STATS);
+        CompactionMetadata compactionMetadata = (CompactionMetadata) sstableMetadata.get(MetadataType.COMPACTION);
         SerializationHeader.Component header = (SerializationHeader.Component) sstableMetadata.get(MetadataType.HEADER);
 
         // Check if sstable is created using same partitioner.
@@ -550,7 +551,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
 
         try
         {
-            return new SSTableReaderBuilder.ForBatch(descriptor, metadata, components, statsMetadata, header.toHeader(descriptor, metadata.get())).build();
+            return new SSTableReaderBuilder.ForBatch(descriptor, metadata, components, statsMetadata, compactionMetadata, header.toHeader(descriptor, metadata.get())).build();
         }
         catch (UnknownColumnException e)
         {
@@ -587,7 +588,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
 
         verifyCompressionInfoExistenceIfApplicable(descriptor, components);
 
-        EnumSet<MetadataType> types = EnumSet.of(MetadataType.VALIDATION, MetadataType.STATS, MetadataType.HEADER);
+        EnumSet<MetadataType> types = EnumSet.of(MetadataType.VALIDATION, MetadataType.STATS, MetadataType.HEADER, MetadataType.COMPACTION);
 
         Map<MetadataType, MetadataComponent> sstableMetadata;
         try
@@ -600,6 +601,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         }
         ValidationMetadata validationMetadata = (ValidationMetadata) sstableMetadata.get(MetadataType.VALIDATION);
         StatsMetadata statsMetadata = (StatsMetadata) sstableMetadata.get(MetadataType.STATS);
+        CompactionMetadata compactionMetadata = (CompactionMetadata) sstableMetadata.get(MetadataType.COMPACTION);
         SerializationHeader.Component header = (SerializationHeader.Component) sstableMetadata.get(MetadataType.HEADER);
         assert header != null;
 
@@ -623,6 +625,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
                                                        isOffline,
                                                        components,
                                                        statsMetadata,
+                                                       compactionMetadata,
                                                        header.toHeader(descriptor.toString(), metadata.get(), descriptor.version, isOffline)).build();
         }
         catch (UnknownColumnException e)
@@ -770,6 +773,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
              builder.metadataRef,
              builder.maxDataAge,
              builder.statsMetadata,
+             builder.compactionMetadata,
              builder.openReason,
              builder.header,
              builder.summary,
@@ -783,6 +787,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
                             TableMetadataRef metadata,
                             long maxDataAge,
                             StatsMetadata sstableMetadata,
+                            CompactionMetadata compactionMetadata,
                             OpenReason openReason,
                             SerializationHeader header,
                             IndexSummary summary,
@@ -799,6 +804,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         this.bf = bf;
         this.maxDataAge = maxDataAge;
         this.openReason = openReason;
+        this.compactionMetadata = Optional.ofNullable(compactionMetadata);
         tidy = new InstanceTidier(descriptor, metadata.id);
         selfRef = new Ref<>(this, tidy);
     }

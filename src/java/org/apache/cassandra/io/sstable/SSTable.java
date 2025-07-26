@@ -95,7 +95,8 @@ public abstract class SSTable
 
     protected final DiskOptimizationStrategy optimizationStrategy;
     protected final TableMetadataRef metadata;
-    protected Optional<CompactionMetadata> cachedCompactionMetadata;
+    // This field is null if the compaction metadata is not loaded yet, it can be a empty optional if the compaction metadata is not available
+    protected Optional<CompactionMetadata> compactionMetadata;
     private static final int SAMPLES_CAP = 10000;
     private static final int BYTES_CAP = 10000000;
 
@@ -120,12 +121,13 @@ public abstract class SSTable
 
     public Optional<CompactionMetadata> getCompactionMetadata() throws IOException
     {
-        if (cachedCompactionMetadata == null)
+        // if compaction metadata is not loaded yet, load it
+        if (compactionMetadata == null)
         {
             logger.debug("Loading compaction metadata for {}", descriptor);
-            cachedCompactionMetadata = Optional.ofNullable((CompactionMetadata) descriptor.getMetadataSerializer().deserialize(descriptor, MetadataType.COMPACTION));
+            compactionMetadata = Optional.ofNullable((CompactionMetadata) descriptor.getMetadataSerializer().deserialize(descriptor, MetadataType.COMPACTION));
         }
-        return cachedCompactionMetadata;
+        return compactionMetadata;
     }
 
     /**
