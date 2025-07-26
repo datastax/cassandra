@@ -204,6 +204,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         long minimalSizeBytes = m << 20;
 
         Controller controller = Mockito.mock(Controller.class);
+        ShardManager shardManager = Mockito.mock(ShardManager.class);
         when(controller.getMinSstableSizeBytes()).thenReturn(minimalSizeBytes);
         when(controller.getNumShards(anyDouble())).thenReturn(1);
         when(controller.getBaseSstableSize(anyInt())).thenReturn((double) minimalSizeBytes);
@@ -264,7 +265,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
                 assertEquals(i, level.getIndex());
 
                 Collection<CompactionAggregate.UnifiedAggregate> compactionAggregates =
-                level.getCompactionAggregates(entry.getKey(), controller, dataSetSizeBytes);
+                level.getCompactionAggregates(entry.getKey(), controller, shardManager, dataSetSizeBytes);
 
                 long selectedCount = compactionAggregates.stream()
                                                          .filter(a -> !a.isEmpty())
@@ -322,8 +323,9 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         long minimalSizeBytes = m << 20;
 
         Controller controller = Mockito.mock(Controller.class);
+        ShardManager shardManager = Mockito.mock(ShardManager.class);
         when(controller.getMinSstableSizeBytes()).thenReturn(minimalSizeBytes);
-        when(controller.getNumShards(anyDouble())).thenReturn(1);
+        when(controller.getNumShards(anyDouble())).thenReturn(16);
         when(controller.getBaseSstableSize(anyInt())).thenReturn((double) minimalSizeBytes);
         when(controller.maxConcurrentCompactions()).thenReturn(1000); // let it generate as many candidates as it can
         when(controller.maxThroughput()).thenReturn(Double.MAX_VALUE);
@@ -378,7 +380,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
                 assertEquals(i, level.getIndex());
 
                 Collection<CompactionAggregate.UnifiedAggregate> compactionAggregates =
-                    level.getCompactionAggregates(entry.getKey(), controller, dataSetSizeBytes);
+                    level.getCompactionAggregates(entry.getKey(), controller, shardManager, dataSetSizeBytes);
 
                 Set<CompactionSSTable> selectedSSTables = new HashSet<>();
                 for (CompactionAggregate.UnifiedAggregate aggregate : compactionAggregates)
@@ -793,6 +795,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         when(controller.getMaxLevelDensity(anyInt(), anyDouble())).thenCallRealMethod();
         when(controller.getSurvivalFactor(anyInt())).thenReturn(1.0);
         when(controller.getNumShards(anyDouble())).thenReturn(numShards);
+        when(controller.getMaxSstablesPerShardFactor()).thenReturn(10.0);
         when(controller.getMaxSpaceOverhead()).thenReturn(maxSpaceOverhead);
         when(controller.getBaseSstableSize(anyInt())).thenReturn((double) minSstableSizeBytes);
         when(controller.maxConcurrentCompactions()).thenReturn(maxCount);
@@ -1389,6 +1392,7 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         when(controller.getThreshold(anyInt())).thenCallRealMethod();
         when(controller.getSurvivalFactor(anyInt())).thenReturn(1.0);
         when(controller.getNumShards(anyDouble())).thenReturn(numShards);
+        when(controller.getMaxSstablesPerShardFactor()).thenReturn(10.0);
         when(controller.getBaseSstableSize(anyInt())).thenReturn((double) minimalSizeBytes);
         when(controller.maxConcurrentCompactions()).thenReturn(1000); // let it generate as many candidates as it can
         when(controller.maxCompactionSpaceBytes()).thenReturn(Long.MAX_VALUE);
@@ -2017,6 +2021,48 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         testBucketSelection(repeats(4, arr(6, 3)), arr(6, 6), Overlaps.InclusionMethod.TRANSITIVE, 4, 2, 3);
     }
 
+    // We use a level with only non-overlapping SSTables, so there won't be any standard bucketing compaction.
+    // The per-shard threshold is fanout(3) * maxSstablesPerShardFactor(10) = 30.
+    // We use a number of SSTables per shard just superior to the per-shard threshold.
+    // We use a total number of SSTables just superior to numShards * sstablesPerShard so the SSTables are not aligned
+    // with the shard boundaries. This means that all shards will have an SSTable in common with the next shard.
+    // We drop the SSTables that cross the boundaries between the first and second shard, and between the second and
+    // third shard.
+    // In the end, we get 3 groups of shards with SSTables in common:
+    // - a group with the first shard which has perShardThreshold + 1 SSTables, so will get compacted.
+    // - a group with the second shard which has perShardThreshold SSTables, so will not get compacted.
+    // - a group with the rest of the shards, one of those shards having perShardThreshold + 1 SSTables, so will get compacted.
+    @Test
+    public void testBucketSelectionNonOverlapping()
+    {
+        int numShards = 16;
+        double maxSstablesPerShardFactor = 10.0;
+        int perShardThreshold = (int) (3 * maxSstablesPerShardFactor);
+        int sstablesPerShard = perShardThreshold + 1;
+        testBucketSelection(arr(numShards * sstablesPerShard + 1),
+                            arr(sstablesPerShard, sstablesPerShard * (numShards - 2)),
+                            Overlaps.InclusionMethod.TRANSITIVE,
+                            numShards,
+                            maxSstablesPerShardFactor,
+                            perShardThreshold,
+                            sstablesPerShard, sstablesPerShard * 2);
+    }
+
+    // Same as testBucketSelectionNonOverlapping, but with an infinite maxSstablesPerShardFactor
+    // to deactivate compaction of oversize shards.
+    @Test
+    public void testBucketSelectionNonOverlappingInfiniteFactor()
+    {
+        int numShards = 16;
+        int sstablesPerShard = (3 * 10) + 1;
+        testBucketSelection(arr(numShards * sstablesPerShard + 1),
+                            arr(),
+                            Overlaps.InclusionMethod.TRANSITIVE,
+                            numShards,
+                            Double.POSITIVE_INFINITY,
+                            numShards * sstablesPerShard - 1,
+                            sstablesPerShard, sstablesPerShard * 2);
+    }
 
     private int[] arr(int... values)
     {
@@ -2053,6 +2099,11 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
 
     public void testBucketSelection(int[] counts, int[] expecteds, Overlaps.InclusionMethod overlapInclusionMethod, int expectedRemaining, int... dropFromFirst)
     {
+        testBucketSelection(counts, expecteds, overlapInclusionMethod, 16, 10.0, expectedRemaining, dropFromFirst);
+    }
+
+    public void testBucketSelection(int[] counts, int[] expecteds, Overlaps.InclusionMethod overlapInclusionMethod, int numShards, double maxSstablesPerShardFactor, int expectedRemaining, int... dropFromFirst)
+    {
         Set<SSTableReader> allSSTables = new HashSet<>();
         int fanout = counts.length;
         for (int i = 0; i < fanout; ++i)
@@ -2071,6 +2122,8 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         when(controller.getFanout(anyInt())).thenCallRealMethod();
         when(controller.getThreshold(anyInt())).thenCallRealMethod();
         when(controller.getMaxLevelDensity(anyInt(), anyDouble())).thenCallRealMethod();
+        when(controller.getNumShards(anyDouble())).thenReturn(numShards);
+        when(controller.getMaxSstablesPerShardFactor()).thenReturn(maxSstablesPerShardFactor);
         when(controller.getSurvivalFactor(anyInt())).thenReturn(1.0);
         when(controller.getBaseSstableSize(anyInt())).thenReturn((double) (90 << 20));
         when(controller.overlapInclusionMethod()).thenReturn(overlapInclusionMethod);
@@ -2128,7 +2181,6 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
             assertEquals(1.3333, pick.overheadToDataRatio(), 0.0001);
         }
 
-        Mockito.when(controller.getNumShards(anyDouble())).thenReturn(16);  // co-prime with counts to ensure multiple sstables fall in each shard
         // Make sure getMaxOverlapsMap does not fail.
         System.out.println(strategy.getMaxOverlapsMap());
 
