@@ -204,7 +204,7 @@ public class GuardrailsConfig
         enforceDefault(vector_dimensions_failure_threshold, v -> vector_dimensions_failure_threshold = v, 8192, 8192);
 
         enforceDefault(columns_per_table_failure_threshold, v -> columns_per_table_failure_threshold = v, 200L, 50L);
-        enforceDefault(secondary_index_per_table_failure_threshold, v -> secondary_index_per_table_failure_threshold = v, 0, 1);
+        enforceDefault(secondary_index_per_table_failure_threshold, v -> secondary_index_per_table_failure_threshold = v, 1, 1);
         enforceDefault(sasi_indexes_per_table_failure_threshold, v -> sasi_indexes_per_table_failure_threshold = v, 0, 0);
         enforceDefault(materialized_view_per_table_failure_threshold, v -> materialized_view_per_table_failure_threshold = v, 0, 2);
         enforceDefault(tables_warn_threshold, v -> tables_warn_threshold = v, 100L, 100L);
