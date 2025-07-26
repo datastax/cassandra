@@ -2338,6 +2338,11 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         return sstableMetadata;
     }
 
+    public Optional<CompactionMetadata> getCompactionMetadataNoLoad() // TODO: find a better name
+    {
+        return compactionMetadata;
+    }
+
     public RandomAccessReader openDataReader(RateLimiter limiter, ReadPattern accessPattern)
     {
         assert limiter != null;
