@@ -533,6 +533,14 @@ UCS accepts these compaction strategy parameters:
   Sets $b$ to the specified value, $\lambda$ to 1, and the default minimum sstable size to 'auto'.  
   Disabled by default and cannot be used in combination with `base_shard_count`, `target_sstable_size` or
   `sstable_growth`.
+* `max_sstables_per_shard_factor` Limits the number of SSTables per shard. If the number of sstables in a shard
+  exceeds this factor times the shard compaction threshold, a major compaction of the shard will be triggered.
+  Some conditions like slow writes can lead to SSTables being very small, and never overlap with enough other SSTables
+  to be compacted.
+  So this setting is useful to prevent the number of SSTables in a shard from growing too large, which can cause
+  problems due to the per-sstable overhead. Also these small SSTables may still have overlaps even if under the
+  compaction threshold (eg. due to write replicas) and never compacting them wastes storage space.
+  The default value is 10.
 
 All UCS options can also be supplied as system properties, using the prefix `unified_compaction.`, e.g. 
 `-Dunified_compaction.sstable_growth=0.5` sets the default `sstable_growth` to 0.5.
