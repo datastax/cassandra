@@ -126,6 +126,7 @@ public class AdaptiveController extends Controller
                               Overlaps.InclusionMethod overlapInclusionMethod,
                               boolean parallelizeOutputShards,
                               boolean hasVectorType,
+                              double maxSstablesPerShardFactor,
                               int intervalSec,
                               int minScalingParameter,
                               int maxScalingParameter,
@@ -154,6 +155,7 @@ public class AdaptiveController extends Controller
               overlapInclusionMethod,
               parallelizeOutputShards,
               hasVectorType,
+              maxSstablesPerShardFactor,
               metadata);
 
         this.scalingParameters = scalingParameters;
@@ -184,6 +186,7 @@ public class AdaptiveController extends Controller
                                   Overlaps.InclusionMethod overlapInclusionMethod,
                                   boolean parallelizeOutputShards,
                                   boolean hasVectorType,
+                                  double maxSstablesPerShardFactor,
                                   TableMetadata metadata,
                                   Map<String, String> options)
     {
@@ -292,6 +295,7 @@ public class AdaptiveController extends Controller
                                       overlapInclusionMethod,
                                       parallelizeOutputShards,
                                       hasVectorType,
+                                      maxSstablesPerShardFactor,
                                       intervalSec,
                                       minScalingParameter,
                                       maxScalingParameter,
