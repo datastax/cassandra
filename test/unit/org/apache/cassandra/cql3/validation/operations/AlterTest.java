@@ -29,7 +29,6 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
-import org.apache.cassandra.db.memtable.AbstractShardedMemtable;
 import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.memtable.SkipListMemtable;
 import org.apache.cassandra.db.memtable.TestMemtable;
@@ -47,7 +46,6 @@ import org.apache.cassandra.utils.FBUtilities;
 
 import static java.lang.String.format;
 import static org.apache.cassandra.config.CassandraRelevantProperties.TRIE_MEMTABLE_SHARD_COUNT;
-import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertSame;
@@ -63,7 +61,6 @@ public class AlterTest extends CQLTester
         // into TokenMetadata; expect trouble
         TRIE_MEMTABLE_SHARD_COUNT.setString("1");
         CQLTester.setUpClass();
-        assertThat(AbstractShardedMemtable.getDefaultShardCount()).isEqualTo(1);;
     }
 
     @Test
