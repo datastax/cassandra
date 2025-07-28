@@ -998,7 +998,7 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
 
             for (Level level : entry.getValue())
             {
-                Collection<CompactionAggregate.UnifiedAggregate> aggregates = level.getCompactionAggregates(arena, controller, spaceAvailable);
+                Collection<CompactionAggregate.UnifiedAggregate> aggregates = level.getCompactionAggregates(arena, controller, getShardManager(), spaceAvailable);
                 // Note: We allow empty aggregates into the list of pending compactions. The pending compactions list
                 // is for progress tracking only, and it is helpful to see empty levels there.
                 pending.addAll(aggregates);
@@ -1506,14 +1506,96 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                 logger.trace("Level: {}", this);
         }
 
+        private List<CompactionAggregate.UnifiedAggregate> getOversizeShardsAggregates(Arena arena,
+                                                                               Controller controller,
+                                                                               ShardManager shardManager)
+        {
+            List<CompactionAggregate.UnifiedAggregate> aggregates = new ArrayList<>();
+            double shardThreshold = fanout * controller.getMaxSstablesPerShardFactor();
+            if (sstables.size() > shardThreshold)
+            {
+                List<Set<CompactionSSTable>> groups = shardManager.splitSSTablesInShards(sstables,
+                                                                                         controller.getNumShards(max),
+                                                                                         (sstableShard, shardRange) -> Sets.newHashSet(sstableShard));
+
+                Set<CompactionSSTable> sstablesInOversizeGroup = new HashSet<>();
+                for (Set<CompactionSSTable> ssTables : groups)
+                {
+                    if (ssTables.size() > shardThreshold)
+                    {
+                        sstablesInOversizeGroup.addAll(ssTables);
+                    }
+                }
+
+                if (!sstablesInOversizeGroup.isEmpty())
+                {
+                    // Now combine the groups that share an sstable so that we have valid independent transactions.
+                    // Only keep the groups that were combined with an oversize group.
+                    groups = Overlaps.combineSetsWithCommonElement(groups);
+                    List<CompactionSSTable> unbucketed =  new ArrayList<>();
+
+                    for (Set<CompactionSSTable> group : groups)
+                    {
+                        boolean inOverSizeGroup = false;
+                        for (CompactionSSTable sstable : group)
+                        {
+                            if (sstablesInOversizeGroup.contains(sstable))
+                            {
+                                inOverSizeGroup = true;
+                                break;
+                            }
+                        }
+                        if (inOverSizeGroup)
+                        {
+                            aggregates.add(
+                            CompactionAggregate.createUnified(group,
+                                                              Overlaps.maxOverlap(group,
+                                                                                  CompactionSSTable.startsAfter,
+                                                                                  CompactionSSTable.firstKeyComparator,
+                                                                                  CompactionSSTable.lastKeyComparator),
+                                                              createPick(controller, nextTimeUUID(), index, group),
+                                                              Collections.emptyList(),
+                                                              arena,
+                                                              this)
+                            );
+                        }
+                        else
+                        {
+                            unbucketed.addAll(group);
+                        }
+                    }
+                    // Add all unbucketed sstables separately. Note that this will list the level (with its set of sstables)
+                    // even if it does not need compaction.
+                    if (!unbucketed.isEmpty())
+                        aggregates.add(CompactionAggregate.createUnified(unbucketed,
+                                                                         maxOverlap,
+                                                                         CompactionPick.EMPTY,
+                                                                         Collections.emptySet(),
+                                                                         arena,
+                                                                         this));
+                    return aggregates;
+                }
+            }
+            return aggregates;
+        }
+
         /// Return the compaction aggregate
         Collection<CompactionAggregate.UnifiedAggregate> getCompactionAggregates(Arena arena,
                                                                                  Controller controller,
+                                                                                 ShardManager shardManager,
                                                                                  long spaceAvailable)
         {
             if (logger.isTraceEnabled())
                 logger.trace("Creating compaction aggregate with sstable set {}", sstables);
 
+            List<CompactionAggregate.UnifiedAggregate> aggregates = new ArrayList<>();
+
+            if (sstables.isEmpty())
+            {
+                if (logger.isTraceEnabled())
+                    logger.trace("No sstables in level {} of arena {}, skipping compaction", this, arena);
+                return aggregates;
+            }
 
             // Note that adjacent overlap sets may include deduplicated sstable
             List<Set<CompactionSSTable>> overlaps = Overlaps.constructOverlapSets(sstables,
@@ -1530,9 +1612,19 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
                                                                       this::makeBucket,
                                                                       unbucketed::addAll);
 
-            List<CompactionAggregate.UnifiedAggregate> aggregates = new ArrayList<>();
-            for (Bucket bucket : buckets)
-                aggregates.add(bucket.constructAggregate(controller, spaceAvailable, arena));
+            if (!buckets.isEmpty())
+            {
+                for (Bucket bucket : buckets)
+                    aggregates.add(bucket.constructAggregate(controller, spaceAvailable, arena));
+            }
+            else
+            {
+                // CNDB-14577: If there are no overlaps, we look if some shards have too many SSTables.
+                // If that's the case, we perform a major compaction on those shards.
+                List<CompactionAggregate.UnifiedAggregate> oversizeShardsAggregates = getOversizeShardsAggregates(arena, controller, shardManager);
+                if (!oversizeShardsAggregates.isEmpty())
+                    return oversizeShardsAggregates;
+            }
 
             // Add all unbucketed sstables separately. Note that this will list the level (with its set of sstables)
             // even if it does not need compaction.
