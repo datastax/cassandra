@@ -214,6 +214,7 @@ public class StaticControllerTest extends ControllerTest
                                                            Controller.DEFAULT_OVERLAP_INCLUSION_METHOD,
                                                            true,
                                                            false,
+                                                           Controller.DEFAULT_MAX_SSTABLES_PER_SHARD_FACTOR,
                                                            keyspaceName,
                                                            tableName);
         super.testStartShutdown(controller);
@@ -242,6 +243,7 @@ public class StaticControllerTest extends ControllerTest
                                                            Controller.DEFAULT_OVERLAP_INCLUSION_METHOD,
                                                            true,
                                                            false,
+                                                           Controller.DEFAULT_MAX_SSTABLES_PER_SHARD_FACTOR,
                                                            keyspaceName,
                                                            tableName);
         super.testShutdownNotStarted(controller);
@@ -270,6 +272,7 @@ public class StaticControllerTest extends ControllerTest
                                                            Controller.DEFAULT_OVERLAP_INCLUSION_METHOD,
                                                            true,
                                                            false,
+                                                           Controller.DEFAULT_MAX_SSTABLES_PER_SHARD_FACTOR,
                                                            keyspaceName,
                                                            tableName);
         super.testStartAlreadyStarted(controller);
