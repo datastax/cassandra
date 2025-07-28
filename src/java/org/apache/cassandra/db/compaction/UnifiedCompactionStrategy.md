@@ -319,6 +319,24 @@ on the number of overlapping sources we compact; in that case we use the collect
 select at most limit-many in any included overlap set, making sure that if an sstable is included in this compaction,
 all older ones are also included to maintain time order.
 
+## Non-overlapping sstables trigger
+
+In some scenarios it is possible for (small) non-overlapping sstables to accumulate in numbers that can cause problems
+due to the sheer number of sstables present. For example, in tables with regularly scheduled snapshots, which also use
+time-based partitioning, that regular snapshot will often flush single-partition sstables. When the partition time
+window passes, the normal overlap processing will no longer find newly flushed data that overlaps with older sstables
+and will thus leave those sstables alone. Eventually we can end up with thousands of sstables on a lower level that are
+never compacted.
+
+This can be a problem, especially in combination with SAI indexing, which prefers a lower number of sstables overall.
+To address it, the strategy offers a threshold for the number of sstables that can be present on any of the shards that
+the sharding strategy assigns for a given level. The threshold is specified as a multiple of a level's fan factor: if
+there are no normal compactions to perform on a level, and we can find a shard that has more sstables than the
+threshold, we perform the equivalent of a major compaction for the smallest set of shards that contains it. The result
+is split on each output shard boundary and results in a single sstable for each of the output shards. This should
+create sstables that span many partitions and that will thus progress nicely through the normal processing in the
+next levels of the hierarchy.
+
 ## Prioritization of compactions
 
 Compaction strategies aim to minimize the read amplification of queries, which is defined by the number of sstables
@@ -533,6 +551,14 @@ UCS accepts these compaction strategy parameters:
   Sets $b$ to the specified value, $\lambda$ to 1, and the default minimum sstable size to 'auto'.  
   Disabled by default and cannot be used in combination with `base_shard_count`, `target_sstable_size` or
   `sstable_growth`.
+* `max_sstables_per_shard_factor` Limits the number of SSTables per shard. If the number of sstables in a shard
+  exceeds this factor times the shard compaction threshold, a major compaction of the shard will be triggered.
+  Some conditions like slow writes can lead to SSTables being very small, and never overlap with enough other SSTables
+  to be compacted.
+  So this setting is useful to prevent the number of SSTables in a shard from growing too large, which can cause
+  problems due to the per-sstable overhead. Also these small SSTables may still have overlaps even if under the
+  compaction threshold (eg. due to write replicas) and never compacting them wastes storage space.  
+  The default value is 10.
 
 All UCS options can also be supplied as system properties, using the prefix `unified_compaction.`, e.g. 
 `-Dunified_compaction.sstable_growth=0.5` sets the default `sstable_growth` to 0.5.
