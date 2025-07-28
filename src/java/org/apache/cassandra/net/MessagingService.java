@@ -217,8 +217,11 @@ public class MessagingService extends MessagingServiceMBeanImpl
     // If differences get merged upstream then we can revert to OS versioning.
     public static final int VERSION_DS_10 = 100;
     public static final int VERSION_DS_11 = 101; // adds ann_options (CNDB-12456)
+    public static final int VERSION_DS_12 = 102; // adds index hints (CNDB-13129)
     public static final int minimum_version = VERSION_30;
     public static final int current_version = currentVersion();
+    @Deprecated // remove when cndb no longer supports bdp/6.8-cndb
+    public static final boolean current_version_override = CassandraRelevantProperties.DS_CURRENT_MESSAGING_VERSION.isPresent();
     // DSE 6.8 version for backward compatibility
     public static final int VERSION_DSE_68 = 168;
 
@@ -226,6 +229,7 @@ public class MessagingService extends MessagingServiceMBeanImpl
     static AcceptVersions accept_streaming = new AcceptVersions(current_version, current_version);
     static Map<Integer, Integer> versionOrdinalMap = Arrays.stream(Version.values()).collect(Collectors.toMap(v -> v.value, Enum::ordinal));
 
+    @Deprecated // remove when cndb no longer supports bdp/6.8-cndb
     private static int currentVersion()
     {
         int version = CassandraRelevantProperties.DS_CURRENT_MESSAGING_VERSION.getInt();
@@ -265,6 +269,7 @@ public class MessagingService extends MessagingServiceMBeanImpl
         VERSION_41(MessagingService.VERSION_41),
         VERSION_DS_10(MessagingService.VERSION_DS_10),
         VERSION_DS_11(MessagingService.VERSION_DS_11),
+        VERSION_DS_12(MessagingService.VERSION_DS_12),
         VERSION_DSE68(MessagingService.VERSION_DSE_68);
 
         public final int value;

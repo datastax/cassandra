@@ -26,10 +26,9 @@ import java.util.List;
 import java.util.Map;
 
 import org.junit.Assert;
+import org.junit.Ignore;
 import org.junit.Test;
 
-import org.apache.cassandra.index.sai.disk.format.IndexComponent;
-import org.apache.cassandra.index.sai.disk.v1.trie.InvertedIndexWriter;
 import org.apache.cassandra.index.sai.utils.SaiRandomizedTest;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -77,6 +76,26 @@ public class RAMStringIndexerTest extends SaiRandomizedTest
             assertArrayEquals("0".getBytes(), terms.getMinTerm().array());
             assertArrayEquals("2".getBytes(), terms.getMaxTerm().array());
         }
+    }
+
+    @Test
+    public void testLargeNumberOfDocs()
+    {
+        int maxDocsSize = 1000;
+        RAMStringIndexer indexer = new RAMStringIndexer(false, maxDocsSize);
+
+        int startingRowId = 0;
+        int i = 0;
+        while (i++ < maxDocsSize)
+        {
+            int rowId = startingRowId + i;
+            indexer.addAll(List.of(new BytesRef("0")), rowId);
+
+            if (i < maxDocsSize)
+                assertFalse(indexer.requiresFlush());
+        }
+
+        assertTrue(indexer.requiresFlush());
     }
 
     @Test

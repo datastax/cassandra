@@ -344,6 +344,9 @@ public class Verb
 
     Verb toPre40Verb()
     {
+        if (!isResponse() && id >= 38 && !MessagingService.current_version_override)
+            // PING_REQ(37) is unused pre40 and will be ignored
+            return PING_REQ;
         if (!isResponse())
             return this;
         if (priority == P0)

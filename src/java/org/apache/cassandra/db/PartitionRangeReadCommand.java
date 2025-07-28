@@ -22,6 +22,7 @@ import java.util.concurrent.TimeUnit;
 
 import com.google.common.annotations.VisibleForTesting;
 
+import org.apache.cassandra.cql3.CqlBuilder;
 import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.schema.TableMetadata;
@@ -386,21 +387,24 @@ public class PartitionRangeReadCommand extends ReadCommand implements PartitionR
         return Verb.RANGE_REQ;
     }
 
-    protected void appendCQLWhereClause(StringBuilder sb)
+    @Override
+    protected void appendCQLWhereClause(CqlBuilder builder)
     {
         if (dataRange.isUnrestricted() && rowFilter().isEmpty())
             return;
 
-        sb.append(" WHERE ");
+        builder.append(" WHERE ");
         // We put the row filter first because the data range can end by "ORDER BY"
         if (!rowFilter().isEmpty())
         {
-            sb.append(rowFilter());
+            builder.append(rowFilter());
             if (!dataRange.isUnrestricted())
-                sb.append(" AND ");
+                builder.append(" AND ");
         }
         if (!dataRange.isUnrestricted())
-            sb.append(dataRange.toCQLString(metadata()));
+        {
+            builder.append(dataRange.toCQLString(metadata()));
+        }
     }
 
     @Override

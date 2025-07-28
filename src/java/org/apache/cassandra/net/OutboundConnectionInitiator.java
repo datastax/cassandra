@@ -58,6 +58,7 @@ import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.memory.BufferPools;
 
 import static java.util.concurrent.TimeUnit.*;
+import static org.apache.cassandra.net.MessagingService.VERSION_3014;
 import static org.apache.cassandra.net.MessagingService.VERSION_40;
 import static org.apache.cassandra.net.HandshakeProtocol.*;
 import static org.apache.cassandra.net.ConnectionType.STREAMING;
@@ -244,7 +245,8 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
         public void channelInactive(ChannelHandlerContext ctx) throws Exception
         {
             super.channelInactive(ctx);
-            resultPromise.tryFailure(new ClosedChannelException());
+            resultPromise.tryFailure(new ClosedOutboundConnectionException(String.format("channelInactive close, version = %s, framing = %s, encryption = %s",
+                                                                                         requestMessagingVersion, settings.framing, settings.encryption)));
         }
 
         /**
@@ -315,6 +317,11 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
                         {
                             case CRC:
                             case UNPROTECTED:
+                                // note, Legacy (pre40) doesn't do crc:
+                                //  implemented in that,
+                                // HandshakeProtocol.Accept.maybeDecode(..) always returns before any read/check of crc,
+                                // and HandshakeProtocol.Accept.respondPre40(..) never computes/writes any crc.
+                                // ref: https://github.com/datastax/cassandra/pull/1801#discussion_r2173183200
                                 frameEncoder = FrameEncoderLegacy.instance;
                                 break;
                             case LZ4:
@@ -331,9 +338,15 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
 
                     if (result.isSuccess())
                     {
-                        // Third handshake message carries PV 10 rather than PV 100.
-                        // Note that CC -> CC handshake doesn't use thrid message at all.
-                        ConfirmOutboundPre40 message = new ConfirmOutboundPre40(settings.acceptVersions.min, settings.from);
+                        // while still supporting VERSION_30, we want to preference VERSION_3014 as a minimum version
+                        //  (to workaround bugs in `select *` column filter deserialisation on the legacy peer)
+                        int dseCompatMinVersion =  MessagingService.current_version_override
+                                ? settings.acceptVersions.min
+                                : Math.min(MessagingService.VERSION_3014, msg.maxMessagingVersion);
+                        // Third handshake message carries PV 10/11 rather than PV 100/101.
+                        // Note that CC -> CC handshake doesn't use third message at all.
+                        ConfirmOutboundPre40 message = new ConfirmOutboundPre40(dseCompatMinVersion, settings.from);
+
                         AsyncChannelPromise.writeAndFlush(ctx, message.encode());
                     }
                 }
@@ -487,4 +500,20 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
         static <SuccessType extends Success> Result<SuccessType> incompatible(int closestSupportedVersion, int maxMessagingVersion) { return new Incompatible(closestSupportedVersion, maxMessagingVersion); }
     }
 
+    // helps logging wrt Handler.channelInactive() above
+    static class ClosedOutboundConnectionException extends ClosedChannelException
+    {
+        private final String message;
+
+        public ClosedOutboundConnectionException(String message)
+        {
+            this.message = message;
+        }
+
+        @Override
+        public String getMessage()
+        {
+            return message;
+        }
+    }
 }

@@ -61,7 +61,7 @@ public class TableId
         return new TableId(UUID.fromString(idString));
     }
 
-    private static TableId fromHexString(String nonDashUUID)
+    public static TableId fromHexString(String nonDashUUID)
     {
         ByteBuffer bytes = ByteBufferUtil.hexToBytes(nonDashUUID);
         long msb = bytes.getLong(0);

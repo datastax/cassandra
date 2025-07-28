@@ -164,12 +164,7 @@ public class DeleteStatement extends ModificationStatement
                 operations.add(op);
             }
 
-            StatementRestrictions restrictions = newRestrictions(metadata,
-                                                                 bindVariables,
-                                                                 operations,
-                                                                 whereClause,
-                                                                 conditions,
-                                                                 Collections.emptyList());
+            StatementRestrictions restrictions = newRestrictions(metadata, bindVariables, operations, whereClause, conditions);
 
             DeleteStatement stmt = new DeleteStatement(rawCQLStatement,
                                                        bindVariables,

@@ -37,7 +37,6 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-
 import javax.inject.Inject;
 
 import com.google.common.collect.Iterables;
@@ -60,7 +59,6 @@ import io.airlift.airline.Command;
 import io.airlift.airline.HelpOption;
 import io.airlift.airline.Option;
 import io.airlift.airline.SingleCommand;
-
 import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -69,9 +67,9 @@ import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.compaction.unified.AdaptiveController;
 import org.apache.cassandra.db.compaction.unified.Controller;
 import org.apache.cassandra.db.compaction.unified.CostsCalculator;
+import org.apache.cassandra.db.compaction.unified.Environment;
 import org.apache.cassandra.db.compaction.unified.Reservations;
 import org.apache.cassandra.db.compaction.unified.StaticController;
-import org.apache.cassandra.db.compaction.unified.Environment;
 import org.apache.cassandra.db.lifecycle.ILifecycleTransaction;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.dht.IPartitioner;
@@ -79,6 +77,7 @@ import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ExpMovingAverage;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.MonotonicClock;
@@ -87,7 +86,9 @@ import org.apache.cassandra.utils.Overlaps;
 import org.apache.cassandra.utils.PageAware;
 import org.mockito.Mockito;
 
-import static org.junit.Assert.*;
+import static org.apache.cassandra.SchemaLoader.standardCFMD;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 import static org.mockito.Mockito.when;
 
 /**
@@ -221,6 +222,9 @@ public class CompactionSimulationTest extends BaseCompactionStrategyTest
 
     @Option(name= {"-overlap-inclusion-method"}, description = "Overlap inclusion method, NONE, SINGLE or TRANSITIVE")
     Overlaps.InclusionMethod overlapInclusionMethod = Overlaps.InclusionMethod.TRANSITIVE;
+
+    @Option(name= {"-max-sstables-per-shard-factor"}, description = "Factor used to determine the maximum number of sstables per level shard")
+    double maxSstablesPerShardFactor = 10;
 
     @BeforeClass
     public static void setUpClass()
@@ -389,6 +393,7 @@ public class CompactionSimulationTest extends BaseCompactionStrategyTest
         int[] Ws = new int[] { W };
         int[] previousWs = new int[] { W };
         double maxSpaceOverhead = 0.2;
+        TableMetadata metadata = standardCFMD(keyspace, table).build();
 
         Controller controller = adaptive
                                 ? new AdaptiveController(MonotonicClock.preciseTime,
@@ -411,14 +416,14 @@ public class CompactionSimulationTest extends BaseCompactionStrategyTest
                                                          overlapInclusionMethod,
                                                          true,
                                                          false,
+                                                         maxSstablesPerShardFactor,
                                                          updateTimeSec,
                                                          minW,
                                                          maxW,
                                                          gain,
                                                          minCost,
                                                          maxAdaptiveCompactions,
-                                                         "ks",
-                                                         "tbl")
+                                                         metadata)
                                 : new StaticController(new SimulatedEnvironment(counters, valueSize),
                                                        Ws,
                                                        new double[] { o },
@@ -439,8 +444,8 @@ public class CompactionSimulationTest extends BaseCompactionStrategyTest
                                                        overlapInclusionMethod,
                                                        true,
                                                        false,
-                                                       "ks",
-                                                       "tbl");
+                                                       maxSstablesPerShardFactor,
+                                                       metadata);
 
         return new UnifiedCompactionStrategy(strategyFactory, controller);
     }

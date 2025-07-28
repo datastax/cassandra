@@ -16,9 +16,9 @@
 
 package org.apache.cassandra.db.compaction.unified;
 
+import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collections;
-import java.io.IOException;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -34,23 +34,21 @@ import java.util.stream.Collectors;
 import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
-
-import org.apache.cassandra.config.Config;
-import org.apache.cassandra.db.compaction.CompactionSSTable;
-import org.apache.cassandra.io.FSError;
-import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.codahale.metrics.Gauge;
+import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.compaction.CompactionAggregate;
 import org.apache.cassandra.db.compaction.CompactionPick;
 import org.apache.cassandra.db.compaction.CompactionRealm;
+import org.apache.cassandra.db.compaction.CompactionSSTable;
 import org.apache.cassandra.db.compaction.CompactionStrategy;
 import org.apache.cassandra.db.compaction.UnifiedCompactionStrategy;
 import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.io.FSError;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileWriter;
 import org.apache.cassandra.metrics.DefaultNameFactory;
@@ -58,6 +56,7 @@ import org.apache.cassandra.metrics.MetricNameFactory;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.MonotonicClock;
 import org.apache.cassandra.utils.Overlaps;
 import org.json.simple.JSONArray;
@@ -314,6 +313,10 @@ public abstract class Controller
     @Deprecated
     static final String STATIC_SCALING_FACTORS_OPTION = "static_scaling_factors";
 
+    static final String MAX_SSTABLES_PER_SHARD_FACTOR_OPTION = "max_sstables_per_shard_factor";
+    static final double DEFAULT_MAX_SSTABLES_PER_SHARD_FACTOR = Double.parseDouble(getSystemProperty(MAX_SSTABLES_PER_SHARD_FACTOR_OPTION, "10"));
+
+
     protected final MonotonicClock clock;
     protected final Environment env;
     protected final double[] survivalFactors;
@@ -326,8 +329,7 @@ public abstract class Controller
     protected final long expiredSSTableCheckFrequency;
     protected final boolean ignoreOverlapsInExpirationCheck;
     protected final boolean parallelizeOutputShards;
-    protected String keyspaceName;
-    protected String tableName;
+    protected final TableMetadata metadata;
 
     protected final int baseShardCount;
     private final boolean isReplicaAware;
@@ -345,6 +347,8 @@ public abstract class Controller
 
     final boolean l0ShardsEnabled;
     final boolean hasVectorType;
+
+    final double maxSstablesPerShardFactor;
 
     Controller(MonotonicClock clock,
                Environment env,
@@ -365,7 +369,9 @@ public abstract class Controller
                Reservations.Type reservationsType,
                Overlaps.InclusionMethod overlapInclusionMethod,
                boolean parallelizeOutputShards,
-               boolean hasVectorType)
+               boolean hasVectorType,
+               double maxSstablesPerShardFactor,
+               TableMetadata metadata)
     {
         this.clock = clock;
         this.env = env;
@@ -386,6 +392,8 @@ public abstract class Controller
         this.l0ShardsEnabled = Boolean.parseBoolean(getSystemProperty(L0_SHARDS_ENABLED_OPTION, "false")); // FIXME VECTOR-23
         this.parallelizeOutputShards = parallelizeOutputShards;
         this.hasVectorType = hasVectorType;
+        this.maxSstablesPerShardFactor = maxSstablesPerShardFactor;
+        this.metadata = metadata;
 
         if (maxSSTablesToCompact <= 0)  // use half the maximum permitted compaction size as upper bound by default
             maxSSTablesToCompact = (int) (dataSetSize * this.maxSpaceOverhead * 0.5 / getMinSstableSizeBytes());
@@ -400,17 +408,26 @@ public abstract class Controller
         this.ignoreOverlapsInExpirationCheck = ALLOW_UNSAFE_AGGRESSIVE_SSTABLE_EXPIRATION && ignoreOverlapsInExpirationCheck;
     }
 
-    public static File getControllerConfigPath(String keyspaceName, String tableName)
+    public static File getControllerConfigPath(TableMetadata metadata)
     {
-        String fileName = keyspaceName + '.' + tableName + '-' + "controller-config.JSON";
+        String suffix = "-controller-config.JSON";
+        String fileName = metadata.keyspace + '.' + metadata.name + suffix;
+        if (fileName.length() > 255)
+        {
+            int spaceLeft = 255 - suffix.length() - 36 - 2; // 36 is the length of a UUID, 2 - for two separators
+            String keyspaceAbbrev = metadata.keyspace.substring(0, Math.min(metadata.keyspace.length(), spaceLeft / 2));
+            spaceLeft -= keyspaceAbbrev.length();
+            String tableAbbrev = metadata.name.substring(0, Math.min(metadata.name.length(), spaceLeft));
+            fileName = String.format("%s.%s.%s%s", keyspaceAbbrev, tableAbbrev, metadata.id.toHexString(), suffix);
+        }
         return new File(DatabaseDescriptor.getMetadataDirectory(), fileName);
     }
 
-    public static void storeOptions(String keyspaceName, String tableName, int[] scalingParameters, long flushSizeBytes)
+    public static void storeOptions(TableMetadata metadata, int[] scalingParameters, long flushSizeBytes)
     {
-        if (SchemaConstants.isSystemKeyspace(keyspaceName))
+        if (SchemaConstants.isSystemKeyspace(metadata.keyspace))
             return;
-        File f = getControllerConfigPath(keyspaceName, tableName);
+        File f = getControllerConfigPath(metadata);
         try(FileWriter fileWriter = new FileWriter(f, File.WriteMode.OVERWRITE);)
         {
             JSONArray jsonArray = new JSONArray();
@@ -786,6 +803,11 @@ public abstract class Controller
         return hasVectorType;
     }
 
+    public double getMaxSstablesPerShardFactor()
+    {
+        return maxSstablesPerShardFactor;
+    }
+
     /**
      * @return true if the controller is running
      */
@@ -1035,6 +1057,10 @@ public abstract class Controller
                                           ? Boolean.parseBoolean(options.get(PARALLELIZE_OUTPUT_SHARDS_OPTION))
                                           : DEFAULT_PARALLELIZE_OUTPUT_SHARDS;
 
+        double maxSstablesPerShardFactor = options.containsKey(MAX_SSTABLES_PER_SHARD_FACTOR_OPTION)
+                                       ? Double.parseDouble(options.get(MAX_SSTABLES_PER_SHARD_FACTOR_OPTION))
+                                       : DEFAULT_MAX_SSTABLES_PER_SHARD_FACTOR;
+
         return adaptive
                ? AdaptiveController.fromOptions(env,
                                                 survivalFactors,
@@ -1054,8 +1080,8 @@ public abstract class Controller
                                                 overlapInclusionMethod,
                                                 parallelizeOutputShards,
                                                 hasVectorType,
-                                                realm.getKeyspaceName(),
-                                                realm.getTableName(),
+                                                maxSstablesPerShardFactor,
+                                                realm.metadata(),
                                                 options)
                : StaticController.fromOptions(env,
                                               survivalFactors,
@@ -1075,8 +1101,8 @@ public abstract class Controller
                                               overlapInclusionMethod,
                                               parallelizeOutputShards,
                                               hasVectorType,
-                                              realm.getKeyspaceName(),
-                                              realm.getTableName(),
+                                              maxSstablesPerShardFactor,
+                                              realm.metadata(),
                                               options,
                                               useVectorOptions);
     }
@@ -1302,6 +1328,26 @@ public abstract class Controller
                 throw new ConfigurationException(String.format("Invalid overlap inclusion method %s. The valid options are %s.",
                                                                s,
                                                                Arrays.toString(Overlaps.InclusionMethod.values())));
+            }
+        }
+
+        s = options.remove(MAX_SSTABLES_PER_SHARD_FACTOR_OPTION);
+        if (s != null)
+        {
+            try
+            {
+                double maxSstablesPerShardFactor = Double.parseDouble(s);
+                if (maxSstablesPerShardFactor < 1)
+                    throw new ConfigurationException(String.format("%s %s must be a float >= 1",
+                                                                   MAX_SSTABLES_PER_SHARD_FACTOR_OPTION,
+                                                                   s));
+            }
+            catch (NumberFormatException e)
+            {
+                throw new ConfigurationException(String.format(floatParseErr,
+                                                               s,
+                                                               MAX_SSTABLES_PER_SHARD_FACTOR_OPTION),
+                                                 e);
             }
         }
 

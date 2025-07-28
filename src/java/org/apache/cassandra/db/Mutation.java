@@ -61,6 +61,7 @@ import static org.apache.cassandra.net.MessagingService.VERSION_40;
 import static org.apache.cassandra.net.MessagingService.VERSION_41;
 import static org.apache.cassandra.net.MessagingService.VERSION_DS_10;
 import static org.apache.cassandra.net.MessagingService.VERSION_DS_11;
+import static org.apache.cassandra.net.MessagingService.VERSION_DS_12;
 import static org.apache.cassandra.utils.MonotonicClock.approxTime;
 
 public class Mutation implements IMutation
@@ -324,6 +325,7 @@ public class Mutation implements IMutation
     private int serializedSize41;
     private int serializedSizeDS10;
     private int serializedSizeDS11;
+    private int serializedSizeDS12;
 
     public int serializedSize(int version)
     {
@@ -353,6 +355,10 @@ public class Mutation implements IMutation
                 if (serializedSizeDS11 == 0)
                     serializedSizeDS11 = (int) serializer.serializedSize(this, VERSION_DS_11);
                 return serializedSizeDS11;
+            case VERSION_DS_12:
+                if (serializedSizeDS12 == 0)
+                    serializedSizeDS12 = (int) serializer.serializedSize(this, VERSION_DS_12);
+                return serializedSizeDS12;
             default:
                 throw new IllegalStateException("Unknown serialization version: " + version);
         }

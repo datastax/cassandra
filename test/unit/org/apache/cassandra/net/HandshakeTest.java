@@ -29,9 +29,13 @@ import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
 import io.netty.channel.EventLoop;
 import io.netty.util.concurrent.Future;
+
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.OutboundConnectionInitiator.Result;
@@ -39,6 +43,8 @@ import org.apache.cassandra.net.OutboundConnectionInitiator.Result.MessagingSucc
 
 import static org.apache.cassandra.net.MessagingService.VERSION_30;
 import static org.apache.cassandra.net.MessagingService.VERSION_3014;
+import static org.apache.cassandra.net.MessagingService.VERSION_40;
+import static org.apache.cassandra.net.MessagingService.VERSION_DS_11;
 import static org.apache.cassandra.net.MessagingService.current_version;
 import static org.apache.cassandra.net.MessagingService.minimum_version;
 import static org.apache.cassandra.net.ConnectionType.SMALL_MESSAGES;
@@ -142,6 +148,15 @@ public class HandshakeTest
     }
 
     @Test
+    public void testSendCompatibleMinVersionPre40() throws InterruptedException, ExecutionException
+    {
+        Result result = handshake(VERSION_30, VERSION_30, VERSION_3014, VERSION_30, VERSION_3014);
+        Assert.assertEquals(Result.Outcome.RETRY, result.outcome);
+        // special case where VERSION_30 gets bumped to 3014 (so to avoid the column filter bug)
+        Assert.assertEquals(VERSION_3014, result.retry().withMessagingVersion);
+    }
+
+    @Test
     public void testSendCompatibleMaxVersionPre40() throws InterruptedException, ExecutionException
     {
         Result result = handshake(VERSION_3014, VERSION_30, VERSION_3014, VERSION_30, VERSION_3014);
@@ -171,9 +186,65 @@ public class HandshakeTest
     public void testDSEToCCInitialHandshake() throws InterruptedException, ExecutionException
     {
         // This is how DSE 255 (0,4) intiaties the connection to CC (10,100)
-        Result result = handshake(255, 0, 4, 10, 100);
+        Result result = handshake(255, 0, 4, VERSION_30, 100);
         Assert.assertEquals(Result.Outcome.SUCCESS, result.outcome);
+        Assert.assertEquals(255, result.success().messagingVersion);
         result.success().channel.close();
+    }
+
+
+    @Test
+    public void testDSE6ToCCInitialHandshake() throws InterruptedException, ExecutionException
+    {
+        // This is how DSE 257 (0,12) intiaties the connection to CC (10,101)
+        Result result = handshake(257, 0, 257, VERSION_30, VERSION_DS_11);
+        Assert.assertEquals(Result.Outcome.SUCCESS, result.outcome);
+        Assert.assertEquals(VERSION_30, result.success().messagingVersion);
+        result.success().channel.close();
+    }
+
+    @Test
+    public void testC30ToDSE6InitialHandshake() throws InterruptedException, ExecutionException
+    {
+        // This is how  C* 3.0.13 (0,10) intiaties the connection to DSE 257 (10,257)
+        Result result = handshake(VERSION_30, 0, VERSION_30, VERSION_30, 257);
+        Assert.assertEquals(Result.Outcome.SUCCESS, result.outcome);
+        Assert.assertEquals(VERSION_30, result.success().messagingVersion);
+    }
+
+    @Test
+    public void testC3014ToDSE6InitialHandshake() throws InterruptedException, ExecutionException
+    {
+        // This is how  C* 3.0.14 (0,101) intiaties the connection to DSE 257 (10,257)
+        Result result = handshake(VERSION_3014, 0, VERSION_3014, VERSION_30, 257);
+        Assert.assertEquals(Result.Outcome.SUCCESS, result.outcome);
+        Assert.assertEquals(VERSION_3014, result.success().messagingVersion);
+    }
+
+    @Test
+    public void testCCToDSE6InitialHandshake() throws InterruptedException, ExecutionException
+    {
+        // This is how  CC (10,100) intiaties the connection to DSE 257 (0,4)
+        Result result = handshake(VERSION_DS_11, 0, VERSION_DS_11, VERSION_30, 257);
+        Assert.assertEquals(Result.Outcome.RETRY, result.outcome);
+        Assert.assertEquals(VERSION_3014, result.retry().withMessagingVersion);
+    }
+
+    @Test
+    public void testCCToDSE6InitialHandshakeOverride() throws InterruptedException, ExecutionException
+    {
+        try
+        {
+            System.setProperty(CassandraRelevantProperties.DS_CURRENT_MESSAGING_VERSION.getKey(), "11");
+            // This is how  CC (10,100) intiaties the connection to DSE 257 (0,4)
+            Result result = handshake(VERSION_DS_11, 0, VERSION_DS_11, VERSION_30, 257);
+            Assert.assertEquals(Result.Outcome.RETRY, result.outcome);
+            Assert.assertEquals(VERSION_3014, result.retry().withMessagingVersion);
+        }
+        finally
+        {
+            System.clearProperty(CassandraRelevantProperties.DS_CURRENT_MESSAGING_VERSION.getKey());
+        }
     }
 
     @Test
@@ -229,7 +300,46 @@ public class HandshakeTest
     public void testSendToFuturePost40BelievedToBePre40() throws InterruptedException, ExecutionException
     {
         Result result = handshake(VERSION_30, VERSION_30, current_version, VERSION_30, current_version + 1);
-        Assert.assertEquals(Result.Outcome.SUCCESS, result.outcome);
-        Assert.assertEquals(VERSION_30, result.success().messagingVersion);
+        Assert.assertEquals(Result.Outcome.RETRY, result.outcome);
+        // special case where VERSION_30 gets bumped to 3014 (so to avoid the column filter bug)
+        Assert.assertEquals(VERSION_3014, result.retry().withMessagingVersion);
+    }
+
+    @Test
+    public void testHandshakeAcceptsDseNodesWithForced3014Version() throws Crc.InvalidCrc
+    {
+        ByteBuf buf = Unpooled.buffer();
+        buf.writeInt(257); // Simulate DSE 6.8+ version encoding
+
+        HandshakeProtocol.Accept accept = HandshakeProtocol.Accept.maybeDecode(buf, MessagingService.VERSION_40);
+        Assert.assertNotNull(accept);
+        Assert.assertEquals(0, accept.useMessagingVersion);
+        Assert.assertEquals(MessagingService.VERSION_3014, accept.maxMessagingVersion);
+
+        buf = Unpooled.buffer();
+        buf.writeInt(257);
+        accept = HandshakeProtocol.Accept.maybeDecode(buf, MessagingService.VERSION_3014);
+        Assert.assertNotNull(accept);
+        Assert.assertEquals(0, accept.useMessagingVersion);
+        Assert.assertEquals(MessagingService.VERSION_3014, accept.maxMessagingVersion);
+    }
+
+    @Test
+    public void testHandshakeVersionNegotiationWithPre40Peer() throws Crc.InvalidCrc
+    {
+        ByteBuf buf = Unpooled.buffer();
+        buf.writeInt(MessagingService.VERSION_30); // Pre-4.0 version
+
+        HandshakeProtocol.Accept accept = HandshakeProtocol.Accept.maybeDecode(buf, MessagingService.VERSION_40);
+        Assert.assertNotNull(accept);
+        Assert.assertEquals(0, accept.useMessagingVersion);
+        Assert.assertEquals(MessagingService.VERSION_30, accept.maxMessagingVersion);
+
+        buf = Unpooled.buffer();
+        buf.writeInt(MessagingService.VERSION_30);
+        accept = HandshakeProtocol.Accept.maybeDecode(buf, MessagingService.VERSION_40);
+        Assert.assertNotNull(accept);
+        Assert.assertEquals(0, accept.useMessagingVersion);
+        Assert.assertEquals(MessagingService.VERSION_30, accept.maxMessagingVersion);
     }
 }

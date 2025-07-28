@@ -372,6 +372,12 @@ public enum CassandraRelevantProperties
     /** Whether to optimize query plans */
     SAI_QUERY_OPTIMIZATION_LEVEL("cassandra.sai.query_optimization_level", "1"),
 
+    /** Controls the number of rows read in a single batch when fetching rows for a partition key */
+    SAI_PARTITION_ROW_BATCH_SIZE("cassandra.sai.partition_row_batch_size", "100"),
+
+    /** Controls the maximum number of expressions that will be used in a SAI intersection operation. */
+    SAI_INTERSECTION_CLAUSE_LIMIT("cassandra.sai.intersection.clause.limit", "2"),
+
     /** Whether vector type only allows float vectors. True by default. **/
     VECTOR_FLOAT_ONLY("cassandra.float_only_vectors", "true"),
     /** Enables use of vector type. True by default. **/
@@ -604,6 +610,7 @@ public enum CassandraRelevantProperties
      * The current messaging version. This is used when we add new messaging versions without adopting them immediately,
      * or to force the node to use a specific version for testing purposes.
      */
+    @Deprecated // remove when cndb no longer supports bdp/6.8-cndb
     DS_CURRENT_MESSAGING_VERSION("ds.current_messaging_version", Integer.toString(MessagingService.VERSION_DS_11)),
 
     /**
@@ -655,7 +662,12 @@ public enum CassandraRelevantProperties
     /**
      * Whether to use fair locking for TrieMemtable shard locks. Defaults to false.
      */
-    TRIE_MEMTABLE_SHARD_LOCK_FAIRNESS("cassandra.trie.memtable.shard.lock.fairness", "false");
+    TRIE_MEMTABLE_SHARD_LOCK_FAIRNESS("cassandra.trie.memtable.shard.lock.fairness", "false"),
+
+    /**
+     * A directory to the default system key location - used by transparent data encryption
+     */
+    SYSTEM_KEY_DIRECTORY("cassandra.system_key_directory", "/etc/cassandra/conf");
 
     CassandraRelevantProperties(String key, String defaultVal)
     {

@@ -23,12 +23,15 @@ import java.util.*;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import javax.annotation.Nullable;
+
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Multimap;
 import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.index.FeatureNeedsIndexRebuildException;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.slf4j.Logger;
@@ -50,6 +53,7 @@ import org.apache.cassandra.db.filter.ClusteringIndexFilter;
 import org.apache.cassandra.db.filter.ClusteringIndexNamesFilter;
 import org.apache.cassandra.db.filter.ClusteringIndexSliceFilter;
 import org.apache.cassandra.db.filter.DataLimits;
+import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.marshal.AbstractType;
@@ -70,7 +74,6 @@ import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
 import org.apache.cassandra.index.sai.disk.v1.Segment;
 import org.apache.cassandra.index.sai.disk.vector.VectorCompression;
 import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
-import org.apache.cassandra.index.sai.iterators.KeyRangeIntersectionIterator;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.iterators.KeyRangeTermIterator;
 import org.apache.cassandra.index.sai.memory.MemtableIndex;
@@ -87,6 +90,7 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.InsertionOrderedNavigableSet;
 import org.apache.cassandra.utils.MergeIterator;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.Throwables;
@@ -121,6 +125,8 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
 
     private final PrimaryKey.Factory keyFactory;
     private final PrimaryKey firstPrimaryKey;
+
+    private final NavigableSet<Clustering<?>> nextClusterings;
 
     final Plan.Factory planFactory;
 
@@ -178,11 +184,12 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
 
         this.keyFactory = PrimaryKey.factory(cfs.metadata().comparator, indexFeatureSet);
         this.firstPrimaryKey = keyFactory.createTokenOnly(mergeRange.left.getToken());
+        this.nextClusterings = new InsertionOrderedNavigableSet<>(cfs.metadata().comparator);
         var tableMetrics = new Plan.TableMetrics(estimateTotalAvailableRows(ranges),
                                                  avgCellsPerRow(),
                                                  avgRowSizeInBytes(),
                                                  cfs.getLiveSSTables().size());
-        this.planFactory = new Plan.Factory(tableMetrics, this);
+        this.planFactory = new Plan.Factory(tableMetrics, this, command.rowFilter().indexHints);
     }
 
     public PrimaryKey.Factory primaryKeyFactory()
@@ -209,7 +216,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     {
         // NOTE: we cannot remove the order by filter expression here yet because it is used in the FilterTree class
         // to filter out shadowed rows.
-        return this.command.rowFilter().root();
+        return this.command.rowFilter().root;
     }
 
     /**
@@ -295,16 +302,24 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     /**
      * Get an iterator over the rows for this partition key. Builds a search view that includes all memtables and all
      * {@link SSTableSet#LIVE} sstables.
-     * @param key
+     * @param keys
      * @param executionController
      * @return
      */
-    public UnfilteredRowIterator getPartition(PrimaryKey key, ReadExecutionController executionController)
+    public UnfilteredRowIterator getPartition(List<PrimaryKey> keys, ReadExecutionController executionController)
     {
-        if (key == null)
-            throw new IllegalArgumentException("non-null key required");
+        if (keys == null)
+            throw new IllegalArgumentException("non-null keys required");
+        if (keys.isEmpty())
+            throw new IllegalArgumentException("At least one primary key is required!");
 
-        SinglePartitionReadCommand partition = getPartitionReadCommand(key, executionController);
+        SinglePartitionReadCommand partition = SinglePartitionReadCommand.create(cfs.metadata(),
+                                                                                 command.nowInSec(),
+                                                                                 command.columnFilter(),
+                                                                                 RowFilter.NONE,
+                                                                                 DataLimits.NONE,
+                                                                                 keys.get(0).partitionKey(),
+                                                                                 makeFilter(keys));
         return partition.queryMemtableAndDisk(cfs, executionController);
     }
 
@@ -377,12 +392,13 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         // The limit here is higher than the final limit, so that the optimizer has a bit more freedom
         // in which predicates it leaves in the plan and the probability of accidentally removing a good branch
         // here is even lower.
-        Plan plan = rowsIteration.limitIntersectedClauses(KeyRangeIntersectionIterator.INTERSECTION_CLAUSE_LIMIT * 3);
+        int intersectionClauseLimit = CassandraRelevantProperties.SAI_INTERSECTION_CLAUSE_LIMIT.getInt();
+        Plan plan = rowsIteration.limitIntersectedClauses(intersectionClauseLimit * 3);
 
         if (QUERY_OPT_LEVEL > 0)
             plan = plan.optimize();
 
-        plan = plan.limitIntersectedClauses(KeyRangeIntersectionIterator.INTERSECTION_CLAUSE_LIMIT);
+        plan = plan.limitIntersectedClauses(intersectionClauseLimit);
 
         if (plan.contains(node -> node instanceof Plan.AnnIndexScan))
             queryContext.setFilterSortOrder(QueryContext.FilterSortOrder.SCAN_THEN_FILTER);
@@ -540,7 +556,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     void buildPlanForExpressions(Plan.Builder builder, Collection<Expression> expressions)
     {
         Operation.OperationType op = builder.type;
-        assert !expressions.isEmpty() : "expressions should not be empty for " + op + " in " + command.rowFilter().root();
+        assert !expressions.isEmpty() : "expressions should not be empty for " + op + " in " + command.rowFilter().root;
 
         assert !expressions.stream().anyMatch(e -> e.operation == Expression.Op.ORDER_BY);
 
@@ -551,11 +567,17 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
             return;
         }
 
+        IndexHints hints = command.rowFilter().indexHints;
+
         for (Expression expression : expressions)
         {
             if (expression.context.isIndexed())
             {
-                if ( expression.getOp() == Expression.Op.NOT_EQ)
+                // Skip the expressions using indexes that are excluded by the user-provided hints
+                if (hints.excludes(expression.context.getIndexName()))
+                    continue;
+
+                if (expression.getOp() == Expression.Op.NOT_EQ)
                     builder.add(buildInequalityPlan(expression));
                 else
                 {
@@ -785,9 +807,11 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
                command.clusteringIndexFilter(key.partitionKey()).selects(key.clustering());
     }
 
+    @Nullable
     private StorageAttachedIndex getBestIndexFor(RowFilter.Expression expression)
     {
-        return cfs.indexManager.getBestIndexFor(expression, StorageAttachedIndex.class).orElse(null);
+        return cfs.indexManager.getBestIndexFor(expression, command.rowFilter().indexHints, StorageAttachedIndex.class)
+                               .orElse(null);
     }
 
     // Note: This method assumes that the selects method has already been called for the
@@ -801,6 +825,29 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         else
             return new ClusteringIndexNamesFilter(FBUtilities.singleton(key.clustering(), cfs.metadata().comparator),
                                                   clusteringIndexFilter.isReversed());
+    }
+
+    private ClusteringIndexFilter makeFilter(List<PrimaryKey> keys)
+    {
+        PrimaryKey firstKey = keys.get(0);
+
+        assert !indexFeatureSet.isRowAware() ||
+               cfs.metadata().comparator.size() == 0 && firstKey.hasEmptyClustering() ||
+               cfs.metadata().comparator.size() > 0 && (!firstKey.hasEmptyClustering() || cfs.metadata().hasStaticColumns()):
+        "PrimaryKey " + firstKey + " clustering does not match table. There should be a clustering of size " + cfs.metadata().comparator.size();
+
+        ClusteringIndexFilter clusteringIndexFilter = command.clusteringIndexFilter(firstKey.partitionKey());
+        if (cfs.metadata().comparator.size() == 0 || firstKey.hasEmptyClustering())
+        {
+            return clusteringIndexFilter;
+        }
+        else
+        {
+            nextClusterings.clear();
+            for (PrimaryKey key : keys)
+                nextClusterings.add(key.clustering());
+            return new ClusteringIndexNamesFilter(nextClusterings, clusteringIndexFilter.isReversed());
+        }
     }
 
     /**
