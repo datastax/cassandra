@@ -626,6 +626,30 @@ public abstract class ControllerTest
         testBooleanOption(Controller.PARALLELIZE_OUTPUT_SHARDS_OPTION, Controller.DEFAULT_PARALLELIZE_OUTPUT_SHARDS, Controller::parallelizeOutputShards);
     }
 
+    @Test
+    public void testMaxSstablesPerShardFactor()
+    {
+        HashMap<String, String> options = new HashMap<>();
+        Controller controller = Controller.fromOptions(cfs, options);
+        assertEquals(Controller.DEFAULT_MAX_SSTABLES_PER_SHARD_FACTOR, controller.getMaxSstablesPerShardFactor(), epsilon);
+
+        options.put(Controller.MAX_SSTABLES_PER_SHARD_FACTOR_OPTION, "123.456");
+        Controller.validateOptions(options);
+        controller = Controller.fromOptions(cfs, options);
+        assertEquals(123.456, controller.getMaxSstablesPerShardFactor(), epsilon);
+
+        options.put(Controller.MAX_SSTABLES_PER_SHARD_FACTOR_OPTION, "1e1000");
+        Controller.validateOptions(options);
+        controller = Controller.fromOptions(cfs, options);
+        assertEquals(Double.POSITIVE_INFINITY, controller.getMaxSstablesPerShardFactor(), epsilon);
+
+        options.put(Controller.MAX_SSTABLES_PER_SHARD_FACTOR_OPTION, "0.9");
+        assertThrows(ConfigurationException.class, () -> Controller.validateOptions(options));
+
+        options.put(Controller.MAX_SSTABLES_PER_SHARD_FACTOR_OPTION, "invalid");
+        assertThrows(ConfigurationException.class, () -> Controller.validateOptions(options));
+    }
+
     public void testBooleanOption(String name, boolean defaultValue, Predicate<Controller> getter, String... extraSettings)
     {
         Controller controller = Controller.fromOptions(cfs, newOptions(extraSettings));
