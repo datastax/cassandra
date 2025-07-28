@@ -951,6 +951,7 @@ public enum CassandraRelevantProperties
     UCS_L0_SHARDS_ENABLED("unified_compaction.l0_shards_enabled", "true"),
     UCS_MAX_ADAPTIVE_COMPACTIONS("unified_compaction.max_adaptive_compactions", "5"),
     UCS_MAX_SPACE_OVERHEAD("unified_compaction.max_space_overhead", "0.2"),
+    UCS_MAX_SSTABLES_PER_SHARD_FACTOR("unified_compaction.max_sstables_per_shard_factor", "10"),
     UCS_MIN_SSTABLE_SIZE("unified_compaction.min_sstable_size", "100MiB"),
     UCS_NUM_SHARDS("unified_compaction.num_shards"),
     UCS_OVERLAP_INCLUSION_METHOD("unified_compaction.overlap_inclusion_method"),
