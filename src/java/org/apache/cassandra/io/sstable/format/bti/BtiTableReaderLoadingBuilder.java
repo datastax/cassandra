@@ -19,6 +19,7 @@
 package org.apache.cassandra.io.sstable.format.bti;
 
 import java.io.IOException;
+import java.util.Optional;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -92,11 +93,12 @@ public class BtiTableReaderLoadingBuilder extends SortedTableReaderLoadingBuilde
     {
         try
         {
-            StatsComponent statsComponent = StatsComponent.load(descriptor, MetadataType.STATS, MetadataType.VALIDATION, MetadataType.HEADER);
+            StatsComponent statsComponent = StatsComponent.load(descriptor, MetadataType.STATS, MetadataType.VALIDATION, MetadataType.HEADER, MetadataType.COMPACTION);
             builder.setSerializationHeader(statsComponent.serializationHeader(descriptor, builder.getTableMetadataRef().getLocal()));
             checkArgument(!online || builder.getSerializationHeader() != null);
 
             builder.setStatsMetadata(statsComponent.statsMetadata());
+            builder.setCompactionMetadata(Optional.ofNullable(statsComponent.compactionMetadata()));
             ValidationMetadata validationMetadata = statsComponent.validationMetadata();
             validatePartitioner(builder.getTableMetadataRef().getLocal(), validationMetadata);
 
