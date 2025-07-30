@@ -87,7 +87,6 @@ import org.apache.cassandra.io.sstable.SSTableIdentityIterator;
 import org.apache.cassandra.io.sstable.SSTableReadsListener;
 import org.apache.cassandra.io.sstable.format.SSTableFormat.Components;
 import org.apache.cassandra.io.sstable.metadata.CompactionMetadata;
-import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.io.util.ChannelProxy;
@@ -328,7 +327,7 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
 
             try
             {
-                CompactionMetadata metadata = StatsComponent.load(sstable.descriptor).compactionMetadata();
+                CompactionMetadata metadata = sstable.getCompactionMetadata().orElse(null);
                 // If we can't load the CompactionMetadata, we are forced to estimate the keys using the index
                 // summary. (CASSANDRA-10676)
                 if (metadata == null)
@@ -383,8 +382,7 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
 
         try
         {
-            CompactionMetadata metadata = (CompactionMetadata) descriptor.getMetadataSerializer()
-                                                                         .deserialize(descriptor, MetadataType.COMPACTION);
+            CompactionMetadata metadata = getCompactionMetadata().orElse(null);
             return metadata == null ? null : metadata.cardinalityEstimator;
         }
         catch (IOException e)
@@ -513,6 +511,7 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
         this.dfile = builder.getDataFile();
         this.maxDataAge = builder.getMaxDataAge();
         this.openReason = builder.getOpenReason();
+        this.compactionMetadata = builder.getCompactionMetadata();
         this.first = builder.getFirst();
         this.last = builder.getLast();
         this.interval = first == null || last == null ? null : Interval.create(first, last, this);
@@ -689,6 +688,7 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
             b.setDataFile(sharedCopy ? sharedCopyOrNull(dfile) : dfile);
 
         b.setStatsMetadata(sstableMetadata);
+        b.setCompactionMetadata(compactionMetadata);
         b.setSerializationHeader(header);
         b.setMaxDataAge(maxDataAge);
         b.setOpenReason(openReason);
@@ -1513,6 +1513,17 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
         return sstableMetadata;
     }
 
+    /**
+     * This method accesses directly the compactionMetadata field without loading it from disk in case it was not loaded yet.
+     * It is used only by ForwardingSSTableReader in tests.
+     * @return the internal value of the field
+     */
+    @VisibleForTesting
+    Optional<CompactionMetadata> getCompactionMetadataUnsafe()
+    {
+        return compactionMetadata;
+    }
+
     public RandomAccessReader openDataReader(RateLimiter limiter, ReadPattern accessPattern)
     {
         assert limiter != null;
@@ -2214,6 +2225,7 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
     {
         private long maxDataAge;
         private StatsMetadata statsMetadata;
+        private Optional<CompactionMetadata> compactionMetadata;
         private OpenReason openReason;
         private SerializationHeader serializationHeader;
         private FileHandle dataFile;
@@ -2237,6 +2249,13 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
         {
             Preconditions.checkNotNull(statsMetadata);
             this.statsMetadata = statsMetadata;
+            return (B) this;
+        }
+
+        public B setCompactionMetadata(Optional<CompactionMetadata> compactionMetadata)
+        {
+//            Preconditions.checkNotNull(compactionMetadata);
+            this.compactionMetadata = compactionMetadata != null ? compactionMetadata : Optional.empty();
             return (B) this;
         }
 
@@ -2285,6 +2304,11 @@ public abstract class SSTableReader extends SSTable implements UnfilteredSource,
         public StatsMetadata getStatsMetadata()
         {
             return statsMetadata;
+        }
+
+        public Optional<CompactionMetadata> getCompactionMetadata()
+        {
+            return compactionMetadata;
         }
 
         public OpenReason getOpenReason()
