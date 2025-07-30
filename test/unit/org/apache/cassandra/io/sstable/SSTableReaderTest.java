@@ -18,6 +18,7 @@
 package org.apache.cassandra.io.sstable;
 
 import java.io.IOException;
+import java.lang.reflect.Field;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.attribute.FileTime;
@@ -29,6 +30,7 @@ import java.util.EnumSet;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
@@ -93,6 +95,7 @@ import org.apache.cassandra.io.sstable.format.bti.BtiFormat;
 import org.apache.cassandra.io.sstable.indexsummary.IndexSummarySupport;
 import org.apache.cassandra.io.sstable.keycache.KeyCache;
 import org.apache.cassandra.io.sstable.keycache.KeyCacheSupport;
+import org.apache.cassandra.io.sstable.metadata.CompactionMetadata;
 import org.apache.cassandra.io.sstable.metadata.MetadataComponent;
 import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.sstable.metadata.ValidationMetadata;
@@ -127,6 +130,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 import static org.junit.Assume.assumeTrue;
@@ -1573,7 +1577,7 @@ public class SSTableReaderTest
     }
 
     @Test
-    public void testGetApproximateKeyCount() throws InterruptedException
+    public void testGetApproximateKeyCount() throws Exception
     {
         ColumnFamilyStore store = discardSSTables(KEYSPACE1, CF_STANDARD);
         getNewSSTable(store);
@@ -1584,6 +1588,31 @@ public class SSTableReaderTest
 
             TimeUnit.MILLISECONDS.sleep(1000); //Giving enough time to clear files.
             List<SSTableReader> sstables = new ArrayList<>(viewFragment1.sstables);
+            assertEquals(50, SSTableReader.getApproximateKeyCount(sstables));
+
+            Field compactionMetadataField = ReflectionUtils.getField(SSTable.class, "compactionMetadata");
+            for (SSTableReader sstable : sstables)
+                compactionMetadataField.set(sstable, null);
+
+            // simulate the case in which CompactionMetadata is not loaded yet
+            for (SSTableReader sstable : sstables)
+                assertNull(compactionMetadataField.get(sstable));
+
+            assertEquals(50, SSTableReader.getApproximateKeyCount(sstables));
+
+            // verify that CompactionMetadata has been loaded from storage
+            for (SSTableReader sstable : sstables)
+            {
+                Optional<CompactionMetadata> compactionMetadata = (Optional<CompactionMetadata>) compactionMetadataField.get(sstable);
+                assertNotNull(compactionMetadata);
+                assertTrue(compactionMetadata.isPresent());
+            }
+
+            // simulate the case in which CompactionMetadata is not present
+            for (SSTableReader sstable : sstables)
+                compactionMetadataField.set(sstable, Optional.empty());
+
+            // in this case the cardinality is not available, so we fallback to the index summary
             assertEquals(50, SSTableReader.getApproximateKeyCount(sstables));
         }
     }
