@@ -186,7 +186,7 @@ public class MockSchema
                                                               .get(MetadataType.STATS);
             SSTableReader reader = SSTableReader.internalOpen(descriptor, components, cfs.metadata,
                                                               fileHandle.sharedCopy(), fileHandle.sharedCopy(), indexSummary.sharedCopy(),
-                                                              new AlwaysPresentFilter(), 1L, metadata, SSTableReader.OpenReason.NORMAL, header);
+                                                              new AlwaysPresentFilter(), 1L, metadata, null, SSTableReader.OpenReason.NORMAL, header);
             reader.first = readerBounds(firstToken);
             reader.last = readerBounds(lastToken);
             if (!keepRef)
