@@ -221,7 +221,7 @@ public class EncryptedSequentialWriter extends SequentialWriter
             encrypted.limit(CHUNK_SIZE);
 
             if (encrypted.getInt(CHUNK_SIZE - 4) != (int) checksum.getValue())
-                throw new CorruptBlockException(getFile().toString(), truncateChunk, CHUNK_SIZE);
+                throw new CorruptBlockException(getFile(), truncateChunk, CHUNK_SIZE);
 
             try
             {
@@ -233,7 +233,7 @@ public class EncryptedSequentialWriter extends SequentialWriter
             }
             catch (IOException e)
             {
-                throw new CorruptBlockException(getFile().toString(), truncateChunk, CHUNK_SIZE, e);
+                throw new CorruptBlockException(getFile(), truncateChunk, CHUNK_SIZE, e);
             }
         }
         catch (CorruptBlockException e)
@@ -242,7 +242,7 @@ public class EncryptedSequentialWriter extends SequentialWriter
         }
         catch (EOFException e)
         {
-            throw new CorruptSSTableException(new CorruptBlockException(getFile().toString(), truncateChunk, CHUNK_SIZE), getFile());
+            throw new CorruptSSTableException(new CorruptBlockException(getFile(), truncateChunk, CHUNK_SIZE), getFile());
         }
         catch (IOException e)
         {
