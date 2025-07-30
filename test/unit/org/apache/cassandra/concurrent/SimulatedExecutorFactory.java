@@ -141,7 +141,7 @@ public class SimulatedExecutorFactory implements ExecutorFactory, Clock
     }
 
     @Override
-    public ScheduledExecutorPlus scheduled(boolean executeOnShutdown, String name, int priority, SimulatorSemantics simulatorSemantics)
+    public ScheduledExecutorPlus scheduled(boolean executeOnShutdown, String name, int priority, SimulatorSemantics simulatorSemantics, int threads)
     {
         return new ForwardingScheduledExecutorPlus(new UnorderedScheduledExecutorService());
     }
