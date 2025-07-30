@@ -19,6 +19,8 @@ package org.apache.cassandra.io.sstable.format.bti;
 
 import java.io.IOException;
 import java.util.Collection;
+import java.util.Map;
+import java.util.Optional;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
@@ -44,6 +46,10 @@ import org.apache.cassandra.io.sstable.format.SSTableReader.OpenReason;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SortedTableWriter;
 import org.apache.cassandra.io.sstable.format.bti.BtiFormat.Components;
+import org.apache.cassandra.io.sstable.metadata.CompactionMetadata;
+import org.apache.cassandra.io.sstable.metadata.MetadataComponent;
+import org.apache.cassandra.io.sstable.metadata.MetadataType;
+import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.io.util.DataPosition;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.MmappedRegionsCache;
@@ -101,7 +107,9 @@ public class BtiTableWriter extends SortedTableWriter<BtiFormatPartitionWriter, 
 
         try
         {
-            builder.setStatsMetadata(statsMetadata());
+            Map<MetadataType, MetadataComponent> finalMetadata = finalizeMetadata();
+            builder.setStatsMetadata((StatsMetadata) finalMetadata.get(MetadataType.STATS));
+            builder.setCompactionMetadata(Optional.ofNullable((CompactionMetadata)finalMetadata.get(MetadataType.COMPACTION)));
 
             partitionIndex = partitionIndexSupplier.get();
             rowIndexFile = indexWriter.rowIndexFHBuilder.complete();

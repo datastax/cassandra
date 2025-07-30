@@ -47,6 +47,8 @@ import org.apache.cassandra.io.sstable.filter.BloomFilterTracker;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableFormat.Components;
 import org.apache.cassandra.io.sstable.format.TOCComponent;
+import org.apache.cassandra.io.sstable.metadata.CompactionMetadata;
+import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.metrics.TableMetrics;
@@ -78,6 +80,8 @@ public abstract class SSTable
     public final boolean compression;
 
     protected final TableMetadataRef metadata;
+    // This field is null if the compaction metadata is not loaded yet, it can be a empty optional if the compaction metadata is not available
+    protected Optional<CompactionMetadata> compactionMetadata;
 
     public final ChunkCache chunkCache;
     public final IOOptions ioOptions;
@@ -163,6 +167,17 @@ public abstract class SSTable
     public ImmutableSet<Component> components()
     {
         return components;
+    }
+
+    public Optional<CompactionMetadata> getCompactionMetadata() throws IOException
+    {
+        // if compaction metadata is not loaded yet, load it
+        if (compactionMetadata == null)
+        {
+            logger.debug("Loading compaction metadata for {}", descriptor);
+            compactionMetadata = Optional.ofNullable((CompactionMetadata) descriptor.getMetadataSerializer().deserialize(descriptor, MetadataType.COMPACTION));
+        }
+        return compactionMetadata;
     }
 
     /**
