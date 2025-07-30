@@ -69,9 +69,9 @@ public class ScheduledThreadPoolExecutorPlus extends ScheduledThreadPoolExecutor
         }
     };
 
-    ScheduledThreadPoolExecutorPlus(NamedThreadFactory threadFactory)
+    ScheduledThreadPoolExecutorPlus(int corePoolSize, NamedThreadFactory threadFactory)
     {
-        super(1, threadFactory);
+        super(corePoolSize, threadFactory);
         setRejectedExecutionHandler(rejectedExecutionHandler);
     }
 
