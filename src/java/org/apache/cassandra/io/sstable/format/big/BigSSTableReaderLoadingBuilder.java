@@ -19,6 +19,7 @@
 package org.apache.cassandra.io.sstable.format.big;
 
 import java.io.IOException;
+import java.util.Optional;
 import java.util.OptionalInt;
 
 import org.slf4j.Logger;
@@ -75,11 +76,12 @@ public class BigSSTableReaderLoadingBuilder extends SortedTableReaderLoadingBuil
             if (online && builder.getTableMetadataRef().getLocal().params.caching.cacheKeys())
                 builder.setKeyCache(new KeyCache(CacheService.instance.keyCache));
 
-            StatsComponent statsComponent = StatsComponent.load(descriptor, MetadataType.STATS, MetadataType.HEADER, MetadataType.VALIDATION);
+            StatsComponent statsComponent = StatsComponent.load(descriptor, MetadataType.STATS, MetadataType.HEADER, MetadataType.VALIDATION, MetadataType.COMPACTION);
             builder.setSerializationHeader(statsComponent.serializationHeader(descriptor, builder.getTableMetadataRef().getLocal()));
             checkArgument(!online || builder.getSerializationHeader() != null);
 
             builder.setStatsMetadata(statsComponent.statsMetadata());
+            builder.setCompactionMetadata(Optional.ofNullable(statsComponent.compactionMetadata()));
             if (descriptor.version.hasKeyRange() && statsComponent.statsMetadata() != null)
             {
                 builder.setFirst(tableMetadataRef.getLocal().partitioner.decorateKey(statsComponent.statsMetadata().firstKey));

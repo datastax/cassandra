@@ -1392,6 +1392,7 @@ public class LogTransactionTest extends AbstractTransactionalTest
                                                                          .setFilter(FilterFactory.AlwaysPresent)
                                                                          .setMaxDataAge(1L)
                                                                          .setStatsMetadata(metadata)
+                                                                         .setCompactionMetadata(null)
                                                                          .setOpenReason(SSTableReader.OpenReason.NORMAL)
                                                                          .setSerializationHeader(header)
                                                                          .setFirst(key)
