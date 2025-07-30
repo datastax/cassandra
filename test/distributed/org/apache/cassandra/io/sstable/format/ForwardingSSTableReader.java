@@ -23,6 +23,7 @@ import java.nio.ByteBuffer;
 import java.util.Collection;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Optional;
 
 import com.google.common.collect.ImmutableSet;
 import com.google.common.util.concurrent.RateLimiter;
@@ -51,6 +52,7 @@ import org.apache.cassandra.io.sstable.IVerifier;
 import org.apache.cassandra.io.sstable.KeyIterator;
 import org.apache.cassandra.io.sstable.KeyReader;
 import org.apache.cassandra.io.sstable.SSTableReadsListener;
+import org.apache.cassandra.io.sstable.metadata.CompactionMetadata;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.io.util.ChannelProxy;
 import org.apache.cassandra.io.util.CheckedFunction;
@@ -526,6 +528,12 @@ public abstract class ForwardingSSTableReader extends SSTableReader
     public StatsMetadata getSSTableMetadata()
     {
         return delegate.getSSTableMetadata();
+    }
+
+    @Override
+    public Optional<CompactionMetadata> getCompactionMetadata() throws IOException
+    {
+        return delegate.getCompactionMetadataUnsafe();
     }
 
     @Override
