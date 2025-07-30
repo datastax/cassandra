@@ -233,9 +233,9 @@ public abstract class FuzzTestBase extends CQLTester.InMemory
             }
 
             @Override
-            public ScheduledExecutorPlus scheduled(boolean executeOnShutdown, String name, int priority, SimulatorSemantics simulatorSemantics)
+            public ScheduledExecutorPlus scheduled(boolean executeOnShutdown, String name, int priority, SimulatorSemantics simulatorSemantics, int threads)
             {
-                return delegate.scheduled(executeOnShutdown, name, priority, simulatorSemantics);
+                return delegate.scheduled(executeOnShutdown, name, priority, simulatorSemantics, threads);
             }
 
             private boolean shouldMock()
