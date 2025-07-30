@@ -343,7 +343,7 @@ public abstract class SSTableWriter extends SSTable implements Transactional, SS
         }
     }
 
-    protected Map<MetadataType, MetadataComponent> finalizeMetadata()
+    protected final Map<MetadataType, MetadataComponent> finalizeMetadata()
     {
         return metadataCollector.finalizeMetadata(getPartitioner().getClass().getCanonicalName(),
                                                   metadata().params.bloomFilterFpChance,
@@ -353,11 +353,6 @@ public abstract class SSTableWriter extends SSTable implements Transactional, SS
                                                   header,
                                                   first.retainable().getKey(),
                                                   last.retainable().getKey());
-    }
-
-    protected StatsMetadata statsMetadata()
-    {
-        return (StatsMetadata) finalizeMetadata().get(MetadataType.STATS);
     }
 
     public void releaseMetadataOverhead()
@@ -415,7 +410,8 @@ public abstract class SSTableWriter extends SSTable implements Transactional, SS
             {
                 if (storageHandler != null)
                 {
-                    StatsMetadata stats = statsMetadata();
+                    Map<MetadataType, MetadataComponent> finalMetadata = finalizeMetadata();
+                    StatsMetadata stats = (StatsMetadata) finalMetadata.get(MetadataType.STATS);
                     finalReader = storageHandler.onOpeningWrittenSSTableFailure(SSTableReader.OpenReason.NORMAL,
                                                                                 descriptor,
                                                                                 components(),
