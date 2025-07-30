@@ -178,7 +178,7 @@ public class VectorTester extends SAITester
     }
 
     /**
-     * {@link VectorTester} parameterized for {@link Version#CA}, {@link Version#DC}, {@link Version#EC}, and {@link Version#ED}.
+     * {@link VectorTester} parameterized for all {@link Version}s supporting vector indexes.
      */
     @Ignore
     @RunWith(Parameterized.class)
