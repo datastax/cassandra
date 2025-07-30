@@ -1010,6 +1010,172 @@ public class VectorTypeTest extends VectorTester.Versioned
     }
 
     /**
+     * Tests a filter-then-sort query with a concurrent vector deletion. See CNDB-10536 for details.
+     */
+    @Test
+    public void testFilterThenSortQueryWithConcurrentVectorDeletion() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v vector<float, 2>, c int)");
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(c) USING 'StorageAttachedIndex'");
+
+        // write into memtable
+        execute("INSERT INTO %s (k, v, c) VALUES (1, [1, 1], 1)");
+        execute("INSERT INTO %s (k, v, c) VALUES (2, [2, 2], 1)");
+
+        // inject a barrier to block CassandraOnHeapGraph#getOrdinal
+        Injections.Barrier barrier = Injections.newBarrier("block_get_ordinal", 2, false)
+                                               .add(InvokePointBuilder.newInvokePoint()
+                                                                      .onClass(CassandraOnHeapGraph.class)
+                                                                      .onMethod("getOrdinal")
+                                                                      .atEntry())
+                                               .build();
+        Injections.inject(barrier);
+
+        // start a filter-then-sort query asynchronously that will get blocked in the injected barrier
+        QueryController.QUERY_OPT_LEVEL = 0;
+        ExecutorService executor = Executors.newFixedThreadPool(1);
+        String select = "SELECT k FROM %s WHERE c=1 ORDER BY v ANN OF [1, 1] LIMIT 100";
+        Future<UntypedResultSet> future = executor.submit(() -> execute(select));
+
+        // once the query is blocked, delete one of the vectors and flush, so the postings for the vector are removed
+        waitForAssert(() -> Assert.assertEquals(1, barrier.getCount()));
+        execute("DELETE v FROM %s WHERE k = 1");
+        flush();
+
+        // release the barrier to resume the query, which should succeed
+        barrier.countDown();
+        assertRows(future.get(), row(2));
+
+        assertEquals(0, executor.shutdownNow().size());
+    }
+
+    @Test
+    public void testPartitionKeyRestrictionCombinedWithSearchPredicate() throws Throwable
+    {
+        // Need to test the search then order path
+        QueryController.QUERY_OPT_LEVEL = 0;
+
+        // We use a clustered primary key to simplify the mental model for this test.
+        // The bug this test exposed happens when the last row(s) in a segment, based on PK order, are present
+        // in a peer index for an sstable's search index but not its vector index.
+        createTable("CREATE TABLE %s (partition int, i int, v vector<float, 2>, c int, PRIMARY KEY(partition, i))");
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function': 'euclidean'}");
+        createIndex("CREATE CUSTOM INDEX ON %s(c) USING 'StorageAttachedIndex'");
+
+        var partitionKeys = new ArrayList<Integer>();
+        // Insert many rows
+        for (int i = 1; i < 1000; i++)
+        {
+            execute("INSERT INTO %s (partition, i, v, c) VALUES (?, ?, ?, ?)", i, i, vector(i, i), i);
+            partitionKeys.add(i);
+        }
+
+        beforeAndAfterFlush(() -> {
+            // Restricted by partition key and with low as well as high cardinality of results for column c
+            assertRows(execute("SELECT i FROM %s WHERE partition = 1 AND c > 0 ORDER BY v ANN OF [1,1] LIMIT 1"), row(1));
+            assertRows(execute("SELECT i FROM %s WHERE partition = 1 AND c < 10 ORDER BY v ANN OF [1,1] LIMIT 1"), row(1));
+
+            // Do some partition key range queries, the restriction on c is meaningless, but forces the search then
+            // order path
+            var r1 = execute("SELECT partition FROM %s WHERE token(partition) < token(11) AND c > 0 ORDER BY v ANN OF [1,1] LIMIT 1000");
+            var e1 = keysWithUpperBound(partitionKeys, 11,false);
+            assertThat(keys(r1)).containsExactlyInAnyOrderElementsOf(e1);
+
+            var r2 = execute("SELECT partition FROM %s WHERE token(partition) >= token(11) AND token(partition) <= token(20) AND c <= 1000 ORDER BY v ANN OF [1,1] LIMIT 1000");
+            var e2 = keysInBounds(partitionKeys, 11, true, 20, true);
+            assertThat(keys(r2)).containsExactlyInAnyOrderElementsOf(e2);
+        });
+    }
+
+    @Test
+    public void newJVectorOptionsTest()
+    {
+        // jvector version is tied to sai version, so the test parameterization covers all relevant cases.
+        // Configure the version to ensure we don't fail for settings that are unsupported on earlier versions of jvector
+
+        // This test ensures that we can set and retrieve new jvector parameters
+        // (neighborhood_overflow, alpha, enable_hierarchy), and that they are honored at index build time.
+
+        createTable("CREATE TABLE %s (pk int, txt text, vec vector<float, 4>, PRIMARY KEY(pk))");
+
+        // We'll specify a few options, including the existing ones (e.g. maximum_node_connections).
+        // Setting dimension=4 also triggers the default alpha=1.2 if not overridden,
+        // which you can compare to your own defaults in the IndexWriterConfig code.
+
+        // This should succeed.
+        createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex' "
+                    + "WITH OPTIONS = {"
+                    + "  'maximum_node_connections' : '20', "
+                    + "  'construction_beam_width'   : '300', "
+                    + "  'similarity_function'       : 'euclidean', "
+                    + "  'enable_hierarchy'          : 'true', "
+                    + "  'neighborhood_overflow'     : '1.5', "
+                    + "  'alpha'                     : '1.8' "
+                    + '}');
+
+        // Insert many rows
+        for (int i = 0; i < 2000; i++)
+            execute("INSERT INTO %s (pk, txt, vec) VALUES (?, ?, ?)", i, "row" + i, randomVectorBoxed(4));
+
+        // Run basic query to confirm we can, no need to validate results
+        execute("SELECT pk FROM %s ORDER BY vec ANN OF [2.0, 2.0, 3.0, 4.0] LIMIT 2");
+        // Confirm that we can flush with custom options
+        flush();
+        // Run basic query to confirm we can, no need to validate results
+        execute("SELECT pk FROM %s ORDER BY vec ANN OF [2.0, 2.0, 3.0, 4.0] LIMIT 2");
+        // Confirm that we can compact with custom options
+        compact();
+        // Run basic query to confirm we can, no need to validate results
+        execute("SELECT pk FROM %s ORDER BY vec ANN OF [2.0, 2.0, 3.0, 4.0] LIMIT 2");
+
+        // Confirm that the config picks up our custom settings.
+        StorageAttachedIndex saiIndex =
+        (StorageAttachedIndex) getCurrentColumnFamilyStore().indexManager.listIndexes().iterator().next();
+
+        IndexWriterConfig config = saiIndex.getIndexContext().getIndexWriterConfig();
+        // Check the new fields
+        assertEquals(1.5f, config.getNeighborhoodOverflow(999f), 0.0001f);
+        assertEquals(1.8f,  config.getAlpha(999f),               0.0001f);
+        assertTrue(config.isHierarchyEnabled());
+        assertEquals(20,    config.getMaximumNodeConnections());
+        assertEquals(40,    config.getAnnMaxDegree());
+        assertEquals(300,   config.getConstructionBeamWidth());
+        assertEquals(VectorSimilarityFunction.EUCLIDEAN, config.getSimilarityFunction());
+    }
+
+    @Test
+    public void testMemtableInsertSearchInsertSearchHandling()
+    {
+        createTable("CREATE TABLE %s (id text PRIMARY KEY, embedding vector<float, 5>)");
+        createIndex("CREATE CUSTOM INDEX ON %s(embedding) USING 'StorageAttachedIndex' " +
+                    "WITH OPTIONS = {'similarity_function': 'dot_product', 'source_model': 'OTHER'}");
+
+        // Insert initial data
+        execute("INSERT INTO %s (id, embedding) VALUES ('row1', [0.1, 0.1, 0.1, 0.1, 0.1])");
+        execute("INSERT INTO %s (id, embedding) VALUES ('row2', [0.9, 0.9, 0.9, 0.9, 0.9])");
+
+        // Query 100 times to try to guarantee all graph searchers are initialized
+        for (int i = 0; i < 100; i++)
+        {
+            // Initial vector search
+            UntypedResultSet initialSearch = execute("SELECT * FROM %s ORDER BY embedding ANN OF [0.8, 0.8, 0.8, 0.8, 0.8] LIMIT 1");
+            assertThat(initialSearch).hasSize(1);
+        }
+
+        // Update one of the rows (this update wasn't observed due to state leaked between queries previously)
+        execute("INSERT INTO %s (id, embedding) VALUES ('row3', [0.7, 0.7, 0.7, 0.7, 0.7])");
+
+        // Query 100 times to make sure it works as expected
+        for (int j = 0; j < 100; j++)
+        {
+            // Get all data to verify we have 2 rows
+            UntypedResultSet allData = execute("SELECT * FROM %s ORDER BY embedding ANN OF [0.8, 0.8, 0.8, 0.8, 0.8] LIMIT 1000");
+            assertThat(allData).hasSize(3);
+        }
+    }
+
+    /**
      * This test broke with ED because the limit pulls in all primary keys from the score ordered iterator,
      * and then we grabbed the wrong one in the batch, which led to the outdated score being used for sorting.
      */
