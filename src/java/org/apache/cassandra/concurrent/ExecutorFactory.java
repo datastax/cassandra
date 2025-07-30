@@ -115,10 +115,32 @@ public interface ExecutorFactory extends ExecutorBuilderFactory.Jmxable<Executor
      * @param executeOnShutdown if false, waiting tasks will be cancelled on shutdown
      * @param name the name of the executor, the executor's thread group, and of any worker threads
      * @param priority the thread priority of workers
+     * @param threads the number of threads in the pool
+     * @return a {@link ScheduledExecutorPlus}
+     */
+    default ScheduledExecutorPlus scheduled(boolean executeOnShutdown, String name, int priority, int threads) { return scheduled(executeOnShutdown, name, priority, NORMAL, threads); }
+
+    /**
+     * @param executeOnShutdown if false, waiting tasks will be cancelled on shutdown
+     * @param name the name of the executor, the executor's thread group, and of any worker threads
+     * @param priority the thread priority of workers
      * @param simulatorSemantics indicate special semantics for the executor under simulation
      * @return a {@link ScheduledExecutorPlus}
      */
-    ScheduledExecutorPlus scheduled(boolean executeOnShutdown, String name, int priority, SimulatorSemantics simulatorSemantics);
+    default ScheduledExecutorPlus scheduled(boolean executeOnShutdown, String name, int priority, SimulatorSemantics simulatorSemantics)
+    {
+        return scheduled(executeOnShutdown, name, priority, simulatorSemantics, 1);
+    }
+
+    /**
+     * @param executeOnShutdown if false, waiting tasks will be cancelled on shutdown
+     * @param name the name of the executor, the executor's thread group, and of any worker threads
+     * @param priority the thread priority of workers
+     * @param simulatorSemantics indicate special semantics for the executor under simulation
+     * @param threads the number of threads in the pool
+     * @return a {@link ScheduledExecutorPlus}
+     */
+    ScheduledExecutorPlus scheduled(boolean executeOnShutdown, String name, int priority, SimulatorSemantics simulatorSemantics, int threads);
 
     /**
      * Create and start a new thread to execute {@code runnable}
@@ -282,9 +304,9 @@ public interface ExecutorFactory extends ExecutorBuilderFactory.Jmxable<Executor
         }
 
         @Override
-        public ScheduledExecutorPlus scheduled(boolean executeOnShutdown, String name, int priority, SimulatorSemantics simulatorSemantics)
+        public ScheduledExecutorPlus scheduled(boolean executeOnShutdown, String name, int priority, SimulatorSemantics simulatorSemantics, int threads)
         {
-            ScheduledThreadPoolExecutorPlus executor = new ScheduledThreadPoolExecutorPlus(newThreadFactory(name, priority));
+            ScheduledThreadPoolExecutorPlus executor = new ScheduledThreadPoolExecutorPlus(threads, newThreadFactory(name, priority));
             if (!executeOnShutdown)
                 executor.setExecuteExistingDelayedTasksAfterShutdownPolicy(false);
             return executor;
