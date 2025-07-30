@@ -99,7 +99,7 @@ public class MetadataSerializerTest
         Map<MetadataType, MetadataComponent> originalMetadata = constructMetadata(false);
 
         MetadataSerializer serializer = new MetadataSerializer();
-        Version latestVersion = DatabaseDescriptor.getSelectedSSTableFormat().getLatestVersion();
+        Version latestVersion = format.getLatestVersion();
         Descriptor desc = new Descriptor(latestVersion, FileUtils.getTempDir(), "test", "test", new SequenceBasedSSTableId(0));
         File statsFile = serialize(originalMetadata, serializer, desc);
 
@@ -118,15 +118,24 @@ public class MetadataSerializerTest
     @Test
     public void testSerializationWithEncryption() throws IOException
     {
+        Version version = format.getLatestVersion();
+
+        // Skip this test if metadata encryption is not supported
+        if (!version.metadataIsEncrypted())
+        {
+            logger.info("Skipping testEncryption - metadata encryption not supported in version {}", version);
+            return;
+        }
+
         Map<MetadataType, MetadataComponent> originalMetadata = constructMetadata(false);
 
         MetadataSerializer serializer = new MetadataSerializer();
-        Descriptor desc = new Descriptor(DatabaseDescriptor.getSelectedSSTableFormat().getLatestVersion(), FileUtils.getTempDir(), "test", "test", new SequenceBasedSSTableId(0));
-        File statsFile = serialize(originalMetadata, serializer, desc);
+        Descriptor desc = new Descriptor(format.getLatestVersion(), FileUtils.getTempDir(), "test", "test", new SequenceBasedSSTableId(0));
+        File statsFile = serializeWithEncryption(originalMetadata, serializer, desc);
 
         try (RandomAccessReader in = RandomAccessReader.open(statsFile))
         {
-            Map<MetadataType, MetadataComponent> deserialized = serializer.deserialize(desc, in, EnumSet.allOf(MetadataType.class));
+            Map<MetadataType, MetadataComponent> deserialized = deserializeWithEncryption(serializer, desc, in);
 
             for (MetadataType type : MetadataType.values())
             {
@@ -225,6 +234,19 @@ public class MetadataSerializerTest
         }
     }
 
+    private Map<MetadataType, MetadataComponent> deserializeWithEncryption(MetadataSerializer serializer, Descriptor desc, RandomAccessReader in) throws IOException
+    {
+        MetadataSerializer.testCompressionParams = compressionParams;
+        try
+        {
+            return serializer.deserialize(desc, in, EnumSet.allOf(MetadataType.class));
+        }
+        finally
+        {
+            MetadataSerializer.testCompressionParams = null;
+        }
+    }
+
     public Map<MetadataType, MetadataComponent> constructMetadata(boolean withNulls)
     {
         CommitLogPosition club = new CommitLogPosition(11L, 12);
@@ -238,7 +260,7 @@ public class MetadataSerializerTest
                                          .build();
         MetadataCollector collector = new MetadataCollector(cfm.comparator)
                                       .commitLogIntervals(new IntervalSet<>(cllb, club));
-        Version version = DatabaseDescriptor.getSelectedSSTableFormat().getLatestVersion();
+        Version version = format.getLatestVersion();
         if (version.hasTokenSpaceCoverage())
             collector.tokenSpaceCoverage(0.7);
 
