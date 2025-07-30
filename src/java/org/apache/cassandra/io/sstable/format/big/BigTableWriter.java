@@ -22,6 +22,7 @@ import java.nio.ByteBuffer;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Optional;
 import java.util.function.Consumer;
 
 import com.google.common.collect.ImmutableSet;
@@ -49,6 +50,10 @@ import org.apache.cassandra.io.sstable.indexsummary.IndexSummary;
 import org.apache.cassandra.io.sstable.indexsummary.IndexSummaryBuilder;
 import org.apache.cassandra.io.sstable.keycache.KeyCache;
 import org.apache.cassandra.io.sstable.keycache.KeyCacheSupport;
+import org.apache.cassandra.io.sstable.metadata.CompactionMetadata;
+import org.apache.cassandra.io.sstable.metadata.MetadataComponent;
+import org.apache.cassandra.io.sstable.metadata.MetadataType;
+import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.io.util.DataPosition;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
@@ -146,7 +151,9 @@ public class BigTableWriter extends SortedTableWriter<BigFormatPartitionWriter, 
         try
         {
 
-            builder.setStatsMetadata(statsMetadata());
+            Map<MetadataType, MetadataComponent> finalMetadata = finalizeMetadata();
+            builder.setStatsMetadata((StatsMetadata) finalMetadata.get(MetadataType.STATS));
+            builder.setCompactionMetadata(Optional.ofNullable((CompactionMetadata) finalMetadata.get(MetadataType.COMPACTION)));
 
             EstimatedHistogram partitionSizeHistogram = builder.getStatsMetadata().estimatedPartitionSize;
             if (boundary != null)
