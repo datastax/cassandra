@@ -307,7 +307,7 @@ public class InterceptingExecutorFactory implements ExecutorFactory, Closeable
     }
 
     @Override
-    public ScheduledExecutorPlus scheduled(boolean executeOnShutdown, String name, int priority, SimulatorSemantics simulatorSemantics)
+    public ScheduledExecutorPlus scheduled(boolean executeOnShutdown, String name, int priority, SimulatorSemantics simulatorSemantics, int threads)
     {
         switch (simulatorSemantics)
         {
