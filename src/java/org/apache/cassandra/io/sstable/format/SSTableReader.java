@@ -409,54 +409,6 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         }
     }
 
-    /**
-     * Estimates how much of the keys we would keep if the sstables were compacted together
-     */
-    public static double estimateCompactionGain(Set<SSTableReader> overlapping)
-    {
-        Set<ICardinality> cardinalities = new HashSet<>(overlapping.size());
-        for (SSTableReader sstable : overlapping)
-        {
-            try
-            {
-                ICardinality cardinality = sstable.getCompactionMetadata().map(c -> c.cardinalityEstimator).orElse(null);
-                if (cardinality != null)
-                    cardinalities.add(cardinality);
-                else
-                    logger.trace("Got a null cardinality estimator in: {}", sstable.getFilename());
-            }
-            catch (IOException e)
-            {
-                logger.warn("Could not read up compaction metadata for {}", sstable, e);
-            }
-        }
-        long totalKeyCountBefore = 0;
-        for (ICardinality cardinality : cardinalities)
-        {
-            totalKeyCountBefore += cardinality.cardinality();
-        }
-        if (totalKeyCountBefore == 0)
-            return 1;
-
-        long totalKeyCountAfter = mergeCardinalities(cardinalities).cardinality();
-        logger.trace("Estimated compaction gain: {}/{}={}", totalKeyCountAfter, totalKeyCountBefore, ((double)totalKeyCountAfter)/totalKeyCountBefore);
-        return ((double)totalKeyCountAfter)/totalKeyCountBefore;
-    }
-
-    private static ICardinality mergeCardinalities(Collection<ICardinality> cardinalities)
-    {
-        ICardinality base = new HyperLogLogPlus(13, 25); // see MetadataCollector.cardinality
-        try
-        {
-            base = base.merge(cardinalities.toArray(new ICardinality[cardinalities.size()]));
-        }
-        catch (CardinalityMergeException e)
-        {
-            logger.warn("Could not merge cardinalities", e);
-        }
-        return base;
-    }
-
     public static SSTableReader open(Descriptor descriptor)
     {
         TableMetadataRef metadata;
@@ -2338,7 +2290,13 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         return sstableMetadata;
     }
 
-    public Optional<CompactionMetadata> getCompactionMetadataNoLoad() // TODO: find a better name
+    /**
+     * This method accesses directly the compactionMetadata field without loading it from disk in case it was not loaded yet.
+     * It is used only by ForwardingSSTableReader in tests.
+     * @return the internal value of the field
+     */
+    @VisibleForTesting
+    Optional<CompactionMetadata> getCompactionMetadataUnsafe()
     {
         return compactionMetadata;
     }
