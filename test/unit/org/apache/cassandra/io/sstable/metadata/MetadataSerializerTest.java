@@ -155,7 +155,7 @@ public class MetadataSerializerTest
         MetadataSerializer serializer = new MetadataSerializer();
         File statsFile = serialize(originalMetadata, serializer, SSTableFormat.Type.current().info.getLatestVersion(), true);
 
-        Descriptor desc = new Descriptor(statsFile.parent(), "", "", new SequenceBasedSSTableId(0), SSTableFormat.Type.BTI);
+        Descriptor desc = new Descriptor(statsFile.parent(), "", "", new SequenceBasedSSTableId(0), SSTableFormat.Type.current());
         try (RandomAccessReader in = RandomAccessReader.open(statsFile))
         {
             Map<MetadataType, MetadataComponent> deserialized = serializer.deserialize(desc, in, EnumSet.allOf(MetadataType.class));

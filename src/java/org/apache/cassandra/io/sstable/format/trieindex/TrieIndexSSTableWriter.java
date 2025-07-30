@@ -23,6 +23,8 @@ import java.nio.channels.SeekableByteChannel;
 import java.nio.file.Files;
 import java.nio.file.StandardOpenOption;
 import java.util.Collection;
+import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Consumer;
@@ -52,7 +54,10 @@ import org.apache.cassandra.io.sstable.format.SSTableFlushObserver;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReaderBuilder;
 import org.apache.cassandra.io.sstable.format.SortedTableWriter;
+import org.apache.cassandra.io.sstable.metadata.CompactionMetadata;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
+import org.apache.cassandra.io.sstable.metadata.MetadataComponent;
+import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.io.util.BufferedDataOutputStreamPlus;
 import org.apache.cassandra.io.util.DataOutputStreamPlus;
@@ -191,7 +196,9 @@ public class TrieIndexSSTableWriter extends SortedTableWriter
 
         return iwriter.buildPartial(dataLength, partitionIndex ->
         {
-            StatsMetadata stats = statsMetadata();
+            Map<MetadataType, MetadataComponent> finalMetadata = finalizeMetadata();
+            StatsMetadata stats = (StatsMetadata) finalMetadata.get(MetadataType.STATS);
+            CompactionMetadata compactionMetadata = (CompactionMetadata) finalMetadata.get(MetadataType.COMPACTION);
 
             FileHandle ifile = iwriter.rowIndexFHBuilder.withLength(iwriter.rowIndexFile.getLastFlushOffset()).complete();
             // With trie indices it is no longer necessary to limit the file size; just make sure indices and data
@@ -201,9 +208,11 @@ public class TrieIndexSSTableWriter extends SortedTableWriter
             FileHandle dfile = dbuilder.bufferSize(dataBufferSize).withLength(dataLength).complete();
             invalidateCacheAtPreviousBoundary(dfile, dataLength);
             SSTableReader sstable = TrieIndexSSTableReader.internalOpen(descriptor,
-                                                               components(), metadata,
-                                                               ifile, dfile, partitionIndex, iwriter.bf.sharedCopy(),
-                                                               maxDataAge, stats, SSTableReader.OpenReason.EARLY, header);
+                                                                        components(), metadata,
+                                                                        ifile, dfile, partitionIndex, iwriter.bf.sharedCopy(),
+                                                                        maxDataAge, stats,
+                                                                        Optional.of(compactionMetadata),  // never null here
+                                                                        SSTableReader.OpenReason.EARLY, header);
 
             sstable.first = getMinimalKey(partitionIndex.firstKey());
             sstable.last = getMinimalKey(partitionIndex.lastKey());
@@ -227,7 +236,7 @@ public class TrieIndexSSTableWriter extends SortedTableWriter
 
     @SuppressWarnings("resource")
     @Override
-    protected SSTableReader openReader(SSTableReader.OpenReason reason, FileHandle dataFileHandle, StatsMetadata stats)
+    protected SSTableReader openReader(SSTableReader.OpenReason reason, FileHandle dataFileHandle, StatsMetadata stats, Optional<CompactionMetadata> compactionMetadata)
     {
         PartitionIndex partitionIndex = iwriter.completedPartitionIndex();
         FileHandle rowIndexFile = iwriter.rowIndexFHBuilder.complete();
@@ -240,6 +249,7 @@ public class TrieIndexSSTableWriter extends SortedTableWriter
                                                             iwriter.bf.sharedCopy(),
                                                             maxDataAge,
                                                             stats,
+                                                            compactionMetadata,
                                                             reason,
                                                             header);
         sstable.setup(true);

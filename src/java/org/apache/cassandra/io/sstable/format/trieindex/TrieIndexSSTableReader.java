@@ -28,6 +28,7 @@ import java.util.Collections;
 import java.util.EnumSet;
 import java.util.Iterator;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import javax.annotation.Nonnull;
 
@@ -70,6 +71,7 @@ import org.apache.cassandra.io.sstable.format.SSTableReadsListener.SkippingReaso
 import org.apache.cassandra.io.sstable.format.ScrubPartitionIterator;
 import org.apache.cassandra.io.sstable.format.big.BigTableRowIndexEntry;
 import org.apache.cassandra.io.sstable.format.trieindex.PartitionIndex.IndexPosIterator;
+import org.apache.cassandra.io.sstable.metadata.CompactionMetadata;
 import org.apache.cassandra.io.sstable.metadata.MetadataComponent;
 import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
@@ -116,9 +118,10 @@ public class TrieIndexSSTableReader extends SSTableReader
     @VisibleForTesting
     public static final double fpChanceTolerance = Double.parseDouble(System.getProperty(Config.PROPERTY_PREFIX + "bloom_filter_fp_chance_tolerance", "0.000001"));
 
-    TrieIndexSSTableReader(Descriptor desc, Set<Component> components, TableMetadataRef metadata, Long maxDataAge, StatsMetadata sstableMetadata, OpenReason openReason, SerializationHeader header, FileHandle dfile, FileHandle rowIndexFile, PartitionIndex partitionIndex, IFilter bf)
+    TrieIndexSSTableReader(Descriptor desc, Set<Component> components, TableMetadataRef metadata, Long maxDataAge, StatsMetadata sstableMetadata, Optional<CompactionMetadata> compactionMetadata,
+                           OpenReason openReason, SerializationHeader header, FileHandle dfile, FileHandle rowIndexFile, PartitionIndex partitionIndex, IFilter bf)
     {
-        super(desc, components, metadata, maxDataAge, sstableMetadata, openReason, header, null, dfile, null, bf);
+        super(desc, components, metadata, maxDataAge, sstableMetadata, compactionMetadata, openReason, header, null, dfile, null, bf);
         this.rowIndexFile = rowIndexFile;
         this.partitionIndex = partitionIndex;
     }
@@ -138,6 +141,7 @@ public class TrieIndexSSTableReader extends SSTableReader
                                                                   metadata,
                                                                   maxDataAge,
                                                                   sstableMetadata,
+                                                                  compactionMetadata,
                                                                   openReason,
                                                                   header,
                                                                   dfile.sharedCopy(),
@@ -164,6 +168,7 @@ public class TrieIndexSSTableReader extends SSTableReader
                                                IFilter bf,
                                                long maxDataAge,
                                                StatsMetadata sstableMetadata,
+                                               Optional<CompactionMetadata> compactionMetadata,
                                                OpenReason openReason,
                                                SerializationHeader header)
     {
@@ -171,7 +176,7 @@ public class TrieIndexSSTableReader extends SSTableReader
 
         // Make sure the SSTableReader internalOpen part does the same.
         assert desc.getFormat() == TrieIndexFormat.instance;
-        TrieIndexSSTableReader reader = new TrieIndexSSTableReader(desc, components, metadata, maxDataAge, sstableMetadata, openReason, header, dfile, rowIndexFile, partitionIndex, bf);
+        TrieIndexSSTableReader reader = new TrieIndexSSTableReader(desc, components, metadata, maxDataAge, sstableMetadata, compactionMetadata, openReason, header, dfile, rowIndexFile, partitionIndex, bf);
         reader.first = partitionIndex.firstKey();
         reader.last = partitionIndex.lastKey();
 
@@ -185,6 +190,7 @@ public class TrieIndexSSTableReader extends SSTableReader
                                                IFilter bf,
                                                long maxDataAge,
                                                StatsMetadata sstableMetadata,
+                                               Optional<CompactionMetadata> compactionMetadata,
                                                OpenReason openReason,
                                                SerializationHeader header)
     {
@@ -192,7 +198,7 @@ public class TrieIndexSSTableReader extends SSTableReader
 
         // Make sure the SSTableReader internalOpen part does the same.
         assert desc.getFormat() == TrieIndexFormat.instance;
-        return new TrieIndexSSTableReader(desc, components, metadata, maxDataAge, sstableMetadata, openReason, header, dfile, null, null, bf);
+        return new TrieIndexSSTableReader(desc, components, metadata, maxDataAge, sstableMetadata, compactionMetadata, openReason, header, dfile, null, null, bf);
     }
 
     @Override
@@ -945,7 +951,7 @@ public class TrieIndexSSTableReader extends SSTableReader
 
         checkRequiredComponents(descriptor, components, validate);
 
-        EnumSet<MetadataType> types = EnumSet.of(MetadataType.VALIDATION, MetadataType.STATS, MetadataType.HEADER);
+        EnumSet<MetadataType> types = EnumSet.of(MetadataType.VALIDATION, MetadataType.STATS, MetadataType.HEADER, MetadataType.COMPACTION);
         Map<MetadataType, MetadataComponent> sstableMetadata;
         try
         {
@@ -958,6 +964,7 @@ public class TrieIndexSSTableReader extends SSTableReader
 
         ValidationMetadata validationMetadata = (ValidationMetadata) sstableMetadata.get(MetadataType.VALIDATION);
         StatsMetadata statsMetadata = (StatsMetadata) sstableMetadata.get(MetadataType.STATS);
+        CompactionMetadata compactionMetadata = (CompactionMetadata) sstableMetadata.get(MetadataType.COMPACTION);
         SerializationHeader.Component header = (SerializationHeader.Component) sstableMetadata.get(MetadataType.HEADER);
 
         // Check if sstable is created using same partitioner.
@@ -1006,6 +1013,7 @@ public class TrieIndexSSTableReader extends SSTableReader
                                                                   bloomFilter,
                                                                   System.currentTimeMillis(),
                                                                   statsMetadata,
+                                                                  Optional.ofNullable(compactionMetadata),
                                                                   OpenReason.NORMAL,
                                                                   header.toHeader(descriptor.toString(), metadata.get(), descriptor.version, isOffline));
                 }
@@ -1019,6 +1027,7 @@ public class TrieIndexSSTableReader extends SSTableReader
                                                               bloomFilter,
                                                               System.currentTimeMillis(),
                                                               statsMetadata,
+                                                              Optional.ofNullable(compactionMetadata),
                                                               OpenReason.NORMAL,
                                                               header.toHeader(descriptor.toString(), metadata.get(), descriptor.version, isOffline));
             }
