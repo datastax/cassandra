@@ -348,8 +348,9 @@ public abstract class SortedTableWriter extends SSTableWriter
         if (maxDataAge < 0)
             maxDataAge = System.currentTimeMillis();
 
-        StatsMetadata stats = statsMetadata();
-        CompactionMetadata compactionMetadata = compactionMetadata();
+        Map<MetadataType, MetadataComponent> finalMetadata = finalizeMetadata();
+        StatsMetadata stats = (StatsMetadata) finalMetadata.get(MetadataType.STATS);
+        CompactionMetadata compactionMetadata = (CompactionMetadata) finalMetadata.get(MetadataType.COMPACTION);
 
         int dataBufferSize = optimizationStrategy.bufferSize(stats.estimatedPartitionSize.percentile(DatabaseDescriptor.getDiskOptimizationEstimatePercentile()));
         // Note that creating the `CompressionMetadata` below does not read from disk: the compression metadata is

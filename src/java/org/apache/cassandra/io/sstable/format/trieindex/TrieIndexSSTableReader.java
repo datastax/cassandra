@@ -951,7 +951,7 @@ public class TrieIndexSSTableReader extends SSTableReader
 
         checkRequiredComponents(descriptor, components, validate);
 
-        EnumSet<MetadataType> types = EnumSet.of(MetadataType.VALIDATION, MetadataType.STATS, MetadataType.HEADER);
+        EnumSet<MetadataType> types = EnumSet.of(MetadataType.VALIDATION, MetadataType.STATS, MetadataType.HEADER, MetadataType.COMPACTION);
         Map<MetadataType, MetadataComponent> sstableMetadata;
         try
         {

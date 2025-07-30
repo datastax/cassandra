@@ -20,6 +20,7 @@ package org.apache.cassandra.io.sstable.format.big;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Collection;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -49,6 +50,8 @@ import org.apache.cassandra.io.sstable.format.SSTableReaderBuilder;
 import org.apache.cassandra.io.sstable.format.SortedTableWriter;
 import org.apache.cassandra.io.sstable.metadata.CompactionMetadata;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
+import org.apache.cassandra.io.sstable.metadata.MetadataComponent;
+import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.io.util.DataPosition;
 import org.apache.cassandra.io.util.File;
@@ -193,8 +196,9 @@ public class BigTableWriter extends SortedTableWriter
         if (boundary == null)
             return false;
 
-        StatsMetadata stats = statsMetadata();
-        CompactionMetadata compactionMetadata = compactionMetadata();
+        Map<MetadataType, MetadataComponent> finalMetadata = finalizeMetadata();
+        StatsMetadata stats = (StatsMetadata) finalMetadata.get(MetadataType.STATS);
+        CompactionMetadata compactionMetadata = (CompactionMetadata) finalMetadata.get(MetadataType.COMPACTION);
         assert boundary.indexLength > 0 && boundary.dataLength > 0;
         // open the reader early
         IndexSummary indexSummary = iwriter.summary.build(metadata().partitioner, boundary);

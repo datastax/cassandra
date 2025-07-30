@@ -23,6 +23,7 @@ import java.nio.channels.SeekableByteChannel;
 import java.nio.file.Files;
 import java.nio.file.StandardOpenOption;
 import java.util.Collection;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -55,6 +56,8 @@ import org.apache.cassandra.io.sstable.format.SSTableReaderBuilder;
 import org.apache.cassandra.io.sstable.format.SortedTableWriter;
 import org.apache.cassandra.io.sstable.metadata.CompactionMetadata;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
+import org.apache.cassandra.io.sstable.metadata.MetadataComponent;
+import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.io.util.BufferedDataOutputStreamPlus;
 import org.apache.cassandra.io.util.DataOutputStreamPlus;
@@ -193,8 +196,9 @@ public class TrieIndexSSTableWriter extends SortedTableWriter
 
         return iwriter.buildPartial(dataLength, partitionIndex ->
         {
-            StatsMetadata stats = statsMetadata();
-            CompactionMetadata compactionMetadata = compactionMetadata();
+            Map<MetadataType, MetadataComponent> finalMetadata = finalizeMetadata();
+            StatsMetadata stats = (StatsMetadata) finalMetadata.get(MetadataType.STATS);
+            CompactionMetadata compactionMetadata = (CompactionMetadata) finalMetadata.get(MetadataType.COMPACTION);
 
             FileHandle ifile = iwriter.rowIndexFHBuilder.withLength(iwriter.rowIndexFile.getLastFlushOffset()).complete();
             // With trie indices it is no longer necessary to limit the file size; just make sure indices and data

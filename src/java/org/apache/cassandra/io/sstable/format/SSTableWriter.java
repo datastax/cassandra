@@ -405,17 +405,6 @@ public abstract class SSTableWriter extends SSTable implements Transactional
                                                   header);
     }
 
-    protected StatsMetadata statsMetadata()
-    {
-        return (StatsMetadata) finalizeMetadata().get(MetadataType.STATS);
-    }
-
-    // NotNull
-    protected CompactionMetadata compactionMetadata()
-    {
-        return (CompactionMetadata) finalizeMetadata().get(MetadataType.COMPACTION);
-    }
-
     public void releaseMetadataOverhead()
     {
         metadataCollector.release();
