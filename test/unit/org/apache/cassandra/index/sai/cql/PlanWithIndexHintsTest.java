@@ -56,18 +56,8 @@ import static java.lang.String.format;
  *    <li>Excluded indexes shouldn't be included in the query {@link Plan}.</li>
  * </ul>
  */
-@RunWith(Parameterized.class)
-public class PlanWithIndexHintsTest extends SAITester
+public class PlanWithIndexHintsTest extends SAITester.Versioned
 {
-    @Parameterized.Parameter
-    public Version version;
-
-    @Parameterized.Parameters(name = "version={0}")
-    public static List<Object> data()
-    {
-        return Version.ALL.stream().map(v -> new Object[]{v}).collect(Collectors.toList());
-    }
-
     @BeforeClass
     public static void setUpClass()
     {
@@ -78,7 +68,6 @@ public class PlanWithIndexHintsTest extends SAITester
     @Before
     public void setup() throws Throwable
     {
-        SAIUtil.setCurrentVersion(version);
         CassandraRelevantProperties.DS_CURRENT_MESSAGING_VERSION.setInt(MessagingService.VERSION_DS_12);
     }
 
