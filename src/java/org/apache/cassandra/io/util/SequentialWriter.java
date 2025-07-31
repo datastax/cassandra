@@ -106,15 +106,24 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
     // TODO: we should specify as a parameter if we permit an existing file or not
     private static FileChannel openChannel(File file)
     {
+        return openChannel(file, true);
+    }
+
+    private static FileChannel openChannel(File file, boolean readable)
+    {
         try
         {
             if (file.exists())
             {
-                return FileChannel.open(file.toPath(), StandardOpenOption.READ, StandardOpenOption.WRITE);
+                StandardOpenOption[] options = readable ? new StandardOpenOption[] {StandardOpenOption.WRITE, StandardOpenOption.READ}
+                                                        : new StandardOpenOption[] {StandardOpenOption.WRITE};
+                return FileChannel.open(file.toPath(), options);
             }
             else
             {
-                FileChannel channel = FileChannel.open(file.toPath(), StandardOpenOption.READ, StandardOpenOption.WRITE, StandardOpenOption.CREATE_NEW);
+                StandardOpenOption[] options = readable ? new StandardOpenOption[] {StandardOpenOption.WRITE, StandardOpenOption.READ, StandardOpenOption.CREATE_NEW}
+                                                        : new StandardOpenOption[] {StandardOpenOption.WRITE, StandardOpenOption.CREATE_NEW};
+                FileChannel channel = FileChannel.open(file.toPath(), options);
                 try
                 {
                     SyncUtil.trySyncDir(file.parent());
@@ -162,7 +171,12 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
      */
     public SequentialWriter(File file, SequentialWriterOption option, boolean strictFlushing)
     {
-        super(openChannel(file), option.allocateBuffer());
+        this(file, true, option, strictFlushing);
+    }
+
+    public SequentialWriter(File file, boolean readable, SequentialWriterOption option, boolean strictFlushing)
+    {
+        super(openChannel(file, readable), option.allocateBuffer());
         this.strictFlushing = strictFlushing;
         this.fchannel = (FileChannel)channel;
 
@@ -293,6 +307,29 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
     public long paddedPosition()
     {
         return PageAware.padded(position());
+    }
+
+    public void updateFileHandle(FileHandle.Builder fhBuilder)
+    {
+        updateFileHandle(fhBuilder, -1);
+    }
+
+    public void updateFileHandle(FileHandle.Builder fhBuilder, long dataLength)
+    {
+        // Set actual length to avoid having to read it off the file system.
+        fhBuilder.withLengthOverride(dataLength > 0 ? dataLength : lastFlushOffset);
+    }
+
+    /**
+     * Some writers cannot feasibly calculate the exact length of a file. If any user needs to be able to store
+     * metadata at the end, they should use this function to ensure the content to be written can be addressed
+     * using `fileLength - bytesNeeded`.
+     *
+     * See PartitionIndexBuilder#complete and PartitionIndex#load for usage example.
+     */
+    public void establishEndAddressablePosition(int bytesNeeded) throws IOException
+    {
+        // Nothing to do when file length can be exactly determined.
     }
 
     /**
