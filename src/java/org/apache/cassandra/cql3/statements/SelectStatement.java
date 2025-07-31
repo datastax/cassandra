@@ -70,6 +70,7 @@ import org.apache.cassandra.cql3.restrictions.Restrictions;
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.apache.cassandra.db.guardrails.GuardrailsConfigProvider;
 import org.apache.cassandra.cql3.selection.SortedRowsBuilder;
+import org.apache.cassandra.db.marshal.FloatType;
 import org.apache.cassandra.sensors.SensorsCustomParams;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.Schema;
@@ -109,7 +110,6 @@ import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.guardrails.Guardrails;
 import org.apache.cassandra.db.marshal.CompositeType;
-import org.apache.cassandra.db.marshal.FloatType;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.rows.Row;
@@ -146,8 +146,6 @@ import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.NoSpamLogger;
 
 import static java.lang.String.format;
-import org.apache.cassandra.index.sai.disk.format.Version;
-import org.apache.cassandra.config.CassandraRelevantProperties;
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkFalse;
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkNotNull;
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkNull;
@@ -170,13 +168,6 @@ import static org.apache.cassandra.utils.ByteBufferUtil.UNSET_BYTE_BUFFER;
 @ThreadSafe
 public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
 {
-    // TODO remove this when we no longer need to downgrade to replicas that don't know about synthetic columns,
-    // and the related code in
-    //  - StatementRestrictions.addOrderingRestrictions
-    //  - StorageAttachedIndexSearcher.PrimaryKeyIterator constructor
-    public static final boolean ANN_USE_SYNTHETIC_SCORE = CassandraRelevantProperties.SAI_ANN_USE_SYNTHETIC_SCORE
-        .getBoolean(Version.current().after(Version.EC));
-
     private static final Logger logger = LoggerFactory.getLogger(SelectStatement.class);
     private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(SelectStatement.logger, 1, TimeUnit.MINUTES);
     public static final String USAGE_WARNING_PAGE_WEIGHT = "Applied page weight limit of ";

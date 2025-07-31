@@ -582,8 +582,6 @@ public class VectorTypeTest extends VectorTester.VersionedWithChecksums
         }
     }
 
-
-
     @Test
     public void selectFloatVectorFunctions()
     {
