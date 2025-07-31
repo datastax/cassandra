@@ -1037,4 +1037,25 @@ public class VectorTypeTest extends VectorTester.VersionedWithChecksums
         }
     }
 
+    /**
+     * This test broke with ED because the limit pulls in all primary keys from the score ordered iterator,
+     * and then we grabbed the wrong one in the batch, which led to the outdated score being used for sorting.
+     */
+    @Test
+    public void testUpdateRowScoreToWorsePositionButIncludeInBatch()
+    {
+        createTable("CREATE TABLE %s (k int, c int, r vector<float, 2>, v int, PRIMARY KEY(k, c))");
+        createIndex("CREATE CUSTOM INDEX ON %s(r) USING 'StorageAttachedIndex'");
+
+        String insert = "INSERT INTO %s (k, c, r, v) VALUES (?, ?, ?, ?)";
+        execute(insert, row(0, 1, vector(0.1f, 0.1f), 0));
+        execute(insert, row(1, 2, vector(0.1f, 0.2f), 0));
+        flush();
+
+        // update the best vector to make it the worst
+        execute(insert, row(0, 1, vector(0.1f, 0.5f), 0));
+
+        // query with ANN only
+        assertRows(execute("SELECT c FROM %s ORDER BY r ANN OF [0.1, 0.1] LIMIT 10"), row(2), row(1));
+    }
 }
