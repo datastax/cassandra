@@ -16,40 +16,17 @@
 
 package org.apache.cassandra.index.sai.cql;
 
-import java.util.Collection;
-import java.util.stream.Collectors;
-
-import org.junit.Before;
 import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.junit.runners.Parameterized;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
-import org.apache.cassandra.index.sai.SAIUtil;
+import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.assertj.core.api.Assertions;
 
-@RunWith(Parameterized.class)
-public class LargePartitionsTest extends VectorTester
+public class LargePartitionsTest extends SAITester.Versioned
 {
     public static final int NUM_PARTITIONS = 10;
     public static final int LARGE_PARTITION_SIZE = CassandraRelevantProperties.SAI_PARTITION_ROW_BATCH_SIZE.getInt() * 4;
-
-    @Parameterized.Parameter
-    public Version version;
-
-    @Parameterized.Parameters(name = "{0}")
-    public static Collection<Object[]> data()
-    {
-        return Version.ALL.stream().map(v -> new Object[]{ v }).collect(Collectors.toList());
-    }
-
-    @Before
-    public void setup() throws Throwable
-    {
-        super.setup();
-        SAIUtil.setCurrentVersion(version);
-    }
 
     @Test
     public void testLargePartition() throws Throwable
