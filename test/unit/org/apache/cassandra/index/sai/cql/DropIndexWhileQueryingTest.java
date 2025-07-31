@@ -16,14 +16,10 @@
 
 package org.apache.cassandra.index.sai.cql;
 
-import java.util.Collection;
-import java.util.stream.Collectors;
+import org.junit.Test;
 
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.apache.cassandra.index.sai.IndexContext;
-import org.apache.cassandra.index.sai.SAITester;
-import org.apache.cassandra.index.sai.SAIUtil;
-import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.plan.QueryController;
 import org.apache.cassandra.index.sai.plan.TopKProcessor;
 import org.apache.cassandra.inject.ActionBuilder;
@@ -31,35 +27,12 @@ import org.apache.cassandra.inject.Injection;
 import org.apache.cassandra.inject.Injections;
 import org.apache.cassandra.inject.InvokePointBuilder;
 
-import org.junit.Before;
-import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.junit.runners.Parameterized;
-
 import static org.apache.cassandra.inject.InvokePointBuilder.newInvokePoint;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertTrue;
 
-@RunWith(Parameterized.class)
-public class DropIndexWhileQueryingTest extends SAITester
+public class DropIndexWhileQueryingTest extends VectorTester.Versioned
 {
-    @Parameterized.Parameter
-    public Version version;
-
-    @Parameterized.Parameters(name = "version={0}")
-    public static Collection<Object> data()
-    {
-        return Version.ALL.stream()
-                          .filter(v -> v.onOrAfter(Version.JVECTOR_EARLIEST))
-                          .map(v -> new Object[]{ v})
-                          .collect(Collectors.toList());
-    }
-
-    @Before
-    public void setCurrentSAIVersion()
-    {
-        SAIUtil.setCurrentVersion(version);
-    }
     // See CNDB-10732
     @Test
     public void testDropIndexWhileQuerying() throws Throwable
