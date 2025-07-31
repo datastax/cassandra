@@ -67,7 +67,7 @@ public class Version implements Comparable<Version>
     // Start validating vector index component checksums, except for the TERMS_FILE because it's checksum is non-standard
     // and isn't easily validated when an sstable index has multiple segments within the TERMS_FILE.
     public static final Version EC = new Version("ec", V7OnDiskFormat.instance, (c, i, g) -> stargazerFileNameFormat(c, i, g, "ec"));
-    // total terms count serialization in index metadata
+    // total terms count serialization in index metadata, enables ANN_USE_SYNTHETIC_SCORE by default
     public static final Version ED = new Version("ed", V7OnDiskFormat.instance, (c, i, g) -> stargazerFileNameFormat(c, i, g, "ed"));
 
     // These are in reverse-chronological order so that the latest version is first. Version matching tests
