@@ -42,7 +42,6 @@ import org.apache.cassandra.cql3.restrictions.Restrictions;
 import org.apache.cassandra.cql3.selection.SortedRowsBuilder;
 import org.apache.cassandra.db.marshal.FloatType;
 import org.apache.cassandra.guardrails.Guardrails;
-import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.sensors.SensorsCustomParams;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.Schema;
@@ -107,13 +106,6 @@ import static org.apache.cassandra.utils.ByteBufferUtil.UNSET_BYTE_BUFFER;
  */
 public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
 {
-    // TODO remove this when we no longer need to downgrade to replicas that don't know about synthetic columns,
-    // and the related code in
-    //  - StatementRestrictions.addOrderingRestrictions
-    //  - StorageAttachedIndexSearcher.PrimaryKeyIterator constructor
-    public static final boolean ANN_USE_SYNTHETIC_SCORE = Boolean.parseBoolean(
-    System.getProperty("cassandra.sai.ann_use_synthetic_score", Version.current().after(Version.EC) ? "true" : "false"));
-
     private static final Logger logger = LoggerFactory.getLogger(SelectStatement.class);
     private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(SelectStatement.logger, 1, TimeUnit.MINUTES);
     public static final String TOPK_AGGREGATION_ERROR = "Top-K queries can not be run with aggregation";
