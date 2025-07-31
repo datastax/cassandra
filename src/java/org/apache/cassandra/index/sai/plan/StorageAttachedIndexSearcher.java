@@ -732,27 +732,24 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                 }
 
                 var now = FBUtilities.nowInSeconds();
-                boolean isRowValid = false;
                 var row = clusters.next();
                 assert !clusters.hasNext() : "Expected only one row per partition";
                 if (!row.isRangeTombstoneMarker())
                 {
                     for (PrimaryKeyWithSortKey sourceKey : sourceKeys)
                     {
-                        // Each of these primary keys are equal, but they have different source tables. Therefore,
-                        // we check to see if the row is valid for any of them, and if it is, we return the row.
+                        // Each of these primary keys are equal, but they have different source tables.
+                        // Only one can be valid.
                         if (sourceKey.isIndexDataValid((Row) row, now))
                         {
-                            isRowValid = true;
                             // We can only count the pk as processed once we know it was valid for one of the
                             // scored keys.
                             processedKeys.add(pk);
-                            break;
+                            return new PrimaryKeyIterator(partition, staticRow, row, sourceKey, syntheticScoreColumn);
                         }
                     }
                 }
-                return isRowValid ? new PrimaryKeyIterator(partition, staticRow, row, sourceKeys, syntheticScoreColumn)
-                                  : null;
+                return null;
             }
         }
 
@@ -776,7 +773,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             private boolean consumed = false;
             private final Unfiltered row;
 
-            public PrimaryKeyIterator(UnfilteredRowIterator partition, Row staticRow, Unfiltered content, List<PrimaryKeyWithSortKey> primaryKeysWithScore, ColumnMetadata syntheticScoreColumn)
+            public PrimaryKeyIterator(UnfilteredRowIterator partition, Row staticRow, Unfiltered content, PrimaryKeyWithSortKey primaryKeyWithSortKey, ColumnMetadata syntheticScoreColumn)
             {
                 super(partition.metadata(),
                       partition.partitionKey(),
@@ -786,14 +783,11 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                       partition.isReverseOrder(),
                       partition.stats());
 
-                assert !primaryKeysWithScore.isEmpty();
-                var isScoredRow = primaryKeysWithScore.get(0) instanceof PrimaryKeyWithScore;
-                if (!content.isRow() || !isScoredRow)
+                if (!content.isRow() || !(primaryKeyWithSortKey instanceof PrimaryKeyWithScore))
                 {
                     this.row = content;
                     return;
                 }
-
 
                 if (syntheticScoreColumn == null)
                 {
@@ -807,7 +801,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                 columnData.addAll(originalRow.columnData());
 
                 // inject +score as a new column
-                var pkWithScore = (PrimaryKeyWithScore) primaryKeysWithScore.get(0);
+                var pkWithScore = (PrimaryKeyWithScore) primaryKeyWithSortKey;
                 columnData.add(BufferCell.live(syntheticScoreColumn,
                                                FBUtilities.nowInSeconds(),
                                                FloatType.instance.decompose(pkWithScore.indexScore)));
