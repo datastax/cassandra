@@ -96,8 +96,8 @@ public class Ordering
      */
     public static class Ann implements Expression
     {
-        // TODO remove this when we no longer need to downgrade to replicas that don't know about synthetic columns,
-        // and the related code in
+        // TODO: remove this when we no longer need to downgrade to replicas on versilic class LargePartitionon lower than ED SAI that don't
+        //  know about synthetic columns, and the related code in
         //  - StatementRestrictions.addOrderingRestrictions
         //  - StorageAttachedIndexSearcher.PrimaryKeyIterator constructor
         // This is volatile rather than final so that tests may use reflection to change it.

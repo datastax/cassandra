@@ -19,10 +19,11 @@ package org.apache.cassandra.index.sai.cql;
 import org.junit.Test;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.assertj.core.api.Assertions;
 
-public class LargePartitionsTest extends VectorTester.Versioned
+public class LargePartitionsTest extends SAITester.Versioned
 {
     public static final int NUM_PARTITIONS = 10;
     public static final int LARGE_PARTITION_SIZE = CassandraRelevantProperties.SAI_PARTITION_ROW_BATCH_SIZE.getInt() * 4;
