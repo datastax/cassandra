@@ -50,8 +50,11 @@ import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.BeforeClass;
+import org.junit.Ignore;
 import org.junit.Rule;
 import org.junit.rules.TestRule;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
 
 import com.datastax.driver.core.QueryTrace;
 import com.datastax.driver.core.ResultSet;
@@ -1087,6 +1090,32 @@ public class SAITester extends CQLTester
             Assert.assertNotNull(warnings);
             Assert.assertEquals(1, warnings.size());
             Assert.assertEquals(expectedWarning, warnings.get(0));
+        }
+    }
+
+    /**
+     * {@link CQLTester} parameterized for {@link Version#ALL}.
+     */
+    @Ignore
+    @RunWith(Parameterized.class)
+    public abstract static class Versioned extends SAITester
+    {
+        @Parameterized.Parameter
+        public Version version;
+
+        @Parameterized.Parameters(name = "{0}")
+        public static Collection<Object[]> data()
+        {
+            // See Version file for explanation of changes associated with each version
+            return Version.ALL.stream()
+                              .map(v -> new Object[]{ v })
+                              .collect(Collectors.toList());
+        }
+
+        @Before
+        public void setCurrentVersion() throws Throwable
+        {
+            SAIUtil.setCurrentVersion(version);
         }
     }
 }

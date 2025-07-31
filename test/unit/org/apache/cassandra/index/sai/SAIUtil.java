@@ -20,6 +20,7 @@ package org.apache.cassandra.index.sai;
 
 import java.lang.reflect.Field;
 
+import org.apache.cassandra.cql3.Ordering;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.utils.ReflectionUtils;
 
@@ -27,14 +28,21 @@ public class SAIUtil
 {
     public static void setCurrentVersion(Version version)
     {
-        Field current = null;
         try
         {
-            current = Version.class.getDeclaredField("CURRENT");
+            // set the current version
+            Field current = Version.class.getDeclaredField("CURRENT");
             current.setAccessible(true);
             Field modifiersField = ReflectionUtils.getModifiersField();
             modifiersField.setAccessible(true);
             current.set(null, version);
+
+            // set the synthetic score flag too, because it depends on the current version
+            current = Ordering.Ann.class.getDeclaredField("USE_SYNTHETIC_SCORE");
+            current.setAccessible(true);
+            modifiersField = ReflectionUtils.getField(Field.class, "modifiers");
+            modifiersField.setAccessible(true);
+            current.set(null, Ordering.Ann.useSyntheticScore(version));
         }
         catch (Exception e)
         {

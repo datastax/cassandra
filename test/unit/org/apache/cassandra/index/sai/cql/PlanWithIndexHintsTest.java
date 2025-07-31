@@ -17,16 +17,12 @@
 package org.apache.cassandra.index.sai.cql;
 
 import java.util.Arrays;
-import java.util.List;
-import java.util.stream.Collectors;
 
 import org.apache.cassandra.net.MessagingService;
 import org.junit.Assume;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.junit.runners.Parameterized;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.cql3.restrictions.SingleColumnRestriction;
@@ -36,7 +32,6 @@ import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.ReadFailureException;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.index.sai.SAITester;
-import org.apache.cassandra.index.sai.SAIUtil;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.analyzer.AnalyzerEqOperatorSupport;
 import org.apache.cassandra.index.sai.disk.format.Version;
@@ -56,18 +51,8 @@ import static java.lang.String.format;
  *    <li>Excluded indexes shouldn't be included in the query {@link Plan}.</li>
  * </ul>
  */
-@RunWith(Parameterized.class)
-public class PlanWithIndexHintsTest extends SAITester
+public class PlanWithIndexHintsTest extends SAITester.Versioned
 {
-    @Parameterized.Parameter
-    public Version version;
-
-    @Parameterized.Parameters(name = "version={0}")
-    public static List<Object> data()
-    {
-        return Version.ALL.stream().map(v -> new Object[]{v}).collect(Collectors.toList());
-    }
-
     @BeforeClass
     public static void setUpClass()
     {
@@ -78,7 +63,6 @@ public class PlanWithIndexHintsTest extends SAITester
     @Before
     public void setup() throws Throwable
     {
-        SAIUtil.setCurrentVersion(version);
         CassandraRelevantProperties.DS_CURRENT_MESSAGING_VERSION.setInt(MessagingService.VERSION_DS_12);
     }
 
