@@ -92,7 +92,7 @@ public class EncryptedSequentialWriter extends SequentialWriter
                                      SequentialWriterOption option,
                                      ICompressor encryptor)
     {
-        super(file, SequentialWriterOption.newBuilder()
+        super(file, true, SequentialWriterOption.newBuilder()
                             .bufferSize(maxBytesInPage(encryptor))
                             .bufferType(BufferType.preferredForCompression())
                             .finishOnClose(option.finishOnClose())
