@@ -174,7 +174,7 @@ public class VectorTester extends SAITester
     }
 
     /**
-     * {@link VectorTester} parameterized for {@link Version#CA}, {@link Version#DC}, and {@link Version#EB}.
+     * {@link VectorTester} parameterized for {@link Version#CA}, {@link Version#DC}, {@link Version#EC}, and {@link Version#ED}.
      */
     @Ignore
     @RunWith(Parameterized.class)
@@ -187,7 +187,7 @@ public class VectorTester extends SAITester
         public static Collection<Object[]> data()
         {
             // See Version file for explanation of changes associated with each version
-            return Stream.of(Version.CA, Version.DC, Version.EC).map(v -> new Object[]{ v }).collect(Collectors.toList());
+            return Stream.of(Version.CA, Version.DC, Version.EC, Version.ED).map(v -> new Object[]{ v }).collect(Collectors.toList());
         }
 
         @Before
