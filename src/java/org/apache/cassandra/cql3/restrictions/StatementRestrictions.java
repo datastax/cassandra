@@ -762,7 +762,7 @@ public class StatementRestrictions
                 if (orderings.size() > 1)
                     throw new InvalidRequestException("Cannot combine clustering column ordering with non-clustering column ordering");
                 Ordering ordering = indexOrderings.get(0);
-                // TODO remove the instanceof with SelectStatement.ANN_USE_SYNTHETIC_SCORE.
+                // TODO remove the instanceof with Ordering.Ann.USE_SYNTHETIC_SCORE.
                 if (ordering.direction != Ordering.Direction.ASC && (ordering.expression.isScored() || ordering.expression instanceof Ordering.Ann))
                     throw new InvalidRequestException("Descending ANN ordering is not supported");
                 if (!ENABLE_SAI_GENERAL_ORDER_BY && ordering.expression instanceof Ordering.SingleColumn)
