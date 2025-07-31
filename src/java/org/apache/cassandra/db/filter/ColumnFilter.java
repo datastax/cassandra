@@ -69,7 +69,7 @@ public abstract class ColumnFilter
 
     public static final Serializer serializer = new Serializer();
 
-    // TODO remove this with ANN_USE_SYNTHETIC_SCORE
+    // TODO remove this with Ordering.Ann.USE_SYNTHETIC_SCORE
     public abstract boolean fetchesExplicitly(ColumnMetadata column);
 
     /**
