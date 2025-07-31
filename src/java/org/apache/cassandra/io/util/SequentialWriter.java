@@ -104,11 +104,6 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
     }
 
     // TODO: we should specify as a parameter if we permit an existing file or not
-    private static FileChannel openChannel(File file)
-    {
-        return openChannel(file, true);
-    }
-
     private static FileChannel openChannel(File file, boolean readable)
     {
         try
@@ -171,7 +166,7 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
      */
     public SequentialWriter(File file, SequentialWriterOption option, boolean strictFlushing)
     {
-        this(file, true, option, strictFlushing);
+        this(file, false, option, strictFlushing);
     }
 
     public SequentialWriter(File file, boolean readable, SequentialWriterOption option, boolean strictFlushing)
