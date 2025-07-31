@@ -18,9 +18,10 @@
 
 package org.apache.cassandra.cql3;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.cql3.restrictions.SingleColumnRestriction;
 import org.apache.cassandra.cql3.restrictions.SingleRestriction;
-import org.apache.cassandra.cql3.statements.SelectStatement;
+import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 
@@ -96,6 +97,14 @@ public class Ordering
      */
     public static class Ann implements Expression
     {
+        // TODO: remove this when we no longer need to downgrade to replicas on version lower than ED SAI that don't
+        //  know about synthetic columns, and the related code in
+        //  - StatementRestrictions.addOrderingRestrictions
+        //  - StorageAttachedIndexSearcher.PrimaryKeyIterator constructor
+        // This is volatile rather than final so that tests may use reflection to change it.
+        @SuppressWarnings("FieldMayBeFinal")
+        private static volatile boolean USE_SYNTHETIC_SCORE = useSyntheticScore(Version.CURRENT);
+
         final ColumnMetadata column;
         final Term vectorValue;
         final Direction direction;
@@ -105,6 +114,17 @@ public class Ordering
             this.column = column;
             this.vectorValue = vectorValue;
             this.direction = direction;
+        }
+
+        public static boolean useSyntheticScore(Version version)
+        {
+            boolean defaultValue = version.onOrAfter(Version.ED);
+            return CassandraRelevantProperties.SAI_ANN_USE_SYNTHETIC_SCORE.getBoolean(defaultValue);
+        }
+
+        public static boolean useSyntheticScore()
+        {
+            return USE_SYNTHETIC_SCORE;
         }
 
         @Override
@@ -128,7 +148,7 @@ public class Ordering
         @Override
         public boolean isScored()
         {
-            return SelectStatement.ANN_USE_SYNTHETIC_SCORE;
+            return useSyntheticScore();
         }
     }
 
@@ -267,6 +287,3 @@ public class Ordering
         }
     }
 }
-
-
-
