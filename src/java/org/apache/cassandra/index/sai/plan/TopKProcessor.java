@@ -36,7 +36,7 @@ import io.github.jbellis.jvector.vector.VectorizationProvider;
 import io.github.jbellis.jvector.vector.types.VectorFloat;
 import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
 import org.apache.cassandra.cql3.Operator;
-import org.apache.cassandra.cql3.statements.SelectStatement;
+import org.apache.cassandra.cql3.Ordering;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Keyspace;
@@ -104,7 +104,7 @@ public class TopKProcessor
 
         this.indexContext = indexAndExpression.left;
         this.expression = indexAndExpression.right;
-        if (expression.operator() == Operator.ANN && !SelectStatement.ANN_USE_SYNTHETIC_SCORE)
+        if (expression.operator() == Operator.ANN && !Ordering.Ann.useSyntheticScore())
             this.queryVector = vts.createFloatVector(TypeUtil.decomposeVector(indexContext, expression.getIndexValue().duplicate()));
         else
             this.queryVector = null;
@@ -319,7 +319,7 @@ public class TopKProcessor
             return FloatType.instance.compose(cell.buffer());
         }
 
-        // TODO remove this once we enable ANN_USE_SYNTHETIC_SCORE
+        // TODO remove this once we enable Ordering.Ann.USE_SYNTHETIC_SCORE
         ByteBuffer value = indexContext.getValueOf(key, row, FBUtilities.nowInSeconds());
         if (value != null)
         {

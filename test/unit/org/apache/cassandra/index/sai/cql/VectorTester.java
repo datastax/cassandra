@@ -23,7 +23,6 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 import org.apache.commons.lang3.reflect.FieldUtils;
 import org.junit.Before;
@@ -173,8 +172,13 @@ public class VectorTester extends SAITester
         return matches * 1.0 / result.size();
     }
 
+    protected String vectorString(float[] vector)
+    {
+        return Arrays.toString(vector);
+    }
+
     /**
-     * {@link VectorTester} parameterized for {@link Version#CA}, {@link Version#DC}, {@link Version#EC}, and {@link Version#ED}.
+     * {@link VectorTester} parameterized for all {@link Version}s supporting vector indexes.
      */
     @Ignore
     @RunWith(Parameterized.class)
@@ -187,7 +191,10 @@ public class VectorTester extends SAITester
         public static Collection<Object[]> data()
         {
             // See Version file for explanation of changes associated with each version
-            return Stream.of(Version.CA, Version.DC, Version.EC, Version.ED).map(v -> new Object[]{ v }).collect(Collectors.toList());
+            return Version.ALL.stream()
+                              .filter(v -> v.onOrAfter(Version.JVECTOR_EARLIEST))
+                              .map(v -> new Object[]{ v })
+                              .collect(Collectors.toList());
         }
 
         @Before
