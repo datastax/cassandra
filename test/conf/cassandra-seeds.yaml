@@ -42,16 +42,3 @@ row_cache_class_name: org.apache.cassandra.cache.OHCProvider
 row_cache_size_in_mb: 16
 enable_user_defined_functions: true
 enable_scripted_user_defined_functions: false
-guardrails:
-    columns_per_table_failure_threshold: -1
-    fields_per_udt_failure_threshold: -1
-    collection_size_warn_threshold_in_kb: -1
-    items_per_collection_warn_threshold: -1
-    secondary_index_per_table_failure_threshold: -1
-    materialized_view_per_table_failure_threshold: -1
-    tables_warn_threshold: -1
-    tables_failure_threshold: -1
-    write_consistency_levels_disallowed: []
-    in_select_cartesian_product_failure_threshold: -1
-    partition_keys_in_select_failure_threshold: -1
-    disk_usage_percentage_warn_threshold: -1

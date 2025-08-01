@@ -162,8 +162,8 @@ public class GuardrailsConfig
         // for read requests
         enforceDefault(page_size_failure_threshold_in_kb, v -> page_size_failure_threshold_in_kb = v, NO_LIMIT, 512);
 
-        enforceDefault(in_select_cartesian_product_failure_threshold, v -> in_select_cartesian_product_failure_threshold = v, 25, 25);
-        enforceDefault(partition_keys_in_select_failure_threshold, v -> partition_keys_in_select_failure_threshold = v, 20, 20);
+        enforceDefault(in_select_cartesian_product_failure_threshold, v -> in_select_cartesian_product_failure_threshold = v, NO_LIMIT, 25);
+        enforceDefault(partition_keys_in_select_failure_threshold, v -> partition_keys_in_select_failure_threshold = v, NO_LIMIT, 20);
 
         enforceDefault(tombstone_warn_threshold, v -> tombstone_warn_threshold = v, 1000, 1000);
         enforceDefault(tombstone_failure_threshold, v -> tombstone_failure_threshold = v, 100000, 100000);
@@ -190,25 +190,25 @@ public class GuardrailsConfig
         // We use a LinkedHashSet just for the sake of preserving the ordering in error messages
         enforceDefault(write_consistency_levels_disallowed,
                        v -> write_consistency_levels_disallowed = ImmutableSet.copyOf(v),
-                       Collections.<String>singleton("ANY"),
+                       Collections.<String>emptySet(),
                        new LinkedHashSet<>(Arrays.asList("ANY", "ONE", "LOCAL_ONE")));
 
         // for schema
         enforceDefault(counter_enabled, v -> counter_enabled = v, true, true);
 
-        enforceDefault(fields_per_udt_failure_threshold, v -> fields_per_udt_failure_threshold = v, 100L, 10L);
-        enforceDefault(collection_size_warn_threshold_in_kb, v -> collection_size_warn_threshold_in_kb = v, 10240L, 5 * 1024L);
-        enforceDefault(items_per_collection_warn_threshold, v -> items_per_collection_warn_threshold = v, 200L, 20L);
+        enforceDefault(fields_per_udt_failure_threshold, v -> fields_per_udt_failure_threshold = v, -1L, 10L);
+        enforceDefault(collection_size_warn_threshold_in_kb, v -> collection_size_warn_threshold_in_kb = v, -1L, 5 * 1024L);
+        enforceDefault(items_per_collection_warn_threshold, v -> items_per_collection_warn_threshold = v, -1L, 20L);
 
         enforceDefault(vector_dimensions_warn_threshold, v -> vector_dimensions_warn_threshold = v, -1, -1);
         enforceDefault(vector_dimensions_failure_threshold, v -> vector_dimensions_failure_threshold = v, 8192, 8192);
 
-        enforceDefault(columns_per_table_failure_threshold, v -> columns_per_table_failure_threshold = v, 200L, 50L);
-        enforceDefault(secondary_index_per_table_failure_threshold, v -> secondary_index_per_table_failure_threshold = v, 1, 1);
-        enforceDefault(sasi_indexes_per_table_failure_threshold, v -> sasi_indexes_per_table_failure_threshold = v, 0, 0);
-        enforceDefault(materialized_view_per_table_failure_threshold, v -> materialized_view_per_table_failure_threshold = v, 0, 2);
-        enforceDefault(tables_warn_threshold, v -> tables_warn_threshold = v, 100L, 100L);
-        enforceDefault(tables_failure_threshold, v -> tables_failure_threshold = v, 200L, 200L);
+        enforceDefault(columns_per_table_failure_threshold, v -> columns_per_table_failure_threshold = v, -1L, 50L);
+        enforceDefault(secondary_index_per_table_failure_threshold, v -> secondary_index_per_table_failure_threshold = v, NO_LIMIT, 1);
+        enforceDefault(sasi_indexes_per_table_failure_threshold, v -> sasi_indexes_per_table_failure_threshold = v, NO_LIMIT, 0);
+        enforceDefault(materialized_view_per_table_failure_threshold, v -> materialized_view_per_table_failure_threshold = v, NO_LIMIT, 2);
+        enforceDefault(tables_warn_threshold, v -> tables_warn_threshold = v, -1L, 100L);
+        enforceDefault(tables_failure_threshold, v -> tables_failure_threshold = v, -1L, 200L);
 
         enforceDefault(table_properties_disallowed,
                        v -> table_properties_disallowed = ImmutableSet.copyOf(v),
@@ -226,7 +226,7 @@ public class GuardrailsConfig
                                                           .collect(Collectors.toList())));
 
         // for node status
-        enforceDefault(disk_usage_percentage_warn_threshold, v -> disk_usage_percentage_warn_threshold = v, 70, 70);
+        enforceDefault(disk_usage_percentage_warn_threshold, v -> disk_usage_percentage_warn_threshold = v, NO_LIMIT, 70);
         enforceDefault(disk_usage_percentage_failure_threshold, v -> disk_usage_percentage_failure_threshold = v, NO_LIMIT, 80);
         enforceDefault(disk_usage_max_disk_size_in_gb, v -> disk_usage_max_disk_size_in_gb = v, (long) NO_LIMIT, (long) NO_LIMIT);
 
