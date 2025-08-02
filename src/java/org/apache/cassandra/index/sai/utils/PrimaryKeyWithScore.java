@@ -34,14 +34,24 @@ public class PrimaryKeyWithScore extends PrimaryKeyWithSortKey
 
     public PrimaryKeyWithScore(IndexContext context, Memtable source, PrimaryKey primaryKey, float indexScore)
     {
+        this(context, (Object) source, primaryKey, indexScore);
+    }
+
+    public PrimaryKeyWithScore(IndexContext context, SSTableId<?> source, PrimaryKey primaryKey, float indexScore)
+    {
+        this(context, (Object) source, primaryKey, indexScore);
+    }
+
+    private PrimaryKeyWithScore(IndexContext context, Object source, PrimaryKey primaryKey, float indexScore)
+    {
         super(context, source, primaryKey);
         this.indexScore = indexScore;
     }
 
-    public PrimaryKeyWithScore(IndexContext context, SSTableId source, PrimaryKey primaryKey, float indexScore)
+    @Override
+    public PrimaryKeyWithScore forStaticRow()
     {
-        super(context, source, primaryKey);
-        this.indexScore = indexScore;
+        return new PrimaryKeyWithScore(context, sourceTable, primaryKey.forStaticRow(), indexScore);
     }
 
     @Override

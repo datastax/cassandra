@@ -28,6 +28,7 @@ import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.io.sstable.SSTableId;
+import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 
@@ -40,19 +41,13 @@ import org.apache.cassandra.utils.bytecomparable.ByteSource;
 public abstract class PrimaryKeyWithSortKey implements PrimaryKey
 {
     protected final IndexContext context;
-    private final PrimaryKey primaryKey;
+    protected final PrimaryKey primaryKey;
     // Either a Memtable reference or an SSTableId reference
-    private final Object sourceTable;
+    protected final Object sourceTable;
 
-    protected PrimaryKeyWithSortKey(IndexContext context, Memtable sourceTable, PrimaryKey primaryKey)
+    protected PrimaryKeyWithSortKey(IndexContext context, Object sourceTable, PrimaryKey primaryKey)
     {
-        this.context = context;
-        this.sourceTable = sourceTable;
-        this.primaryKey = primaryKey;
-    }
-
-    protected PrimaryKeyWithSortKey(IndexContext context, SSTableId sourceTable, PrimaryKey primaryKey)
-    {
+        assert sourceTable instanceof Memtable || sourceTable instanceof SSTableId;
         this.context = context;
         this.sourceTable = sourceTable;
         this.primaryKey = primaryKey;
@@ -65,10 +60,18 @@ public abstract class PrimaryKeyWithSortKey implements PrimaryKey
 
     public boolean isIndexDataValid(Row row, int nowInSecs)
     {
-        assert context.getDefinition().isRegular() : "Only regular columns are supported, got " + context.getDefinition();
-        var cell = row.getCell(context.getDefinition());
+        ColumnMetadata column = context.getDefinition();
+
+        if (row.isStatic() && !column.isStatic())
+            return true;
+
+        if (!row.isStatic() && !column.isRegular())
+            return true;
+
+        var cell = row.getCell(column);
         if (!cell.isLive(nowInSecs))
             return false;
+
         assert cell instanceof CellWithSourceTable : "Expected CellWithSource, got " + cell.getClass();
         return sourceTable.equals(((CellWithSourceTable<?>) cell).sourceTable())
                && isIndexDataEqualToLiveData(cell.buffer());
@@ -102,7 +105,6 @@ public abstract class PrimaryKeyWithSortKey implements PrimaryKey
         // in a HashMap to prevent loading the same row multiple times.
         return primaryKey.equals(((PrimaryKeyWithSortKey) obj).primaryKey());
     }
-
 
     // Generic primary key wrapper methods:
     @Override
