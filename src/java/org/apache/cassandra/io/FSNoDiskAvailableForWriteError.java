@@ -25,10 +25,19 @@ import java.io.IOException;
  */
 public class FSNoDiskAvailableForWriteError extends FSWriteError
 {
+    private final String keyspace;
+
     public FSNoDiskAvailableForWriteError(String keyspace)
     {
         super(new IOException(String.format("The data directories for the %s keyspace have been marked as unwritable",
                                             keyspace)));
+
+        this.keyspace = keyspace;
+    }
+
+    public String getKeyspace()
+    {
+        return keyspace;
     }
 
     @Override
