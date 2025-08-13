@@ -217,6 +217,7 @@ public class DatabaseDescriptor
         if (clientInitialized)
             throw new AssertionError("clientInitialization() already called");
 
+        conf.guardrails.applyDefaults();
         // Some unit tests require this :(
         if (daemonInitialized)
             return;
@@ -441,7 +442,6 @@ public class DatabaseDescriptor
 
     private static void applyGuardrails()
     {
-        conf.guardrails.applyConfig();
         conf.guardrails.validate();
         getGuardrailsConfig().validateAfterDataDirectoriesExist();
     }
@@ -3738,6 +3738,17 @@ public class DatabaseDescriptor
     public static boolean isEmulateDbaasDefaults()
     {
         return conf.emulate_dbaas_defaults;
+    }
+
+    @VisibleForTesting
+    public static boolean setHcdGuardrailsDefaults(boolean hcd_guardrail_defaults)
+    {
+        return conf.hcd_guardrail_defaults = hcd_guardrail_defaults;
+    }
+
+    public static boolean isHcdGuardrailsDefaults()
+    {
+        return conf.hcd_guardrail_defaults;
     }
 
     public static PageSize getAggregationSubPageSize()

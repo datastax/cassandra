@@ -73,7 +73,7 @@ public class GuardrailSAIIndexesTest extends GuardrailTester
             DatabaseDescriptor.setEmulateDbaasDefaults(dbaas);
 
             GuardrailsConfig config = new GuardrailsConfig();
-            config.applyConfig();
+            config.applyDefaults();
 
             assertEquals(GuardrailsConfig.DEFAULT_INDEXES_PER_TABLE_THRESHOLD, (int) config.sai_indexes_per_table_failure_threshold);
             assertEquals(GuardrailsConfig.DEFAULT_INDEXES_TOTAL_THRESHOLD, (int) config.sai_indexes_total_failure_threshold);
