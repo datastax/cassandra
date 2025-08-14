@@ -90,7 +90,7 @@ public class UDTMoveTest extends CQLTester
 
                         try (SequentialWriter out = new SequentialWriter(new File(sstablesLocation2.resolve(sourcePath.getFileName()))))
                         {
-                            new MetadataSerializer().serialize(metadata, out, reader.descriptor.version);
+                            new MetadataSerializer().serialize(metadata, out, reader.descriptor);
                             out.sync();
                         }
 
