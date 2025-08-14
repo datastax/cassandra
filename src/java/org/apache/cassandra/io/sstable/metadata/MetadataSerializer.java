@@ -19,20 +19,22 @@ package org.apache.cassandra.io.sstable.metadata;
 
 import java.io.FileNotFoundException;
 import java.io.IOException;
-import java.util.Collections;
+import java.nio.ByteBuffer;
+import java.util.Arrays;
 import java.util.EnumMap;
 import java.util.EnumSet;
-import java.util.List;
 import java.util.Map;
 import java.util.function.UnaryOperator;
 import java.util.zip.CRC32;
 
 import com.google.common.base.Throwables;
-import com.google.common.collect.Lists;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.io.FSWriteError;
+import org.apache.cassandra.io.compress.CompressionMetadata;
+import org.apache.cassandra.io.compress.ICompressor;
+import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableFormat.Components;
@@ -64,24 +66,54 @@ public class MetadataSerializer implements IMetadataSerializer
 
     private static final int CHECKSUM_LENGTH = 4; // CRC32
 
-    public void serialize(Map<MetadataType, MetadataComponent> components, DataOutputPlus out, Version version) throws IOException
+    public void serialize(Map<MetadataType, MetadataComponent> components, DataOutputPlus out, Descriptor descriptor) throws IOException
     {
+        Version version = descriptor.version;
         boolean checksum = version.hasMetadataChecksum();
         CRC32 crc = new CRC32();
+        final int componentsCount = components.size();
+        
         // sort components by type
-        List<MetadataComponent> sortedComponents = Lists.newArrayList(components.values());
-        Collections.sort(sortedComponents);
+        MetadataComponent[] sortedComponents = components.values().toArray(new MetadataComponent[componentsCount]);
+        Arrays.sort(sortedComponents);
 
         // write number of component
-        out.writeInt(components.size());
-        updateChecksumInt(crc, components.size());
+        out.writeInt(componentsCount);
+        updateChecksumInt(crc, componentsCount);
         maybeWriteChecksum(crc, out, version);
 
-        // build and write toc
-        int lastPosition = 4 + (8 * sortedComponents.size()) + (checksum ? 2 * CHECKSUM_LENGTH : 0);
-        Map<MetadataType, Integer> sizes = new EnumMap<>(MetadataType.class);
-        for (MetadataComponent component : sortedComponents)
+        ICompressor encryptor = getEncryptor(descriptor, true);
+        ByteBuffer[] componentsSerializations = new ByteBuffer[componentsCount];
+
+        // serialize and possibly encrypt components
+        for (int i = 0; i < componentsCount; ++i)
         {
+            MetadataComponent metadataComponent = sortedComponents[i];
+            MetadataType componentType = metadataComponent.getType();
+            int size = componentType.serializer.serializedSize(version, metadataComponent);
+
+            try (DataOutputBuffer dob = new DataOutputBuffer(size))
+            {
+                componentType.serializer.serialize(version, metadataComponent, dob);
+                if (encryptor != null)
+                {
+                    ByteBuffer encrypted = ByteBuffer.allocate(encryptor.initialCompressedBufferLength(size));
+                    encryptor.compress(dob.buffer(), encrypted);
+                    encrypted.flip();
+                    componentsSerializations[i] = encrypted;
+                }
+                else
+                {
+                    componentsSerializations[i] = dob.buffer();
+                }
+            }
+        }
+
+        // build and write toc
+        int lastPosition = 4 + (8 * componentsCount) + (checksum ? 2 * CHECKSUM_LENGTH : 0);
+        for (int i = 0; i < componentsCount; ++i)
+        {
+            MetadataComponent component = sortedComponents[i];
             MetadataType type = component.getType();
             // serialize type
             out.writeInt(type.ordinal());
@@ -89,24 +121,18 @@ public class MetadataSerializer implements IMetadataSerializer
             // serialize position
             out.writeInt(lastPosition);
             updateChecksumInt(crc, lastPosition);
-            int size = type.serializer.serializedSize(version, component);
+            int size = componentsSerializations[i].remaining();
             lastPosition += size + (checksum ? CHECKSUM_LENGTH : 0);
-            sizes.put(type, size);
         }
         maybeWriteChecksum(crc, out, version);
 
-        // serialize components
-        for (MetadataComponent component : sortedComponents)
+        // copy components to output
+        for (int i = 0; i < componentsCount; ++i)
         {
-            byte[] bytes;
-            try (DataOutputBuffer dob = new DataOutputBuffer(sizes.get(component.getType())))
-            {
-                component.getType().serializer.serialize(version, component, dob);
-                bytes = dob.getData();
-            }
+            ByteBuffer bytes = componentsSerializations[i];
             out.write(bytes);
-
-            crc.reset(); crc.update(bytes);
+            crc.reset();
+            crc.update(bytes);
             maybeWriteChecksum(crc, out, version);
         }
     }
@@ -186,6 +212,7 @@ public class MetadataSerializer implements IMetadataSerializer
         MetadataType[] allMetadataTypes = MetadataType.values();
 
         Map<MetadataType, MetadataComponent> components = new EnumMap<>(MetadataType.class);
+        ICompressor encryptor = getEncryptor(descriptor, false);
 
         for (int i = 0; i < count; i++)
         {
@@ -198,11 +225,22 @@ public class MetadataSerializer implements IMetadataSerializer
             }
 
             byte[] buffer = new byte[isChecksummed ? lengths[i] - CHECKSUM_LENGTH : lengths[i]];
+            int bufLen = buffer.length;
             in.readFully(buffer);
 
             crc.reset(); crc.update(buffer);
             maybeValidateChecksum(crc, in, descriptor);
-            try (DataInputBuffer dataInputBuffer = new DataInputBuffer(buffer))
+            
+            if (encryptor != null)
+            {
+                // Because we only use the encryption component, we are guaranteed that the serialization will fit
+                // within the buffer we already have, and that we can decrypt in place
+                // (see org.apache.cassandra.io.compress.Encryptor.canDecompressInPlace).
+                assert encryptor.canDecompressInPlace();
+                bufLen = encryptor.uncompress(buffer, 0, buffer.length, buffer, 0);
+            }
+            
+            try (DataInputBuffer dataInputBuffer = new DataInputBuffer(buffer, 0, bufLen))
             {
                 components.put(type, type.serializer.deserialize(descriptor.version, dataInputBuffer));
             }
@@ -268,7 +306,7 @@ public class MetadataSerializer implements IMetadataSerializer
         File file = descriptor.tmpFileFor(Components.STATS);
         try (DataOutputStreamPlus out = file.newOutputStream(File.WriteMode.OVERWRITE))
         {
-            serialize(currentComponents, out, descriptor.version);
+            serialize(currentComponents, out, descriptor);
             out.flush();
         }
         catch (IOException e)
@@ -286,4 +324,51 @@ public class MetadataSerializer implements IMetadataSerializer
         rewriteSSTableMetadata(descriptor, currentComponents);
     }
 
+    /**
+     * Read the compression info file pointed by the given descriptor and create the corresponding encryptor.
+     *
+     * Returns null if no encryption applies (version doesn't support it, compression is not applied, or the applicable
+     * compression does not include encryption).
+     */
+    // Package-private for testing
+    static CompressionParams testCompressionParams = null;
+    
+    private ICompressor getEncryptor(Descriptor desc, boolean writeTime)
+    {
+        if (!desc.version.metadataIsEncrypted())
+            return null;
+        
+        // For testing, use the provided compression params
+        if (testCompressionParams != null)
+        {
+            ICompressor compressor = testCompressionParams.getSstableCompressor();
+            if (compressor != null)
+                return compressor.encryptionOnly();
+            return null;
+        }
+        
+        File compressionFile = desc.fileFor(Components.COMPRESSION_INFO);
+        if (!compressionFile.exists())
+            return null;
+
+        try
+        {
+            // Read the compression metadata from file
+            // We pass a small compressedLength as we only need the parameters, not the actual chunk offsets
+            CompressionMetadata cm = CompressionMetadata.open(compressionFile, 1024, false);
+            // Note: we use only the encryption component, without any compression. The reason for doing this is to
+            // avoid having to allocate (and save the size of) an additional buffer to hold the larger uncompressed
+            // serialization on reads.
+            ICompressor compressor = cm.parameters.getSstableCompressor();
+            if (compressor != null)
+                return compressor.encryptionOnly();
+            return null;
+        }
+        catch (Exception e)
+        {
+            // If we can't read the compression metadata, assume no encryption
+            logger.debug("Could not read compression metadata for {}: {}", desc, e.getMessage());
+            return null;
+        }
+    }
 }
