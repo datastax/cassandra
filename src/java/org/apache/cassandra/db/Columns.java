@@ -589,7 +589,7 @@ public class Columns extends AbstractCollection<ColumnMetadata> implements Colle
          */
         public void serializeSubset(Collection<ColumnMetadata> columns, Columns superset, DataOutputPlus out) throws IOException
         {
-            /**
+            /*
              * We weight this towards small sets, and sets where the majority of items are present, since
              * we expect this to mostly be used for serializing result sets.
              *
