@@ -42,7 +42,7 @@ import com.google.common.base.Joiner;
 import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -66,6 +66,7 @@ import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.PathUtils;
+import org.apache.cassandra.locator.SimpleSnitch;
 import org.apache.cassandra.nodes.Nodes;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.KeyspaceMetadata;
@@ -363,13 +364,19 @@ public class StartupChecks
             if (Murmur3Partitioner.instance != DatabaseDescriptor.getPartitioner())
                 logger.warn("Not using murmur3 partitioner ({}). {}", DatabaseDescriptor.getPartitioner().getClass().getName(), WARN_SUFFIX);
 
+            if (DatabaseDescriptor.getEndpointSnitch() instanceof SimpleSnitch)
+                logger.warn("SimpleSnitch is only for dev/test environments. {}", WARN_SUFFIX);
+
             if (DatabaseDescriptor.getNumTokens() > 16)
                 logger.warn("num_tokens {} too high. Values over 16 poorly impact repairs and node bootstrapping/decommissioning. {}",
                             DatabaseDescriptor.getNumTokens(), WARN_SUFFIX);
 
+            if(SSTableFormat.Type.BTI != SSTableFormat.Type.current())
+                logger.warn("Trie-based SSTables (bti) should always be the default (current is {}). {}", SSTableFormat.Type.current(), WARN_SUFFIX);
+
             // ServerTestUtils.prepare() enables transient replication, so we have to skip this when we're inside a unit test
             if(DatabaseDescriptor.isTransientReplicationEnabled() && null == System.getProperty("cassandra.testtag"))
-                throw new StartupException(StartupException.ERR_WRONG_CONFIG, "Transient Replication cannot not be used in HCD.");
+                throw new StartupException(StartupException.ERR_WRONG_CONFIG, "Transient Replication cannot be used in HCD.");
 
             if(DatabaseDescriptor.getEnableMaterializedViews())
                 logger.warn("Materialised Views should not be enabled. {}", WARN_SUFFIX);
@@ -392,8 +399,41 @@ public class StartupChecks
                 logger.warn("Guardrails value {} for batch_size_fail_threshold_in_kb is too high (>640). {}",
                         DatabaseDescriptor.getGuardrailsConfig().batch_size_fail_threshold_in_kb, WARN_SUFFIX);
 
-            if(SSTableFormat.Type.BTI != SSTableFormat.Type.current())
-                logger.warn("Trie-based SSTables (bti) should always be the default (current is {}). {}", SSTableFormat.Type.current(), WARN_SUFFIX);
+            if (DatabaseDescriptor.getGuardrailsConfig().columns_per_table_failure_threshold > 200)
+                logger.warn("Guardrails value {} for columns_per_table_failure_threshold is too high (>200). {}",
+                        DatabaseDescriptor.getGuardrailsConfig().columns_per_table_failure_threshold, WARN_SUFFIX);
+
+            if (DatabaseDescriptor.getGuardrailsConfig().fields_per_udt_failure_threshold > 100)
+                logger.warn("Guardrails value {} for fields_per_udt_failure_threshold is too high (>100). {}",
+                        DatabaseDescriptor.getGuardrailsConfig().fields_per_udt_failure_threshold, WARN_SUFFIX);
+
+            if (DatabaseDescriptor.getGuardrailsConfig().collection_size_warn_threshold_in_kb > 10480)
+                logger.warn("Guardrails value {} for collection_size_warn_threshold_in_kb is too high (>10480). {}",
+                        DatabaseDescriptor.getGuardrailsConfig().collection_size_warn_threshold_in_kb, WARN_SUFFIX);
+
+            if (DatabaseDescriptor.getGuardrailsConfig().items_per_collection_warn_threshold > 200)
+                logger.warn("Guardrails value {} for items_per_collection_warn_threshold is too high (>200). {}",
+                        DatabaseDescriptor.getGuardrailsConfig().items_per_collection_warn_threshold, WARN_SUFFIX);
+
+            if (DatabaseDescriptor.getGuardrailsConfig().tables_warn_threshold > 100)
+                logger.warn("Guardrails value {} for tables_warn_threshold is too high (>100). {}",
+                        DatabaseDescriptor.getGuardrailsConfig().tables_warn_threshold, WARN_SUFFIX);
+
+            if (DatabaseDescriptor.getGuardrailsConfig().tables_failure_threshold > 200)
+                logger.warn("Guardrails value {} for tables_failure_threshold is too high (>200). {}",
+                        DatabaseDescriptor.getGuardrailsConfig().tables_failure_threshold, WARN_SUFFIX);
+
+            if (DatabaseDescriptor.getGuardrailsConfig().in_select_cartesian_product_failure_threshold > 25)
+                logger.warn("Guardrails value {} for in_select_cartesian_product_failure_threshold is too high (>25). {}",
+                        DatabaseDescriptor.getGuardrailsConfig().in_select_cartesian_product_failure_threshold, WARN_SUFFIX);
+
+            if (DatabaseDescriptor.getGuardrailsConfig().partition_keys_in_select_failure_threshold > 20)
+                logger.warn("Guardrails value {} for partition_keys_in_select_failure_threshold is too high (>20). {}",
+                        DatabaseDescriptor.getGuardrailsConfig().partition_keys_in_select_failure_threshold, WARN_SUFFIX);
+
+            if (!DatabaseDescriptor.getGuardrailsConfig().write_consistency_levels_disallowed.contains("ANY"))
+                logger.warn("Guardrails value \"{}\" for write_consistency_levels_disallowed does not contain \"ANY\". {}",
+                        StringUtils.join(DatabaseDescriptor.getGuardrailsConfig().write_consistency_levels_disallowed, ','), WARN_SUFFIX);
         }
     };
 

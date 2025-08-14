@@ -3740,6 +3740,17 @@ public class DatabaseDescriptor
         return conf.emulate_dbaas_defaults;
     }
 
+    @VisibleForTesting
+    public static boolean setHcdGuardrailsDefaults(boolean hcd_guardrail_defaults)
+    {
+        return conf.hcd_guardrail_defaults = hcd_guardrail_defaults;
+    }
+
+    public static boolean isHcdGuardrailsDefaults()
+    {
+        return conf.hcd_guardrail_defaults;
+    }
+
     public static PageSize getAggregationSubPageSize()
     {
         return PageSize.inBytes(conf.aggregation_subpage_size_in_kb * 1024);
