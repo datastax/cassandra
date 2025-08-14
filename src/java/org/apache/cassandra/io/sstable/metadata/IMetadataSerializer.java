@@ -24,7 +24,6 @@ import java.util.function.UnaryOperator;
 
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.io.sstable.format.Version;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.utils.TimeUUID;
 
@@ -39,10 +38,10 @@ public interface IMetadataSerializer
      *
      * @param components Metadata components to serialize
      * @param out
-     * @param version
+     * @param descriptor
      * @throws IOException
      */
-    void serialize(Map<MetadataType, MetadataComponent> components, DataOutputPlus out, Version version) throws IOException;
+    void serialize(Map<MetadataType, MetadataComponent> components, DataOutputPlus out, Descriptor descriptor) throws IOException;
 
     /**
      * Deserialize specified metadata components from given descriptor.
