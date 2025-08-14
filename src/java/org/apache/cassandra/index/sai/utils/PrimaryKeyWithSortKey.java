@@ -62,10 +62,14 @@ public abstract class PrimaryKeyWithSortKey implements PrimaryKey
     {
         ColumnMetadata column = context.getDefinition();
 
-        if (row.isStatic() && !column.isStatic())
+        // If the indexed column is part of the primary key, we don't need this type of validation because we would have
+        // fetched the row using the indexed primary key, so they have to match.
+        if (column.isPrimaryKeyColumn())
             return true;
 
-        if (!row.isStatic() && !column.isRegular())
+        // If the row is static and the column is not static, or vice versa, the indexed value won't be present so we
+        // don't need to check if live data matches indexed data.
+        if (row.isStatic() != column.isStatic())
             return true;
 
         var cell = row.getCell(column);
