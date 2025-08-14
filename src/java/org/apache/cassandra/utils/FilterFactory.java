@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.utils;
 
+import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -72,6 +73,7 @@ public class FilterFactory
      * Asserts that the given probability can be satisfied using this
      * filter.
      */
+    @VisibleForTesting
     public static IFilter getFilter(long numElements, double maxFalsePosProbability)
     {
         return getFilter(numElements, maxFalsePosProbability, BloomFilter.memoryLimiter);
