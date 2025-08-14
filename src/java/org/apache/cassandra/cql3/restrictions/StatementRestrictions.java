@@ -87,6 +87,8 @@ public class StatementRestrictions
     public static final String BM25_ORDERING_REQUIRES_ANALYZED_INDEX_MESSAGE = "BM25 ordering on column %s requires an analyzed index";
     public static final String BM25_ORDERING_REQUIRES_REGULAR_COLUMN_MESSAGE = "BM25 ordering on %s column %s is not supported. " +
                                                                                "Only regular columns are supported.";
+    public static final String ANN_ORDERING_REQUIRES_REGULAR_COLUMN_MESSAGE = "ANN ordering on %s column %s is not supported. " +
+                                                                               "Only regular columns are supported.";
     public static final String NON_CLUSTER_ORDERING_REQUIRES_INDEX_MESSAGE =
     "Ordering on non-clustering column %s requires the column to be indexed with a non-analyzed index.";
     public static final String NON_CLUSTER_ORDERING_REQUIRES_ALL_RESTRICTED_NON_PARTITION_KEY_COLUMNS_INDEXED_MESSAGE =
@@ -737,6 +739,11 @@ public class StatementRestrictions
 
                 if (ordering.expression instanceof Ordering.Bm25 && !column.isRegular())
                     throw new InvalidRequestException(String.format(BM25_ORDERING_REQUIRES_REGULAR_COLUMN_MESSAGE,
+                                                                    column.kind.name().toLowerCase().replace("_", " "),
+                                                                    column.name));
+
+                if (ordering.expression instanceof Ordering.Ann && !column.isRegular())
+                    throw new InvalidRequestException(String.format(ANN_ORDERING_REQUIRES_REGULAR_COLUMN_MESSAGE,
                                                                     column.kind.name().toLowerCase().replace("_", " "),
                                                                     column.name));
 

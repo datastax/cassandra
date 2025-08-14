@@ -20,6 +20,7 @@ package org.apache.cassandra.index.sai.cql;
 
 import java.util.Collections;
 
+import org.assertj.core.api.Assertions;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -37,6 +38,7 @@ import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.messages.ResultMessage;
 
+import static java.lang.String.format;
 import static org.apache.cassandra.cql3.restrictions.StatementRestrictions.NON_CLUSTER_ORDERING_REQUIRES_INDEX_MESSAGE;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
@@ -221,5 +223,87 @@ public class GenericOrderByInvalidQueryTest extends SAITester
         options.updateConsistency(consistencyLevel);
 
         return ((ResultMessage.Rows)statement.execute(queryState, options, System.nanoTime())).result;
+    }
+
+    @Test
+    public void testOrderByPartitionKeyComponent()
+    {
+        createTable("CREATE TABLE %s (k1 int, k2 vector<float, 3>, PRIMARY KEY((k1, k2)))");
+        createVectorIndex("k2");
+
+        String insert = "INSERT INTO %s (k1, k2) VALUES (?, ?)";
+        Object[] row1 = row(1, vector(1.0f, 0.0f, 0.0f));
+        Object[] row2 = row(2, vector(0.0f, 1.0f, 0.0f));
+        Object[] row3 = row(3, vector(0.0f, 0.0f, 1.0f));
+        execute(insert, row1);
+        execute(insert, row2);
+        execute(insert, row3);
+
+        assertRejectsANNOnNonRegularColumn("SELECT * FROM %s ORDER BY k2 ANN OF [1.0, 0.0, 0.0] LIMIT 10", "partition key", "k2");
+    }
+
+    @Test
+    public void testOrderByClusteringKey()
+    {
+        createTable("CREATE TABLE %s (k int, c vector<float, 3>, PRIMARY KEY(k, c))");
+        createVectorIndex("c");
+
+        String insert = "INSERT INTO %s (k, c) VALUES (?, ?)";
+        Object[] row1 = row(1, vector(1.0f, 0.0f, 0.0f));
+        Object[] row2 = row(2, vector(0.0f, 1.0f, 0.0f));
+        Object[] row3 = row(3, vector(0.0f, 0.0f, 1.0f));
+        execute(insert, row1);
+        execute(insert, row2);
+        execute(insert, row3);
+
+        assertRejectsANNOnNonRegularColumn("SELECT * FROM %s ORDER BY c ANN OF [1.0, 0.0, 0.0] LIMIT 10", "clustering", "c");
+    }
+
+    @Test
+    public void testOrderByClusteringKeyComponent()
+    {
+        createTable("CREATE TABLE %s (k int, c1 int, c2 vector<float, 3>, PRIMARY KEY(k, c1, c2))");
+        createVectorIndex("c2");
+
+        String insert = "INSERT INTO %s (k, c1, c2) VALUES (?, ?, ?)";
+        Object[] row1 = row(1, 1, vector(1.0f, 0.0f, 0.0f));
+        Object[] row2 = row(1, 2, vector(0.0f, 1.0f, 0.0f));
+        Object[] row3 = row(2, 1, vector(0.0f, 0.0f, 1.0f));
+        execute(insert, row1);
+        execute(insert, row2);
+        execute(insert, row3);
+
+        assertRejectsANNOnNonRegularColumn("SELECT * FROM %s ORDER BY c2 ANN OF [1.0, 0.0, 0.0] LIMIT 10", "clustering", "c2");
+    }
+
+    @Test
+    public void testOrderByStaticColumn()
+    {
+        createTable("CREATE TABLE %s (k int, c int, s vector<float, 3> static, PRIMARY KEY(k, c))");
+        createVectorIndex("s");
+
+        String insert = "INSERT INTO %s (k, c, s) VALUES (?, ?, ?)";
+        Object[] row1 = row(1, 0, vector(1.0f, 0.0f, 0.0f));
+        Object[] row2 = row(2, 0, vector(0.0f, 1.0f, 0.0f));
+        Object[] row3 = row(3, 0, vector(0.0f, 0.0f, 1.0f));
+        execute(insert, row1);
+        execute(insert, row2);
+        execute(insert, row3);
+
+        assertRejectsANNOnNonRegularColumn("SELECT k, c, s FROM %s ORDER BY s ANN OF [1.0, 0.0, 0.0] LIMIT 10", "static", "s");
+    }
+
+    private void createVectorIndex(String column)
+    {
+        createIndex("CREATE CUSTOM INDEX ON %s(" + column + ") " +
+                "USING 'org.apache.cassandra.index.sai.StorageAttachedIndex' " +
+                "WITH OPTIONS = {'similarity_function': 'cosine'}");
+    }
+
+    private void assertRejectsANNOnNonRegularColumn(String query, String columnType, String column)
+    {
+        Assertions.assertThatThrownBy(() -> execute(query))
+                .isInstanceOf(InvalidRequestException.class)
+                .hasMessage(format(StatementRestrictions.ANN_ORDERING_REQUIRES_REGULAR_COLUMN_MESSAGE, columnType, column));
     }
 }
