@@ -916,6 +916,9 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         }, "StorageServiceShutdownHook");
         JVMStabilityInspector.registerShutdownHook(drainOnShutdown, this::onShutdownHookRemoved);
 
+        // Register signal handlers to log received signals for shutdown investigation
+        registerSignalHandlers();
+
         replacing = isReplacing();
 
         if (!Boolean.parseBoolean(System.getProperty("cassandra.start_gossip", "true")))
@@ -1024,6 +1027,41 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     public static boolean isSeed()
     {
         return DatabaseDescriptor.getSeeds().contains(FBUtilities.getBroadcastAddressAndPort());
+    }
+
+    private void registerSignalHandlers()
+    {
+        try
+        {
+            String[] signals = {"TERM", "INT", "HUP"};
+            
+            for (String signalName : signals)
+            {
+                try
+                {
+                    sun.misc.Signal signal = new sun.misc.Signal(signalName);
+                    sun.misc.Signal.handle(signal, 
+                        new sun.misc.SignalHandler()
+                        {
+                            @Override
+                            public void handle(sun.misc.Signal sig)
+                            {
+                                logger.info("Received signal: SIG{} ({})", sig.getName(), sig.getNumber());
+                                // Note: We don't chain to previous handlers to avoid complexity
+                            }
+                        });
+                }
+                catch (IllegalArgumentException e)
+                {
+                    logger.debug("Signal SIG{} is not available on this platform", signalName);
+                }
+            }
+        }
+        catch (Throwable t)
+        {
+            // Don't let signal handler registration failure prevent startup
+            logger.warn("Failed to register signal handlers for shutdown logging", t);
+        }
     }
 
     private void prepareToJoin() throws ConfigurationException
@@ -5219,6 +5257,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
         assert !isShutdown;
         isShutdown = true;
+
+        logger.info("Running StorageService shutdown hook");
 
         Throwable preShutdownHookThrowable = Throwables.perform(null, preShutdownHooks.stream().map(h -> h::run));
         if (preShutdownHookThrowable != null)
