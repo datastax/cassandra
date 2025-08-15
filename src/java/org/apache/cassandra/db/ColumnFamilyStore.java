@@ -3484,6 +3484,13 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         return Objects.requireNonNull(getIfExists(tableId)).metric;
     }
 
+    @Nullable
+    public static TableMetrics metricsForIfPresent(TableId tableId)
+    {
+        ColumnFamilyStore cfs = getIfExists(tableId);
+        return cfs == null ? null : cfs.metric;
+    }
+
     // Used by CNDB
     public long getMemtablesLiveSize()
     {
