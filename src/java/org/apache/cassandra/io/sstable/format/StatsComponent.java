@@ -77,12 +77,17 @@ public class StatsComponent
 
     public SerializationHeader serializationHeader(Descriptor descriptor, TableMetadata metadata)
     {
+        return serializationHeader(descriptor, metadata, false);
+    }
+
+    public SerializationHeader serializationHeader(Descriptor descriptor, TableMetadata metadata, boolean isOfflineTool)
+    {
         SerializationHeader.Component header = serializationHeader();
         if (header != null)
         {
             try
             {
-                return header.toHeader(descriptor, metadata);
+                return header.toHeader(descriptor.toString(), metadata, descriptor.version, isOfflineTool);
             }
             catch (UnknownColumnException ex)
             {
