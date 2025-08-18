@@ -339,7 +339,7 @@ public class SerializationHeader
             }
             catch (InvalidColumnTypeException e)
             {
-                AbstractType<?> fixed = allowImplicitlyFrozenTuples ? tryFix(type, columnName, isPrimaryKeyColumn, metadata.isCounter(), dropped, isForOfflineTool) : null;
+                AbstractType<?> fixed = (allowImplicitlyFrozenTuples || isForOfflineTool) ? tryFix(type, columnName, isPrimaryKeyColumn, metadata.isCounter(), dropped, isForOfflineTool) : null;
                 if (fixed == null)
                 {
                     // We don't know how to fix. We throw an error here because reading such table may result in corruption
