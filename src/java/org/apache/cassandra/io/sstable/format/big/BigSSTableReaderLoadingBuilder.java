@@ -77,7 +77,7 @@ public class BigSSTableReaderLoadingBuilder extends SortedTableReaderLoadingBuil
                 builder.setKeyCache(new KeyCache(CacheService.instance.keyCache));
 
             StatsComponent statsComponent = StatsComponent.load(descriptor, MetadataType.STATS, MetadataType.HEADER, MetadataType.VALIDATION, MetadataType.COMPACTION);
-            builder.setSerializationHeader(statsComponent.serializationHeader(descriptor, builder.getTableMetadataRef().getLocal()));
+            builder.setSerializationHeader(statsComponent.serializationHeader(descriptor, builder.getTableMetadataRef().getLocal(), !online));
             checkArgument(!online || builder.getSerializationHeader() != null);
 
             builder.setStatsMetadata(statsComponent.statsMetadata());
