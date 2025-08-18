@@ -189,11 +189,13 @@ public class SSTablePartitionsTest extends OfflineToolUtils
         assertThatToolSucceds(new File(SSTABLE_1).parentPath())
                 .isEqualTo(HEADER_1 + SUMMARY_1);
 
-        assertThatToolSucceds("-r", new File(SSTABLE_1).parent().parentPath())
+        // When running recursively, we may encounter corrupted legacy SSTables (e.g., legacy_ma_tuple)
+        // These are logged to stderr but the tool continues processing other SSTables, so set allowUnclean
+        assertThatToolSucceds(true, "-r", new File(SSTABLE_1).parent().parentPath())
                 .contains(HEADER_1 + SUMMARY_1)
                 .contains(HEADER_2 + SUMMARY_2);
 
-        assertThatToolSucceds("--recursive", new File(SSTABLE_2).parent().parentPath())
+        assertThatToolSucceds(true, "--recursive", new File(SSTABLE_2).parent().parentPath())
                 .contains(HEADER_1 + SUMMARY_1)
                 .contains(HEADER_2 + SUMMARY_2);
     }
@@ -636,9 +638,15 @@ public class SSTablePartitionsTest extends OfflineToolUtils
 
     private static AbstractStringAssert<?> assertThatToolSucceds(String... args)
     {
+        return assertThatToolSucceds(false, args);
+    }
+
+    private static AbstractStringAssert<?> assertThatToolSucceds(boolean allowUnclean, String... args)
+    {
         ToolResult tool = invokeTool(args);
         Assertions.assertThat(tool.getExitCode()).isZero();
-        tool.assertOnCleanExit();
+        if (!allowUnclean)
+            tool.assertOnCleanExit();
         return Assertions.assertThat(tool.getStdout());
     }
 
