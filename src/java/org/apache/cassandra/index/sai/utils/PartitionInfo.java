@@ -18,8 +18,6 @@
 
 package org.apache.cassandra.index.sai.utils;
 
-import java.util.Objects;
-
 import javax.annotation.Nullable;
 
 import org.apache.cassandra.db.DecoratedKey;
@@ -75,24 +73,5 @@ public class PartitionInfo
                                  baseRowIterator.columns(),
                                  partitionDeletion,
                                  encodingStats);
-    }
-
-    @Override
-    public boolean equals(Object o)
-    {
-        if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
-        PartitionInfo that = (PartitionInfo) o;
-        return Objects.equals(key, that.key)
-               && Objects.equals(staticRow, that.staticRow)
-               && Objects.equals(columns, that.columns)
-               && Objects.equals(partitionDeletion, that.partitionDeletion)
-               && Objects.equals(encodingStats, that.encodingStats);
-    }
-
-    @Override
-    public int hashCode()
-    {
-        return Objects.hash(key, staticRow, columns, partitionDeletion, encodingStats);
     }
 }
