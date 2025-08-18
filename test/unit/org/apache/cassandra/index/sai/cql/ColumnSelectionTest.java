@@ -21,7 +21,7 @@ import org.junit.Test;
 public class ColumnSelectionTest extends VectorTester
 {
     /**
-     * Tests that we can select any column in any table with SAI indexes. See CNDB-14997 for further details.
+     * Tests that we can select any type of column in any table with SAI indexes. See CNDB-14997 for further details.
      */
     @Test
     public void testColumnSelection() throws Throwable
