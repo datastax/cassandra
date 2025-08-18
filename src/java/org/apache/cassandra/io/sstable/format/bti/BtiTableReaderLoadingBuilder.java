@@ -94,7 +94,7 @@ public class BtiTableReaderLoadingBuilder extends SortedTableReaderLoadingBuilde
         try
         {
             StatsComponent statsComponent = StatsComponent.load(descriptor, MetadataType.STATS, MetadataType.VALIDATION, MetadataType.HEADER, MetadataType.COMPACTION);
-            builder.setSerializationHeader(statsComponent.serializationHeader(descriptor, builder.getTableMetadataRef().getLocal()));
+            builder.setSerializationHeader(statsComponent.serializationHeader(descriptor, builder.getTableMetadataRef().getLocal(), !online));
             checkArgument(!online || builder.getSerializationHeader() != null);
 
             builder.setStatsMetadata(statsComponent.statsMetadata());
