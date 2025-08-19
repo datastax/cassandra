@@ -346,7 +346,7 @@ public class DatabaseDescriptorTest
             fail("Should have received a ConfigurationException batch_size_warn_threshold = 2GiB");
         }
         catch (ConfigurationException ignored) { }
-        Assert.assertEquals(5120, DatabaseDescriptor.getBatchSizeWarnThreshold());
+        Assert.assertEquals(65536, DatabaseDescriptor.getBatchSizeWarnThreshold());
     }
 
     @Test
