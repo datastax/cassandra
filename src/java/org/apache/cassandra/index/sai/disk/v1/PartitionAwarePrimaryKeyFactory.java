@@ -81,6 +81,12 @@ public class PartitionAwarePrimaryKeyFactory implements PrimaryKey.Factory
         }
 
         @Override
+        public PartitionAwarePrimaryKey forStaticRow()
+        {
+            return this;
+        }
+
+        @Override
         public Token token()
         {
             return this.token;

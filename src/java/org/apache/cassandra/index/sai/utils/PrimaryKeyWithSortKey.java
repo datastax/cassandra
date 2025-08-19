@@ -28,6 +28,7 @@ import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.io.sstable.SSTableId;
+import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 
@@ -40,19 +41,13 @@ import org.apache.cassandra.utils.bytecomparable.ByteSource;
 public abstract class PrimaryKeyWithSortKey implements PrimaryKey
 {
     protected final IndexContext context;
-    private final PrimaryKey primaryKey;
+    protected final PrimaryKey primaryKey;
     // Either a Memtable reference or an SSTableId reference
-    private final Object sourceTable;
+    protected final Object sourceTable;
 
-    protected PrimaryKeyWithSortKey(IndexContext context, Memtable sourceTable, PrimaryKey primaryKey)
+    protected PrimaryKeyWithSortKey(IndexContext context, Object sourceTable, PrimaryKey primaryKey)
     {
-        this.context = context;
-        this.sourceTable = sourceTable;
-        this.primaryKey = primaryKey;
-    }
-
-    protected PrimaryKeyWithSortKey(IndexContext context, SSTableId sourceTable, PrimaryKey primaryKey)
-    {
+        assert sourceTable instanceof Memtable || sourceTable instanceof SSTableId;
         this.context = context;
         this.sourceTable = sourceTable;
         this.primaryKey = primaryKey;
@@ -65,10 +60,22 @@ public abstract class PrimaryKeyWithSortKey implements PrimaryKey
 
     public boolean isIndexDataValid(Row row, long nowInSecs)
     {
-        assert context.getDefinition().isRegular() : "Only regular columns are supported, got " + context.getDefinition();
-        var cell = row.getCell(context.getDefinition());
+        ColumnMetadata column = context.getDefinition();
+
+        // If the indexed column is part of the primary key, we don't need this type of validation because we would have
+        // fetched the row using the indexed primary key, so they have to match.
+        if (column.isPrimaryKeyColumn())
+            return true;
+
+        // If the row is static and the column is not static, or vice versa, the indexed value won't be present so we
+        // don't need to check if live data matches indexed data.
+        if (row.isStatic() != column.isStatic())
+            return true;
+
+        var cell = row.getCell(column);
         if (!cell.isLive(nowInSecs))
             return false;
+
         // Check if the row is wrapped and if not, skip the source table check
         if (!(cell instanceof CellWithSourceTable))
         {
@@ -108,7 +115,6 @@ public abstract class PrimaryKeyWithSortKey implements PrimaryKey
         // in a HashMap to prevent loading the same row multiple times.
         return primaryKey.equals(((PrimaryKeyWithSortKey) obj).primaryKey());
     }
-
 
     // Generic primary key wrapper methods:
     @Override
