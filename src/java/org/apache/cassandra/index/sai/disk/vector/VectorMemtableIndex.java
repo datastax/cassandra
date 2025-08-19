@@ -314,9 +314,15 @@ public class VectorMemtableIndex extends AbstractMemtableIndex
         var relevantOrdinals = new IntHashSet();
 
         var keysInRange = PrimaryKeyListUtil.getKeysInRange(keys, minimumKey, maximumKey);
+        boolean isStatic = indexContext.getDefinition().isStatic();
 
         keysInRange.forEach(k ->
         {
+            // if the indexed column is static, we need to get the static row associated with the non-static row that
+            // might be referenced by the key
+            if (isStatic)
+                k = k.forStaticRow();
+
             var v = graph.vectorForKey(k);
             if (v == null)
                 return;

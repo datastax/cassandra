@@ -37,6 +37,7 @@ import io.github.jbellis.jvector.vector.types.VectorFloat;
 import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.cql3.Ordering;
+import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Keyspace;
@@ -46,6 +47,7 @@ import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.marshal.FloatType;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
+import org.apache.cassandra.db.rows.BTreeRow;
 import org.apache.cassandra.db.rows.BaseRowIterator;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.Row;
@@ -67,16 +69,19 @@ import static org.apache.cassandra.cql3.statements.RequestValidations.invalidReq
 
 /**
  * Processor applied to SAI based ORDER BY queries.
- *
- *  * On a replica:
- *  *  - filter(ScoreOrderedResultRetriever) is used to collect up to the top-K rows.
- *  *  - We store any tombstones as well, to avoid losing them during coordinator reconciliation.
- *  *  - The result is returned in PK order so that coordinator can merge from multiple replicas.
- *
+ * </p>
+ * On a replica:
+ * <ul>
+ *     <li>filter(ScoreOrderedResultRetriever) is used to collect up to the top-K rows.</li>
+ *     <li>We store any tombstones as well, to avoid losing them during coordinator reconciliation.</li>
+ *     <li>The result is returned in PK order so that coordinator can merge from multiple replicas.</li>
+ * </ul>
  * On a coordinator:
- *  - reorder(PartitionIterator) is used to consume all rows from the provided partitions,
- *    compute the order based on either a column ordering or a similarity score, and keep top-K.
- *  - The result is returned in score/sortkey order.
+ * <ul>
+ *     <li>reorder(PartitionIterator) is used to consume all rows from the provided partitions,
+ *     compute the order based on either a column ordering or a similarity score, and keep top-K.</li>
+ *     <li>The result is returned in score/sortkey order.</li>
+ * </ul>
  */
 public class TopKProcessor
 {
@@ -104,7 +109,7 @@ public class TopKProcessor
 
         this.indexContext = indexAndExpression.left;
         this.expression = indexAndExpression.right;
-        if (expression.operator() == Operator.ANN && !Ordering.Ann.useSyntheticScore())
+        if (expression.operator() == Operator.ANN && !(Ordering.Ann.useSyntheticScore() && expression.column().isRegular()))
             this.queryVector = vts.createFloatVector(TypeUtil.decomposeVector(indexContext, expression.getIndexValue().duplicate()));
         else
             this.queryVector = null;
@@ -253,6 +258,9 @@ public class TopKProcessor
         float keyAndStaticScore = getScoreForRow(key, staticRow);
         PartitionResults pr = new PartitionResults(partitionInfo);
 
+        if (!partitionRowIterator.hasNext())
+            pr.addRow(Triple.of(partitionInfo, BTreeRow.emptyRow(Clustering.EMPTY), keyAndStaticScore));
+
         while (partitionRowIterator.hasNext())
         {
             Unfiltered unfiltered = partitionRowIterator.next();
@@ -278,31 +286,29 @@ public class TopKProcessor
     private int processSingleRowPartition(TreeMap<PartitionInfo, TreeSet<Unfiltered>> unfilteredByPartition,
                                           BaseRowIterator<?> partitionRowIterator)
     {
-        if (!partitionRowIterator.hasNext())
-            return 0;
-
-        Unfiltered unfiltered = partitionRowIterator.next();
+        Unfiltered unfiltered = partitionRowIterator.hasNext() ? partitionRowIterator.next() : null;
         assert !partitionRowIterator.hasNext() : "Only one row should be returned";
         // Always include tombstones for coordinator. It relies on ReadCommand#withMetricsRecording to throw
         // TombstoneOverwhelmingException to prevent OOM.
         PartitionInfo partitionInfo = PartitionInfo.create(partitionRowIterator);
         addUnfiltered(unfilteredByPartition, partitionInfo, unfiltered);
-        return unfiltered.isRangeTombstoneMarker() ? 0 : 1;
+        return unfiltered != null && unfiltered.isRangeTombstoneMarker() ? 0 : 1;
     }
 
     private void addUnfiltered(SortedMap<PartitionInfo, TreeSet<Unfiltered>> unfilteredByPartition,
                                PartitionInfo partitionInfo,
                                Unfiltered unfiltered)
     {
-        TreeSet<Unfiltered> map = unfilteredByPartition.computeIfAbsent(partitionInfo, k -> new TreeSet<>(command.metadata().comparator));
-        map.add(unfiltered);
+        var map = unfilteredByPartition.computeIfAbsent(partitionInfo, k -> new TreeSet<>(command.metadata().comparator));
+        if (unfiltered != null)
+            map.add(unfiltered);
     }
 
     private float getScoreForRow(DecoratedKey key, Row row)
     {
         ColumnMetadata column = indexContext.getDefinition();
 
-        if (column.isPrimaryKeyColumn() && key == null)
+        if (column.isPartitionKey() && key == null)
             return 0;
 
         if (column.isStatic() && !row.isStatic())
