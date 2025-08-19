@@ -722,18 +722,35 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             {
                 queryContext.addPartitionsRead(1);
                 queryContext.checkpoint();
-                var staticRow = partition.staticRow();
                 UnfilteredRowIterator clusters = applyIndexFilter(partition, filterTree, queryContext);
 
-                if (clusters == null || !clusters.hasNext())
-                {
-                    processedKeys.add(pk);
+                if (clusters == null)
                     return null;
-                }
 
                 var now = FBUtilities.nowInSeconds();
+                var staticRow = partition.staticRow();
+                boolean isStaticValid = false;
+
+                // Each of the primary keys are equal, but they have different source tables.
+                // Therefore, we check to see if the static row is valid for any of them.
+                for (PrimaryKeyWithSortKey sourceKey : sourceKeys)
+                {
+                    if (sourceKey.isIndexDataValid(staticRow, now))
+                    {
+                        // If there are no regular rows, return the static row only
+                        if (!clusters.hasNext())
+                            return new PrimaryKeyIterator(partition, staticRow, null, sourceKey, syntheticScoreColumn);
+
+                        isStaticValid = true;
+                        break;
+                    }
+                }
+
+                // If the static row isn't valid, we can skip the partition.
+                if (!isStaticValid)
+                    return null;
+
                 var row = clusters.next();
-                assert !clusters.hasNext() : "Expected only one row per partition";
                 if (!row.isRangeTombstoneMarker())
                 {
                     for (PrimaryKeyWithSortKey sourceKey : sourceKeys)
@@ -771,9 +788,15 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
         public class PrimaryKeyIterator extends AbstractUnfilteredRowIterator
         {
             private boolean consumed = false;
+
+            @Nullable
             private final Unfiltered row;
 
-            public PrimaryKeyIterator(UnfilteredRowIterator partition, Row staticRow, Unfiltered content, PrimaryKeyWithSortKey primaryKeyWithSortKey, ColumnMetadata syntheticScoreColumn)
+            public PrimaryKeyIterator(UnfilteredRowIterator partition,
+                                      Row staticRow,
+                                      @Nullable Unfiltered content,
+                                      PrimaryKeyWithSortKey primaryKeyWithSortKey,
+                                      ColumnMetadata syntheticScoreColumn)
             {
                 super(partition.metadata(),
                       partition.partitionKey(),
@@ -783,7 +806,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
                       partition.isReverseOrder(),
                       partition.stats());
 
-                if (!content.isRow() || !(primaryKeyWithSortKey instanceof PrimaryKeyWithScore))
+                if (content == null || !content.isRow() || !(primaryKeyWithSortKey instanceof PrimaryKeyWithScore))
                 {
                     this.row = content;
                     return;
@@ -818,7 +841,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             @Override
             protected Unfiltered computeNext()
             {
-                if (consumed)
+                if (consumed || row == null)
                     return endOfData();
                 consumed = true;
                 return row;
