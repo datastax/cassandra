@@ -74,6 +74,16 @@ public class PrimaryKeyWithSource implements PrimaryKey
     }
 
     @Override
+    public PrimaryKeyWithSource forStaticRow()
+    {
+        return new PrimaryKeyWithSource(primaryKey().forStaticRow(),
+                                        sourceSstableId,
+                                        sourceRowId,
+                                        sourceSstableMinKey,
+                                        sourceSstableMaxKey);
+    }
+
+    @Override
     public Token token()
     {
         return primaryKey().token();

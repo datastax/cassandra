@@ -112,6 +112,13 @@ public interface PrimaryKey extends Comparable<PrimaryKey>, Accountable
     }
 
     /**
+     * Returns a {@link PrimaryKey} to fetch the static row of the partition associated with this primary key.
+     *
+     * @return a {@link PrimaryKey} for the static row
+     */
+    PrimaryKey forStaticRow();
+
+    /**
      * Returns the {@link Token} associated with this primary key.
      *
      * @return the {@link Token}
