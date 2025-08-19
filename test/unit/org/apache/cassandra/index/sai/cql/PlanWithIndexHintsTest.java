@@ -20,7 +20,6 @@ import java.util.Arrays;
 
 import org.apache.cassandra.net.MessagingService;
 import org.junit.Assume;
-import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -58,12 +57,6 @@ public class PlanWithIndexHintsTest extends SAITester.Versioned
     {
         CassandraRelevantProperties.DS_CURRENT_MESSAGING_VERSION.setInt(MessagingService.VERSION_DS_12);
         SAITester.setUpClass();
-    }
-
-    @Before
-    public void setup() throws Throwable
-    {
-        CassandraRelevantProperties.DS_CURRENT_MESSAGING_VERSION.setInt(MessagingService.VERSION_DS_12);
     }
 
     @Test
@@ -630,16 +623,16 @@ public class PlanWithIndexHintsTest extends SAITester.Versioned
 
         // insert some data
         String insert = "INSERT INTO %s (k1, k2, k3, c1, c2, c3, s1, s2, s3, r1, r2, r3) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
-        Object[] row1 = row(1, "a", vector(0.1f, 0.1f), 10, "aa", vector(0.01f, 0.01f), 100, "aaa", vector(0.001f, 0.001f), 1000, "aaaa", vector(0.0001f, 0.0001f));
-        Object[] row2 = row(1, "a", vector(0.1f, 0.2f), 11, "ab", vector(0.01f, 0.02f), 100, "aaa", vector(0.001f, 0.002f), 1001, "aaab", vector(0.0001f, 0.0002f));
-        Object[] row3 = row(2, "b", vector(0.2f, 0.1f), 10, "aa", vector(0.02f, 0.01f), 200, "bbb", vector(0.002f, 0.001f), 1000, "aaaa", vector(0.0002f, 0.0001f));
-        Object[] row4 = row(2, "b", vector(0.2f, 0.2f), 11, "ab", vector(0.02f, 0.02f), 200, "bbb", vector(0.002f, 0.002f), 1001, "aaab", vector(0.0002f, 0.0002f));
-        execute(insert, row1);
-        execute(insert, row2);
-        execute(insert, row3);
-        execute(insert, row4);
+        execute(insert, row(1, "a", vector(0.1f, 0.1f), 10, "aa", vector(0.01f, 0.01f), 100, "aaa", vector(0.001f, 0.001f), 1000, "aaaa", vector(0.0001f, 0.0001f)));
+        execute(insert, row(1, "a", vector(0.1f, 0.2f), 11, "ab", vector(0.01f, 0.02f), 100, "aaa", vector(0.001f, 0.002f), 1001, "aaab", vector(0.0001f, 0.0002f)));
+        execute(insert, row(2, "b", vector(0.2f, 0.1f), 10, "aa", vector(0.02f, 0.01f), 200, "bbb", vector(0.002f, 0.001f), 1000, "aaaa", vector(0.0002f, 0.0001f)));
+        execute(insert, row(2, "b", vector(0.2f, 0.2f), 11, "ab", vector(0.02f, 0.02f), 200, "bbb", vector(0.002f, 0.002f), 1001, "aaab", vector(0.0002f, 0.0002f)));
+        Object[] row1 = row(1, "a", 10, "aa");
+        Object[] row2 = row(1, "a", 11, "ab");
+        Object[] row3 = row(2, "b", 10, "aa");
+        Object[] row4 = row(2, "b", 11, "ab");
 
-        String query = "SELECT k1, k2, k3, c1, c2, c3, s1, s2, s3, r1, r2, r3 FROM %s ";
+        final String query = "SELECT k1, k2, c1, c2 FROM %s ";
 
         // query partition key columns without hints
         assertThatPlanFor(query + "WHERE k1=1", row1, row2).uses("partition_numeric");
@@ -652,9 +645,8 @@ public class PlanWithIndexHintsTest extends SAITester.Versioned
         assertThatPlanFor(query + "WHERE k2:'a'", row1, row2).uses("partition_analyzed");
         if (supportsBM25)
             assertBM25OnNonRegularColumnIsRejected(query + "ORDER BY k2 BM25 OF 'a' LIMIT 10", ColumnMetadata.Kind.PARTITION_KEY, "k2");
-        // TODO: this hits CNDB-14343, we should either enable this or remove the index creation when that is resolved
-        //  if (supportsANN)
-        //      assertThatPlanFor(query + "ORDER BY k3 ANN OF [0.1, 0.2] LIMIT 10", row1, row2).uses("partition_ann");
+        if (supportsANN)
+            assertThatPlanFor(query + "ORDER BY k3 ANN OF [0.1, 0.1] LIMIT 10", row1, row2, row3, row4).uses("partition_ann");
 
         // query partition key columns with included index
         assertThatPlanFor(query + "WHERE k1=1 WITH included_indexes={partition_numeric}", row1, row2).uses("partition_numeric");
@@ -668,9 +660,8 @@ public class PlanWithIndexHintsTest extends SAITester.Versioned
         if (supportsBM25)
             assertBM25OnNonRegularColumnIsRejected(query + "ORDER BY k2 BM25 OF 'a' LIMIT 10 WITH included_indexes={partition_analyzed}",
                                                    ColumnMetadata.Kind.PARTITION_KEY, "k2");
-        // TODO: this hits CNDB-14343, we should either enable this or remove the index creation when that is resolved
-        //  if (supportsANN)
-        //      assertThatPlanFor(query + "ORDER BY k3 ANN OF [0.1, 0.2] LIMIT 10 WITH included_indexes={partition_ann}", row1, row2).uses("partition_ann");
+        if (supportsANN)
+            assertThatPlanFor(query + "ORDER BY k3 ANN OF [0.1, 0.1] LIMIT 10 WITH included_indexes={partition_ann}", row1, row2, row3, row4).uses("partition_ann");
 
         // query partition key columns with excluded index
         assertThatPlanFor(query + "WHERE k1=1 ALLOW FILTERING WITH excluded_indexes={partition_numeric}", row1, row2).usesNone();
@@ -684,7 +675,7 @@ public class PlanWithIndexHintsTest extends SAITester.Versioned
         if (supportsBM25)
             assertBM25RequiresAnAnalyzedIndex(query + "ORDER BY k2 BM25 OF 'a' LIMIT 10 WITH excluded_indexes={partition_analyzed}", "k2");
         if (supportsANN)
-            assertANNOrderingNeedsIndex(query + "ORDER BY k3 ANN OF [0.1, 0.2] LIMIT 10 WITH excluded_indexes={partition_ann}", "k3");
+            assertANNOrderingNeedsIndex(query + "ORDER BY k3 ANN OF [0.1, 0.1] LIMIT 10 WITH excluded_indexes={partition_ann}", "k3");
 
         // query clustering key columns without hints
         assertThatPlanFor(query + "WHERE c1=10", row1, row3).uses("clustering_numeric");
@@ -697,9 +688,8 @@ public class PlanWithIndexHintsTest extends SAITester.Versioned
         assertCannotBeRestrictedByClustering(query + "WHERE c2:'aa'", "c2");
         if (supportsBM25)
             assertBM25OnNonRegularColumnIsRejected(query + "ORDER BY c2 BM25 OF 'aa' LIMIT 10", ColumnMetadata.Kind.CLUSTERING, "c2");
-        // TODO: this hits CNDB-14343, we should either enable this or remove the index creation when that is resolved
-        //  if (supportsANN)
-        //      assertThatPlanFor(query + "ORDER BY c3 ANN OF [0.1, 0.2] LIMIT 10", row1, row2).uses("clustering_ann");
+        if (supportsANN)
+            assertThatPlanFor(query + "ORDER BY c3 ANN OF [0.1, 0.1] LIMIT 10", row1, row2, row3, row4).uses("clustering_ann");
 
         // query clustering key columns with included index
         assertThatPlanFor(query + "WHERE c1=10 WITH included_indexes={clustering_numeric}", row1, row3).uses("clustering_numeric");
@@ -713,9 +703,8 @@ public class PlanWithIndexHintsTest extends SAITester.Versioned
         if (supportsBM25)
             assertBM25OnNonRegularColumnIsRejected(query + "ORDER BY c2 BM25 OF 'aa' LIMIT 10 WITH included_indexes={clustering_analyzed}",
                                                    ColumnMetadata.Kind.CLUSTERING, "c2");
-        // TODO: this hits CNDB-14343, we should either enable this or remove the index creation when that is resolved
-        //  if (supportsANN)
-        //      assertThatPlanFor(query + "ORDER BY c3 ANN OF [0.1, 0.2] LIMIT 10 WITH included_indexes={clustering_ann}", row1, row2).uses("clustering_ann");
+        if (supportsANN)
+            assertThatPlanFor(query + "ORDER BY c3 ANN OF [0.1, 0.1] LIMIT 10 WITH included_indexes={clustering_ann}", row1, row2, row3, row4).uses("clustering_ann");
 
         // query clustering key columns with excluded index
         assertThatPlanFor(query + "WHERE c1=10 ALLOW FILTERING WITH excluded_indexes={clustering_numeric}", row1, row3).usesNone();
@@ -742,9 +731,8 @@ public class PlanWithIndexHintsTest extends SAITester.Versioned
         assertThatPlanFor(query + "WHERE s2:'aaa'", row1, row2).uses("static_analyzed");
         if (supportsBM25)
             assertBM25OnNonRegularColumnIsRejected(query + "ORDER BY s2 BM25 OF 'aa' LIMIT 10", ColumnMetadata.Kind.STATIC, "s2");
-        // TODO: this hits CNDB-14343, we should either enable this or remove the index creation when that is resolved
-        //  if (supportsANN)
-        //      assertThatPlanFor(query + "ORDER BY s3 ANN OF [0.1, 0.2] LIMIT 10", row1, row2).uses("static_ann");
+        if (supportsANN)
+            assertThatPlanFor(query + "ORDER BY s3 ANN OF [0.1, 0.1] LIMIT 10", row1, row2, row3, row4).uses("static_ann");
 
         // query static columns with included index
         assertThatPlanFor(query + "WHERE s1=100 WITH included_indexes={static_numeric}", row1, row2).uses("static_numeric");
@@ -758,9 +746,8 @@ public class PlanWithIndexHintsTest extends SAITester.Versioned
         if (supportsBM25)
             assertBM25OnNonRegularColumnIsRejected(query + "ORDER BY s2 BM25 OF 'aa' LIMIT 10 WITH included_indexes={static_analyzed}",
                                                    ColumnMetadata.Kind.STATIC, "s2");
-        // TODO: this hits CNDB-14343, we should either enable this or remove the index creation when that is resolved
-        //  if (supportsANN)
-        //      assertThatPlanFor(query + "ORDER BY s3 ANN OF [0.1, 0.2] LIMIT 10 WITH included_indexes={static_ann}", row1, row2).uses("static_ann");
+        if (supportsANN)
+            assertThatPlanFor(query + "ORDER BY s3 ANN OF [0.1, 0.1] LIMIT 10 WITH included_indexes={static_ann}", row1, row2, row3, row4).uses("static_ann");
 
         // query static columns with excluded index
         assertThatPlanFor(query + "WHERE s1=100 ALLOW FILTERING WITH excluded_indexes={static_numeric}", row1, row2).usesNone();
@@ -774,7 +761,7 @@ public class PlanWithIndexHintsTest extends SAITester.Versioned
         if (supportsBM25)
             assertBM25RequiresAnAnalyzedIndex(query + "ORDER BY s2 BM25 OF 'aa' LIMIT 10 WITH excluded_indexes={static_analyzed}", "s2");
         if (supportsANN)
-            assertANNOrderingNeedsIndex(query + "ORDER BY s3 ANN OF [0.1, 0.2] LIMIT 10 WITH excluded_indexes={static_ann}", "s3");
+            assertANNOrderingNeedsIndex(query + "ORDER BY s3 ANN OF [0.1, 0.1] LIMIT 10 WITH excluded_indexes={static_ann}", "s3");
 
         // query regular columns without hints
         assertThatPlanFor(query + "WHERE r1=1000", row1, row3).uses("regular_numeric");
@@ -788,7 +775,7 @@ public class PlanWithIndexHintsTest extends SAITester.Versioned
         if (supportsBM25)
             assertThatPlanFor(query + "ORDER BY r2 BM25 OF 'aaaa' LIMIT 10", row1, row3).uses("regular_analyzed");
         if (supportsANN)
-            assertThatPlanFor(query + "ORDER BY r3 ANN OF [0.1, 0.2] LIMIT 10", row1, row2, row3, row4).uses("regular_ann");
+            assertThatPlanFor(query + "ORDER BY r3 ANN OF [0.1, 0.1] LIMIT 10", row1, row2, row3, row4).uses("regular_ann");
 
         // query regular columns with included indexes
         assertThatPlanFor(query + "WHERE r1=1000 WITH included_indexes={regular_numeric}", row1, row3).uses("regular_numeric");
@@ -802,7 +789,7 @@ public class PlanWithIndexHintsTest extends SAITester.Versioned
         if (supportsBM25)
             assertThatPlanFor(query + "ORDER BY r2 BM25 OF 'aaaa' LIMIT 10 WITH included_indexes={regular_analyzed}", row1, row3).uses("regular_analyzed");
         if (supportsANN)
-            assertThatPlanFor(query + "ORDER BY r3 ANN OF [0.1, 0.2] LIMIT 10 WITH included_indexes={regular_ann}", row1, row2, row3, row4).uses("regular_ann");
+            assertThatPlanFor(query + "ORDER BY r3 ANN OF [0.1, 0.1] LIMIT 10 WITH included_indexes={regular_ann}", row1, row2, row3, row4).uses("regular_ann");
 
         // query regular columns with excluded indexes
         assertThatPlanFor(query + "WHERE r1=1000 ALLOW FILTERING WITH excluded_indexes={regular_numeric}", row1, row3).usesNone();
@@ -816,7 +803,7 @@ public class PlanWithIndexHintsTest extends SAITester.Versioned
         if (supportsBM25)
             assertBM25RequiresAnAnalyzedIndex(query + "ORDER BY r2 BM25 OF 'aaaa' LIMIT 10 WITH excluded_indexes={regular_analyzed}", "r2");
         if (supportsANN)
-            assertANNOrderingNeedsIndex(query + "ORDER BY r3 ANN OF [0.1, 0.2] LIMIT 10 WITH excluded_indexes={regular_ann}", "r3");
+            assertANNOrderingNeedsIndex(query + "ORDER BY r3 ANN OF [0.1, 0.1] LIMIT 10 WITH excluded_indexes={regular_ann}", "r3");
     }
 
     private void assertNeedsAllowFiltering(String query)
