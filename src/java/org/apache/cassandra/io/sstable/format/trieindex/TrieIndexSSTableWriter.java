@@ -354,7 +354,12 @@ public class TrieIndexSSTableWriter extends SortedTableWriter
             rowIndexFile.setPostFlushListener(() -> partitionIndex.markRowIndexSynced(rowIndexFile.getLastFlushOffset()));
             dataFile.setPostFlushListener(() -> partitionIndex.markDataSynced(dataFile.getLastFlushOffset()));
 
-            // when early open is disabled, partial written sstable's BF memory is not included in Tracker
+            // The per-table bloom filter memory is tracked when:
+            // 1. Periodic early open: Opens incomplete sstables when size threshold is hit during writing.
+            //    The BF memory usage is tracked via Tracker.
+            // 2. Completion early open: Opens completed sstables when compaction results in multiple sstables.
+            //    The BF memory usage is tracked via Tracker.
+            // 3. A new sstable is first created here if early-open is not enabled.
             tableMetrics = DatabaseDescriptor.getSSTablePreemptiveOpenIntervalInMB() <= 0 ? ColumnFamilyStore.metricsForIfPresent(table.id) : null;
             if (tableMetrics != null && bf != null)
                 tableMetrics.inFlightBloomFilterOffHeapMemoryUsed.getAndAdd(bf.offHeapSize());
