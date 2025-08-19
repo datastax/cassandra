@@ -40,14 +40,24 @@ public class PrimaryKeyWithByteComparable extends PrimaryKeyWithSortKey
 
     public PrimaryKeyWithByteComparable(IndexContext context, Memtable sourceTable, PrimaryKey primaryKey, ByteComparable byteComparable)
     {
+        this(context, (Object) sourceTable, primaryKey, byteComparable);
+    }
+
+    public PrimaryKeyWithByteComparable(IndexContext context, SSTableId<?> sourceTable, PrimaryKey primaryKey, ByteComparable byteComparable)
+    {
+        this(context, (Object) sourceTable, primaryKey, byteComparable);
+    }
+
+    private PrimaryKeyWithByteComparable(IndexContext context, Object sourceTable, PrimaryKey primaryKey, ByteComparable byteComparable)
+    {
         super(context, sourceTable, primaryKey);
         this.byteComparable = byteComparable;
     }
 
-    public PrimaryKeyWithByteComparable(IndexContext context, SSTableId sourceTable, PrimaryKey primaryKey, ByteComparable byteComparable)
+    @Override
+    public PrimaryKeyWithByteComparable forStaticRow()
     {
-        super(context, sourceTable, primaryKey);
-        this.byteComparable = byteComparable;
+        return new PrimaryKeyWithByteComparable(context, sourceTable, primaryKey.forStaticRow(), byteComparable);
     }
 
     @Override

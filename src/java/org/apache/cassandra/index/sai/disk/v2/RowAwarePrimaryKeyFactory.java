@@ -83,6 +83,12 @@ public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
         }
 
         @Override
+        public RowAwarePrimaryKey forStaticRow()
+        {
+            return new RowAwarePrimaryKey(token, partitionKey, Clustering.STATIC_CLUSTERING, primaryKeySupplier);
+        }
+
+        @Override
         public Token token()
         {
             return token;
@@ -220,12 +226,12 @@ public class RowAwarePrimaryKeyFactory implements PrimaryKey.Factory
             // Object header + 4 references (token, partitionKey, clustering, primaryKeySupplier) + implicit outer reference
             long size = RamUsageEstimator.NUM_BYTES_OBJECT_HEADER +
                        5L * RamUsageEstimator.NUM_BYTES_OBJECT_REF;
-            
+
             if (token != null)
                 size += token.getHeapSize();
             if (partitionKey != null)
-                size += RamUsageEstimator.NUM_BYTES_OBJECT_HEADER + 
-                       2L * RamUsageEstimator.NUM_BYTES_OBJECT_REF + // token and key references  
+                size += RamUsageEstimator.NUM_BYTES_OBJECT_HEADER +
+                       2L * RamUsageEstimator.NUM_BYTES_OBJECT_REF + // token and key references
                        2L * Long.BYTES;
             // We don't count clustering size here as it's managed elsewhere
             return size;
