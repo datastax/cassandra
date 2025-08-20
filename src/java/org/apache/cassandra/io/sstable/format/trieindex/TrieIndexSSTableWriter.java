@@ -29,12 +29,15 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.function.Consumer;
 
+import javax.annotation.Nullable;
+
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Sets;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.SerializationHeader;
@@ -66,6 +69,7 @@ import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.SequentialWriter;
 import org.apache.cassandra.io.util.SequentialWriterOption;
+import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
@@ -316,6 +320,9 @@ public class TrieIndexSSTableWriter extends SortedTableWriter
         private DataPosition riMark;
         private DataPosition piMark;
 
+        @Nullable
+        private final TableMetrics tableMetrics;
+
         IndexWriter(TableMetadata table)
         {
             CompressionParams params = table.params.compression;
@@ -341,10 +348,21 @@ public class TrieIndexSSTableWriter extends SortedTableWriter
 
             partitionIndex = new PartitionIndexBuilder(partitionIndexFile, partitionIndexFHBuilder, descriptor.version.getByteComparableVersion());
             bf = FilterFactory.getFilter(keyCount, table.params.bloomFilterFpChance);
+
             // register listeners to be alerted when the data files are flushed
             partitionIndexFile.setPostFlushListener(() -> partitionIndex.markPartitionIndexSynced(partitionIndexFile.getLastFlushOffset()));
             rowIndexFile.setPostFlushListener(() -> partitionIndex.markRowIndexSynced(rowIndexFile.getLastFlushOffset()));
             dataFile.setPostFlushListener(() -> partitionIndex.markDataSynced(dataFile.getLastFlushOffset()));
+
+            // The per-table bloom filter memory is tracked when:
+            // 1. Periodic early open: Opens incomplete sstables when size threshold is hit during writing.
+            //    The BF memory usage is tracked via Tracker.
+            // 2. Completion early open: Opens completed sstables when compaction results in multiple sstables.
+            //    The BF memory usage is tracked via Tracker.
+            // 3. A new sstable is first created here if early-open is not enabled.
+            tableMetrics = DatabaseDescriptor.getSSTablePreemptiveOpenIntervalInMB() <= 0 ? ColumnFamilyStore.metricsForIfPresent(table.id) : null;
+            if (tableMetrics != null && bf != null)
+                tableMetrics.inFlightBloomFilterOffHeapMemoryUsed.getAndAdd(bf.offHeapSize());
         }
 
         public long append(DecoratedKey key, RowIndexEntry indexEntry) throws IOException
@@ -481,6 +499,8 @@ public class TrieIndexSSTableWriter extends SortedTableWriter
         @Override
         protected Throwable doPostCleanup(Throwable accumulate)
         {
+            if (tableMetrics != null && bf != null)
+                tableMetrics.inFlightBloomFilterOffHeapMemoryUsed.getAndAdd(-bf.offHeapSize());
             return Throwables.close(accumulate, bf, partitionIndex, rowIndexFile, rowIndexFHBuilder, partitionIndexFile, partitionIndexFHBuilder);
         }
     }
