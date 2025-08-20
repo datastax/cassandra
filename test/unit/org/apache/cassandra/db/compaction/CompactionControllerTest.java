@@ -23,7 +23,9 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
 import java.util.concurrent.ForkJoinPool;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.function.LongPredicate;
 
@@ -36,6 +38,9 @@ import org.junit.runner.RunWith;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
+import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.io.sstable.filter.BloomFilterMetrics;
+import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
@@ -50,6 +55,7 @@ import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.WrappedRunnable;
+import org.awaitility.Awaitility;
 import org.jboss.byteman.contrib.bmunit.BMRule;
 import org.jboss.byteman.contrib.bmunit.BMRules;
 import org.jboss.byteman.contrib.bmunit.BMUnitRunner;
@@ -58,6 +64,7 @@ import static org.apache.cassandra.config.CassandraRelevantProperties.ALLOW_UNSA
 import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.assertNotNull;
 
@@ -201,6 +208,65 @@ public class CompactionControllerTest extends SchemaLoader
         expired = CompactionController.getFullyExpiredSSTables(cfs, compacting, x -> overlapping, gcBefore, true);
         assertNotNull(expired);
         assertEquals(1, expired.size());
+    }
+
+    @Test
+    @BMRule(name = "DelayCompaction",
+    targetClass = "CompactionTask$CompactionOperation",
+    targetMethod = "maybeStopOrUpdateState",
+    action = "java.lang.Thread.sleep(1000L);")
+    public void testInFlightBloomFilterMemory()
+    {
+        int earlyOpen = DatabaseDescriptor.getSSTablePreemptiveOpenIntervalInMiB();
+        try
+        {
+            DatabaseDescriptor.setSSTablePreemptiveOpenIntervalInMiB(0);
+
+            Keyspace keyspace = Keyspace.open(KEYSPACE);
+            ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF1);
+            cfs.truncateBlocking();
+            cfs.disableAutoCompaction();
+
+            for (int s = 0; s < 3; ++s)
+            {
+                for (int k = 0; k < 5; k++)
+                    writeRows(cfs, Util.dk("k" + k), k, k + 1);
+                cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
+            }
+
+            TableMetrics tableMetrics = ColumnFamilyStore.metricsForIfPresent(cfs.metadata.id);
+            long bloomFilterMemoryBeforeCompaction = BloomFilterMetrics.instance.bloomFilterOffHeapMemoryUsed.getTableGauge(cfs).getValue();
+            assertNotEquals(0, bloomFilterMemoryBeforeCompaction);
+            assertEquals(0, tableMetrics.inFlightBloomFilterOffHeapMemoryUsed.get());
+
+            // Submit a compaction where all tombstones are expired to make compactor read memtables.
+            Future<?> future = Executors.newCachedThreadPool().submit(() -> {
+                cfs.forceMajorCompaction();
+            });
+
+            Awaitility.await("In flight bloom filter is tracked")
+                      .pollInterval(1, TimeUnit.MILLISECONDS)
+                      .atMost(10, TimeUnit.SECONDS)
+                      .until(() ->
+                             {
+                                 // in-flight bf memory is included
+                                 return tableMetrics.inFlightBloomFilterOffHeapMemoryUsed.get() != 0 &&
+                                        bloomFilterMemoryBeforeCompaction < BloomFilterMetrics.instance.bloomFilterOffHeapMemoryUsed.getTableGauge(cfs).getValue() &&
+                                        // in-flight sstable is not part of tracker
+                                        3 == cfs.getLiveSSTables().size();
+                             });
+
+            // Compaction must have succeeded.
+            FBUtilities.waitOnFuture(future);
+            assertEquals(1, cfs.getLiveSSTables().size());
+
+            // In flight bloom filter is clear
+            assertEquals(0, tableMetrics.inFlightBloomFilterOffHeapMemoryUsed.get());
+        }
+        finally
+        {
+            DatabaseDescriptor.setSSTablePreemptiveOpenIntervalInMiB(earlyOpen);
+        }
     }
 
     @Test

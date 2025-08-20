@@ -31,6 +31,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.LongSupplier;
 import java.util.function.Predicate;
@@ -263,6 +264,8 @@ public class TableMetrics
     public final Gauge<Long> meanPartitionSize;
     /** False positive ratio of bloom filter */
     public final Gauge<Double> bloomFilterFalseRatio;
+
+    public final AtomicLong inFlightBloomFilterOffHeapMemoryUsed = new AtomicLong(0);
     /** Off heap memory used by compression meta data*/
     public final Gauge<Long> compressionMetadataOffHeapMemoryUsed;
 
@@ -456,19 +459,19 @@ public class TableMetrics
     public static final Gauge<Long> globalBytesRepaired = Metrics.register(GLOBAL_FACTORY.createMetricName("BytesRepaired"),
                                                                            () -> totalNonSystemTablesSize(SSTableReader::isRepaired).left);
 
-    public static final Gauge<Long> globalBytesUnrepaired = 
+    public static final Gauge<Long> globalBytesUnrepaired =
         Metrics.register(GLOBAL_FACTORY.createMetricName("BytesUnrepaired"),
                          () -> totalNonSystemTablesSize(s -> !s.isRepaired() && !s.isPendingRepair()).left);
 
-    public static final Gauge<Long> globalBytesPendingRepair = 
+    public static final Gauge<Long> globalBytesPendingRepair =
         Metrics.register(GLOBAL_FACTORY.createMetricName("BytesPendingRepair"),
                          () -> totalNonSystemTablesSize(SSTableReader::isPendingRepair).left);
 
     public final Meter readRepairRequests;
     public final Meter shortReadProtectionRequests;
-    
+
     public final Meter replicaFilteringProtectionRequests;
-    
+
     /**
      * This histogram records the maximum number of rows {@link org.apache.cassandra.service.reads.ReplicaFilteringProtection}
      * caches at a point in time per query. With no replica divergence, this is equivalent to the maximum number of
@@ -611,20 +614,20 @@ public class TableMetrics
         samplers.put(SamplerType.READ_TOMBSTONE_COUNT, topReadPartitionTombstoneCount);
         samplers.put(SamplerType.READ_SSTABLE_COUNT, topReadPartitionSSTableCount);
 
-        memtableColumnsCount = createTableGauge("MemtableColumnsCount", 
+        memtableColumnsCount = createTableGauge("MemtableColumnsCount",
                                                 () -> cfs.getTracker().getView().getCurrentMemtable().operationCount());
 
         // MemtableOnHeapSize naming deprecated in 4.0
-        memtableOnHeapDataSize = createTableGaugeWithDeprecation("MemtableOnHeapDataSize", "MemtableOnHeapSize", 
+        memtableOnHeapDataSize = createTableGaugeWithDeprecation("MemtableOnHeapDataSize", "MemtableOnHeapSize",
                                                                  () -> Memtable.getMemoryUsage(cfs.getTracker().getView().getCurrentMemtable()).ownsOnHeap,
                                                                  new GlobalTableGauge("MemtableOnHeapDataSize"));
 
         // MemtableOffHeapSize naming deprecated in 4.0
-        memtableOffHeapDataSize = createTableGaugeWithDeprecation("MemtableOffHeapDataSize", "MemtableOffHeapSize", 
+        memtableOffHeapDataSize = createTableGaugeWithDeprecation("MemtableOffHeapDataSize", "MemtableOffHeapSize",
                                                                   () -> Memtable.getMemoryUsage(cfs.getTracker().getView().getCurrentMemtable()).ownsOffHeap,
                                                                   new GlobalTableGauge("MemtableOnHeapDataSize"));
-        
-        memtableLiveDataSize = createTableGauge("MemtableLiveDataSize", 
+
+        memtableLiveDataSize = createTableGauge("MemtableLiveDataSize",
                                                 () -> cfs.getTracker().getView().getCurrentMemtable().getLiveDataSize());
 
         // AllMemtablesHeapSize naming deprecated in 4.0
@@ -706,7 +709,7 @@ public class TableMetrics
         };
 
         estimatedColumnCountHistogram = createTableGauge("EstimatedColumnCountHistogram", "EstimatedColumnCountHistogram",
-                                                         () -> combineHistograms(cfs.getSSTables(SSTableSet.CANONICAL), 
+                                                         () -> combineHistograms(cfs.getSSTables(SSTableSet.CANONICAL),
                                                                                  SSTableReader::getEstimatedCellPerPartitionCount), null);
 
         estimatedRowCount = createTableGauge("EstimatedRowCount", "EstimatedRowCount", new CachedGauge<>(1, TimeUnit.SECONDS)
@@ -743,7 +746,7 @@ public class TableMetrics
                 return sstableRows + memtableRows;
             }
         }, null);
-        
+
         sstablesPerReadHistogram = createTableHistogram("SSTablesPerReadHistogram", cfs.getKeyspaceMetrics().sstablesPerReadHistogram, true);
         sstablesPerRangeReadHistogram = createTableHistogram("SSTablesPerRangeReadHistogram", cfs.getKeyspaceMetrics().sstablesPerRangeReadHistogram, true);
         sstablePartitionReadLatency = ExpMovingAverage.decayBy100();

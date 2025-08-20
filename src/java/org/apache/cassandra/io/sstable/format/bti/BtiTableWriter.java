@@ -24,11 +24,15 @@ import java.util.Optional;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
+import javax.annotation.Nullable;
+
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableSet;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.compaction.OperationType;
@@ -54,6 +58,7 @@ import org.apache.cassandra.io.util.DataPosition;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.MmappedRegionsCache;
 import org.apache.cassandra.io.util.SequentialWriter;
+import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Clock;
 import org.apache.cassandra.utils.IFilter;
@@ -189,6 +194,9 @@ public class BtiTableWriter extends SortedTableWriter<BtiFormatPartitionWriter, 
         private DataPosition riMark;
         private DataPosition piMark;
 
+        @Nullable
+        private final TableMetrics tableMetrics;
+
         IndexWriter(Builder b, SequentialWriter dataWriter)
         {
             super(b);
@@ -230,10 +238,22 @@ public class BtiTableWriter extends SortedTableWriter<BtiFormatPartitionWriter, 
                                                         .withMmappedRegionsCache(b.getMmappedRegionsCache());
             }
             partitionIndex = new PartitionIndexBuilder(partitionIndexWriter, partitionIndexFHBuilder, descriptor.version.getByteComparableVersion());
+
             // register listeners to be alerted when the data files are flushed
             partitionIndexWriter.setPostFlushListener(partitionIndex::markPartitionIndexSynced);
             rowIndexWriter.setPostFlushListener(partitionIndex::markRowIndexSynced);
             dataWriter.setPostFlushListener(partitionIndex::markDataSynced);
+
+
+            // The per-table bloom filter memory is tracked when:
+            // 1. Periodic early open: Opens incomplete sstables when size threshold is hit during writing.
+            //    The BF memory usage is tracked via Tracker.
+            // 2. Completion early open: Opens completed sstables when compaction results in multiple sstables.
+            //    The BF memory usage is tracked via Tracker.
+            // 3. A new sstable is first created here if early-open is not enabled.
+            tableMetrics = DatabaseDescriptor.getSSTablePreemptiveOpenIntervalInMiB() <= 0 ? ColumnFamilyStore.metricsForIfPresent(metadata.id) : null;
+            if (tableMetrics != null && bf != null)
+                tableMetrics.inFlightBloomFilterOffHeapMemoryUsed.getAndAdd(bf.offHeapSize());
         }
 
         public long append(DecoratedKey key, AbstractRowIndexEntry indexEntry) throws IOException
@@ -371,6 +391,8 @@ public class BtiTableWriter extends SortedTableWriter<BtiFormatPartitionWriter, 
         @Override
         protected Throwable doPostCleanup(Throwable accumulate)
         {
+            if (tableMetrics != null && bf != null)
+                tableMetrics.inFlightBloomFilterOffHeapMemoryUsed.getAndAdd(-bf.offHeapSize());
             return Throwables.close(accumulate, bf, partitionIndex, rowIndexWriter, partitionIndexWriter);
         }
     }
