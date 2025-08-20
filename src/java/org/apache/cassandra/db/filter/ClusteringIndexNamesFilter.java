@@ -167,12 +167,28 @@ public class ClusteringIndexNamesFilter extends AbstractClusteringIndexFilter
             return "";
 
         StringBuilder sb = new StringBuilder();
-        sb.append('(').append(ColumnMetadata.toCQLString(metadata.clusteringColumns())).append(')');
-        sb.append(clusterings.size() == 1 ? " = " : " IN (");
+
+        boolean multipleColumns = metadata.clusteringColumns().size() > 1;
+        boolean multipleClusterings = clusterings.size() > 1;
+
+        if (multipleColumns)
+            sb.append('(');
+        sb.append(ColumnMetadata.toCQLString(metadata.clusteringColumns()));
+        if (multipleColumns)
+            sb.append(')');
+        sb.append(multipleClusterings ? " IN (" : " = ");
         int i = 0;
         for (Clustering<?> clustering : clusterings)
-            sb.append(i++ == 0 ? "" : ", ").append('(').append(clustering.toCQLString(metadata)).append(')');
-        sb.append(clusterings.size() == 1 ? "" : ")");
+        {
+            sb.append(i++ == 0 ? "" : ", ");
+            if (multipleColumns)
+                sb.append('(');
+            sb.append(clustering.toCQLString(metadata));
+            if (multipleColumns)
+                sb.append(')');
+        }
+        if (multipleClusterings)
+            sb.append(')');
 
         appendOrderByToCQLString(metadata, sb);
         return sb.toString();
