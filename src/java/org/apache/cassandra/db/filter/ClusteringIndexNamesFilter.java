@@ -199,11 +199,19 @@ public class ClusteringIndexNamesFilter extends AbstractClusteringIndexFilter
             sb.append(isSingleClustering ? "" : ")");
         }
 
-        // Remove clustering columns from row filter to avoid duplication
-        for (Clustering<?> clustering : clusterings)
+        // Remove ALL clustering column expressions from row filter to avoid duplication
+        // This handles both exact matches and secondary index queries on clustering columns
+        RowFilter adjustedFilter = rowFilter;
+        for (RowFilter.Expression expr : rowFilter.expressions())
         {
-            for (int j = 0; j < clustering.size(); j++)
-                rowFilter = rowFilter.without(metadata.clusteringColumns().get(j), Operator.EQ, clustering.bufferAt(j));
+            if (metadata.clusteringColumns().contains(expr.column()))
+                adjustedFilter = adjustedFilter.without(expr);
+        }
+
+        // Append remaining row filter conditions (non-clustering columns only)
+        if (!adjustedFilter.isEmpty())
+        {
+            sb.append(" AND ").append(adjustedFilter.toCQLString());
         }
 
         appendOrderByToCQLString(metadata, sb);
