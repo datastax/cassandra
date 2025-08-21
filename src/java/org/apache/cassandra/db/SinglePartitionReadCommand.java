@@ -1284,16 +1284,21 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
             }
         }
 
-        // We put the row filter first because the clustering index filter can end by "ORDER BY"
-        if (!rowFilter().isEmpty())
-            builder.append(" AND ").append(rowFilter().toCQLString());
-
-        // Pass RowFilter.none() to avoid the clustering filter trying to modify our row filter
-        String filterString = clusteringIndexFilter().toCQLString(metadata(), RowFilter.none());
+        // For queries with clustering columns in the rowFilter (e.g., ALLOW FILTERING or secondary index),
+        // remove those conditions to avoid duplication since they'll be handled by the clusteringIndexFilter
+        RowFilter adjustedFilter = rowFilter();
+        for (RowFilter.Expression expr : rowFilter().expressions())
+        {
+            if (metadata().clusteringColumns().contains(expr.column()))
+                adjustedFilter = adjustedFilter.without(expr);
+        }
+        
+        String filterString = clusteringIndexFilter().toCQLString(metadata(), adjustedFilter);
         if (!filterString.isEmpty())
         {
-            // Only add AND if the filter string contains actual conditions (not just ORDER BY)
-            if (!filterString.trim().startsWith("ORDER BY"))
+            // Add AND if we have clustering restrictions or row filters. The filterString may contain
+            // clustering conditions, remaining non-clustering filters, and/or ORDER BY clause.
+            if (!clusteringIndexFilter().selectsAllPartition() || !rowFilter().isEmpty())
                 builder.append(" AND ");
             builder.append(filterString);
         }
