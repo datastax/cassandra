@@ -19,7 +19,6 @@
 package org.apache.cassandra.distributed.test;
 
 import java.io.IOException;
-import java.util.List;
 
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
@@ -31,6 +30,8 @@ import org.apache.cassandra.distributed.api.IInvokableInstance;
 import org.apache.cassandra.distributed.api.SimpleQueryResult;
 import org.apache.cassandra.exceptions.OverloadedException;
 import org.apache.cassandra.service.StorageService;
+import org.assertj.core.api.Assertions;
+import org.assertj.core.api.ListAssert;
 
 import static org.apache.cassandra.config.ReplicaFilteringProtectionOptions.DEFAULT_FAIL_THRESHOLD;
 import static org.apache.cassandra.config.ReplicaFilteringProtectionOptions.DEFAULT_WARN_THRESHOLD;
@@ -112,6 +113,9 @@ public class ReplicaFilteringProtectionTest extends TestBaseImpl
         catch (RuntimeException e)
         {
             assertEquals(e.getClass().getName(), OverloadedException.class.getName());
+            Assertions.assertThat(e)
+                      .hasMessageContaining("Replica filtering protection has cached " + REPLICAS * ROWS)
+                      .hasMessageContaining("cached_replica_rows_fail_threshold");
         }
     }
 
@@ -122,7 +126,7 @@ public class ReplicaFilteringProtectionTest extends TestBaseImpl
 
         String fullTableName = KEYSPACE + '.' + tableName;
 
-        // Case 1: Insert and query rows at ALL to verify base line.
+        // Case 1: Insert and query rows at ALL to verify baseline.
         for (int i = 0; i < ROWS; i++)
         {
             cluster.coordinator(1).execute("INSERT INTO " + fullTableName + "(k, v) VALUES (?, 'old')", ALL, i);
@@ -145,7 +149,7 @@ public class ReplicaFilteringProtectionTest extends TestBaseImpl
         // of that row for all replicas.
         SimpleQueryResult oldResult = cluster.coordinator(1).executeWithResult(query, ALL, "old", ROWS);
         assertRows(oldResult.toObjectArrays());
-        verifyWarningState(shouldWarn, oldResult);
+        verifyWarningState(shouldWarn, ROWS * REPLICAS, oldResult);
 
         // We should have made 3 row "completion" requests.
         assertEquals(ROWS, protectionQueryCount(cluster.get(1), tableName));
@@ -163,10 +167,8 @@ public class ReplicaFilteringProtectionTest extends TestBaseImpl
         // will only warn, therefore, if the warning threshold is actually below the number of replicas.
         // (i.e. The row cache counter is decremented/reset as each partition is consumed.)
         SimpleQueryResult newResult = cluster.coordinator(1).executeWithResult(query, ALL, "new", ROWS);
-        Object[][] newRows = newResult.toObjectArrays();
-        assertRows(newRows, row(1, "new"), row(0, "new"), row(2, "new"));
-
-        verifyWarningState(warnThreshold < REPLICAS, newResult);
+        assertRows(newResult.toObjectArrays(), row(1, "new"), row(0, "new"), row(2, "new"));
+        verifyWarningState(warnThreshold < REPLICAS, REPLICAS, newResult);
 
         // We still sould only have made 3 row "completion" requests, with no replica divergence in the last query.
         assertEquals(ROWS, protectionQueryCount(cluster.get(1), tableName));
@@ -183,10 +185,8 @@ public class ReplicaFilteringProtectionTest extends TestBaseImpl
 
         // Another mismatch is introduced, and we once again cache a version of each row during resolution.
         SimpleQueryResult futureResult = cluster.coordinator(1).executeWithResult(query, ALL, "future", ROWS);
-        Object[][] futureRows = futureResult.toObjectArrays();
-        assertRows(futureRows, row(1, "future"), row(0, "future"), row(2, "future"));
-
-        verifyWarningState(shouldWarn, futureResult);
+        assertRows(futureResult.toObjectArrays(), row(1, "future"), row(0, "future"), row(2, "future"));
+        verifyWarningState(shouldWarn, ROWS * REPLICAS, futureResult);
 
         // We sould have made 3 more row "completion" requests.
         assertEquals(ROWS * 2, protectionQueryCount(cluster.get(1), tableName));
@@ -207,11 +207,19 @@ public class ReplicaFilteringProtectionTest extends TestBaseImpl
         }
     }
 
-    private void verifyWarningState(boolean shouldWarn, SimpleQueryResult futureResult)
+    private void verifyWarningState(boolean shouldWarn, int cached, SimpleQueryResult result)
     {
-        List<String> futureWarnings = futureResult.warnings();
-        assertEquals(shouldWarn, futureWarnings.stream().anyMatch(w -> w.contains("cached_replica_rows_warn_threshold")));
-        assertEquals(shouldWarn ? 1 : 0, futureWarnings.size());
+        ListAssert<String> warnings = Assertions.assertThat(result.warnings());
+        if (shouldWarn)
+        {
+            warnings.hasSize(1)
+                    .anyMatch(w -> w.contains("Replica filtering protection has cached up to " + cached + " rows"))
+                    .anyMatch(w -> w.contains("cached_replica_rows_warn_threshold"));
+        }
+        else
+        {
+            warnings.isEmpty();
+        }
     }
 
     private long protectionQueryCount(IInvokableInstance instance, String tableName)
