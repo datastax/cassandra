@@ -124,4 +124,25 @@ public interface PrimaryKeyMap extends Closeable
     default void close() throws IOException
     {
     }
+
+    class EmptyFactory implements Factory
+    {
+        @Override
+        public PrimaryKeyMap newPerSSTablePrimaryKeyMap()
+        {
+            throw new UnsupportedOperationException("EmptyFactory doesn't support newPerSSTablePrimaryKeyMap()");
+        }
+
+        @Override
+        public long count()
+        {
+            throw new UnsupportedOperationException("EmptyFactory doesn't support count()");
+        }
+
+        @Override
+        public void close() throws IOException
+        {
+            // no-op
+        }
+    }
 }

@@ -17,8 +17,11 @@
  */
 package org.apache.cassandra.index.sai;
 
+import javax.annotation.Nullable;
+
 import com.google.common.base.Objects;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
@@ -68,6 +71,7 @@ public class SSTableContext extends SharedCloseableImpl
     public static SSTableContext create(SSTableReader sstable, IndexComponents.ForRead perSSTableComponents)
     {
         var onDiskFormat = perSSTableComponents.onDiskFormat();
+        // no disk access thus no need to use EmptyFactory
         PrimaryKey.Factory primaryKeyFactory = onDiskFormat.newPrimaryKeyFactory(sstable.metadata().comparator);
 
         Ref<? extends SSTableReader> sstableRef = null;
@@ -82,7 +86,10 @@ public class SSTableContext extends SharedCloseableImpl
                 throw new IllegalStateException("Couldn't acquire reference to the sstable: " + sstable);
             }
 
-            primaryKeyMapFactory = onDiskFormat.newPrimaryKeyMapFactory(perSSTableComponents, primaryKeyFactory, sstable);
+            // avoid opening SAI metadata if reads are disabled
+            primaryKeyMapFactory = CassandraRelevantProperties.SAI_INDEX_READS_DISABLED.getBoolean()
+                                   ? new PrimaryKeyMap.EmptyFactory()
+                                   : onDiskFormat.newPrimaryKeyMapFactory(perSSTableComponents, primaryKeyFactory, sstable);
 
             Cleanup cleanup = new Cleanup(primaryKeyMapFactory, sstableRef);
 
@@ -172,7 +179,7 @@ public class SSTableContext extends SharedCloseableImpl
         private final PrimaryKeyMap.Factory primaryKeyMapFactory;
         private final Ref<? extends SSTableReader> sstableRef;
 
-        private Cleanup(PrimaryKeyMap.Factory primaryKeyMapFactory, Ref<? extends SSTableReader> sstableRef)
+        private Cleanup(@Nullable PrimaryKeyMap.Factory primaryKeyMapFactory, @Nullable Ref<? extends SSTableReader> sstableRef)
         {
             this.primaryKeyMapFactory = primaryKeyMapFactory;
             this.sstableRef = sstableRef;
@@ -181,8 +188,8 @@ public class SSTableContext extends SharedCloseableImpl
         @Override
         public void tidy()
         {
-            Throwable t = sstableRef.ensureReleased(null);
-            t = Throwables.close(t, primaryKeyMapFactory);
+            Throwable t = sstableRef == null ? null : sstableRef.ensureReleased(null);
+            t = primaryKeyMapFactory == null ? null : Throwables.close(t, primaryKeyMapFactory);
 
             Throwables.maybeFail(t);
         }
