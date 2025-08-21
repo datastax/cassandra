@@ -478,17 +478,13 @@ public class PartitionRangeReadCommand extends ReadCommand implements PartitionR
         if (dataRange.isUnrestricted(metadata()) && rowFilter().isEmpty())
             return;
 
-        builder.append(" WHERE ");
-        // Put data range (token) conditions first, then row filter
-        if (!dataRange.isUnrestricted(metadata()))
+        // Pass the rowFilter to dataRange.toCQLString so it can handle 
+        // combining with clustering restrictions properly
+        String rangeString = dataRange.toCQLString(metadata(), rowFilter());
+        if (!rangeString.isEmpty())
         {
-            builder.append(dataRange.toCQLString(metadata(), RowFilter.none()));
-            if (!rowFilter().isEmpty())
-                builder.append(" AND ");
-        }
-        if (!rowFilter().isEmpty())
-        {
-            builder.append(rowFilter().toCQLString());
+            builder.append(" WHERE ");
+            builder.append(rangeString);
         }
     }
 
