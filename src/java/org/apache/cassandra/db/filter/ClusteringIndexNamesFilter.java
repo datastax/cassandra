@@ -171,7 +171,7 @@ public class ClusteringIndexNamesFilter extends AbstractClusteringIndexFilter
         boolean isSingleClustering = clusterings.size() == 1;
 
         StringBuilder sb = new StringBuilder();
-        
+
         if (isSingleColumn && isSingleClustering)
         {
             // Single column, single value - no parentheses
