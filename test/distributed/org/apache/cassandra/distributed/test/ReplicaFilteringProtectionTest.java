@@ -19,7 +19,6 @@
 package org.apache.cassandra.distributed.test;
 
 import java.io.IOException;
-import java.util.List;
 
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
@@ -31,6 +30,8 @@ import org.apache.cassandra.distributed.api.IInvokableInstance;
 import org.apache.cassandra.distributed.api.SimpleQueryResult;
 import org.apache.cassandra.exceptions.OverloadedException;
 import org.apache.cassandra.service.StorageService;
+import org.assertj.core.api.Assertions;
+import org.assertj.core.api.ListAssert;
 
 import static org.apache.cassandra.config.ReplicaFilteringProtectionOptions.DEFAULT_FAIL_THRESHOLD;
 import static org.apache.cassandra.config.ReplicaFilteringProtectionOptions.DEFAULT_WARN_THRESHOLD;
@@ -112,6 +113,9 @@ public class ReplicaFilteringProtectionTest extends TestBaseImpl
         catch (RuntimeException e)
         {
             assertEquals(e.getClass().getName(), OverloadedException.class.getName());
+            Assertions.assertThat(e)
+                      .hasMessageContaining("Replica filtering protection has cached " + REPLICAS * ROWS_PER_PARTITION)
+                      .hasMessageContaining("cached_replica_rows_fail_threshold");
         }
     }
 
@@ -147,7 +151,8 @@ public class ReplicaFilteringProtectionTest extends TestBaseImpl
         // of that row for all replicas.
         SimpleQueryResult oldResult = cluster.coordinator(1).executeWithResult(query, ALL, "old", PARTITIONS * ROWS_PER_PARTITION);
         assertRows(oldResult.toObjectArrays());
-        verifyWarningState(shouldWarn, oldResult);
+        verifyWarningState(shouldWarn, ROWS_PER_PARTITION * REPLICAS, oldResult);
+//        verifyWarningState(shouldWarn, ROWS_PER_PARTITION * REPLICAS, oldResult);
 
         // We should have made 3 row "completion" requests.
         assertEquals(PARTITIONS, protectionQueryCount(cluster.get(1), tableName));
@@ -170,7 +175,7 @@ public class ReplicaFilteringProtectionTest extends TestBaseImpl
                    row(0, 0, "new"), row(0, 1, "new"), row(0, 2, "new"),
                    row(2, 0, "new"), row(2, 1, "new"), row(2, 2, "new"));
 
-        verifyWarningState(warnThreshold < REPLICAS * ROWS_PER_PARTITION, newResult);
+        verifyWarningState(warnThreshold < REPLICAS * ROWS_PER_PARTITION, REPLICAS * ROWS_PER_PARTITION, newResult);
 
         // We still sould only have made 3 row "completion" requests, with no replica divergence in the last query.
         assertEquals(PARTITIONS, protectionQueryCount(cluster.get(1), tableName));
@@ -193,7 +198,7 @@ public class ReplicaFilteringProtectionTest extends TestBaseImpl
                    row(0, 0, "future"), row(0, 1, "future"), row(0, 2, "future"),
                    row(2, 0, "future"), row(2, 1, "future"), row(2, 2, "future"));
 
-        verifyWarningState(shouldWarn, futureResult);
+        verifyWarningState(shouldWarn, ROWS_PER_PARTITION * REPLICAS, futureResult);
 
         // We sould have made 3 more row "completion" requests.
         assertEquals(PARTITIONS * 2, protectionQueryCount(cluster.get(1), tableName));
@@ -212,11 +217,19 @@ public class ReplicaFilteringProtectionTest extends TestBaseImpl
                 cluster.get(node).executeInternal("UPDATE " + table + " SET v = ? WHERE k = ? and c = ?", value, i, j);
     }
 
-    private void verifyWarningState(boolean shouldWarn, SimpleQueryResult futureResult)
+    private void verifyWarningState(boolean shouldWarn, int cached, SimpleQueryResult result)
     {
-        List<String> futureWarnings = futureResult.warnings();
-        assertEquals(shouldWarn, futureWarnings.stream().anyMatch(w -> w.contains("cached_replica_rows_warn_threshold")));
-        assertEquals(shouldWarn ? 1 : 0, futureWarnings.size());
+        ListAssert<String> warnings = Assertions.assertThat(result.warnings());
+        if (shouldWarn)
+        {
+            warnings.hasSize(1)
+                    .anyMatch(w -> w.contains("Replica filtering protection has cached up to " + cached + " rows"))
+                    .anyMatch(w -> w.contains("cached_replica_rows_warn_threshold"));
+        }
+        else
+        {
+            warnings.isEmpty();
+        }
     }
 
     private long protectionQueryCount(IInvokableInstance instance, String tableName)
