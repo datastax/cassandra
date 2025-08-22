@@ -46,15 +46,15 @@ public class SinglePartitionReadCommandCQLTest extends ReadCommandCQLTester<Sing
 
         assertToCQLString("SELECT * FROM %s WHERE k = 0", "SELECT * FROM %s WHERE k = 0");
 
-        assertToCQLString("SELECT * FROM %s WHERE k = 0 AND c = 0", "SELECT * FROM %s WHERE k = 0 AND (c) = (0)");
-        assertToCQLString("SELECT * FROM %s WHERE k = 0 AND (c) = (0)", "SELECT * FROM %s WHERE k = 0 AND (c) = (0)");
+        assertToCQLString("SELECT * FROM %s WHERE k = 0 AND c = 0", "SELECT * FROM %s WHERE k = 0 AND c = 0");
+        assertToCQLString("SELECT * FROM %s WHERE k = 0 AND (c) = (0)", "SELECT * FROM %s WHERE k = 0 AND c = 0");
         assertToCQLString("SELECT * FROM %s WHERE k = 0 AND c > 0", "SELECT * FROM %s WHERE k = 0 AND c > 0");
         assertToCQLString("SELECT * FROM %s WHERE k = 0 AND c < 0", "SELECT * FROM %s WHERE k = 0 AND c < 0");
         assertToCQLString("SELECT * FROM %s WHERE k = 0 AND c >= 0", "SELECT * FROM %s WHERE k = 0 AND c >= 0");
         assertToCQLString("SELECT * FROM %s WHERE k = 0 AND c <= 0", "SELECT * FROM %s WHERE k = 0 AND c <= 0");
 
         assertToCQLString("SELECT * FROM %s WHERE k = 0 AND v = 1 ALLOW FILTERING", "SELECT * FROM %s WHERE k = 0 AND v = 1");
-        assertToCQLString("SELECT * FROM %s WHERE k = 0 AND c = 0 AND v = 1 ALLOW FILTERING", "SELECT * FROM %s WHERE k = 0 AND v = 1 AND (c) = (0)");
+        assertToCQLString("SELECT * FROM %s WHERE k = 0 AND c = 0 AND v = 1 ALLOW FILTERING", "SELECT * FROM %s WHERE k = 0 AND v = 1 AND c = 0");
         assertToCQLString("SELECT * FROM %s WHERE k = 0 AND c > 0 AND v = 1 ALLOW FILTERING", "SELECT * FROM %s WHERE k = 0 AND v = 1 AND c > 0");
         assertToCQLString("SELECT * FROM %s WHERE k = 0 AND c < 0 AND v = 1 ALLOW FILTERING", "SELECT * FROM %s WHERE k = 0 AND v = 1 AND c < 0");
         assertToCQLString("SELECT * FROM %s WHERE k = 0 AND c >= 0 AND v = 1 ALLOW FILTERING", "SELECT * FROM %s WHERE k = 0 AND v = 1 AND c >= 0");
