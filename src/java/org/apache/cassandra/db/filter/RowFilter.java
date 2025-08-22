@@ -1479,7 +1479,7 @@ public class RowFilter
             }
 
             return cql
-                   ? String.format("%s %s %s", column.name.toCQLString(), operator, type.toCQLString(value))
+                   ? String.format("%s %s %s", column.name.toCQLString(), operator, type.toCQLString(value, true))
                    : String.format("%s %s %s", column.name.toString(), operator, type.getString(value, true));
         }
 
@@ -1599,7 +1599,7 @@ public class RowFilter
             AbstractType<?> nt = mt.nameComparator();
             AbstractType<?> vt = mt.valueComparator();
             return cql
-                 ? String.format("%s[%s] %s %s", column.name.toCQLString(), nt.toCQLString(key), operator, vt.toCQLString(value))
+                 ? String.format("%s[%s] %s %s", column.name.toCQLString(), nt.toCQLString(key, true), operator, vt.toCQLString(value, true))
                  : String.format("%s[%s] %s %s", column.name.toString(), nt.getString(key), operator, vt.getString(value));
         }
 
