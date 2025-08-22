@@ -282,6 +282,21 @@ public class DataRange
         return new DataRange(range, clusteringIndexFilter);
     }
 
+    /**
+     * Whether this range queries a single partition. That happens for partition queries using secondary indexes, which
+     * are internally mapped to range commands using a single-key data range.
+     *
+     * @return {@code true} if this range queries a single partition, {@code false} otherwise
+     */
+    public boolean isSinglePartition()
+    {
+        return keyRange.inclusiveLeft() &&
+               keyRange.inclusiveRight() &&
+               keyRange.left instanceof DecoratedKey &&
+               keyRange.right instanceof DecoratedKey &&
+               keyRange.left.equals(keyRange.right);
+    }
+
     public String toString(TableMetadata metadata)
     {
         return String.format("range=%s pfilter=%s", keyRange.getString(metadata.partitionKeyType), clusteringIndexFilter.toString(metadata));
@@ -295,17 +310,33 @@ public class DataRange
         CqlBuilder builder = new CqlBuilder();
 
         boolean needAnd = false;
-        if (!startKey().isMinimum())
+
+        if (isSinglePartition())
         {
-            appendClause(startKey(), builder, metadata, true, keyRange.isStartInclusive());
+            /*
+             * Single partition queries using an index are internally mapped to range commands where the start and end
+             * key are the same. If that is the case, we want to print the query as an equality on the partition key
+             * rather than a token range, as if it was a partition query, for better readability.
+             */
+            builder.append(ColumnMetadata.toCQLString(metadata.partitionKeyColumns()));
+            builder.append(" = ");
+            appendKeyString(builder, metadata.partitionKeyType, ((DecoratedKey) startKey()).getKey());
             needAnd = true;
         }
-        if (!stopKey().isMinimum())
+        else
         {
-            if (needAnd)
-                builder.append(" AND ");
-            appendClause(stopKey(), builder, metadata, false, keyRange.isEndInclusive());
-            needAnd = true;
+            if (!startKey().isMinimum())
+            {
+                appendClause(startKey(), builder, metadata, true, keyRange.isStartInclusive());
+                needAnd = true;
+            }
+            if (!stopKey().isMinimum())
+            {
+                if (needAnd)
+                    builder.append(" AND ");
+                appendClause(stopKey(), builder, metadata, false, keyRange.isEndInclusive());
+                needAnd = true;
+            }
         }
 
         String filterString = clusteringIndexFilter.toCQLString(metadata, rowFilter);
