@@ -46,7 +46,7 @@ DEFAULT_CQLSH_TERM = 'xterm'
 try:
     Pattern = re._pattern_type
 except AttributeError:
-    # Python 3.7+
+    # Python 3.8-3.12
     Pattern = re.Pattern
 
 def get_smm_sequence(term='xterm'):
