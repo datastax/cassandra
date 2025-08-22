@@ -43,11 +43,7 @@ else:
 DEFAULT_CQLSH_PROMPT = DEFAULT_PREFIX + '(\S+@)?cqlsh(:\S+)?> '
 DEFAULT_CQLSH_TERM = 'xterm'
 
-try:
-    Pattern = re._pattern_type
-except AttributeError:
-    # Python 3.7+
-    Pattern = re.Pattern
+Pattern = re.Pattern
 
 def get_smm_sequence(term='xterm'):
     """

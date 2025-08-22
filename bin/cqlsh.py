@@ -34,8 +34,8 @@ from contextlib import contextmanager
 from glob import glob
 from uuid import UUID
 
-if sys.version_info < (3, 6) and sys.version_info[0:2] != (2, 7):
-    sys.exit("\ncqlsh requires Python 3.6+ or Python 2.7 (deprecated)\n")
+if sys.version_info < (3, 8) or sys.version_info > (3, 12):
+    sys.exit("\ncqlsh requires Python 3.8-3.12\n")
 
 # see CASSANDRA-10428
 if platform.python_implementation().startswith('Jython'):
@@ -117,7 +117,7 @@ if cql_zip:
     sys.path.insert(0, os.path.join(cql_zip, 'cassandra-driver-' + ver))
 
 # the driver needs dependencies
-third_parties = ('futures-', 'six-', 'geomet-', 'pure_sasl-', 'datastax_db_*-')
+third_parties = ('futures-', 'geomet-', 'pure_sasl-', 'datastax_db_*-')
 
 for lib in third_parties:
     lib_zip = find_zip(lib)
@@ -576,7 +576,6 @@ class Shell(cmd.Cmd):
 
         if tty:
             self.reset_prompt()
-            self.maybe_warn_py2()
             self.report_connection()
             print('Use HELP for help.')
         else:
@@ -660,12 +659,6 @@ class Shell(cmd.Cmd):
         # set_cql_version.
         vers['cql'] = self.cql_version
         print("[cqlsh %(shver)s | Cassandra %(build)s | CQL spec %(cql)s | Native protocol v%(protocol)s]" % vers)
-
-    def maybe_warn_py2(self):
-        py2_suppress_warn = 'CQLSH_NO_WARN_PY2'
-        if sys.version_info[0:2] == (2, 7) and not os.environ.get(py2_suppress_warn):
-            print("Python 2.7 support is deprecated. "
-                  "Install Python 3.6+ or set %s to suppress this message.\n" % (py2_suppress_warn,))
 
     def show_session(self, sessionid, partial_session=False):
         print_trace_session(self, self.tracing_style, self.session, sessionid, partial_session)
