@@ -17,8 +17,6 @@
  */
 package org.apache.cassandra.index.sai;
 
-import javax.annotation.Nullable;
-
 import com.google.common.base.Objects;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
@@ -88,7 +86,7 @@ public class SSTableContext extends SharedCloseableImpl
 
             // avoid opening SAI metadata if reads are disabled
             primaryKeyMapFactory = CassandraRelevantProperties.SAI_INDEX_READS_DISABLED.getBoolean()
-                                   ? new PrimaryKeyMap.EmptyFactory()
+                                   ? new PrimaryKeyMap.DummyThrowingFactory()
                                    : onDiskFormat.newPrimaryKeyMapFactory(perSSTableComponents, primaryKeyFactory, sstable);
 
             Cleanup cleanup = new Cleanup(primaryKeyMapFactory, sstableRef);
@@ -179,7 +177,7 @@ public class SSTableContext extends SharedCloseableImpl
         private final PrimaryKeyMap.Factory primaryKeyMapFactory;
         private final Ref<? extends SSTableReader> sstableRef;
 
-        private Cleanup(@Nullable PrimaryKeyMap.Factory primaryKeyMapFactory, @Nullable Ref<? extends SSTableReader> sstableRef)
+        private Cleanup(PrimaryKeyMap.Factory primaryKeyMapFactory, Ref<? extends SSTableReader> sstableRef)
         {
             this.primaryKeyMapFactory = primaryKeyMapFactory;
             this.sstableRef = sstableRef;
@@ -188,8 +186,8 @@ public class SSTableContext extends SharedCloseableImpl
         @Override
         public void tidy()
         {
-            Throwable t = sstableRef == null ? null : sstableRef.ensureReleased(null);
-            t = primaryKeyMapFactory == null ? null : Throwables.close(t, primaryKeyMapFactory);
+            Throwable t = sstableRef.ensureReleased(null);
+            t = Throwables.close(t, primaryKeyMapFactory);
 
             Throwables.maybeFail(t);
         }

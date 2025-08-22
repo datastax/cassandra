@@ -92,6 +92,7 @@ import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_INDEX_READS_DISABLED;
 import static org.apache.cassandra.config.CassandraRelevantProperties.VALIDATE_MAX_TERM_SIZE_AT_COORDINATOR;
 
 /**
@@ -937,7 +938,7 @@ public class IndexContext
                 SSTableIndex index = new SSTableIndex(context, perIndexComponents);
                 if (CassandraRelevantProperties.SAI_INDEX_READS_DISABLED.getBoolean())
                 {
-                    logger.debug(logMessage("Successfully loaded index for SSTable {}"), context.descriptor());
+                    logger.debug(logMessage("Skipped loading index for SSTable {} as it's disabled by {}"), context.descriptor(), SAI_INDEX_READS_DISABLED.getKey());
                 }
                 else
                 {

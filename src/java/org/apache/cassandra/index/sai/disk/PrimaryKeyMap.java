@@ -125,7 +125,10 @@ public interface PrimaryKeyMap extends Closeable
     {
     }
 
-    class EmptyFactory implements Factory
+    /**
+     * When SAI_INDEX_READS_DISABLED is true, this is used to avoid loading SAI files to reduce disk access and memory usage
+     */
+    class DummyThrowingFactory implements Factory
     {
         @Override
         public PrimaryKeyMap newPerSSTablePrimaryKeyMap()
