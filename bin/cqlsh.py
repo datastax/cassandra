@@ -34,8 +34,8 @@ from contextlib import contextmanager
 from glob import glob
 from uuid import UUID
 
-if sys.version_info < (3, 6) and sys.version_info[0:2] != (2, 7):
-    sys.exit("\ncqlsh requires Python 3.6+ or Python 2.7 (deprecated)\n")
+if sys.version_info < (3, 8) or sys.version_info > (3, 12):
+    sys.exit("\ncqlsh requires Python 3.8-3.12\n")
 
 # see CASSANDRA-10428
 if platform.python_implementation().startswith('Jython'):
@@ -117,7 +117,7 @@ if cql_zip:
     sys.path.insert(0, os.path.join(cql_zip, 'cassandra-driver-' + ver))
 
 # the driver needs dependencies
-third_parties = ('futures-', 'six-', 'geomet-', 'pure_sasl-', 'datastax_db_*-')
+third_parties = ('futures-', 'geomet-', 'pure_sasl-', 'datastax_db_*-')
 
 for lib in third_parties:
     lib_zip = find_zip(lib)
