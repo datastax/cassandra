@@ -42,6 +42,8 @@ import org.apache.cassandra.sensors.RequestSensors;
 import org.apache.cassandra.sensors.RequestTracker;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.concurrent.SimpleCondition;
+import org.apache.cassandra.metrics.ReplicaResponseSizeMetrics;
+import org.apache.cassandra.net.MessagingService;
 
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 
@@ -159,7 +161,10 @@ public class ReadCallback<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<
     public void onResponse(Message<ReadResponse> message)
     {
         assertWaitingFor(message.from());
+        
         resolver.preprocess(message);
+        
+        trackReplicaResponseSize(message);
 
         /*
          * Ensure that data is present and the response accumulator has properly published the
@@ -169,6 +174,25 @@ public class ReadCallback<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<
          */
         if (resolver.isDataPresent() && resolver.responses.size() >= blockFor)
             condition.signalAll();
+    }
+
+    /**
+     * Track the size of a response message from a replica
+     * @param message the response message
+     */
+    private void trackReplicaResponseSize(Message<ReadResponse> message)
+    {
+        if (!ReplicaResponseSizeMetrics.isMetricsEnabled())
+            return;
+            
+        // Only track remote responses (local responses have null from field)
+        // check that we have a valid payload and serializer and the response type supports size tracking
+        if (message != null && message.from() != null && message.payload != null 
+            && message.verb().serializer() != null && message.payload.supportsResponseSizeTracking())
+        {
+            int responseSize = message.payloadSize(MessagingService.current_version);
+            ReplicaResponseSizeMetrics.recordReadResponseSize(responseSize);
+        }
     }
 
     public void response(ReadResponse result)
