@@ -3,7 +3,6 @@
 # http://datastax.github.io/python-driver/installation.html#cython-based-extensions
 six>=1.12.0
 -e git+https://github.com/datastax/python-driver.git@3.29.2#egg=cassandra-driver
-# change to tag?
 # Used ccm version is tracked by cassandra-test branch in ccm repo. Please create a PR there for fixes or upgrades to new releases.
 -e git+https://github.com/datastax/cassandra-ccm.git@converged-cassandra#egg=ccm
 coverage
