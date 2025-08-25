@@ -290,7 +290,7 @@ public final class CqlBuilder
 
         public OptionsBuilder append(String name, Map<String, String> options)
         {
-            return options.isEmpty() ? this : append(name, () -> builder.append(options, false));
+            return options.isEmpty() ? this : append(name, () -> builder.append(options, true));
         }
 
         public OptionsBuilder append(String name, Set<String> options)
