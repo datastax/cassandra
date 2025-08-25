@@ -936,7 +936,7 @@ public class IndexContext
                 }
 
                 SSTableIndex index = new SSTableIndex(context, perIndexComponents);
-                if (CassandraRelevantProperties.SAI_INDEX_READS_DISABLED.getBoolean())
+                if (SAI_INDEX_READS_DISABLED.getBoolean())
                 {
                     logger.debug(logMessage("Skipped loading index for SSTable {} as it's disabled by {}"), context.descriptor(), SAI_INDEX_READS_DISABLED.getKey());
                 }
