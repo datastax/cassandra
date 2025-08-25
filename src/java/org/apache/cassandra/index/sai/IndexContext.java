@@ -38,6 +38,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget;
 import org.apache.cassandra.db.ClusteringComparator;
@@ -91,6 +92,7 @@ import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_INDEX_READS_DISABLED;
 import static org.apache.cassandra.config.CassandraRelevantProperties.VALIDATE_MAX_TERM_SIZE_AT_COORDINATOR;
 
 /**
@@ -934,8 +936,15 @@ public class IndexContext
                 }
 
                 SSTableIndex index = new SSTableIndex(context, perIndexComponents);
-                long count = context.primaryKeyMapFactory().count();
-                logger.debug(logMessage("Successfully loaded index for SSTable {} with {} rows."), context.descriptor(), count);
+                if (SAI_INDEX_READS_DISABLED.getBoolean())
+                {
+                    logger.debug(logMessage("Skipped loading index for SSTable {} as it's disabled by {}"), context.descriptor(), SAI_INDEX_READS_DISABLED.getKey());
+                }
+                else
+                {
+                    long count = context.primaryKeyMapFactory().count();
+                    logger.debug(logMessage("Successfully loaded index for SSTable {} with {} rows."), context.descriptor(), count);
+                }
 
                 // Try to add new index to the set, if set already has such index, we'll simply release and move on.
                 // This covers situation when SSTable collection has the same SSTable multiple
