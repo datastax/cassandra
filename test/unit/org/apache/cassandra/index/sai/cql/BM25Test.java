@@ -870,26 +870,26 @@ public class BM25Test extends SAITester
 
     public final static Object[][] DATASET =
     {
-    { 0, "Climate", 5, "Climate change is a pressing issue. Climate patterns are shifting globally. Scientists study climate data daily.", 1 },
-    { 1, "Technology", 3, "Technology is advancing. New technology in AI and robotics is groundbreaking.", 1 },
-    { 2, "Economy", 4, "The economy is recovering. Economy experts are optimistic. However, the global economy still faces risks.", 1 },
-    { 3, "Health", 3, "Health is wealth. Health policies need to be improved to ensure better public health outcomes.", 1 },
-    { 4, "Education", 2, "Education is the foundation of success. Online education is booming.", 4 },
-    { 5, "Climate", 4, "Climate and health are closely linked. Climate affects air quality and health outcomes.", 2 },
-    { 6, "Education", 3, "Technology and education go hand in hand. EdTech is revolutionizing education through technology.", 3 },
-    { 7, "Economy", 3, "The global economy is influenced by technology. Fintech is a key part of the economy today.", 2 },
-    { 8, "Health", 3, "Education and health programs must be prioritized. Health education is vital in schools.", 2 },
-    { 9, "Mixed", 3, "Technology, economy, and education are pillars of development.", 2 },
-    { 10, "Climate", 5, "Climate climate climate. It's everywhere. Climate drives political and economic decisions.", 1 },
-    { 11, "Health", 2, "Health concerns rise with climate issues. Health organizations are sounding the alarm.", 2 },
-    { 12, "Economy", 3, "The economy is fluctuating. Uncertainty looms over the economy.", 1 },
-    { 13, "Health", 3, "Cutting-edge technology is transforming healthcare. Healthtech merges health and technology.", 1 },
-    { 14, "Education", 2, "Education reforms are underway. Education experts suggest holistic changes.", 1 },
-    { 15, "Climate", 4, "Climate affects the economy and health. Climate events cost billions annually.", 1 },
-    { 16, "Technology", 3, "Technology is the backbone of the modern economy. Without technology, economic growth stagnates.", 2 },
-    { 17, "Health", 2, "Health is discussed less than economy or climate or technology, but health matters deeply.", 1 },
-    { 18, "Climate", 5, "Climate change, climate policies, climate research—climate is the buzzword of our time.", 2 },
-    { 19, "Mixed", 3, "Investments in education and technology will shape the future of the global economy.", 1 }
+    { 0, "Climate", 5, "Climate change is a pressing issue. Climate patterns are shifting globally. Scientists study climate data daily." },
+    { 1, "Technology", 3, "Technology is advancing. New technology in AI and robotics is groundbreaking." },
+    { 2, "Economy", 4, "The economy is recovering. Economy experts are optimistic. However, the global economy still faces risks." },
+    { 3, "Health", 3, "Health is wealth. Health policies need to be improved to ensure better public health outcomes." },
+    { 4, "Education", 2, "Education is the foundation of success. Online education is booming." },
+    { 5, "Climate", 4, "Climate and health are closely linked. Climate affects air quality and health outcomes." },
+    { 6, "Education", 3, "Technology and education go hand in hand. EdTech is revolutionizing education through technology." },
+    { 7, "Economy", 3, "The global economy is influenced by technology. Fintech is a key part of the economy today." },
+    { 8, "Health", 3, "Education and health programs must be prioritized. Health education is vital in schools." },
+    { 9, "Mixed", 3, "Technology, economy, and education are pillars of development." },
+    { 10, "Climate", 5, "Climate climate climate. It's everywhere. Climate drives political and economic decisions." },
+    { 11, "Health", 2, "Health concerns rise with climate issues. Health organizations are sounding the alarm." },
+    { 12, "Economy", 3, "The economy is fluctuating. Uncertainty looms over the economy." },
+    { 13, "Health", 3, "Cutting-edge technology is transforming healthcare. Healthtech merges health and technology." },
+    { 14, "Education", 2, "Education reforms are underway. Education experts suggest holistic changes." },
+    { 15, "Climate", 4, "Climate affects the economy and health. Climate events cost billions annually." },
+    { 16, "Technology", 3, "Technology is the backbone of the modern economy. Without technology, economic growth stagnates." },
+    { 17, "Health", 2, "Health is discussed less than economy or climate or technology, but health matters deeply." },
+    { 18, "Climate", 5, "Climate change, climate policies, climate research—climate is the buzzword of our time." },
+    { 19, "Mixed", 3, "Investments in education and technology will shape the future of the global economy." }
     };
 
     private void analyzeDataset(String term)
@@ -932,24 +932,7 @@ public class BM25Test extends SAITester
 
     public static void insertCollectionData(SAITester tester)
     {
-        int setsize = 1;
         for (int row = 0; row < DATASET.length; row++)
-        {
-            var set = new HashSet<String>();
-            for (int j = 0; j < setsize; j++)
-                set.add((String) DATASET[row - j][3]);
-            if (setsize >= 3)
-                setsize -= 2;
-            else
-                setsize++;
-            var map = new HashMap<Integer, String>();
-            var map_text = new HashMap<String, String>();
-            for (int j = 0; j <= row && j < 3; j++)
-            {
-                map.putIfAbsent((Integer) DATASET[row - j][2], (String) DATASET[row - j][1]);
-                map_text.putIfAbsent((String) DATASET[row - j][1], (String) DATASET[row - j][3]);
-            }
-
             tester.execute(
             "INSERT INTO %s (id, category, score, body, bodyset, map_category, map_body) " +
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -957,11 +940,34 @@ public class BM25Test extends SAITester
             DATASET[row][1],
             DATASET[row][2],
             DATASET[row][3],
-            set,
-            map,
-            map_text
+            generateSetColumnValue(row),
+            generateMapValueIntKey(row),
+            generateMapValueTextKey(row)
             );
-        }
+    }
+
+    private static HashSet<String> generateSetColumnValue(int row)
+    {
+        HashSet<String> setColumnValue = new HashSet<>();
+        for (int i = 0; i < row % 3 + 1; i++)
+            setColumnValue.add((String) DATASET[row - i][3]);
+        return setColumnValue;
+    }
+
+    private static HashMap<Integer, String> generateMapValueIntKey(int row)
+    {
+        HashMap<Integer, String> mapIntKey = new HashMap<>();
+        for (int j = 0; j <= row && j < 3; j++)
+            mapIntKey.putIfAbsent((Integer) DATASET[row - j][2], (String) DATASET[row - j][1]);
+        return mapIntKey;
+    }
+
+    private static HashMap<String, String> generateMapValueTextKey(int row)
+    {
+        HashMap<String, String> mapTextKey = new HashMap<>();
+        for (int j = 0; j <= row && j < 3; j++)
+            mapTextKey.putIfAbsent((String) DATASET[row - j][1], (String) DATASET[row - j][3]);
+        return mapTextKey;
     }
 
     private void executeQuery(List<Integer> expected, String query, Object... values) throws Throwable
