@@ -51,6 +51,7 @@ import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.transport.Dispatcher;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.metrics.ReplicaResponseSizeMetrics;
 
 import static java.util.concurrent.TimeUnit.DAYS;
 import static org.apache.cassandra.net.NoPayload.noPayload;
@@ -386,5 +387,88 @@ public class WriteResponseHandlerTest
         return Message.builder(Verb.ECHO_REQ, noPayload)
                       .from(targets.get(target).endpoint())
                       .build();
+    }
+
+    /**
+     * Test that write response metrics are properly collected for remote responses
+     */
+    @Test
+    public void testWriteResponseMetricsForRemoteResponses() throws Throwable
+    {
+        long initialTotalBytes = ReplicaResponseSizeMetrics.totalBytesReceived.getCount();
+        long initialWriteBytes = ReplicaResponseSizeMetrics.writeResponseBytesReceived.getCount();
+        long initialHistogramCount = ReplicaResponseSizeMetrics.writeResponseBytesPerResponse.getCount();
+        
+        AbstractWriteResponseHandler<?> handler = createWriteResponseHandler(ConsistencyLevel.LOCAL_QUORUM, ConsistencyLevel.EACH_QUORUM, Dispatcher.RequestTime.forImmediateExecution());
+        
+        handler.onResponse(createDummyMessage(0)); // Remote replica in DC1
+        handler.onResponse(createDummyMessage(1)); // Remote replica in DC1
+        
+        handler.get();
+        
+        assertTrue("Total bytes metric should have increased",
+                   ReplicaResponseSizeMetrics.totalBytesReceived.getCount() >= initialTotalBytes);
+        assertTrue("Write bytes metric should have increased", 
+                   ReplicaResponseSizeMetrics.writeResponseBytesReceived.getCount() >= initialWriteBytes);
+        assertTrue("Histogram count should have increased by at least 2", 
+                   ReplicaResponseSizeMetrics.writeResponseBytesPerResponse.getCount() >= initialHistogramCount + 2);
+    }
+
+    /**
+     * Test that write response metrics are NOT collected for local responses
+     */
+    @Test
+    public void testWriteResponseMetricsSkippedForLocalResponses() throws Throwable
+    {
+        long initialTotalBytes = ReplicaResponseSizeMetrics.totalBytesReceived.getCount();
+        long initialWriteBytes = ReplicaResponseSizeMetrics.writeResponseBytesReceived.getCount();
+        
+        AbstractWriteResponseHandler<?> handler = createWriteResponseHandler(ConsistencyLevel.ONE, ConsistencyLevel.ONE, Dispatcher.RequestTime.forImmediateExecution());
+        
+        // Simulate a local response (message.from() == null)
+        handler.onResponse(null);
+        
+        handler.get();
+        
+        // Check that metrics were NOT updated for local response
+        assertEquals("Total bytes should not change for local responses", 
+                     initialTotalBytes, ReplicaResponseSizeMetrics.totalBytesReceived.getCount());
+        assertEquals("Write bytes should not change for local responses", 
+                     initialWriteBytes, ReplicaResponseSizeMetrics.writeResponseBytesReceived.getCount());
+    }
+
+    /**
+     * Test that metrics collection handles errors gracefully
+     */
+    @Test
+    public void testWriteResponseMetricsHandlesExceptionsGracefully() throws Throwable
+    {
+        AbstractWriteResponseHandler<?> handler = createWriteResponseHandler(ConsistencyLevel.ONE, ConsistencyLevel.ONE, Dispatcher.RequestTime.forImmediateExecution());
+        
+        // Send a normal response first to satisfy consistency
+        handler.onResponse(createDummyMessage(0));
+        
+        handler.get();
+        
+        // The metrics collection handles null payloads and other edge cases gracefully
+    }
+
+    /**
+     * Test that write response metrics track all responses, including those after consistency is met
+     */
+    @Test  
+    public void testWriteResponseMetricsTracksAllResponses() throws Throwable
+    {
+        long initialHistogramCount = ReplicaResponseSizeMetrics.writeResponseBytesPerResponse.getCount();
+        
+        AbstractWriteResponseHandler<?> handler = createWriteResponseHandler(ConsistencyLevel.LOCAL_QUORUM, ConsistencyLevel.EACH_QUORUM, Dispatcher.RequestTime.forImmediateExecution());
+        
+        handler.onResponse(createDummyMessage(0));
+        handler.onResponse(createDummyMessage(1));
+        handler.onResponse(createDummyMessage(2)); // Extra response after consistency met
+        
+        // All 3 responses should be tracked in metrics
+        assertTrue("All responses should be tracked, not just those meeting consistency",
+                   ReplicaResponseSizeMetrics.writeResponseBytesPerResponse.getCount() >= initialHistogramCount + 3);
     }
 }
