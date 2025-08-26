@@ -670,6 +670,8 @@ public enum CassandraRelevantProperties
     REPLACE_ADDRESS_FIRST_BOOT("cassandra.replace_address_first_boot"),
     REPLACE_NODE("cassandra.replace_node"),
     REPLACE_TOKEN("cassandra.replace_token"),
+    // Enable/disable replica response size metrics collection
+    REPLICA_RESPONSE_SIZE_METRICS_ENABLED("cassandra.replica_response_size_metrics_enabled", "true"),
     /**
      * Number of replicas required to store batchlog for atomicity, only accepts values of 1 or 2.
      */
