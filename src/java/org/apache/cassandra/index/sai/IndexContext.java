@@ -96,6 +96,7 @@ import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_MAX_ST
 import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_MAX_VECTOR_TERM_SIZE;
 import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_VALIDATE_MAX_TERM_SIZE_AT_COORDINATOR;
 import static org.apache.cassandra.utils.Clock.Global.nanoTime;
+import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_INDEX_READS_DISABLED;
 
 /**
  * Manage metadata for each column index.
@@ -944,8 +945,15 @@ public class IndexContext
                 }
 
                 SSTableIndex index = new SSTableIndex(context, perIndexComponents);
-                long count = context.primaryKeyMapFactory().count();
-                logger.debug(logMessage("Successfully loaded index for SSTable {} with {} rows."), context.descriptor(), count);
+                if (SAI_INDEX_READS_DISABLED.getBoolean())
+                {
+                    logger.debug(logMessage("Skipped loading index for SSTable {} as it's disabled by {}"), context.descriptor(), SAI_INDEX_READS_DISABLED.getKey());
+                }
+                else
+                {
+                    long count = context.primaryKeyMapFactory().count();
+                    logger.debug(logMessage("Successfully loaded index for SSTable {} with {} rows."), context.descriptor(), count);
+                }
 
                 // Try to add new index to the set, if set already has such index, we'll simply release and move on.
                 // This covers situation when SSTable collection has the same SSTable multiple

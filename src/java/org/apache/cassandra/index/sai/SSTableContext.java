@@ -19,6 +19,7 @@ package org.apache.cassandra.index.sai;
 
 import com.google.common.base.Objects;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
@@ -68,6 +69,7 @@ public class SSTableContext extends SharedCloseableImpl
     public static SSTableContext create(SSTableReader sstable, IndexComponents.ForRead perSSTableComponents)
     {
         var onDiskFormat = perSSTableComponents.onDiskFormat();
+        // no disk access thus no need to use EmptyFactory
         PrimaryKey.Factory primaryKeyFactory = onDiskFormat.newPrimaryKeyFactory(sstable.metadata().comparator);
 
         Ref<? extends SSTableReader> sstableRef = null;
@@ -82,7 +84,10 @@ public class SSTableContext extends SharedCloseableImpl
                 throw new IllegalStateException("Couldn't acquire reference to the sstable: " + sstable);
             }
 
-            primaryKeyMapFactory = onDiskFormat.newPrimaryKeyMapFactory(perSSTableComponents, primaryKeyFactory, sstable);
+            // avoid opening SAI metadata if reads are disabled
+            primaryKeyMapFactory = CassandraRelevantProperties.SAI_INDEX_READS_DISABLED.getBoolean()
+                                   ? new PrimaryKeyMap.DummyThrowingFactory()
+                                   : onDiskFormat.newPrimaryKeyMapFactory(perSSTableComponents, primaryKeyFactory, sstable);
 
             Cleanup cleanup = new Cleanup(primaryKeyMapFactory, sstableRef);
 
