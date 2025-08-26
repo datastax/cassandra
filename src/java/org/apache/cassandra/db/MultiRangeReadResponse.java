@@ -108,6 +108,12 @@ public abstract class MultiRangeReadResponse extends ReadResponse
         throw new UnsupportedOperationException();
     }
 
+    @Override
+    public boolean supportsResponseSizeTracking()
+    {
+        return false;
+    }
+
     /**
      * A local response that is not meant to be serialized or used for caching remote endpoint's multi-range response.
      */
@@ -232,6 +238,12 @@ public abstract class MultiRangeReadResponse extends ReadResponse
 
         @Override
         public boolean isDigestResponse()
+        {
+            return false;
+        }
+
+        @Override
+        public boolean supportsResponseSizeTracking()
         {
             return false;
         }
