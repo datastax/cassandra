@@ -81,6 +81,18 @@ public abstract class ReadResponse
     public abstract boolean isDigestResponse();
 
     /**
+     * Indicates whether this response type supports response size tracking for metrics.
+     * Some response types (like MultiRangeReadResponse) may not support payload size calculation
+     * and will throw UnsupportedOperationException when attempting to serialize for size calculation.
+     * 
+     * @return true if this response supports size tracking, false otherwise
+     */
+    public boolean supportsResponseSizeTracking()
+    {
+        return true;
+    }
+
+    /**
      * Creates a string of the requested partition in this read response suitable for debugging.
      */
     public String toDebugString(ReadCommand command, DecoratedKey key)
