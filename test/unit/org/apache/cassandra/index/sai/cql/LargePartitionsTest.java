@@ -45,7 +45,7 @@ public class LargePartitionsTest extends SAITester.Versioned
                 int n = c % 2;
                 String t = "t_" + n;
                 String a = "other a_" + n;
-                Vector<Float> v = vector(1.0f, n);
+                Vector<Float> v = vectorOf(1.0f, n);
                 execute("INSERT INTO %s (k, c, n, t, a, v) VALUES (?, ?, ?, ?, ?, ?)", k, c, n, t, a, v);
             }
         }

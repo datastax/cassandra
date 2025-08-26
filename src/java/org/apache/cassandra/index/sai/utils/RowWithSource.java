@@ -291,6 +291,12 @@ public class RowWithSource implements Row
     }
 
     @Override
+    public int dataSizeBeforePurge()
+    {
+        return row.dataSizeBeforePurge();
+    }
+
+    @Override
     public long unsharedHeapSize()
     {
         return row.unsharedHeapSize() + EMPTY_SIZE;
