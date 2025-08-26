@@ -27,6 +27,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.db.WriteType;
 import org.apache.cassandra.net.Verb;
+import org.apache.cassandra.metrics.ReplicaResponseSizeMetrics;
 
 /**
  * Handles blocking writes for ONE, ANY, TWO, THREE, QUORUM, and ALL consistency levels.
@@ -64,6 +65,7 @@ public class WriteResponseHandler<T> extends AbstractWriteResponseHandler<T>
     @Override
     public void onResponse(Message<T> m)
     {
+        trackReplicaResponseSize(m);
         if (responsesUpdater.decrementAndGet(this) == 0)
             signal();
         //Must be last after all subclass processing
