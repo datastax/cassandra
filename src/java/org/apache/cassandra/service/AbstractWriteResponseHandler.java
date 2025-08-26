@@ -51,6 +51,8 @@ import org.apache.cassandra.sensors.RequestTracker;
 import org.apache.cassandra.transport.Dispatcher;
 import org.apache.cassandra.utils.concurrent.Condition;
 import org.apache.cassandra.utils.concurrent.UncheckedInterruptedException;
+import org.apache.cassandra.metrics.ReplicaResponseSizeMetrics;
+import org.apache.cassandra.net.MessagingService;
 
 import static java.lang.Long.MAX_VALUE;
 import static java.lang.Math.min;
@@ -313,6 +315,24 @@ public abstract class AbstractWriteResponseHandler<T> implements RequestCallback
      * null message means "response from local write"
      */
     public abstract void onResponse(Message<T> msg);
+    
+    /**
+     * Track the size of a response message from a replica
+     * @param msg the response message
+     */
+    protected void trackReplicaResponseSize(Message<T> msg)
+    {
+        if (!ReplicaResponseSizeMetrics.isMetricsEnabled())
+            return;
+            
+        // Only track remote responses (local responses have null from field)
+        // Also check that we have a valid payload and serializer
+        if (msg != null && msg.from() != null && msg.payload != null && msg.verb().serializer() != null)
+        {
+            int responseSize = msg.payloadSize(MessagingService.current_version);
+            ReplicaResponseSizeMetrics.recordWriteResponseSize(responseSize);
+        }
+    }
 
     public void signal()
     {
