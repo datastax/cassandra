@@ -795,20 +795,15 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
                     continue;
                 }
 
+                UnfilteredRowIterator iter;
                 if (intersects || hasRequiredStatics)
                 {
                     if (!sstable.isRepaired())
                         controller.updateMinOldestUnrepairedTombstone(sstable.getMinLocalDeletionTime());
 
                     // 'iter' is added to iterators which is closed on exception, or through the closing of the final merged iterator
-                    UnfilteredRowIterator iter = intersects ? makeRowIteratorWithLowerBound(cfs, sstable, metricsCollector)
-                                                            : makeRowIteratorWithSkippedNonStaticContent(cfs, sstable, metricsCollector);
-
-                    var wrapped = rowTransformer != null ? Transformation.apply(iter, rowTransformer.apply(sstable.getId())) : iter;
-
-                    inputCollector.addSSTableIterator(sstable, wrapped);
-                    mostRecentPartitionTombstone = Math.max(mostRecentPartitionTombstone,
-                                                            iter.partitionLevelDeletion().markedForDeleteAt());
+                    iter = intersects ? makeRowIteratorWithLowerBound(cfs, sstable, metricsCollector)
+                                      : makeRowIteratorWithSkippedNonStaticContent(cfs, sstable, metricsCollector);
                 }
                 else
                 {
@@ -820,7 +815,7 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
                     // an iterator figure out that (see `StatsMetadata.hasPartitionLevelDeletions`)
 
                     // 'iter' is added to iterators which is closed on exception, or through the closing of the final merged iterator
-                    UnfilteredRowIterator iter = makeRowIteratorWithSkippedNonStaticContent(cfs, sstable, metricsCollector);
+                    iter = makeRowIteratorWithSkippedNonStaticContent(cfs, sstable, metricsCollector);
 
                     // if the sstable contains a partition delete, then we must include it regardless of whether it
                     // shadows any other data seen locally as we can't guarantee that other replicas have seen it
@@ -829,18 +824,20 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
                         if (!sstable.isRepaired())
                             controller.updateMinOldestUnrepairedTombstone(sstable.getMinLocalDeletionTime());
 
-                        var wrapped = rowTransformer != null ? Transformation.apply(iter, rowTransformer.apply(sstable.getId())) : iter;
-
-                        inputCollector.addSSTableIterator(sstable, wrapped);
-
                         includedDueToTombstones++;
-                        mostRecentPartitionTombstone = Math.max(mostRecentPartitionTombstone,
-                                                                iter.partitionLevelDeletion().markedForDeleteAt());
                     }
                     else
                     {
                         iter.close();
+                        iter = null;
                     }
+                }
+                if (iter != null)
+                {
+                    var wrapped = rowTransformer != null ? Transformation.apply(iter, rowTransformer.apply(sstable.getId())) : iter;
+                    inputCollector.addSSTableIterator(sstable, wrapped);
+                    mostRecentPartitionTombstone = Math.max(mostRecentPartitionTombstone,
+                                                            iter.partitionLevelDeletion().markedForDeleteAt());
                 }
             }
 
