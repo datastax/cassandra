@@ -77,6 +77,7 @@ public class DatacenterSyncWriteResponseHandler<T> extends AbstractWriteResponse
 
     public void onResponse(Message<T> message)
     {
+        trackReplicaResponseSize(message);
         try
         {
             String dataCenter = message == null
