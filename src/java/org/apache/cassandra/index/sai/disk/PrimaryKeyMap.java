@@ -124,4 +124,28 @@ public interface PrimaryKeyMap extends Closeable
     default void close() throws IOException
     {
     }
+
+    /**
+     * When SAI_INDEX_READS_DISABLED is true, this is used to avoid loading SAI files to reduce disk access and memory usage
+     */
+    class DummyThrowingFactory implements Factory
+    {
+        @Override
+        public PrimaryKeyMap newPerSSTablePrimaryKeyMap()
+        {
+            throw new UnsupportedOperationException("EmptyFactory doesn't support newPerSSTablePrimaryKeyMap()");
+        }
+
+        @Override
+        public long count()
+        {
+            throw new UnsupportedOperationException("EmptyFactory doesn't support count()");
+        }
+
+        @Override
+        public void close() throws IOException
+        {
+            // no-op
+        }
+    }
 }
