@@ -21,7 +21,9 @@ package org.apache.cassandra.io.sstable;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 
+import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.metrics.TableMetrics;
 
 public abstract class AbstractMetricsProviders<R extends SSTableReader> implements MetricsProviders
 {
@@ -34,6 +36,25 @@ public abstract class AbstractMetricsProviders<R extends SSTableReader> implemen
     {
         return new SimpleGaugeProvider<>(this::map, name, readers -> {
             T total = neutralValue;
+            for (R reader : readers)
+                total = combiner.apply(total, extractor.apply(reader));
+            return total;
+        });
+    }
+
+    protected final GaugeProvider<Long> bloomFilterOffHeapMemoryUsedAwareCFSGaugeProvider(String name, Long neutralValue, Function<R, Long> extractor, BiFunction<Long, Long, Long> combiner)
+    {
+        return new SimpleGaugeProvider<>(this::map, name, readers -> {
+            Long total = neutralValue;
+
+            // Optionally add in-flight bloom filter off-heap memory used
+            if (readers.iterator().hasNext()) {
+                R firstReader = readers.iterator().next();
+                TableMetrics tableMetrics = ColumnFamilyStore.metricsForIfPresent(firstReader.metadata().id);
+                if (tableMetrics != null)
+                    total = tableMetrics.inFlightBloomFilterOffHeapMemoryUsed.get();
+            }
+
             for (R reader : readers)
                 total = combiner.apply(total, extractor.apply(reader));
             return total;
