@@ -65,10 +65,7 @@ public class BloomFilterMetrics<R extends SSTableReaderWithFilter> extends Abstr
     /**
      * Off heap memory used by bloom filter
      */
-    public final GaugeProvider<Long> bloomFilterOffHeapMemoryUsed = newGaugeProvider("BloomFilterOffHeapMemoryUsed",
-                                                                                     // FIXME: CNDB-15213
-                                                                                     //   Seems to correspond to TableMetrics.bloomFilterOffHeapMemoryUsed.getLong() in main
-                                                                                     //   where we want TableMetrics.inFlightBloomFilterOffHeapMemoryUsed.get() as the initial value;
+    public final GaugeProvider<Long> bloomFilterOffHeapMemoryUsed = bloomFilterOffHeapMemoryUsedAwareCFSGaugeProvider("BloomFilterOffHeapMemoryUsed",
                                                                                      0L,
                                                                                      SSTableReaderWithFilter::getFilterOffHeapSize,
                                                                                      Long::sum);
