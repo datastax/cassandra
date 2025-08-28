@@ -28,19 +28,19 @@ public class PartitionRangeReadCommandCQLTest extends ReadCommandCQLTester<Parti
 
         assertToCQLString("SELECT * FROM %s", "SELECT * FROM %s");
 
-        assertToCQLString("SELECT * FROM %s WHERE c = 0 ALLOW FILTERING", "SELECT * FROM %s WHERE (c) = (0)");
-        assertToCQLString("SELECT * FROM %s WHERE (c) = (0) ALLOW FILTERING", "SELECT * FROM %s WHERE (c) = (0)");
+        assertToCQLString("SELECT * FROM %s WHERE c = 0 ALLOW FILTERING", "SELECT * FROM %s WHERE c = 0");
+        assertToCQLString("SELECT * FROM %s WHERE c = 0 ALLOW FILTERING", "SELECT * FROM %s WHERE c = 0");
         assertToCQLString("SELECT * FROM %s WHERE c > 0 ALLOW FILTERING", "SELECT * FROM %s WHERE c > 0");
         assertToCQLString("SELECT * FROM %s WHERE c < 0 ALLOW FILTERING", "SELECT * FROM %s WHERE c < 0");
         assertToCQLString("SELECT * FROM %s WHERE c >= 0 ALLOW FILTERING", "SELECT * FROM %s WHERE c >= 0");
         assertToCQLString("SELECT * FROM %s WHERE c <= 0 ALLOW FILTERING", "SELECT * FROM %s WHERE c <= 0");
 
         assertToCQLString("SELECT * FROM %s WHERE v = 1 ALLOW FILTERING", "SELECT * FROM %s WHERE v = 1");
-        assertToCQLString("SELECT * FROM %s WHERE c = 0 AND v = 1 ALLOW FILTERING", "SELECT * FROM %s WHERE v = 1 AND (c) = (0)");
-        assertToCQLString("SELECT * FROM %s WHERE c > 0 AND v = 1 ALLOW FILTERING", "SELECT * FROM %s WHERE v = 1 AND c > 0");
-        assertToCQLString("SELECT * FROM %s WHERE c < 0 AND v = 1 ALLOW FILTERING", "SELECT * FROM %s WHERE v = 1 AND c < 0");
-        assertToCQLString("SELECT * FROM %s WHERE c >= 0 AND v = 1 ALLOW FILTERING", "SELECT * FROM %s WHERE v = 1 AND c >= 0");
-        assertToCQLString("SELECT * FROM %s WHERE c <= 0 AND v = 1 ALLOW FILTERING", "SELECT * FROM %s WHERE v = 1 AND c <= 0");
+        assertToCQLString("SELECT * FROM %s WHERE c = 0 AND v = 1 ALLOW FILTERING", "SELECT * FROM %s WHERE c = 0 AND v = 1");
+        assertToCQLString("SELECT * FROM %s WHERE c > 0 AND v = 1 ALLOW FILTERING", "SELECT * FROM %s WHERE c > 0 AND v = 1");
+        assertToCQLString("SELECT * FROM %s WHERE c < 0 AND v = 1 ALLOW FILTERING", "SELECT * FROM %s WHERE c < 0 AND v = 1");
+        assertToCQLString("SELECT * FROM %s WHERE c >= 0 AND v = 1 ALLOW FILTERING", "SELECT * FROM %s WHERE c >= 0 AND v = 1");
+        assertToCQLString("SELECT * FROM %s WHERE c <= 0 AND v = 1 ALLOW FILTERING", "SELECT * FROM %s WHERE c <= 0 AND v = 1");
     }
 
     @Override

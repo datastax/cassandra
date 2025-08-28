@@ -1037,7 +1037,7 @@ public abstract class ReadCommand extends AbstractReadQuery
              .append(SelectOptions.ANN_OPTIONS, rowFilter().annOptions().toCQLString());
         });
 
-        builder.append(" ALLOW FILTERING");
+//        builder.append(" ALLOW FILTERING");
         return builder.toString();
     }
 
