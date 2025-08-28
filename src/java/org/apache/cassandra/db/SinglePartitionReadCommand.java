@@ -386,6 +386,12 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
                       lastReturned == null ? clusteringIndexFilter() : clusteringIndexFilter.forPaging(metadata().comparator, lastReturned, false));
     }
 
+    @Override
+    public boolean isSinglePartition()
+    {
+        return true;
+    }
+
     public PartitionIterator execute(ConsistencyLevel consistency, QueryState queryState, long queryStartNanoTime) throws RequestExecutionException
     {
         if (clusteringIndexFilter.isEmpty(metadata().comparator))

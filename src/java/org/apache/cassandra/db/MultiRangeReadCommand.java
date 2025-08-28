@@ -133,6 +133,15 @@ public class MultiRangeReadCommand extends ReadCommand
                                          command.indexQueryPlan());
     }
 
+    @Override
+    public boolean isSinglePartition()
+    {
+        if (dataRanges.size() != 1)
+            return false;
+
+        return dataRanges.get(0).isSinglePartition();
+    }
+
     /**
      * @return all token ranges to be queried
      */
