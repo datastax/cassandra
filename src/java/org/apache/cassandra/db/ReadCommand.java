@@ -248,6 +248,11 @@ public abstract class ReadCommand extends AbstractReadQuery
         return indexQueryPlan != null && indexQueryPlan.isTopK();
     }
 
+    /**
+     * @return {@code true} if this command only queries a single partition, {@code false} otherwise.
+     */
+    public abstract boolean isSinglePartition();
+
     @VisibleForTesting
     public Index.Searcher indexSearcher()
     {

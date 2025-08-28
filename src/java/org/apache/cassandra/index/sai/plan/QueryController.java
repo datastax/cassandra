@@ -863,7 +863,8 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     {
         closeUnusedIterators();
         closeQueryViews();
-        if (tableQueryMetrics != null) tableQueryMetrics.record(queryContext);
+        if (tableQueryMetrics != null)
+            tableQueryMetrics.record(queryContext, command);
     }
 
     /**
