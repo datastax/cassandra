@@ -1479,7 +1479,7 @@ public class RowFilter
             }
 
             return cql
-                   ? String.format("%s %s %s", column.name.toCQLString(), operator, type.toCQLString(value))
+                   ? String.format("%s %s %s", column.name.toCQLString(), operator, type.toCQLString(value, true))
                    : String.format("%s %s %s", column.name.toString(), operator, type.getString(value, true));
         }
 
