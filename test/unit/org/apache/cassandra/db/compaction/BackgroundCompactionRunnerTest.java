@@ -30,12 +30,19 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import org.apache.cassandra.config.Config;
+import org.apache.cassandra.io.FSDiskFullWriteError;
+import org.apache.cassandra.io.FSNoDiskAvailableForWriteError;
 import org.apache.cassandra.io.FSWriteError;
+import org.apache.cassandra.io.compress.CompressionMetadata;
+import org.apache.cassandra.io.compress.CorruptBlockException;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
+import org.apache.cassandra.io.util.CorruptFileException;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.utils.JVMKiller;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.KillerForTests;
@@ -58,6 +65,7 @@ import org.assertj.core.util.Preconditions;
 import org.mockito.ArgumentCaptor;
 import org.mockito.ArgumentMatchers;
 import org.mockito.Mockito;
+import org.openjdk.jmh.util.FileUtils;
 
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -543,7 +551,50 @@ public class BackgroundCompactionRunnerTest
     }
 
     @Test
-    public void handleCorruptionException()
+    public void handleCorruptionSSTableException()
+    {
+        handleCorruptionException(() -> new CorruptSSTableException(null, "corrupted"));
+    }
+
+    @Test
+    public void handleCorruptionBlockException()
+    {
+        handleCorruptionException(() -> {
+            try
+            {
+                CompressionMetadata.Chunk chunk = new CompressionMetadata.Chunk(1L, 1);
+                File file = new File(FileUtils.tempFile("temp"));
+                CorruptBlockException corruptBlockException = new CorruptBlockException(file, chunk);
+                assertThat(corruptBlockException.getFile()).isEqualTo(file);
+                return corruptBlockException;
+            }
+            catch (IOException e)
+            {
+                throw new RuntimeException(e);
+            }
+        });
+    }
+
+    @Test
+    public void handleCorruptionFileException()
+    {
+        handleCorruptionException(() -> {
+            try
+            {
+                File file = new File(FileUtils.tempFile("temp"));
+                CorruptFileException corruptFileException = new CorruptFileException(null, file);
+                assertThat(corruptFileException.getFile()).isEqualTo(file);
+                return corruptFileException;
+            }
+            catch (IOException e)
+            {
+                throw new RuntimeException(e);
+            }
+        });
+    }
+
+
+    private void handleCorruptionException(Supplier<Exception> provider)
     {
         JVMKiller originalKiller = JVMStabilityInspector.replaceKiller(new KillerForTests());
         Config.DiskFailurePolicy originalPolicy = DatabaseDescriptor.getDiskFailurePolicy();
@@ -558,10 +609,10 @@ public class BackgroundCompactionRunnerTest
 
             long before = CompactionManager.instance.getMetrics().totalCompactionsFailed.getCount();
 
-            CorruptSSTableException corruptSSTableException = new CorruptSSTableException(null, "corrupted");
-            BackgroundCompactionRunner.handleCompactionError(corruptSSTableException, cfs);
+            Exception exception = provider.get();
+            BackgroundCompactionRunner.handleCompactionError(exception, cfs);
 
-            assertThat(diskErrorEncountered.get()).isSameAs(corruptSSTableException);
+            assertThat(diskErrorEncountered.get()).isSameAs(exception);
             assertThat(CompactionManager.instance.getMetrics().totalCompactionsFailed.getCount()).isEqualTo(before + 1);
         }
         finally
@@ -571,6 +622,7 @@ public class BackgroundCompactionRunnerTest
             JVMStabilityInspector.setDiskErrorHandler(originalDiskErrorHandler);
         }
     }
+
 
     @Test
     public void handleFSWriteError()
@@ -627,6 +679,33 @@ public class BackgroundCompactionRunnerTest
             DatabaseDescriptor.setDiskFailurePolicy(originalPolicy);
             JVMStabilityInspector.replaceKiller(originalKiller);
             JVMStabilityInspector.setDiskErrorHandler(originalDiskErrorHandler);
+        }
+    }
+
+    @Test
+    public void handDiskFullErrors()
+    {
+        JVMKiller originalKiller = JVMStabilityInspector.replaceKiller(new KillerForTests());
+        Consumer<Throwable> originalGlobalErrorHandler = JVMStabilityInspector.getGlobalErrorHandler();
+        try
+        {
+            long before = CompactionManager.instance.getMetrics().totalCompactionsFailed.getCount();
+
+            FSNoDiskAvailableForWriteError noDiskAvailableForWriteError = new FSNoDiskAvailableForWriteError("ks");
+            assertThat(noDiskAvailableForWriteError.getKeyspace()).isEqualTo("ks");
+            BackgroundCompactionRunner.handleCompactionError(noDiskAvailableForWriteError, cfs);
+            assertThat(CompactionManager.instance.getMetrics().totalCompactionsFailed.getCount()).isEqualTo(before + 1);
+
+
+            FSDiskFullWriteError diskFullWriteError = new FSDiskFullWriteError("ks2", 100);
+            assertThat(diskFullWriteError.getKeyspace()).isEqualTo("ks2");
+            BackgroundCompactionRunner.handleCompactionError(diskFullWriteError, cfs);
+            assertThat(CompactionManager.instance.getMetrics().totalCompactionsFailed.getCount()).isEqualTo(before + 2);
+        }
+        finally
+        {
+            JVMStabilityInspector.replaceKiller(originalKiller);
+            JVMStabilityInspector.setGlobalErrorHandler(originalGlobalErrorHandler);
         }
     }
 
