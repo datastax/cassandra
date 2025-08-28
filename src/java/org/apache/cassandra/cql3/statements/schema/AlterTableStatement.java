@@ -102,6 +102,7 @@ public abstract class AlterTableStatement extends AlterSchemaStatement
         return schema.withAddedOrUpdated(apply(keyspace, table));
     }
 
+    // CNDB-14199: the method is needed for CNDB
     public boolean containsDateRangeTypeColumn()
     {
         // Classes that need this method exposed have to override it
