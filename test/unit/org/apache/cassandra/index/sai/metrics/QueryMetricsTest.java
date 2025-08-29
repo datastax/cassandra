@@ -27,11 +27,11 @@ import org.junit.Test;
 import org.junit.rules.ExpectedException;
 
 import com.datastax.driver.core.ResultSet;
-import org.apache.cassandra.index.sai.disk.format.Version;
+import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.index.sai.plan.QueryController;
 import org.apache.cassandra.metrics.CassandraMetricsRegistry;
 
-import static org.apache.cassandra.index.sai.metrics.TableQueryMetrics.TABLE_QUERY_METRIC_TYPE;
+import static org.apache.cassandra.index.sai.metrics.TableQueryMetrics.AbstractQueryMetrics.makeName;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
@@ -42,7 +42,18 @@ public class QueryMetricsTest extends AbstractMetricsTest
                                                         "{'class' : 'SizeTieredCompactionStrategy', 'enabled' : false }";
     private static final String CREATE_INDEX_TEMPLATE = "CREATE CUSTOM INDEX IF NOT EXISTS %s ON %s.%s(%s) USING 'StorageAttachedIndex'";
 
-    private static final String PER_QUERY_METRIC_TYPE = "PerQuery";
+    private static final String TABLE_QUERY_METRIC_TYPE = TableQueryMetrics.PerTable.METRIC_TYPE;
+    private static final String TABLE_FILTER_QUERY_METRIC_TYPE = makeName(TABLE_QUERY_METRIC_TYPE, "Filter");
+    private static final String TABLE_TOPK_QUERY_METRIC_TYPE = makeName(TABLE_QUERY_METRIC_TYPE, "TopK");
+    private static final String TABLE_PARTITION_QUERY_METRIC_TYPE = makeName(TABLE_QUERY_METRIC_TYPE, "SinglePartition");
+    private static final String TABLE_RANGE_QUERY_METRIC_TYPE = makeName(TABLE_QUERY_METRIC_TYPE, "Range");
+
+    private static final String PER_QUERY_METRIC_TYPE = TableQueryMetrics.PerQuery.METRIC_TYPE;
+    private static final String PER_FILTER_QUERY_METRIC_TYPE = makeName(PER_QUERY_METRIC_TYPE, "Filter");
+    private static final String PER_TOPK_QUERY_METRIC_TYPE = makeName(PER_QUERY_METRIC_TYPE, "TopK");
+    private static final String PER_PARTITION_QUERY_METRIC_TYPE = makeName(PER_QUERY_METRIC_TYPE, "SinglePartition");
+    private static final String PER_RANGE_QUERY_METRIC_TYPE = makeName(PER_QUERY_METRIC_TYPE, "Range");
+
     private static final String GLOBAL_METRIC_TYPE = "ColumnQueryMetrics";
 
     @Rule
@@ -219,7 +230,7 @@ public class QueryMetricsTest extends AbstractMetricsTest
 
         waitForGreaterThanZero(objectNameNoIndex("QueryLatency", keyspace, table, PER_QUERY_METRIC_TYPE));
 
-        waitForEquals(objectNameNoIndex("TotalPartitionReads", keyspace, table, TableQueryMetrics.TABLE_QUERY_METRIC_TYPE), resultCounter);
+        waitForEquals(objectNameNoIndex("TotalPartitionReads", keyspace, table, TABLE_QUERY_METRIC_TYPE), resultCounter);
         waitForEquals(objectName("KDTreeIntersectionLatency", keyspace, table, index, GLOBAL_METRIC_TYPE), queryCounter);
     }
 
@@ -336,7 +347,7 @@ public class QueryMetricsTest extends AbstractMetricsTest
 
         waitForGreaterThanZero(objectNameNoIndex("QueryLatency", keyspace, table, PER_QUERY_METRIC_TYPE));
 
-        waitForEquals(objectNameNoIndex("TotalPartitionReads", keyspace, table, TableQueryMetrics.TABLE_QUERY_METRIC_TYPE), resultCounter);
+        waitForEquals(objectNameNoIndex("TotalPartitionReads", keyspace, table, TABLE_QUERY_METRIC_TYPE), resultCounter);
     }
 
     @Test
@@ -406,6 +417,71 @@ public class QueryMetricsTest extends AbstractMetricsTest
         waitForEquals(objectName("KDTreeIntersectionEarlyExits", keyspace, table, index, GLOBAL_METRIC_TYPE), 2L);
     }
 
+    @Test
+    public void testQueryTypeMetrics()
+    {
+        // create table and indexes for vector and numeric
+        String table = createTable("CREATE TABLE %s (k int, c int, n int, v vector<float, 2>, PRIMARY KEY(k, c))");
+        createIndex("CREATE CUSTOM INDEX ON %s(n) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
+
+        // insert some data
+        int numPartitions = 11;
+        int numRowsPerPartition = 13;
+        int numRows = numPartitions * numRowsPerPartition;
+        for (int k = 0; k < numPartitions; k++)
+            for (int c = 0; c < numRowsPerPartition; c++)
+                execute("INSERT INTO %s (k, c, n, v) VALUES (?, ?, 1, [1, 1])", k, c);
+
+        // filter query (goes to the general, filter and range query metrics)
+        UntypedResultSet rows = execute("SELECT k, c FROM %s WHERE n = 1");
+        assertEquals(numRows, rows.size());
+
+        // top-k query (goes to the general, top-k and range query metrics)
+        rows = execute("SELECT k, c FROM %s ORDER BY v ANN OF [1, 1] LIMIT 1000");
+        assertEquals(numRows, rows.size());
+
+        // partition query (goes to the general, filter single-partition query metrics)
+        rows = execute("SELECT k, c FROM %s WHERE k = 0 AND n = 1");
+        assertEquals(numRowsPerPartition, rows.size());
+
+        // Verify metrics for total queries completed.
+        waitForEquals(objectNameNoIndex("TotalQueriesCompleted", KEYSPACE, table, TABLE_QUERY_METRIC_TYPE), 3);
+        waitForEquals(objectNameNoIndex("TotalQueriesCompleted", KEYSPACE, table, TABLE_FILTER_QUERY_METRIC_TYPE), 2);
+        waitForEquals(objectNameNoIndex("TotalQueriesCompleted", KEYSPACE, table, TABLE_TOPK_QUERY_METRIC_TYPE), 1);
+        waitForEquals(objectNameNoIndex("TotalQueriesCompleted", KEYSPACE, table, TABLE_PARTITION_QUERY_METRIC_TYPE), 1);
+        waitForEquals(objectNameNoIndex("TotalQueriesCompleted", KEYSPACE, table, TABLE_RANGE_QUERY_METRIC_TYPE), 2);
+
+        // Verify histograms for partitions reads per query.
+        waitForHistogramCountEquals(objectNameNoIndex("PartitionReads", KEYSPACE, table, PER_QUERY_METRIC_TYPE), 3);
+        waitForHistogramCountEquals(objectNameNoIndex("PartitionReads", KEYSPACE, table, PER_FILTER_QUERY_METRIC_TYPE), 2);
+        waitForHistogramCountEquals(objectNameNoIndex("PartitionReads", KEYSPACE, table, PER_TOPK_QUERY_METRIC_TYPE), 1);
+        waitForHistogramCountEquals(objectNameNoIndex("PartitionReads", KEYSPACE, table, PER_PARTITION_QUERY_METRIC_TYPE), 1);
+        waitForHistogramCountEquals(objectNameNoIndex("PartitionReads", KEYSPACE, table, PER_RANGE_QUERY_METRIC_TYPE), 2);
+
+        // Verify histograms for rows filtered per query.
+        waitForHistogramCountEquals(objectNameNoIndex("RowsFiltered", KEYSPACE, table, PER_QUERY_METRIC_TYPE), 3);
+        waitForHistogramCountEquals(objectNameNoIndex("RowsFiltered", KEYSPACE, table, PER_FILTER_QUERY_METRIC_TYPE), 2);
+        waitForHistogramCountEquals(objectNameNoIndex("RowsFiltered", KEYSPACE, table, PER_TOPK_QUERY_METRIC_TYPE), 1);
+        waitForHistogramCountEquals(objectNameNoIndex("RowsFiltered", KEYSPACE, table, PER_PARTITION_QUERY_METRIC_TYPE), 1);
+        waitForHistogramCountEquals(objectNameNoIndex("RowsFiltered", KEYSPACE, table, PER_RANGE_QUERY_METRIC_TYPE), 2);
+
+        // Verify counters for total partition reads. Note that the top-k query creates a partition per matching row,
+        // without grouping them by partition. That means a partition for every row.
+        waitForEquals(objectNameNoIndex("TotalPartitionReads", KEYSPACE, table, TABLE_QUERY_METRIC_TYPE), numPartitions + numRows + 1);
+        waitForEquals(objectNameNoIndex("TotalPartitionReads", KEYSPACE, table, TABLE_FILTER_QUERY_METRIC_TYPE), numPartitions + 1);
+        waitForEquals(objectNameNoIndex("TotalPartitionReads", KEYSPACE, table, TABLE_TOPK_QUERY_METRIC_TYPE), numRows);
+        waitForEquals(objectNameNoIndex("TotalPartitionReads", KEYSPACE, table, TABLE_PARTITION_QUERY_METRIC_TYPE), 1);
+        waitForEquals(objectNameNoIndex("TotalPartitionReads", KEYSPACE, table, TABLE_RANGE_QUERY_METRIC_TYPE), numPartitions + numRows);
+
+        // Verify counters for total rows filtered.
+        waitForEquals(objectNameNoIndex("TotalRowsFiltered", KEYSPACE, table, TABLE_QUERY_METRIC_TYPE), numRows + numRowsPerPartition + numRows);
+        waitForEquals(objectNameNoIndex("TotalRowsFiltered", KEYSPACE, table, TABLE_FILTER_QUERY_METRIC_TYPE), numRows + numRowsPerPartition);
+        waitForEquals(objectNameNoIndex("TotalRowsFiltered", KEYSPACE, table, TABLE_TOPK_QUERY_METRIC_TYPE), numRows);
+        waitForEquals(objectNameNoIndex("TotalRowsFiltered", KEYSPACE, table, TABLE_PARTITION_QUERY_METRIC_TYPE), numRowsPerPartition);
+        waitForEquals(objectNameNoIndex("TotalRowsFiltered", KEYSPACE, table, TABLE_RANGE_QUERY_METRIC_TYPE), numRows + numRows);
+    }
+
     private long getPerQueryMetrics(String keyspace, String table, String metricsName)
     {
         return (long) getMetricValue(objectNameNoIndex(metricsName, keyspace, table, PER_QUERY_METRIC_TYPE));
@@ -413,6 +489,6 @@ public class QueryMetricsTest extends AbstractMetricsTest
 
     private long getTableQueryMetrics(String keyspace, String table, String metricsName)
     {
-        return (long) getMetricValue(objectNameNoIndex(metricsName, keyspace, table, TableQueryMetrics.TABLE_QUERY_METRIC_TYPE));
+        return (long) getMetricValue(objectNameNoIndex(metricsName, keyspace, table, TABLE_QUERY_METRIC_TYPE));
     }
 }
