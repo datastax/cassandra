@@ -60,6 +60,9 @@ public class Config
 {
     private static final Logger logger = LoggerFactory.getLogger(Config.class);
 
+    // Tracks the set of config keys set by the user.  See CNDB-15137
+    public final Set<String> userSetConfigKeys = new HashSet<>();
+
     public static Set<String> splitCommaDelimited(String src)
     {
         if (src == null)
