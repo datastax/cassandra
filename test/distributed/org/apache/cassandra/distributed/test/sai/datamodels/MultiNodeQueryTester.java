@@ -36,6 +36,7 @@ import org.apache.cassandra.index.sai.cql.datamodels.DataModel;
 import org.apache.cassandra.index.sai.cql.datamodels.IndexQuerySupport;
 import org.apache.cassandra.utils.Shared;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.ENABLE_GUARDRAILS_FOR_ANONYMOUS_USER;
 import static org.apache.cassandra.distributed.api.Feature.GOSSIP;
 import static org.apache.cassandra.distributed.api.Feature.NETWORK;
 
@@ -65,6 +66,10 @@ abstract class MultiNodeQueryTester extends TestBaseImpl
     @BeforeClass
     public static void setupCluster() throws Exception
     {
+        // Disable guardrails for anonymous users (no client authentication) This allows the test to avoid
+        // being affected by guardrails for anonymous users.
+        ENABLE_GUARDRAILS_FOR_ANONYMOUS_USER.setBoolean(false);
+
         cluster = Cluster.build(3)
                          .withConfig(config -> config.with(NETWORK, GOSSIP)
                                                      .set("hinted_handoff_enabled", false))

@@ -375,6 +375,11 @@ public class YamlConfigurationLoader implements ConfigurationLoader
                     if (value == null && get(object) != null && !allowsNull)
                         nullProperties.add(getName());
 
+                    // Record the property name if set from YAML
+                    if (object instanceof Config) {
+                        ((Config) object).userSetConfigKeys.add(getName());
+                    }
+
                     result.set(object, value);
                 }
 
