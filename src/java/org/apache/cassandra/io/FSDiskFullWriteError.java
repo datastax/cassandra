@@ -22,10 +22,19 @@ import java.io.IOException;
 
 public class FSDiskFullWriteError extends FSWriteError
 {
+    private final String keyspace;
+
     public FSDiskFullWriteError(String keyspace, long mutationSize)
     {
         super(new IOException(String.format("Insufficient disk space to write %d bytes into the %s keyspace",
                                             mutationSize,
                                             keyspace)));
+
+        this.keyspace = keyspace;
+    }
+
+    public String getKeyspace()
+    {
+        return keyspace;
     }
 }

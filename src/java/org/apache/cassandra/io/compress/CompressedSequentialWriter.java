@@ -304,7 +304,7 @@ public class CompressedSequentialWriter extends SequentialWriter
             }
             catch (IOException e)
             {
-                throw new CorruptBlockException(getFile().toString(), chunkOffset, chunkSize, e);
+                throw new CorruptBlockException(getFile(), chunkOffset, chunkSize, e);
             }
 
             CRC32 checksum = new CRC32();
@@ -317,7 +317,7 @@ public class CompressedSequentialWriter extends SequentialWriter
             int storedChecksum = crcCheckBuffer.getInt();
             int computedChecksum = (int) checksum.getValue();
             if (storedChecksum != computedChecksum)
-                throw new CorruptBlockException(getFile().toString(), chunkOffset, chunkSize, storedChecksum, computedChecksum);
+                throw new CorruptBlockException(getFile(), chunkOffset, chunkSize, storedChecksum, computedChecksum);
         }
         catch (CorruptBlockException e)
         {
@@ -325,7 +325,7 @@ public class CompressedSequentialWriter extends SequentialWriter
         }
         catch (EOFException e)
         {
-            throw new CorruptSSTableException(new CorruptBlockException(getFile().toString(), chunkOffset, chunkSize), getFile());
+            throw new CorruptSSTableException(new CorruptBlockException(getFile(), chunkOffset, chunkSize), getFile());
         }
         catch (IOException e)
         {
