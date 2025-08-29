@@ -41,6 +41,7 @@ import org.apache.cassandra.metrics.TopPartitionTracker;
 import org.apache.cassandra.repair.state.ValidationState;
 import org.apache.cassandra.utils.Clock;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.MerkleTree;
 import org.apache.cassandra.utils.MerkleTrees;
 import org.apache.cassandra.utils.NonThrowingCloseable;
@@ -205,6 +206,7 @@ public class ValidationManager implements IValidationManager
                     // we need to inform the remote end of our failure, otherwise it will hang on repair forever
                     validator.fail(e);
                     logger.error("Validation failed.", e);
+                    JVMStabilityInspector.inspectThrowable(e);
                     throw e;
                 }
                 return this;

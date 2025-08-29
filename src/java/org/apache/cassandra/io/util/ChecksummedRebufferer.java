@@ -49,7 +49,7 @@ class ChecksummedRebufferer extends BufferManagingRebufferer
         }
         catch (IOException e)
         {
-            throw new CorruptFileException(e, channel().filePath());
+            throw new CorruptFileException(e, channel().getFile());
         }
 
         return this;
