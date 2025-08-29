@@ -18,12 +18,18 @@
 
 package org.apache.cassandra.config;
 
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.Set;
 import java.util.function.Consumer;
+import java.util.function.IntConsumer;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 import javax.annotation.Nullable;
 
+import com.google.common.annotations.VisibleForTesting;
+import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -33,10 +39,13 @@ import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.guardrails.Guardrails;
 import org.apache.cassandra.db.guardrails.GuardrailsConfig;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.schema.TableParams;
 import org.apache.cassandra.service.disk.usage.DiskUsageMonitor;
 
 import static java.lang.String.format;
 import static java.util.stream.Collectors.toSet;
+import static org.apache.cassandra.config.DataStorageSpec.DataStorageUnit.KIBIBYTES;
+import static org.apache.cassandra.config.DataStorageSpec.DataStorageUnit.MEBIBYTES;
 
 /**
  * Configuration settings for guardrails populated from the Yaml file.
@@ -55,7 +64,11 @@ import static java.util.stream.Collectors.toSet;
 public class GuardrailsOptions implements GuardrailsConfig
 {
     private static final Logger logger = LoggerFactory.getLogger(GuardrailsOptions.class);
+
+    public static final int NO_LIMIT = -1;
     public static final int UNSET = -2;
+    public static final int DEFAULT_INDEXES_PER_TABLE_THRESHOLD = 10;
+    public static final int DEFAULT_INDEXES_TOTAL_THRESHOLD = 100;
 
     private final Config config;
 
@@ -63,15 +76,7 @@ public class GuardrailsOptions implements GuardrailsConfig
     {
         this.config = config;
 
-        // SAI Table Failure threshold (may be overridden via system property)
-        int overrideTableFailureThreshold = CassandraRelevantProperties.INDEX_GUARDRAILS_TABLE_FAILURE_THRESHOLD.getInt(UNSET);
-        if (overrideTableFailureThreshold != UNSET)
-            config.sai_indexes_per_table_fail_threshold = overrideTableFailureThreshold;
-
-        // SAI Total Failure threshold (may be overridden via system property)
-        int overrideTotalFailureThreshold = CassandraRelevantProperties.INDEX_GUARDRAILS_TOTAL_FAILURE_THRESHOLD.getInt(UNSET);
-        if (overrideTotalFailureThreshold != UNSET)
-            config.sai_indexes_total_fail_threshold = overrideTotalFailureThreshold;
+        enforceDefaults();
 
         validateMaxIntThreshold(config.keyspaces_warn_threshold, config.keyspaces_fail_threshold, "keyspaces");
         validateMaxIntThreshold(config.tables_warn_threshold, config.tables_fail_threshold, "tables");
@@ -111,6 +116,141 @@ public class GuardrailsOptions implements GuardrailsConfig
                                  "sai_sstable_indexes_per_query",
                                  false);
         validateMaxIntThreshold(config.tombstone_warn_threshold, config.tombstone_failure_threshold, "tombstone_threshold");
+    }
+
+    /**
+     * If {@link DatabaseDescriptor#isEmulateDbaasDefaults()} is true, apply cloud defaults to guardrails settings that
+     * are not specified in yaml; otherwise, apply on-prem defaults to guardrails settings that are not specified in yaml;
+     */
+    @VisibleForTesting
+    public void enforceDefaults()
+    {
+        // for read requests
+        enforceDefault("page_size_fail_threshold", (IntConsumer) (v -> config.page_size_fail_threshold = v), NO_LIMIT, 512);
+
+        enforceDefault("in_select_cartesian_product_fail_threshold", (IntConsumer) (v -> config.in_select_cartesian_product_fail_threshold = v), NO_LIMIT, 25);
+        enforceDefault("partition_keys_in_select_fail_threshold", (IntConsumer) (v -> config.partition_keys_in_select_fail_threshold = v), NO_LIMIT, 20);
+
+        enforceDefault("tombstone_warn_threshold", (IntConsumer) (v -> config.tombstone_warn_threshold = v), 1000, 1000);
+        enforceDefault("tombstone_failure_threshold", (IntConsumer) (v -> config.tombstone_failure_threshold = v), 100000, 100000);
+
+        // Default to no warning and failure at 4 times the maxTopK value
+        int maxTopK = CassandraRelevantProperties.SAI_VECTOR_SEARCH_MAX_TOP_K.getInt();
+        enforceDefault("sai_ann_rerank_k_warn_threshold", (IntConsumer) (v -> config.sai_ann_rerank_k_warn_threshold = v), -1, -1);
+        enforceDefault("sai_ann_rerank_k_fail_threshold", (IntConsumer) (v -> config.sai_ann_rerank_k_fail_threshold = v), 4 * maxTopK, 4 * maxTopK);
+
+        // for write requests
+        enforceDefault("logged_batch_enabled", v -> config.logged_batch_enabled = v, true, true);
+        enforceDefault("batch_size_warn_threshold", v -> config.batch_size_warn_threshold = v, new DataStorageSpec.IntKibibytesBound("64KiB"), new DataStorageSpec.IntKibibytesBound("64KiB"));
+        enforceDefault("batch_size_fail_threshold", v -> config.batch_size_fail_threshold = v, new DataStorageSpec.IntKibibytesBound("640KiB"), new DataStorageSpec.IntKibibytesBound("640KiB"));
+        enforceDefault("unlogged_batch_across_partitions_warn_threshold", (IntConsumer) (v -> config.unlogged_batch_across_partitions_warn_threshold = v), 10, 10);
+
+        enforceDefault("drop_truncate_table_enabled", v -> config.drop_truncate_table_enabled = v, true, true);
+
+        enforceDefault("user_timestamps_enabled", v -> config.user_timestamps_enabled = v, true, true);
+
+        enforceDefault("column_value_size_fail_threshold", v -> config.column_value_size_fail_threshold = v, null, new DataStorageSpec.LongBytesBound(5 * 1024L, KIBIBYTES));
+
+        enforceDefault("read_before_write_list_operations_enabled", v -> config.read_before_write_list_operations_enabled = v, true, false);
+
+        // We use a LinkedHashSet just for the sake of preserving the ordering in error messages
+        enforceDefault("write_consistency_levels_disallowed",
+                       v -> config.write_consistency_levels_disallowed = ImmutableSet.copyOf(v),
+                       Collections.<ConsistencyLevel>emptySet(),
+                       new LinkedHashSet<>(Arrays.asList(ConsistencyLevel.ANY, ConsistencyLevel.ONE, ConsistencyLevel.LOCAL_ONE)));
+
+        // for schema
+        enforceDefault("counter_enabled", v -> config.counter_enabled = v, true, true);
+
+        enforceDefault("fields_per_udt_fail_threshold", (IntConsumer) (v -> config.fields_per_udt_fail_threshold = v), -1, 10);
+        enforceDefault("collection_size_warn_threshold", v -> config.collection_size_warn_threshold = v, null, new DataStorageSpec.LongBytesBound(5 * 1024L, KIBIBYTES));
+        enforceDefault("items_per_collection_warn_threshold", v -> config.items_per_collection_warn_threshold = v, -1, 20);
+
+        enforceDefault("vector_dimensions_warn_threshold", v -> config.vector_dimensions_warn_threshold = v, -1, -1);
+        enforceDefault("vector_dimensions_fail_threshold", v -> config.vector_dimensions_fail_threshold = v, 8192, 8192);
+
+        enforceDefault("columns_per_table_fail_threshold", v -> config.columns_per_table_fail_threshold = v, -1, 50);
+        enforceDefault("secondary_indexes_per_table_fail_threshold", v -> config.secondary_indexes_per_table_fail_threshold = v, NO_LIMIT, 1);
+        enforceDefault("sasi_indexes_per_table_fail_threshold", v -> config.sasi_indexes_per_table_fail_threshold = v, NO_LIMIT, 0);
+        enforceDefault("materialized_views_per_table_fail_threshold", v -> config.materialized_views_per_table_fail_threshold = v, NO_LIMIT, 2);
+        enforceDefault("tables_warn_threshold", v -> config.tables_warn_threshold = v, -1, 100);
+        enforceDefault("tables_fail_threshold", v -> config.tables_fail_threshold = v, -1, 200);
+
+        enforceDefault("table_properties_disallowed",
+                       v -> config.table_properties_disallowed = ImmutableSet.copyOf(v),
+                       Collections.<String>emptySet(),
+                       Collections.<String>emptySet());
+
+        enforceDefault("table_properties_ignored",
+                       v -> config.table_properties_ignored = ImmutableSet.copyOf(v),
+                       Collections.<String>emptySet(),
+                       new LinkedHashSet<>(TableAttributes.allKeywords().stream()
+                                                          .sorted()
+                                                          .filter(p -> !p.equals(TableParams.Option.DEFAULT_TIME_TO_LIVE.toString()) &&
+                                                                       !p.equals(TableParams.Option.COMMENT.toString()) &&
+                                                                       !p.equals(TableParams.Option.EXTENSIONS.toString()))
+                                                          .collect(Collectors.toList())));
+
+        // for node status
+        enforceDefault("data_disk_usage_percentage_warn_threshold", v -> config.data_disk_usage_percentage_warn_threshold = v, NO_LIMIT, 70);
+        enforceDefault("data_disk_usage_percentage_fail_threshold", v -> config.data_disk_usage_percentage_fail_threshold = v, NO_LIMIT, 80);
+        enforceDefault("data_disk_usage_max_disk_size", v -> config.data_disk_usage_max_disk_size = v, null, (DataStorageSpec.LongBytesBound) null);
+
+        enforceDefault("partition_size_warn_threshold", v -> config.partition_size_warn_threshold = v, new DataStorageSpec.LongBytesBound(100,MEBIBYTES), new DataStorageSpec.LongBytesBound(100, MEBIBYTES));
+
+        // SAI Table Failure threshold (maye be overridden via system property)
+        int overrideTableFailureThreshold = CassandraRelevantProperties.INDEX_GUARDRAILS_TABLE_FAILURE_THRESHOLD.getInt(UNSET);
+        if (overrideTableFailureThreshold != UNSET)
+            config.sai_indexes_per_table_fail_threshold = overrideTableFailureThreshold;
+        else
+            enforceDefault("sai_indexes_per_table_fail_threshold", v -> config.sai_indexes_per_table_fail_threshold = v, DEFAULT_INDEXES_PER_TABLE_THRESHOLD, DEFAULT_INDEXES_PER_TABLE_THRESHOLD);
+
+        // SAI Table Failure threshold (maye be overridden via system property)
+        int overrideTotalFailureThreshold = CassandraRelevantProperties.INDEX_GUARDRAILS_TOTAL_FAILURE_THRESHOLD.getInt(UNSET);
+        if (overrideTotalFailureThreshold != UNSET)
+            config.sai_indexes_total_fail_threshold = overrideTotalFailureThreshold;
+        else
+            enforceDefault("sai_indexes_total_fail_threshold", v -> config.sai_indexes_total_fail_threshold = v, DEFAULT_INDEXES_TOTAL_THRESHOLD, DEFAULT_INDEXES_TOTAL_THRESHOLD);
+
+        enforceDefault("offset_rows_warn_threshold", v -> config.offset_rows_warn_threshold = v, 10000, 10000);
+        enforceDefault("offset_rows_fail_threshold", v -> config.offset_rows_fail_threshold = v, 20000, 20000);
+
+        enforceDefault("query_filters_warn_threshold", v -> config.query_filters_warn_threshold = v, -1, -1);
+        enforceDefault("query_filters_fail_threshold", v -> config.query_filters_fail_threshold = v, -1, -1);
+    }
+
+    /**
+     * Enforce default value based on {@link DatabaseDescriptor#isEmulateDbaasDefaults()} if
+     * it's not specified in yaml
+     *
+     * @param configName current config value defined in yaml
+     * @param optionSetter setter to updated given config
+     * @param onPremDefault default value for on-prem
+     * @param dbaasDefault default value for constellation DB-as-a-service
+     * @param <T>
+     */
+    private <T> void enforceDefault(String configName, Consumer<T> optionSetter, T onPremDefault, T dbaasDefault)
+    {
+        if (config.userSetConfigKeys.contains(configName))
+            return;
+
+        optionSetter.accept(DatabaseDescriptor.isEmulateDbaasDefaults() ? dbaasDefault : onPremDefault);
+    }
+
+    private void enforceDefault(String configName, IntConsumer optionSetter, int onPremDefault, int dbaasDefault)
+    {
+        if (config.userSetConfigKeys.contains(configName))
+            return;
+
+        optionSetter.accept(DatabaseDescriptor.isEmulateDbaasDefaults() ? dbaasDefault : onPremDefault);
+    }
+
+    private void enforceDefault(String configName, Consumer<Boolean> optionSetter, boolean onPremDefault, boolean dbaasDefault)
+    {
+        if (config.userSetConfigKeys.contains(configName))
+            return;
+
+        optionSetter.accept(DatabaseDescriptor.isEmulateDbaasDefaults() ? dbaasDefault : onPremDefault);
     }
 
     @Override
