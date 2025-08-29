@@ -106,7 +106,7 @@ public abstract class EncryptedChunkReader extends AbstractReaderFileProxy imple
             //Change the limit to include the checksum
             input.limit(start + CHUNK_SIZE);
             if (input.getInt() != checksum)
-                throw new CorruptBlockException(channel.filePath(), position, CHUNK_SIZE);
+                throw new CorruptBlockException(channel.getFile(), position, CHUNK_SIZE);
         }
 
         int length = input.getInt(start + CHUNK_SIZE - FOOTER_LENGTH);
