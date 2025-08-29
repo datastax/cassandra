@@ -242,6 +242,14 @@ public abstract class ReadCommand extends AbstractReadQuery
         return indexQueryPlan;
     }
 
+    /**
+     * @return {@code true} if this command uses index-based filtering, {@code false} otherwise
+     */
+    public boolean usesIndexFiltering()
+    {
+        return indexQueryPlan != null && indexQueryPlan.usesIndexFiltering();
+    }
+
     @Override
     public boolean isTopK()
     {

@@ -51,8 +51,9 @@ public class TableQueryMetrics
     public TableQueryMetrics(TableMetadata table)
     {
         addMetrics(table, "", cmd -> true);
-        addMetrics(table, "Filter", cmd -> !cmd.isTopK()); // queries that are filtering only
-        addMetrics(table, "TopK", ReadCommand::isTopK); // queries that are top-k only
+        addMetrics(table, "Filter", cmd -> !cmd.isTopK() && cmd.usesIndexFiltering()); // queries that are filtering only
+        addMetrics(table, "TopK", cmd -> cmd.isTopK() && !cmd.usesIndexFiltering()); // queries that are top-k only
+        addMetrics(table, "Hybrid", cmd -> cmd.isTopK() && cmd.usesIndexFiltering()); // queries that are both filtering and top-k
         addMetrics(table, "SinglePartition", ReadCommand::isSinglePartition); // single-partition queries
         addMetrics(table, "Range", cmd -> !cmd.isSinglePartition()); // range queries
     }
