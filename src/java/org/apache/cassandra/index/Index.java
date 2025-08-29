@@ -231,7 +231,7 @@ public interface Index
     {
         return getBuildTaskSupport();
     }
-    
+
     /**
      * Returns the type of operations supported by the index in case its building has failed and it's needing recovery.
      *
@@ -1100,6 +1100,14 @@ public interface Index
         default boolean isTopK()
         {
             return false;
+        }
+
+        /**
+         * @return {@code true} if this plan uses index-based filtering, {@code false} otherwise
+         */
+        default boolean usesIndexFiltering()
+        {
+            return true;
         }
     }
 
