@@ -19,37 +19,47 @@ package org.apache.cassandra.io.compress;
 
 import java.io.IOException;
 
+import org.apache.cassandra.io.util.File;
+
 public class CorruptBlockException extends IOException
 {
-    public CorruptBlockException(String filePath, CompressionMetadata.Chunk chunk)
+    private final File file;
+
+    public CorruptBlockException(File file, CompressionMetadata.Chunk chunk)
     {
-        this(filePath, chunk, null);
+        this(file, chunk, null);
     }
 
-    public CorruptBlockException(String filePath, CompressionMetadata.Chunk chunk, Throwable cause)
+    public CorruptBlockException(File file, CompressionMetadata.Chunk chunk, Throwable cause)
     {
-        this(filePath, chunk.offset, chunk.length, cause);
+        this(file, chunk.offset, chunk.length, cause);
     }
 
-    public CorruptBlockException(String filePath, long offset, int length)
+    public CorruptBlockException(File file, long offset, int length)
     {
-        this(filePath, offset, length, null);
+        this(file, offset, length, null);
     }
 
-    public CorruptBlockException(String filePath, long offset, int length, Throwable cause)
+    public CorruptBlockException(File file, long offset, int length, Throwable cause)
     {
-        super(String.format("(%s): corruption detected, chunk at %d of length %d.", filePath, offset, length), cause);
+        super(String.format("(%s): corruption detected, chunk at %d of length %d.", file.toString(), offset, length), cause);
+        this.file = file;
     }
 
-    public CorruptBlockException(String filePath, CompressionMetadata.Chunk chunk, int storedChecksum, int calculatedChecksum)
+    public CorruptBlockException(File file, CompressionMetadata.Chunk chunk, int storedChecksum, int calculatedChecksum)
     {
-        this(filePath, chunk.offset, chunk.length, storedChecksum, calculatedChecksum);
+        this(file, chunk.offset, chunk.length, storedChecksum, calculatedChecksum);
     }
 
-    public CorruptBlockException(String filePath, long offset, int length, int storedChecksum, int calculatedChecksum)
+    public CorruptBlockException(File file, long offset, int length, int storedChecksum, int calculatedChecksum)
     {
         super(String.format("(%s): corruption detected, chunk at %d of length %d has mismatched checksums. Expected %d, but calculated %d",
-                            filePath, offset, length, storedChecksum, calculatedChecksum));
+                            file.toString(), offset, length, storedChecksum, calculatedChecksum));
+        this.file = file;
     }
 
+    public File getFile()
+    {
+        return file;
+    }
 }

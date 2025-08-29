@@ -144,7 +144,7 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
         {
             compressed.limit(length);
             if (channel.read(compressed, chunkOffset) != length)
-                throw new CorruptBlockException(channel.filePath(), chunk);
+                throw new CorruptBlockException(channel.getFile(), chunk);
 
             if (shouldCheckCrc)
             {
@@ -155,7 +155,7 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
                 compressed.limit(length);
                 int storedChecksum = compressed.getInt();
                 if (storedChecksum != checksum)
-                    throw new CorruptBlockException(channel.filePath(), chunk, storedChecksum, checksum);
+                    throw new CorruptBlockException(channel.getFile(), chunk, storedChecksum, checksum);
             }
 
             compressed.position(0).limit(chunk.length);
@@ -200,7 +200,7 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
                 compressed.limit(length);
                 int storedChecksum = compressed.getInt();
                 if (storedChecksum != checksum)
-                    throw new CorruptBlockException(channel.filePath(), chunk, storedChecksum, checksum);
+                    throw new CorruptBlockException(channel.getFile(), chunk, storedChecksum, checksum);
             }
 
             compressed.position(0).limit(chunk.length);
@@ -307,7 +307,7 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
                         }
                         catch (IOException e)
                         {
-                            throw new CorruptBlockException(channel.filePath(), chunk, e);
+                            throw new CorruptBlockException(channel.getFile(), chunk, e);
                         }
                     }
                     finally
@@ -319,7 +319,7 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
                 {
                     uncompressed.position(0).limit(chunk.length);
                     if (channel.read(uncompressed, chunkOffset) != chunk.length)
-                        throw new CorruptBlockException(channel.filePath(), chunk);
+                        throw new CorruptBlockException(channel.getFile(), chunk);
                 }
                 uncompressed.flip();
             }
@@ -389,7 +389,7 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
                         compressedChunk.limit(compressedChunk.capacity());
                         int storedChecksum = compressedChunk.getInt();
                         if (storedChecksum != checksum)
-                            throw new CorruptBlockException(channel.filePath(), chunk, storedChecksum, checksum);
+                            throw new CorruptBlockException(channel.getFile(), chunk, storedChecksum, checksum);
                     }
 
                     compressedChunk.position(chunkOffsetInSegment).limit(chunkOffsetInSegment + chunk.length);
@@ -402,7 +402,7 @@ public abstract class CompressedChunkReader extends AbstractReaderFileProxy impl
                 }
                 catch (IOException e)
                 {
-                    throw new CorruptBlockException(channel.filePath(), chunk, e);
+                    throw new CorruptBlockException(channel.getFile(), chunk, e);
                 }
                 uncompressed.flip();
             }

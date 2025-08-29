@@ -20,6 +20,7 @@ package org.apache.cassandra.io.sstable;
 import java.nio.file.Path;
 
 import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.io.util.PathUtils;
 import org.apache.cassandra.utils.DseLegacy;
 
 public class CorruptSSTableException extends RuntimeException
@@ -34,7 +35,7 @@ public class CorruptSSTableException extends RuntimeException
 
     public CorruptSSTableException(Throwable cause, String path)
     {
-        this(cause, new File(path));
+        this(cause, new File(PathUtils.getPath(path)));
     }
 
     protected CorruptSSTableException(String msg, Throwable cause, File file)
@@ -48,5 +49,4 @@ public class CorruptSSTableException extends RuntimeException
     {
         this(cause, new File(path));
     }
-
 }
