@@ -21,11 +21,16 @@ package org.apache.cassandra.io.util;
 @SuppressWarnings("serial")
 public class CorruptFileException extends RuntimeException
 {
-    public final String filePath;
+    public final File file;
 
-    public CorruptFileException(Exception cause, String filePath)
+    public CorruptFileException(Exception cause, File file)
     {
         super(cause);
-        this.filePath = filePath;
+        this.file = file;
+    }
+
+    public File getFile()
+    {
+        return file;
     }
 }

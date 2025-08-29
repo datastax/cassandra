@@ -111,6 +111,11 @@ public final class JVMStabilityInspector
         commitLogHandler = errorHandler;
     }
 
+    public static Consumer<Throwable> getDiskErrorHandler()
+    {
+        return diskHandler;
+    }
+
     /**
      * Certain Throwables and Exceptions represent "Die" conditions for the server.
      * This recursively checks the input Throwable's cause hierarchy until null.
