@@ -24,7 +24,6 @@ import os
 import re
 import subprocess
 import sys
-import six
 import unittest
 
 from .basecase import (BaseTestCase, TEST_HOST, TEST_PORT,

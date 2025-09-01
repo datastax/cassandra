@@ -117,19 +117,15 @@ if cql_zip:
     sys.path.insert(0, os.path.join(cql_zip, 'cassandra-driver-' + ver))
 
 # the driver needs dependencies
-third_parties = ('futures-', 'geomet-', 'pure_sasl-', 'datastax_db_*-')
+third_parties = ('geomet-', 'pure_sasl-', 'datastax_db_*-')
 
 for lib in third_parties:
     lib_zip = find_zip(lib)
     if lib_zip:
         sys.path.insert(0, lib_zip)
 
-# We cannot import six until we add its location to sys.path so the Python
-# interpreter can find it. Do not move this to the top.
-import six
-
-from six.moves import configparser, input
-from six import StringIO, ensure_text, ensure_str
+import configparser
+from io import StringIO
 
 warnings.filterwarnings("ignore", r".*blist.*")
 try:
@@ -369,7 +365,7 @@ class DecodeError(Exception):
 
 
 def maybe_ensure_text(val):
-    return ensure_text(val) if val else val
+    return str(val) if val else val
 
 
 class FormatError(DecodeError):
@@ -434,7 +430,7 @@ def insert_driver_hooks():
 
 
 class Shell(cmd.Cmd):
-    custom_prompt = ensure_text(os.getenv('CQLSH_PROMPT', ''))
+    custom_prompt = os.getenv('CQLSH_PROMPT', '')
     if custom_prompt != '':
         custom_prompt += "\n"
     default_prompt = custom_prompt + "cqlsh> "
@@ -908,15 +904,14 @@ class Shell(cmd.Cmd):
 
     def get_input_line(self, prompt=''):
         if self.tty:
-            self.lastcmd = input(ensure_str(prompt))
-            line = ensure_text(self.lastcmd) + '\n'
+            self.lastcmd = input(str(prompt))
+            line = self.lastcmd + '\n'
         else:
-            self.lastcmd = ensure_text(self.stdin.readline())
+            self.lastcmd = self.stdin.readline()
             line = self.lastcmd
             if not len(line):
                 raise EOFError
         self.lineno += 1
-        line = ensure_text(line)
         return line
 
     def use_stdin_reader(self, until='', prompt=''):
@@ -977,7 +972,6 @@ class Shell(cmd.Cmd):
         Returns true if the statement is complete and was handled (meaning it
         can be reset).
         """
-        statementtext = ensure_text(statementtext)
         statementtext = self.strip_comment_blocks(statementtext)
         try:
             statements, endtoken_escaped = cqlruleset.cql_split_statements(statementtext)
@@ -1023,7 +1017,7 @@ class Shell(cmd.Cmd):
         if readline is not None:
             nl_count = srcstr.count("\n")
 
-            new_hist = ensure_str(srcstr.replace("\n", " ").rstrip())
+            new_hist = srcstr.replace("\n", " ").rstrip()
 
             if nl_count > 1 and self.last_hist != new_hist:
                 readline.add_history(new_hist)
@@ -1074,7 +1068,6 @@ class Shell(cmd.Cmd):
         self.tracing_style = tracing_was_enabled
 
     def perform_statement(self, statement):
-        statement = ensure_text(statement)
 
         stmt = SimpleStatement(statement, consistency_level=self.consistency_level, serial_consistency_level=self.serial_consistency_level, fetch_size=self.page_size if self.use_paging else None)
         success, future = self.perform_simple_statement(stmt)
@@ -1126,7 +1119,7 @@ class Shell(cmd.Cmd):
             return False, None
 
         def print_cql_error(err):
-            err_msg = ensure_text(err.message if hasattr(err, 'message') else str(err))
+            err_msg = err.message if hasattr(err, 'message') else str(err)
             self.printerr(str(err.__class__.__name__) + ": " + err_msg)
 
         future = self.session.execute_async(statement, trace=self.tracing_style in ["full", "compact"])
@@ -1459,7 +1452,7 @@ class Shell(cmd.Cmd):
                     self.describe_element(result)
 
             except CQL_ERRORS as err:
-                err_msg = ensure_text(err.message if hasattr(err, 'message') else str(err))
+                err_msg = err.message if hasattr(err, 'message') else str(err)
                 self.printerr(err_msg.partition("message=")[2].strip('"'))
             except Exception:
                 import traceback
@@ -1475,7 +1468,7 @@ class Shell(cmd.Cmd):
         """
         Print the output for a DESCRIBE KEYSPACES query
         """
-        names = [ensure_str(r['name']) for r in rows]
+        names = [r['name'] for r in rows]
 
         print('')
         cmd.Cmd.columnize(self, names)
@@ -1495,7 +1488,7 @@ class Shell(cmd.Cmd):
                 keyspace = row['keyspace_name']
                 names = list()
 
-            names.append(ensure_str(row['name']))
+            names.append(str(row['name']))
 
         if keyspace is not None:
             self.print_keyspace_element_names(keyspace, names)
@@ -1637,7 +1630,7 @@ class Shell(cmd.Cmd):
         if fname is not None:
             fname = self.cql_unprotect_value(fname)
 
-        copyoptnames = list(map(six.text_type.lower, parsed.get_binding('optnames', ())))
+        copyoptnames = list(map(str.lower, parsed.get_binding('optnames', ())))
         copyoptvals = list(map(self.cql_unprotect_value, parsed.get_binding('optvals', ())))
         opts = dict(list(zip(copyoptnames, copyoptvals)))
 
@@ -2098,11 +2091,11 @@ class Shell(cmd.Cmd):
             out = self.query_out
 
         # convert Exceptions, etc to text
-        if not isinstance(text, six.text_type):
-            text = "{}".format(text)
+        if not isinstance(text, str):
+            text = str(text)
 
         to_write = self.applycolor(text, color) + ('\n' if newline else '')
-        to_write = ensure_str(to_write)
+        to_write = str(to_write)
         out.write(to_write)
 
     def flush_output(self):
@@ -2220,7 +2213,7 @@ def should_use_color():
 
 
 def read_options(cmdlineargs, environment):
-    configs = configparser.SafeConfigParser() if sys.version_info < (3, 2) else configparser.ConfigParser()
+    configs = configparser.ConfigParser()
     configs.read(CONFIG_FILE)
 
     rawconfigs = configparser.RawConfigParser()
