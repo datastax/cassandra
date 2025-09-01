@@ -567,6 +567,18 @@ public enum CassandraRelevantProperties
     CUSTOM_SAI_INDEX_COMPONENTS_DISCOVERY("cassandra.sai.custom_components_discovery_class"),
 
     /**
+     * Whether to enable SAI per-table metrics for different types of queries, such as filter queries, top-k queries,
+     * hybrid queries, single-partition queries, and range queries. These metrics are always counters.
+     */
+    SAI_QUERY_TYPE_PER_TABLE_METRICS_ENABLED("cassandra.sai.metrics.query_type.per_table.enabled", "true"),
+
+    /**
+     * Whether to enable SAI per-query metrics for different types of queries, such as filter queries, top-k queries,
+     * hybrid queries, single-partition queries, and range queries. These metrics are histograms and timers.
+     */
+    SAI_QUERY_TYPE_PER_QUERY_METRICS_ENABLED("cassandra.sai.metrics.query_type.per_query.enabled", "true"),
+
+    /**
      * If true, while creating or altering schema, NetworkTopologyStrategy won't check if the DC exists.
      * This is to remain compatible with older workflows that first change the replication before adding the nodes.
      * Otherwise, it will validate that the names match existing DCs before allowing replication change.

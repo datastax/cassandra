@@ -28,6 +28,7 @@ import org.junit.Test;
 import org.junit.rules.ExpectedException;
 
 import com.datastax.driver.core.ResultSet;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.index.sai.plan.QueryController;
@@ -465,8 +466,19 @@ public class QueryMetricsTest extends AbstractMetricsTest
     @Test
     public void testQueryTypeMetrics()
     {
+        testQueryTypeMetrics(false, false);
+        testQueryTypeMetrics(false, true);
+        testQueryTypeMetrics(true, false);
+        testQueryTypeMetrics(true, true);
+    }
+
+    private void testQueryTypeMetrics(boolean perTable, boolean perQuery)
+    {
+        CassandraRelevantProperties.SAI_QUERY_TYPE_PER_TABLE_METRICS_ENABLED.setBoolean(perTable);
+        CassandraRelevantProperties.SAI_QUERY_TYPE_PER_QUERY_METRICS_ENABLED.setBoolean(perQuery);
+
         // create table and indexes for vector and numeric
-        String table = createTable("CREATE TABLE %s (k int, c int, n int, v vector<float, 2>, PRIMARY KEY(k, c))");
+        createTable("CREATE TABLE %s (k int, c int, n int, v vector<float, 2>, PRIMARY KEY(k, c))");
         createIndex("CREATE CUSTOM INDEX ON %s(n) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
 
@@ -495,45 +507,71 @@ public class QueryMetricsTest extends AbstractMetricsTest
         assertEquals(numRows, rows.size());
 
         // Verify metrics for total queries completed.
-        waitForEquals(objectNameNoIndex("TotalQueriesCompleted", KEYSPACE, table, TABLE_QUERY_METRIC_TYPE), 4);
-        waitForEquals(objectNameNoIndex("TotalQueriesCompleted", KEYSPACE, table, TABLE_FILTER_QUERY_METRIC_TYPE), 2);
-        waitForEquals(objectNameNoIndex("TotalQueriesCompleted", KEYSPACE, table, TABLE_TOPK_QUERY_METRIC_TYPE), 1);
-        waitForEquals(objectNameNoIndex("TotalQueriesCompleted", KEYSPACE, table, TABLE_HYBRID_QUERY_METRIC_TYPE), 1);
-        waitForEquals(objectNameNoIndex("TotalQueriesCompleted", KEYSPACE, table, TABLE_PARTITION_QUERY_METRIC_TYPE), 1);
-        waitForEquals(objectNameNoIndex("TotalQueriesCompleted", KEYSPACE, table, TABLE_RANGE_QUERY_METRIC_TYPE), 3);
-
-        // Verify histograms for partitions reads per query.
-        waitForHistogramCountEquals(objectNameNoIndex("PartitionReads", KEYSPACE, table, PER_QUERY_METRIC_TYPE), 4);
-        waitForHistogramCountEquals(objectNameNoIndex("PartitionReads", KEYSPACE, table, PER_FILTER_QUERY_METRIC_TYPE), 2);
-        waitForHistogramCountEquals(objectNameNoIndex("PartitionReads", KEYSPACE, table, PER_TOPK_QUERY_METRIC_TYPE), 1);
-        waitForHistogramCountEquals(objectNameNoIndex("PartitionReads", KEYSPACE, table, PER_HYBRID_QUERY_METRIC_TYPE), 1);
-        waitForHistogramCountEquals(objectNameNoIndex("PartitionReads", KEYSPACE, table, PER_PARTITION_QUERY_METRIC_TYPE), 1);
-        waitForHistogramCountEquals(objectNameNoIndex("PartitionReads", KEYSPACE, table, PER_RANGE_QUERY_METRIC_TYPE), 3);
-
-        // Verify histograms for rows filtered per query.
-        waitForHistogramCountEquals(objectNameNoIndex("RowsFiltered", KEYSPACE, table, PER_QUERY_METRIC_TYPE), 4);
-        waitForHistogramCountEquals(objectNameNoIndex("RowsFiltered", KEYSPACE, table, PER_FILTER_QUERY_METRIC_TYPE), 2);
-        waitForHistogramCountEquals(objectNameNoIndex("RowsFiltered", KEYSPACE, table, PER_TOPK_QUERY_METRIC_TYPE), 1);
-        waitForHistogramCountEquals(objectNameNoIndex("RowsFiltered", KEYSPACE, table, PER_HYBRID_QUERY_METRIC_TYPE), 1);
-        waitForHistogramCountEquals(objectNameNoIndex("RowsFiltered", KEYSPACE, table, PER_PARTITION_QUERY_METRIC_TYPE), 1);
-        waitForHistogramCountEquals(objectNameNoIndex("RowsFiltered", KEYSPACE, table, PER_RANGE_QUERY_METRIC_TYPE), 3);
+        String name = "TotalQueriesCompleted";
+        waitForEquals(objectName(name, TABLE_QUERY_METRIC_TYPE), 4);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_FILTER_QUERY_METRIC_TYPE), 2);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_TOPK_QUERY_METRIC_TYPE), 1);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_HYBRID_QUERY_METRIC_TYPE), 1);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_PARTITION_QUERY_METRIC_TYPE), 1);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_RANGE_QUERY_METRIC_TYPE), 3);
 
         // Verify counters for total partition reads. Note that the top-k query creates a partition per matching row,
         // without grouping them by partition. That means a partition for every row.
-        waitForEquals(objectNameNoIndex("TotalPartitionReads", KEYSPACE, table, TABLE_QUERY_METRIC_TYPE), numPartitions + numRows  + numRows + 1);
-        waitForEquals(objectNameNoIndex("TotalPartitionReads", KEYSPACE, table, TABLE_FILTER_QUERY_METRIC_TYPE), numPartitions + 1);
-        waitForEquals(objectNameNoIndex("TotalPartitionReads", KEYSPACE, table, TABLE_TOPK_QUERY_METRIC_TYPE), numRows);
-        waitForEquals(objectNameNoIndex("TotalPartitionReads", KEYSPACE, table, TABLE_HYBRID_QUERY_METRIC_TYPE), numRows);
-        waitForEquals(objectNameNoIndex("TotalPartitionReads", KEYSPACE, table, TABLE_PARTITION_QUERY_METRIC_TYPE), 1);
-        waitForEquals(objectNameNoIndex("TotalPartitionReads", KEYSPACE, table, TABLE_RANGE_QUERY_METRIC_TYPE), numPartitions + numRows + numRows);
+        name = "TotalPartitionReads";
+        waitForEquals(objectName(name, TABLE_QUERY_METRIC_TYPE), numPartitions + numRows + numRows + 1);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_FILTER_QUERY_METRIC_TYPE), numPartitions + 1);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_TOPK_QUERY_METRIC_TYPE), numRows);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_HYBRID_QUERY_METRIC_TYPE), numRows);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_PARTITION_QUERY_METRIC_TYPE), 1);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_RANGE_QUERY_METRIC_TYPE), numPartitions + numRows + numRows);
 
         // Verify counters for total rows filtered.
-        waitForEquals(objectNameNoIndex("TotalRowsFiltered", KEYSPACE, table, TABLE_QUERY_METRIC_TYPE), numRows + numRowsPerPartition + numRows + numRows);
-        waitForEquals(objectNameNoIndex("TotalRowsFiltered", KEYSPACE, table, TABLE_FILTER_QUERY_METRIC_TYPE), numRows + numRowsPerPartition);
-        waitForEquals(objectNameNoIndex("TotalRowsFiltered", KEYSPACE, table, TABLE_TOPK_QUERY_METRIC_TYPE), numRows);
-        waitForEquals(objectNameNoIndex("TotalRowsFiltered", KEYSPACE, table, TABLE_HYBRID_QUERY_METRIC_TYPE), numRows);
-        waitForEquals(objectNameNoIndex("TotalRowsFiltered", KEYSPACE, table, TABLE_PARTITION_QUERY_METRIC_TYPE), numRowsPerPartition);
-        waitForEquals(objectNameNoIndex("TotalRowsFiltered", KEYSPACE, table, TABLE_RANGE_QUERY_METRIC_TYPE), numRows + numRows + numRows);
+        name = "TotalRowsFiltered";
+        waitForEquals(objectName(name, TABLE_QUERY_METRIC_TYPE), numRows + numRowsPerPartition + numRows + numRows);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_FILTER_QUERY_METRIC_TYPE), numRows + numRowsPerPartition);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_TOPK_QUERY_METRIC_TYPE), numRows);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_HYBRID_QUERY_METRIC_TYPE), numRows);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_PARTITION_QUERY_METRIC_TYPE), numRowsPerPartition);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_RANGE_QUERY_METRIC_TYPE), numRows + numRows + numRows);
+
+        // Verify histograms for partitions reads per query.
+        name = "PartitionReads";
+        waitForHistogramCountEquals(objectName(name, PER_QUERY_METRIC_TYPE), 4);
+        waitForHistogramCountEqualsIfExists(perQuery, objectName(name, PER_FILTER_QUERY_METRIC_TYPE), 2);
+        waitForHistogramCountEqualsIfExists(perQuery, objectName(name, PER_TOPK_QUERY_METRIC_TYPE), 1);
+        waitForHistogramCountEqualsIfExists(perQuery, objectName(name, PER_HYBRID_QUERY_METRIC_TYPE), 1);
+        waitForHistogramCountEqualsIfExists(perQuery, objectName(name, PER_PARTITION_QUERY_METRIC_TYPE), 1);
+        waitForHistogramCountEqualsIfExists(perQuery, objectName(name, PER_RANGE_QUERY_METRIC_TYPE), 3);
+
+        // Verify histograms for rows filtered per query.
+        name = "RowsFiltered";
+        waitForHistogramCountEquals(objectName(name, PER_QUERY_METRIC_TYPE), 4);
+        waitForHistogramCountEqualsIfExists(perQuery, objectName(name, PER_FILTER_QUERY_METRIC_TYPE), 2);
+        waitForHistogramCountEqualsIfExists(perQuery, objectName(name, PER_TOPK_QUERY_METRIC_TYPE), 1);
+        waitForHistogramCountEqualsIfExists(perQuery, objectName(name, PER_HYBRID_QUERY_METRIC_TYPE), 1);
+        waitForHistogramCountEqualsIfExists(perQuery, objectName(name, PER_PARTITION_QUERY_METRIC_TYPE), 1);
+        waitForHistogramCountEqualsIfExists(perQuery, objectName(name, PER_RANGE_QUERY_METRIC_TYPE), 3);
+    }
+
+    private ObjectName objectName(String name, String type)
+    {
+        return objectNameNoIndex(name, KEYSPACE, currentTable(), type);
+    }
+
+    protected void waitForEqualsIfExists(boolean shouldExist, ObjectName name, long value)
+    {
+        if (shouldExist)
+            waitForEquals(name, value);
+        else
+            assertMetricDoesNotExist(name);
+    }
+
+    protected void waitForHistogramCountEqualsIfExists(boolean shouldExist, ObjectName name, long count)
+    {
+        if (shouldExist)
+            waitForHistogramCountEquals(name, count);
+        else
+            assertMetricDoesNotExist(name);
     }
 
     private long getPerQueryMetrics(String keyspace, String table, String metricsName)
