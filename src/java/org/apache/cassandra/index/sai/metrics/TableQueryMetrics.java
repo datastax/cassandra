@@ -26,6 +26,7 @@ import java.util.regex.Pattern;
 import com.codahale.metrics.Counter;
 import com.codahale.metrics.Histogram;
 import com.codahale.metrics.Timer;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.schema.TableMetadata;
@@ -36,9 +37,21 @@ import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
 /**
  * Table query metrics for different types of query. The metrics for each type of query are divided into two groups:
  * <ul>
- * <li>Per table counters ({@link PerTable}).</li>
- * <li>Per query timers and histograms ({@link PerQuery}).</li>
+ *    <li>Per table counters ({@link PerTable}).</li>
+ *    <li>Per query timers and histograms ({@link PerQuery}).</li>
  * </ul>
+ * The following types of query are tracked:
+ * <ul>
+ *    <li>All SAI queries.</li>
+ *    <li>Filter queries (filtering only, no top-k).</li>
+ *    <li>Top-k queries (top-k only, no filtering).</li>
+ *    <li>Hybrid queries (both filtering and top-k).</li>
+ *    <li>Single-partition queries.</li>
+ *    <li>Range queries.</li>
+ * </ul>
+ * The general metrics for all SAI queries are always recorded. The other types of queries are recorded only if they are
+ * enabled via the {@link CassandraRelevantProperties#SAI_QUERY_TYPE_PER_TABLE_METRICS_ENABLED} and
+ * {@link CassandraRelevantProperties#SAI_QUERY_TYPE_PER_QUERY_METRICS_ENABLED} system properties.
  */
 public class TableQueryMetrics
 {
@@ -60,8 +73,11 @@ public class TableQueryMetrics
 
     private void addMetrics(TableMetadata table, String type, Predicate<ReadCommand> filter)
     {
-        perTableMetrics.add(new PerTable(table, type, filter));
-        perQueryMetrics.add(new PerQuery(table, type, filter));
+        if (type.isEmpty() || CassandraRelevantProperties.SAI_QUERY_TYPE_PER_TABLE_METRICS_ENABLED.getBoolean())
+            perTableMetrics.add(new PerTable(table, type, filter));
+
+        if (type.isEmpty() || CassandraRelevantProperties.SAI_QUERY_TYPE_PER_QUERY_METRICS_ENABLED.getBoolean())
+            perQueryMetrics.add(new PerQuery(table, type, filter));
     }
 
     /**
@@ -106,7 +122,7 @@ public class TableQueryMetrics
             this.filter = filter;
         }
 
-        protected final void record(Snapshot snapshot, ReadCommand command)
+        public final void record(Snapshot snapshot, ReadCommand command)
         {
             if (filter.test(command))
                 record(snapshot);
@@ -197,12 +213,6 @@ public class TableQueryMetrics
                                   queryLatencyMicros);
                 }
             }
-        }
-
-        @Override
-        public void release()
-        {
-            super.release();
         }
     }
 
