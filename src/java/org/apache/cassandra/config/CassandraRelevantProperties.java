@@ -576,7 +576,7 @@ public enum CassandraRelevantProperties
      * Whether to enable SAI per-query metrics for different types of queries, such as filter queries, top-k queries,
      * hybrid queries, single-partition queries, and range queries. These metrics are histograms and timers.
      */
-    SAI_QUERY_TYPE_PER_QUERY_METRICS_ENABLED("cassandra.sai.metrics.query_type.per_query.enabled", "true"),
+    SAI_QUERY_TYPE_PER_QUERY_METRICS_ENABLED("cassandra.sai.metrics.query_type.per_query.enabled", "false"),
 
     /**
      * If true, while creating or altering schema, NetworkTopologyStrategy won't check if the DC exists.
