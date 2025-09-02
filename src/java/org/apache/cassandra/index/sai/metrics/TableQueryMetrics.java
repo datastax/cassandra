@@ -91,6 +91,33 @@ public class TableQueryMetrics
         Snapshot snapshot = new Snapshot(context);
         perTableMetrics.forEach(m -> m.record(snapshot, command));
         perQueryMetrics.forEach(m -> m.record(snapshot, command));
+
+        if (Tracing.isTracing())
+        {
+            final long queryLatencyMicros = TimeUnit.NANOSECONDS.toMicros(snapshot.totalQueryTimeNs);
+
+            if (snapshot.filterSortOrder == QueryContext.FilterSortOrder.SEARCH_THEN_ORDER)
+            {
+                Tracing.trace("Index query accessed memtable indexes, {}, and {}, selected {} before ranking, " +
+                              "post-filtered {} in {}, and took {} microseconds.",
+                              pluralize(snapshot.sstablesHit, "SSTable index", "es"),
+                              pluralize(snapshot.segmentsHit, "segment", "s"),
+                              pluralize(snapshot.rowsPreFiltered, "row", "s"),
+                              pluralize(snapshot.rowsFiltered, "row", "s"),
+                              pluralize(snapshot.partitionsRead, "partition", "s"),
+                              queryLatencyMicros);
+            }
+            else
+            {
+                Tracing.trace("Index query accessed memtable indexes, {}, and {}, post-filtered {} in {}, " +
+                              "and took {} microseconds.",
+                              pluralize(snapshot.sstablesHit, "SSTable index", "es"),
+                              pluralize(snapshot.segmentsHit, "segment", "s"),
+                              pluralize(snapshot.rowsFiltered, "row", "s"),
+                              pluralize(snapshot.partitionsRead, "partition", "s"),
+                              queryLatencyMicros);
+            }
+        }
     }
 
     /**
@@ -186,33 +213,6 @@ public class TableQueryMetrics
                 sortThenFilterQueriesCompleted.inc();
             else if (snapshot.filterSortOrder == QueryContext.FilterSortOrder.SEARCH_THEN_ORDER)
                 filterThenSortQueriesCompleted.inc();
-
-            if (Tracing.isTracing())
-            {
-                final long queryLatencyMicros = TimeUnit.NANOSECONDS.toMicros(snapshot.totalQueryTimeNs);
-
-                if (snapshot.filterSortOrder == QueryContext.FilterSortOrder.SEARCH_THEN_ORDER)
-                {
-                    Tracing.trace("Index query accessed memtable indexes, {}, and {}, selected {} before ranking, " +
-                                  "post-filtered {} in {}, and took {} microseconds.",
-                                  pluralize(snapshot.sstablesHit, "SSTable index", "es"),
-                                  pluralize(snapshot.segmentsHit, "segment", "s"),
-                                  pluralize(snapshot.rowsPreFiltered, "row", "s"),
-                                  pluralize(snapshot.rowsFiltered, "row", "s"),
-                                  pluralize(snapshot.partitionsRead, "partition", "s"),
-                                  queryLatencyMicros);
-                }
-                else
-                {
-                    Tracing.trace("Index query accessed memtable indexes, {}, and {}, post-filtered {} in {}, " +
-                                  "and took {} microseconds.",
-                                  pluralize(snapshot.sstablesHit, "SSTable index", "es"),
-                                  pluralize(snapshot.segmentsHit, "segment", "s"),
-                                  pluralize(snapshot.rowsFiltered, "row", "s"),
-                                  pluralize(snapshot.partitionsRead, "partition", "s"),
-                                  queryLatencyMicros);
-                }
-            }
         }
     }
 
