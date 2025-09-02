@@ -1156,8 +1156,8 @@ public class StatementRestrictions
 
         ANNOptions annOptions = selectOptions.parseANNOptions();
 
-        RowFilter rowFilter = RowFilter.builder(indexRegistry, indexHints)
-                                       .buildFromRestrictions(this, table, options, clientState, annOptions);
+        RowFilter.Builder filterBuilder = new RowFilter.Builder(needsReconciliation, indexRegistry, indexHints);
+        RowFilter rowFilter = filterBuilder.buildFromRestrictions(this, table, options, clientState, annOptions);
 
         if (hasAnnOptions && !rowFilter.hasANN())
             throw new InvalidRequestException(ANN_OPTIONS_WITHOUT_ORDER_BY_ANN);
