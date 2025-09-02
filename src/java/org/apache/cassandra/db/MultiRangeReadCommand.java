@@ -136,10 +136,7 @@ public class MultiRangeReadCommand extends ReadCommand
     @Override
     public boolean isSinglePartition()
     {
-        if (dataRanges.size() != 1)
-            return false;
-
-        return dataRanges.get(0).isSinglePartition();
+        return dataRanges.size() == 1 && dataRanges.get(0).isSinglePartition();
     }
 
     /**

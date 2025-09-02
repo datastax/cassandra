@@ -46,18 +46,18 @@ public class QueryMetricsTest extends AbstractMetricsTest
     private static final String CREATE_INDEX_TEMPLATE = "CREATE CUSTOM INDEX IF NOT EXISTS %s ON %s.%s(%s) USING 'StorageAttachedIndex'";
 
     private static final String TABLE_QUERY_METRIC_TYPE = TableQueryMetrics.PerTable.METRIC_TYPE;
-    private static final String TABLE_FILTER_QUERY_METRIC_TYPE = makeName(TABLE_QUERY_METRIC_TYPE, "Filter");
-    private static final String TABLE_TOPK_QUERY_METRIC_TYPE = makeName(TABLE_QUERY_METRIC_TYPE, "TopK");
+    private static final String TABLE_FILTER_QUERY_METRIC_TYPE = makeName(TABLE_QUERY_METRIC_TYPE, "FilterOnly");
+    private static final String TABLE_TOPK_QUERY_METRIC_TYPE = makeName(TABLE_QUERY_METRIC_TYPE, "TopKOnly");
     private static final String TABLE_HYBRID_QUERY_METRIC_TYPE = makeName(TABLE_QUERY_METRIC_TYPE, "Hybrid");
-    private static final String TABLE_PARTITION_QUERY_METRIC_TYPE = makeName(TABLE_QUERY_METRIC_TYPE, "SinglePartition");
-    private static final String TABLE_RANGE_QUERY_METRIC_TYPE = makeName(TABLE_QUERY_METRIC_TYPE, "Range");
+    private static final String TABLE_SINGLE_PARTITION_QUERY_METRIC_TYPE = makeName(TABLE_QUERY_METRIC_TYPE, "SinglePartition");
+    private static final String TABLE_MULTI_PARTITION_QUERY_METRIC_TYPE = makeName(TABLE_QUERY_METRIC_TYPE, "MultiPartition");
 
     private static final String PER_QUERY_METRIC_TYPE = TableQueryMetrics.PerQuery.METRIC_TYPE;
-    private static final String PER_FILTER_QUERY_METRIC_TYPE = makeName(PER_QUERY_METRIC_TYPE, "Filter");
-    private static final String PER_TOPK_QUERY_METRIC_TYPE = makeName(PER_QUERY_METRIC_TYPE, "TopK");
+    private static final String PER_FILTER_QUERY_METRIC_TYPE = makeName(PER_QUERY_METRIC_TYPE, "FilterOnly");
+    private static final String PER_TOPK_QUERY_METRIC_TYPE = makeName(PER_QUERY_METRIC_TYPE, "TopKOnly");
     private static final String PER_HYBRID_QUERY_METRIC_TYPE = makeName(PER_QUERY_METRIC_TYPE, "Hybrid");
-    private static final String PER_PARTITION_QUERY_METRIC_TYPE = makeName(PER_QUERY_METRIC_TYPE, "SinglePartition");
-    private static final String PER_RANGE_QUERY_METRIC_TYPE = makeName(PER_QUERY_METRIC_TYPE, "Range");
+    private static final String PER_SINGLE_PARTITION_QUERY_METRIC_TYPE = makeName(PER_QUERY_METRIC_TYPE, "SinglePartition");
+    private static final String PER_MULTI_PARTITION_QUERY_METRIC_TYPE = makeName(PER_QUERY_METRIC_TYPE, "MultiPartition");
 
     private static final String GLOBAL_METRIC_TYPE = "ColumnQueryMetrics";
 
@@ -423,10 +423,11 @@ public class QueryMetricsTest extends AbstractMetricsTest
     }
 
     /**
-     * Test the {@link ReadCommand} flags that are used to determine the query type in metrics.
+     * Test the {@link ReadCommand} flags that are used to determine the kind of query (top-k only, filtering only,
+     * hybrid, single partition and multipartition) in metrics.
      */
     @Test
-    public void testQueryTypeFlags()
+    public void testQueryKindFlags()
     {
         createTable("CREATE TABLE %s (k int, c int, n int, s text, v vector<float, 2>, PRIMARY KEY(k, c))");
 
@@ -464,18 +465,18 @@ public class QueryMetricsTest extends AbstractMetricsTest
      * Test that metrics are correctly separated for different types of queries.
      */
     @Test
-    public void testQueryTypeMetrics()
+    public void testQueryKindMetrics()
     {
-        testQueryTypeMetrics(false, false);
-        testQueryTypeMetrics(false, true);
-        testQueryTypeMetrics(true, false);
-        testQueryTypeMetrics(true, true);
+        testQueryKindMetrics(false, false);
+        testQueryKindMetrics(false, true);
+        testQueryKindMetrics(true, false);
+        testQueryKindMetrics(true, true);
     }
 
-    private void testQueryTypeMetrics(boolean perTable, boolean perQuery)
+    private void testQueryKindMetrics(boolean perTable, boolean perQuery)
     {
-        CassandraRelevantProperties.SAI_QUERY_TYPE_PER_TABLE_METRICS_ENABLED.setBoolean(perTable);
-        CassandraRelevantProperties.SAI_QUERY_TYPE_PER_QUERY_METRICS_ENABLED.setBoolean(perQuery);
+        CassandraRelevantProperties.SAI_QUERY_KIND_PER_TABLE_METRICS_ENABLED.setBoolean(perTable);
+        CassandraRelevantProperties.SAI_QUERY_KIND_PER_QUERY_METRICS_ENABLED.setBoolean(perQuery);
 
         // create table and indexes for vector and numeric
         createTable("CREATE TABLE %s (k int, c int, n int, v vector<float, 2>, PRIMARY KEY(k, c))");
@@ -512,8 +513,8 @@ public class QueryMetricsTest extends AbstractMetricsTest
         waitForEqualsIfExists(perTable, objectName(name, TABLE_FILTER_QUERY_METRIC_TYPE), 2);
         waitForEqualsIfExists(perTable, objectName(name, TABLE_TOPK_QUERY_METRIC_TYPE), 1);
         waitForEqualsIfExists(perTable, objectName(name, TABLE_HYBRID_QUERY_METRIC_TYPE), 1);
-        waitForEqualsIfExists(perTable, objectName(name, TABLE_PARTITION_QUERY_METRIC_TYPE), 1);
-        waitForEqualsIfExists(perTable, objectName(name, TABLE_RANGE_QUERY_METRIC_TYPE), 3);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_SINGLE_PARTITION_QUERY_METRIC_TYPE), 1);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_MULTI_PARTITION_QUERY_METRIC_TYPE), 3);
 
         // Verify counters for total partition reads. Note that the top-k query creates a partition per matching row,
         // without grouping them by partition. That means a partition for every row.
@@ -522,8 +523,8 @@ public class QueryMetricsTest extends AbstractMetricsTest
         waitForEqualsIfExists(perTable, objectName(name, TABLE_FILTER_QUERY_METRIC_TYPE), numPartitions + 1);
         waitForEqualsIfExists(perTable, objectName(name, TABLE_TOPK_QUERY_METRIC_TYPE), numRows);
         waitForEqualsIfExists(perTable, objectName(name, TABLE_HYBRID_QUERY_METRIC_TYPE), numRows);
-        waitForEqualsIfExists(perTable, objectName(name, TABLE_PARTITION_QUERY_METRIC_TYPE), 1);
-        waitForEqualsIfExists(perTable, objectName(name, TABLE_RANGE_QUERY_METRIC_TYPE), numPartitions + numRows + numRows);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_SINGLE_PARTITION_QUERY_METRIC_TYPE), 1);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_MULTI_PARTITION_QUERY_METRIC_TYPE), numPartitions + numRows + numRows);
 
         // Verify counters for total rows filtered.
         name = "TotalRowsFiltered";
@@ -531,8 +532,8 @@ public class QueryMetricsTest extends AbstractMetricsTest
         waitForEqualsIfExists(perTable, objectName(name, TABLE_FILTER_QUERY_METRIC_TYPE), numRows + numRowsPerPartition);
         waitForEqualsIfExists(perTable, objectName(name, TABLE_TOPK_QUERY_METRIC_TYPE), numRows);
         waitForEqualsIfExists(perTable, objectName(name, TABLE_HYBRID_QUERY_METRIC_TYPE), numRows);
-        waitForEqualsIfExists(perTable, objectName(name, TABLE_PARTITION_QUERY_METRIC_TYPE), numRowsPerPartition);
-        waitForEqualsIfExists(perTable, objectName(name, TABLE_RANGE_QUERY_METRIC_TYPE), numRows + numRows + numRows);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_SINGLE_PARTITION_QUERY_METRIC_TYPE), numRowsPerPartition);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_MULTI_PARTITION_QUERY_METRIC_TYPE), numRows + numRows + numRows);
 
         // Verify histograms for partitions reads per query.
         name = "PartitionReads";
@@ -540,8 +541,8 @@ public class QueryMetricsTest extends AbstractMetricsTest
         waitForHistogramCountEqualsIfExists(perQuery, objectName(name, PER_FILTER_QUERY_METRIC_TYPE), 2);
         waitForHistogramCountEqualsIfExists(perQuery, objectName(name, PER_TOPK_QUERY_METRIC_TYPE), 1);
         waitForHistogramCountEqualsIfExists(perQuery, objectName(name, PER_HYBRID_QUERY_METRIC_TYPE), 1);
-        waitForHistogramCountEqualsIfExists(perQuery, objectName(name, PER_PARTITION_QUERY_METRIC_TYPE), 1);
-        waitForHistogramCountEqualsIfExists(perQuery, objectName(name, PER_RANGE_QUERY_METRIC_TYPE), 3);
+        waitForHistogramCountEqualsIfExists(perQuery, objectName(name, PER_SINGLE_PARTITION_QUERY_METRIC_TYPE), 1);
+        waitForHistogramCountEqualsIfExists(perQuery, objectName(name, PER_MULTI_PARTITION_QUERY_METRIC_TYPE), 3);
 
         // Verify histograms for rows filtered per query.
         name = "RowsFiltered";
@@ -549,8 +550,8 @@ public class QueryMetricsTest extends AbstractMetricsTest
         waitForHistogramCountEqualsIfExists(perQuery, objectName(name, PER_FILTER_QUERY_METRIC_TYPE), 2);
         waitForHistogramCountEqualsIfExists(perQuery, objectName(name, PER_TOPK_QUERY_METRIC_TYPE), 1);
         waitForHistogramCountEqualsIfExists(perQuery, objectName(name, PER_HYBRID_QUERY_METRIC_TYPE), 1);
-        waitForHistogramCountEqualsIfExists(perQuery, objectName(name, PER_PARTITION_QUERY_METRIC_TYPE), 1);
-        waitForHistogramCountEqualsIfExists(perQuery, objectName(name, PER_RANGE_QUERY_METRIC_TYPE), 3);
+        waitForHistogramCountEqualsIfExists(perQuery, objectName(name, PER_SINGLE_PARTITION_QUERY_METRIC_TYPE), 1);
+        waitForHistogramCountEqualsIfExists(perQuery, objectName(name, PER_MULTI_PARTITION_QUERY_METRIC_TYPE), 3);
     }
 
     private ObjectName objectName(String name, String type)
