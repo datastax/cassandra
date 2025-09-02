@@ -20,7 +20,6 @@ package org.apache.cassandra.db.filter;
 import java.io.IOException;
 import java.util.*;
 
-import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.rows.*;
