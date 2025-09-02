@@ -35,49 +35,49 @@ import org.apache.cassandra.tracing.Tracing;
 import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
 
 /**
- * Table query metrics for different types of query. The metrics for each type of query are divided into two groups:
+ * Table query metrics for different kinds of query. The metrics for each type of query are divided into two groups:
  * <ul>
  *    <li>Per table counters ({@link PerTable}).</li>
  *    <li>Per query timers and histograms ({@link PerQuery}).</li>
  * </ul>
- * The following types of query are tracked:
+ * The following kinds of query are tracked:
  * <ul>
  *    <li>All SAI queries.</li>
  *    <li>Filter queries (filtering only, no top-k).</li>
  *    <li>Top-k queries (top-k only, no filtering).</li>
  *    <li>Hybrid queries (both filtering and top-k).</li>
  *    <li>Single-partition queries.</li>
- *    <li>Range queries.</li>
+ *    <li>Multipartition queries.</li>
  * </ul>
- * The general metrics for all SAI queries are always recorded. The other types of queries are recorded only if they are
- * enabled via the {@link CassandraRelevantProperties#SAI_QUERY_TYPE_PER_TABLE_METRICS_ENABLED} and
- * {@link CassandraRelevantProperties#SAI_QUERY_TYPE_PER_QUERY_METRICS_ENABLED} system properties.
+ * The general metrics for all SAI queries are always recorded. The other kinds of queries are recorded only if they are
+ * enabled via the {@link CassandraRelevantProperties#SAI_QUERY_KIND_PER_TABLE_METRICS_ENABLED} and
+ * {@link CassandraRelevantProperties#SAI_QUERY_KIND_PER_QUERY_METRICS_ENABLED} system properties.
  */
 public class TableQueryMetrics
 {
-    /** Per table metrics for all types of queries (counters). */
+    /** Per table metrics for all kinds of queries (counters). */
     private final List<PerTable> perTableMetrics = new ArrayList<>();
 
-    /** Per query metrics for all types of queries (timers and histograms). */
+    /** Per query metrics for all kinds of queries (timers and histograms). */
     private final List<PerQuery> perQueryMetrics = new ArrayList<>();
 
     public TableQueryMetrics(TableMetadata table)
     {
         addMetrics(table, "", cmd -> true);
-        addMetrics(table, "Filter", cmd -> !cmd.isTopK() && cmd.usesIndexFiltering()); // queries that are filtering only
-        addMetrics(table, "TopK", cmd -> cmd.isTopK() && !cmd.usesIndexFiltering()); // queries that are top-k only
+        addMetrics(table, "FilterOnly", cmd -> !cmd.isTopK() && cmd.usesIndexFiltering()); // queries that are filtering only
+        addMetrics(table, "TopKOnly", cmd -> cmd.isTopK() && !cmd.usesIndexFiltering()); // queries that are top-k only
         addMetrics(table, "Hybrid", cmd -> cmd.isTopK() && cmd.usesIndexFiltering()); // queries that are both filtering and top-k
         addMetrics(table, "SinglePartition", ReadCommand::isSinglePartition); // single-partition queries
-        addMetrics(table, "Range", cmd -> !cmd.isSinglePartition()); // range queries
+        addMetrics(table, "MultiPartition", cmd -> !cmd.isSinglePartition()); // multipartition queries
     }
 
-    private void addMetrics(TableMetadata table, String type, Predicate<ReadCommand> filter)
+    private void addMetrics(TableMetadata table, String queryKind, Predicate<ReadCommand> filter)
     {
-        if (type.isEmpty() || CassandraRelevantProperties.SAI_QUERY_TYPE_PER_TABLE_METRICS_ENABLED.getBoolean())
-            perTableMetrics.add(new PerTable(table, type, filter));
+        if (queryKind.isEmpty() || CassandraRelevantProperties.SAI_QUERY_KIND_PER_TABLE_METRICS_ENABLED.getBoolean())
+            perTableMetrics.add(new PerTable(table, queryKind, filter));
 
-        if (type.isEmpty() || CassandraRelevantProperties.SAI_QUERY_TYPE_PER_QUERY_METRICS_ENABLED.getBoolean())
-            perQueryMetrics.add(new PerQuery(table, type, filter));
+        if (queryKind.isEmpty() || CassandraRelevantProperties.SAI_QUERY_KIND_PER_QUERY_METRICS_ENABLED.getBoolean())
+            perQueryMetrics.add(new PerQuery(table, queryKind, filter));
     }
 
     /**
@@ -108,7 +108,7 @@ public class TableQueryMetrics
     }
 
     /**
-     * Family of metrics for a specific type of query.
+     * Family of metrics for a specific kind of query.
      */
     public abstract static class AbstractQueryMetrics extends AbstractMetrics
     {
@@ -116,9 +116,9 @@ public class TableQueryMetrics
 
         private final Predicate<ReadCommand> filter;
 
-        private AbstractQueryMetrics(String keyspace, String table, String scope, String type, Predicate<ReadCommand> filter)
+        private AbstractQueryMetrics(String keyspace, String table, String scope, String queryKind, Predicate<ReadCommand> filter)
         {
-            super(keyspace, table, makeName(scope, type));
+            super(keyspace, table, makeName(scope, queryKind));
             this.filter = filter;
         }
 
@@ -130,14 +130,14 @@ public class TableQueryMetrics
 
         protected abstract void record(Snapshot snapshot);
 
-        public static String makeName(String scope, String type)
+        public static String makeName(String scope, String queryKind)
         {
-            return PATTERN.matcher(scope).replaceFirst(type + "Query");
+            return PATTERN.matcher(scope).replaceFirst(queryKind + "Query");
         }
     }
 
     /**
-     * Per table metrics for a specific type of query. These metrics are always counters.
+     * Per table metrics for a specific kind of query. These metrics are always counters.
      */
     public static class PerTable extends AbstractQueryMetrics
     {
@@ -153,12 +153,12 @@ public class TableQueryMetrics
 
         /**
          * @param table the table to measure metrics for
-         * @param type an identifier for the type of query which metrics are being recorded for
+         * @param queryKind an identifier for the kind of query which metrics are being recorded for
          * @param filter a predicate that determines whether a given query should be recorded
          */
-        public PerTable(TableMetadata table, String type, Predicate<ReadCommand> filter)
+        public PerTable(TableMetadata table, String queryKind, Predicate<ReadCommand> filter)
         {
-            super(table.keyspace, table.name, METRIC_TYPE, type, filter);
+            super(table.keyspace, table.name, METRIC_TYPE, queryKind, filter);
 
             totalPartitionReads = Metrics.counter(createMetricName("TotalPartitionReads"));
             totalRowsFiltered = Metrics.counter(createMetricName("TotalRowsFiltered"));
@@ -217,7 +217,7 @@ public class TableQueryMetrics
     }
 
     /**
-     * Per query metrics for a specific type of query. These metrics are always timers and histograms.
+     * Per query metrics for a specific kind of query. These metrics are always timers and histograms.
      */
     public static class PerQuery extends AbstractQueryMetrics
     {
@@ -257,9 +257,14 @@ public class TableQueryMetrics
          */
         public final Timer annGraphSearchLatency;
 
-        public PerQuery(TableMetadata table, String type, Predicate<ReadCommand> filter)
+        /**
+         * @param table the table to measure metrics for
+         * @param queryKind an identifier for the kind of query which metrics are being recorded for
+         * @param filter a predicate that determines whether a given query should be recorded
+         */
+        public PerQuery(TableMetadata table, String queryKind, Predicate<ReadCommand> filter)
         {
-            super(table.keyspace, table.name, METRIC_TYPE, type, filter);
+            super(table.keyspace, table.name, METRIC_TYPE, queryKind, filter);
 
             queryLatency = Metrics.timer(createMetricName("QueryLatency"));
 
