@@ -37,6 +37,8 @@ import com.google.common.util.concurrent.AbstractFuture;
 import com.google.common.util.concurrent.ListeningExecutorService;
 import com.google.common.util.concurrent.MoreExecutors;
 
+import org.apache.commons.lang3.exception.ExceptionUtils;
+
 import org.apache.cassandra.concurrent.DebuggableThreadPoolExecutor;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.locator.EndpointsByRange;
@@ -413,6 +415,7 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
 
     public synchronized void terminateSessions()
     {
+        logger.info("Terminating repair sessions \n {}", ExceptionUtils.getStackTrace(new Exception()));
         Throwable cause = new IOException("Terminate session is called");
         for (RepairSession session : sessions.values())
         {
