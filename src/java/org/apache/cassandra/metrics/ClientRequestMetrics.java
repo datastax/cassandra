@@ -31,6 +31,7 @@ public class ClientRequestMetrics
     public final Meter timeouts;
     public final Meter unavailables;
     public final Meter failures;
+    public final Meter invalid;
 
     /**
      * this is the metric that measures the actual execution time of a certain request;
@@ -54,6 +55,7 @@ public class ClientRequestMetrics
         timeouts = Metrics.meter(factory.createMetricName(namePrefix + "Timeouts"));
         unavailables = Metrics.meter(factory.createMetricName(namePrefix + "Unavailables"));
         failures = Metrics.meter(factory.createMetricName(namePrefix + "Failures"));
+        invalid = Metrics.meter(factory.createMetricName(namePrefix + "Invalid"));
         executionTimeMetrics = new LatencyMetrics(factory, namePrefix);
         serviceTimeMetrics = new LatencyMetrics(factory, namePrefix + "ServiceTime");
     }
@@ -63,6 +65,7 @@ public class ClientRequestMetrics
         Metrics.remove(factory.createMetricName(namePrefix + "Timeouts"));
         Metrics.remove(factory.createMetricName(namePrefix + "Unavailables"));
         Metrics.remove(factory.createMetricName(namePrefix + "Failures"));
+        Metrics.remove(factory.createMetricName(namePrefix + "Invalid"));
         executionTimeMetrics.release();
         serviceTimeMetrics.release();
     }

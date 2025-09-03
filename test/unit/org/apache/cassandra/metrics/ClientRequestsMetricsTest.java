@@ -240,6 +240,7 @@ public class ClientRequestsMetricsTest
         metrics.timeouts.mark();
         metrics.failures.mark();
         metrics.unavailables.mark();
+        metrics.invalid.mark();
         updateLatencyMetrics(metrics.executionTimeMetrics);
         updateLatencyMetrics(metrics.serviceTimeMetrics);
     }
@@ -297,6 +298,7 @@ public class ClientRequestsMetricsTest
         assertEquals(value, metrics.timeouts.getCount());
         assertEquals(value, metrics.failures.getCount());
         assertEquals(value, metrics.unavailables.getCount());
+        assertEquals(value, metrics.invalid.getCount());
         verifyLatencyMetrics(metrics.executionTimeMetrics, value);
         verifyLatencyMetrics(metrics.serviceTimeMetrics, value);
     }

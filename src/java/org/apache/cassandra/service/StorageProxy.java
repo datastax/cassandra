@@ -279,6 +279,14 @@ public class StorageProxy implements StorageProxyMBean
                 writeTracker.onError(e);
                 throw e;
             }
+            catch (InvalidRequestException e)
+            {
+                metrics.writeMetrics.invalid.mark();
+                metrics.writeMetricsForLevel(consistencyLevel).invalid.mark();
+                Tracing.trace("Invalid request: {}", e.getMessage());
+                writeTracker.onError(e);
+                throw e;
+            }
             finally
             {
                 long endTime = System.nanoTime();
@@ -592,6 +600,13 @@ public class StorageProxy implements StorageProxyMBean
         {
             metrics.casWriteMetrics.unavailables.mark();
             metrics.writeMetricsForLevel(consistencyForPaxos).unavailables.mark();
+            lwtTracker.onError(e);
+            throw e;
+        }
+        catch (InvalidRequestException e)
+        {
+            metrics.casWriteMetrics.invalid.mark();
+            metrics.writeMetricsForLevel(consistencyForPaxos).invalid.mark();
             lwtTracker.onError(e);
             throw e;
         }
@@ -1162,6 +1177,14 @@ public class StorageProxy implements StorageProxyMBean
             metrics.writeMetrics.unavailables.mark();
             metrics.writeMetricsForLevel(consistencyLevel).unavailables.mark();
             Tracing.trace("Overloaded");
+            writeTracker.onError(e);
+            throw e;
+        }
+        catch (InvalidRequestException e)
+        {
+            metrics.writeMetrics.invalid.mark();
+            metrics.writeMetricsForLevel(consistencyLevel).invalid.mark();
+            Tracing.trace("Invalid request: {}", e.getMessage());
             writeTracker.onError(e);
             throw e;
         }
@@ -2101,6 +2124,14 @@ public class StorageProxy implements StorageProxyMBean
             readTracker.onError(e);
             throw e;
         }
+        catch (InvalidRequestException e)
+        {
+            metrics.readMetrics.invalid.mark();
+            metrics.casReadMetrics.invalid.mark();
+            metrics.readMetricsForLevel(consistencyLevel).invalid.mark();
+            readTracker.onError(e);
+            throw e;
+        }
         finally
         {
             long endTime = System.nanoTime();
@@ -2155,6 +2186,13 @@ public class StorageProxy implements StorageProxyMBean
         {
             metrics.readMetrics.failures.mark();
             metrics.readMetricsForLevel(consistencyLevel).failures.mark();
+            readTracker.onError(e);
+            throw e;
+        }
+        catch (InvalidRequestException e)
+        {
+            metrics.readMetrics.invalid.mark();
+            metrics.readMetricsForLevel(consistencyLevel).invalid.mark();
             readTracker.onError(e);
             throw e;
         }
