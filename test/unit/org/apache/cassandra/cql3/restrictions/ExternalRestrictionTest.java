@@ -153,5 +153,11 @@ public class ExternalRestrictionTest extends CQLTester
         {
             throw new UnsupportedOperationException();
         }
+
+        @Override
+        public String toCQLString(boolean maskValues)
+        {
+            throw new UnsupportedOperationException();
+        }
     }
 }

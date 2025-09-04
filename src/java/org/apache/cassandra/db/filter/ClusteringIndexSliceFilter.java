@@ -133,12 +133,13 @@ public class ClusteringIndexSliceFilter extends AbstractClusteringIndexFilter
         return String.format("slice(slices=%s, reversed=%b)", slices, reversed);
     }
 
-    public String toCQLString(TableMetadata metadata)
+    @Override
+    public String toCQLString(TableMetadata metadata, boolean maskValues)
     {
         StringBuilder sb = new StringBuilder();
 
         if (!selectsAllPartition())
-            sb.append(slices.toCQLString(metadata));
+            sb.append(slices.toCQLString(metadata, maskValues));
 
         appendOrderByToCQLString(metadata, sb);
 

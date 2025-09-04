@@ -651,6 +651,12 @@ public class OperationTest extends SchemaLoader
         {
             throw new UnsupportedOperationException();
         }
+
+        @Override
+        public String toCQLString(boolean maskValues)
+        {
+            throw new UnsupportedOperationException();
+        }
     }
 
     private static Unfiltered buildRow(Cell<?>... cells)

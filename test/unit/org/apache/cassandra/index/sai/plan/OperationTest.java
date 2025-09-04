@@ -642,6 +642,12 @@ public class OperationTest extends IndexingSchemaLoader
         {
             throw new UnsupportedOperationException();
         }
+
+        @Override
+        public String toCQLString(boolean maskValues)
+        {
+            throw new UnsupportedOperationException();
+        }
     }
 
     private static DecoratedKey buildKey(Object... key) {

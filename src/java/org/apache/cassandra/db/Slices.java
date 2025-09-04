@@ -146,7 +146,7 @@ public abstract class Slices implements Iterable<Slice>
      */
     public abstract boolean intersects(Slice slice);
 
-    public abstract String toCQLString(TableMetadata metadata);
+    public abstract String toCQLString(TableMetadata metadata, boolean maskValues);
 
     /**
      * Checks if this <code>Slices</code> is empty.
@@ -555,7 +555,8 @@ public abstract class Slices implements Iterable<Slice>
             return sb.append("}").toString();
         }
 
-        public String toCQLString(TableMetadata metadata)
+        @Override
+        public String toCQLString(TableMetadata metadata, boolean maskValues)
         {
             StringBuilder sb = new StringBuilder();
 
@@ -607,14 +608,14 @@ public abstract class Slices implements Iterable<Slice>
 
                     if (values.size() == 1)
                     {
-                        sb.append(" = ").append(column.type.getString(first.startValue));
+                        sb.append(" = ").append(maskValues ? "?" : column.type.getString(first.startValue));
                     }
                     else
                     {
                         sb.append(" IN (");
                         int j = 0;
                         for (ByteBuffer value : values)
-                            sb.append(j++ == 0 ? "" : ", ").append(column.type.getString(value));
+                            sb.append(j++ == 0 ? "" : ", ").append(maskValues ? "?" : column.type.getString(value));
                         sb.append(")");
                     }
                 }
@@ -634,7 +635,7 @@ public abstract class Slices implements Iterable<Slice>
                             sb.append(first.startInclusive ? " <= " : " < ");
                         else
                             sb.append(first.startInclusive ? " >= " : " > ");
-                        sb.append(column.type.getString(first.startValue));
+                        sb.append(maskValues ? "?" : column.type.getString(first.startValue));
                     }
                     if (first.endValue != null)
                     {
@@ -646,7 +647,7 @@ public abstract class Slices implements Iterable<Slice>
                             sb.append(first.endInclusive ? " >= " : " > ");
                         else
                             sb.append(first.endInclusive ? " <= " : " < ");
-                        sb.append(column.type.getString(first.endValue));
+                        sb.append(maskValues ? "?" : column.type.getString(first.endValue));
                     }
                 }
             }
@@ -771,7 +772,7 @@ public abstract class Slices implements Iterable<Slice>
             return "ALL";
         }
 
-        public String toCQLString(TableMetadata metadata)
+        public String toCQLString(TableMetadata metadata, boolean maskValues)
         {
             return "";
         }
@@ -852,7 +853,7 @@ public abstract class Slices implements Iterable<Slice>
             return "NONE";
         }
 
-        public String toCQLString(TableMetadata metadata)
+        public String toCQLString(TableMetadata metadata, boolean maskValues)
         {
             return "";
         }

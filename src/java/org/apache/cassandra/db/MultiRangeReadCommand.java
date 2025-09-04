@@ -314,7 +314,7 @@ public class MultiRangeReadCommand extends ReadCommand
     }
 
     @Override
-    protected void appendCQLWhereClause(CqlBuilder builder)
+    protected void appendCQLWhereClause(CqlBuilder builder, boolean maskValues)
     {
         if (ranges().size() == 1 && ranges().get(0).isUnrestricted() && rowFilter().isEmpty())
             return;
@@ -323,7 +323,7 @@ public class MultiRangeReadCommand extends ReadCommand
         // We put the row filter first because the data range can end by "ORDER BY"
         if (!rowFilter().isEmpty())
         {
-            builder.append(rowFilter());
+            builder.append(rowFilter().toCQLString(maskValues));
             builder.append(" AND ");
         }
 
@@ -336,7 +336,7 @@ public class MultiRangeReadCommand extends ReadCommand
                 if (!isFirst)
                     builder.append(" AND ");
                 isFirst = false;
-                builder.append(dataRange.toCQLString(metadata()));
+                builder.append(dataRange.toCQLString(metadata(), maskValues));
             }
         }
     }
