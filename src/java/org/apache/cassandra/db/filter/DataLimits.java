@@ -709,7 +709,7 @@ public abstract class DataLimits
             if (bytesLimit != NO_LIMIT)
                 limits.add("BYTES LIMIT " + bytesLimit);
             if (rowLimit != NO_LIMIT)
-                limits.add("ROWS LIMIT " + rowLimit);
+                limits.add("LIMIT " + rowLimit);
             if (perPartitionLimit != NO_LIMIT)
                 limits.add("PER PARTITION LIMIT " + perPartitionLimit);
 
@@ -888,7 +888,7 @@ public abstract class DataLimits
         @Override
         public float estimateTotalResults(ColumnFamilyStore cfs)
         {
-            // For the moment, we return the estimated number of rows as we have no good way of estimating 
+            // For the moment, we return the estimated number of rows as we have no good way of estimating
             // the number of groups that will be returned. Hopefully, we should be able to fix
             // that problem at some point.
             return super.estimateTotalResults(cfs);
