@@ -25,6 +25,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.spi.FileSystemProvider;
 import java.time.Instant;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -47,10 +48,12 @@ import org.slf4j.LoggerFactory;
 import com.vdurmont.semver4j.Semver;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.config.Config.DiskAccessMode;
+import org.apache.cassandra.config.DataStorageSpec;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.StartupChecksOptions;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.dht.IPartitioner;
@@ -60,6 +63,8 @@ import org.apache.cassandra.exceptions.StartupException;
 import org.apache.cassandra.io.filesystem.ForwardingFileSystem;
 import org.apache.cassandra.io.filesystem.ForwardingFileSystemProvider;
 import org.apache.cassandra.io.filesystem.ForwardingPath;
+import org.apache.cassandra.io.sstable.format.SSTableFormat;
+import org.apache.cassandra.io.sstable.format.big.BigFormat;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.service.DataResurrectionCheck.Heartbeat;
@@ -124,6 +129,8 @@ public class StartupChecksTest
     public void tearDown() throws IOException
     {
         new File(sstableDir).deleteRecursive();
+        ((Logger) LoggerFactory.getLogger(StartupChecks.class)).detachAppender(testAppender);
+        testAppender.stop();
     }
 
     @AfterClass
@@ -405,16 +412,36 @@ public class StartupChecksTest
     @Test
     public void yamlConfigWarn() throws Exception
     {
-        // String sstableTypeProp = System.getProperty(SSTableFormat.FORMAT_DEFAULT_PROP, SSTableFormat.Type.BTI.name).toUpperCase();
+        SSTableFormat<?, ?> selectedSSTableType = DatabaseDescriptor.getSelectedSSTableFormat();
         int tokens = DatabaseDescriptor.getNumTokens();
+        boolean hcdDefaults = DatabaseDescriptor.isHcdGuardrailsDefaults();
         int tombstone_failure_threshold = DatabaseDescriptor.getGuardrailsConfig().getTombstoneFailThreshold();
         int batch_size_fail_threshold_in_kb = DatabaseDescriptor.getBatchSizeFailThresholdInKiB();
+        int columns_per_table_failure_threshold = DatabaseDescriptor.getGuardrailsConfig().getColumnsPerTableFailThreshold();
+        int fields_per_udt_failure_threshold = DatabaseDescriptor.getGuardrailsConfig().getFieldsPerUDTFailThreshold();
+        DataStorageSpec.LongBytesBound collection_size_warn_threshold_in_kb = DatabaseDescriptor.getGuardrailsConfig().getCollectionSizeWarnThreshold();
+        int items_per_collection_warn_threshold = DatabaseDescriptor.getGuardrailsConfig().getItemsPerCollectionWarnThreshold();
+        int tables_warn_threshold = DatabaseDescriptor.getGuardrailsConfig().getTablesWarnThreshold();
+        int tables_failure_threshold = DatabaseDescriptor.getGuardrailsConfig().getTablesFailThreshold();
+        int in_select_cartesian_product_failure_threshold = DatabaseDescriptor.getGuardrailsConfig().getInSelectCartesianProductFailThreshold();
+        int partition_keys_in_select_failure_threshold = DatabaseDescriptor.getGuardrailsConfig().getPartitionKeysInSelectFailThreshold();
+        Set<ConsistencyLevel> write_consistency_levels_disallowed = DatabaseDescriptor.getGuardrailsConfig().getWriteConsistencyLevelsDisallowed();
         try
         {
-            // System.setProperty(SSTableFormat.FORMAT_DEFAULT_PROP, SSTableFormat.Type.BIG.name);
+            DatabaseDescriptor.setHcdGuardrailsDefaults(true);
+            DatabaseDescriptor.getGuardrailsConfig().applyConfig();
+            DatabaseDescriptor.setSelectedSSTableFormat(BigFormat.getInstance());
             DatabaseDescriptor.getRawConfig().num_tokens = 17;
             DatabaseDescriptor.getGuardrailsConfig().setTombstonesThreshold(DatabaseDescriptor.getGuardrailsConfig().getTombstoneWarnThreshold(), 100001);
             DatabaseDescriptor.setBatchSizeFailThresholdInKiB(641);
+            DatabaseDescriptor.getGuardrailsConfig().setColumnsPerTableThreshold(DatabaseDescriptor.getGuardrailsConfig().getColumnsPerTableWarnThreshold(), 201);;
+            DatabaseDescriptor.getGuardrailsConfig().setFieldsPerUDTThreshold(DatabaseDescriptor.getGuardrailsConfig().getFieldsPerUDTWarnThreshold(), 101);
+            DatabaseDescriptor.getGuardrailsConfig().setCollectionSizeThreshold(new DataStorageSpec.LongBytesBound.LongBytesBound(10481, DataStorageSpec.DataStorageUnit.KIBIBYTES), DatabaseDescriptor.getGuardrailsConfig().getCollectionSizeFailThreshold());
+            DatabaseDescriptor.getGuardrailsConfig().setItemsPerCollectionThreshold(201, DatabaseDescriptor.getGuardrailsConfig().getItemsPerCollectionFailThreshold());
+            DatabaseDescriptor.getGuardrailsConfig().setTablesThreshold(101, 201);
+            DatabaseDescriptor.getGuardrailsConfig().setInSelectCartesianProductThreshold(DatabaseDescriptor.getGuardrailsConfig().getInSelectCartesianProductWarnThreshold(), 26);
+            DatabaseDescriptor.getGuardrailsConfig().setPartitionKeysInSelectThreshold(DatabaseDescriptor.getGuardrailsConfig().getPartitionKeysInSelectWarnThreshold(), 21);
+            DatabaseDescriptor.getGuardrailsConfig().setWriteConsistencyLevelsDisallowed(Collections.emptySet());
             startupChecks = startupChecks.withTest(StartupChecks.checkYamlConfig);
             startupChecks.verify(options);
             assertWarningLogged("Not using murmur3 partitioner (org.apache.cassandra.dht.ByteOrderedPartitioner).");
@@ -424,21 +451,34 @@ public class StartupChecksTest
             assertWarningLogged("Using `DROP COMPACT STORAGE` on tables should not be enabled.");
             assertWarningLogged("Guardrails value 100001 for tombstone_failure_threshold is too high (>100000).");
             assertWarningLogged("Guardrails value 641 for batch_size_fail_threshold_in_kb is too high (>640).");
-            
-            // Test SSTable format warning only if current format is not BTI
-            if (!"bti".equals(DatabaseDescriptor.getSelectedSSTableFormat().name()))
-                assertWarningLogged("Trie-based SSTables (bti) should always be the default (current is BIG).");
+            assertWarningLogged("Guardrails value 201 for columns_per_table_fail_threshold is too high (>200).");
+            assertWarningLogged("Guardrails value 101 for fields_per_udt_fail_threshold is too high (>100).");
+            assertWarningLogged("Guardrails value 10481KiB for collection_size_warn_threshold is too high (>10480).");
+            assertWarningLogged("Guardrails value 201 for items_per_collection_warn_threshold is too high (>200).");
+            assertWarningLogged("Guardrails value 101 for tables_warn_threshold is too high (>100).");
+            assertWarningLogged("Guardrails value 201 for tables_fail_threshold is too high (>200).");
+            assertWarningLogged("Guardrails value 26 for in_select_cartesian_product_fail_threshold is too high (>25).");
+            assertWarningLogged("Guardrails value 21 for partition_keys_in_select_fail_threshold is too high (>20).");
+            assertWarningLogged("Guardrails value \"\" for write_consistency_levels_disallowed does not contain \"ANY\".");
+            assertWarningLogged("Trie-based SSTables (bti) should always be the default (current is big).");
         }
         finally
         {
-            // if (null == sstableTypeProp)
-            //     System.clearProperty(SSTableFormat.FORMAT_DEFAULT_PROP);
-            // else
-            //     System.setProperty(SSTableFormat.FORMAT_DEFAULT_PROP, SSTableFormat.Type.BIG.name);
+            DatabaseDescriptor.setHcdGuardrailsDefaults(hcdDefaults);
+            DatabaseDescriptor.getGuardrailsConfig().applyConfig();
+            DatabaseDescriptor.setSelectedSSTableFormat(selectedSSTableType);
 
             DatabaseDescriptor.getRawConfig().num_tokens = tokens;
             DatabaseDescriptor.getGuardrailsConfig().setTombstonesThreshold(DatabaseDescriptor.getGuardrailsConfig().getTombstoneWarnThreshold(), tombstone_failure_threshold);
             DatabaseDescriptor.setBatchSizeFailThresholdInKiB(batch_size_fail_threshold_in_kb);
+            DatabaseDescriptor.getGuardrailsConfig().setColumnsPerTableThreshold(DatabaseDescriptor.getGuardrailsConfig().getColumnsPerTableWarnThreshold(), columns_per_table_failure_threshold);
+            DatabaseDescriptor.getGuardrailsConfig().setFieldsPerUDTThreshold(DatabaseDescriptor.getGuardrailsConfig().getFieldsPerUDTWarnThreshold(), fields_per_udt_failure_threshold);
+            DatabaseDescriptor.getGuardrailsConfig().setCollectionSizeThreshold(collection_size_warn_threshold_in_kb, DatabaseDescriptor.getGuardrailsConfig().getCollectionSizeWarnThreshold());
+            DatabaseDescriptor.getGuardrailsConfig().setItemsPerCollectionThreshold(items_per_collection_warn_threshold, DatabaseDescriptor.getGuardrailsConfig().getItemsPerCollectionFailThreshold());
+            DatabaseDescriptor.getGuardrailsConfig().setTablesThreshold(tables_warn_threshold, tables_failure_threshold);
+            DatabaseDescriptor.getGuardrailsConfig().setInSelectCartesianProductThreshold(DatabaseDescriptor.getGuardrailsConfig().getInSelectCartesianProductWarnThreshold(), in_select_cartesian_product_failure_threshold);
+            DatabaseDescriptor.getGuardrailsConfig().setPartitionKeysInSelectThreshold(DatabaseDescriptor.getGuardrailsConfig().getPartitionKeysInSelectWarnThreshold(), partition_keys_in_select_failure_threshold);
+            DatabaseDescriptor.getGuardrailsConfig().setWriteConsistencyLevelsDisallowed(write_consistency_levels_disallowed);
         }
     }
 
