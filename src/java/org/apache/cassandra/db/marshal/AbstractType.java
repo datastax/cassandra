@@ -33,7 +33,6 @@ import com.google.common.collect.ImmutableList;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.cql3.AssignmentTestable;
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.ColumnSpecification;
@@ -181,6 +180,16 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
     public ByteBuffer decompose(T value)
     {
         return getSerializer().serialize(value);
+    }
+
+    /**
+     * Generates a CQL literal representing the specified binary value.
+     *
+     * @param bytes the value to convert to a CQL literal.
+     */
+    public String toCQLString(ByteBuffer bytes)
+    {
+        return bytes == null ? "null" : asCQL3Type().toCQLLiteral(bytes, ProtocolVersion.CURRENT);
     }
 
     /** get a string representation of the bytes used for various identifier (NOT just for log messages) */

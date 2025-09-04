@@ -592,7 +592,7 @@ public final class ColumnMetadata extends ColumnSpecification implements Selecta
             return "";
 
         StringBuilder sb = new StringBuilder();
-        sb.append(defs.next().name);
+        sb.append(defs.next().name.toCQLString());
         while (defs.hasNext())
             sb.append(", ").append(defs.next().name);
         return sb.toString();
@@ -611,7 +611,7 @@ public final class ColumnMetadata extends ColumnSpecification implements Selecta
      *
      * This is the same than the column type, except for non-frozen collections where it's the 'valueComparator'
      * of the collection.
-     * 
+     *
      * This method should not be used to get value type of non-frozon UDT.
      */
     public AbstractType<?> cellValueType()
