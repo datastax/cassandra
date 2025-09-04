@@ -20,6 +20,7 @@ package org.apache.cassandra.test.microbench.instance;
 
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.ExecutorService;
@@ -29,6 +30,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
 import com.google.common.base.Throwables;
+
+import org.apache.commons.codec.digest.MurmurHash3;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
@@ -76,6 +79,52 @@ public abstract class ReadTest extends CQLTester
     @Param({"1"})
     int threadCount = 1;
 
+    @Param({"0"})
+    double deletionsRatio = 0;
+
+    @Param({"EQUAL"})
+    DeletionSpec deletionSpec = DeletionSpec.EQUAL;
+
+    public enum DeletionPattern
+    {
+        RANDOM,
+        FROM_START,
+        SPREAD;
+    }
+
+    public enum DeletionSpec
+    {
+        EQUAL("picid = ?", 0),
+        SINGLETON_RANGE("picid >= ? AND picid <= ?", 0, 0),
+        RANGE_TO_NEXT("picid >= ? AND picid < ?", 0, -1),
+        RANGE_10("picid >= ? AND picid < ?", 0, 10),
+        RANGE_FROM_START("picid <= ?", 0);
+
+        final int[] argumentShifts;
+        final String spec;
+
+        DeletionSpec(String spec, int... argumentShifts)
+        {
+            this.argumentShifts = argumentShifts;
+            this.spec = spec;
+        }
+
+        Object[] convertArgs(Object[] args, ReadTest test)
+        {
+            Object[] result = new Object[1 + argumentShifts.length];
+            result[0] = args[0];
+            long column = (Long) args[1];
+            for (int i = 0; i < argumentShifts.length; ++i)
+                result[i + 1] = column + (argumentShifts[i] >= 0 ? argumentShifts[i] : test.getDiffToNext() * -argumentShifts[i]);
+            return result;
+        }
+    }
+
+    @Param({"RANDOM"})
+    DeletionPattern deletionPattern = DeletionPattern.RANDOM;
+
+    long deletionCount;
+
     ExecutorService executorService;
 
     @Setup(Level.Trial)
@@ -118,6 +167,19 @@ public abstract class ReadTest extends CQLTester
             performWrite(writeStatement, i, BATCH);
         if (i < count)
             performWrite(writeStatement, i, count - i);
+
+        deletionCount = Math.min((long) (count * deletionsRatio), count);
+        if (deletionCount > 0)
+        {
+            String deleteStatement = "DELETE FROM " + table + " WHERE userid = ? AND " + deletionSpec.spec;
+            System.err.println("Deleting " + deletionCount + " using " + deleteStatement);
+
+            for (i = 0; i <= deletionCount - BATCH; i += BATCH)
+                performDelete(deleteStatement, i, BATCH);
+            if (i < deletionCount)
+                performDelete(deleteStatement, i, deletionCount - i);
+        }
+
         long writeLength = System.currentTimeMillis() - writeStart;
         System.err.format("... done in %.3f s.\n", writeLength / 1000.0);
 
@@ -154,6 +216,11 @@ public abstract class ReadTest extends CQLTester
 
     abstract Object[] writeArguments(long i);
 
+    long getDiffToNext()
+    {
+        return 1;
+    }
+
     public void performWrite(String writeStatement, long ofs, long count) throws Throwable
     {
         if (threadCount == 1)
@@ -179,6 +246,60 @@ public abstract class ReadTest extends CQLTester
                                                    try
                                                    {
                                                        execute(writeStatement, writeArguments(pos));
+                                                       return 1;
+                                                   }
+                                                   catch (Throwable throwable)
+                                                   {
+                                                       throw Throwables.propagate(throwable);
+                                                   }
+                                               }));
+        }
+        long done = 0;
+        for (Future<Integer> f : futures)
+            done += f.get();
+        assert count == done;
+    }
+
+    long deleteIndex(long index)
+    {
+        switch (deletionPattern)
+        {
+            case FROM_START:
+                return index;
+            case RANDOM:
+                return Integer.remainderUnsigned(MurmurHash3.hash32(index), count);
+            case SPREAD:
+                return index * count / deletionCount;
+            default:
+                throw new AssertionError();
+        }
+    }
+
+    public void performDelete(String deleteStatement, long ofs, long count) throws Throwable
+    {
+        if (threadCount == 1)
+            performDeleteSerial(deleteStatement, ofs, count);
+        else
+            performDeleteThreads(deleteStatement, ofs, count);
+    }
+
+    public void performDeleteSerial(String deleteStatement, long ofs, long count) throws Throwable
+    {
+        for (long i = ofs; i < ofs + count; ++i)
+            execute(deleteStatement, deletionSpec.convertArgs(writeArguments(deleteIndex(i)), this));
+    }
+
+    public void performDeleteThreads(String deleteStatement, long ofs, long count) throws Throwable
+    {
+        List<Future<Integer>> futures = new ArrayList<>();
+        for (long i = 0; i < count; ++i)
+        {
+            long pos = ofs + i;
+            futures.add(executorService.submit(() ->
+                                               {
+                                                   try
+                                                   {
+                                                       execute(deleteStatement, deletionSpec.convertArgs(writeArguments(deleteIndex(pos)), ReadTest.this));
                                                        return 1;
                                                    }
                                                    catch (Throwable throwable)

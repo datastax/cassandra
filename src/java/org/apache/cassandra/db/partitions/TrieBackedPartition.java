@@ -53,7 +53,6 @@ import org.apache.cassandra.db.tries.Direction;
 import org.apache.cassandra.db.tries.InMemoryBaseTrie;
 import org.apache.cassandra.db.tries.InMemoryDeletionAwareTrie;
 import org.apache.cassandra.db.tries.InMemoryTrie;
-import org.apache.cassandra.db.tries.Trie;
 import org.apache.cassandra.db.tries.TrieEntriesIterator;
 import org.apache.cassandra.db.tries.TrieSet;
 import org.apache.cassandra.db.tries.TrieSpaceExhaustedException;
@@ -513,16 +512,18 @@ public class TrieBackedPartition implements Partition
         final boolean reversed;
         final ColumnFilter selection;
         final DeletionTime partitionLevelDeletion;
+        final DeletionAwareTrie<Object, TrieTombstoneMarker> trie;
         final Row staticRow;
 
-        protected UnfilteredIterator(ColumnFilter selection, Trie<Object> trie, boolean reversed)
+        protected UnfilteredIterator(ColumnFilter selection, DeletionAwareTrie<Object, TrieTombstoneMarker> trie, boolean reversed)
         {
             this(selection, trie, reversed, TrieBackedPartition.this.partitionLevelDeletion());
         }
 
-        private UnfilteredIterator(ColumnFilter selection, Trie<Object> trie, boolean reversed, DeletionTime partitionLevelDeletion)
+        private UnfilteredIterator(ColumnFilter selection, DeletionAwareTrie<Object, TrieTombstoneMarker> trie, boolean reversed, DeletionTime partitionLevelDeletion)
         {
-            super(trie, Direction.fromBoolean(reversed));
+            super(trie.mergedTrieSwitchable((x, y) -> x instanceof RowData ? x : y), Direction.fromBoolean(reversed));
+            this.trie = trie;
             this.selection = selection;
             this.reversed = reversed;
             this.partitionLevelDeletion = partitionLevelDeletion;
@@ -595,6 +596,17 @@ public class TrieBackedPartition implements Partition
         {
             // nothing to close
         }
+
+        @Override
+        public boolean stopIssuingTombstones()
+        {
+            ((DeletionAwareTrie.DeletionsStopControl) cursor).stopIssuingDeletions(this);
+
+            Unfiltered next = peekNextIfAvailable();
+            if (next != null && next.isRangeTombstoneMarker())
+                consumeNext();
+            return true;
+        }
     }
 
     public UnfilteredRowIterator unfilteredIterator(ColumnFilter selection, ByteComparable[] bounds, boolean reversed)
@@ -603,8 +615,7 @@ public class TrieBackedPartition implements Partition
             return UnfilteredRowIterators.noRowsIterator(metadata, partitionKey, staticRow(), partitionLevelDeletion(), reversed);
 
         DeletionAwareTrie<Object, TrieTombstoneMarker> slicedTrie = trie.intersect(TrieSet.ranges(BYTE_COMPARABLE_VERSION, bounds));
-        Trie<Object> mergedTrie = slicedTrie.mergedTrie((x, y) -> x instanceof RowData ? x : y);
-        return new RecombiningUnfilteredRowIterator(new UnfilteredIterator(selection, mergedTrie, reversed));
+        return new RecombiningUnfilteredRowIterator(new UnfilteredIterator(selection, slicedTrie, reversed));
     }
 
     public UnfilteredRowIterator unfilteredIterator(ColumnFilter selection, Slices slices, boolean reversed)

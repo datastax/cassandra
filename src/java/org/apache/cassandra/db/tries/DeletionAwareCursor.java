@@ -170,6 +170,43 @@ public interface DeletionAwareCursor<T, D extends RangeState<D>> extends Cursor<
         }
     }
 
+    /// A variant of [LiveAndDeletionsMergeCursor] that can be asked to stop issuing deletion markers.
+    class SwitchableLiveAndDeletionsMergeCursor<T, D extends RangeState<D>, Z>
+    extends LiveAndDeletionsMergeCursor<T, D, Z>
+    implements DeletionAwareTrie.DeletionsStopControl
+    {
+        boolean stopIssuingDeletions = false;
+
+        SwitchableLiveAndDeletionsMergeCursor(BiFunction<T, D, Z> resolver, DeletionAwareCursor<T, D> c1)
+        {
+            super(resolver, c1);
+        }
+
+        public void stopIssuingDeletions(ResettingTransitionsReceiver receiver)
+        {
+            stopIssuingDeletions = true;
+            // drop any already open deletion branch
+            switch (state)
+            {
+                case AT_C2:
+                    // we need to exit the deletion branch at the next advance
+                    c2 = RangeCursor.empty(direction, byteComparableVersion());
+                    break;
+                default:
+                    state = state.C1_ONLY;
+                    break;
+            }
+        }
+
+        @Override
+        int postAdvance(int depth)
+        {
+            if (stopIssuingDeletions)
+                return depth;
+            return super.postAdvance(depth);
+        }
+    }
+
     /// A cursor presenting the deletion markers of a deletion-aware trie.
     ///
     /// This cursor combines all deletion branches into a single trie. Because it is not known where a deletion branch

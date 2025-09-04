@@ -50,6 +50,25 @@ class RecombiningUnfilteredRowIterator extends WrappingUnfilteredRowIterator
     }
 
     @Override
+    public boolean stopIssuingTombstones()
+    {
+        if (!wrapped.stopIssuingTombstones())
+            return false;
+
+        if (nextPrepared && next == null)
+            return true; // this is already exhausted
+
+        // clear all buffered state that includes tombstones
+        if (bufferedTwo != null && bufferedTwo.isRangeTombstoneMarker())
+            bufferedTwo = null;
+        if (bufferedOne != null && bufferedOne.isRangeTombstoneMarker())
+            bufferedOne = bufferedTwo;  // can be null
+        if (nextPrepared && next.isRangeTombstoneMarker())
+            nextPrepared = false;
+        return true;
+    }
+
+    @Override
     public boolean hasNext()
     {
         return computeNext() != null;
