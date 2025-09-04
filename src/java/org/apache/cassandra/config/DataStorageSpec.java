@@ -201,6 +201,14 @@ public abstract class DataStorageSpec
         }
 
         /**
+         * @return the amount of data storage in kibibytes
+         */
+        public long toKibibytes()
+        {
+            return unit().toKibibytes(quantity());
+        }
+
+        /**
          * @return the amount of data storage in bytes
          */
         public long toBytes()
