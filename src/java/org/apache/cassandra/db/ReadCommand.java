@@ -20,7 +20,6 @@ package org.apache.cassandra.db;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
@@ -38,12 +37,9 @@ import com.google.common.collect.Sets;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.cql3.CqlBuilder;
-import org.apache.cassandra.cql3.statements.SelectOptions;
 import org.apache.cassandra.db.filter.ClusteringIndexFilter;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.filter.DataLimits;
-import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.filter.TombstoneOverwhelmingException;
 import org.apache.cassandra.db.partitions.PartitionIterator;
@@ -598,7 +594,7 @@ public abstract class ReadCommand extends AbstractReadQuery
                 Threshold guardrail = shouldRespectTombstoneThresholds()
                                                 ? Guardrails.scannedTombstones
                                                 : DefaultGuardrail.DefaultThreshold.NEVER_TRIGGERED;
-                return guardrail.newCounter(ReadCommand.this::toCQLString, true, null);
+                return guardrail.newCounter(ReadCommand.this::toCQLString, false, null);
             }
 
             private MetricRecording()
@@ -752,8 +748,6 @@ public abstract class ReadCommand extends AbstractReadQuery
 
     public abstract Verb verb();
 
-    protected abstract void appendCQLWhereClause(CqlBuilder builder);
-
     // Skip purgeable tombstones. We do this because it's safe to do (post-merge of the memtable and sstable at least), it
     // can save us some bandwith, and avoid making us throw a TombstoneOverwhelmingException for purgeable tombstones (which
     // are to some extend an artefact of compaction lagging behind and hence counting them is somewhat unintuitive).
@@ -776,50 +770,6 @@ public abstract class ReadCommand extends AbstractReadQuery
             }
         }
         return Transformation.apply(iterator, new WithoutPurgeableTombstones());
-    }
-
-    /**
-     * Recreate the CQL string corresponding to this query.
-     * <p>
-     * Note that in general the returned string will not be exactly the original user string, first
-     * because there isn't always a single syntax for a given query,  but also because we don't have
-     * all the information needed (we know the non-PK columns queried but not the PK ones as internally
-     * we query them all). So this shouldn't be relied too strongly, but this should be good enough for
-     * debugging purpose which is what this is for.
-     */
-    @Override
-    public String toCQLString()
-    {
-        CqlBuilder builder = new CqlBuilder();
-        builder.append("SELECT ").append(columnFilter().toCQLString());
-        builder.append(" FROM ").append(metadata().keyspace).append('.').append(metadata().name);
-        appendCQLWhereClause(builder);
-
-        if (limits() != DataLimits.NONE)
-            builder.append(' ').append(limits());
-
-        builder.appendOptions(b -> {
-
-            IndexHints indexHints = rowFilter().indexHints;
-            Set<String> included = new HashSet<>();
-            for (IndexMetadata i : indexHints.included)
-                included.add(i.name);
-            Set<String> excluded = new HashSet<>();
-            for (IndexMetadata i : indexHints.excluded)
-                excluded.add(i.name);
-
-            b.append(SelectOptions.INCLUDED_INDEXES, included)
-             .append(SelectOptions.EXCLUDED_INDEXES, excluded)
-             .append(SelectOptions.ANN_OPTIONS, rowFilter().annOptions().toCQLString());
-        });
-
-        return builder.toString();
-    }
-
-    // Monitorable interface
-    public String name()
-    {
-        return toCQLString();
     }
 
     @SuppressWarnings("resource") // resultant iterators are closed by their callers

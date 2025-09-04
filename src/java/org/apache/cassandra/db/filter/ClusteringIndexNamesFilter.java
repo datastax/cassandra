@@ -161,7 +161,8 @@ public class ClusteringIndexNamesFilter extends AbstractClusteringIndexFilter
         return sb.append(')').toString();
     }
 
-    public String toCQLString(TableMetadata metadata)
+    @Override
+    public String toCQLString(TableMetadata metadata, boolean maskValues)
     {
         if (metadata.clusteringColumns().isEmpty() || clusterings.isEmpty())
             return "";
@@ -183,7 +184,7 @@ public class ClusteringIndexNamesFilter extends AbstractClusteringIndexFilter
             sb.append(i++ == 0 ? "" : ", ");
             if (multipleColumns)
                 sb.append('(');
-            sb.append(clustering.toCQLString(metadata));
+            sb.append(clustering.toCQLString(metadata, maskValues));
             if (multipleColumns)
                 sb.append(')');
         }

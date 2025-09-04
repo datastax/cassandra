@@ -153,7 +153,7 @@ public interface ClusteringIndexFilter
     public Kind kind();
 
     public String toString(TableMetadata metadata);
-    public String toCQLString(TableMetadata metadata);
+    public String toCQLString(TableMetadata metadata, boolean maskValues);
 
     public interface Serializer
     {

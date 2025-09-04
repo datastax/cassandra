@@ -76,18 +76,18 @@ public class VirtualTableSinglePartitionReadQuery extends VirtualTableReadQuery 
     }
 
     @Override
-    protected void appendCQLWhereClause(CqlBuilder builder)
+    protected void appendCQLWhereClause(CqlBuilder builder, boolean maskValues)
     {
         builder.append(" WHERE ");
 
         builder.append(ColumnMetadata.toCQLString(metadata().partitionKeyColumns())).append(" = ");
-        DataRange.appendKeyString(builder, metadata().partitionKeyType, partitionKey().getKey());
+        DataRange.appendKeyString(builder, metadata().partitionKeyType, partitionKey().getKey(), maskValues);
 
         // We put the row filter first because the clustering index filter can end by "ORDER BY"
         if (!rowFilter().isEmpty())
             builder.append(" AND ").append(rowFilter());
 
-        String filterString = clusteringIndexFilter().toCQLString(metadata());
+        String filterString = clusteringIndexFilter().toCQLString(metadata(), maskValues);
         if (!filterString.isEmpty())
             builder.append(" AND ").append(filterString);
     }

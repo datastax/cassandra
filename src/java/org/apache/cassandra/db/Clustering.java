@@ -78,13 +78,13 @@ public interface Clustering<V> extends ClusteringPrefix<V>
         return sb.toString();
     }
 
-    public default String toCQLString(TableMetadata metadata)
+    default String toCQLString(TableMetadata metadata, boolean maskValues)
     {
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < size(); i++)
         {
             ColumnMetadata c = metadata.clusteringColumns().get(i);
-            sb.append(i == 0 ? "" : ", ").append(c.type.getString(get(i), accessor()));
+            sb.append(i == 0 ? "" : ", ").append(maskValues ? "?" : c.type.getString(get(i), accessor()));
         }
         return sb.toString();
     }

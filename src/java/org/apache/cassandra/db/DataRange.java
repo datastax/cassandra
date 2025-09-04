@@ -272,7 +272,7 @@ public class DataRange
         return String.format("range=%s pfilter=%s", keyRange.getString(metadata.partitionKeyType), clusteringIndexFilter.toString(metadata));
     }
 
-    public String toCQLString(TableMetadata metadata)
+    public String toCQLString(TableMetadata metadata, boolean maskValues)
     {
         if (isUnrestricted())
             return "";
@@ -290,33 +290,38 @@ public class DataRange
              */
             builder.append(ColumnMetadata.toCQLString(metadata.partitionKeyColumns()));
             builder.append(" = ");
-            appendKeyString(builder, metadata.partitionKeyType, ((DecoratedKey) startKey()).getKey());
+            appendKeyString(builder, metadata.partitionKeyType, ((DecoratedKey) startKey()).getKey(), maskValues);
             needAnd = true;
         }
         else
         {
             if (!startKey().isMinimum())
             {
-                appendClause(startKey(), builder, metadata, true, keyRange.isStartInclusive());
+                appendClause(startKey(), builder, metadata, true, keyRange.isStartInclusive(), maskValues);
                 needAnd = true;
             }
             if (!stopKey().isMinimum())
             {
                 if (needAnd)
                     builder.append(" AND ");
-                appendClause(stopKey(), builder, metadata, false, keyRange.isEndInclusive());
+                appendClause(stopKey(), builder, metadata, false, keyRange.isEndInclusive(), maskValues);
                 needAnd = true;
             }
         }
 
-        String filterString = clusteringIndexFilter.toCQLString(metadata);
+        String filterString = clusteringIndexFilter.toCQLString(metadata, maskValues);
         if (!filterString.isEmpty())
             builder.append(needAnd ? " AND " : "").append(filterString);
 
         return builder.toString();
     }
 
-    private void appendClause(PartitionPosition pos, CqlBuilder builder, TableMetadata metadata, boolean isStart, boolean isInclusive)
+    private void appendClause(PartitionPosition pos,
+                              CqlBuilder builder,
+                              TableMetadata metadata,
+                              boolean isStart,
+                              boolean isInclusive,
+                              boolean maskValues)
     {
         builder.append("token(");
         builder.append(ColumnMetadata.toCQLString(metadata.partitionKeyColumns()));
@@ -325,14 +330,14 @@ public class DataRange
         {
             builder.append(getOperator(isStart, isInclusive)).append(" ");
             builder.append("token(");
-            appendKeyString(builder, metadata.partitionKeyType, ((DecoratedKey)pos).getKey());
+            appendKeyString(builder, metadata.partitionKeyType, ((DecoratedKey)pos).getKey(), maskValues);
             builder.append(")");
         }
         else
         {
             Token.KeyBound keyBound = (Token.KeyBound) pos;
             builder.append(getOperator(isStart, isStart == keyBound.isMinimumBound)).append(" ");
-            builder.append(keyBound.getToken());
+            builder.append(maskValues ? "?" : keyBound.getToken());
         }
     }
 
@@ -345,18 +350,18 @@ public class DataRange
 
     // TODO: this is reused in SinglePartitionReadCommand but this should not really be here. Ideally
     // we need a more "native" handling of composite partition keys.
-    public static void appendKeyString(CqlBuilder builder, AbstractType<?> type, ByteBuffer key)
+    public static void appendKeyString(CqlBuilder builder, AbstractType<?> type, ByteBuffer key, boolean maskValues)
     {
         if (type instanceof CompositeType)
         {
             CompositeType ct = (CompositeType)type;
             ByteBuffer[] values = ct.split(key);
             for (int i = 0; i < ct.subTypes().size(); i++)
-                builder.append(i == 0 ? "" : ", ").append(ct.subTypes().get(i).getString(values[i]));
+                builder.append(i == 0 ? "" : ", ").append(maskValues ? "?" : ct.subTypes().get(i).getString(values[i]));
         }
         else
         {
-            builder.append(type.getString(key));
+            builder.append(maskValues ? "?" : type.getString(key));
         }
     }
 

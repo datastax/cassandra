@@ -326,6 +326,11 @@ public class RowFilter
         return root.toString();
     }
 
+    public String toCQLString(boolean maskValues)
+    {
+        return root.toCQLString(maskValues);
+    }
+
     public static Builder builder()
     {
         return new Builder(null, IndexHints.NONE);
@@ -409,7 +414,7 @@ public class RowFilter
          * <p>
          *
          * This wrapper method makes sure we pass a {@code RowFilter.Builder} that is always in conjunction mode to the
-         * respective {@code addToRowFilterDelegate} method. If multiple expressions are added to the row filter, this 
+         * respective {@code addToRowFilterDelegate} method. If multiple expressions are added to the row filter, this
          * method makes sure they are joined with AND in their own {@link FilterElement}.
          *
          * @param addToRowFilterDelegate a function that adds expressions / child filter elements
@@ -717,19 +722,24 @@ public class RowFilter
         @Override
         public String toString()
         {
+            return toCQLString(false);
+        }
+
+        public String toCQLString(boolean maskValues)
+        {
             StringBuilder sb = new StringBuilder();
             for (int i = 0; i < expressions.size(); i++)
             {
                 if (sb.length() > 0)
                     sb.append(isDisjunction ? " OR " : " AND ");
-                sb.append(expressions.get(i));
+                sb.append(expressions.get(i).toCQLString(maskValues));
             }
             for (int i = 0; i < children.size(); i++)
             {
                 if (sb.length() > 0)
                     sb.append(isDisjunction ? " OR " : " AND ");
                 sb.append('(');
-                sb.append(children.get(i));
+                sb.append(children.get(i).toCQLString(maskValues));
                 sb.append(')');
             }
             return sb.toString();
@@ -1007,6 +1017,14 @@ public class RowFilter
         {
             return Objects.hashCode(column.name, operator, value);
         }
+
+        @Override
+        public final String toString()
+        {
+            return toCQLString(false);
+        }
+
+        public abstract String toCQLString(boolean maskValues);
 
         public static class Serializer
         {
@@ -1313,7 +1331,7 @@ public class RowFilter
         }
 
         @Override
-        public String toString()
+        public String toCQLString(boolean maskValues)
         {
             AbstractType<?> type = column.type;
             switch (operator)
@@ -1340,7 +1358,7 @@ public class RowFilter
                 default:
                     break;
             }
-            var valueString = type.getString(value);
+            var valueString = maskValues ? "?" : type.getString(value);
             if (valueString.length() > 9)
                 valueString = valueString.substring(0, 6) + "...";
             return String.format("%s %s %s", column.name, operator, valueString);
@@ -1454,11 +1472,12 @@ public class RowFilter
             }
         }
 
-        @Override
-        public String toString()
+        public String toCQLString(boolean maskValues)
         {
             MapType<?, ?> mt = (MapType<?, ?>)column.type;
-            return String.format("%s[%s] %s %s", column.name, mt.nameComparator().getString(key), operator, mt.valueComparator().getString(value));
+            return String.format("%s[%s] %s %s", column.name, maskValues ? "?" : mt.nameComparator().getString(key),
+                                 operator,
+                                 maskValues ? "?" : mt.valueComparator().getString(value));
         }
 
         @Override
@@ -1625,10 +1644,10 @@ public class RowFilter
         }
 
         @Override
-        public String toString()
+        public String toCQLString(boolean maskValues)
         {
             return String.format("GEO_DISTANCE(%s, %s) %s %s", column.name, column.type.getString(value),
-                                 distanceOperator, FloatType.instance.getString(distance));
+                                 distanceOperator, maskValues ? "?" : FloatType.instance.getString(distance));
         }
 
         @Override
@@ -1702,7 +1721,7 @@ public class RowFilter
         }
 
         @Override
-        public String toString()
+        public String toCQLString(boolean maskValues)
         {
             return String.format("expr(%s, %s)",
                                  targetIndex.name,

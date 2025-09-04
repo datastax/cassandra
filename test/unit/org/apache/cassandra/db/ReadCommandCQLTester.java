@@ -22,11 +22,12 @@ public abstract class ReadCommandCQLTester<T extends ReadCommand> extends CQLTes
 {
     protected abstract T parseCommand(String query);
 
-    protected void assertToCQLString(String query, String expected)
+    protected void assertToCQLString(String query, String expectedDebugCQL, String expectedCQL)
     {
         T command = parseCommand(query);
+        Assertions.assertThat(command.toCQLStringWithSensitiveData())
+                  .isEqualTo(formatQuery(expectedDebugCQL));
         Assertions.assertThat(command.toCQLString())
-                  .isEqualTo(formatQuery(expected));
+                  .isEqualTo(formatQuery(expectedCQL));
     }
 }
-

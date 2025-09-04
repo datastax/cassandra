@@ -41,7 +41,6 @@ import org.apache.cassandra.db.transform.RTBoundValidator;
 import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.index.Index;
-import org.apache.cassandra.index.sai.utils.RowWithSourceTable;
 import org.apache.cassandra.io.sstable.format.RowIndexEntry;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
@@ -1147,18 +1146,18 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
     }
 
     @Override
-    protected void appendCQLWhereClause(CqlBuilder builder)
+    protected void appendCQLWhereClause(CqlBuilder builder, boolean maskValues)
     {
         builder.append(" WHERE ");
 
         builder.append(ColumnMetadata.toCQLString(metadata().partitionKeyColumns())).append(" = ");
-        DataRange.appendKeyString(builder, metadata().partitionKeyType, partitionKey().getKey());
+        DataRange.appendKeyString(builder, metadata().partitionKeyType, partitionKey().getKey(), maskValues);
 
         // We put the row filter first because the clustering index filter can end by "ORDER BY"
         if (!rowFilter().isEmpty())
-            builder.append(" AND ").append(rowFilter());
+            builder.append(" AND ").append(rowFilter().toCQLString(maskValues));
 
-        String filterString = clusteringIndexFilter().toCQLString(metadata());
+        String filterString = clusteringIndexFilter().toCQLString(metadata(), maskValues);
         if (!filterString.isEmpty())
             builder.append(" AND ").append(filterString);
     }

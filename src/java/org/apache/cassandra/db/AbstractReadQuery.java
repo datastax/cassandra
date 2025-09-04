@@ -17,13 +17,21 @@
  */
 package org.apache.cassandra.db;
 
+import java.util.Set;
+
+import com.google.common.annotations.VisibleForTesting;
+
+import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.CqlBuilder;
+import org.apache.cassandra.cql3.statements.SelectOptions;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.filter.DataLimits;
+import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.monitoring.MonitorableImpl;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterators;
+import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 
 /**
@@ -90,28 +98,64 @@ abstract class AbstractReadQuery extends MonitorableImpl implements ReadQuery
     }
 
     /**
-     * Recreate the CQL string corresponding to this query.
+     * Recreates the CQL string corresponding to this query, representing any specific values with '?',
+     * to prevent leaking sensitive data.
      * <p>
      * Note that in general the returned string will not be exactly the original user string, first
      * because there isn't always a single syntax for a given query,  but also because we don't have
      * all the information needed (we know the non-PK columns queried but not the PK ones as internally
-     * we query them all). So this shouldn't be relied too strongly, but this should be good enough for
-     * debugging purpose which is what this is for.
+     * we query them all). So this shouldn't be relied upon too strongly, but this should be good enough for
+     * logging purposes which is what this is for.
      */
     public String toCQLString()
     {
-        CqlBuilder builder = new CqlBuilder().append("SELECT ")
-                                             .append(columnFilter().toCQLString())
-                                             .append(" FROM ")
-                                             .append(metadata().keyspace)
-                                             .append('.')
-                                             .append(metadata().name);
-        appendCQLWhereClause(builder);
+        return toCQLString(true);
+    }
+
+    /**
+     * Recreates the CQL string corresponding to this query, exposing specific column values which might contain
+     * sensitive data. This should only be used for debugging purposes.
+     * <p>
+     * Note that in general the returned string will not be exactly the original user string, first
+     * because there isn't always a single syntax for a given query,  but also because we don't have
+     * all the information needed (we know the non-PK columns queried but not the PK ones as internally
+     * we query them all). So this shouldn't be relied upon too strongly, but this should be good enough for
+     * debugging purposes which is what this is for.
+     */
+    @VisibleForTesting
+    public String toCQLStringWithSensitiveData()
+    {
+        return toCQLString(false);
+    }
+
+    @VisibleForTesting
+    private String toCQLString(boolean maskValues)
+    {
+        CqlBuilder builder = new CqlBuilder();
+        builder.append("SELECT ").append(columnFilter().toCQLString());
+        builder.append(" FROM ").append(ColumnIdentifier.maybeQuote(metadata().keyspace))
+               .append('.')
+               .append(ColumnIdentifier.maybeQuote(metadata().name));
+
+        appendCQLWhereClause(builder, maskValues);
 
         if (limits() != DataLimits.NONE)
             builder.append(' ').append(limits());
+
+        // ALLOW FILTERING might not be strictly necessary
+        builder.append(" ALLOW FILTERING");
+
+        builder.appendOptions(b -> {
+            IndexHints indexHints = rowFilter().indexHints;
+            Set<String> included = IndexMetadata.toNames(indexHints.included);
+            Set<String> excluded = IndexMetadata.toNames(indexHints.excluded);
+            b.append(SelectOptions.INCLUDED_INDEXES, included)
+             .append(SelectOptions.EXCLUDED_INDEXES, excluded)
+             .append(SelectOptions.ANN_OPTIONS, rowFilter().annOptions().toCQLString());
+        });
+
         return builder.toString();
     }
 
-    protected abstract void appendCQLWhereClause(CqlBuilder builder);
+    protected abstract void appendCQLWhereClause(CqlBuilder builder, boolean maskValues);
 }
