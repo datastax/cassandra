@@ -30,7 +30,7 @@ import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 /// descendants).
 public abstract class TrieEntriesIterator<T, V> extends TriePathReconstructor implements Iterator<V>
 {
-    private final Cursor<T> cursor;
+    protected final Cursor<T> cursor;
     private final Predicate<T> predicate;
     T next;
     boolean gotNext;
@@ -68,10 +68,20 @@ public abstract class TrieEntriesIterator<T, V> extends TriePathReconstructor im
         if (!hasNext())
             throw new IllegalStateException("next without hasNext");
 
+        return mapContent(consumeNext(), keyBytes, keyPos);
+    }
+
+    protected T consumeNext()
+    {
         gotNext = false;
         T v = next;
         next = null;
-        return mapContent(v, keyBytes, keyPos);
+        return v;
+    }
+
+    protected T peekNextIfAvailable()
+    {
+        return gotNext ? next : null;
     }
 
     ByteComparable.Version byteComparableVersion()

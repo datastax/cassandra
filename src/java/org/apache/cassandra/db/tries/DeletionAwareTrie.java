@@ -445,6 +445,23 @@ extends BaseTrie<T, DeletionAwareCursor<T, D>, DeletionAwareTrie<T, D>>
         return dir -> new DeletionAwareCursor.LiveAndDeletionsMergeCursor<>(resolver, cursor(dir));
     }
 
+    /// Interface used to ask a cursor to stop issuing deletions. Provided by the cursor implementing
+    /// [#mergedTrieSwitchable].
+    interface DeletionsStopControl
+    {
+        void stopIssuingDeletions(Cursor.ResettingTransitionsReceiver receiver);
+    }
+
+    /// Returns a view of the combination of the live data and deletions in this trie as a regular [Trie], using
+    /// the provided mapping function to covert values to a common type.
+    ///
+    /// The only difference with [#mergedTrie] is that this cursor can be asked to stop visiting deletion branches
+    /// via the [DeletionsStopControl] interface.
+    default <Z> Trie<Z> mergedTrieSwitchable(BiFunction<T, D, Z> resolver)
+    {
+        return dir -> new DeletionAwareCursor.SwitchableLiveAndDeletionsMergeCursor<>(resolver, cursor(dir));
+    }
+
     static <T, D extends RangeState<D>>
     DeletionAwareTrie<T, D> empty(ByteComparable.Version byteComparableVersion)
     {
