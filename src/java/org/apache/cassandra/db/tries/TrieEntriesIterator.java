@@ -33,7 +33,7 @@ import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 /// behaviour, see [WithNullFiltering].
 public abstract class TrieEntriesIterator<T, V> extends TriePathReconstructor implements Iterator<V>
 {
-    private final Cursor<T> cursor;
+    protected final Cursor<T> cursor;
     private final Predicate<T> predicate;
     T next;
     boolean gotNext;

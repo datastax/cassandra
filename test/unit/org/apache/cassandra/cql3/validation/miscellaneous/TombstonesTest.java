@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.cql3.validation.miscellaneous;
 
+import java.util.Arrays;
 import java.util.concurrent.TimeUnit;
 
 import com.google.common.base.Throwables;
@@ -24,22 +25,43 @@ import com.google.common.base.Throwables;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.filter.TombstoneOverwhelmingException;
+import org.apache.cassandra.db.memtable.TrieMemtable;
 
 import static junit.framework.Assert.assertEquals;
 import static junit.framework.Assert.assertTrue;
 import static junit.framework.Assert.fail;
+import static org.junit.Assert.assertFalse;
 
 /**
  * Test that TombstoneOverwhelmingException gets thrown when it should be and doesn't when it shouldn't be.
  */
+@RunWith(Parameterized.class)
 public class TombstonesTest extends CQLTester
 {
+    @Parameterized.Parameter
+    public String memtableClass;
+
+    @Parameterized.Parameter(1)
+    public boolean flush;
+
+    @Parameterized.Parameters(name = "{0} flush: {1}")
+    public static Iterable<Object[]> parameters()
+    {
+        return Arrays.asList(new Object[] {"SkipListMemtable", false},
+                             new Object[] {"TrieMemtableStage1", true}, // this uses the same partition code as SkipListMemtable
+                             new Object[] {"TrieMemtableStage2", false}, // this flushes like SkipListMemtable, no need to test flushed
+                             new Object[] {"TrieMemtable", false},
+                             new Object[] {"TrieMemtable", true});
+    }
+
     static final int ORIGINAL_FAILURE_THRESHOLD = DatabaseDescriptor.getGuardrailsConfig().tombstone_failure_threshold;
     static final int FAILURE_THRESHOLD = 100;
 
@@ -65,20 +87,23 @@ public class TombstonesTest extends CQLTester
     public void testBelowThresholdSelect() throws Throwable
     {
 
-        String tableName = createTable("CREATE TABLE %s (a text, b text, c text, PRIMARY KEY (a, b));");
+        String tableName = createTable("CREATE TABLE %s (a text, b text, c text, PRIMARY KEY (a, b)) WITH memtable = {'class': '" + memtableClass + "'};");
         ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(tableName);
         long oldFailures = cfs.metric.tombstoneFailures.getCount();
         long oldWarnings = cfs.metric.tombstoneWarnings.getCount();
+        boolean tombstonesCountTowardsThresholds = flush || !(cfs.getCurrentMemtable() instanceof TrieMemtable);
 
         // insert exactly the amount of tombstones that shouldn't trigger an exception
         for (int i = 0; i < FAILURE_THRESHOLD; i++)
             execute("DELETE FROM %s WHERE a = 'key' and b = '" + i + "'");
+        if (flush)
+            flush();
 
         try
         {
             execute("SELECT * FROM %s WHERE a = 'key';");
             assertEquals(oldFailures, cfs.metric.tombstoneFailures.getCount());
-            assertEquals(oldWarnings + 1, cfs.metric.tombstoneWarnings.getCount());
+            assertEquals(oldWarnings + (tombstonesCountTowardsThresholds ? 1 : 0), cfs.metric.tombstoneWarnings.getCount());
         }
         catch (Throwable e)
         {
@@ -89,22 +114,27 @@ public class TombstonesTest extends CQLTester
     @Test
     public void testBeyondThresholdSelect() throws Throwable
     {
-        String tableName = createTable("CREATE TABLE %s (a text, b text, c text, PRIMARY KEY (a, b));");
+        String tableName = createTable("CREATE TABLE %s (a text, b text, c text, PRIMARY KEY (a, b)) WITH memtable = {'class': '" + memtableClass + "'};");
         ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(tableName);
         long oldFailures = cfs.metric.tombstoneFailures.getCount();
         long oldWarnings = cfs.metric.tombstoneWarnings.getCount();
+        boolean tombstonesCountTowardsThresholds = flush || !(cfs.getCurrentMemtable() instanceof TrieMemtable);
 
         // insert exactly the amount of tombstones that *SHOULD* trigger an exception
         for (int i = 0; i < FAILURE_THRESHOLD + 1; i++)
             execute("DELETE FROM %s WHERE a = 'key' and b = '" + i + "'");
+        if (flush)
+            flush();
 
         try
         {
             execute("SELECT * FROM %s WHERE a = 'key';");
-            fail("SELECT with tombstones beyond the threshold should have failed, but hasn't");
+            assertFalse("SELECT with tombstones beyond the threshold should have failed, but hasn't", tombstonesCountTowardsThresholds);
         }
         catch (Throwable e)
         {
+            assertTrue(memtableClass + " should not be affected by the number of tombstones", tombstonesCountTowardsThresholds);
+
             String error = "Expected exception instanceof TombstoneOverwhelmingException instead got "
                            + System.lineSeparator()
                            + Throwables.getStackTraceAsString(e);
@@ -117,7 +147,18 @@ public class TombstonesTest extends CQLTester
     @Test
     public void testAllShadowedSelect() throws Throwable
     {
-        String tableName = createTable("CREATE TABLE %s (a text, b text, c text, PRIMARY KEY (a, b));");
+        testAllShadowedSelect(false);
+    }
+
+    @Test
+    public void testAllShadowedInSeparateSSTable() throws Throwable
+    {
+        testAllShadowedSelect(true);
+    }
+
+    public void testAllShadowedSelect(boolean flushBetween) throws Throwable
+    {
+        String tableName = createTable("CREATE TABLE %s (a text, b text, c text, PRIMARY KEY (a, b)) WITH memtable = {'class': '" + memtableClass + "'};");
         ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(tableName);
         long oldFailures = cfs.metric.tombstoneFailures.getCount();
         long oldWarnings = cfs.metric.tombstoneWarnings.getCount();
@@ -126,8 +167,14 @@ public class TombstonesTest extends CQLTester
         for (int i = 0; i < FAILURE_THRESHOLD + 1; i++)
             execute("INSERT INTO %s (a, b, c) VALUES ('key', 'column" + i + "', null);");
 
+        if (flushBetween)
+            flush();
+
         // delete all with a partition level tombstone
         execute("DELETE FROM %s WHERE a = 'key'");
+
+        if (flush)
+            flush();
 
         try
         {
@@ -144,7 +191,7 @@ public class TombstonesTest extends CQLTester
     @Test
     public void testLiveShadowedCellsSelect() throws Throwable
     {
-        String tableName = createTable("CREATE TABLE %s (a text, b text, c text, PRIMARY KEY (a, b));");
+        String tableName = createTable("CREATE TABLE %s (a text, b text, c text, PRIMARY KEY (a, b)) WITH memtable = {'class': '" + memtableClass + "'};");
         ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(tableName);
         long oldFailures = cfs.metric.tombstoneFailures.getCount();
         long oldWarnings = cfs.metric.tombstoneWarnings.getCount();
@@ -154,6 +201,9 @@ public class TombstonesTest extends CQLTester
 
         // delete all with a partition level tombstone
         execute("DELETE FROM %s WHERE a = 'key'");
+
+        if (flush)
+            flush();
 
         try
         {
@@ -170,13 +220,15 @@ public class TombstonesTest extends CQLTester
     @Test
     public void testExpiredTombstones() throws Throwable
     {
-        String tableName = createTable("CREATE TABLE %s (a text, b text, c text, PRIMARY KEY (a, b)) WITH gc_grace_seconds = 1;");
+        String tableName = createTable("CREATE TABLE %s (a text, b text, c text, PRIMARY KEY (a, b)) WITH gc_grace_seconds = 1 AND memtable = {'class': '" + memtableClass + "'};");
         ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(tableName);
         long oldFailures = cfs.metric.tombstoneFailures.getCount();
         long oldWarnings = cfs.metric.tombstoneWarnings.getCount();
 
         for (int i = 0; i < FAILURE_THRESHOLD + 1; i++)
             execute("INSERT INTO %s (a, b, c) VALUES ('key', 'column" + i + "', null);");
+        if (flush)
+            flush();
 
         // not yet past gc grace - must throw a TOE
         try
@@ -211,18 +263,22 @@ public class TombstonesTest extends CQLTester
     @Test
     public void testBeyondWarnThresholdSelect() throws Throwable
     {
-        String tableName = createTable("CREATE TABLE %s (a text, b text, c text, PRIMARY KEY (a,b));");
+        String tableName = createTable("CREATE TABLE %s (a text, b text, c text, PRIMARY KEY (a,b)) WITH memtable = {'class': '" + memtableClass + "'};");
         ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(tableName);
         long oldFailures = cfs.metric.tombstoneFailures.getCount();
         long oldWarnings = cfs.metric.tombstoneWarnings.getCount();
+        boolean tombstonesCountTowardsThresholds = flush || !(cfs.getCurrentMemtable() instanceof TrieMemtable);
 
         // insert the number of tombstones that *SHOULD* trigger an Warning
         for (int i = 0; i < WARN_THRESHOLD + 1; i++)
             execute("DELETE FROM %s WHERE a = 'key' and b = '" + i + "'");
+        if (flush)
+            flush();
+
         try
         {
             execute("SELECT * FROM %s WHERE a = 'key';");
-            assertEquals(oldWarnings + 1, cfs.metric.tombstoneWarnings.getCount());
+            assertEquals(oldWarnings + (tombstonesCountTowardsThresholds ? 1 : 0), cfs.metric.tombstoneWarnings.getCount());
             assertEquals(oldFailures, cfs.metric.tombstoneFailures.getCount());
         }
         catch (Throwable e)

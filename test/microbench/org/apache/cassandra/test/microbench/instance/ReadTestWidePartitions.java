@@ -33,6 +33,12 @@ public class ReadTestWidePartitions extends ReadTest
         return new Object[] { i % partitions, i, i };
     }
 
+    @Override
+    long getDiffToNext()
+    {
+        return partitions;
+    }
+
     Object[] readArguments(long i, long offset)
     {
         return new Object[] { (i + offset) % partitions, i };
