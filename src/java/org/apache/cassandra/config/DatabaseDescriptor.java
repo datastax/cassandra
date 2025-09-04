@@ -1207,6 +1207,8 @@ public class DatabaseDescriptor
         try
         {
             guardrails = new GuardrailsOptions(conf);
+            guardrails.applyConfig();
+            guardrails.validate();
         }
         catch (IllegalArgumentException e)
         {
@@ -5582,6 +5584,17 @@ public class DatabaseDescriptor
     public static boolean isEmulateDbaasDefaults()
     {
         return conf.emulate_dbaas_defaults;
+    }
+
+    @VisibleForTesting
+    public static boolean setHcdGuardrailsDefaults(boolean hcd_guardrail_defaults)
+    {
+        return conf.hcd_guardrail_defaults = hcd_guardrail_defaults;
+    }
+
+    public static boolean isHcdGuardrailsDefaults()
+    {
+        return conf.hcd_guardrail_defaults;
     }
 
     public static PageSize getAggregationSubPageSize()
