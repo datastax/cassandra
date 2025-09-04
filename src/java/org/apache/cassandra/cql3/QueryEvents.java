@@ -34,6 +34,9 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.cql3.statements.AuthenticationStatement;
 import org.apache.cassandra.cql3.statements.BatchStatement;
+import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.metrics.ClientRequestsMetrics;
+import org.apache.cassandra.metrics.ClientRequestsMetricsProvider;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.Message;
 import org.apache.cassandra.transport.messages.ResultMessage;
@@ -84,12 +87,25 @@ public class QueryEvents
         }
     }
 
+    private void updateMetrics(CQLStatement statement, Exception cause)
+    {
+        if (statement instanceof CQLStatement.SingleKeyspaceCqlStatement)
+        {
+            ClientRequestsMetrics metrics = ClientRequestsMetricsProvider.instance.metrics(((CQLStatement.SingleKeyspaceCqlStatement) statement).keyspace());
+            if (cause instanceof InvalidRequestException)
+                metrics.allRequestsMetrics.invalid.mark();
+            else
+                metrics.allRequestsMetrics.otherErrors.mark();
+        }
+    }
+
     public void notifyQueryFailure(CQLStatement statement,
                                    String query,
                                    QueryOptions options,
                                    QueryState state,
                                    Exception cause)
     {
+        updateMetrics(statement, cause);
         try
         {
             final String maybeObfuscatedQuery = listeners.size() > 0 ? maybeObfuscatePassword(statement, query) : query;
@@ -129,6 +145,9 @@ public class QueryEvents
                                      Exception cause)
     {
         CQLStatement statement = prepared != null ? prepared.statement : null;
+
+        updateMetrics(statement, cause);
+
         String query = prepared != null ? prepared.statement.getRawCQLStatement() : null;
         try
         {
@@ -183,6 +202,10 @@ public class QueryEvents
                     queries.add(p.statement.getRawCQLStatement());
                 });
             }
+
+            if (!statements.isEmpty())
+                updateMetrics(statements.get(0), cause);
+
             try
             {
                 for (Listener listener : listeners)
