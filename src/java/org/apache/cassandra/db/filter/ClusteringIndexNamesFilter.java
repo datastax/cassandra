@@ -20,6 +20,7 @@ package org.apache.cassandra.db.filter;
 import java.io.IOException;
 import java.util.*;
 
+import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.rows.*;
@@ -161,34 +162,41 @@ public class ClusteringIndexNamesFilter extends AbstractClusteringIndexFilter
         return sb.append(')').toString();
     }
 
-    public String toCQLString(TableMetadata metadata)
+    @Override
+    public String toCQLString(TableMetadata metadata, RowFilter rowFilter)
     {
         if (metadata.clusteringColumns().isEmpty() || clusterings.isEmpty())
-            return "";
+            return rowFilter.toCQLString();
+
+        boolean isSingleColumn = metadata.clusteringColumns().size() == 1;
+        boolean isSingleClustering = clusterings.size() == 1;
 
         StringBuilder sb = new StringBuilder();
+        sb.append(isSingleColumn ? "" : '(')
+          .append(ColumnMetadata.toCQLString(metadata.clusteringColumns()))
+          .append(isSingleColumn ? "" : ')');
 
-        boolean multipleColumns = metadata.clusteringColumns().size() > 1;
-        boolean multipleClusterings = clusterings.size() > 1;
-
-        if (multipleColumns)
-            sb.append('(');
-        sb.append(ColumnMetadata.toCQLString(metadata.clusteringColumns()));
-        if (multipleColumns)
-            sb.append(')');
-        sb.append(multipleClusterings ? " IN (" : " = ");
+        sb.append(isSingleClustering ? " = " : " IN (");
         int i = 0;
         for (Clustering<?> clustering : clusterings)
         {
-            sb.append(i++ == 0 ? "" : ", ");
-            if (multipleColumns)
-                sb.append('(');
-            sb.append(clustering.toCQLString(metadata));
-            if (multipleColumns)
-                sb.append(')');
+            sb.append(i++ == 0 ? "" : ", ")
+              .append(isSingleColumn ? "" : '(')
+              .append(clustering.toCQLString(metadata))
+              .append(isSingleColumn ? "" : ')');
+
+            for (int j = 0; j < clustering.size(); j++)
+                rowFilter = rowFilter.without(metadata.clusteringColumns().get(j), Operator.EQ, clustering.bufferAt(j));
         }
-        if (multipleClusterings)
-            sb.append(')');
+        sb.append(isSingleClustering ? "" : ")");
+        rowFilter = rowFilter.without(metadata.clusteringColumns().get(0), Operator.IN);
+
+        if (!rowFilter.isEmpty())
+        {
+            String filter = rowFilter.toCQLString();
+            sb.append(filter.startsWith("ORDER BY") ? " " : " AND ");
+            sb.append(filter);
+        }
 
         appendOrderByToCQLString(metadata, sb);
         return sb.toString();

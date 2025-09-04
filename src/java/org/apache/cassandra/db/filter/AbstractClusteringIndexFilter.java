@@ -19,10 +19,10 @@ package org.apache.cassandra.db.filter;
 
 import java.io.IOException;
 
+import org.apache.cassandra.db.marshal.ReversedType;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.db.*;
-import org.apache.cassandra.db.marshal.ReversedType;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 
@@ -47,20 +47,23 @@ public abstract class AbstractClusteringIndexFilter implements ClusteringIndexFi
         return false;
     }
 
-    protected abstract void serializeInternal(DataOutputPlus out, int version) throws IOException;
-    protected abstract long serializedSizeInternal(int version);
-
     protected void appendOrderByToCQLString(TableMetadata metadata, StringBuilder sb)
     {
         if (reversed)
         {
-            sb.append(" ORDER BY (");
+            sb.append(" ORDER BY ");
             int i = 0;
             for (ColumnMetadata column : metadata.clusteringColumns())
-                sb.append(i++ == 0 ? "" : ", ").append(column.name).append(column.type instanceof ReversedType ? " ASC" : " DESC");
-            sb.append(')');
+            {
+                sb.append(i++ == 0 ? "" : ", ")
+                  .append(column.name.toCQLString())
+                  .append(column.type instanceof ReversedType ? " ASC" : " DESC");
+            }
         }
     }
+
+    protected abstract void serializeInternal(DataOutputPlus out, int version) throws IOException;
+    protected abstract long serializedSizeInternal(int version);
 
     private static class FilterSerializer implements Serializer
     {

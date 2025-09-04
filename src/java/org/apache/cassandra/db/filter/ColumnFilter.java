@@ -952,7 +952,7 @@ public abstract class ColumnFilter
                 if (s.isEmpty())
                     joiner.add(columnName);
                 else
-                    s.forEach(subSel -> joiner.add(String.format("%s%s", columnName, subSel)));
+                    s.forEach(subSel -> joiner.add(String.format("%s%s", columnName, subSel.toString(cql))));
             }
             return joiner.toString();
         }
