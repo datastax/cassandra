@@ -285,8 +285,8 @@ public class RowFilter
     }
 
     /**
-     * Returns this filter but without the provided expression. This method
-     * *assumes* that the filter contains the provided expression.
+     * Returns this filter but without the provided expression. This method *assumes* that the filter contains the
+     * provided expression, and it looks in all the levels of the filter tree.
      */
     public RowFilter without(Expression expression)
     {
@@ -297,9 +297,13 @@ public class RowFilter
         return new RowFilter(root.filter(e -> !e.equals(expression)), indexHints);
     }
 
-    public RowFilter withoutExpressions()
+    /**
+     * Returns a copy of this filter but without first level expressions with the provided column.
+     * If this filter doesn't contain the specified expressions this method will just return an identical copy of this filter.
+     */
+    public RowFilter withoutFirstLevelExpression(ColumnMetadata column)
     {
-        return NONE;
+        return restrictFirstLevel(e -> !e.column.equals(column));
     }
 
     /**
@@ -315,6 +319,11 @@ public class RowFilter
         return new RowFilter(root.filter(filter), indexHints);
     }
 
+    public RowFilter restrictFirstLevel(Predicate<Expression> filter)
+    {
+        return new RowFilter(root.filterFirstLevel(filter), indexHints);
+    }
+
     public boolean isEmpty()
     {
         return root.isEmpty();
@@ -324,6 +333,11 @@ public class RowFilter
     public String toString()
     {
         return root.toString();
+    }
+
+    public String toCQLString()
+    {
+        return root.toCQLString();
     }
 
     public static Builder builder()
@@ -409,7 +423,7 @@ public class RowFilter
          * <p>
          *
          * This wrapper method makes sure we pass a {@code RowFilter.Builder} that is always in conjunction mode to the
-         * respective {@code addToRowFilterDelegate} method. If multiple expressions are added to the row filter, this 
+         * respective {@code addToRowFilterDelegate} method. If multiple expressions are added to the row filter, this
          * method makes sure they are joined with AND in their own {@link FilterElement}.
          *
          * @param addToRowFilterDelegate a function that adds expressions / child filter elements
@@ -625,6 +639,14 @@ public class RowFilter
             return builder.build();
         }
 
+        public FilterElement filterFirstLevel(Predicate<Expression> filter)
+        {
+            FilterElement.Builder builder = new Builder(isDisjunction);
+            expressions.stream().filter(filter).forEach(builder.expressions::add);
+            builder.children.addAll(children);
+            return builder.build();
+        }
+
         public List<FilterElement> children()
         {
             return children;
@@ -717,20 +739,35 @@ public class RowFilter
         @Override
         public String toString()
         {
+            return toCQLString();
+        }
+
+        public String toCQLString()
+        {
             StringBuilder sb = new StringBuilder();
-            for (int i = 0; i < expressions.size(); i++)
+            for (Expression expression : expressions)
             {
+                if (expression.isOrderingExpression())
+                    continue;
                 if (sb.length() > 0)
                     sb.append(isDisjunction ? " OR " : " AND ");
-                sb.append(expressions.get(i));
+                sb.append(expression.toCQLString());
             }
-            for (int i = 0; i < children.size(); i++)
+            for (FilterElement child : children)
             {
                 if (sb.length() > 0)
                     sb.append(isDisjunction ? " OR " : " AND ");
                 sb.append('(');
-                sb.append(children.get(i));
+                sb.append(child.toCQLString());
                 sb.append(')');
+            }
+            for (Expression expression : expressions)
+            {
+                if (!expression.isOrderingExpression())
+                    continue;
+                if (sb.length() > 0)
+                    sb.append(' ');
+                sb.append(expression.toCQLString());
             }
             return sb.toString();
         }
@@ -877,6 +914,11 @@ public class RowFilter
             return null;
         }
 
+        public boolean isOrderingExpression()
+        {
+            return operator == Operator.ANN || operator == Operator.BM25 || operator == Operator.ORDER_BY_ASC || operator == Operator.ORDER_BY_DESC;
+        }
+
         protected boolean isSatisfiedBy(AbstractType<?> type, ByteBuffer foundValue)
         {
             if (foundValue == null)
@@ -1006,6 +1048,17 @@ public class RowFilter
         public int hashCode()
         {
             return Objects.hashCode(column.name, operator, value);
+        }
+
+        @Override
+        public String toString()
+        {
+            return toCQLString();
+        }
+
+        public String toCQLString()
+        {
+            return "";
         }
 
         public static class Serializer
@@ -1313,7 +1366,7 @@ public class RowFilter
         }
 
         @Override
-        public String toString()
+        public String toCQLString()
         {
             AbstractType<?> type = column.type;
             switch (operator)
@@ -1336,14 +1389,21 @@ public class RowFilter
                 case ORDER_BY_ASC:
                 case ORDER_BY_DESC:
                     // These don't have a value, so we return here to prevent an error calling type.getString(value)
-                    return String.format("%s %s", column.name, operator);
+                    return String.format("ORDER BY %s %s", column.name.toCQLString(), operator);
+                case ANN:
+                    return String.format("ORDER BY %s ANN OF %s", column.name.toCQLString(), valueAsCQLString(type, value));
                 default:
                     break;
             }
-            var valueString = type.getString(value);
+            return String.format("%s %s %s", column.name.toCQLString(), operator, valueAsCQLString(type, value));
+        }
+
+        private static String valueAsCQLString(AbstractType<?> type, ByteBuffer value)
+        {
+            var valueString = type.toCQLString(value);
             if (valueString.length() > 9)
                 valueString = valueString.substring(0, 6) + "...";
-            return String.format("%s %s %s", column.name, operator, valueString);
+            return valueString;
         }
 
         @Override
@@ -1455,10 +1515,14 @@ public class RowFilter
         }
 
         @Override
-        public String toString()
+        public String toCQLString()
         {
-            MapType<?, ?> mt = (MapType<?, ?>)column.type;
-            return String.format("%s[%s] %s %s", column.name, mt.nameComparator().getString(key), operator, mt.valueComparator().getString(value));
+            MapType<?, ?> mt = (MapType<?, ?>) column.type;
+            return String.format("%s[%s] %s %s",
+                                 column.name.toCQLString(),
+                                 mt.nameComparator().toCQLString(key),
+                                 operator,
+                                 mt.valueComparator().toCQLString(value));
         }
 
         @Override
@@ -1625,10 +1689,13 @@ public class RowFilter
         }
 
         @Override
-        public String toString()
+        public String toCQLString()
         {
-            return String.format("GEO_DISTANCE(%s, %s) %s %s", column.name, column.type.getString(value),
-                                 distanceOperator, FloatType.instance.getString(distance));
+            return String.format("GEO_DISTANCE(%s, %s) %s %s",
+                                 column.name.toCQLString(),
+                                 column.type.toCQLString(value),
+                                 distanceOperator,
+                                 FloatType.instance.toCQLString(distance));
         }
 
         @Override
@@ -1702,7 +1769,7 @@ public class RowFilter
         }
 
         @Override
-        public String toString()
+        public String toCQLString()
         {
             return String.format("expr(%s, %s)",
                                  targetIndex.name,

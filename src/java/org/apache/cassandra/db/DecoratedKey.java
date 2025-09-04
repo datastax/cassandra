@@ -170,6 +170,8 @@ public abstract class DecoratedKey implements PartitionPosition, FilterKey
      * Generate CQL representation of this partition key for the given table.
      * For single-column keys: "k = 0"
      * For multi-column keys: "k1 = 1 AND k2 = 2"
+     *
+     * @param metadata the table metadata
      */
     public String toCQLString(TableMetadata metadata)
     {
@@ -189,7 +191,7 @@ public abstract class DecoratedKey implements PartitionPosition, FilterKey
 
     private static String toCQLString(ColumnMetadata metadata, ByteBuffer key)
     {
-        return String.format("%s = %s", metadata.name.toCQLString(), metadata.type.getString(key));
+        return String.format("%s = %s", metadata.name.toCQLString(), metadata.type.toCQLString(key));
     }
 
     public Token getToken()

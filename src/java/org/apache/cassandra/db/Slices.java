@@ -24,6 +24,9 @@ import java.util.*;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Iterators;
 
+import org.apache.cassandra.cql3.CqlBuilder;
+import org.apache.cassandra.cql3.Operator;
+import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.db.marshal.AbstractType;
@@ -146,7 +149,14 @@ public abstract class Slices implements Iterable<Slice>
      */
     public abstract boolean intersects(Slice slice);
 
-    public abstract String toCQLString(TableMetadata metadata);
+    /**
+     * Returns a CQL string representing this slice and the specified {@link RowFilter}.
+     *
+     * @param metadata the table metadata
+     * @param rowFilter a row filter
+     * @return a CQL string representing this slice and the specified {@link RowFilter}
+     */
+    public abstract String toCQLString(TableMetadata metadata, RowFilter rowFilter);
 
     /**
      * Checks if this <code>Slices</code> is empty.
@@ -555,9 +565,10 @@ public abstract class Slices implements Iterable<Slice>
             return sb.append("}").toString();
         }
 
-        public String toCQLString(TableMetadata metadata)
+        @Override
+        public String toCQLString(TableMetadata metadata, RowFilter rowFilter)
         {
-            StringBuilder sb = new StringBuilder();
+            CqlBuilder builder = new CqlBuilder();
 
             // In CQL, condition are expressed by column, so first group things that way,
             // i.e. for each column, we create a list of what each slice contains on that column
@@ -596,10 +607,10 @@ public abstract class Slices implements Iterable<Slice>
                 if (first.isEQ())
                 {
                     if (needAnd)
-                        sb.append(" AND ");
+                        builder.append(" AND ");
                     needAnd = true;
 
-                    sb.append(column.name);
+                    builder.append(column.name.toCQLString());
 
                     Set<ByteBuffer> values = new LinkedHashSet<>();
                     for (int j = 0; j < componentInfo.size(); j++)
@@ -607,50 +618,66 @@ public abstract class Slices implements Iterable<Slice>
 
                     if (values.size() == 1)
                     {
-                        sb.append(" = ").append(column.type.getString(first.startValue));
+                        builder.append(" = ").append(column.type.toCQLString(first.startValue));
                     }
                     else
                     {
-                        sb.append(" IN (");
+                        builder.append(" IN (");
                         int j = 0;
                         for (ByteBuffer value : values)
-                            sb.append(j++ == 0 ? "" : ", ").append(column.type.getString(value));
-                        sb.append(")");
+                        {
+                            builder.append(j++ == 0 ? "" : ", ").append(column.type.toCQLString(value));
+                        }
+                        builder.append(')');
                     }
                 }
                 else
                 {
                     boolean isReversed = column.isReversedType();
+                    Operator operator;
 
                     // As said above, we assume (without checking) that this means all ComponentOfSlice for this column
                     // are the same, so we only bother about the first.
                     if (first.startValue != null)
                     {
                         if (needAnd)
-                            sb.append(" AND ");
+                            builder.append(" AND ");
                         needAnd = true;
-                        sb.append(column.name);
+                        builder.append(column.name.toCQLString());
                         if (isReversed)
-                            sb.append(first.startInclusive ? " <= " : " < ");
+                            operator = first.startInclusive ? Operator.LTE : Operator.LT;
                         else
-                            sb.append(first.startInclusive ? " >= " : " > ");
-                        sb.append(column.type.getString(first.startValue));
+                            operator = first.startInclusive ? Operator.GTE : Operator.GT;
+                        builder.append(' ').append(operator).append(' ')
+                          .append(column.type.toCQLString(first.startValue));
                     }
                     if (first.endValue != null)
                     {
                         if (needAnd)
-                            sb.append(" AND ");
+                            builder.append(" AND ");
                         needAnd = true;
-                        sb.append(column.name);
+                        builder.append(column.name.toCQLString());
                         if (isReversed)
-                            sb.append(first.endInclusive ? " >= " : " > ");
+                            operator = first.endInclusive ? Operator.GTE : Operator.GT;
                         else
-                            sb.append(first.endInclusive ? " <= " : " < ");
-                        sb.append(column.type.getString(first.endValue));
+                            operator = first.endInclusive ? Operator.LTE : Operator.LT;
+                        builder.append(' ').append(operator).append(' ')
+                          .append(column.type.toCQLString(first.endValue));
                     }
                 }
+
+                // Remove index restrictions for this clustering column from the row filter, so we don't print them twice.
+                // The row filter can contain expressions copying the clustering filter restrictions, because indexed
+                // clustering key restrictions are added to the row filter at the CQL layer for easier consumption
+                // downstream. However, due to CQL validation the row filter won't contain additional expressions for
+                // columns that are included in the clustering filter, besided the aformentioned copies.
+                rowFilter = rowFilter.withoutFirstLevelExpression(column);
             }
-            return sb.toString();
+
+            // Append the row filter.
+            builder.append(rowFilter, true);
+
+            return builder.toString();
         }
 
         // An somewhat adhoc utility class only used by nameAsCQLString
@@ -771,9 +798,10 @@ public abstract class Slices implements Iterable<Slice>
             return "ALL";
         }
 
-        public String toCQLString(TableMetadata metadata)
+        @Override
+        public String toCQLString(TableMetadata metadata, RowFilter rowFilter)
         {
-            return "";
+            return rowFilter.toCQLString();
         }
     }
 
@@ -852,7 +880,8 @@ public abstract class Slices implements Iterable<Slice>
             return "NONE";
         }
 
-        public String toCQLString(TableMetadata metadata)
+        @Override
+        public String toCQLString(TableMetadata metadata, RowFilter rowFilter)
         {
             return "";
         }
