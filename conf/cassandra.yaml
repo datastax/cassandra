@@ -2340,14 +2340,5 @@ drop_compact_storage_enabled: false
 #
 storage_compatibility_mode: NONE
 
-# Emulates DataStax Constellation database-as-a-service defaults.
-#
-# When enabled, some defaults are modified to match those used by DataStax Constellation (DataStax cloud data
-# platform). This includes (but is not limited to) stricter guardrails defaults.
-#
-# This can be used as an convenience to develop and test applications meant to run on DataStax Constellation.
-#
-# Warning: when enabled, the updated defaults reflect those of DataStax Constellation _at the time_ of the currently
-#                 used DSE release. This is a best-effort emulation of said defaults. Further, all nodes must use the same
-#                 config value.
-# emulate_dbaas_defaults: false
+# Changes defaults considered production safest for HCD users
+# hcd_guardrail_defaults: false
