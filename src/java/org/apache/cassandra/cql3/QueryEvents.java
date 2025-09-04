@@ -35,6 +35,10 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.cql3.statements.AuthenticationStatement;
 import org.apache.cassandra.cql3.statements.BatchStatement;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.exceptions.RequestFailureException;
+import org.apache.cassandra.exceptions.RequestTimeoutException;
+import org.apache.cassandra.exceptions.UnavailableException;
+import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.metrics.ClientRequestsMetrics;
 import org.apache.cassandra.metrics.ClientRequestsMetricsProvider;
 import org.apache.cassandra.service.QueryState;
@@ -94,6 +98,12 @@ public class QueryEvents
             ClientRequestsMetrics metrics = ClientRequestsMetricsProvider.instance.metrics(((CQLStatement.SingleKeyspaceCqlStatement) statement).keyspace());
             if (cause instanceof InvalidRequestException)
                 metrics.allRequestsMetrics.invalid.mark();
+            else if (cause instanceof UnavailableException)
+                metrics.allRequestsMetrics.unavailables.mark();
+            else if (cause instanceof RequestTimeoutException)
+                metrics.allRequestsMetrics.timeouts.mark();
+            else if (cause instanceof RequestFailureException)
+                metrics.allRequestsMetrics.failures.mark();
             else
                 metrics.allRequestsMetrics.otherErrors.mark();
         }
