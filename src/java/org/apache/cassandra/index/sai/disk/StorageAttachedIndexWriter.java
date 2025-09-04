@@ -317,6 +317,16 @@ public class StorageAttachedIndexWriter implements SSTableFlushObserver
         // Mark the write aborted, so we can short-circuit any further operations on the component writers.
         aborted = true;
         
+        // For non-compaction and non-flush, make any indexes involved in this transaction non-queryable,
+        // as they will likely not match the backing table.
+        // For compaction and flush: the task should be aborted and new sstables will not be added to tracker.
+        // We do not want to mark the index as non-queryable on compaction and flush because otherwise
+        // the index status would be propagated to the other nodes and that would make querying the index impossible
+        // also on the other nodes. If the problem with compaction or flush repeats, then it is better to fail
+        // on this node only and let the rest of the cluster operate normally.
+        if (fromIndex && opType != OperationType.COMPACTION && opType != OperationType.FLUSH)
+            indices.forEach(StorageAttachedIndex::makeIndexNonQueryable);
+        
         for (PerIndexWriter perIndexWriter : perIndexWriters)
         {
             try

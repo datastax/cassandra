@@ -41,6 +41,7 @@ import static net.bytebuddy.matcher.ElementMatchers.named;
 import static org.apache.cassandra.distributed.api.Feature.GOSSIP;
 import static org.apache.cassandra.distributed.api.Feature.NETWORK;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.fail;
 import static org.junit.Assert.assertFalse;
 
 public class IndexStreamingFailureTest extends TestBaseImpl
@@ -108,9 +109,26 @@ public class IndexStreamingFailureTest extends TestBaseImpl
         rs = second.executeInternal(String.format("SELECT pk FROM %s.%s WHERE pk = ?", KEYSPACE, table), 1);
         assertThat(rs.length).isEqualTo(0);
 
-        // ...and querying the index also returns nothing, as the index for the streamed SSTable was never built.
-        rs = second.executeInternal(String.format("SELECT pk FROM %s.%s WHERE v = ?", KEYSPACE, table), "v1");
-        assertThat(rs.length).isEqualTo(0);
+        if (streamEntireSSTables)
+        {
+            // ...and querying the index also returns nothing, as the index for the streamed SSTable was never built.
+            rs = second.executeInternal(String.format("SELECT pk FROM %s.%s WHERE v = ?", KEYSPACE, table), "v1");
+            assertThat(rs.length).isEqualTo(0);
+        }
+        else
+        {
+            // The injected ByteBuddy error will cause the index build to fail, so querying the index should fail.
+            try
+            {
+                second.executeInternal(String.format("SELECT pk FROM %s.%s WHERE v = ?", KEYSPACE, table), "v1");
+                fail("Expected IndexNotAvailableException exception");
+            }
+            catch (Exception e)
+            {
+                assertThat(e.getClass().getName()).contains("IndexNotAvailableException");
+                assertThat(e.getMessage()).contains("The secondary index 'non_entire_file_test_v_index' is not yet available");
+            }
+        }
 
         // On restart, ensure that the index remains querable and does not include the data we attempted to stream. 
         ClusterUtils.stopUnchecked(second);
