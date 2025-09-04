@@ -2552,3 +2552,6 @@ storage_compatibility_mode: NONE
 #                 used DSE release. This is a best-effort emulation of said defaults. Further, all nodes must use the same
 #                 config value.
 # emulate_dbaas_defaults: false
+
+# Changes defaults considered production safest for HCD users
+# hcd_guardrail_defaults: false

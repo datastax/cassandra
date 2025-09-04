@@ -27,10 +27,12 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.config.GuardrailsOptions;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 
 import static java.lang.String.format;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
 
 public class GuardrailSAIIndexesTest extends GuardrailTester
@@ -62,36 +64,53 @@ public class GuardrailSAIIndexesTest extends GuardrailTester
         DatabaseDescriptor.getGuardrailsConfig().setStorageAttachedIndexesTotalThreshold(-1, defaultSAITotalFailureThreshold);
     }
 
-//    @Test
-//    public void testDefaultsOnPrem()
-//    {
-//        testDefaults(false);
-//    }
-//
-//    @Test
-//    public void testDefaultsDBAAS()
-//    {
-//        testDefaults(true);
-//    }
-//
-//    public void testDefaults(boolean dbaas)
-//    {
-//        boolean previous = DatabaseDescriptor.isEmulateDbaasDefaults();
-//        try
-//        {
-//            DatabaseDescriptor.setEmulateDbaasDefaults(dbaas);
-//
-//            GuardrailsConfig config = new GuardrailsConfig();
-//            config.applyConfig();
-//
-//            assertEquals(GuardrailsConfig.DEFAULT_INDEXES_PER_TABLE_THRESHOLD, (int) config.sai_indexes_per_table_failure_threshold);
-//            assertEquals(GuardrailsConfig.DEFAULT_INDEXES_TOTAL_THRESHOLD, (int) config.sai_indexes_total_failure_threshold);
-//        }
-//        finally
-//        {
-//            DatabaseDescriptor.setEmulateDbaasDefaults(previous);
-//        }
-//    }
+    @Test
+    public void testNoProfileDefault()
+    {
+        testDefaults(false, false);
+    }
+
+    @Test
+    public void testDefaultsDBAAS()
+    {
+        testDefaults(true, false);
+    }
+
+    @Test
+    public void testDefaultsHCD()
+    {
+        testDefaults(true, false);
+    }
+
+    @Test
+    public void testInvalidConfig()
+    {
+        assertThatThrownBy(() -> testDefaults(true, true))
+            .isInstanceOf(AssertionError.class)
+            .hasMessageContaining("Cannot set both hcd_guardrail_defaults and emulate_dbaas_defaults to true");
+    }
+
+    public void testDefaults(boolean dbaas, boolean hcd)
+    {
+        boolean previousDbaas = DatabaseDescriptor.isEmulateDbaasDefaults();
+        boolean previousHcd = DatabaseDescriptor.isHcdGuardrailsDefaults();
+        try
+        {
+            DatabaseDescriptor.setEmulateDbaasDefaults(dbaas);
+            DatabaseDescriptor.setHcdGuardrailsDefaults(hcd);
+
+            GuardrailsOptions config = DatabaseDescriptor.getGuardrailsConfig();
+            config.applyConfig();
+
+            assertEquals(GuardrailsOptions.DEFAULT_INDEXES_PER_TABLE_THRESHOLD, config.getStorageAttachedIndexesPerTableFailThreshold());
+            assertEquals(GuardrailsOptions.DEFAULT_INDEXES_TOTAL_THRESHOLD, config.getStorageAttachedIndexesTotalFailThreshold());
+        }
+        finally
+        {
+            DatabaseDescriptor.setEmulateDbaasDefaults(previousDbaas);
+            DatabaseDescriptor.setHcdGuardrailsDefaults(previousHcd);
+        }
+    }
 
     @Test
     public void testPerTableFailureThreshold() throws Throwable

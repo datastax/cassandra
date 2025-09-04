@@ -53,6 +53,7 @@ import com.vdurmont.semver4j.Semver;
 import net.jpountz.lz4.LZ4Factory;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.Config;
+import org.apache.cassandra.config.DataStorageSpec;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.StartupChecksOptions;
 import org.apache.cassandra.cql3.QueryProcessor;
@@ -69,9 +70,11 @@ import org.apache.cassandra.exceptions.StartupException;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.UUIDBasedSSTableId;
+import org.apache.cassandra.io.sstable.format.bti.BtiFormat;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.PathUtils;
+import org.apache.cassandra.locator.SimpleSnitch;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.Schema;
@@ -888,13 +891,19 @@ public class StartupChecks
             if (Murmur3Partitioner.instance != DatabaseDescriptor.getPartitioner())
                 logger.warn("Not using murmur3 partitioner ({}). {}", DatabaseDescriptor.getPartitioner().getClass().getName(), WARN_SUFFIX);
 
+            if (DatabaseDescriptor.getEndpointSnitch() instanceof SimpleSnitch)
+                logger.warn("SimpleSnitch is only for dev/test environments. {}", WARN_SUFFIX);
+
             if (DatabaseDescriptor.getNumTokens() > 16)
                 logger.warn("num_tokens {} too high. Values over 16 poorly impact repairs and node bootstrapping/decommissioning. {}",
                             DatabaseDescriptor.getNumTokens(), WARN_SUFFIX);
 
+            if (!BtiFormat.NAME.equals(DatabaseDescriptor.getSelectedSSTableFormat().name()))
+                logger.warn("Trie-based SSTables (bti) should always be the default (current is {}). {}", DatabaseDescriptor.getSelectedSSTableFormat().name(), WARN_SUFFIX);
+
             // ServerTestUtils.prepare() enables transient replication, so we have to skip this when we're inside a unit test
             if(DatabaseDescriptor.isTransientReplicationEnabled() && "cassandra.testtag_IS_UNDEFINED".equals(CassandraRelevantProperties.TEST_CASSANDRA_TESTTAG.getString()))
-                throw new StartupException(StartupException.ERR_WRONG_CONFIG, "Transient Replication cannot not be used in HCD.");
+                throw new StartupException(StartupException.ERR_WRONG_CONFIG, "Transient Replication cannot be used in HCD.");
 
             if(DatabaseDescriptor.getMaterializedViewsEnabled())
                 logger.warn("Materialised Views should not be enabled. {}", WARN_SUFFIX);
@@ -917,8 +926,42 @@ public class StartupChecks
                 logger.warn("Guardrails value {} for batch_size_fail_threshold_in_kb is too high (>640). {}",
                         DatabaseDescriptor.getBatchSizeFailThresholdInKiB(), WARN_SUFFIX);
 
-            if ("big".equals(DatabaseDescriptor.getSelectedSSTableFormat().name()))
-                logger.warn("Trie-based SSTables (bti) should always be the default (current is BIG). {}", WARN_SUFFIX);
+            if (DatabaseDescriptor.getGuardrailsConfig().getColumnsPerTableFailThreshold() > 200)
+                logger.warn("Guardrails value {} for columns_per_table_fail_threshold is too high (>200). {}",
+                            DatabaseDescriptor.getGuardrailsConfig().getColumnsPerTableFailThreshold(), WARN_SUFFIX);
+
+            if (DatabaseDescriptor.getGuardrailsConfig().getFieldsPerUDTFailThreshold() > 100)
+                logger.warn("Guardrails value {} for fields_per_udt_fail_threshold is too high (>100). {}",
+                            DatabaseDescriptor.getGuardrailsConfig().getFieldsPerUDTFailThreshold(), WARN_SUFFIX);
+
+            DataStorageSpec.LongBytesBound collectionSizeWarnThreshold = DatabaseDescriptor.getGuardrailsConfig().getCollectionSizeWarnThreshold();
+            if (collectionSizeWarnThreshold != null && collectionSizeWarnThreshold.toKibibytes() > 10480)
+                logger.warn("Guardrails value {} for collection_size_warn_threshold is too high (>10480). {}",
+                            collectionSizeWarnThreshold, WARN_SUFFIX);
+
+            if (DatabaseDescriptor.getGuardrailsConfig().getItemsPerCollectionWarnThreshold() > 200)
+                logger.warn("Guardrails value {} for items_per_collection_warn_threshold is too high (>200). {}",
+                            DatabaseDescriptor.getGuardrailsConfig().getItemsPerCollectionWarnThreshold(), WARN_SUFFIX);
+
+            if (DatabaseDescriptor.getGuardrailsConfig().getTablesWarnThreshold() > 100)
+                logger.warn("Guardrails value {} for tables_warn_threshold is too high (>100). {}",
+                            DatabaseDescriptor.getGuardrailsConfig().getTablesWarnThreshold(), WARN_SUFFIX);
+
+            if (DatabaseDescriptor.getGuardrailsConfig().getTablesFailThreshold() > 200)
+                logger.warn("Guardrails value {} for tables_fail_threshold is too high (>200). {}",
+                            DatabaseDescriptor.getGuardrailsConfig().getTablesFailThreshold(), WARN_SUFFIX);
+
+            if (DatabaseDescriptor.getGuardrailsConfig().getInSelectCartesianProductFailThreshold() > 25)
+                logger.warn("Guardrails value {} for in_select_cartesian_product_fail_threshold is too high (>25). {}",
+                            DatabaseDescriptor.getGuardrailsConfig().getInSelectCartesianProductFailThreshold(), WARN_SUFFIX);
+
+            if (DatabaseDescriptor.getGuardrailsConfig().getPartitionKeysInSelectFailThreshold() > 20)
+                logger.warn("Guardrails value {} for partition_keys_in_select_fail_threshold is too high (>20). {}",
+                            DatabaseDescriptor.getGuardrailsConfig().getPartitionKeysInSelectFailThreshold(), WARN_SUFFIX);
+
+            if (!DatabaseDescriptor.getGuardrailsConfig().getWriteConsistencyLevelsDisallowed().contains("ANY"))
+                logger.warn("Guardrails value \"{}\" for write_consistency_levels_disallowed does not contain \"ANY\". {}",
+                            StringUtils.join(DatabaseDescriptor.getGuardrailsConfig().getWriteConsistencyLevelsDisallowed(), ','), WARN_SUFFIX);
         }
     };
 
