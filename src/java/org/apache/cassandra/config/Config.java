@@ -806,6 +806,7 @@ public class Config
     public volatile boolean log_out_of_token_range_requests = true;
     public volatile boolean reject_out_of_token_range_requests = false;
     public boolean emulate_dbaas_defaults = false;
+    public boolean hcd_guardrail_defaults = false;
 
     /**
      * The intial capacity for creating RangeTombstoneList.
