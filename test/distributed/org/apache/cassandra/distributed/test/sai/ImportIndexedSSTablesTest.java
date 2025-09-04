@@ -47,6 +47,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import static org.apache.cassandra.distributed.api.Feature.GOSSIP;
 import static org.apache.cassandra.distributed.api.Feature.NETWORK;
+import static org.assertj.core.api.Assertions.fail;
 
 public class ImportIndexedSSTablesTest extends TestBaseImpl
 {
@@ -102,8 +103,18 @@ public class ImportIndexedSSTablesTest extends TestBaseImpl
 
         rs = first.executeInternal(String.format("SELECT pk FROM %s.%s WHERE pk = ?", KEYSPACE, table), 1);
         assertThat(rs.length).isEqualTo(0);
-        rs = first.executeInternal(String.format("SELECT pk FROM %s.%s WHERE v = ?", KEYSPACE, table), "v1");
-        assertThat(rs.length).isEqualTo(0);
+
+        try
+        {
+            // The injected ByteBuddy error will cause the index build to fail, so querying the index should fail.
+            first.executeInternal(String.format("SELECT pk FROM %s.%s WHERE v = ?", KEYSPACE, table), "v1");
+            fail("Expected IndexNotAvailableException exception");
+        }
+        catch (Exception e)
+        {
+            assertThat(e.getClass().getName()).contains("IndexNotAvailableException");
+            assertThat(e.getMessage()).contains("The secondary index 'fail_during_import_test_v_index' is not yet available");
+        }
     }
 
     @Test
