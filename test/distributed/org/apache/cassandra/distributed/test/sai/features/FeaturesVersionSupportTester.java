@@ -33,6 +33,7 @@ import org.apache.cassandra.index.sai.disk.format.Version;
 import org.assertj.core.api.Assertions;
 
 import static net.bytebuddy.matcher.ElementMatchers.named;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import static org.apache.cassandra.distributed.api.ConsistencyLevel.ALL;
 import static org.apache.cassandra.distributed.api.ConsistencyLevel.ONE;
 import static org.apache.cassandra.distributed.api.Feature.GOSSIP;
@@ -61,7 +62,16 @@ public abstract class FeaturesVersionSupportTester extends TestBaseImpl
         
         FeaturesVersionSupportTester.version = version;
         cluster = init(Cluster.build(2)
-                              .withInstanceInitializer((cl, n) -> BB.install(cl, n, version))
+                              .withInstanceInitializer((cl, n) -> {
+                                  // Disable synthetic score to ensure compatibility between ED and older versions.
+                                  // ED enables it by default but older versions don't support it.
+                                  // Note: In 5.0, Ordering.useSyntheticScore() uses CassandraRelevantProperties
+                                  // which caches values at class loading time, so we must set this property before
+                                  // the classes are loaded. In the main branch, Ordering uses System.getProperty() directly,
+                                  // which is why this workaround isn't needed there.
+                                  CassandraRelevantProperties.SAI_ANN_USE_SYNTHETIC_SCORE.setBoolean(false);
+                                  BB.install(cl, n, version);
+                              })
                               .withConfig(config -> config.with(GOSSIP).with(NETWORK))
                               .start(), 1);
         
