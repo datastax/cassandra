@@ -76,7 +76,8 @@ import org.apache.cassandra.service.QueryInfoTracker;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 
-import static org.apache.cassandra.net.Verb.READ_REQ;
+import static org.apache.cassandra.net.Verb.READ_RSP;
+import static org.apache.cassandra.net.Verb.RANGE_RSP;
 
 /**
  * Base class for testing various components which deal with read responses
@@ -249,7 +250,7 @@ public abstract class AbstractReadResponseTest
         ReadResponse response = isDigestResponse
                                 ? ReadResponse.createDigestResponse(data, command)
                                 : ReadResponse.createRemoteDataResponse(data, repairedDataDigest, hasPendingRepair, command, fromVersion);
-        return Message.builder(READ_REQ, response)
+        return Message.builder(command.isRangeRequest() ? RANGE_RSP : READ_RSP, response)
                       .from(from)
                       .build();
     }
