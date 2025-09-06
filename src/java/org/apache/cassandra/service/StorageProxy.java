@@ -603,6 +603,7 @@ public class StorageProxy implements StorageProxyMBean
             metrics.casWriteMetrics.serviceTimeMetrics.addNano(endTime - queryStartNanoTime);
             metrics.writeMetricsForLevel(consistencyForPaxos).executionTimeMetrics.addNano(latency);
             metrics.writeMetricsForLevel(consistencyForPaxos).serviceTimeMetrics.addNano(endTime - queryStartNanoTime);
+            Keyspace.openAndGetStore(metadata).metric.coordinatorCasWriteLatency.update(latency, NANOSECONDS);
         }
     }
 
@@ -2111,7 +2112,7 @@ public class StorageProxy implements StorageProxyMBean
             metrics.casReadMetrics.serviceTimeMetrics.addNano(endTime - queryStartNanoTime);
             metrics.readMetricsForLevel(consistencyLevel).executionTimeMetrics.addNano(latency);
             metrics.readMetricsForLevel(consistencyLevel).serviceTimeMetrics.addNano(endTime - queryStartNanoTime);
-            Keyspace.open(metadata.keyspace).getColumnFamilyStore(metadata.name).metric.coordinatorReadLatency.update(latency, TimeUnit.NANOSECONDS);
+            Keyspace.openAndGetStore(metadata).metric.coordinatorCasReadLatency.update(latency, TimeUnit.NANOSECONDS);
         }
         return result;
     }
