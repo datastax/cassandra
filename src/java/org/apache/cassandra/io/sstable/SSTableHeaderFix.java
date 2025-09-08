@@ -315,7 +315,16 @@ public abstract class SSTableHeaderFix
     {
         Stream.of(path)
               .flatMap(SSTableHeaderFix::maybeExpandDirectory)
-              .filter(p -> Descriptor.fromFileWithComponent(new File(p)).right.type == SSTableFormat.Components.DATA.type)
+              .filter(p -> {
+                  try
+                  {
+                      return Descriptor.fromFileWithComponent(new File(p)).right.type == SSTableFormat.Components.DATA.type;
+                  }
+                  catch (IllegalArgumentException e) // ignore the '.keep' files
+                  {
+                      return false;
+                  }
+              })
               .map(Path::toString)
               .map((String file) -> Descriptor.fromFile(new File(file)))
               .forEach(descriptors::add);
