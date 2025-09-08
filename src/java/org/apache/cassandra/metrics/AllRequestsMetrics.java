@@ -38,6 +38,7 @@ public class AllRequestsMetrics extends ClientRequestMetrics
         otherErrors = Metrics.meter(factory.createMetricName(namePrefix + "OtherErrors"));
     }
 
+    @Override
     public void release()
     {
         super.release();
