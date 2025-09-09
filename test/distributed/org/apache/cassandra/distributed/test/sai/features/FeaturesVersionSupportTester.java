@@ -68,6 +68,7 @@ public abstract class FeaturesVersionSupportTester extends TestBaseImpl
                                   // which caches values at class loading time, so we must set this property before
                                   // the classes are loaded. In the main branch, Ordering uses System.getProperty() directly,
                                   // which is why this workaround isn't needed there.
+                                  // checkstyle: suppress below 'blockSystemPropertyUsage'
                                   System.setProperty("cassandra.sai.ann_use_synthetic_score", "false");
                                   BB.install(cl, n, version);
                               })
