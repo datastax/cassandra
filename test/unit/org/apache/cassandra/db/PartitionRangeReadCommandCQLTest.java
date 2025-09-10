@@ -87,6 +87,12 @@ public class PartitionRangeReadCommandCQLTest extends ReadCommandCQLTester<Parti
         assertToCQLString("SELECT * FROM %s WHERE v = 0 AND k = 0 AND c1 = 1 AND c2 < 2", "SELECT * FROM %s WHERE k = 0 AND c1 = 1 AND c2 < 2 AND v = 0 ALLOW FILTERING");
         assertToCQLString("SELECT * FROM %s WHERE v = 0 AND k = 0 AND c1 = 1 AND c2 >= 2", "SELECT * FROM %s WHERE k = 0 AND c1 = 1 AND c2 >= 2 AND v = 0 ALLOW FILTERING");
         assertToCQLString("SELECT * FROM %s WHERE v = 0 AND k = 0 AND c1 = 1 AND c2 <= 2", "SELECT * FROM %s WHERE k = 0 AND c1 = 1 AND c2 <= 2 AND v = 0 ALLOW FILTERING");
+
+        // test with multi-column partition key and index
+        createTable("CREATE TABLE %s (k1 int, k2 int, c int, v int, PRIMARY KEY ((k1, k2), c))");
+        createIndex("CREATE INDEX ON %s(v)");
+        assertToCQLString("SELECT * FROM %s WHERE v = 1 AND k1 = 1 AND k2 = 2", "SELECT * FROM %s WHERE k1 = 1 AND k2 = 2 AND v = 1 ALLOW FILTERING");
+        assertToCQLString("SELECT * FROM %s WHERE v = 1 AND k1 = 1 AND k2 = 2 AND c = 3", "SELECT * FROM %s WHERE k1 = 1 AND k2 = 2 AND c = 3 AND v = 1 ALLOW FILTERING");
     }
 
     @Override
