@@ -1152,9 +1152,9 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
     }
 
     @Override
-    public void appendCQLWhereClause(CqlBuilder builder)
+    public void appendCQLWhereClause(CqlBuilder builder, boolean redact)
     {
-        SinglePartitionReadQuery.super.appendCQLWhereClause(builder);
+        SinglePartitionReadQuery.super.appendCQLWhereClause(builder, redact);
     }
 
     protected void serializeSelection(DataOutputPlus out, int version) throws IOException
