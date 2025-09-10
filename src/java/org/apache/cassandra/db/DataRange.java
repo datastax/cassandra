@@ -318,9 +318,7 @@ public class DataRange
              * key are the same. If that is the case, we want to print the query as an equality on the partition key
              * rather than a token range, as if it was a partition query, for better readability.
              */
-            builder.append(ColumnMetadata.toCQLString(metadata.partitionKeyColumns()));
-            builder.append(" = ");
-            appendKeyString(builder, metadata.partitionKeyType, ((DecoratedKey) startKey()).getKey());
+            builder.append(((DecoratedKey) startKey()).toCQLString(metadata));
             needAnd = true;
         }
         else
