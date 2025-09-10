@@ -95,8 +95,8 @@ public class VirtualTablePartitionRangeReadQuery extends VirtualTableReadQuery i
     }
 
     @Override
-    public void appendCQLWhereClause(CqlBuilder builder)
+    public void appendCQLWhereClause(CqlBuilder builder, boolean redact)
     {
-        PartitionRangeReadQuery.super.appendCQLWhereClause(builder);
+        PartitionRangeReadQuery.super.appendCQLWhereClause(builder, redact);
     }
 }
