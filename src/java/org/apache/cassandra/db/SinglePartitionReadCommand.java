@@ -1151,8 +1151,7 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
     {
         builder.append(" WHERE ");
 
-        builder.append(ColumnMetadata.toCQLString(metadata().partitionKeyColumns())).append(" = ");
-        DataRange.appendKeyString(builder, metadata().partitionKeyType, partitionKey().getKey());
+        builder.append(partitionKey().toCQLString(metadata()));
 
         // We put the row filter first because the clustering index filter can end by "ORDER BY"
         if (!rowFilter().isEmpty())
