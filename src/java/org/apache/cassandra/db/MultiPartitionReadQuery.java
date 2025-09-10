@@ -28,7 +28,7 @@ public interface MultiPartitionReadQuery extends ReadQuery
 {
     List<DataRange> ranges();
 
-    default void appendCQLWhereClause(CqlBuilder builder)
+    default void appendCQLWhereClause(CqlBuilder builder, boolean redact)
     {
         List<DataRange> ranges = ranges();
         if (ranges.size() == 1 && ranges.get(0).isUnrestricted() && rowFilter().isEmpty())
@@ -36,10 +36,10 @@ public interface MultiPartitionReadQuery extends ReadQuery
 
         // Append the data ranges.
         TableMetadata metadata = metadata();
-        boolean hasRanges = appendRanges(builder);
+        boolean hasRanges = appendRanges(builder, redact);
 
         // Append the clustering index filter and the row filter.
-        String filter = ranges.get(0).clusteringIndexFilter.toCQLString(metadata, rowFilter());
+        String filter = ranges.get(0).clusteringIndexFilter.toCQLString(metadata, rowFilter(), redact);
         if (!filter.isEmpty())
         {
             if (filter.startsWith("ORDER BY"))
@@ -52,13 +52,13 @@ public interface MultiPartitionReadQuery extends ReadQuery
         }
     }
 
-    private boolean appendRanges(CqlBuilder builder)
+    private boolean appendRanges(CqlBuilder builder, boolean redact)
     {
         List<DataRange> ranges = ranges();
         boolean hasRangeRestrictions = false;
         if (ranges().size() == 1)
         {
-            String rangeString = ranges.get(0).toCQLString(metadata());
+            String rangeString = ranges.get(0).toCQLString(metadata(), redact);
             if (!rangeString.isEmpty())
             {
                 builder.append(" WHERE ").append(rangeString);
@@ -72,7 +72,7 @@ public interface MultiPartitionReadQuery extends ReadQuery
             {
                 if (i > 0)
                     builder.append(" OR ");
-                builder.append(ranges.get(i).toCQLString(metadata()));
+                builder.append(ranges.get(i).toCQLString(metadata(), redact));
             }
             builder.append(')');
             hasRangeRestrictions = true;

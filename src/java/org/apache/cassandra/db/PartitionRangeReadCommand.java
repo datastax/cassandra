@@ -388,9 +388,9 @@ public class PartitionRangeReadCommand extends ReadCommand implements PartitionR
     }
 
     @Override
-    public void appendCQLWhereClause(CqlBuilder builder)
+    public void appendCQLWhereClause(CqlBuilder builder, boolean redact)
     {
-        PartitionRangeReadQuery.super.appendCQLWhereClause(builder);
+        PartitionRangeReadQuery.super.appendCQLWhereClause(builder, redact);
     }
 
     @Override
