@@ -349,9 +349,9 @@ public class RowFilter
         return root.toString();
     }
 
-    public String toCQLString()
+    public String toCQLString(boolean redact)
     {
-        return root.toCQLString();
+        return root.toCQLString(redact);
     }
 
     public static Builder builder()
@@ -753,10 +753,10 @@ public class RowFilter
         @Override
         public String toString()
         {
-            return toCQLString();
+            return toCQLString(false);
         }
 
-        public String toCQLString()
+        public String toCQLString(boolean redact)
         {
             StringBuilder sb = new StringBuilder();
             for (int i = 0; i < expressions.size(); i++)
@@ -766,14 +766,14 @@ public class RowFilter
                     continue;
                 if (sb.length() > 0)
                     sb.append(isDisjunction ? " OR " : " AND ");
-                sb.append(expression.toCQLString());
+                sb.append(expression.toCQLString(redact));
             }
             for (int i = 0; i < children.size(); i++)
             {
                 if (sb.length() > 0)
                     sb.append(isDisjunction ? " OR " : " AND ");
                 sb.append('(');
-                sb.append(children.get(i).toCQLString());
+                sb.append(children.get(i).toCQLString(redact));
                 sb.append(')');
             }
             for (int i = 0; i < expressions.size(); i++)
@@ -783,7 +783,7 @@ public class RowFilter
                     continue;
                 if (sb.length() > 0)
                     sb.append(' ');
-                sb.append(expression.toCQLString());
+                sb.append(expression.toCQLString(redact));
             }
             return sb.toString();
         }
@@ -1069,10 +1069,10 @@ public class RowFilter
         @Override
         public String toString()
         {
-            return toCQLString();
+            return toCQLString(false);
         }
 
-        public String toCQLString()
+        public String toCQLString(boolean redact)
         {
             return "";
         }
@@ -1382,7 +1382,7 @@ public class RowFilter
         }
 
         @Override
-        public String toCQLString()
+        public String toCQLString(boolean redact)
         {
             AbstractType<?> type = column.type;
             switch (operator)
@@ -1407,20 +1407,35 @@ public class RowFilter
                     // These don't have a value, so we return here to prevent an error calling type.getString(value)
                     return String.format("ORDER BY %s %s", column.name, operator);
                 case ANN:
-                    return String.format("ORDER BY %s ANN OF %s", column.name, valueAsCQLString(type, value));
+                    return String.format("ORDER BY %s ANN OF %s", column.name, truncateValue(type.toCQLString(value, redact)));
+                case LIKE_PREFIX:
+                    return likeToCQLString("'%s%%'", type, redact);
+                case LIKE_SUFFIX:
+                    return likeToCQLString("'%%%s'", type, redact);
+                case LIKE_CONTAINS:
+                    return likeToCQLString("'%%%s%%'", type, redact);
+                case LIKE_MATCHES:
+                    return likeToCQLString("'%s'", type, redact);
                 default:
                     break;
             }
-            return String.format("%s %s %s", column.name.toCQLString(), operator, valueAsCQLString(type, value));
+            return String.format("%s %s %s", column.name.toCQLString(), operator, truncateValue(type.toCQLString(value, redact)));
         }
 
-        private static String valueAsCQLString(AbstractType<?> type, ByteBuffer value)
+        private String likeToCQLString(String pattern, AbstractType<?> type, boolean redact)
         {
-            var valueString = type.toCQLString(value);
-            if (valueString.length() > 9)
-                valueString = valueString.substring(0, 6) + "...";
-            return valueString;
+            if (redact)
+                return String.format("%s LIKE ?", column.name);
+
+            String stringValue = String.format(pattern, type.getString(value));
+            return String.format("%s LIKE %s", column.name, truncateValue(stringValue));
         }
+
+        private static String truncateValue(String value)
+        {
+            return value.length() > 9 ? value.substring(0, 6) + "..." : value;
+        }
+
 
         @Override
         protected Kind kind()
@@ -1531,14 +1546,14 @@ public class RowFilter
         }
 
         @Override
-        public String toCQLString()
+        public String toCQLString(boolean redact)
         {
             MapType<?, ?> mt = (MapType<?, ?>) column.type;
             return String.format("%s[%s] %s %s",
                                  column.name.toCQLString(),
-                                 mt.nameComparator().toCQLString(key),
+                                 mt.nameComparator().toCQLString(key, redact),
                                  operator,
-                                 mt.valueComparator().toCQLString(value));
+                                 mt.valueComparator().toCQLString(value, redact));
         }
 
         @Override
@@ -1705,13 +1720,13 @@ public class RowFilter
         }
 
         @Override
-        public String toCQLString()
+        public String toCQLString(boolean redact)
         {
             return String.format("GEO_DISTANCE(%s, %s) %s %s",
                                  column.name.toCQLString(),
-                                 column.type.toCQLString(value),
+                                 column.type.toCQLString(value, redact),
                                  distanceOperator,
-                                 FloatType.instance.toCQLString(distance));
+                                 FloatType.instance.toCQLString(distance, redact));
         }
 
         @Override
@@ -1785,7 +1800,7 @@ public class RowFilter
         }
 
         @Override
-        public String toCQLString()
+        public String toCQLString(boolean redact)
         {
             return String.format("expr(%s, %s)",
                                  targetIndex.name,

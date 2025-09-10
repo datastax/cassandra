@@ -148,7 +148,7 @@ public abstract class Slices implements Iterable<Slice>
      */
     public abstract boolean intersects(Slice slice);
 
-    public abstract String toCQLString(TableMetadata metadata, RowFilter rowFilter);
+    public abstract String toCQLString(TableMetadata metadata, RowFilter rowFilter, boolean redact);
 
     /**
      * Checks if this <code>Slices</code> is empty.
@@ -558,7 +558,7 @@ public abstract class Slices implements Iterable<Slice>
         }
 
         @Override
-        public String toCQLString(TableMetadata metadata, RowFilter rowFilter)
+        public String toCQLString(TableMetadata metadata, RowFilter rowFilter, boolean redact)
         {
             StringBuilder sb = new StringBuilder();
 
@@ -610,7 +610,7 @@ public abstract class Slices implements Iterable<Slice>
 
                     if (values.size() == 1)
                     {
-                        sb.append(" = ").append(column.type.toCQLString(first.startValue));
+                        sb.append(" = ").append(column.type.toCQLString(first.startValue, redact));
                         rowFilter = rowFilter.withoutFirstLevelExpression(column, Operator.EQ, first.startValue);
                     }
                     else
@@ -619,7 +619,7 @@ public abstract class Slices implements Iterable<Slice>
                         int j = 0;
                         for (ByteBuffer value : values)
                         {
-                            sb.append(j++ == 0 ? "" : ", ").append(column.type.toCQLString(value));
+                            sb.append(j++ == 0 ? "" : ", ").append(column.type.toCQLString(value, redact));
                             rowFilter = rowFilter.withoutFirstLevelExpression(column, Operator.EQ, value);
                         }
                         sb.append(')');
@@ -643,7 +643,7 @@ public abstract class Slices implements Iterable<Slice>
                         else
                             operator = first.startInclusive ? Operator.GTE : Operator.GT;
                         sb.append(' ').append(operator).append(' ')
-                          .append(column.type.toCQLString(first.startValue));
+                          .append(column.type.toCQLString(first.startValue, redact));
                         rowFilter = rowFilter.withoutFirstLevelExpression(column, operator, first.startValue);
                     }
                     if (first.endValue != null)
@@ -657,7 +657,7 @@ public abstract class Slices implements Iterable<Slice>
                         else
                             operator = first.endInclusive ? Operator.LTE : Operator.LT;
                         sb.append(' ').append(operator).append(' ')
-                          .append(column.type.toCQLString(first.endValue));
+                          .append(column.type.toCQLString(first.endValue, redact));
                         rowFilter = rowFilter.withoutFirstLevelExpression(column, operator, first.endValue);
                     }
                 }
@@ -667,7 +667,7 @@ public abstract class Slices implements Iterable<Slice>
             // Append the row filter.
             if (!rowFilter.isEmpty())
             {
-                String filter = rowFilter.toCQLString();
+                String filter = rowFilter.toCQLString(redact);
                 sb.append(filter.startsWith("ORDER BY") ? " " : " AND ");
                 sb.append(filter);
             }
@@ -794,9 +794,9 @@ public abstract class Slices implements Iterable<Slice>
         }
 
         @Override
-        public String toCQLString(TableMetadata metadata, RowFilter rowFilter)
+        public String toCQLString(TableMetadata metadata, RowFilter rowFilter, boolean redact)
         {
-            return rowFilter.toCQLString();
+            return rowFilter.toCQLString(redact);
         }
     }
 
@@ -876,7 +876,7 @@ public abstract class Slices implements Iterable<Slice>
         }
 
         @Override
-        public String toCQLString(TableMetadata metadata, RowFilter rowFilter)
+        public String toCQLString(TableMetadata metadata, RowFilter rowFilter, boolean redact)
         {
             return "";
         }

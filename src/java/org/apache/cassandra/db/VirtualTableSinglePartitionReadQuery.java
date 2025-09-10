@@ -76,9 +76,9 @@ public class VirtualTableSinglePartitionReadQuery extends VirtualTableReadQuery 
     }
 
     @Override
-    public void appendCQLWhereClause(CqlBuilder builder)
+    public void appendCQLWhereClause(CqlBuilder builder, boolean redact)
     {
-        SinglePartitionReadQuery.super.appendCQLWhereClause(builder);
+        SinglePartitionReadQuery.super.appendCQLWhereClause(builder, redact);
     }
 
     @Override

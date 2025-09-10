@@ -271,7 +271,7 @@ public class DataRange
         return String.format("range=%s pfilter=%s", keyRange.getString(metadata.partitionKeyType), clusteringIndexFilter.toString(metadata));
     }
 
-    public String toCQLString(TableMetadata metadata)
+    public String toCQLString(TableMetadata metadata, boolean redact)
     {
         if (isUnrestricted())
             return "";
@@ -283,20 +283,20 @@ public class DataRange
              * key are the same. If that is the case, we want to print the query as an equality on the partition key
              * rather than a token range, as if it was a partition query, for better readability.
              */
-            return ((DecoratedKey) startKey()).toCQLString(metadata);
+            return ((DecoratedKey) startKey()).toCQLString(metadata, redact);
         }
         else
         {
             StringBuilder builder = new StringBuilder();
             if (!startKey().isMinimum())
             {
-                appendCQLClause(startKey(), builder, metadata, true, keyRange.isStartInclusive());
+                appendCQLClause(startKey(), builder, metadata, true, keyRange.isStartInclusive(), redact);
             }
             if (!stopKey().isMinimum())
             {
                 if (builder.length() > 0)
                     builder.append(" AND ");
-                appendCQLClause(stopKey(), builder, metadata, false, keyRange.isEndInclusive());
+                appendCQLClause(stopKey(), builder, metadata, false, keyRange.isEndInclusive(), redact);
             }
             return builder.toString();
         }
@@ -306,7 +306,8 @@ public class DataRange
                                  StringBuilder builder,
                                  TableMetadata metadata,
                                  boolean isStart,
-                                 boolean isInclusive)
+                                 boolean isInclusive,
+                                 boolean redact)
     {
         builder.append("token(");
         builder.append(ColumnMetadata.toCQLString(metadata.partitionKeyColumns()));
@@ -315,14 +316,14 @@ public class DataRange
         {
             builder.append(getOperator(isStart, isInclusive)).append(' ');
             builder.append("token(");
-            appendKeyString(builder, metadata.partitionKeyType, ((DecoratedKey)pos).getKey());
+            appendKeyString(builder, metadata.partitionKeyType, ((DecoratedKey)pos).getKey(), redact);
             builder.append(')');
         }
         else
         {
             Token.KeyBound keyBound = (Token.KeyBound) pos;
-            builder.append(getOperator(isStart, isStart == keyBound.isMinimumBound)).append(" ");
-            builder.append(keyBound.getToken());
+            builder.append(getOperator(isStart, isStart == keyBound.isMinimumBound)).append(' ');
+            builder.append(redact ? "?" : keyBound.getToken());
         }
     }
 
@@ -335,18 +336,18 @@ public class DataRange
 
     // TODO: this is reused in SinglePartitionReadCommand but this should not really be here. Ideally
     // we need a more "native" handling of composite partition keys.
-    public static void appendKeyString(StringBuilder builder, AbstractType<?> type, ByteBuffer key)
+    public static void appendKeyString(StringBuilder builder, AbstractType<?> type, ByteBuffer key, boolean redact)
     {
         if (type instanceof CompositeType)
         {
             CompositeType ct = (CompositeType)type;
             ByteBuffer[] values = ct.split(key);
             for (int i = 0; i < ct.subTypes().size(); i++)
-                builder.append(i == 0 ? "" : ", ").append(ct.subTypes().get(i).toCQLString(values[i]));
+                builder.append(i == 0 ? "" : ", ").append(ct.subTypes().get(i).toCQLString(values[i], redact));
         }
         else
         {
-            builder.append(type.toCQLString(key));
+            builder.append(type.toCQLString(key, redact));
         }
     }
 
