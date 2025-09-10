@@ -59,6 +59,11 @@ public class SinglePartitionReadCommandCQLTest extends ReadCommandCQLTester<Sing
         assertToCQLString("SELECT * FROM %s WHERE k = 0 AND c < 0 AND v = 1 ALLOW FILTERING", "SELECT * FROM %s WHERE k = 0 AND c < 0 AND v = 1 ALLOW FILTERING");
         assertToCQLString("SELECT * FROM %s WHERE k = 0 AND c >= 0 AND v = 1 ALLOW FILTERING", "SELECT * FROM %s WHERE k = 0 AND c >= 0 AND v = 1 ALLOW FILTERING");
         assertToCQLString("SELECT * FROM %s WHERE k = 0 AND c <= 0 AND v = 1 ALLOW FILTERING", "SELECT * FROM %s WHERE k = 0 AND c <= 0 AND v = 1 ALLOW FILTERING");
+
+        // test with multi-column partition key (without index to test SinglePartitionReadCommand directly)
+        createTable("CREATE TABLE %s (k1 int, k2 int, c int, v int, PRIMARY KEY ((k1, k2), c))");
+        assertToCQLString("SELECT * FROM %s WHERE k1 = 1 AND k2 = 2", "SELECT * FROM %s WHERE k1 = 1 AND k2 = 2 ALLOW FILTERING");
+        assertToCQLString("SELECT * FROM %s WHERE k1 = 1 AND k2 = 2 AND c = 3", "SELECT * FROM %s WHERE k1 = 1 AND k2 = 2 AND c = 3 ALLOW FILTERING");
     }
 
     @Override
