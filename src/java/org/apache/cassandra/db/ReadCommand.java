@@ -607,7 +607,7 @@ public abstract class ReadCommand extends AbstractReadQuery
                 Threshold guardrail = shouldRespectTombstoneThresholds()
                                                 ? Guardrails.scannedTombstones
                                                 : DefaultGuardrail.DefaultThreshold.NEVER_TRIGGERED;
-                return guardrail.newCounter(ReadCommand.this::toCQLString, true, null);
+                return guardrail.newCounter(ReadCommand.this::toCQLString, false, null);
             }
 
             private MetricRecording()
