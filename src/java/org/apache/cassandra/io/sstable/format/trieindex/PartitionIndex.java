@@ -38,7 +38,6 @@ import org.apache.cassandra.io.tries.ValueIterator;
 import org.apache.cassandra.io.tries.Walker;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileHandle;
-import org.apache.cassandra.io.util.ReadPattern;
 import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.PageAware;
