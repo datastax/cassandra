@@ -111,7 +111,7 @@ public class AbstractReadQueryToCQLStringTest extends CQLTester
              "SELECT * FROM %s WHERE v2 = 2 AND v1 = 1 ALLOW FILTERING");
         test("SELECT * FROM %s WHERE token(k) > 0 AND v1 = 1");
         test("SELECT * FROM %s WHERE k = 0 AND v1 = 1",
-             "SELECT * FROM %s WHERE token(k) >= token(0) AND token(k) <= token(0) AND v1 = 1 ALLOW FILTERING");
+             "SELECT * FROM %s WHERE k = 0 AND v1 = 1 ALLOW FILTERING");
 
         // grouped partition-directed queries, maybe producing multiple queries
         test("SELECT * FROM %s WHERE k IN (0)",
@@ -205,7 +205,7 @@ public class AbstractReadQueryToCQLStringTest extends CQLTester
         test("SELECT * FROM %s WHERE token(k1, k2) > 0 AND v2 = 2");
 //      test("SELECT * FROM %s WHERE k1 = 1 AND k2 = 2 AND v1 = 1");
         test("SELECT * FROM %s WHERE k1 = 1 AND k2 = 2 AND v1 = 1",
-                          "SELECT * FROM %s WHERE token(k1, k2) >= token(1, 2) AND token(k1, k2) <= token(1, 2) AND v1 = 1 ALLOW FILTERING");
+                          "SELECT * FROM %s WHERE k1 = 1 AND k2 = 2 AND v1 = 1 ALLOW FILTERING");
 
         // grouped partition-directed queries, maybe producing multiple queries
         test("SELECT * FROM %s WHERE k1 IN (1) AND k2 = 2",
@@ -308,9 +308,9 @@ public class AbstractReadQueryToCQLStringTest extends CQLTester
              "SELECT * FROM %s WHERE v2 = 2 AND v1 = 1 ALLOW FILTERING");
         test("SELECT * FROM %s WHERE token(k) > 0 AND v1 = 1");
         test("SELECT * FROM %s WHERE k = 0 AND v1 = 1",
-             "SELECT * FROM %s WHERE token(k) >= token(0) AND token(k) <= token(0) AND v1 = 1 ALLOW FILTERING");
+             "SELECT * FROM %s WHERE k = 0 AND v1 = 1 ALLOW FILTERING");
         test("SELECT * FROM %s WHERE k = 0 AND v1 = 1 AND c = 1",
-             "SELECT * FROM %s WHERE token(k) >= token(0) AND token(k) <= token(0) AND c = 1 AND v1 = 1 ALLOW FILTERING");
+             "SELECT * FROM %s WHERE k = 0 AND c = 1 AND v1 = 1 ALLOW FILTERING");
 
         // grouped partition-directed queries, maybe producing multiple queries
         test("SELECT * FROM %s WHERE k IN (0)",
@@ -467,9 +467,9 @@ public class AbstractReadQueryToCQLStringTest extends CQLTester
              "SELECT * FROM %s WHERE v2 = 2 AND v1 = 1 ALLOW FILTERING");
         test("SELECT * FROM %s WHERE token(k1, k2) > 0 AND v1 = 1");
         test("SELECT * FROM %s WHERE k1 = 1 AND k2 = 2 AND v1 = 1",
-             "SELECT * FROM %s WHERE token(k1, k2) >= token(1, 2) AND token(k1, k2) <= token(1, 2) AND v1 = 1 ALLOW FILTERING");
+             "SELECT * FROM %s WHERE k1 = 1 AND k2 = 2 AND v1 = 1 ALLOW FILTERING");
         test("SELECT * FROM %s WHERE k1 = 1 AND k2 = 2 AND c1 = 1 AND v1 = 1",
-             "SELECT * FROM %s WHERE token(k1, k2) >= token(1, 2) AND token(k1, k2) <= token(1, 2) AND c1 = 1 AND v1 = 1 ALLOW FILTERING");
+             "SELECT * FROM %s WHERE k1 = 1 AND k2 = 2 AND c1 = 1 AND v1 = 1 ALLOW FILTERING");
 
         // grouped partition-directed queries, maybe producing multiple queries
         test("SELECT * FROM %s WHERE k1 IN (1) AND k2 IN (2)",
