@@ -249,6 +249,13 @@ public enum CassandraRelevantProperties
      */
     REPAIR_PARENT_SESSION_LISTENER("cassandra.custom_parent_repair_session_listener_class"),
 
+    /**
+     * Allow repair in mixed major version clusters. When false (default), repair operations
+     * will fail in clusters with mixed major versions unless explicitly allowed.
+     * Set to true to allow repair during rolling upgrades.
+     */
+    ALLOW_MIXED_REPAIR("cassandra.allow_mixed_repair", "false"),
+
     //cassandra properties (without the "cassandra." prefix)
 
     /**
