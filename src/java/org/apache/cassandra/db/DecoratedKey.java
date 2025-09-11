@@ -185,7 +185,7 @@ public abstract class DecoratedKey implements PartitionPosition, FilterKey
 
     private static String toCQLString(ColumnMetadata metadata, ByteBuffer key)
     {
-        return String.format("%s = %s", metadata.name.toCQLString(), metadata.type.getString(key));
+        return String.format("%s = %s", metadata.name.toCQLString(), metadata.type.toCQLString(key));
     }
 
     public Token getToken()
