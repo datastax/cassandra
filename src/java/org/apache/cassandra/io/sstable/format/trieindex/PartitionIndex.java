@@ -38,7 +38,6 @@ import org.apache.cassandra.io.tries.ValueIterator;
 import org.apache.cassandra.io.tries.Walker;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileHandle;
-import org.apache.cassandra.io.util.ReadPattern;
 import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.PageAware;
@@ -326,6 +325,11 @@ public class PartitionIndex implements Closeable
 
         public <ResultType> ResultType ceiling(PartitionPosition key, Acceptor<PartitionPosition, ResultType> acceptor) throws IOException
         {
+            return ceiling(key, acceptor, true);
+        }
+
+        public <ResultType> ResultType ceiling(PartitionPosition key, Acceptor<PartitionPosition, ResultType> acceptor, boolean acceptFullMatchesForDataFile) throws IOException
+        {
             // Look for a prefix of the key. If there is one, the key it stands for could be less, equal, or greater
             // than the required value so try that first.
             int b = followWithGreater(key);
@@ -333,7 +337,7 @@ public class PartitionIndex implements Closeable
             if (!hasChildren() || b == ByteSource.END_OF_STREAM)
             {
                 long indexPos = getCurrentIndexPos();
-                if (indexPos != NOT_FOUND)
+                if (indexPos != NOT_FOUND && (indexPos >= 0 || acceptFullMatchesForDataFile))
                 {
                     ResultType res = acceptor.accept(indexPos, false, key);
                     if (res != null)

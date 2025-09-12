@@ -238,6 +238,11 @@ public class TrieIndexSSTableReader extends SSTableReader
     @Override
     protected RowIndexEntry getPosition(PartitionPosition key, Operator op, boolean updateCacheAndStats, boolean permitMatchPastLast, SSTableReadsListener listener)
     {
+        return getPosition(key, op, updateCacheAndStats, permitMatchPastLast, listener, true, false);
+    }
+
+    private RowIndexEntry getPosition(PartitionPosition key, Operator op, boolean updateCacheAndStats, boolean permitMatchPastLast, SSTableReadsListener listener, boolean acceptPrefixMatchesForDataFile, boolean forceAssumeNoMatchForDataFile)
+    {
         assert !permitMatchPastLast;
 
         PartitionPosition searchKey;
@@ -256,7 +261,7 @@ public class TrieIndexSSTableReader extends SSTableReader
 
             try (PartitionIndex.Reader reader = partitionIndex.openReader())
             {
-                return reader.ceiling(searchKey, (pos, assumeNoMatch, compareKey) -> retrieveEntryIfAcceptable(searchOp, compareKey, pos, assumeNoMatch));
+                return reader.ceiling(searchKey, (pos, assumeNoMatch, compareKey) -> retrieveEntryIfAcceptable(searchOp, compareKey, pos, assumeNoMatch, forceAssumeNoMatchForDataFile), acceptPrefixMatchesForDataFile);
             }
             catch (IOException e)
             {
@@ -268,6 +273,58 @@ public class TrieIndexSSTableReader extends SSTableReader
         throw new UnsupportedOperationException("Unsupported op: " + op);
     }
 
+    @Override
+    public PartitionPositionBounds getApproximatePositionsForBounds(AbstractBounds<PartitionPosition> bounds)
+    {
+        // Compared to the corresponding non-approximate call to `getPosition`, we pass `forceAssumeNoMatch = true`.
+        // It means that if we get a full prefix match on the partition index trie, then the underlying call
+        // to `retrieveEntryIfAcceptable` will not try to "validate" the entry and will return the offset of whatever
+        // key correspond to the index prefix. In practice, if that key (the concrete one in the sstable) is equal
+        // or greater to `bounds.left`, then this is the right/best answer. But if that key is smaller than
+        // `bounds.left`, then it means we could have returned the offset to the next key in the sstable (and this
+        // is what the non-approximate call does) but we don't. It's "correct" in that the start we return still
+        // covers what we want, but it is not always "optimal".
+        RowIndexEntry rieLeft = getPosition(bounds.left,
+                                            bounds.inclusiveLeft() ? Operator.GE : Operator.GT,
+                                            false,
+                                            false,
+                                            SSTableReadsListener.NOOP_LISTENER,
+                                            true,
+                                            true);
+        if (rieLeft == null) // empty range
+            return null;
+        long left = rieLeft.position;
+
+        // Compared to the corresponding non-approximate call to `getPosition`, we pass `acceptFullMatchesForDataFile = false`.
+        // It means that if we get a full prefix match on the patrition index trie, then we never use the corresponding
+        // entry (assuming no row index) and instead always return the next/greater one. This is because the prefix
+        // may correspond to a key _before_ `bounds.right`. If we returned the offset to (the beginning of) that key, it
+        // would effectively be excluded, but it should be included. By always going to the next key, we ensure the
+        // key gets included in that case. Of course, when the prefix correspond to a key _after_ `bounds.right`, then
+        // returning the offset to that key would be optimal, but we will return the offset to the next key instead.
+        RowIndexEntry rieRight = bounds.right.isMinimum() ? null
+                                                          : getPosition(bounds.right,
+                                                                        bounds.inclusiveRight() ? Operator.GT : Operator.GE,
+                                                                        false,
+                                                                        false,
+                                                                        SSTableReadsListener.NOOP_LISTENER,
+                                                                        false,
+                                                                        true);
+        long right;
+        if (rieRight != null)
+            right = rieRight.position;
+        else // right is beyond end
+            right = uncompressedLength();   // this should also be correct for EARLY readers
+
+        if (left >= right)
+        {
+            // empty range
+            return null;
+        }
+
+        return new PartitionPositionBounds(left, right);
+    }
+
     /**
      * Called by getPosition above (via Reader.ceiling/floor) to check if the position satisfies the full key constraint.
      * This is called once if there is a prefix match (which can be in any relationship with the sought key, thus
@@ -275,7 +332,7 @@ public class TrieIndexSSTableReader extends SSTableReader
      * (with assumeNoMatch: true).
      * Returns the index entry at this position, or null if the search op rejects it.
      */
-    private RowIndexEntry retrieveEntryIfAcceptable(Operator searchOp, PartitionPosition searchKey, long pos, boolean assumeNoMatch) throws IOException
+    private RowIndexEntry retrieveEntryIfAcceptable(Operator searchOp, PartitionPosition searchKey, long pos, boolean assumeNoMatch, boolean forceAssumeNoMatchForDataFile) throws IOException
     {
         if (pos >= 0)
         {
@@ -296,7 +353,7 @@ public class TrieIndexSSTableReader extends SSTableReader
         else
         {
             pos = ~pos;
-            if (!assumeNoMatch)
+            if (!(assumeNoMatch || forceAssumeNoMatchForDataFile))
             {
                 try (FileDataInput in = dfile.createReader(pos))
                 {
