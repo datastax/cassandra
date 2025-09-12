@@ -40,13 +40,13 @@ import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.Version;
 import org.apache.cassandra.io.util.DataInputBuffer;
+import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.io.util.DataOutputStreamPlus;
 import org.apache.cassandra.io.util.File;
-import org.apache.cassandra.io.util.FileDataInput;
+import org.apache.cassandra.io.util.FileInputStreamPlus;
 import org.apache.cassandra.io.util.FileOutputStreamPlus;
-import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static org.apache.cassandra.utils.FBUtilities.updateChecksumInt;
@@ -157,7 +157,7 @@ public class MetadataSerializer implements IMetadataSerializer
         }
         else
         {
-            try (RandomAccessReader r = RandomAccessReader.open(statsFile))
+            try (FileInputStreamPlus r = new FileInputStreamPlus(statsFile))
             {
                 components = deserialize(descriptor, r, types);
             }
@@ -171,7 +171,7 @@ public class MetadataSerializer implements IMetadataSerializer
     }
 
     public Map<MetadataType, MetadataComponent> deserialize(Descriptor descriptor,
-                                                            FileDataInput in,
+                                                            FileInputStreamPlus in,
                                                             EnumSet<MetadataType> selectedTypes)
     throws IOException
     {
@@ -182,7 +182,7 @@ public class MetadataSerializer implements IMetadataSerializer
          * Read TOC
          */
 
-        int length = (int) in.bytesRemaining();
+        int length = (int) in.getChannel().size();
 
         int count = in.readInt();
         updateChecksumInt(crc, count);
@@ -250,7 +250,7 @@ public class MetadataSerializer implements IMetadataSerializer
         return components;
     }
 
-    private static void maybeValidateChecksum(CRC32 crc, FileDataInput in, Descriptor descriptor) throws IOException
+    private static void maybeValidateChecksum(CRC32 crc, DataInputPlus in, Descriptor descriptor) throws IOException
     {
         if (!descriptor.version.hasMetadataChecksum())
             return;
