@@ -183,7 +183,7 @@ public class GuardrailsOptions implements GuardrailsConfig
 
         enforceDefault("columns_per_table_fail_threshold", v -> config.columns_per_table_fail_threshold = v, -1, 50, 200);
         enforceDefault("secondary_indexes_per_table_fail_threshold", v -> config.secondary_indexes_per_table_fail_threshold = v, NO_LIMIT, 1, 0);
-        enforceDefault("sasi_indexes_per_table_fail_threshold", v -> config.sasi_indexes_per_table_fail_threshold = v, NO_LIMIT, 0, 0);
+        enforceDefault("sasi_indexes_per_table_fail_threshold", v -> config.sasi_indexes_per_table_fail_threshold = v, NO_LIMIT, NO_LIMIT, 0);
         enforceDefault("materialized_views_per_table_fail_threshold", v -> config.materialized_views_per_table_fail_threshold = v, NO_LIMIT, 2, 0);
         enforceDefault("tables_warn_threshold", v -> config.tables_warn_threshold = v, -1, 100, 100);
         enforceDefault("tables_fail_threshold", v -> config.tables_fail_threshold = v, -1, 200, 200);
