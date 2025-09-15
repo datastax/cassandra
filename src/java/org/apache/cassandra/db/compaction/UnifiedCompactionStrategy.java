@@ -1089,7 +1089,10 @@ public class UnifiedCompactionStrategy extends AbstractCompactionStrategy
             ++proposed;
             long overheadSizeInBytes = pick.totalOverheadInBytes();
             if (overheadSizeInBytes > spaceAvailable)
+            {
+                getBackgroundCompactions().incrementSkippedAggregatesDueToDiskSpace();
                 continue; // compaction is too large for current cycle
+            }
 
             int currentLevel = levelOf(pick);
             boolean isAdaptive = controller.isRecentAdaptive(pick);
