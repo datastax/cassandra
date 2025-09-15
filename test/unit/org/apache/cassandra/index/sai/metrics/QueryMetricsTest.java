@@ -38,6 +38,7 @@ import static org.apache.cassandra.index.sai.metrics.TableQueryMetrics.AbstractQ
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
+import org.apache.cassandra.index.sai.metrics.TableQueryMetrics.QueryKind;
 
 public class QueryMetricsTest extends AbstractMetricsTest
 {
@@ -46,18 +47,18 @@ public class QueryMetricsTest extends AbstractMetricsTest
     private static final String CREATE_INDEX_TEMPLATE = "CREATE CUSTOM INDEX IF NOT EXISTS %s ON %s.%s(%s) USING 'StorageAttachedIndex'";
 
     private static final String TABLE_QUERY_METRIC_TYPE = TableQueryMetrics.PerTable.METRIC_TYPE;
-    private static final String TABLE_FILTER_QUERY_METRIC_TYPE = makeName(TABLE_QUERY_METRIC_TYPE, "FilterOnly");
-    private static final String TABLE_TOPK_QUERY_METRIC_TYPE = makeName(TABLE_QUERY_METRIC_TYPE, "TopKOnly");
-    private static final String TABLE_HYBRID_QUERY_METRIC_TYPE = makeName(TABLE_QUERY_METRIC_TYPE, "Hybrid");
-    private static final String TABLE_SINGLE_PARTITION_QUERY_METRIC_TYPE = makeName(TABLE_QUERY_METRIC_TYPE, "SinglePartition");
-    private static final String TABLE_MULTI_PARTITION_QUERY_METRIC_TYPE = makeName(TABLE_QUERY_METRIC_TYPE, "MultiPartition");
+    private static final String TABLE_FILTER_QUERY_METRIC_TYPE = makeName(TABLE_QUERY_METRIC_TYPE, QueryKind.FILTER_ONLY);
+    private static final String TABLE_TOPK_QUERY_METRIC_TYPE = makeName(TABLE_QUERY_METRIC_TYPE, QueryKind.TOPK_ONLY);
+    private static final String TABLE_HYBRID_QUERY_METRIC_TYPE = makeName(TABLE_QUERY_METRIC_TYPE, QueryKind.HYBRID);
+    private static final String TABLE_SINGLE_PARTITION_QUERY_METRIC_TYPE = makeName(TABLE_QUERY_METRIC_TYPE, QueryKind.SINGLE_PARTITION);
+    private static final String TABLE_MULTI_PARTITION_QUERY_METRIC_TYPE = makeName(TABLE_QUERY_METRIC_TYPE, QueryKind.MULTI_PARTITION);
 
     private static final String PER_QUERY_METRIC_TYPE = TableQueryMetrics.PerQuery.METRIC_TYPE;
-    private static final String PER_FILTER_QUERY_METRIC_TYPE = makeName(PER_QUERY_METRIC_TYPE, "FilterOnly");
-    private static final String PER_TOPK_QUERY_METRIC_TYPE = makeName(PER_QUERY_METRIC_TYPE, "TopKOnly");
-    private static final String PER_HYBRID_QUERY_METRIC_TYPE = makeName(PER_QUERY_METRIC_TYPE, "Hybrid");
-    private static final String PER_SINGLE_PARTITION_QUERY_METRIC_TYPE = makeName(PER_QUERY_METRIC_TYPE, "SinglePartition");
-    private static final String PER_MULTI_PARTITION_QUERY_METRIC_TYPE = makeName(PER_QUERY_METRIC_TYPE, "MultiPartition");
+    private static final String PER_FILTER_QUERY_METRIC_TYPE = makeName(PER_QUERY_METRIC_TYPE, QueryKind.FILTER_ONLY);
+    private static final String PER_TOPK_QUERY_METRIC_TYPE = makeName(PER_QUERY_METRIC_TYPE, QueryKind.TOPK_ONLY);
+    private static final String PER_HYBRID_QUERY_METRIC_TYPE = makeName(PER_QUERY_METRIC_TYPE, QueryKind.HYBRID);
+    private static final String PER_SINGLE_PARTITION_QUERY_METRIC_TYPE = makeName(PER_QUERY_METRIC_TYPE, QueryKind.SINGLE_PARTITION);
+    private static final String PER_MULTI_PARTITION_QUERY_METRIC_TYPE = makeName(PER_QUERY_METRIC_TYPE, QueryKind.MULTI_PARTITION);
 
     private static final String GLOBAL_METRIC_TYPE = "ColumnQueryMetrics";
 
