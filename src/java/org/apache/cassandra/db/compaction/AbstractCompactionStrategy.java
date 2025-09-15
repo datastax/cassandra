@@ -358,6 +358,11 @@ abstract class AbstractCompactionStrategy implements CompactionStrategy
         return backgroundCompactions;
     }
 
+    public long getSkippedAggregatesDueToDiskSpace()
+    {
+        return backgroundCompactions.getSkippedAggregatesDueToDiskSpace();
+    }
+
     public static Map<String, String> validateOptions(Map<String, String> options) throws ConfigurationException
     {
         return CompactionStrategyOptions.validateOptions(options);
