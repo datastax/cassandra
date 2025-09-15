@@ -23,6 +23,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 
 import com.google.common.collect.ImmutableList;
 import org.slf4j.Logger;
@@ -72,6 +73,11 @@ public class BackgroundCompactions
      * the compaction rate to temporarily drop to levels that permit an extra thread.
      */
     MovingAverage compactionRate = ExpMovingAverage.decayBy1000();
+
+    /**
+     * Track num of skipped compaction aggregates due to insufficient disk space
+     */
+    private final AtomicLong skippedAggregatesDueToDiskSpace = new AtomicLong(0);
 
     BackgroundCompactions(CompactionRealm realm)
     {
@@ -281,6 +287,16 @@ public class BackgroundCompactions
             if (durationInMillis > 0 && outputDiskSize > 0)
                 compactionRate.update(outputDiskSize * 1.e3 / durationInMillis);
         }
+    }
+
+    public void incrementSkippedAggregatesDueToDiskSpace()
+    {
+        skippedAggregatesDueToDiskSpace.incrementAndGet();
+    }
+
+    public long getSkippedAggregatesDueToDiskSpace()
+    {
+        return skippedAggregatesDueToDiskSpace.get();
     }
 
     public Collection<CompactionAggregate> getAggregates()
