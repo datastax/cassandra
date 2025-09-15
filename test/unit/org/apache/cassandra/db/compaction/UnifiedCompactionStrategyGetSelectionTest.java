@@ -190,6 +190,7 @@ public class UnifiedCompactionStrategyGetSelectionTest extends BaseCompactionStr
         when(strategy.getController()).thenReturn(controller);
         when(strategy.getShardingStats(any())).thenReturn(stats);
         when(strategy.getSelection(any(), anyInt(), any(), anyLong(), anyInt())).thenCallRealMethod();
+        when(strategy.getBackgroundCompactions()).thenReturn(Mockito.mock(BackgroundCompactions.class));
 
         int[] perLevel = new int[levelCount];
         int maxReservations = totalCount / levelCount;
