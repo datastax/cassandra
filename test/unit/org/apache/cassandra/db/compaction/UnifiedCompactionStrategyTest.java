@@ -22,6 +22,7 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -42,6 +43,7 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Sets;
+
 import org.junit.Assert;
 import org.junit.After;
 import org.junit.Before;
@@ -72,6 +74,7 @@ import org.apache.cassandra.utils.concurrent.Transactional;
 import org.mockito.Mockito;
 
 import static org.assertj.core.api.Assertions.assertThat;
+
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotEquals;
@@ -79,6 +82,7 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
+
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -2208,5 +2212,48 @@ public class UnifiedCompactionStrategyTest extends BaseCompactionStrategyTest
         assertEquals(1, level.index);
         assertEquals(0.25d, level.min, 0);
         assertEquals(0.5d, level.max, 0);
+    }
+
+    @Test
+    public void testSkippedAggregatesOnInsufficientDiskSpace()
+    {
+        long overheadSizeInBytes = 1000L;
+        long insufficientSpaceAvailable = 500L;
+
+        BackgroundCompactions backgroundCompactions = Mockito.mock(BackgroundCompactions.class);
+        Controller controller = Mockito.mock(Controller.class, Mockito.withSettings().stubOnly());
+
+        when(controller.prioritize(anyList())).thenCallRealMethod();
+        when(controller.getReservedThreads()).thenReturn(0);
+        when(controller.getReservationsType()).thenReturn(Reservations.Type.PER_LEVEL);
+        when(controller.getOverheadSizeInBytes(any(), anyLong())).thenReturn(overheadSizeInBytes);
+        when(controller.isRecentAdaptive(any())).thenReturn(false);
+        when(controller.overlapInclusionMethod()).thenReturn(Overlaps.InclusionMethod.TRANSITIVE);
+        when(controller.parallelizeOutputShards()).thenReturn(false);
+
+        CompactionSSTable mockSSTable = Mockito.mock(CompactionSSTable.class);
+        CompactionPick pick = CompactionPick.create(TimeUUID.Generator.nextTimeUUID(),
+                                                    0,
+                                                    ImmutableList.of(mockSSTable),
+                                                    Collections.emptySet(),
+                                                    1,
+                                                    overheadSizeInBytes,
+                                                    overheadSizeInBytes,
+                                                    overheadSizeInBytes);
+
+        CompactionAggregate.UnifiedAggregate aggregate = Mockito.mock(CompactionAggregate.UnifiedAggregate.class, Mockito.withSettings().stubOnly());
+        when(aggregate.getSelected()).thenReturn(pick);
+        when(aggregate.maxOverlap()).thenReturn(0);
+
+        UnifiedCompactionStrategy strategy = new UnifiedCompactionStrategy(strategyFactory, backgroundCompactions, controller);
+        List<CompactionAggregate.UnifiedAggregate> pending = Arrays.asList(aggregate);
+        int[] perLevel = new int[1];
+
+        List<CompactionAggregate> result = strategy.getSelection(pending, 1, perLevel, insufficientSpaceAvailable, 0);
+        assertEquals("No compactions should be selected when insufficient disk space", 0, result.size());
+        Mockito.verify(backgroundCompactions, Mockito.times(1)).incrementSkippedAggregatesDueToDiskSpace();
+
+        Mockito.when(backgroundCompactions.getSkippedAggregatesDueToDiskSpace()).thenReturn(1L);
+        assertThat(strategy.getSkippedAggregatesDueToDiskSpace()).isEqualTo(1);
     }
 }
