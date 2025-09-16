@@ -72,12 +72,6 @@ public class IndexHints
         }
 
         @Override
-        public Set<Index> includedIn(Collection<Index> indexes)
-        {
-            return Collections.emptySet();
-        }
-
-        @Override
         public boolean includesAnyOf(Collection<Index> indexes)
         {
             return false;
@@ -93,12 +87,6 @@ public class IndexHints
         public boolean excludes(String indexName)
         {
             return false;
-        }
-
-        @Override
-        public <T extends Index> Set<T> notExcluded(Iterable<T> indexes)
-        {
-            return Sets.newHashSet(indexes);
         }
 
         @Override
@@ -157,23 +145,6 @@ public class IndexHints
     }
 
     /**
-     * Returns the indexes in the specified collection of indexes that are included by these hints.
-     *
-     * @param indexes a collection of indexes
-     * @return the indexes that are included by these hints
-     */
-    public Set<Index> includedIn(Collection<Index> indexes)
-    {
-        Set<Index> result = new HashSet<>();
-        for (Index index : indexes)
-        {
-            if (includes(index))
-                result.add(index);
-        }
-        return result;
-    }
-
-    /**
      * @param indexes a collection of indexes
      * @return {@code true} if any of the indexes is included, {@code false} otherwise
      */
@@ -208,21 +179,6 @@ public class IndexHints
                 return true;
         }
         return false;
-    }
-
-    /**
-     * @param indexes a set of indexes
-     * @return the indexes that are not excluded by these hints
-     */
-    public <T extends Index> Set<T> notExcluded(Iterable<T> indexes)
-    {
-        Set<T> result = new HashSet<>();
-        for (T index : indexes)
-        {
-            if (!excludes(index))
-                result.add(index);
-        }
-        return result;
     }
 
     /**

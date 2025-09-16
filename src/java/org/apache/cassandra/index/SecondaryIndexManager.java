@@ -210,7 +210,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
      * The indexes that are available for querying.
      */
     private final Set<String> queryableIndexes = Sets.newConcurrentHashSet();
-    
+
     /**
      * The indexes that are available for writing.
      */
@@ -594,7 +594,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
      *
      * If the index doesn't support ALL {@link Index.LoadType} it performs a recovery {@link Index#getRecoveryTaskSupport()}
      * instead of a build {@link Index#getBuildTaskSupport()}
-     * 
+     *
      * @param sstables      the SSTables to be (re)indexed
      * @param indexes       the indexes to be (re)built for the specifed SSTables
      * @param isFullRebuild True if this method is invoked as a full index rebuild, false otherwise
@@ -1367,6 +1367,24 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
         return ImmutableSet.copyOf(indexes.values());
     }
 
+    @Override
+    public Collection<Index> listNotExcludedIndexes(IndexHints hints)
+    {
+        if (indexes.isEmpty())
+            return Collections.emptySet();
+
+        if (hints == IndexHints.NONE || hints.excluded.isEmpty())
+            return listIndexes();
+
+        ImmutableSet.Builder<Index> builder = ImmutableSet.builder();
+        for (Index index : indexes.values())
+        {
+            if (!hints.excludes(index))
+                builder.add(index);
+        }
+        return builder.build();
+    }
+
     public Set<Index.Group> listIndexGroups()
     {
         return ImmutableSet.copyOf(indexGroups.values());
@@ -1950,7 +1968,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
                 Index.Status status = Index.Status.valueOf(e.getValue());
                 indexStatus.put(keyspaceIndex, status);
             }
-            
+
             Map<String, Index.Status> oldStatus = peerIndexStatus.put(endpoint, indexStatus);
             Map<String, Index.Status> updated = updatedIndexStatuses(oldStatus, indexStatus);
             Set<String> removed = removedIndexStatuses(oldStatus, indexStatus);
