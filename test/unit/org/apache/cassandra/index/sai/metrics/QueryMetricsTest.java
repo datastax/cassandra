@@ -536,6 +536,33 @@ public class QueryMetricsTest extends AbstractMetricsTest
         waitForEqualsIfExists(perTable, objectName(name, TABLE_SINGLE_PARTITION_QUERY_METRIC_TYPE), numRowsPerPartition);
         waitForEqualsIfExists(perTable, objectName(name, TABLE_MULTI_PARTITION_QUERY_METRIC_TYPE), numRows + numRows + numRows);
 
+        // Verify counters for timeouts.
+        name = "TotalQueryTimeouts";
+        waitForEquals(objectName(name, TABLE_QUERY_METRIC_TYPE), 0);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_FILTER_QUERY_METRIC_TYPE), 0);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_TOPK_QUERY_METRIC_TYPE), 0);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_HYBRID_QUERY_METRIC_TYPE), 0);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_SINGLE_PARTITION_QUERY_METRIC_TYPE), 0);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_MULTI_PARTITION_QUERY_METRIC_TYPE), 0);
+
+        // Verify counters for sort-then-filter queries.
+        name = "SortThenFilterQueriesCompleted";
+        waitForEquals(objectName(name, TABLE_QUERY_METRIC_TYPE), 1);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_FILTER_QUERY_METRIC_TYPE), 0);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_TOPK_QUERY_METRIC_TYPE), 1); // was 4
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_HYBRID_QUERY_METRIC_TYPE), 0);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_SINGLE_PARTITION_QUERY_METRIC_TYPE), 0);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_MULTI_PARTITION_QUERY_METRIC_TYPE), 1);
+
+        // Verify counters for filter-then-sort queries.
+        name = "FilterThenSortQueriesCompleted";
+        waitForEquals(objectName(name, TABLE_QUERY_METRIC_TYPE), 1);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_FILTER_QUERY_METRIC_TYPE), 0);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_TOPK_QUERY_METRIC_TYPE), 0);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_HYBRID_QUERY_METRIC_TYPE), 1);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_SINGLE_PARTITION_QUERY_METRIC_TYPE), 0);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_MULTI_PARTITION_QUERY_METRIC_TYPE), 1);
+
         // Verify histograms for partitions reads per query.
         name = "PartitionReads";
         waitForHistogramCountEquals(objectName(name, PER_QUERY_METRIC_TYPE), 4);
