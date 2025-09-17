@@ -728,6 +728,20 @@ public enum CassandraRelevantProperties
     SAI_NUMERIC_VALUES_MONOTONIC_BLOCK_SIZE("dse.sai.numeric_values.monotonic_block_size", "16384"),
     /** Controls the number of rows read in a single batch when fetching rows for a partition key */
     SAI_PARTITION_ROW_BATCH_SIZE("cassandra.sai.partition_row_batch_size", "100"),
+
+    /**
+     * Whether to enable SAI per-query metrics for different kinds of query, such as filter-only queries, top-k-only
+     * queries, hybrid queries, single-partition queries, and multipartition queries. These metrics are histograms and
+     * timers.
+     */
+    SAI_QUERY_KIND_PER_QUERY_METRICS_ENABLED("cassandra.sai.metrics.query_kind.per_query.enabled", "false"),
+
+    /**
+     * Whether to enable SAI per-table metrics for different kinds of query, such as filter-only queries, top-k-only
+     * queries, hybrid queries, single-partition queries, and multipartition queries. These metrics are always counters.
+     */
+    SAI_QUERY_KIND_PER_TABLE_METRICS_ENABLED("cassandra.sai.metrics.query_kind.per_table.enabled", "true"),
+
     SAI_QUERY_OPT_LEVEL("cassandra.sai.query.optimization.level", "1"),
     SAI_REDUCE_TOPK_ACROSS_SSTABLES("cassandra.sai.reduce_topk_across_sstables", "true"),
     SAI_TEST_DISABLE_TIMEOUT("cassandra.sai.test.timeout_disabled", "false"),

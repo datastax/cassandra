@@ -150,6 +150,12 @@ public class MultiRangeReadCommand extends ReadCommand
                : MultiRangeReadResponse.createDataResponse(iterator, this);
     }
 
+    @Override
+    public boolean isSinglePartition()
+    {
+        return dataRanges.size() == 1 && dataRanges.get(0).isSinglePartition();
+    }
+
     /**
      * @return all token ranges to be queried
      */
