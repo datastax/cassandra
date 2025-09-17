@@ -124,7 +124,7 @@ public class GroupComponentsTest extends SAITester
         
         execute("SELECT * FROM %s WHERE value = 1");
         
-        long queriesCompleted = queryMetrics.totalQueriesCompleted.getCount();
+        long queriesCompleted = queryMetrics.perTableMetrics.get(TableQueryMetrics.QueryKind.ALL).totalQueriesCompleted.getCount();
         assertEquals("TableQueryMetrics should track completed queries", 1L, queriesCompleted);
         
         TableQueryMetrics queryMetrics2 = group.queryMetrics();
