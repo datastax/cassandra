@@ -60,7 +60,6 @@ import org.apache.cassandra.index.sai.disk.vector.CompactionGraph;
 import org.apache.cassandra.index.sai.utils.NamedMemoryLimiter;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
-import org.apache.cassandra.metrics.QuickSlidingWindowReservoir;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
 import org.apache.lucene.util.BytesRef;
@@ -102,10 +101,8 @@ public abstract class SegmentBuilder
     final AbstractAnalyzer analyzer;
 
     // track memory usage for this segment so we can flush when it gets too big
-    private final NamedMemoryLimiter limiter;
+    protected final NamedMemoryLimiter limiter;
     long totalBytesAllocated;
-    // when we're adding terms asynchronously, totalBytesAllocated will be an approximation and this tracks the exact size
-    final LongAdder totalBytesAllocatedConcurrent = new LongAdder();
 
     private final long lastValidSegmentRowID;
 
@@ -127,7 +124,6 @@ public abstract class SegmentBuilder
     protected ByteBuffer maxTerm;
 
     protected final AtomicInteger updatesInFlight = new AtomicInteger(0);
-    protected final QuickSlidingWindowReservoir termSizeReservoir = new QuickSlidingWindowReservoir(100);
     protected AtomicReference<Throwable> asyncThrowable = new AtomicReference<>();
 
 
@@ -151,7 +147,7 @@ public abstract class SegmentBuilder
             this.buffer = new byte[typeSize];
             this.indexWriterConfig = indexWriterConfig;
             totalBytesAllocated = kdTreeRamBuffer.ramBytesUsed();
-            totalBytesAllocatedConcurrent.add(totalBytesAllocated);}
+        }
 
         public boolean isEmpty()
         {
@@ -200,7 +196,6 @@ public abstract class SegmentBuilder
             this.byteComparableVersion = components.byteComparableVersionFor(IndexComponentType.TERMS_DATA);
             ramIndexer = new RAMStringIndexer(writeFrequencies());
             totalBytesAllocated = ramIndexer.estimatedBytesUsed();
-            totalBytesAllocatedConcurrent.add(totalBytesAllocated);
         }
 
         private boolean writeFrequencies()
@@ -247,6 +242,8 @@ public abstract class SegmentBuilder
     public static class VectorOffHeapSegmentBuilder extends SegmentBuilder
     {
         private final CompactionGraph graphIndex;
+        protected final AtomicLong maxBytesAddedObserved = new AtomicLong(0);
+        protected final LongAdder reconciliationBytes = new LongAdder();
 
         public VectorOffHeapSegmentBuilder(IndexComponents.ForWrite components,
                                            long rowIdOffset,
@@ -266,7 +263,6 @@ public abstract class SegmentBuilder
                 throw new UncheckedIOException(e);
             }
             totalBytesAllocated = graphIndex.ramBytesUsed();
-            totalBytesAllocatedConcurrent.add(totalBytesAllocated);
         }
 
         @Override
@@ -282,7 +278,7 @@ public abstract class SegmentBuilder
         }
 
         @Override
-        protected long addInternalAsync(List<ByteBuffer> terms, int segmentRowId)
+        protected void addInternalAsync(List<ByteBuffer> terms, int segmentRowId)
         {
             assert terms.size() == 1;
 
@@ -293,21 +289,31 @@ public abstract class SegmentBuilder
             try
             {
                 result = graphIndex.maybeAddVector(terms.get(0), segmentRowId);
+                observeAllocatedBytes(result.bytesUsed);
             }
             catch (IOException e)
             {
                 throw new UncheckedIOException(e);
             }
             if (result.vector == null)
-                return result.bytesUsed;
+                return;
 
             updatesInFlight.incrementAndGet();
+
+            // Increment by double max bytes before dispatching the task to avoid a subsequent insertion from
+            // exceeding the limit. Upon completion, the limiter will be corrected with the actual size.
+            long estimatedBytes = maxBytesAddedObserved.get() * 2;
+            long reconciledBytes = reconciliationBytes.sumThenReset();
+            observeAllocatedBytes(estimatedBytes + reconciledBytes);
+
             compactionExecutor.submit(() -> {
                 try
                 {
-                    long bytesAdded = result.bytesUsed + graphIndex.addGraphNode(result);
-                    totalBytesAllocatedConcurrent.add(bytesAdded);
-                    termSizeReservoir.update(bytesAdded);
+                    long bytesAdded = graphIndex.addGraphNode(result);
+                    maxBytesAddedObserved.accumulateAndGet(bytesAdded, Math::max);
+                    // Store the difference between the estimated and actual bytes added for correction on the
+                    // next call to addInternalAsync.
+                    reconciliationBytes.add(bytesAdded - estimatedBytes);
                 }
                 catch (Throwable th)
                 {
@@ -318,15 +324,10 @@ public abstract class SegmentBuilder
                     updatesInFlight.decrementAndGet();
                 }
             });
-            // bytes allocated will be approximated immediately as the average of recently added terms,
-            // rather than waiting until the async update completes to get the exact value.  The latter could
-            // result in a dangerously large discrepancy between the amount of memory actually consumed
-            // and the amount the limiter knows about if the queue depth grows.
-            busyWaitWhile(() -> termSizeReservoir.size() == 0 && asyncThrowable.get() == null);
+
             if (asyncThrowable.get() != null) {
                 throw new RuntimeException("Error adding term asynchronously", asyncThrowable.get());
             }
-            return (long) termSizeReservoir.getMean();
         }
 
         @Override
@@ -342,6 +343,12 @@ public abstract class SegmentBuilder
         public boolean supportsAsyncAdd()
         {
             return true;
+        }
+
+        @Override
+        public void reconcileAsyncByteAllocations()
+        {
+            observeAllocatedBytes(reconciliationBytes.sumThenReset());
         }
 
         @Override
@@ -368,13 +375,14 @@ public abstract class SegmentBuilder
     public static class VectorOnHeapSegmentBuilder extends SegmentBuilder
     {
         private final CassandraOnHeapGraph<Integer> graphIndex;
+        protected final AtomicLong maxBytesAddedObserved = new AtomicLong(0);
+        protected final LongAdder reconciliationBytes = new LongAdder();
 
         public VectorOnHeapSegmentBuilder(IndexComponents.ForWrite components, long rowIdOffset, long keyCount, NamedMemoryLimiter limiter)
         {
             super(components, rowIdOffset, limiter);
             graphIndex = new CassandraOnHeapGraph<>(components.context(), false, null);
             totalBytesAllocated = graphIndex.ramBytesUsed();
-            totalBytesAllocatedConcurrent.add(totalBytesAllocated);
         }
 
         @Override
@@ -391,15 +399,20 @@ public abstract class SegmentBuilder
         }
 
         @Override
-        protected long addInternalAsync(List<ByteBuffer> terms, int segmentRowId)
+        protected void addInternalAsync(List<ByteBuffer> terms, int segmentRowId)
         {
             updatesInFlight.incrementAndGet();
+            long estimatedBytes = maxBytesAddedObserved.get() * 2;
+            long reconciledBytes = reconciliationBytes.sumThenReset();
+            observeAllocatedBytes(estimatedBytes + reconciledBytes);
             compactionExecutor.submit(() -> {
                 try
                 {
                     long bytesAdded = addInternal(terms, segmentRowId);
-                    totalBytesAllocatedConcurrent.add(bytesAdded);
-                    termSizeReservoir.update(bytesAdded);
+                    maxBytesAddedObserved.accumulateAndGet(bytesAdded, Math::max);
+                    // Store the difference between the estimated and actual bytes added for correction on the
+                    // next call to addInternalAsync.
+                    reconciliationBytes.add(bytesAdded - estimatedBytes);
                 }
                 catch (Throwable th)
                 {
@@ -410,15 +423,9 @@ public abstract class SegmentBuilder
                     updatesInFlight.decrementAndGet();
                 }
             });
-            // bytes allocated will be approximated immediately as the average of recently added terms,
-            // rather than waiting until the async update completes to get the exact value.  The latter could
-            // result in a dangerously large discrepancy between the amount of memory actually consumed
-            // and the amount the limiter knows about if the queue depth grows.
-            busyWaitWhile(() -> termSizeReservoir.size() == 0 && asyncThrowable.get() == null);
             if (asyncThrowable.get() != null) {
                 throw new RuntimeException("Error adding term asynchronously", asyncThrowable.get());
             }
-            return (long) termSizeReservoir.getMean();
         }
 
         @Override
@@ -437,6 +444,12 @@ public abstract class SegmentBuilder
         {
             return true;
         }
+
+        @Override
+        public void reconcileAsyncByteAllocations()
+        {
+            observeAllocatedBytes(reconciliationBytes.sumThenReset());
+        }
     }
 
     private SegmentBuilder(IndexComponents.ForWrite components, long rowIdOffset, NamedMemoryLimiter limiter)
@@ -450,6 +463,15 @@ public abstract class SegmentBuilder
         this.lastValidSegmentRowID = testLastValidSegmentRowId >= 0 ? testLastValidSegmentRowId : LAST_VALID_SEGMENT_ROW_ID;
 
         minimumFlushBytes = limiter.limitBytes() / ACTIVE_BUILDER_COUNT.getAndIncrement();
+    }
+
+    protected void observeAllocatedBytes(long bytes)
+    {
+        if (bytes != 0)
+        {
+            totalBytesAllocated += bytes;
+            limiter.increment(bytes);
+        }
     }
 
     public SegmentMetadata flush() throws IOException
@@ -474,27 +496,25 @@ public abstract class SegmentBuilder
         return metadataBuilder.build();
     }
 
-    public long analyzeAndAdd(ByteBuffer rawTerm, AbstractType<?> type, PrimaryKey key, long sstableRowId)
+    public void analyzeAndAdd(ByteBuffer rawTerm, AbstractType<?> type, PrimaryKey key, long sstableRowId)
     {
-        long totalSize = 0;
         if (TypeUtil.isLiteral(type))
         {
             var terms = ByteLimitedMaterializer.materializeTokens(analyzer, rawTerm, components.context(), key);
-            totalSize += add(terms, key, sstableRowId);
+            add(terms, key, sstableRowId);
             totalTermCount += terms.size();
         }
         else
         {
-            totalSize += add(List.of(rawTerm), key, sstableRowId);
+            add(List.of(rawTerm), key, sstableRowId);
             totalTermCount++;
         }
-        return totalSize;
     }
 
-    private long add(List<ByteBuffer> terms, PrimaryKey key, long sstableRowId)
+    private void add(List<ByteBuffer> terms, PrimaryKey key, long sstableRowId)
     {
         if (terms.isEmpty())
-            return 0;
+            return;
 
         Preconditions.checkState(!flushed, "Cannot add to flushed segment");
         Preconditions.checkArgument(sstableRowId >= maxSSTableRowId,
@@ -527,29 +547,31 @@ public abstract class SegmentBuilder
 
         maxSegmentRowId = Math.max(maxSegmentRowId, segmentRowId);
 
-        long bytesAllocated;
         if (supportsAsyncAdd())
         {
             // only vector indexing is done async and there can only be one term
             assert terms.size() == 1;
-            bytesAllocated = addInternalAsync(terms, segmentRowId);
+            addInternalAsync(terms, segmentRowId);
         }
         else
         {
-            bytesAllocated = addInternal(terms, segmentRowId);
+            long bytesAllocated = addInternal(terms, segmentRowId);
+            observeAllocatedBytes(bytesAllocated);
         }
-
-        totalBytesAllocated += bytesAllocated;
-        return bytesAllocated;
     }
 
-    protected long addInternalAsync(List<ByteBuffer> terms, int segmentRowId)
+    protected void addInternalAsync(List<ByteBuffer> terms, int segmentRowId)
     {
         throw new UnsupportedOperationException();
     }
 
     public boolean supportsAsyncAdd() {
         return false;
+    }
+
+    protected void reconcileAsyncByteAllocations()
+    {
+        throw new UnsupportedOperationException();
     }
 
     public Throwable getAsyncThrowable()
@@ -562,6 +584,7 @@ public abstract class SegmentBuilder
         // addTerm is only called by the compaction thread, serially, so we don't need to worry about new
         // terms being added while we're waiting -- updatesInFlight can only decrease
         busyWaitWhile(() -> updatesInFlight.get() > 0);
+        reconcileAsyncByteAllocations();
     }
 
     long totalBytesAllocated()
