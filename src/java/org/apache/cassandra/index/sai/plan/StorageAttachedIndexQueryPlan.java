@@ -57,6 +57,7 @@ public class StorageAttachedIndexQueryPlan implements Index.QueryPlan
     private final Set<Index> indexes;
     private final IndexFeatureSet indexFeatureSet;
     private final Orderer orderer;
+    private final boolean usesIndexFiltering;
 
     private StorageAttachedIndexQueryPlan(ColumnFamilyStore cfs,
                                           TableQueryMetrics queryMetrics,
@@ -70,6 +71,7 @@ public class StorageAttachedIndexQueryPlan implements Index.QueryPlan
         this.indexes = indexes;
         this.indexFeatureSet = indexFeatureSet;
         this.orderer = Orderer.from(cfs.getIndexManager(), filter);
+        this.usesIndexFiltering = hasIndexFilters(filter, indexes);
     }
 
     @Nullable
@@ -249,5 +251,24 @@ public class StorageAttachedIndexQueryPlan implements Index.QueryPlan
     public boolean isTopK()
     {
         return orderer != null;
+    }
+
+    @Override
+    public boolean usesIndexFiltering()
+    {
+        return usesIndexFiltering;
+    }
+
+    public static boolean hasIndexFilters(RowFilter filter, Set<Index> indexes)
+    {
+        for (RowFilter.Expression e : filter.expressions())
+        {
+            for (Index index : indexes)
+            {
+                if (index.supportsExpression(e) && !Orderer.isFilterExpressionOrderer(e))
+                    return true;
+            }
+        }
+        return false;
     }
 }
