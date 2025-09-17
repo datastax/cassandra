@@ -474,6 +474,12 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
     }
 
     @Override
+    public boolean isSinglePartition()
+    {
+        return true;
+    }
+
+    @Override
     public PartitionIterator execute(ConsistencyLevel consistency, ClientState state, Dispatcher.RequestTime requestTime) throws RequestExecutionException
     {
         if (clusteringIndexFilter.isEmpty(metadata().comparator))

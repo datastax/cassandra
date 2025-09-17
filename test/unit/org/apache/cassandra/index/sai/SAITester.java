@@ -40,6 +40,7 @@ import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import javax.annotation.Nullable;
 import javax.management.AttributeNotFoundException;
+import javax.management.InstanceNotFoundException;
 import javax.management.MalformedObjectNameException;
 import javax.management.ObjectName;
 
@@ -473,6 +474,11 @@ public class SAITester extends CQLTester
             throw new RuntimeException(e);
         }
         return metricValue;
+    }
+
+    protected void assertMetricDoesNotExist(ObjectName name)
+    {
+        Assertions.assertThatThrownBy(() -> getMetricValue(name)).hasRootCauseInstanceOf(InstanceNotFoundException.class);
     }
 
     protected void startCompaction() throws Throwable
