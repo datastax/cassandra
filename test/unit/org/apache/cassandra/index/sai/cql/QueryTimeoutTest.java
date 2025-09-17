@@ -74,8 +74,8 @@ public class QueryTimeoutTest extends SAITester
         execute("SELECT * FROM %s WHERE v1 >= 0 AND v1 < 10000");
         execute("SELECT * FROM %s WHERE v2 = '0'");
 
-        queryCountName = objectNameNoIndex("TotalQueriesCompleted", CQLTester.KEYSPACE, currentTable(), TableQueryMetrics.TABLE_QUERY_METRIC_TYPE);
-        queryTimeoutsName = objectNameNoIndex("TotalQueryTimeouts", CQLTester.KEYSPACE, currentTable(), TableQueryMetrics.TABLE_QUERY_METRIC_TYPE);
+        queryCountName = objectNameNoIndex("TotalQueriesCompleted", CQLTester.KEYSPACE, currentTable(), TableQueryMetrics.PerTable.METRIC_TYPE);
+        queryTimeoutsName = objectNameNoIndex("TotalQueryTimeouts", CQLTester.KEYSPACE, currentTable(), TableQueryMetrics.PerTable.METRIC_TYPE);
     }
 
     @After

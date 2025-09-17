@@ -188,6 +188,12 @@ public class PartitionRangeReadCommand extends ReadCommand implements PartitionR
                       false);
     }
 
+    @Override
+    public boolean isSinglePartition()
+    {
+        return dataRange.isSinglePartition();
+    }
+
     public ClusteringIndexFilter clusteringIndexFilter(DecoratedKey key)
     {
         return dataRange.clusteringIndexFilter(key);
