@@ -32,7 +32,9 @@ import java.util.function.ObjIntConsumer;
 import org.apache.cassandra.db.DiskBoundaries;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.SortedLocalRanges;
+import org.apache.cassandra.dht.Bounds;
 import org.apache.cassandra.dht.IPartitioner;
+import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.locator.AbstractReplicationStrategy;
@@ -113,8 +115,8 @@ public interface ShardManager
 
     static Range<Token> coveringRange(PartitionPosition first, PartitionPosition last)
     {
-        // To include the token of last, the range's upper bound must be increased.
-        return new Range<>(first.getToken(), last.getToken().nextValidToken());
+        // To include the token of left, the range's lower bound must be decreased.
+        return new Range<>(first.isMinimum() ? first.getToken() : first.getToken().prevValidToken(), last.getToken());
     }
 
 

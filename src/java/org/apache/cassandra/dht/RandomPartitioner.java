@@ -278,6 +278,15 @@ public class RandomPartitioner implements IPartitioner
             return new BigIntegerToken(next);
         }
 
+        @Override
+        public Token prevValidToken()
+        {
+            BigInteger prev = this.isMinimum() || token.compareTo(ZERO) == 0
+                              ? MAXIMUM
+                              : token.subtract(BigInteger.ONE);
+            return new BigIntegerToken(prev);
+        }
+
         public double size(Token next)
         {
             BigIntegerToken n = (BigIntegerToken) next;
