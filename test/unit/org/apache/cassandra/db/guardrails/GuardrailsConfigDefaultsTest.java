@@ -23,6 +23,7 @@ import java.util.Collections;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.GuardrailsOptions;
@@ -41,7 +42,7 @@ public class GuardrailsConfigDefaultsTest
     @BeforeClass
     public static void setup()
     {
-        System.setProperty("cassandra.config", "cassandra.yaml");
+        CassandraRelevantProperties.CASSANDRA_CONFIG.setString("cassandra.yaml");
         DatabaseDescriptor.daemonInitialization();
     }
 
