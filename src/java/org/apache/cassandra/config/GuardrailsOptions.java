@@ -88,10 +88,10 @@ public class GuardrailsOptions implements GuardrailsConfig
         validateMaxIntThreshold(config.keyspaces_warn_threshold, config.keyspaces_fail_threshold, "keyspaces");
         validateMaxIntThreshold(config.tables_warn_threshold, config.tables_fail_threshold, "tables");
         validateMaxIntThreshold(config.columns_per_table_warn_threshold, config.columns_per_table_fail_threshold, "columns_per_table");
-        validateMaxIntThreshold(config.secondary_indexes_per_table_warn_threshold, config.secondary_indexes_per_table_fail_threshold, "secondary_indexes_per_table");
+        validateMaxIntThreshold(config.secondary_indexes_per_table_warn_threshold, config.secondary_indexes_per_table_fail_threshold, "secondary_indexes_per_table", true);
         validateMaxIntThreshold(config.sai_indexes_per_table_warn_threshold, config.sai_indexes_per_table_fail_threshold, "sai_indexes_per_table");
         validateMaxIntThreshold(config.sai_indexes_total_warn_threshold, config.sai_indexes_total_fail_threshold, "sai_indexes_total");
-        validateMaxIntThreshold(config.sasi_indexes_per_table_warn_threshold, config.sasi_indexes_per_table_fail_threshold, "sasi_indexes_per_table");
+        validateMaxIntThreshold(config.sasi_indexes_per_table_warn_threshold, config.sasi_indexes_per_table_fail_threshold, "sasi_indexes_per_table", true);
         validateMaxIntThreshold(config.materialized_views_per_table_warn_threshold, config.materialized_views_per_table_fail_threshold, "materialized_views_per_table", true);
         config.table_properties_warned = validateTableProperties(config.table_properties_warned, "table_properties_warned");
         config.table_properties_ignored = validateTableProperties(config.table_properties_ignored, "table_properties_ignored");
@@ -183,7 +183,7 @@ public class GuardrailsOptions implements GuardrailsConfig
 
         enforceDefault("columns_per_table_fail_threshold", v -> config.columns_per_table_fail_threshold = v, -1, 50, 200);
         enforceDefault("secondary_indexes_per_table_fail_threshold", v -> config.secondary_indexes_per_table_fail_threshold = v, NO_LIMIT, 1, 0);
-        enforceDefault("sasi_indexes_per_table_fail_threshold", v -> config.sasi_indexes_per_table_fail_threshold = v, NO_LIMIT, NO_LIMIT, 0);
+        enforceDefault("sasi_indexes_per_table_fail_threshold", v -> config.sasi_indexes_per_table_fail_threshold = v, NO_LIMIT, 0, 0);
         enforceDefault("materialized_views_per_table_fail_threshold", v -> config.materialized_views_per_table_fail_threshold = v, NO_LIMIT, 2, 0);
         enforceDefault("tables_warn_threshold", v -> config.tables_warn_threshold = v, -1, 100, 100);
         enforceDefault("tables_fail_threshold", v -> config.tables_fail_threshold = v, -1, 200, 200);
@@ -372,7 +372,7 @@ public class GuardrailsOptions implements GuardrailsConfig
 
     public void setSecondaryIndexesPerTableThreshold(int warn, int fail)
     {
-        validateMaxIntThreshold(warn, fail, "secondary_indexes_per_table");
+        validateMaxIntThreshold(warn, fail, "secondary_indexes_per_table", true);
         updatePropertyWithLogging("secondary_indexes_per_table_warn_threshold",
                                   warn,
                                   () -> config.secondary_indexes_per_table_warn_threshold,
@@ -397,7 +397,7 @@ public class GuardrailsOptions implements GuardrailsConfig
 
     public void setSasiIndexesPerTableThreshold(int warn, int fail)
     {
-        validateMaxIntThreshold(warn, fail, "sasi_indexes_per_table");
+        validateMaxIntThreshold(warn, fail, "sasi_indexes_per_table", true);
         updatePropertyWithLogging("sasi_indexes_per_table_warn_threshold",
                                   warn,
                                   () -> config.sasi_indexes_per_table_warn_threshold,
