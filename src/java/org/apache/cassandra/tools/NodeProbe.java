@@ -1940,10 +1940,10 @@ public class NodeProbe implements AutoCloseable
             case "SSTableIndexesHit":
             case "IndexSegmentsHit":
             case "RowsFiltered":
-                return TableQueryMetrics.PerQueryMetrics.PER_QUERY_METRICS_TYPE;
+                return TableQueryMetrics.PerQuery.METRIC_TYPE;
             case "PostFilteringReadLatency":
             case "TotalQueryTimeouts":
-                return TableQueryMetrics.TABLE_QUERY_METRIC_TYPE;
+                return TableQueryMetrics.PerTable.METRIC_TYPE;
             case "DiskUsedBytes":
                 return IndexGroupMetrics.INDEX_GROUP_METRICS_TYPE;
             case "TotalIndexCount":
