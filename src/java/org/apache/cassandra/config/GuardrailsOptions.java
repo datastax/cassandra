@@ -137,7 +137,7 @@ public class GuardrailsOptions implements GuardrailsConfig
                 : "Cannot set both hcd_guardrail_defaults and emulate_dbaas_defaults to true";
 
         // for read requests
-        enforceDefault("page_size_fail_threshold", (IntConsumer) (v -> config.page_size_fail_threshold = v), NO_LIMIT, 512, NO_LIMIT);
+        enforceDefault("page_weight_fail_threshold", v -> config.page_weight_fail_threshold = v, null, new DataStorageSpec.IntBytesBound("512KiB"), null);
 
         enforceDefault("in_select_cartesian_product_fail_threshold", (IntConsumer) (v -> config.in_select_cartesian_product_fail_threshold = v), NO_LIMIT, 25, 25);
         enforceDefault("partition_keys_in_select_fail_threshold", (IntConsumer) (v -> config.partition_keys_in_select_fail_threshold = v), NO_LIMIT, 20, 20);
