@@ -37,7 +37,6 @@ import static org.apache.cassandra.distributed.api.Feature.GOSSIP;
 import static org.apache.cassandra.distributed.api.Feature.NETWORK;
 import static org.apache.cassandra.utils.TimeUUID.Generator.nextTimeUUID;
 import static org.awaitility.Awaitility.await;
-import static org.junit.Assert.assertEquals;
 
 public class TraceTest extends TestBaseImpl
 {
@@ -72,26 +71,20 @@ public class TraceTest extends TestBaseImpl
             UUID sessionId = nextTimeUUID().asUUID();
             cluster.coordinator(1).executeWithTracingWithResult(sessionId, "SELECT * from trace_ks.tbl WHERE v1 < " + MATCHED_ROWS, ConsistencyLevel.ONE);
 
+            // TODO We can improve the asserts for this when we have improved tracing and multi-node support
             await().atMost(5, TimeUnit.SECONDS).until(() -> {
                 List<TracingUtil.TraceEntry> traceEntries = TracingUtil.getTrace(cluster, sessionId, ConsistencyLevel.ONE);
                 return traceEntries.stream().map(traceEntry -> traceEntry.activity)
                                    .filter(activity -> activity.contains("post-filtered"))
                                    .mapToLong(this::fetchPartitionCount).sum() == MATCHED_ROWS;
             });
-            
-            //TODO We can improve the asserts for this when we have improved tracing and multi-node support
-            assertEquals(MATCHED_ROWS, TracingUtil.getTrace(cluster, sessionId, ConsistencyLevel.ONE)
-                                        .stream()
-                                        .map(traceEntry -> traceEntry.activity)
-                                        .filter(activity -> activity.contains("post-filtered"))
-                                        .mapToLong(this::fetchPartitionCount).sum());
         }
         finally
         {
             TracingUtil.setWaitForTracingEventTimeoutSecs(originalTraceTimeout);
         }
     }
-    
+
     private long fetchPartitionCount(String activity)
     {
         List<Long> values = new ArrayList<>();
