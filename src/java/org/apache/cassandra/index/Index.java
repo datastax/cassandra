@@ -1186,6 +1186,14 @@ public interface Index
         {
             return false;
         }
+
+        /**
+         * @return {@code true} if this plan uses index-based filtering, {@code false} otherwise
+         */
+        default boolean usesIndexFiltering()
+        {
+            return true;
+        }
     }
 
     /*
