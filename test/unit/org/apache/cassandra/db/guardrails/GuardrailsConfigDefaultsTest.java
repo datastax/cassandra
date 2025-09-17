@@ -18,12 +18,8 @@
 
 package org.apache.cassandra.db.guardrails;
 
-import java.util.Arrays;
 import java.util.Collections;
-import java.util.LinkedHashSet;
-import java.util.Set;
 
-import com.google.common.collect.ImmutableSet;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -132,21 +128,19 @@ public class GuardrailsConfigDefaultsTest
 
     private void verifyNoProfileDefaults(GuardrailsOptions guardrails)
     {
-        Config config = DatabaseDescriptor.getRawConfig();
-
         // Read request guardrails
         assertEquals("page_size_fail_threshold", GuardrailsOptions.NO_LIMIT, guardrails.getPageSizeFailThreshold());
         assertEquals("in_select_cartesian_product_fail_threshold", GuardrailsOptions.NO_LIMIT, guardrails.getInSelectCartesianProductFailThreshold());
         assertEquals("partition_keys_in_select_fail_threshold", GuardrailsOptions.NO_LIMIT, guardrails.getPartitionKeysInSelectFailThreshold());
-        assertEquals("tombstone_warn_threshold", 1000, config.tombstone_warn_threshold);
-        assertEquals("tombstone_failure_threshold", 100000, config.tombstone_failure_threshold);
+        assertEquals("tombstone_warn_threshold", 1000, guardrails.getTombstoneWarnThreshold());
+        assertEquals("tombstone_failure_threshold", 100000, guardrails.getTombstoneFailThreshold());
 
         // Write request guardrails
         assertEquals("logged_batch_enabled", true, guardrails.getLoggedBatchEnabled());
         assertEquals("batch_size_warn_threshold", 64, guardrails.getBatchSizeWarnThreshold() / 1024);
         assertEquals("batch_size_fail_threshold", 640, guardrails.getBatchSizeFailThreshold() / 1024);
         assertEquals("unlogged_batch_across_partitions_warn_threshold", 10, guardrails.getUnloggedBatchAcrossPartitionsWarnThreshold());
-        assertEquals("drop_truncate_table_enabled", true, config.drop_truncate_table_enabled);
+        assertEquals("drop_truncate_table_enabled", true, guardrails.getDropTruncateTableEnabled());
         assertEquals("user_timestamps_enabled", true, guardrails.getUserTimestampsEnabled());
         assertEquals("column_value_size_fail_threshold", GuardrailsOptions.NO_LIMIT, guardrails.getColumnValueSizeFailThreshold() == null ? GuardrailsOptions.NO_LIMIT : (int) (guardrails.getColumnValueSizeFailThreshold().toBytes() / 1024));
         assertEquals("read_before_write_list_operations_enabled", true, guardrails.getReadBeforeWriteListOperationsEnabled());
@@ -163,7 +157,7 @@ public class GuardrailsConfigDefaultsTest
         assertEquals("vector_dimensions_fail_threshold", 8192, guardrails.getVectorDimensionsFailThreshold());
         assertEquals("columns_per_table_fail_threshold", GuardrailsOptions.NO_LIMIT, guardrails.getColumnsPerTableFailThreshold());
         assertEquals("secondary_indexes_per_table_fail_threshold", GuardrailsOptions.NO_LIMIT, guardrails.getSecondaryIndexesPerTableFailThreshold());
-        assertEquals("sasi_indexes_per_table_fail_threshold", GuardrailsOptions.NO_LIMIT, config.sasi_indexes_per_table_fail_threshold);
+        assertEquals("sasi_indexes_per_table_fail_threshold", GuardrailsOptions.NO_LIMIT, guardrails.getSasiIndexesPerTableFailThreshold());
         assertEquals("materialized_views_per_table_fail_threshold", GuardrailsOptions.NO_LIMIT, guardrails.getMaterializedViewsPerTableFailThreshold());
         assertEquals("tables_warn_threshold", GuardrailsOptions.NO_LIMIT, guardrails.getTablesWarnThreshold());
         assertEquals("tables_fail_threshold", GuardrailsOptions.NO_LIMIT, guardrails.getTablesFailThreshold());
@@ -193,21 +187,19 @@ public class GuardrailsConfigDefaultsTest
 
     private void verifyDbaasDefaults(GuardrailsOptions guardrails)
     {
-        Config config = DatabaseDescriptor.getRawConfig();
-
         // Read request guardrails
         assertEquals("page_size_fail_threshold", 512, guardrails.getPageSizeFailThreshold());
         assertEquals("in_select_cartesian_product_fail_threshold", 25, guardrails.getInSelectCartesianProductFailThreshold());
         assertEquals("partition_keys_in_select_fail_threshold", 20, guardrails.getPartitionKeysInSelectFailThreshold());
-        assertEquals("tombstone_warn_threshold", 1000, config.tombstone_warn_threshold);
-        assertEquals("tombstone_failure_threshold", 100000, config.tombstone_failure_threshold);
+        assertEquals("tombstone_warn_threshold", 1000, guardrails.getTombstoneWarnThreshold());
+        assertEquals("tombstone_failure_threshold", 100000, guardrails.getTombstoneFailThreshold());
 
         // Write request guardrails
         assertEquals("logged_batch_enabled", true, guardrails.getLoggedBatchEnabled());
         assertEquals("batch_size_warn_threshold", 64, guardrails.getBatchSizeWarnThreshold() / 1024);
         assertEquals("batch_size_fail_threshold", 640, guardrails.getBatchSizeFailThreshold() / 1024);
         assertEquals("unlogged_batch_across_partitions_warn_threshold", 10, guardrails.getUnloggedBatchAcrossPartitionsWarnThreshold());
-        assertEquals("drop_truncate_table_enabled", true, config.drop_truncate_table_enabled);
+        assertEquals("drop_truncate_table_enabled", true, guardrails.getDropTruncateTableEnabled());
         assertEquals("user_timestamps_enabled", true, guardrails.getUserTimestampsEnabled());
         assertEquals("column_value_size_fail_threshold", 5 * 1024 * 1024, guardrails.getColumnValueSizeFailThreshold().toBytes());
         assertEquals("read_before_write_list_operations_enabled", false, guardrails.getReadBeforeWriteListOperationsEnabled());
@@ -227,7 +219,7 @@ public class GuardrailsConfigDefaultsTest
         assertEquals("vector_dimensions_fail_threshold", 8192, guardrails.getVectorDimensionsFailThreshold());
         assertEquals("columns_per_table_fail_threshold", 50, guardrails.getColumnsPerTableFailThreshold());
         assertEquals("secondary_indexes_per_table_fail_threshold", 1, guardrails.getSecondaryIndexesPerTableFailThreshold());
-        assertEquals("sasi_indexes_per_table_fail_threshold", 0, config.sasi_indexes_per_table_fail_threshold);
+        assertEquals("sasi_indexes_per_table_fail_threshold", 0, guardrails.getSasiIndexesPerTableFailThreshold());
         assertEquals("materialized_views_per_table_fail_threshold", 2, guardrails.getMaterializedViewsPerTableFailThreshold());
         assertEquals("tables_warn_threshold", 100, guardrails.getTablesWarnThreshold());
         assertEquals("tables_fail_threshold", 200, guardrails.getTablesFailThreshold());
@@ -257,21 +249,19 @@ public class GuardrailsConfigDefaultsTest
 
     private void verifyHcdDefaults(GuardrailsOptions guardrails)
     {
-        Config config = DatabaseDescriptor.getRawConfig();
-
         // Read request guardrails
         assertEquals("page_size_fail_threshold", GuardrailsOptions.NO_LIMIT, guardrails.getPageSizeFailThreshold());
         assertEquals("in_select_cartesian_product_fail_threshold", 25, guardrails.getInSelectCartesianProductFailThreshold());
         assertEquals("partition_keys_in_select_fail_threshold", 20, guardrails.getPartitionKeysInSelectFailThreshold());
-        assertEquals("tombstone_warn_threshold", 1000, config.tombstone_warn_threshold);
-        assertEquals("tombstone_failure_threshold", 100000, config.tombstone_failure_threshold);
+        assertEquals("tombstone_warn_threshold", 1000, guardrails.getTombstoneWarnThreshold());
+        assertEquals("tombstone_failure_threshold", 100000, guardrails.getTombstoneFailThreshold());
 
         // Write request guardrails
         assertEquals("logged_batch_enabled", true, guardrails.getLoggedBatchEnabled());
         assertEquals("batch_size_warn_threshold", 64, guardrails.getBatchSizeWarnThreshold() / 1024);
         assertEquals("batch_size_fail_threshold", 640, guardrails.getBatchSizeFailThreshold() / 1024);
         assertEquals("unlogged_batch_across_partitions_warn_threshold", 10, guardrails.getUnloggedBatchAcrossPartitionsWarnThreshold());
-        assertEquals("drop_truncate_table_enabled", true, config.drop_truncate_table_enabled);
+        assertEquals("drop_truncate_table_enabled", true, guardrails.getDropTruncateTableEnabled());
         assertEquals("user_timestamps_enabled", true, guardrails.getUserTimestampsEnabled());
         assertEquals("column_value_size_fail_threshold", GuardrailsOptions.NO_LIMIT, guardrails.getColumnValueSizeFailThreshold() == null ? GuardrailsOptions.NO_LIMIT : (int) (guardrails.getColumnValueSizeFailThreshold().toBytes() / 1024));
         assertEquals("read_before_write_list_operations_enabled", true, guardrails.getReadBeforeWriteListOperationsEnabled());
@@ -289,7 +279,7 @@ public class GuardrailsConfigDefaultsTest
         assertEquals("vector_dimensions_fail_threshold", 8192, guardrails.getVectorDimensionsFailThreshold());
         assertEquals("columns_per_table_fail_threshold", 200, guardrails.getColumnsPerTableFailThreshold());
         assertEquals("secondary_indexes_per_table_fail_threshold", 0, guardrails.getSecondaryIndexesPerTableFailThreshold());
-        assertEquals("sasi_indexes_per_table_fail_threshold", 0, config.sasi_indexes_per_table_fail_threshold);
+        assertEquals("sasi_indexes_per_table_fail_threshold", 0, guardrails.getSasiIndexesPerTableFailThreshold());
         assertEquals("materialized_views_per_table_fail_threshold", 0, guardrails.getMaterializedViewsPerTableFailThreshold());
         assertEquals("tables_warn_threshold", 100, guardrails.getTablesWarnThreshold());
         assertEquals("tables_fail_threshold", 200, guardrails.getTablesFailThreshold());
