@@ -66,6 +66,7 @@ public class QueryContext
     private float annRerankFloor = 0.0f; // only called from single-threaded setup code
 
     private final LongAdder shadowedPrimaryKeyCount = new LongAdder();
+    private final LongAdder postFilteringReadLatency = new LongAdder();
 
     // Determines the order of using indexes for filtering and sorting.
     // Null means the query execution order hasn't been decided yet.
@@ -144,6 +145,11 @@ public class QueryContext
     public void addAnnGraphSearchLatency(long val)
     {
         annGraphSearchLatency.add(val);
+    }
+
+    public void addPostFilteringReadLatency(long val)
+    {
+        postFilteringReadLatency.add(val);
     }
 
     public void setFilterSortOrder(FilterSortOrder filterSortOrder)
@@ -245,6 +251,11 @@ public class QueryContext
     {
         if (observedFloor < Float.POSITIVE_INFINITY)
             annRerankFloor = max(annRerankFloor, observedFloor);
+    }
+
+    public long getPostFilteringReadLatency()
+    {
+        return postFilteringReadLatency.longValue();
     }
 
     /**
