@@ -42,6 +42,7 @@ import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.vint.VIntCoding;
 
 import static java.lang.String.format;
 
@@ -584,14 +585,14 @@ public class IndexHints
             int n = indexes.size();
             assert n < Short.MAX_VALUE : TOO_MANY_INDEXES_ERROR + n;
 
-            out.writeShort(n);
+            out.writeVInt(n);
             for (IndexMetadata index : indexes)
                 IndexMetadata.serializer.serialize(index, out, version);
         }
 
         private Set<IndexMetadata> deserialize(DataInputPlus in, int version, TableMetadata table) throws IOException
         {
-            short n = in.readShort();
+            int n = (int) in.readVInt();
             Set<IndexMetadata> indexes = new HashSet<>(n);
             for (short i = 0; i < n; i++)
             {
@@ -606,8 +607,7 @@ public class IndexHints
             if (indexes.isEmpty())
                 return 0;
 
-            long size = 0;
-            size += TypeSizes.SHORT_SIZE; // number of indexes
+            long size = VIntCoding.computeVIntSize(indexes.size());
             for (IndexMetadata index : indexes)
                 size += IndexMetadata.serializer.serializedSize(index, version);
             return size;
