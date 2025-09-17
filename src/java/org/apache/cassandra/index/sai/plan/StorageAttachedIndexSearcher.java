@@ -32,10 +32,12 @@ import java.util.Queue;
 import java.util.Set;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
+
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -77,6 +79,7 @@ import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.AbstractIterator;
+import org.apache.cassandra.utils.Clock;
 import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.btree.BTree;
@@ -513,11 +516,15 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
 
         public UnfilteredRowIterator apply(List<PrimaryKey> keys)
         {
+            long startTimeNanos = Clock.Global.nanoTime();
             UnfilteredRowIterator partition = controller.getPartition(keys, executionController);
             queryContext.addPartitionsRead(1);
             queryContext.checkpoint();
             UnfilteredRowIterator filtered = applyIndexFilter(partition, filterTree, queryContext);
 
+            // Note that we record the duration of the read after post-filtering, which actually
+            // materializes the rows from disk.
+            queryContext.addPostFilteringReadLatency(Clock.Global.nanoTime() - startTimeNanos);
             return filtered;
         }
 
@@ -533,7 +540,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             FileUtils.closeQuietly(operation);
             controller.finish();
             if (tableQueryMetrics != null)
-                tableQueryMetrics.record(queryContext);
+                tableQueryMetrics.record(queryContext, command);
         }
     }
 
@@ -782,7 +789,7 @@ public class StorageAttachedIndexSearcher implements Index.Searcher
             FileUtils.closeQuietly(scoredPrimaryKeyIterator);
             controller.finish();
             if (tableQueryMetrics != null)
-                tableQueryMetrics.record(queryContext);
+                tableQueryMetrics.record(queryContext, command);
         }
 
         public class PrimaryKeyIterator extends AbstractUnfilteredRowIterator
