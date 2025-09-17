@@ -145,15 +145,15 @@ public abstract class ThresholdTester extends GuardrailTester
     public void testConfigValidation()
     {
         assertNotNull(guardrail);
-        testValidationOfThresholdProperties(guardrail.name + "_warn_threshold", guardrail.name + "_fail_threshold");
+        testValidationOfThresholdProperties(guardrail.name + "_warn_threshold", guardrail.name + "_fail_threshold", false);
     }
 
-    protected void testValidationOfThresholdProperties(String warnName, String failName)
+    protected void testValidationOfThresholdProperties(String warnName, String failName, boolean allowZero)
     {
         setter.accept(guardrails(), disabledValue, disabledValue);
 
-        testValidationOfStrictlyPositiveProperty((g, a) -> setter.accept(g, disabledValue, a), failName);
-        testValidationOfStrictlyPositiveProperty((g, w) -> setter.accept(g, w, disabledValue), warnName);
+        testValidationOfStrictlyPositiveProperty((g, a) -> setter.accept(g, disabledValue, a), failName, allowZero);
+        testValidationOfStrictlyPositiveProperty((g, w) -> setter.accept(g, w, disabledValue), warnName, allowZero);
 
         setter.accept(guardrails(), disabledValue, disabledValue);
         Assertions.assertThatThrownBy(() -> setter.accept(guardrails(), 2L, 1L))
@@ -289,12 +289,19 @@ public abstract class ThresholdTester extends GuardrailTester
         assertInvalidPositiveProperty((g, l) -> setter.accept(g, l.intValue()), (long) value, maxValue, name);
     }
 
-    protected void testValidationOfStrictlyPositiveProperty(BiConsumer<Guardrails, Long> setter, String name)
+    protected void testValidationOfStrictlyPositiveProperty(BiConsumer<Guardrails, Long> setter, String name, boolean allowZero)
     {
         assertInvalidStrictlyPositiveProperty(setter, Integer.MIN_VALUE, name);
         assertInvalidStrictlyPositiveProperty(setter, -2, name);
         assertValidProperty(setter, disabledValue);
-        assertInvalidStrictlyPositiveProperty(setter, disabledValue == null ? -1 : 0, name);
+        if (allowZero)
+        {
+            assertValidProperty(setter, 0L);
+            if (disabledValue == null)
+                assertInvalidStrictlyPositiveProperty(setter, -1, name);
+        }
+        else
+            assertInvalidStrictlyPositiveProperty(setter, disabledValue == null ? -1 : 0, name);
         assertValidProperty(setter, 1L);
         assertValidProperty(setter, 2L);
         assertValidProperty(setter, maxValue);
