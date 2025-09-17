@@ -583,7 +583,7 @@ public abstract class SegmentBuilder
     {
         // addTerm is only called by the compaction thread, serially, so we don't need to worry about new
         // terms being added while we're waiting -- updatesInFlight can only decrease
-        busyWaitWhile(() -> updatesInFlight.get() > 0);
+        busyWaitWhile(() -> updatesInFlight.get() > 0, 60_000);
         reconcileAsyncByteAllocations();
     }
 
