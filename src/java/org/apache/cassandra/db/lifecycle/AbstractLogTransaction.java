@@ -18,9 +18,9 @@
 package org.apache.cassandra.db.lifecycle;
 
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
-import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.utils.concurrent.Transactional;
 
@@ -37,6 +37,16 @@ public abstract class AbstractLogTransaction extends Transactional.AbstractTrans
                                           List<Obsoletion> obsoletions,
                                           Tracker tracker,
                                           Throwable accumulate);
+
+    /**
+     * Perform optional validation on current transaction's input sstables and output sstables
+     *
+     * @param obsolete sstables to obsolete
+     * @param update sstables to update to system
+     */
+    public void validate(Set<SSTableReader> obsolete, Set<SSTableReader> update)
+    {
+    }
 
     public static class Obsoletion
     {

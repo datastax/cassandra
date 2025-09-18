@@ -221,6 +221,7 @@ public class LifecycleTransaction extends Transactional.AbstractTransactional im
 
         // This needs to be called after checkpoint and having prepared the obsoletions because it will upload the deletion
         // marks in CNDB
+        log.validate(logged.obsolete, logged.update);
         log.prepareToCommit();
     }
 
