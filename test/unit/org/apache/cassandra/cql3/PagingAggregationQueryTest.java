@@ -134,7 +134,7 @@ public class PagingAggregationQueryTest extends CQLTester
     }
 
     @Test
-    public void testAggregationWithRowDeletions()
+    public void testAggregationWithPartialRowDeletions()
     {
         createTable("CREATE TABLE %s (k bigint, c int, v blob, PRIMARY KEY(k, c))");
 
@@ -183,6 +183,57 @@ public class PagingAggregationQueryTest extends CQLTester
         // test aggregation with group by
         Assertions.assertThat(execute("SELECT COUNT(*) FROM %s GROUP BY k").size()).isEqualTo(NUM_PARTITIONS);
         Assertions.assertThat(execute("SELECT COUNT(*) FROM %s GROUP BY k, c").size()).isEqualTo(NUM_PARTITIONS * (numClusterings - 2));
+    }
+
+    @Test
+    public void testAggregationWithCompleteRowDeletions()
+    {
+        createTable("CREATE TABLE %s (k bigint, c int, v blob, PRIMARY KEY(k, c))");
+
+        int numClusterings = 7;
+
+        // insert some clusterings, and flush
+        for (long k = 1; k <= NUM_PARTITIONS; k++)
+        {
+            // insert some clusterings
+            for (int c = 1; c <= numClusterings; c++)
+            {
+                execute("INSERT INTO %s (k, c, v) VALUES (?, ?, ?)", k, c, value);
+            }
+        }
+        maybeFlush();
+
+        // for each partition, delete the first and last clustering
+        for (long k = 1; k <= NUM_PARTITIONS; k++)
+        {
+            for (int c = 1; c <= numClusterings; c++)
+            {
+                execute("DELETE FROM %s WHERE k = ? AND c = ?", k, c);
+
+                // test aggregation on single partition query
+                int numRows = execute("SELECT * FROM %s WHERE k=?", k).size();
+                long count = execute("SELECT COUNT(*) FROM %s WHERE k=?", k).one().getLong("count");
+                Assertions.assertThat(count)
+                          .isEqualTo(numRows)
+                          .isEqualTo(numClusterings - c);
+            }
+
+            Assertions.assertThat(execute("SELECT max(k) FROM %s WHERE k=?", k).one().getBytes("system.max(k)")).isNull();
+            Assertions.assertThat(execute("SELECT max(k) FROM %s WHERE k=?", k).one().getBytes("system.max(c)")).isNull();
+        }
+
+        // test aggregation on range query
+        int selectRows = execute("SELECT * FROM %s").size();
+        long selectCountRows = execute("SELECT COUNT(*) FROM %s").one().getLong("count");
+        Assertions.assertThat(selectCountRows)
+                  .isEqualTo(selectRows)
+                  .isEqualTo(0);
+        Assertions.assertThat(execute("SELECT max(k) FROM %s").one().getBytes("system.max(k)")).isNull();
+        Assertions.assertThat(execute("SELECT max(k) FROM %s").one().getBytes("system.max(c)")).isNull();
+
+        // test aggregation with group by
+        Assertions.assertThat(execute("SELECT COUNT(*) FROM %s GROUP BY k").size()).isEqualTo(0);
+        Assertions.assertThat(execute("SELECT COUNT(*) FROM %s GROUP BY k, c").size()).isEqualTo(0);
     }
 
     @Test
