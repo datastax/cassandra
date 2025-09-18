@@ -571,7 +571,6 @@ public abstract class SegmentBuilder
 
     protected void reconcileAsyncByteAllocations()
     {
-        throw new UnsupportedOperationException();
     }
 
     public Throwable getAsyncThrowable()
