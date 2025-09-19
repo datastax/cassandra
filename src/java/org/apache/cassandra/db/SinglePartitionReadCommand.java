@@ -386,6 +386,12 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
                       lastReturned == null ? clusteringIndexFilter() : clusteringIndexFilter.forPaging(metadata().comparator, lastReturned, false));
     }
 
+    @Override
+    public boolean isSinglePartition()
+    {
+        return true;
+    }
+
     public PartitionIterator execute(ConsistencyLevel consistency, QueryState queryState, long queryStartNanoTime) throws RequestExecutionException
     {
         if (clusteringIndexFilter.isEmpty(metadata().comparator))
@@ -1151,8 +1157,7 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
     {
         builder.append(" WHERE ");
 
-        builder.append(ColumnMetadata.toCQLString(metadata().partitionKeyColumns())).append(" = ");
-        DataRange.appendKeyString(builder, metadata().partitionKeyType, partitionKey().getKey());
+        builder.append(partitionKey().toCQLString(metadata()));
 
         // We put the row filter first because the clustering index filter can end by "ORDER BY"
         if (!rowFilter().isEmpty())

@@ -19,11 +19,16 @@ package org.apache.cassandra.db;
 
 import java.nio.ByteBuffer;
 import java.util.Comparator;
+import java.util.List;
+import java.util.StringJoiner;
 import java.util.function.BiFunction;
 
+import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.dht.Token.KeyBound;
+import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
@@ -159,6 +164,32 @@ public abstract class DecoratedKey implements PartitionPosition, FilterKey
     {
         String keystring = getKey() == null ? "null" : ByteBufferUtil.bytesToHex(getKey());
         return "DecoratedKey(" + getToken() + ", " + keystring + ")";
+    }
+
+    /**
+     * Generate CQL representation of this partition key for the given table.
+     * For single-column keys: "k = 0"
+     * For multi-column keys: "k1 = 1 AND k2 = 2"
+     */
+    public String toCQLString(TableMetadata metadata)
+    {
+        List<ColumnMetadata> columns = metadata.partitionKeyColumns();
+
+        if (columns.size() == 1)
+            return toCQLString(columns.get(0), getKey());
+
+        ByteBuffer[] values = ((CompositeType) metadata.partitionKeyType).split(getKey());
+        StringJoiner joiner = new StringJoiner(" AND ");
+
+        for (int i = 0; i < columns.size(); i++)
+            joiner.add(toCQLString(columns.get(i), values[i]));
+
+        return joiner.toString();
+    }
+
+    private static String toCQLString(ColumnMetadata metadata, ByteBuffer key)
+    {
+        return String.format("%s = %s", metadata.name.toCQLString(), metadata.type.getString(key));
     }
 
     public Token getToken()
