@@ -301,7 +301,10 @@ public abstract class SegmentBuilder
             updatesInFlight.incrementAndGet();
 
             // Increment by double max bytes before dispatching the task to avoid a subsequent insertion from
-            // exceeding the limit. Upon completion, the limiter will be corrected with the actual size.
+            // exceeding the limit. Also add back any bytes that were reconciled previous calls that have since
+            // completed. It is expected that the reconciliation process typically results in a net reduction
+            // because we overestimate the number of bytes required per insertion, and as such, we allow for a lazy
+            // reconciliation process.
             long estimatedBytes = maxBytesAddedObserved.get() * 2;
             long reconciledBytes = reconciliationBytes.sumThenReset();
             observeAllocatedBytes(estimatedBytes + reconciledBytes);
@@ -402,6 +405,7 @@ public abstract class SegmentBuilder
         protected void addInternalAsync(List<ByteBuffer> terms, int segmentRowId)
         {
             updatesInFlight.incrementAndGet();
+            // See VectorOffHeapSegmentBuilder for comments on this logic
             long estimatedBytes = maxBytesAddedObserved.get() * 2;
             long reconciledBytes = reconciliationBytes.sumThenReset();
             observeAllocatedBytes(estimatedBytes + reconciledBytes);
