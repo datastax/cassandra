@@ -33,36 +33,8 @@ import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.github.jamm.MemoryLayoutSpecification;
 
-/// In-memory trie built for fast modification and reads executing concurrently with writes from a single mutator thread.
-///
-/// The main method for performing writes is [#apply(Trie,UpsertTransformer,Predicate)] which takes a trie as
-/// an argument and merges it into the current trie using the methods supplied by the given [UpsertTransformer],
-/// force copying anything below the points where the third argument returns true.
-///
-///
-/// The predicate can be used to implement several forms of atomicity and consistency guarantees:
-///   -  if the predicate is `nf -> false`, neither atomicity nor sequential consistency is guaranteed - readers
-///     can see any mixture of old and modified content
-///   -  if the predicate is `nf -> true`, full sequential consistency will be provided, i.e. if a reader sees any
-///     part of a modification, it will see all of it, and all the results of all previous modifications
-///   -  if the predicate is `nf -> nf.isBranching()` the write will be atomic, i.e. either none or all of the
-///     content of the merged trie will be visible by concurrent readers, but not sequentially consistent, i.e. there
-///     may be writes that are not visible to a reader even when they precede writes that are visible.
-///   -  if the predicate is `nf -> <some_test>(nf.content())` the write will be consistent below the identified
-///     point (used e.g. by Memtable to ensure partition-level consistency)
-///
-///
-///     Additionally, the class provides several simpler write methods for efficiency and convenience:
-///   -  [#putRecursive(ByteComparable,Object,UpsertTransformer)] inserts a single value using a recursive walk.
-///     It cannot provide consistency (single-path writes are always atomic). This is more efficient as it stores the
-///     walk state in the stack rather than on the heap but can cause a `StackOverflowException`.
-///   -  [#putSingleton(ByteComparable,Object,UpsertTransformer)] is a non-recursive version of the above, using
-///     the `apply` machinery.
-///   -  [#putSingleton(ByteComparable,Object,UpsertTransformer,boolean)] uses the fourth argument to choose
-///     between the two methods above, where some external property can be used to decide if the keys are short enough
-///     to permit recursive execution.
-///
-///     Because it uses 32-bit pointers in byte buffers, this trie has a fixed size limit of 2GB.
+/// Base class for mutable in-memory tries, providing the common infrastructure for plain, range and deletion-aware
+/// in-memory tries.
 public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
 {
     // See the trie format description in InMemoryReadTrie.
@@ -296,13 +268,15 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
     private int getCopyOrAllocate(int pointerAddress, int originalChild, int offsetWhenAllocating) throws TrieSpaceExhaustedException
     {
         int child = getIntVolatile(pointerAddress);
-        if (child == originalChild)
+        if (child == NONE)
         {
-            if (originalChild == NONE)
-                child = allocateCell() | offsetWhenAllocating;
-            else
-                child = copyCell(originalChild);
-
+            child = allocateCell() | offsetWhenAllocating;
+            // volatile writes not needed because this branch is not attached yet
+            putInt(pointerAddress, child);
+        }
+        else if (child == originalChild)
+        {
+            child = copyCell(originalChild);
             // volatile writes not needed because this branch is not attached yet
             putInt(pointerAddress, child);
         }
@@ -416,7 +390,7 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
 
         int childPos = splitCellPointerAddress(tail, splitNodeChildIndex(trans), SPLIT_OTHER_LEVEL_LIMIT);
         if (isNull(newChild))
-            return removePathVolatile(node, midPos, mid, tailPos, tail, childPos);
+            return removeSplitChildVolatile(node, midPos, mid, tailPos, tail, childPos);
         else
         {
             putIntVolatile(childPos, newChild);
@@ -424,7 +398,11 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
         }
     }
 
-    private int removePathVolatile(int node, int midPos, int mid, int tailPos, int tail, int childPos) throws TrieSpaceExhaustedException
+    /// Remove a split child, propagating the removal upward if this results in an empty split node cell.
+    /// This version of the method is called when the node being modified is reachable and may be concurrently accessed
+    /// by reads.
+    private int removeSplitChildVolatile(int node, int midPos, int mid, int tailPos, int tail, int childPos)
+    throws TrieSpaceExhaustedException
     {
         if (isNull(getIntVolatile(childPos)))
             return node;
@@ -482,7 +460,7 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
         int childPos = splitCellPointerAddress(tail, splitNodeChildIndex(trans), SPLIT_OTHER_LEVEL_LIMIT);
         putInt(childPos, newChild);
         if (isNull(newChild))
-            return removePath(node, midPos, mid, tailPos, tail);
+            return removeSplitPathNonVolatile(node, midPos, mid, tailPos, tail);
         else
             return node;    // normal path, adding data
     }
@@ -498,35 +476,36 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
         node = copyIfOriginal(node, originalNode);
         assert offset(node) == SPLIT_OFFSET : "Invalid split node in trie";
 
-        int midPos = splitCellPointerAddress(0, splitNodeMidIndex(trans), SPLIT_START_LEVEL_LIMIT);
-        int midOriginal = originalNode != NONE ? getIntVolatile(midPos + originalNode) : NONE;
-        int mid = getCopyOrAllocate(node + midPos, midOriginal, SPLIT_OFFSET);
+        int midPos = splitCellPointerAddress(node, splitNodeMidIndex(trans), SPLIT_START_LEVEL_LIMIT);
+        int midOriginal = originalNode != NONE ? getIntVolatile(midPos + originalNode - node) : NONE;
+        int mid = getCopyOrAllocate(midPos, midOriginal, SPLIT_OFFSET);
         assert offset(mid) == SPLIT_OFFSET : "Invalid split node in trie";
 
-        int tailPos = splitCellPointerAddress(0, splitNodeTailIndex(trans), SPLIT_OTHER_LEVEL_LIMIT);
-        int tailOriginal = midOriginal != NONE ? getIntVolatile(tailPos + midOriginal) : NONE;
-        int tail = getCopyOrAllocate(mid + tailPos, tailOriginal, SPLIT_OFFSET);
+        int tailPos = splitCellPointerAddress(mid, splitNodeTailIndex(trans), SPLIT_OTHER_LEVEL_LIMIT);
+        int tailOriginal = midOriginal != NONE ? getIntVolatile(tailPos + midOriginal - mid) : NONE;
+        int tail = getCopyOrAllocate(tailPos, tailOriginal, SPLIT_OFFSET);
         assert offset(tail) == SPLIT_OFFSET : "Invalid split node in trie";
 
         int childPos = splitCellPointerAddress(tail, splitNodeChildIndex(trans), SPLIT_OTHER_LEVEL_LIMIT);
         putInt(childPos, newChild);
         if (isNull(newChild))
-            return removePath(node, midPos, mid, tailPos, tail);
+            return removeSplitPathNonVolatile(node, midPos, mid, tailPos, tail);
         else
-            return node;    // normal path, adding data
+            return node;
     }
 
-    private int removePath(int node, int midPos, int mid, int tailPos, int tail)
+    /// Propagate the removal of a split child upward if it resulted in an empty split node cell,
+    /// assuming that the node being modified is not reachable and cannot be accessed concurrently.
+    private int removeSplitPathNonVolatile(int node, int midPos, int mid, int tailPos, int tail)
     {
-        // Removing a transition
         if (!isSplitBlockEmpty(tail, SPLIT_OTHER_LEVEL_LIMIT))
             return node;
         recycleCell(tail);
-        putInt(mid + tailPos, NONE);
+        putInt(tailPos, NONE);
         if (!isSplitBlockEmpty(mid, SPLIT_OTHER_LEVEL_LIMIT))
             return node;
         recycleCell(mid);
-        putInt(node + midPos, NONE);
+        putInt(midPos, NONE);
         if (!isSplitBlockEmpty(node, SPLIT_START_LEVEL_LIMIT))
             return node;
         recycleCell(node);
@@ -596,8 +575,8 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
         return node;
     }
 
-    /// Attach a child to the given sparse node. This may be an update for an existing branch, or a new child for the node.
-    /// Resulting node is not reachable, no volatile set needed.
+    /// Remove a child of the given sparse node. To ensure the safety of concurrent operations, this is always done
+    /// as a copying operation as we can't safely shift entries in a sparse node.
     private int removeSparseChild(int node, int index) throws TrieSpaceExhaustedException
     {
         recycleCell(node);
@@ -988,7 +967,7 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
 
     final ApplyState applyState = new ApplyState();
 
-    /// Represents the state for an [#apply] operation. Contains a stack of all nodes we descended through
+    /// Represents the state for an [InMemoryTrie#apply] operation. Contains a stack of all nodes we descended through
     /// and used to update the nodes with any new data during ascent.
     ///
     /// To make this as efficient and GC-friendly as possible, we use an integer array (instead of is an object stack)
