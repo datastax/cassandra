@@ -89,7 +89,7 @@ public class TrieBackedPartition implements Partition
 
     /// Interface implemented by partition markers, both the singleton below used for standalone [TrieBackedPartition],
     /// and the marker used in tail tries in `TrieMemtable`s.
-    public interface PartitionMarker {};
+    public interface PartitionMarker {}
 
     /// Singleton partition marker used for standalone [TrieBackedPartition] and [TriePartitionUpdate] objects.
     public static final PartitionMarker PARTITION_MARKER = new PartitionMarker()
@@ -174,7 +174,7 @@ public class TrieBackedPartition implements Partition
             if (activeDeletion.deletes(livenessInfo.timestamp()))
                 newLiveness = LivenessInfo.EMPTY;
 
-            Object[] newBTree = BTree.<ColumnData, ColumnData>transformAndFilter(columnsBTree, (cd) ->
+            Object[] newBTree = BTree.<ColumnData, ColumnData>transformAndFilter(columnsBTree, cd ->
             {
                 ColumnMetadata column = cd.column();
                 if (column.isComplex())

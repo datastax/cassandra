@@ -36,7 +36,7 @@ abstract class IntersectionCursor<T, C extends Cursor<T>> implements Cursor<T>
     final Direction direction;
     State state;
 
-    public IntersectionCursor(C source, TrieSetCursor set)
+    IntersectionCursor(C source, TrieSetCursor set)
     {
         this.direction = source.direction();
         this.source = source;

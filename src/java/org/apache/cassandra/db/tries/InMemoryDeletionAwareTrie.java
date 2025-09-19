@@ -85,7 +85,7 @@ extends InMemoryBaseTrie<T> implements DeletionAwareTrie<T, D>
         @Override
         public T content()
         {
-            return (T) content;
+            return content;
         }
 
         @Override

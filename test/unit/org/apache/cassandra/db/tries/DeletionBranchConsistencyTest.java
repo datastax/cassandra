@@ -43,9 +43,9 @@ extends ConsistencyTestBase<ConsistencyTestBase.TestStateMetadata,
 {
 
     @SuppressWarnings("rawtypes") // type does not matter, we are always throwing an exception
-    InMemoryBaseTrie.UpsertTransformer UPSERT_THROW = (x, y) -> { throw new AssertionError(); };
+    static final InMemoryBaseTrie.UpsertTransformer UPSERT_THROW = (x, y) -> { throw new AssertionError(); };
     @SuppressWarnings("rawtypes") // type does not matter, we are always throwing an exception
-    BiFunction BIFUNCTION_THROW = (x, y) -> { throw new AssertionError(); };
+    static final BiFunction BIFUNCTION_THROW = (x, y) -> { throw new AssertionError(); };
 
     @Override
     InMemoryDeletionAwareTrie<TestStateMetadata, TestRangeState> makeTrie(OpOrder readOrder)

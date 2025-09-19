@@ -29,7 +29,7 @@ abstract class TrieDumper<T> implements Cursor.Walker<T, String>
     int currentLength = 0;
     int depthAdjustment = 0;
 
-    public TrieDumper()
+    TrieDumper()
     {
         this.b = new StringBuilder();
     }

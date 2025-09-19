@@ -20,20 +20,14 @@ package org.apache.cassandra.db.tries;
 
 import java.util.Arrays;
 import java.util.List;
-import java.util.stream.Collectors;
 
-import com.google.common.base.Predicates;
 import org.junit.Test;
 
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 import static java.util.Arrays.asList;
-import static org.apache.cassandra.db.tries.DataPoint.contentOnlyList;
-import static org.apache.cassandra.db.tries.DataPoint.deletionOnlyList;
 import static org.apache.cassandra.db.tries.DataPoint.fromList;
-import static org.apache.cassandra.db.tries.DataPoint.toList;
 import static org.apache.cassandra.db.tries.DataPoint.verify;
-import static org.junit.Assert.assertEquals;
 
 public class DeletionAwareIntersectionTest extends DeletionAwareTestBase
 {

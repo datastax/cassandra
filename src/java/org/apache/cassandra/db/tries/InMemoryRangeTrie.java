@@ -102,30 +102,32 @@ public class InMemoryRangeTrie<S extends RangeState<S>> extends InMemoryBaseTrie
 
         private int updateActiveAndReturn(int depth)
         {
-            if (depth < 0)
+            if (depth >= 0)
             {
+                // Always check if we are seeing new content; if we do, that's an easy state update.
+                S content = content();
+                if (content != null)
+                {
+                    activeRange = content;
+                    prevContent = content;
+                    activeIsSet = true;
+                }
+                else if (prevContent != null)
+                {
+                    // If the previous state was exact, its right side is what we now have.
+                    activeRange = prevContent.precedingState(direction.opposite());
+                    prevContent = null;
+                    assert activeIsSet;
+                }
+                // otherwise the active state is either not set or still valid.
+            }
+            else
+            {
+                // exhausted
                 activeIsSet = true;
                 activeRange = null;
                 prevContent = null;
-                return depth;
             }
-
-            // Always check if we are seeing new content; if we do, that's an easy state update.
-            S content = content();
-            if (content != null)
-            {
-                activeRange = content;
-                prevContent = content;
-                activeIsSet = true;
-            }
-            else if (prevContent != null)
-            {
-                // If the previous state was exact, its right side is what we now have.
-                activeRange = prevContent.precedingState(direction.opposite());
-                prevContent = null;
-                assert activeIsSet;
-            }
-            // otherwise the active state is either not set or still valid.
             return depth;
         }
 

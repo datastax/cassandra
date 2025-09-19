@@ -202,7 +202,7 @@ interface RangeCursor<S extends RangeState<S>> extends Cursor<S>
 
     static <S extends RangeState<S>> RangeCursor<S> done(Direction direction, ByteComparable.Version version)
     {
-        return new Done<S>(direction, version);
+        return new Done<>(direction, version);
     }
 
     class FromSet<S extends RangeState<S>> implements RangeCursor<S>

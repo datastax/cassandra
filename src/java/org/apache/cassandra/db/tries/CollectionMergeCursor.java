@@ -97,7 +97,7 @@ abstract class CollectionMergeCursor<T, C extends Cursor<T>> implements Cursor<T
     /// The collected content.
     T collectedContent;
 
-    public <I> CollectionMergeCursor(Trie.CollectionMergeResolver<T> resolver, Direction direction, Collection<I> inputs, IntFunction<C[]> cursorArrayConstructor, BiFunction<I, Direction, C> extractor)
+    <I> CollectionMergeCursor(Trie.CollectionMergeResolver<T> resolver, Direction direction, Collection<I> inputs, IntFunction<C[]> cursorArrayConstructor, BiFunction<I, Direction, C> extractor)
     {
         this.resolver = resolver;
         this.direction = direction;

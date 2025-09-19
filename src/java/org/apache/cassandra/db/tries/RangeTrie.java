@@ -41,11 +41,6 @@ import org.apache.cassandra.utils.bytecomparable.ByteSource;
 /// See [RangeCursor] and [Trie.md](./Trie.md) for further details on the implementation of range tries.
 public interface RangeTrie<S extends RangeState<S>> extends BaseTrie<S, RangeCursor<S>, RangeTrie<S>>
 {
-    default <R> R process(Direction direction, Cursor.Walker<? super S, R> walker)
-    {
-        return cursor(direction).process(walker);
-    }
-
     /// Returns a singleton trie mapping the given byte path to a marker.
     ///
     /// Note: Ranges are meant to use boundaries that are distinct from data and thus a singleton range would list

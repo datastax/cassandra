@@ -82,9 +82,9 @@ public class InMemoryTrie<T> extends InMemoryBaseTrie<T> implements Trie<T>
         return new InMemoryTrie<>(byteComparableVersion, bufferType, ExpectedLifetime.LONG, opOrder);
     }
 
-    public InMemoryCursor makeCursor(Direction direction)
+    public InMemoryCursor<T> makeCursor(Direction direction)
     {
-        return new InMemoryCursor(this, direction, root, 0, -1);
+        return new InMemoryCursor<>(this, direction, root, 0, -1);
     }
 
     /// Modify this trie to apply the mutation given in the form of a trie. Any content in the mutation will be resolved

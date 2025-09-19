@@ -159,6 +159,11 @@ interface DataPoint
 
     static InMemoryDeletionAwareTrie<LivePoint, DeletionMarker> fromList(List<DataPoint> list)
     {
+        return fromList(list, false);
+    }
+
+    static InMemoryDeletionAwareTrie<LivePoint, DeletionMarker> fromList(List<DataPoint> list, boolean forceCopy)
+    {
         InMemoryDeletionAwareTrie<LivePoint, DeletionMarker> trie = InMemoryDeletionAwareTrie.shortLived(VERSION);
         try
         {
@@ -176,7 +181,7 @@ interface DataPoint
                             DataPoint::deleteLive,
                             DataPoint::deleteLive,
                             false,
-                            v -> false
+                            v -> forceCopy
                     );
                 }
             }
@@ -209,7 +214,7 @@ interface DataPoint
                             DataPoint::deleteLive,
                             DataPoint::deleteLive,
                             false,
-                            v -> false
+                            v -> forceCopy
                     );
                 }
 

@@ -124,8 +124,8 @@ interface TrieSetCursor extends RangeCursor<TrieSetCursor.RangeState>
         @Override
         public RangeState restrict(boolean applicableBefore, boolean applicableAfter)
         {
-            return fromProperties(this.applicableBefore & applicableBefore,
-                                  this.applicableAfter & applicableAfter,
+            return fromProperties(this.applicableBefore && applicableBefore,
+                                  this.applicableAfter && applicableAfter,
                                   this.isBoundary);
         }
 
@@ -133,8 +133,8 @@ interface TrieSetCursor extends RangeCursor<TrieSetCursor.RangeState>
         public RangeState asBoundary(Direction direction)
         {
             final boolean isForward = direction.isForward();
-            return fromProperties(this.applicableBefore & !isForward,
-                                  this.applicableAfter & isForward,
+            return fromProperties(this.applicableBefore && !isForward,
+                                  this.applicableAfter && isForward,
                                   true);
         }
 

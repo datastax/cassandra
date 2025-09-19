@@ -50,8 +50,8 @@ public interface VerificationCursor
         int returnedTransition;
         byte[] path;
 
-        transient Cursor.TransitionsReceiver chainedReceiver = null;
-        transient boolean advanceMultipleCalledReceiver;
+        Cursor.TransitionsReceiver chainedReceiver = null;
+        boolean advanceMultipleCalledReceiver;
 
         Plain(C cursor)
         {
@@ -293,20 +293,11 @@ public interface VerificationCursor
         @Override
         public S precedingState()
         {
-//            Preconditions.checkState(currentPrecedingState == source.precedingState(),
-//                                     "Preceding state changed without advance: %s -> %s. %s\n%s",
-//                                     currentPrecedingState, source.precedingState(),
-//                                     agree(currentPrecedingState, source.precedingState())
-//                                     ? "The values are equal but different object. This is not permitted for performance reasons."
-//                                     : "",
-//                                     this);
-//            // == above is correct, we do not want covering state to be recreated unless some change happened to the cursor
-
-            Preconditions.checkState(currentPrecedingState == source.precedingState() || currentPrecedingState != null && currentPrecedingState.equals(source.precedingState()),
+            Preconditions.checkState(currentPrecedingState == source.precedingState() ||
+                                     currentPrecedingState != null && currentPrecedingState.equals(source.precedingState()),
                                      "Preceding state changed without advance: %s -> %s.\n%s",
                                      currentPrecedingState, source.precedingState(),
                                      this);
-            // == above is correct, we do not want covering state to be recreated unless some change happened to the cursor
             return currentPrecedingState;
         }
 
@@ -392,7 +383,7 @@ public interface VerificationCursor
 
 
         @Override
-        abstract public WithRanges<S, C> tailCursor(Direction direction);
+        public abstract WithRanges<S, C> tailCursor(Direction direction);
 
         @Override
         public String toString()
@@ -412,6 +403,7 @@ public interface VerificationCursor
                                      currentPrecedingState, this);
         }
 
+        @Override
         void verifyEndState()
         {
             Preconditions.checkState(currentPrecedingState == null,

@@ -145,7 +145,7 @@ public class InMemoryTrieConsistencyTest extends ConsistencyTestBase<InMemoryTri
                           trie.usedSizeOffHeap());
     }
 
-    static abstract class Content
+    abstract static class Content
     {
         final String pk;
 

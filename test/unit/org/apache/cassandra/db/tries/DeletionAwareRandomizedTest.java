@@ -37,6 +37,7 @@ import static org.apache.cassandra.db.tries.DataPoint.toList;
 import static org.apache.cassandra.db.tries.DataPoint.verify;
 import static org.junit.Assert.assertEquals;
 import static org.quicktheories.QuickTheory.qt;
+import static org.quicktheories.generators.SourceDSL.booleans;
 import static org.quicktheories.generators.SourceDSL.integers;
 import static org.quicktheories.generators.SourceDSL.lists;
 
@@ -147,12 +148,12 @@ public class DeletionAwareRandomizedTest extends DeletionAwareTestBase
     @Test
     public void testTrieConstructionConsistency()
     {
-        qt().forAll(dataPointListGen())
-            .checkAssert(dataPoints -> {
+        qt().forAll(dataPointListGen(), booleans().all())
+            .checkAssert((dataPoints, forceCopy) -> {
                 if (dataPoints.isEmpty())
                     return; // Skip empty lists
                     
-                DeletionAwareTrie<LivePoint, DeletionMarker> trie = fromList(dataPoints);
+                DeletionAwareTrie<LivePoint, DeletionMarker> trie = fromList(dataPoints, forceCopy);
                 List<DataPoint> reconstructed = toList(trie);
                 
                 assertEquals("Trie construction should be consistent with iteration",
@@ -168,16 +169,16 @@ public class DeletionAwareRandomizedTest extends DeletionAwareTestBase
     @Test
     public void testMergeCommutativity()
     {
-        qt().forAll(dataPointPairGen())
-            .checkAssert(pair -> {
+        qt().forAll(dataPointPairGen(), booleans().all())
+            .checkAssert((pair, forcedCopy) -> {
                 List<DataPoint> list1 = pair.get(0);
                 List<DataPoint> list2 = pair.get(1);
                 
                 if (list1.isEmpty() && list2.isEmpty())
                     return; // Skip empty merges
                     
-                DeletionAwareTrie<LivePoint, DeletionMarker> trie1 = fromList(list1);
-                DeletionAwareTrie<LivePoint, DeletionMarker> trie2 = fromList(list2);
+                DeletionAwareTrie<LivePoint, DeletionMarker> trie1 = fromList(list1, forcedCopy);
+                DeletionAwareTrie<LivePoint, DeletionMarker> trie2 = fromList(list2, forcedCopy);
                 
                 // Merge in both directions
                 DeletionAwareTrie<LivePoint, DeletionMarker> merged1to2 =
@@ -200,13 +201,13 @@ public class DeletionAwareRandomizedTest extends DeletionAwareTestBase
     @Test
     public void testMergeIdentity()
     {
-        qt().forAll(dataPointListGen())
-            .checkAssert(dataPoints -> {
+        qt().forAll(dataPointListGen(), booleans().all())
+            .checkAssert((dataPoints, forcedCopy) -> {
                 if (dataPoints.isEmpty())
                     return; // Skip empty lists
                     
-                DeletionAwareTrie<LivePoint, DeletionMarker> trie = fromList(dataPoints);
-                DeletionAwareTrie<LivePoint, DeletionMarker> empty = fromList(Collections.emptyList());
+                DeletionAwareTrie<LivePoint, DeletionMarker> trie = fromList(dataPoints, forcedCopy);
+                DeletionAwareTrie<LivePoint, DeletionMarker> empty = fromList(Collections.emptyList(), forcedCopy);
                 
                 DeletionAwareTrie<LivePoint, DeletionMarker> merged =
                     trie.mergeWith(empty, LivePoint::combine, DeletionMarker::combine, DeletionMarker::applyTo, false);
@@ -233,8 +234,8 @@ public class DeletionAwareRandomizedTest extends DeletionAwareTestBase
                             int left = Math.min(start, end);
                             int right = Math.max(start, end);
                             return asList(points, left, right);
-                        }))
-            .checkAssert(params -> {
+                        }), booleans().all())
+            .checkAssert((params, forcedCopy) -> {
                 @SuppressWarnings("unchecked")
                 List<DataPoint> dataPoints = (List<DataPoint>) params.get(0);
                 int left = (Integer) params.get(1);
@@ -243,7 +244,7 @@ public class DeletionAwareRandomizedTest extends DeletionAwareTestBase
                 if (dataPoints.isEmpty())
                     return; // Skip empty lists
                     
-                DeletionAwareTrie<LivePoint, DeletionMarker> trie = fromList(dataPoints);
+                DeletionAwareTrie<LivePoint, DeletionMarker> trie = fromList(dataPoints, forcedCopy);
                 DeletionAwareTrie<LivePoint, DeletionMarker> subtrie = 
                     trie.subtrie(before(left), before(right));
                 
@@ -276,16 +277,16 @@ public class DeletionAwareRandomizedTest extends DeletionAwareTestBase
     @Test
     public void testOptimizedMergeCursorEquivalence()
     {
-        qt().forAll(dataPointPairGen())
-            .checkAssert(pair -> {
+        qt().forAll(dataPointPairGen(), booleans().all())
+            .checkAssert((pair, forcedCopy) -> {
                 List<DataPoint> list1 = pair.get(0);
                 List<DataPoint> list2 = pair.get(1);
                 
                 if (list1.isEmpty() || list2.isEmpty())
                     return; // Skip cases with empty lists
                     
-                DeletionAwareTrie<LivePoint, DeletionMarker> trie1 = fromList(list1);
-                DeletionAwareTrie<LivePoint, DeletionMarker> trie2 = fromList(list2);
+                DeletionAwareTrie<LivePoint, DeletionMarker> trie1 = fromList(list1, forcedCopy);
+                DeletionAwareTrie<LivePoint, DeletionMarker> trie2 = fromList(list2, forcedCopy);
                 
                 // Test both optimized and safe merge cursors
                 DeletionAwareCursor<LivePoint, DeletionMarker> cursor1 = trie1.cursor(Direction.FORWARD);
@@ -353,12 +354,12 @@ public class DeletionAwareRandomizedTest extends DeletionAwareTestBase
     @Test
     public void testTrieStructuralInvariants()
     {
-        qt().forAll(dataPointListGen())
-            .checkAssert(dataPoints -> {
+        qt().forAll(dataPointListGen(), booleans().all())
+            .checkAssert((dataPoints, forcedCopy) -> {
                 if (dataPoints.isEmpty())
                     return; // Skip empty lists
 
-                DeletionAwareTrie<LivePoint, DeletionMarker> trie = fromList(dataPoints);
+                DeletionAwareTrie<LivePoint, DeletionMarker> trie = fromList(dataPoints, forcedCopy);
 
                 // Test that trie construction is consistent
                 List<DataPoint> reconstructed = toList(trie);
@@ -396,8 +397,9 @@ public class DeletionAwareRandomizedTest extends DeletionAwareTestBase
                             int left = Math.min(start, end);
                             int right = Math.max(start, end);
                             return asList(points, left, right);
-                        }))
-            .checkAssert(params -> {
+                        }),
+                    booleans().all())
+            .checkAssert((params, forcedCopy) -> {
                 @SuppressWarnings("unchecked")
                 List<DataPoint> dataPoints = (List<DataPoint>) params.get(0);
                 int left = (Integer) params.get(1);
@@ -406,7 +408,7 @@ public class DeletionAwareRandomizedTest extends DeletionAwareTestBase
                 if (dataPoints.isEmpty())
                     return; // Skip empty lists
 
-                DeletionAwareTrie<LivePoint, DeletionMarker> trie = fromList(dataPoints);
+                DeletionAwareTrie<LivePoint, DeletionMarker> trie = fromList(dataPoints, forcedCopy);
 
                 // Get subtrie result
                 DeletionAwareTrie<LivePoint, DeletionMarker> subtrie =
@@ -438,8 +440,9 @@ public class DeletionAwareRandomizedTest extends DeletionAwareTestBase
     public void testMergeAssociativity()
     {
         qt().forAll(dataPointListGen()
-                   .zip(dataPointListGen(), dataPointListGen(), Arrays::asList))
-            .checkAssert(triple -> {
+                   .zip(dataPointListGen(), dataPointListGen(), Arrays::asList),
+                    booleans().all())
+            .checkAssert((triple, forcedCopy) -> {
                 List<DataPoint> list1 = triple.get(0);
                 List<DataPoint> list2 = triple.get(1);
                 List<DataPoint> list3 = triple.get(2);
@@ -447,11 +450,11 @@ public class DeletionAwareRandomizedTest extends DeletionAwareTestBase
                 if (list1.isEmpty() && list2.isEmpty() && list3.isEmpty())
                     return; // Skip all empty
 
-                DeletionAwareTrie<LivePoint, DeletionMarker> trie1 = fromList(list1);
-                DeletionAwareTrie<LivePoint, DeletionMarker> trie2 = fromList(list2);
+                DeletionAwareTrie<LivePoint, DeletionMarker> trie1 = fromList(list1, forcedCopy);
+                DeletionAwareTrie<LivePoint, DeletionMarker> trie2 = fromList(list2, forcedCopy);
                 DeletionAwareTrie<LivePoint, DeletionMarker> trie3 = fromList(list3);
 
-                // Test (A merge B) merge C
+                // Test (A merge B, forcedCopy) merge C
                 DeletionAwareTrie<LivePoint, DeletionMarker> ab =
                     trie1.mergeWith(trie2, LivePoint::combine, DeletionMarker::combine, DeletionMarker::applyTo, false);
                 DeletionAwareTrie<LivePoint, DeletionMarker> ab_c =
@@ -479,8 +482,8 @@ public class DeletionAwareRandomizedTest extends DeletionAwareTestBase
     @Test
     public void testCollectionMerge()
     {
-        qt().forAll(dataPointListGen().zip(dataPointListGen(), dataPointListGen(), Arrays::asList))
-            .checkAssert(triple -> {
+        qt().forAll(dataPointListGen().zip(dataPointListGen(), dataPointListGen(), Arrays::asList), booleans().all())
+            .checkAssert((triple, forcedCopy) -> {
                 List<DataPoint> list1 = triple.get(0);
                 List<DataPoint> list2 = triple.get(1);
                 List<DataPoint> list3 = triple.get(2);
@@ -493,9 +496,9 @@ public class DeletionAwareRandomizedTest extends DeletionAwareTestBase
                 if (!hasNonEmpty || hasEmpty)
                     return; // Skip if all empty or if we have any empty tries
 
-                DeletionAwareTrie<LivePoint, DeletionMarker> trie1 = fromList(list1);
-                DeletionAwareTrie<LivePoint, DeletionMarker> trie2 = fromList(list2);
-                DeletionAwareTrie<LivePoint, DeletionMarker> trie3 = fromList(list3);
+                DeletionAwareTrie<LivePoint, DeletionMarker> trie1 = fromList(list1, forcedCopy);
+                DeletionAwareTrie<LivePoint, DeletionMarker> trie2 = fromList(list2, forcedCopy);
+                DeletionAwareTrie<LivePoint, DeletionMarker> trie3 = fromList(list3, forcedCopy);
 
                 // Test collection merge
                 DeletionAwareTrie<LivePoint, DeletionMarker> collectionMerged =
@@ -526,8 +529,8 @@ public class DeletionAwareRandomizedTest extends DeletionAwareTestBase
     @Test
     public void testOptimizedCollectionMerge()
     {
-        qt().forAll(dataPointListGen().zip(dataPointListGen(), dataPointListGen(), Arrays::asList))
-            .checkAssert(triple -> {
+        qt().forAll(dataPointListGen().zip(dataPointListGen(), dataPointListGen(), Arrays::asList), booleans().all())
+            .checkAssert((triple, forcedCopy) -> {
                 List<DataPoint> list1 = triple.get(0);
                 List<DataPoint> list2 = triple.get(1);
                 List<DataPoint> list3 = triple.get(2);
@@ -540,11 +543,11 @@ public class DeletionAwareRandomizedTest extends DeletionAwareTestBase
                 if (!hasNonEmpty || hasEmpty)
                     return; // Skip if all empty or if we have any empty tries
 
-                DeletionAwareTrie<LivePoint, DeletionMarker> trie1 = fromList(list1);
-                DeletionAwareTrie<LivePoint, DeletionMarker> trie2 = fromList(list2);
+                DeletionAwareTrie<LivePoint, DeletionMarker> trie1 = fromList(list1, forcedCopy);
+                DeletionAwareTrie<LivePoint, DeletionMarker> trie2 = fromList(list2, forcedCopy);
                 DeletionAwareTrie<LivePoint, DeletionMarker> trie3 = fromList(list3);
 
-                // Test safe collection merge (deletionsAtFixedPoints = false)
+                // Test safe collection merge (deletionsAtFixedPoints = false, forcedCopy)
                 DeletionAwareTrie<LivePoint, DeletionMarker> safeMerged = dir ->
                     new CollectionMergeCursor.DeletionAware<>(
                         LivePoint::combineCollection,
