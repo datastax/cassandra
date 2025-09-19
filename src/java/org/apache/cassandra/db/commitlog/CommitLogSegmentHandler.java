@@ -22,17 +22,17 @@ import org.apache.cassandra.io.util.FileUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+/**
+ * After recovery of commit logs is performed, this class is responsible for handling the commit log files that were
+ * replayed.
+ */
 public class CommitLogSegmentHandler
 {
     private static final Logger logger = LoggerFactory.getLogger(CommitLogSegmentHandler.class);
-    public void handleReplayedSegment(final File file)
-    {
-        // no-op by default
-    };
 
-    public void handleReplayedSegment(final File file, boolean hasInvalidAndNoFailedMutations, boolean hasFailedMutations)
+    public void handleReplayedSegment(final File file, boolean hasInvalidMutations, boolean hasFailedMutations)
     {
-        if (!hasFailedMutations)
+        if (!hasFailedMutations && !hasInvalidMutations)
         {
             // (don't decrease managed size, since this was never a "live" segment)
             logger.trace("(Unopened) segment {} is no longer needed and will be deleted now", file);

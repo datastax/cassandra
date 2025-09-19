@@ -96,7 +96,6 @@ public class CommitLog implements CommitLogMBean
     final AbstractCommitLogService executor;
     private Set<String> segmentsWithInvalidMutations;
     private Set<String> segmentsWithFailedMutations;
-    private final String nameOfInvalidMutationDirectory = "INVALID_MUTATIONS";
     volatile Configuration configuration;
     private boolean started = false;
 
@@ -237,16 +236,9 @@ public class CommitLog implements CommitLogMBean
             replayedKeyspaces = recoverFiles(flushReason, files);
             logger.info("Log replay complete, {} replayed mutations", replayedKeyspaces.values().stream().reduce(Integer::sum).orElse(0));
 
-            Set<String> segmentsWithInvalidAndNoFailedMutations = new HashSet<>(segmentsWithInvalidMutations).stream()
-                                                                        .filter(segment -> !segmentsWithFailedMutations.contains(segment))
-                                                                        .collect(Collectors.toSet());
-
-            // We retain all segments with failed mutations in the commit log directory of the host so that they can be replayed again.
-            // Move all segments with invalid (and no failed) mutations to a different sub-directory and delete the segment from the commit log directory of the host.
             for (File f : files)
             {
-                boolean hasFailedMutations = segmentsWithFailedMutations.contains(f.name());
-                segmentManager.handleReplayedSegment(f, segmentsWithInvalidAndNoFailedMutations.contains(f.name()), hasFailedMutations);
+                segmentManager.handleReplayedSegment(f, segmentsWithInvalidMutations.contains(f.name()), segmentsWithFailedMutations.contains(f.name()));
             }
         }
 
@@ -271,11 +263,6 @@ public class CommitLog implements CommitLogMBean
         segmentsWithFailedMutations = replayer.getSegmentWithFailedMutations();
         segmentsWithInvalidMutations = replayer.getSegmentWithInvalidMutations();
         return res;
-    }
-
-    public String getNameOfInvalidMutationDirectory()
-    {
-        return nameOfInvalidMutationDirectory;
     }
 
     public void recoverPath(String path, boolean tolerateTruncation) throws IOException

@@ -105,7 +105,7 @@ public abstract class AbstractCommitLogSegmentManager
      */
     private final AtomicLong size = new AtomicLong();
 
-    public static CommitLogSegmentHandler commitLogSegmentHandler = new CommitLogSegmentHandler();
+    public static volatile CommitLogSegmentHandler commitLogSegmentHandler = new CommitLogSegmentHandler();
 
     @VisibleForTesting
     Thread managerThread;
@@ -419,9 +419,9 @@ public abstract class AbstractCommitLogSegmentManager
         handleReplayedSegment(file, false, false);
     }
 
-    void handleReplayedSegment(final File file, boolean hasInvalidAndNoFailedMutations, boolean hasFailedMutations)
+    void handleReplayedSegment(final File file, boolean hasInvalidMutations, boolean hasFailedMutations)
     {
-        commitLogSegmentHandler.handleReplayedSegment(file, hasInvalidAndNoFailedMutations, hasFailedMutations);
+        commitLogSegmentHandler.handleReplayedSegment(file, hasInvalidMutations, hasFailedMutations);
     }
 
     /**
