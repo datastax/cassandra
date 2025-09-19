@@ -673,6 +673,80 @@ public class PagingAggregationQueryTest extends CQLTester
         assertRangeCount(NUM_PARTITIONS * NUM_CLUSTERINGS);
     }
 
+    @Test
+    public void testTTLsWithSkinnyTable()
+    {
+        // we are only interested in the not NULL value case
+        Assume.assumeTrue(value != null);
+
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, c int, v text)");
+
+        String stringValue = ByteBufferUtil.toDebugHexString(value);
+        String v1 = stringValue + "_1";
+        String v2 = stringValue + "_2";
+
+        // insert some rows, and flush
+        for (int k = 1; k <= NUM_PARTITIONS; k++)
+        {
+            execute("INSERT INTO %s (k, v) VALUES (?, ?)", k, v1);
+        }
+        maybeFlush();
+
+        // test aggregation on range query
+        assertRangeCount(NUM_PARTITIONS);
+
+        // Give a TTL the two first and two last partitions
+        execute("UPDATE %s USING TTL 1 SET v = ? WHERE k = ? ", v2, 1);
+        execute("UPDATE %s USING TTL 1 SET v = ? WHERE k = ? ", v2, NUM_PARTITIONS - 1);
+        maybeFlush();
+
+        // wait for the TTL to expire
+        Uninterruptibles.sleepUninterruptibly(2, TimeUnit.SECONDS);
+
+        // test aggregation on range query
+        assertRangeCount(NUM_PARTITIONS);
+    }
+
+    @Test
+    public void testTTLsWithWideTable()
+    {
+        // we are only interested in the not NULL value case
+        Assume.assumeTrue(value != null);
+
+        createTable("CREATE TABLE %s (k int, c int, v text, PRIMARY KEY(k, c))");
+
+        String stringValue = ByteBufferUtil.toDebugHexString(value);
+        String v1 = stringValue + "_1";
+        String v2 = stringValue + "_2";
+
+        // insert some rows, and flush
+        for (int k = 1; k <= NUM_PARTITIONS; k++)
+        {
+            for (int c = 1; c <= NUM_CLUSTERINGS; c++)
+            {
+                execute("INSERT INTO %s (k, c, v) VALUES (?, ?, ?)", k, c, v1);
+            }
+        }
+        maybeFlush();
+
+        // test aggregation on range query
+        assertRangeCount(NUM_PARTITIONS * NUM_CLUSTERINGS);
+
+        // for each partition, give a TTL the two first and two last clusterings
+        for (int k = 1; k <= NUM_PARTITIONS; k++)
+        {
+            execute("UPDATE %s USING TTL 1 SET v = ? WHERE k = ? AND c = ?", v2, k, 1);
+            execute("UPDATE %s USING TTL 1 SET v = ? WHERE k = ? AND c = ?", v2, k, NUM_CLUSTERINGS - 1);
+        }
+        maybeFlush();
+
+        // wait for the TTL to expire
+        Uninterruptibles.sleepUninterruptibly(2, TimeUnit.SECONDS);
+
+        // test aggregation on range query
+        assertRangeCount(NUM_PARTITIONS * NUM_CLUSTERINGS);
+    }
+
     private void assertPartitionCount(Object k, int expectedCount)
     {
         assertCount("SELECT * FROM %s WHERE k=?", "SELECT COUNT(*) FROM %s WHERE k=?", expectedCount, k);
