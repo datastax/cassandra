@@ -271,24 +271,20 @@ public class TrieIndexSSTableReader extends SSTableReader
     private RowIndexEntry getApproximatePosition(PartitionPosition key, Operator op, boolean isLeftBound)
     {
         assert op == GT || op == GE;
-
-        PartitionPosition searchKey;
-        Operator searchOp;
-
-        if (filterLast() && last.compareTo(key) < 0)
-            return null;
-        boolean filteredLeft = (filterFirst() && first.compareTo(key) > 0);
-        searchKey = filteredLeft ? first : key;
-        searchOp = filteredLeft ? GE : op;
+        // We currently only need this method in contexts where neither early opening nor zero copy transfer are used,
+        // which means we don't have to worry about `filterFirst`/`filterLast`. We could expand that method to support
+        // those, but it's unclear it will ever be needed, and this would require proper testing, so leaving aside for now.
+        assert openReason != OpenReason.MOVED_START : "Early opening is not supported with this method";
+        assert !sstableMetadata.zeroCopyMetadata.exists() : "SSTables with zero copy metadata are not supported";
 
         try (PartitionIndex.Reader reader = partitionIndex.openReader())
         {
-            return reader.ceiling(searchKey, (pos, assumeNoMatch, compareKey) -> {
+            return reader.ceiling(key, (pos, assumeNoMatch, compareKey) -> {
                 // The goal of the overall method, compared to `getPosition`, is to avoid reading the data file. If
                 // whatever partition we look at has a row index (`pos >= 0`), then `retrieveEntryIfAcceptable` may
                 // read the row index file, but it will never read the data file, so we can use it like in `getPosition`.
                 if (pos >= 0)
-                    return retrieveEntryIfAcceptable(searchOp, compareKey, pos, assumeNoMatch);
+                    return retrieveEntryIfAcceptable(op, compareKey, pos, assumeNoMatch);
 
                 // If `assumeNoMatch == false`, then it means we've matched a prefix of the searched key. This means
                 // `pos` points to a key `K` in the sstable that is "the closest on" to `searchKey`, but it may be
