@@ -116,7 +116,7 @@ public interface ShardManager
     static Range<Token> coveringRange(PartitionPosition first, PartitionPosition last)
     {
         // To include the token of left, the range's lower bound must be decreased.
-        return new Range<>(first.isMinimum() ? first.getToken() : first.getToken().prevValidToken(), last.getToken());
+        return new Range<>(first.getToken().isMinimum() ? first.getToken() : first.getToken().prevValidToken(), last.getToken());
     }
 
 
