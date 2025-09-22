@@ -25,6 +25,7 @@ import org.junit.Test;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.Config;
+import org.apache.cassandra.config.DataStorageSpec;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.GuardrailsOptions;
 import org.apache.cassandra.db.ConsistencyLevel;
@@ -131,6 +132,7 @@ public class GuardrailsConfigDefaultsTest
     {
         // Read request guardrails
         assertEquals("page_size_fail_threshold", GuardrailsOptions.NO_LIMIT, guardrails.getPageSizeFailThreshold());
+        assertEquals("page_weight_fail_threshold", null, guardrails.getPageWeightFailThreshold());
         assertEquals("in_select_cartesian_product_fail_threshold", GuardrailsOptions.NO_LIMIT, guardrails.getInSelectCartesianProductFailThreshold());
         assertEquals("partition_keys_in_select_fail_threshold", GuardrailsOptions.NO_LIMIT, guardrails.getPartitionKeysInSelectFailThreshold());
         assertEquals("tombstone_warn_threshold", 1000, guardrails.getTombstoneWarnThreshold());
@@ -189,7 +191,8 @@ public class GuardrailsConfigDefaultsTest
     private void verifyDbaasDefaults(GuardrailsOptions guardrails)
     {
         // Read request guardrails
-        assertEquals("page_size_fail_threshold", 512, guardrails.getPageSizeFailThreshold());
+        assertEquals("page_size_fail_threshold", -1, guardrails.getPageSizeFailThreshold());
+        assertEquals("page_weight_fail_threshold", new DataStorageSpec.IntBytesBound("512KiB"), guardrails.getPageWeightFailThreshold());
         assertEquals("in_select_cartesian_product_fail_threshold", 25, guardrails.getInSelectCartesianProductFailThreshold());
         assertEquals("partition_keys_in_select_fail_threshold", 20, guardrails.getPartitionKeysInSelectFailThreshold());
         assertEquals("tombstone_warn_threshold", 1000, guardrails.getTombstoneWarnThreshold());
@@ -252,6 +255,7 @@ public class GuardrailsConfigDefaultsTest
     {
         // Read request guardrails
         assertEquals("page_size_fail_threshold", GuardrailsOptions.NO_LIMIT, guardrails.getPageSizeFailThreshold());
+        assertEquals("page_weight_fail_threshold", null, guardrails.getPageWeightFailThreshold());
         assertEquals("in_select_cartesian_product_fail_threshold", 25, guardrails.getInSelectCartesianProductFailThreshold());
         assertEquals("partition_keys_in_select_fail_threshold", 20, guardrails.getPartitionKeysInSelectFailThreshold());
         assertEquals("tombstone_warn_threshold", 1000, guardrails.getTombstoneWarnThreshold());
