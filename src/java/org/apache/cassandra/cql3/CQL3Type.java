@@ -137,7 +137,7 @@ public interface CQL3Type
         return toString(false, true);
     }
 
-    enum Native implements CQL3Type
+    public enum Native implements CQL3Type
     {
         ASCII       (AsciiType.instance),
         BIGINT      (LongType.instance),
@@ -608,7 +608,7 @@ public interface CQL3Type
         }
     }
 
-    class Vector implements CQL3Type
+    public static class Vector implements CQL3Type
     {
         private final VectorType<?> type;
 
