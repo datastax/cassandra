@@ -449,7 +449,13 @@ public abstract class ReadCommand extends AbstractReadQuery
         {
             iterator = withStateTracking(iterator);
             iterator = withReadObserver(iterator);
-            iterator = RTBoundValidator.validate(withoutPurgeableTombstones(iterator, cfs, executionController), Stage.PURGED, false);
+            // We only purge rows before sending them to the coordinator if the limit isn't in bytes.
+            // Otherwise, the replica can send rows with a size lower than the requested page size,
+            // making the coordinator think that there is no more data and wrongly end paging.
+            // See CNDB-15435 for further details.
+            if (limits().bytes() == DataLimits.NO_LIMIT)
+                iterator = withoutPurgeableTombstones(iterator, cfs, executionController);
+            iterator = RTBoundValidator.validate(iterator, Stage.PURGED, false);
             iterator = withMetricsRecording(iterator, cfs.metric, startTimeNanos);
 
             // If we've used a 2ndary index, we know the result already satisfy the primary expression used, so
