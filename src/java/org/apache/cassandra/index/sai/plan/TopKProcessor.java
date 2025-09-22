@@ -36,7 +36,6 @@ import io.github.jbellis.jvector.vector.VectorizationProvider;
 import io.github.jbellis.jvector.vector.types.VectorFloat;
 import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
 import org.apache.cassandra.cql3.Operator;
-import org.apache.cassandra.cql3.Ordering;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
@@ -93,8 +92,9 @@ public class TopKProcessor
     private final ReadCommand command;
     private final IndexContext indexContext;
     private final RowFilter.Expression expression;
-    private final VectorFloat<?> queryVector;
     private final ColumnMetadata scoreColumn;
+    // Lazily compute this value, if needed.
+    private VectorFloat<?> queryVector = null;
 
     private final int limit;
 
@@ -109,10 +109,6 @@ public class TopKProcessor
 
         this.indexContext = indexAndExpression.left;
         this.expression = indexAndExpression.right;
-        if (expression.operator() == Operator.ANN && !(Ordering.Ann.useSyntheticScore() && expression.column().isRegular()))
-            this.queryVector = vts.createFloatVector(TypeUtil.decomposeVector(indexContext, expression.getIndexValue().duplicate()));
-        else
-            this.queryVector = null;
         this.limit = command.limits().count();
         this.scoreColumn = ColumnMetadata.syntheticScoreColumn(expression.column(), FloatType.instance);
     }
@@ -329,6 +325,8 @@ public class TopKProcessor
         ByteBuffer value = indexContext.getValueOf(key, row, FBUtilities.nowInSeconds());
         if (value != null)
         {
+            if (queryVector == null)
+                queryVector = vts.createFloatVector(TypeUtil.decomposeVector(indexContext, expression.getIndexValue().duplicate()));
             var vector = vts.createFloatVector(TypeUtil.decomposeVector(indexContext, value));
             return indexContext.getIndexWriterConfig().getSimilarityFunction().compare(vector, queryVector);
         }
