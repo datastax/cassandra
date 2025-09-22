@@ -268,6 +268,7 @@ public abstract class SegmentBuilder
         @Override
         public boolean isEmpty()
         {
+            // Don't need to check updatesInFlight because we add the vector to the graphIndex before dispatching the task.
             return graphIndex.isEmpty();
         }
 
@@ -391,7 +392,8 @@ public abstract class SegmentBuilder
         @Override
         public boolean isEmpty()
         {
-            return graphIndex.isEmpty();
+            // Must check updatesInFlight first to avoid a race with addInternalAsync and graphIndex.isEmpty().
+            return updatesInFlight.get() == 0 && graphIndex.isEmpty();
         }
 
         @Override
