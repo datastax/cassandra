@@ -17,20 +17,37 @@
  */
 package org.apache.cassandra.db.compaction.validation;
 
+import java.util.Set;
+
+import org.junit.After;
+import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.inject.ActionBuilder;
+import org.apache.cassandra.inject.Injection;
+import org.apache.cassandra.inject.Injections;
+import org.apache.cassandra.inject.InvokePointBuilder;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
 
 public class CompactionValidationTest extends CQLTester
 {
     private static final String CREATE_TABLE_TEMPLATE = "CREATE TABLE %s (pk int, ck1 int, ck2 int, v1 int, v2 int, primary key(pk, ck1, ck2))";
+
+    private static final Injection SIMULATE_NOT_FULLY_EXPIRED = Injections.newCustom("simulate_not_fully_expired")
+                                                                         .add(InvokePointBuilder.newInvokePoint().onClass("org.apache.cassandra.db.compaction.validation.CompactionValidationTask")
+                                                                                                .onMethod("isFullyExpired"))
+                                                                         .add(ActionBuilder.newActionBuilder().actions().doReturn(false))
+                                                                         .build();
 
     @BeforeClass
     public static void setupClass()
@@ -41,6 +58,18 @@ public class CompactionValidationTest extends CQLTester
         DatabaseDescriptor.setSSTablePreemptiveOpenIntervalInMB(-1);
 
         requireNetwork();
+    }
+
+    @Before
+    public void setup()
+    {
+        CassandraRelevantProperties.COMPACTION_VALIDATION_DRY_RUN.reset();
+    }
+
+    @After
+    public void removeInjections()
+    {
+        Injections.deleteAll();
     }
 
     @Test
@@ -248,6 +277,30 @@ public class CompactionValidationTest extends CQLTester
         assertSuccessfulValidationWithAbsentKeys(initial, 2);
     }
 
+    @Test
+    public void testAbortOnDataLossWithNonDryRun() throws Throwable
+    {
+        CassandraRelevantProperties.COMPACTION_VALIDATION_DRY_RUN.setBoolean(false);
+        Injections.inject(SIMULATE_NOT_FULLY_EXPIRED);
+
+        createTable(CREATE_TABLE_TEMPLATE + " WITH gc_grace_seconds = 1");
+
+        populateSSTable(1, 1, 5, 5);
+        populateRowDeletionSSTable(1, 1, 5, 5);
+        FBUtilities.sleepQuietly(2000);
+
+        ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
+        Set<SSTableReader> before = cfs.getLiveSSTables();
+        assertThat(before).hasSize(2);
+
+        Stats initial = Stats.fetch();
+
+        assertThatThrownBy(() -> cfs.forceMajorCompaction()).hasMessageContaining("POTENTIAL DATA LOSS");
+
+        assertThat(cfs.getLiveSSTables()).hasSize(2).isEqualTo(before);
+        assertDataLossWithAbsentKeys(initial, 1); // key 1 missing
+    }
+
     private void populateSSTable(int startPartition, int endPartition, int ck1PerPartition, int ck2PerClustering) throws Throwable
     {
         for (int partition = startPartition; partition <= endPartition; partition++)
@@ -322,6 +375,11 @@ public class CompactionValidationTest extends CQLTester
     private void assertSuccessfulValidationWithoutAbsentKeys(Stats initialStats)
     {
         initialStats.assertStats(1, 1, 0, 0);
+    }
+
+    private void assertDataLossWithAbsentKeys(Stats initialStats, int absentKeys)
+    {
+        initialStats.assertStats(1, 0, absentKeys, 1);
     }
 
     private static class Stats
