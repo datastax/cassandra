@@ -1,0 +1,204 @@
+package org.apache.cassandra.db.compaction.validation;
+
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.TimeUnit;
+import java.util.function.LongPredicate;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.Slices;
+import org.apache.cassandra.db.filter.ColumnFilter;
+import org.apache.cassandra.db.partitions.PurgeFunction;
+import org.apache.cassandra.db.rows.UnfilteredRowIterator;
+import org.apache.cassandra.db.rows.UnfilteredRowIterators;
+import org.apache.cassandra.db.transform.Transformation;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
+import org.apache.cassandra.utils.FBUtilities;
+
+/// Validates compaction tasks to detect potential data loss during compaction operations caused by skipping some
+/// subranges of source sstables, see HCD-130.
+/// The validation ensures all boundary keys from input SSTables are either present in output SSTables
+/// or properly obsoleted by tombstones.
+public class CompactionValidationTask
+{
+    private static final Logger logger = LoggerFactory.getLogger(CompactionValidationTask.class);
+
+    private final UUID id;
+    private final Set<SSTableReader> inputSSTables;
+    private final Set<SSTableReader> outputSSTables;
+    private final CompactionValidationMetrics metrics;
+
+    private final int nowInSec;
+    private final int gcBefore;
+
+    public CompactionValidationTask(UUID id, Set<SSTableReader> inputSSTables, Set<SSTableReader> outputSSTables, CompactionValidationMetrics metrics)
+    {
+        this.id = id;
+        this.inputSSTables = inputSSTables;
+        this.outputSSTables = outputSSTables;
+        this.nowInSec = FBUtilities.nowInSeconds();
+        // Ideally, should use gc_grace_seconds from CompactionController for current compaction task,
+        // but requires additional LifecycleTransaction API changes to pass in gc_grace_seconds.
+        // Using gc_grace_seconds of 0 here, it means validation allows missing boundary keys as long as they
+        // are full of tombstones which are all considered droppable.
+        this.gcBefore = nowInSec;
+        this.metrics = metrics;
+    }
+
+    public void validate()
+    {
+        try
+        {
+            doValidate();
+        }
+        catch (DataLossException e)
+        {
+            // abort compaction task
+            throw e;
+        }
+        catch (Throwable t)
+        {
+            logger.error("Caught unexpected error on validation task for {}: {}", id, t.getMessage(), t);
+        }
+    }
+
+    private void doValidate()
+    {
+        logger.info("Starting compaction validation for task {}", id);
+        long startedNanos = System.nanoTime();
+        metrics.incrementValidation();
+        
+        Set<DecoratedKey> missingKeys = new HashSet<>();
+        for (SSTableReader inputSSTable : inputSSTables)
+        {
+            DecoratedKey firstKey = inputSSTable.first;
+            DecoratedKey lastKey = inputSSTable.last;
+            
+            if (isKeyAbsentInOutputSSTables(firstKey))
+            {
+                if (logger.isTraceEnabled())
+                    logger.trace("[Task {}] First key {} from input sstable {} not found in update sstables",
+                            id, firstKey, inputSSTable.descriptor);
+                missingKeys.add(firstKey);
+            }
+            
+            if (isKeyAbsentInOutputSSTables(lastKey))
+            {
+                if (logger.isTraceEnabled())
+                    logger.warn("[Task {}] Last key {} from input sstable {} not found in update sstables",
+                            id, lastKey, inputSSTable.descriptor);
+                missingKeys.add(lastKey);
+            }
+        }
+        
+        if (missingKeys.isEmpty())
+        {
+            metrics.incrementValidationWithoutMissingKeys();
+            logger.info("[Task {}] Compaction validation passed: all first/last keys found in update sstables, took {}ms",
+                    id, TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedNanos));
+            return;
+        }
+
+        metrics.incrementMissingKeys(missingKeys.size());
+        validateMissingKeysAgainstTombstones(missingKeys);
+        logger.info("[Task {}] Compaction validation passed: all missing keys are properly obsoleted due to tombstones, took {} ms",
+                id, TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedNanos));
+    }
+    
+    private boolean isKeyAbsentInOutputSSTables(DecoratedKey key)
+    {
+        for (SSTableReader outputSSTable : outputSSTables)
+        {
+            if (outputSSTable.first.compareTo(key) <= 0 && outputSSTable.last.compareTo(key) >= 0)
+            {
+                if (outputSSTable.getPosition(key, SSTableReader.Operator.EQ) != null)
+                {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+    
+    private void validateMissingKeysAgainstTombstones(Set<DecoratedKey> missingKeys)
+    {
+        logger.info("[Task {}] Validating {} missing keys against tombstones from input sstables", id, missingKeys.size());
+        
+        for (DecoratedKey missingKey : missingKeys)
+        {
+            if (!isFullyExpired(missingKey))
+            {
+                metrics.incrementPotentialDataLosses();
+                String errorMsg = String.format(
+                    "POTENTIAL DATA LOSS on compaction task %s: Key %s from input sstables not found in update sstables " +
+                    "and the partition is not fully expired.", id, missingKey);
+                logger.error(errorMsg);
+                if (!CassandraRelevantProperties.COMPACTION_VALIDATION_DRY_RUN.getBoolean())
+                    throw new DataLossException(errorMsg);
+            }
+        }
+    }
+
+    private boolean isFullyExpired(DecoratedKey key)
+    {
+        List<UnfilteredRowIterator> iterators = new ArrayList<>();
+        for (SSTableReader sstable : inputSSTables)
+        {
+            if (sstable.couldContain(key))
+                iterators.add(readPartition(key, sstable));
+        }
+
+        // merge all input iterators
+        try (UnfilteredRowIterator merged = UnfilteredRowIterators.merge(iterators))
+        {
+            // apply purging function to get rid of all purgeable content
+            UnfilteredRowIterator purged = Transformation.apply(merged, new WithoutPurgeableTombstones(nowInSec, gcBefore));
+            // if there are non-purgeable content, e.g. live rows or unexpired tombstones, they should appear in output sstables
+            if (purged.staticRow() != null && !purged.staticRow().isEmpty())
+                return false;
+            if (purged.hasNext())
+                return false;
+        }
+
+        return true;
+    }
+
+    private UnfilteredRowIterator readPartition(DecoratedKey partitionKey, SSTableReader sstable)
+    {
+        return sstable.iterator(partitionKey, Slices.ALL, ColumnFilter.all(sstable.metadata()), false, SSTableReadsListener.NOOP_LISTENER);
+    }
+
+    private static class WithoutPurgeableTombstones extends PurgeFunction
+    {
+        public WithoutPurgeableTombstones(int nowInSec, int gcBefore)
+        {
+            super(nowInSec, gcBefore,
+                    // purge all expired tombstones regardless if it's repaired
+                    Integer.MIN_VALUE, false,
+                    // enforceStrictLiveness: only matters for MV
+                    false);
+        }
+
+        @Override
+        protected LongPredicate getPurgeEvaluator()
+        {
+            return time -> true;
+        }
+    }
+
+    public static class DataLossException extends RuntimeException
+    {
+        public DataLossException(String errorMsg)
+        {
+            super(errorMsg);
+        }
+    }
+}

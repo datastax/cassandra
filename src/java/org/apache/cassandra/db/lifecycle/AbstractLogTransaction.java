@@ -21,8 +21,14 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.compaction.validation.CompactionValidationMetrics;
+import org.apache.cassandra.db.compaction.validation.CompactionValidationTask;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.utils.concurrent.Transactional;
+
+import static org.apache.cassandra.db.compaction.OperationType.COMPACTION;
 
 /**
  * A class that tracks sstable files involved in a transaction across sstables:
@@ -46,6 +52,23 @@ public abstract class AbstractLogTransaction extends Transactional.AbstractTrans
      */
     public void validate(Set<SSTableReader> obsolete, Set<SSTableReader> update)
     {
+        // Only validate compaction tasks
+        if (opType() != COMPACTION)
+            return;
+
+        if (!CassandraRelevantProperties.COMPACTION_VALIDATION_ENABLED.getBoolean())
+            return;
+
+        // Nothing to verify if no obsolete SSTables
+        if (obsolete.isEmpty())
+            return;
+
+        // Early-open modifies obsolete SSTables' start keys, making validation unreliable
+        if (DatabaseDescriptor.getSSTablePreemptiveOpenIntervalInMB() > 0)
+            return;
+
+        CompactionValidationTask task = new CompactionValidationTask(id(), obsolete, update, CompactionValidationMetrics.INSTANCE);
+        task.validate();
     }
 
     public static class Obsoletion
