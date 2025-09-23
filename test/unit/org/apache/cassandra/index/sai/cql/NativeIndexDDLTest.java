@@ -32,6 +32,9 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.LongStream;
 
+import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
+import org.apache.cassandra.index.sasi.SASIIndex;
+import org.assertj.core.api.Assertions;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.BeforeClass;
@@ -433,30 +436,31 @@ public class NativeIndexDDLTest extends SAITester
     }
 
     /**
-     * Verify SASI can be created and queries with NDI dependencies.
-     * Not putting in {@link MixedIndexImplementationsTest} because it uses CQLTester which doesn't load NDI dependency.
+     * Verify SASI can be created and queries with SAI dependencies.
+     * Not putting in {@link MixedIndexImplementationsTest} because it uses CQLTester which doesn't load SAI dependency.
      */
     @Test
     public void shouldCreateSASI()
     {
         createTable(CREATE_TABLE_TEMPLATE);
+        createIndex(String.format(CREATE_INDEX_TEMPLATE, "v2"));
 
+        // without options
         createIndex("CREATE CUSTOM INDEX ON %s(v1) USING 'org.apache.cassandra.index.sasi.SASIIndex'");
-        createIndex("CREATE CUSTOM INDEX ON %s(v2) USING 'org.apache.cassandra.index.sasi.SASIIndex' WITH OPTIONS = {'mode': 'CONTAINS',\n" +
+        Assertions.assertThatThrownBy(() -> execute("SELECT id1 FROM %s WHERE v1>=0"))
+                .hasMessageContaining(String.format(StatementRestrictions.HAS_UNSUPPORTED_SASI_INDEX_RESTRICTION_MESSAGE, "v1"));
+        dropIndex("DROP INDEX " + keyspace() + '.' + currentIndex());
+
+        // with options
+        createIndex("CREATE CUSTOM INDEX ON %s(v1) USING 'org.apache.cassandra.index.sasi.SASIIndex' WITH OPTIONS = {'mode': 'CONTAINS',\n" +
                     "'analyzer_class': 'org.apache.cassandra.index.sasi.analyzer.StandardAnalyzer',\n" +
                     "'tokenization_enable_stemming': 'true',\n" +
                     "'tokenization_locale': 'en',\n" +
                     "'tokenization_skip_stop_words': 'true',\n" +
                     "'analyzed': 'true',\n" +
                     "'tokenization_normalize_lowercase': 'true'};");
-
-        execute("INSERT INTO %s (id1, v1, v2) VALUES ('1', 1, '0');");
-
-        ResultSet rows = executeNet("SELECT id1 FROM %s WHERE v1>=0");
-        assertEquals(1, rows.all().size());
-
-        rows = executeNet("SELECT id1 FROM %s WHERE v2 like '0'");
-        assertEquals(1, rows.all().size());
+        Assertions.assertThatThrownBy(() -> execute("SELECT id1 FROM %s WHERE v1>=0"))
+                .hasMessageContaining(String.format(StatementRestrictions.HAS_UNSUPPORTED_SASI_INDEX_RESTRICTION_MESSAGE, "v1"));
     }
 
     @Test

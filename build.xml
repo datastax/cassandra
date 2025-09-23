@@ -159,7 +159,6 @@
     <property name="asm.version" value="7.1"/>
     <property name="allocation-instrumenter.version" value="3.1.0"/>
     <property name="bytebuddy.version" value="1.14.17"/>
-    <property name="jflex.version" value="1.8.2"/>
 
     <!-- https://mvnrepository.com/artifact/net.openhft/chronicle-bom/2.24ea87 -->
     <!-- Chronicle is trying to monetize by only publishing stable releases to their subscription repo,
@@ -518,15 +517,6 @@
     </target>
 
     <!--
-        Generates Java sources for tokenization support from jflex
-        grammar files
-    -->
-    <target name="generate-jflex-java" description="Generate Java from jflex grammar">
-        <taskdef classname="jflex.anttask.JFlexTask" classpathref="jflex.classpath" name="jflex" />
-        <jflex file="${build.src.java}/org/apache/cassandra/index/sasi/analyzer/StandardTokenizerImpl.jflex" destdir="${build.src.gen-java}/" />
-    </target>
-
-    <!--
        Fetch Maven Ant Tasks and Cassandra's dependencies
        These targets are intentionally free of dependencies so that they
        can be run stand-alone from a binary release artifact.
@@ -714,9 +704,6 @@
             <exclusion groupId="log4j" artifactId="log4j"/>
           </dependency>
           <dependency groupId="com.carrotsearch" artifactId="hppc" version="0.8.1" />
-          <dependency groupId="de.jflex" artifactId="jflex" version="${jflex.version}">
-            <exclusion groupId="org.apache.ant" artifactId="ant"/>
-          </dependency>
           <dependency groupId="de.huxhorn.sulky" artifactId="de.huxhorn.sulky.ulid" version="8.2.0"/>
           <dependency groupId="com.googlecode.concurrent-trees" artifactId="concurrent-trees" version="2.4.0" />
           <dependency groupId="com.github.ben-manes.caffeine" artifactId="caffeine" version="3.1.8" />
@@ -944,9 +931,6 @@
         <dependency groupId="com.carrotsearch.randomizedtesting" artifactId="randomizedtesting-runner" scope="test"/>
         <dependency groupId="org.hamcrest" artifactId="hamcrest" scope="test"/>
         <dependency groupId="com.esri.geometry" artifactId="esri-geometry-api"/>
-
-        <!-- sasi deps -->
-        <dependency groupId="de.jflex" artifactId="jflex" />
         <dependency groupId="com.googlecode.concurrent-trees" artifactId="concurrent-trees" />
 
         <!-- compile tools -->
@@ -1016,7 +1000,7 @@
         </javac>
     </target>
 
-    <target depends="init,gen-cql3-grammar,generate-cql-html,generate-jflex-java"
+    <target depends="init,gen-cql3-grammar,generate-cql-html"
             name="build-project">
         <echo message="${ant.project.name}: ${ant.file}"/>
         <!-- Order matters! -->
@@ -1228,7 +1212,6 @@
         <fileset dir="doc">
           <include name="cql3/CQL.html" />
           <include name="cql3/CQL.css" />
-          <include name="SASI.md" />
         </fileset>
       </copy>
       <copy todir="${dist.dir}/doc/html" failonerror="false">
@@ -2254,7 +2237,7 @@
   </target>
 
   <!-- Generate IDEA project description files -->
-  <target name="generate-idea-files" depends="init,maven-ant-tasks-init,resolver-dist-lib,gen-cql3-grammar,generate-jflex-java,createVersionPropFile" description="Generate IDEA files">
+  <target name="generate-idea-files" depends="init,maven-ant-tasks-init,resolver-dist-lib,gen-cql3-grammar,createVersionPropFile" description="Generate IDEA files">
     <delete dir=".idea"/>
     <delete file="${eclipse.project.name}.iml"/>
     <mkdir dir=".idea"/>
