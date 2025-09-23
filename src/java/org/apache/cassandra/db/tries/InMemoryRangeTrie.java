@@ -21,11 +21,24 @@ package org.apache.cassandra.db.tries;
 import java.util.function.Predicate;
 
 import org.apache.cassandra.io.compress.BufferType;
+import org.apache.cassandra.utils.ObjectSizes;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 
 public class InMemoryRangeTrie<S extends RangeState<S>> extends InMemoryBaseTrie<S> implements RangeTrie<S>
 {
+    // constants for space calculations
+    private static final long EMPTY_SIZE_ON_HEAP;
+    private static final long EMPTY_SIZE_OFF_HEAP;
+    static
+    {
+        // Measuring the empty size of long-lived tries, because these are the ones for which we want to track size.
+        InMemoryBaseTrie<?> empty = new InMemoryRangeTrie<>(ByteComparable.Version.OSS50, BufferType.ON_HEAP, ExpectedLifetime.LONG, null);
+        EMPTY_SIZE_ON_HEAP = ObjectSizes.measureDeep(empty);
+        empty = new InMemoryRangeTrie<>(ByteComparable.Version.OSS50, BufferType.OFF_HEAP, ExpectedLifetime.LONG, null);
+        EMPTY_SIZE_OFF_HEAP = ObjectSizes.measureDeep(empty);
+    }
+
     InMemoryRangeTrie(ByteComparable.Version byteComparableVersion, BufferType bufferType, ExpectedLifetime lifetime, OpOrder opOrder)
     {
         super(byteComparableVersion, bufferType, lifetime, opOrder);
@@ -56,6 +69,10 @@ public class InMemoryRangeTrie<S extends RangeState<S>> extends InMemoryBaseTrie
         return new InMemoryRangeCursor<>(this, direction, root, 0, -1);
     }
 
+    protected long emptySizeOnHeap()
+    {
+        return bufferType == BufferType.ON_HEAP ? EMPTY_SIZE_ON_HEAP : EMPTY_SIZE_OFF_HEAP;
+    }
 
     static class InMemoryRangeCursor<S extends RangeState<S>> extends InMemoryCursor<S> implements RangeCursor<S>
     {

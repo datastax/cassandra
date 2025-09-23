@@ -22,6 +22,7 @@ import java.util.function.Predicate;
 import com.google.common.base.Predicates;
 
 import org.apache.cassandra.io.compress.BufferType;
+import org.apache.cassandra.utils.ObjectSizes;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 
@@ -57,6 +58,18 @@ import org.apache.cassandra.utils.concurrent.OpOrder;
 ///     Because it uses 32-bit pointers in byte buffers, this trie has a fixed size limit of 2GB.
 public class InMemoryTrie<T> extends InMemoryBaseTrie<T> implements Trie<T>
 {
+    // constants for space calculations
+    private static final long EMPTY_SIZE_ON_HEAP;
+    private static final long EMPTY_SIZE_OFF_HEAP;
+    static
+    {
+        // Measuring the empty size of long-lived tries, because these are the ones for which we want to track size.
+        InMemoryBaseTrie<Object> empty = new InMemoryTrie<>(ByteComparable.Version.OSS50, BufferType.ON_HEAP, ExpectedLifetime.LONG, null);
+        EMPTY_SIZE_ON_HEAP = ObjectSizes.measureDeep(empty);
+        empty = new InMemoryTrie<>(ByteComparable.Version.OSS50, BufferType.OFF_HEAP, ExpectedLifetime.LONG, null);
+        EMPTY_SIZE_OFF_HEAP = ObjectSizes.measureDeep(empty);
+    }
+
     InMemoryTrie(ByteComparable.Version byteComparableVersion, BufferType bufferType, ExpectedLifetime lifetime, OpOrder opOrder)
     {
         super(byteComparableVersion, bufferType, lifetime, opOrder);
@@ -85,6 +98,11 @@ public class InMemoryTrie<T> extends InMemoryBaseTrie<T> implements Trie<T>
     public InMemoryCursor<T> makeCursor(Direction direction)
     {
         return new InMemoryCursor<>(this, direction, root, 0, -1);
+    }
+
+    protected long emptySizeOnHeap()
+    {
+        return bufferType == BufferType.ON_HEAP ? EMPTY_SIZE_ON_HEAP : EMPTY_SIZE_OFF_HEAP;
     }
 
     /// Modify this trie to apply the mutation given in the form of a trie. Any content in the mutation will be resolved

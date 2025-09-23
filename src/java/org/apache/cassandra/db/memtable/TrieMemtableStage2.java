@@ -51,6 +51,7 @@ import org.apache.cassandra.db.partitions.TriePartitionUpdaterStage2;
 import org.apache.cassandra.db.rows.EncodingStats;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.tries.Direction;
+import org.apache.cassandra.db.tries.InMemoryBaseTrie;
 import org.apache.cassandra.db.tries.InMemoryTrie;
 import org.apache.cassandra.db.tries.Trie;
 import org.apache.cassandra.db.tries.TrieEntriesWalker;
@@ -66,8 +67,6 @@ import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.metrics.TrieMemtableMetricsView;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
-import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.MBeanWrapper;
 import org.apache.cassandra.utils.ObjectSizes;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
@@ -119,15 +118,13 @@ public class TrieMemtableStage2 extends AbstractAllocatorMemtable
         default:
             throw new AssertionError();
         }
-
-        MBeanWrapper.instance.registerMBean(new TrieMemtableConfig(), TRIE_MEMTABLE_CONFIG_OBJECT_NAME, MBeanWrapper.OnException.LOG);
     }
 
     /**
      * Force copy checker (see InMemoryTrie.ApplyState) ensuring all modifications apply atomically and consistently to
      * the whole partition.
      */
-    public static final Predicate<InMemoryTrie.NodeFeatures<Object>> FORCE_COPY_PARTITION_BOUNDARY = features -> isPartitionBoundary(features.content());
+    public static final Predicate<InMemoryBaseTrie.NodeFeatures<Object>> FORCE_COPY_PARTITION_BOUNDARY = features -> isPartitionBoundary(features.content());
 
     public static final Predicate<Object> IS_PARTITION_BOUNDARY = TrieMemtableStage2::isPartitionBoundary;
 
@@ -166,21 +163,11 @@ public class TrieMemtableStage2 extends AbstractAllocatorMemtable
      */
     private volatile MemtableAverageRowSize estimatedAverageRowSize;
 
-    @VisibleForTesting
-    public static final String SHARD_COUNT_PROPERTY = "cassandra.trie.memtable.shard.count";
-
-    public static volatile int SHARD_COUNT = Integer.getInteger(SHARD_COUNT_PROPERTY, autoShardCount());
-
-    private static int autoShardCount()
-    {
-        return 4 * FBUtilities.getAvailableProcessors();
-    }
-
     // only to be used by init(), to setup the very first memtable for the cfs
     TrieMemtableStage2(AtomicReference<CommitLogPosition> commitLogLowerBound, TableMetadataRef metadataRef, Owner owner)
     {
         super(commitLogLowerBound, metadataRef, owner);
-        this.boundaries = owner.localRangeSplits(SHARD_COUNT);
+        this.boundaries = owner.localRangeSplits(TrieMemtable.shardCount());
         this.metrics = TrieMemtableMetricsView.getOrCreate(metadataRef.keyspace, metadataRef.name);
         this.shards = generatePartitionShards(boundaries.shardCount(), metadataRef, metrics, owner.readOrdering());
         this.mergedTrie = makeMergedTrie(shards);
@@ -885,38 +872,4 @@ public class TrieMemtableStage2 extends AbstractAllocatorMemtable
         for (MemtableShard shard : shards)
             shard.data.releaseReferencesUnsafe();
     }
-
-    @VisibleForTesting
-    public static class TrieMemtableConfig implements TrieMemtableConfigMXBean
-    {
-        @Override
-        public void setShardCount(String shardCount)
-        {
-            if ("auto".equalsIgnoreCase(shardCount))
-            {
-                SHARD_COUNT = autoShardCount();
-            }
-            else
-            {
-                try
-                {
-                    SHARD_COUNT = Integer.valueOf(shardCount);
-                }
-                catch (NumberFormatException ex)
-                {
-                    logger.warn("Unable to parse {} as valid value for shard count; leaving it as {}",
-                                shardCount, SHARD_COUNT);
-                    return;
-                }
-            }
-            logger.info("Requested setting shard count to {}; set to: {}", shardCount, SHARD_COUNT);
-        }
-
-        @Override
-        public String getShardCount()
-        {
-            return "" + SHARD_COUNT;
-        }
-    }
-
 }

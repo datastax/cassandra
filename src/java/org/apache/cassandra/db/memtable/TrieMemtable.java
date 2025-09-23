@@ -51,6 +51,7 @@ import org.apache.cassandra.db.rows.TrieTombstoneMarker;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.tries.DeletionAwareTrie;
 import org.apache.cassandra.db.tries.Direction;
+import org.apache.cassandra.db.tries.InMemoryBaseTrie;
 import org.apache.cassandra.db.tries.InMemoryDeletionAwareTrie;
 import org.apache.cassandra.db.tries.InMemoryTrie;
 import org.apache.cassandra.db.tries.TrieEntriesWalker;
@@ -107,7 +108,7 @@ public class TrieMemtable extends AbstractAllocatorMemtable
 
     /// Force copy checker (see [InMemoryTrie#apply]) ensuring all modifications apply atomically and consistently to
     /// the whole partition.
-    public static final Predicate<InMemoryTrie.NodeFeatures<Object>> FORCE_COPY_PARTITION_BOUNDARY =
+    public static final Predicate<InMemoryBaseTrie.NodeFeatures<Object>> FORCE_COPY_PARTITION_BOUNDARY =
         features -> TrieBackedPartition.isPartitionBoundary(features.content());
 
     /// Set to true when the memtable requests a switch (e.g. for trie size limit being reached) to ensure only one
@@ -142,11 +143,16 @@ public class TrieMemtable extends AbstractAllocatorMemtable
     @VisibleForTesting
     public static final String SHARD_COUNT_PROPERTY = "cassandra.trie.memtable.shard.count";
 
-    public static volatile int SHARD_COUNT = Integer.getInteger(SHARD_COUNT_PROPERTY, autoShardCount());
+    private static volatile int SHARD_COUNT = Integer.getInteger(SHARD_COUNT_PROPERTY, autoShardCount());
 
     private static int autoShardCount()
     {
         return 4 * FBUtilities.getAvailableProcessors();
+    }
+
+    public static int shardCount()
+    {
+        return SHARD_COUNT;
     }
 
     // only to be used by init(), to setup the very first memtable for the cfs

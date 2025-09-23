@@ -143,7 +143,7 @@ public class TrieMemtableStage1 extends AbstractAllocatorMemtable
     TrieMemtableStage1(AtomicReference<CommitLogPosition> commitLogLowerBound, TableMetadataRef metadataRef, Owner owner)
     {
         super(commitLogLowerBound, metadataRef, owner);
-        this.boundaries = owner.localRangeSplits(TrieMemtable.SHARD_COUNT);
+        this.boundaries = owner.localRangeSplits(TrieMemtable.shardCount());
         this.metrics = TrieMemtableMetricsView.getOrCreate(metadataRef.keyspace, metadataRef.name);
         this.shards = generatePartitionShards(boundaries.shardCount(), metadataRef, metrics);
         this.mergedTrie = makeMergedTrie(shards);

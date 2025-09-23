@@ -247,7 +247,6 @@ public class DeletionAwareIntersectionTest extends DeletionAwareTestBase
 
     private void testIntersections(ByteComparable[] set1, ByteComparable[] set2, ByteComparable[] set3)
     {
-        List<DataPoint> testRanges = getTestRanges();
         testIntersection("1", set1);
 
         testIntersection("2", set2);

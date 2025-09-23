@@ -80,7 +80,8 @@ class SingletonCursor<T> implements Cursor<T>
         }
         currentTransition = current;
         nextTransition = next;
-        return currentDepth = ++depth;
+        currentDepth = ++depth;
+        return currentDepth;
     }
 
     @Override

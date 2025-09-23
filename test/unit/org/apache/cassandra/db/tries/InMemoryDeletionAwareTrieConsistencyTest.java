@@ -19,11 +19,8 @@
 package org.apache.cassandra.db.tries;
 
 import java.util.Collection;
-import java.util.Map;
 import java.util.function.BiFunction;
 import java.util.function.Predicate;
-
-import com.google.common.collect.Iterables;
 
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.concurrent.OpOrder;
@@ -192,7 +189,7 @@ extends ConsistencyTestBase<InMemoryDeletionAwareTrieConsistencyTest.Content,
     }
 
     // Content hierarchy for deletion-aware consistency testing
-    static abstract class Content
+    abstract static class Content
     {
         final String pk;
 

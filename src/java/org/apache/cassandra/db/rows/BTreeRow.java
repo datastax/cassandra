@@ -88,7 +88,7 @@ public class BTreeRow extends AbstractRow
     // no expiring cells, this will be Integer.MAX_VALUE;
     private final int minLocalDeletionTime;
 
-    private BTreeRow(Clustering clustering,
+    private BTreeRow(Clustering<?> clustering,
                      LivenessInfo primaryKeyLivenessInfo,
                      Deletion deletion,
                      Object[] btree,

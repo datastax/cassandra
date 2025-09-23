@@ -215,7 +215,7 @@ extends ConsistencyTestBase<ConsistencyTestBase.TestStateMetadata,
     }
 
     // TestStateMetadata hierarchy for deletion-aware consistency testing
-    static abstract class Content
+    abstract static class Content
     {
         final String pk;
 

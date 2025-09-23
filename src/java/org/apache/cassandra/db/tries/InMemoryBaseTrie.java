@@ -64,18 +64,7 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
 
 
     // constants for space calculations
-    private static final long EMPTY_SIZE_ON_HEAP;
-    private static final long EMPTY_SIZE_OFF_HEAP;
     private static final long REFERENCE_ARRAY_ON_HEAP_SIZE = ObjectSizes.measureDeep(new AtomicReferenceArray<>(0));
-
-    static
-    {
-        // Measuring the empty size of long-lived tries, because these are the ones for which we want to track size.
-        InMemoryBaseTrie<Object> empty = new InMemoryTrie<>(ByteComparable.Version.OSS50, BufferType.ON_HEAP, ExpectedLifetime.LONG, null);
-        EMPTY_SIZE_ON_HEAP = ObjectSizes.measureDeep(empty);
-        empty = new InMemoryTrie<>(ByteComparable.Version.OSS50, BufferType.OFF_HEAP, ExpectedLifetime.LONG, null);
-        EMPTY_SIZE_OFF_HEAP = ObjectSizes.measureDeep(empty);
-    }
 
     enum ExpectedLifetime
     {
@@ -1819,6 +1808,8 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
         return bufferType == BufferType.ON_HEAP ? 0 : usedBufferSpace();
     }
 
+    protected abstract long emptySizeOnHeap();
+
     /// Returns the on heap size of the memtable trie itself, not counting any space taken by referenced content, or
     /// any space that has been allocated but is not currently in use (e.g. recycled cells or preallocated buffer).
     /// The latter means we are undercounting the actual usage, but the purpose of this reporting is to decide when
@@ -1827,9 +1818,10 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
     /// possible to flush out before making these large allocations.
     public long usedSizeOnHeap()
     {
-        return usedObjectSpace() +
+        return emptySizeOnHeap() +
+               usedObjectSpace() +
                REFERENCE_ARRAY_ON_HEAP_SIZE * getBufferIdx(contentCount, CONTENTS_START_SHIFT, CONTENTS_START_SIZE) +
-               (bufferType == BufferType.ON_HEAP ? usedBufferSpace() + EMPTY_SIZE_ON_HEAP : EMPTY_SIZE_OFF_HEAP) +
+               (bufferType == BufferType.ON_HEAP ? usedBufferSpace() : 0) +
                REFERENCE_ARRAY_ON_HEAP_SIZE * getBufferIdx(allocatedPos, BUF_START_SHIFT, BUF_START_SIZE);
     }
 

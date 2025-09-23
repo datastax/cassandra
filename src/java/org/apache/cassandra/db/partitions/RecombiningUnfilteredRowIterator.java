@@ -77,9 +77,9 @@ class RecombiningUnfilteredRowIterator extends WrappingUnfilteredRowIterator
     @Override
     public Unfiltered next()
     {
-        Unfiltered next = computeNext();
+        Unfiltered item = computeNext();
         nextPrepared = false;
-        return next;
+        return item;
     }
 
     private Unfiltered computeNext()

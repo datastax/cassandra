@@ -25,7 +25,7 @@ import org.apache.cassandra.db.LivenessInfo;
 import org.apache.cassandra.db.marshal.ByteArrayAccessor;
 import org.apache.cassandra.db.memtable.TrieMemtableStage2;
 import org.apache.cassandra.db.rows.BTreeRow;
-import org.apache.cassandra.db.tries.InMemoryTrie;
+import org.apache.cassandra.db.tries.InMemoryBaseTrie;
 import org.apache.cassandra.index.transactions.UpdateTransaction;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
@@ -38,7 +38,7 @@ import static org.apache.cassandra.db.partitions.TrieBackedPartitionStage2.RowDa
  */
 public final class TriePartitionUpdaterStage2
 extends BasePartitionUpdater
-implements InMemoryTrie.UpsertTransformerWithKeyProducer<Object, Object>
+implements InMemoryBaseTrie.UpsertTransformerWithKeyProducer<Object, Object>
 {
     private final UpdateTransaction indexer;
     private final TableMetadata metadata;
@@ -58,7 +58,7 @@ implements InMemoryTrie.UpsertTransformerWithKeyProducer<Object, Object>
     }
 
     @Override
-    public Object apply(Object existing, Object update, InMemoryTrie.KeyProducer<Object> keyState)
+    public Object apply(Object existing, Object update, InMemoryBaseTrie.KeyProducer<Object> keyState)
     {
         if (update instanceof RowData)
             return applyRow((RowData) existing, (RowData) update, keyState);
@@ -76,7 +76,7 @@ implements InMemoryTrie.UpsertTransformerWithKeyProducer<Object, Object>
      * @param keyState Used to obtain the path through which this node was reached.
      * @return the insert row, or the merged row, copied using our allocator
      */
-    private RowData applyRow(RowData existing, RowData insert, InMemoryTrie.KeyProducer<Object> keyState)
+    private RowData applyRow(RowData existing, RowData insert, InMemoryBaseTrie.KeyProducer<Object> keyState)
     {
         if (existing == null)
         {
@@ -119,7 +119,7 @@ implements InMemoryTrie.UpsertTransformerWithKeyProducer<Object, Object>
         return new RowData(tree, livenessInfo, deletion);
     }
 
-    private Clustering<?> clusteringFor(InMemoryTrie.KeyProducer<Object> keyState)
+    private Clustering<?> clusteringFor(InMemoryBaseTrie.KeyProducer<Object> keyState)
     {
         return metadata.comparator.clusteringFromByteComparable(
             ByteArrayAccessor.instance,
