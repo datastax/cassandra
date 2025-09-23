@@ -47,7 +47,7 @@ public class CompactionValidationTask
         this.nowInSec = FBUtilities.nowInSeconds();
         // Ideally, should use gc_grace_seconds from CompactionController for current compaction task,
         // but requires additional LifecycleTransaction API changes to pass in gc_grace_seconds.
-        // Using gc_grace_seconds of 0 here, it means validation allows missing boundary keys as long as they
+        // Using gc_grace_seconds of 0 here, it means validation allows absent boundary keys as long as they
         // are full of tombstones which are all considered droppable.
         this.gcBefore = nowInSec;
         this.metrics = metrics;
@@ -76,7 +76,7 @@ public class CompactionValidationTask
         long startedNanos = System.nanoTime();
         metrics.incrementValidation();
         
-        Set<DecoratedKey> missingKeys = new HashSet<>();
+        Set<DecoratedKey> absentKeys = new HashSet<>();
         for (SSTableReader inputSSTable : inputSSTables)
         {
             DecoratedKey firstKey = inputSSTable.first;
@@ -87,7 +87,7 @@ public class CompactionValidationTask
                 if (logger.isTraceEnabled())
                     logger.trace("[Task {}] First key {} from input sstable {} not found in update sstables",
                             id, firstKey, inputSSTable.descriptor);
-                missingKeys.add(firstKey);
+                absentKeys.add(firstKey);
             }
             
             if (isKeyAbsentInOutputSSTables(lastKey))
@@ -95,21 +95,21 @@ public class CompactionValidationTask
                 if (logger.isTraceEnabled())
                     logger.warn("[Task {}] Last key {} from input sstable {} not found in update sstables",
                             id, lastKey, inputSSTable.descriptor);
-                missingKeys.add(lastKey);
+                absentKeys.add(lastKey);
             }
         }
         
-        if (missingKeys.isEmpty())
+        if (absentKeys.isEmpty())
         {
-            metrics.incrementValidationWithoutMissingKeys();
+            metrics.incrementValidationWithoutAbsentKeys();
             logger.info("[Task {}] Compaction validation passed: all first/last keys found in update sstables, took {}ms",
                     id, TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedNanos));
             return;
         }
 
-        metrics.incrementMissingKeys(missingKeys.size());
-        validateMissingKeysAgainstTombstones(missingKeys);
-        logger.info("[Task {}] Compaction validation passed: all missing keys are properly obsoleted due to tombstones, took {} ms",
+        metrics.incrementAbsentKeys(absentKeys.size());
+        validateAbsentKeysAgainstTombstones(absentKeys);
+        logger.info("[Task {}] Compaction validation passed: all absent keys are properly obsoleted due to tombstones, took {} ms",
                 id, TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedNanos));
     }
     
@@ -128,18 +128,18 @@ public class CompactionValidationTask
         return true;
     }
     
-    private void validateMissingKeysAgainstTombstones(Set<DecoratedKey> missingKeys)
+    private void validateAbsentKeysAgainstTombstones(Set<DecoratedKey> absentKeys)
     {
-        logger.info("[Task {}] Validating {} missing keys against tombstones from input sstables", id, missingKeys.size());
+        logger.info("[Task {}] Validating {} absent keys against tombstones from input sstables", id, absentKeys.size());
         
-        for (DecoratedKey missingKey : missingKeys)
+        for (DecoratedKey absentKey : absentKeys)
         {
-            if (!isFullyExpired(missingKey))
+            if (!isFullyExpired(absentKey))
             {
                 metrics.incrementPotentialDataLosses();
                 String errorMsg = String.format(
                     "POTENTIAL DATA LOSS on compaction task %s: Key %s from input sstables not found in update sstables " +
-                    "and the partition is not fully expired.", id, missingKey);
+                    "and the partition is not fully expired.", id, absentKey);
                 logger.error(errorMsg);
                 if (!CassandraRelevantProperties.COMPACTION_VALIDATION_DRY_RUN.getBoolean())
                     throw new DataLossException(errorMsg);

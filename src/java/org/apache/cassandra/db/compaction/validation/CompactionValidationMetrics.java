@@ -11,8 +11,8 @@ public class CompactionValidationMetrics extends MicrometerMetrics
     public static final CompactionValidationMetrics INSTANCE = new CompactionValidationMetrics();
 
     public Counter validationCount;
-    public Counter validationWithoutMissingKeys;
-    public Counter missingKeys;
+    public Counter validationWithoutAbsentKeys;
+    public Counter absentKeys;
     public Counter potentialDataLosses;
 
     public CompactionValidationMetrics()
@@ -30,8 +30,8 @@ public class CompactionValidationMetrics extends MicrometerMetrics
     private void initializeMetrics()
     {
         this.validationCount = registryWithTags().left.counter("compaction_validation_total", registryWithTags().right);
-        this.validationWithoutMissingKeys = registryWithTags().left.counter("compaction_validation_without_missing_key_total", registryWithTags().right);
-        this.missingKeys = registryWithTags().left.counter("compaction_validation_missing_keys_total", registryWithTags().right);
+        this.validationWithoutAbsentKeys = registryWithTags().left.counter("compaction_validation_without_absent_keys_total", registryWithTags().right);
+        this.absentKeys = registryWithTags().left.counter("compaction_validation_absent_keys_count_from_output_total", registryWithTags().right);
         this.potentialDataLosses = registryWithTags().left.counter("compaction_validation_potential_data_loss_total", registryWithTags().right);
     }
 
@@ -45,13 +45,13 @@ public class CompactionValidationMetrics extends MicrometerMetrics
         potentialDataLosses.increment();
     }
 
-    public void incrementValidationWithoutMissingKeys()
+    public void incrementValidationWithoutAbsentKeys()
     {
-        validationWithoutMissingKeys.increment();
+        validationWithoutAbsentKeys.increment();
     }
 
-    public void incrementMissingKeys(int keys)
+    public void incrementAbsentKeys(int keys)
     {
-        missingKeys.increment(keys);
+        absentKeys.increment(keys);
     }
 }

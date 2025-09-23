@@ -43,7 +43,7 @@ public class CompactionValidationTest extends CQLTester
         cfs.forceMajorCompaction();
 
         assertThat(cfs.getLiveSSTables()).hasSize(1);
-        assertSuccessfulValidationWithoutMissingKeys(initial);
+        assertSuccessfulValidationWithoutAbsentKeys(initial);
     }
 
     @Test
@@ -62,7 +62,7 @@ public class CompactionValidationTest extends CQLTester
         cfs.forceMajorCompaction();
 
         assertThat(cfs.getLiveSSTables()).hasSize(1);
-        assertSuccessfulValidationWithoutMissingKeys(initial);
+        assertSuccessfulValidationWithoutAbsentKeys(initial);
     }
 
     @Test
@@ -86,7 +86,7 @@ public class CompactionValidationTest extends CQLTester
         cfs.forceMajorCompaction();
         assertThat(cfs.getLiveSSTables()).hasSize(1);
 
-        assertSuccessfulValidationWithMissingKeys(initial, 2); // key 0 and key 1 are removed
+        assertSuccessfulValidationWithAbsentKeys(initial, 2); // key 0 and key 1 are removed
     }
 
     @Test
@@ -114,7 +114,7 @@ public class CompactionValidationTest extends CQLTester
         cfs.forceMajorCompaction();
         assertThat(cfs.getLiveSSTables()).isEmpty();
 
-        assertSuccessfulValidationWithMissingKeys(initial, 2); // key 1 are removed
+        assertSuccessfulValidationWithAbsentKeys(initial, 2); // key 1 are removed
     }
 
     @Test
@@ -138,7 +138,7 @@ public class CompactionValidationTest extends CQLTester
         cfs.forceMajorCompaction();
         assertThat(cfs.getLiveSSTables()).hasSize(1);
 
-        assertSuccessfulValidationWithMissingKeys(initial, 2); // key 0 and key 1 are removed
+        assertSuccessfulValidationWithAbsentKeys(initial, 2); // key 0 and key 1 are removed
     }
 
     @Test
@@ -162,7 +162,7 @@ public class CompactionValidationTest extends CQLTester
         cfs.forceMajorCompaction();
         assertThat(cfs.getLiveSSTables()).hasSize(1);
 
-        assertSuccessfulValidationWithMissingKeys(initial, 2); // key 0 and key 1 are removed
+        assertSuccessfulValidationWithAbsentKeys(initial, 2); // key 0 and key 1 are removed
     }
 
     @Test
@@ -182,7 +182,7 @@ public class CompactionValidationTest extends CQLTester
         cfs.forceMajorCompaction();
 
         assertThat(cfs.getLiveSSTables()).hasSize(1);
-        assertSuccessfulValidationWithoutMissingKeys(initial);
+        assertSuccessfulValidationWithoutAbsentKeys(initial);
     }
 
     @Test
@@ -204,7 +204,7 @@ public class CompactionValidationTest extends CQLTester
         cfs.forceMajorCompaction();
 
         assertThat(cfs.getLiveSSTables()).hasSize(1);
-        assertSuccessfulValidationWithMissingKeys(initial, 2); // 2 boundary keys from 1st sstable are missing
+        assertSuccessfulValidationWithAbsentKeys(initial, 2); // 2 boundary keys from 1st sstable are absent
     }
 
     @Test
@@ -228,7 +228,7 @@ public class CompactionValidationTest extends CQLTester
 
         // all sstables are removed
         assertThat(cfs.getLiveSSTables()).hasSize(0);
-        assertSuccessfulValidationWithMissingKeys(initial, 2);
+        assertSuccessfulValidationWithAbsentKeys(initial, 2);
     }
 
     private void populateSSTable(int startPartition, int endPartition, int ck1PerPartition, int ck2PerClustering) throws Throwable
@@ -297,12 +297,12 @@ public class CompactionValidationTest extends CQLTester
         flush();
     }
 
-    private void assertSuccessfulValidationWithMissingKeys(Stats initialStats, int missingKeys)
+    private void assertSuccessfulValidationWithAbsentKeys(Stats initialStats, int absentKeys)
     {
-        initialStats.assertStats(1, 0, missingKeys, 0);
+        initialStats.assertStats(1, 0, absentKeys, 0);
     }
 
-    private void assertSuccessfulValidationWithoutMissingKeys(Stats initialStats)
+    private void assertSuccessfulValidationWithoutAbsentKeys(Stats initialStats)
     {
         initialStats.assertStats(1, 1, 0, 0);
     }
@@ -310,15 +310,15 @@ public class CompactionValidationTest extends CQLTester
     private static class Stats
     {
         private final int validations;
-        private final int validationsWithoutMissingKeys;
-        private final int missingKeys;
+        private final int validationsWithoutAbsentKeys;
+        private final int absentKeys;
         private final int potentialDataLosses;
 
-        private Stats(int validations, int validationsWithoutMissingKeys, int missingKeys, int potentialDataLosses)
+        private Stats(int validations, int validationsWithoutAbsentKeys, int absentKeys, int potentialDataLosses)
         {
             this.validations = validations;
-            this.validationsWithoutMissingKeys = validationsWithoutMissingKeys;
-            this.missingKeys = missingKeys;
+            this.validationsWithoutAbsentKeys = validationsWithoutAbsentKeys;
+            this.absentKeys = absentKeys;
             this.potentialDataLosses = potentialDataLosses;
         }
 
@@ -326,17 +326,17 @@ public class CompactionValidationTest extends CQLTester
         {
             CompactionValidationMetrics metrics = CompactionValidationMetrics.INSTANCE;
             return new Stats((int) metrics.validationCount.count(),
-                    (int) metrics.validationWithoutMissingKeys.count(),
-                    (int) metrics.missingKeys.count(),
+                    (int) metrics.validationWithoutAbsentKeys.count(),
+                    (int) metrics.absentKeys.count(),
                     (int) metrics.potentialDataLosses.count());
         }
 
-        public void assertStats(int validationDiff, int validationsWithoutMissingKeysDiff, int missingKeysDiff, int potentialDataLossesDiff)
+        public void assertStats(int validationDiff, int validationsWithoutAbsentKeysDiff, int absentKeysDiff, int potentialDataLossesDiff)
         {
             Stats current = Stats.fetch();
             assertEquals(this.validations + validationDiff, current.validations);
-            assertEquals(this.validationsWithoutMissingKeys + validationsWithoutMissingKeysDiff, current.validationsWithoutMissingKeys);
-            assertEquals(this.missingKeys + missingKeysDiff, current.missingKeys);
+            assertEquals(this.validationsWithoutAbsentKeys + validationsWithoutAbsentKeysDiff, current.validationsWithoutAbsentKeys);
+            assertEquals(this.absentKeys + absentKeysDiff, current.absentKeys);
             assertEquals(this.potentialDataLosses + potentialDataLossesDiff, current.potentialDataLosses);
         }
     }
