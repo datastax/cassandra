@@ -1,5 +1,5 @@
 * Cassandra
-** xref:getting_started/index.adoc[Getting Started]	
+** xref:getting_started/index.adoc[Getting Started]
 *** xref:getting_started/installing.adoc[Installing Cassandra]
 *** xref:getting_started/configuring.adoc[Configuring Cassandra]
 *** xref:getting_started/querying.adoc[Inserting and querying]
@@ -17,7 +17,7 @@
 
 ** xref:architecture/index.adoc[Architecture]
 *** xref:architecture/overview.adoc[Overview]
-*** xref:architecture/dynamo.adoc[Dynamo]		
+*** xref:architecture/dynamo.adoc[Dynamo]
 *** xref:architecture/storage_engine.adoc[Storage engine]
 *** xref:architecture/guarantees.adoc[Guarantees]
 
@@ -46,7 +46,6 @@
 *** xref:cql/triggers.adoc[Triggers]
 *** xref:cql/appendices.adoc[Appendices]
 *** xref:cql/changes.adoc[Changes]
-*** xref:cql/SASI.adoc[SASI]
 *** xref:cql/cql_singlefile.adoc[Single file of CQL information]
 
 ** xref:configuration/index.adoc[Configuration]
@@ -73,7 +72,7 @@
 *** xref:operating/security.adoc[Security]
 *** xref:operating/hardware.adoc[Hardware]
 *** xref:operating/audit_logging.adoc[Audit logging]
-*** xref:operating/compaction/index.adoc[Compaction]		
+*** xref:operating/compaction/index.adoc[Compaction]
 
 ** xref:tools/index.adoc[Tools]
 *** xref:tools/cqlsh.adoc[cqlsh: the CQL shell]
@@ -103,4 +102,3 @@
 ** xref:faq/index.adoc[FAQ]
 
 ** xref:plugins/index.adoc[Plug-ins]
-

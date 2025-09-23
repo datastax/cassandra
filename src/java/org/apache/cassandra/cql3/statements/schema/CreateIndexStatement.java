@@ -213,7 +213,7 @@ public final class CreateIndexStatement extends AlterSchemaStatement
     Set<String> clientWarnings(KeyspacesDiff diff)
     {
         if (attrs.isCustom && attrs.customClass.equals(SASIIndex.class.getName()))
-            return ImmutableSet.of(SASIIndex.USAGE_WARNING);
+            return ImmutableSet.of(SASIIndex.getUnsupportedMessage(keyspaceName, indexName));
 
         if (isDseIndexCreateStatement())
             return ImmutableSet.of(String.format(DSE_INDEX_WARNING, indexName, attrs.customClass));

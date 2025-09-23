@@ -41,7 +41,7 @@
         <copy file="${build.dir}/.versioned_files" tofile="${build.dir}/.ratinclude">
             <filterchain>
                 <linecontainsregexp>
-                    <regexp pattern=".*\.(java|py|sh|xml|spec|md|iml|bat|btm|cql|css|g|html|jflex|jks|mod|name|pom|textile|yml|yaml|MIDRES|HIGHRES|LOWRES)$"/>
+                    <regexp pattern=".*\.(java|py|sh|xml|spec|md|iml|bat|btm|cql|css|g|html|jks|mod|name|pom|textile|yml|yaml|MIDRES|HIGHRES|LOWRES)$"/>
                 </linecontainsregexp>
             </filterchain>
         </copy>

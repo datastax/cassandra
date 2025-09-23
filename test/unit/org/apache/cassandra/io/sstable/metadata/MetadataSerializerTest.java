@@ -208,7 +208,7 @@ public class MetadataSerializerTest
         CommitLogPosition club = new CommitLogPosition(11L, 12);
         CommitLogPosition cllb = new CommitLogPosition(9L, 12);
 
-        TableMetadata cfm = SchemaLoader.clusteringSASICFMD("ks1", "cf1").build();
+        TableMetadata cfm = SchemaLoader.clusteringCFMD("ks1", "cf1").build();
         MetadataCollector collector = new MetadataCollector(cfm.comparator)
                                       .commitLogIntervals(new IntervalSet<>(cllb, club));
 
