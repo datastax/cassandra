@@ -505,7 +505,9 @@ public class TrieBackedPartition implements Partition
     /// partition-level deletions. To do the former, we apply a [RecombiningUnfilteredRowIterator] on top of this. To
     /// do the latter, we extract the partition-level deletion from its coverage of the static row and filter out
     /// tombstone ranges that switch to it.
-    class UnfilteredIterator extends TrieEntriesIterator<Object, Unfiltered> implements UnfilteredRowIterator
+    class UnfilteredIterator
+    extends TrieEntriesIterator.WithNullFiltering<Object, Unfiltered>
+    implements UnfilteredRowIterator
     {
         final boolean reversed;
         final ColumnFilter selection;
@@ -519,8 +521,7 @@ public class TrieBackedPartition implements Partition
 
         private UnfilteredIterator(ColumnFilter selection, DeletionAwareTrie<Object, TrieTombstoneMarker> trie, boolean reversed, DeletionTime partitionLevelDeletion)
         {
-            super(trie.mergedTrieSwitchable((x, y) -> x instanceof RowData ? x : y), Direction.fromBoolean(reversed),
-                  content -> !(content instanceof TrieTombstoneMarker) || !((TrieTombstoneMarker) content).deletionTime().equals(partitionLevelDeletion));
+            super(trie.mergedTrieSwitchable((x, y) -> x instanceof RowData ? x : y), Direction.fromBoolean(reversed));
             this.trie = trie;
             this.selection = selection;
             this.reversed = reversed;
@@ -598,8 +599,8 @@ public class TrieBackedPartition implements Partition
         {
             ((DeletionAwareTrie.DeletionsStopControl) cursor).stopIssuingDeletions(this);
 
-            Object next = peekNextIfAvailable();
-            if (next != null && !(next instanceof RowData))
+            Unfiltered next = peekNextIfAvailable();
+            if (next != null && next.isRangeTombstoneMarker())
                 consumeNext();
             return true;
         }
