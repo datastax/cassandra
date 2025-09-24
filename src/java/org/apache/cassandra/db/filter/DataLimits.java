@@ -628,14 +628,14 @@ public abstract class DataLimits
             {
                 rowsInCurrentPartition = 0;
                 hasLiveStaticRow = !staticRow.isEmpty() && isLive(staticRow);
-                staticRowBytes = hasLiveStaticRow && bytesLimit != NO_LIMIT ? staticRow.dataSizeBeforePurge() : 0;
+                staticRowBytes = hasLiveStaticRow && bytesLimit != NO_LIMIT ? staticRow.liveDataSize(nowInSec) : 0;
             }
 
             @Override
             public Row applyToRow(Row row)
             {
                 if (isLive(row))
-                    incrementRowCount(bytesLimit != NO_LIMIT ? row.dataSizeBeforePurge() : 0);
+                    incrementRowCount(bytesLimit != NO_LIMIT ? row.liveDataSize(nowInSec) : 0);
                 return row;
             }
 
@@ -650,9 +650,9 @@ public abstract class DataLimits
                 super.onPartitionClose();
             }
 
-            protected void incrementRowCount(int rowSize)
+            protected void incrementRowCount(int liveRowSize)
             {
-                bytesCounted += rowSize;
+                bytesCounted += liveRowSize;
                 rowsCounted++;
                 rowsInCurrentPartition++;
                 if (bytesCounted >= bytesLimit || rowsCounted >= rowLimit)
@@ -891,7 +891,7 @@ public abstract class DataLimits
         @Override
         public float estimateTotalResults(ColumnFamilyStore cfs)
         {
-            // For the moment, we return the estimated number of rows as we have no good way of estimating 
+            // For the moment, we return the estimated number of rows as we have no good way of estimating
             // the number of groups that will be returned. Hopefully, we should be able to fix
             // that problem at some point.
             return super.estimateTotalResults(cfs);
@@ -1110,7 +1110,7 @@ public abstract class DataLimits
                     }
                     hasReturnedRowsFromCurrentPartition = false;
                     hasLiveStaticRow = !staticRow.isEmpty() && isLive(staticRow);
-                    staticRowBytes = hasLiveStaticRow ? staticRow.dataSizeBeforePurge() : 0;
+                    staticRowBytes = hasLiveStaticRow ? staticRow.liveDataSize(nowInSec) : 0;
                 }
                 currentPartitionKey = partitionKey;
                 // If we are done we need to preserve the groupInCurrentPartition and rowsCountedInCurrentPartition
@@ -1176,7 +1176,7 @@ public abstract class DataLimits
                 if (isLive(row))
                 {
                     hasUnfinishedGroup = true;
-                    incrementRowCount(bytesLimit != NO_LIMIT ? row.dataSizeBeforePurge() : 0);
+                    incrementRowCount(bytesLimit != NO_LIMIT ? row.liveDataSize(nowInSec) : 0);
                     hasReturnedRowsFromCurrentPartition = true;
                 }
 
@@ -1213,11 +1213,11 @@ public abstract class DataLimits
                 return rowsCountedInCurrentPartition;
             }
 
-            protected void incrementRowCount(int rowSize)
+            protected void incrementRowCount(int rowLiveSize)
             {
                 rowsCountedInCurrentPartition++;
                 rowsCounted++;
-                bytesCounted += rowSize;
+                bytesCounted += rowLiveSize;
                 if (rowsCounted >= rowLimit || bytesCounted >= bytesLimit)
                     stop();
             }
