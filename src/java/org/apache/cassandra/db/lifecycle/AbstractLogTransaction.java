@@ -28,6 +28,7 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.utils.concurrent.Transactional;
 
 import static org.apache.cassandra.db.compaction.OperationType.COMPACTION;
+import static org.apache.cassandra.db.compaction.OperationType.GARBAGE_COLLECT;
 
 /**
  * A class that tracks sstable files involved in a transaction across sstables:
@@ -51,8 +52,8 @@ public abstract class AbstractLogTransaction extends Transactional.AbstractTrans
      */
     public void validate(Set<SSTableReader> obsolete, Set<SSTableReader> update)
     {
-        // Only validate compaction tasks
-        if (opType() != COMPACTION)
+        // Only validate compaction tasks and GC tasks
+        if (opType() != COMPACTION && opType() != GARBAGE_COLLECT)
             return;
 
         if (!CassandraRelevantProperties.COMPACTION_VALIDATION_ENABLED.getBoolean())
