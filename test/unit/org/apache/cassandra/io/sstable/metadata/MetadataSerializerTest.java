@@ -29,7 +29,6 @@ import java.util.List;
 import java.util.Map;
 
 import com.google.common.primitives.Bytes;
-
 import org.junit.BeforeClass;
 import org.junit.Test;
 import org.slf4j.Logger;
@@ -53,9 +52,9 @@ import org.apache.cassandra.io.sstable.format.SSTableFormat.Components;
 import org.apache.cassandra.io.sstable.format.Version;
 import org.apache.cassandra.io.util.DataOutputStreamPlus;
 import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.io.util.FileInputStreamPlus;
 import org.apache.cassandra.io.util.FileOutputStreamPlus;
 import org.apache.cassandra.io.util.FileUtils;
-import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.Throwables;
@@ -103,7 +102,7 @@ public class MetadataSerializerTest
         Descriptor desc = new Descriptor(latestVersion, FileUtils.getTempDir(), "test", "test", new SequenceBasedSSTableId(0));
         File statsFile = serialize(originalMetadata, serializer, desc);
 
-        try (RandomAccessReader in = RandomAccessReader.open(statsFile))
+        try (FileInputStreamPlus in = new FileInputStreamPlus(statsFile))
         {
             Map<MetadataType, MetadataComponent> deserialized = serializer.deserialize(desc, in, EnumSet.allOf(MetadataType.class));
 
@@ -133,7 +132,7 @@ public class MetadataSerializerTest
         Descriptor desc = new Descriptor(format.getLatestVersion(), FileUtils.getTempDir(), "test", "test", new SequenceBasedSSTableId(0));
         File statsFile = serializeWithEncryption(originalMetadata, serializer, desc);
 
-        try (RandomAccessReader in = RandomAccessReader.open(statsFile))
+        try (FileInputStreamPlus in = new FileInputStreamPlus(statsFile))
         {
             Map<MetadataType, MetadataComponent> deserialized = deserializeWithEncryption(serializer, desc, in);
 
@@ -143,7 +142,7 @@ public class MetadataSerializerTest
             }
         }
     }
-    
+
     @Test
     public void testEncryption() throws IOException
     {
@@ -186,7 +185,7 @@ public class MetadataSerializerTest
         Descriptor desc = new Descriptor(format.getLatestVersion(), FileUtils.getTempDir(), "test", "test", new SequenceBasedSSTableId(0));
         File statsFile = serialize(originalMetadata, serializer, desc);
 
-        try (RandomAccessReader in = RandomAccessReader.open(statsFile))
+        try (FileInputStreamPlus in = new FileInputStreamPlus(statsFile))
         {
             // Deserialize and verify that the two histograms have had their overflow buckets cleared:
             Map<MetadataType, MetadataComponent> deserialized = serializer.deserialize(desc, in, EnumSet.allOf(MetadataType.class));
@@ -234,7 +233,7 @@ public class MetadataSerializerTest
         }
     }
 
-    private Map<MetadataType, MetadataComponent> deserializeWithEncryption(MetadataSerializer serializer, Descriptor desc, RandomAccessReader in) throws IOException
+    private Map<MetadataType, MetadataComponent> deserializeWithEncryption(MetadataSerializer serializer, Descriptor desc, FileInputStreamPlus in) throws IOException
     {
         MetadataSerializer.testCompressionParams = compressionParams;
         try
@@ -327,8 +326,8 @@ public class MetadataSerializerTest
         File statsFileLa = serialize(originalMetadata, serializer, descOld);
         // Reading both as earlier version should yield identical results.
         Descriptor desc = new Descriptor(format.getVersion(oldV), statsFileLb.parent(), "", "", new SequenceBasedSSTableId(0));
-        try (RandomAccessReader inLb = RandomAccessReader.open(statsFileLb);
-             RandomAccessReader inLa = RandomAccessReader.open(statsFileLa))
+        try (FileInputStreamPlus inLb = new FileInputStreamPlus(statsFileLb);
+             FileInputStreamPlus inLa = new FileInputStreamPlus(statsFileLa))
         {
             Map<MetadataType, MetadataComponent> deserializedLb = serializer.deserialize(desc, inLb, EnumSet.allOf(MetadataType.class));
             Map<MetadataType, MetadataComponent> deserializedLa = serializer.deserialize(desc, inLa, EnumSet.allOf(MetadataType.class));
