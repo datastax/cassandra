@@ -1032,7 +1032,7 @@ public class SSTableReaderTest
             "ted",
             "ten",
             "tend",
-            "zoo"
+            "yen"
         };
         addPartitionsUnsafe(store, rowPerPartition, keys);
 
@@ -1053,8 +1053,16 @@ public class SSTableReaderTest
         validatePositions(sstable, new Range<>(partitioner.getMinimumToken(), t("te")), keyPositions);
         validatePositions(sstable, new Range<>(t("an"), t("b")), keyPositions);
         validatePositions(sstable, new Range<>(t("te"), t("tea")), keyPositions);
-        validatePositions(sstable, new Range<>(t("g"), t("zoo")), keyPositions);
+        validatePositions(sstable, new Range<>(t("g"), t("yen")), keyPositions);
         validatePositions(sstable, new Range<>(t("ant"), t("t")), keyPositions);
+
+        // The rest of the tests are designed to work regardless of the partitioner, but those below do depend on
+        // order. Tests do run with ordered partitioner but being defensive.
+        if (partitioner.preservesOrder())
+        {
+            validateEmptyRange(sstable, new Range<>(t("bar"), t("foo")));
+            validateEmptyRange(sstable, new Range<>(t("zoo"), partitioner.getMinimumToken()));
+        }
     }
 
     private void addPartitionsUnsafe(ColumnFamilyStore store, int rowPerPartition, String... keys)
@@ -1084,6 +1092,12 @@ public class SSTableReaderTest
                 result[1] = iter.next().getValue();
         }
         return result;
+    }
+
+    private void validateEmptyRange(SSTableReader sstable, Range<Token> range)
+    {
+        assertEquals(List.of(), sstable.getPositionsForRanges(List.of(range)));
+        assertEquals(List.of(), sstable.getApproximatePositionsForRanges(List.of(range)));
     }
 
     private void validatePositions(SSTableReader sstable, Range<Token> range, NavigableMap<PartitionPosition, Long> keyPositions)
