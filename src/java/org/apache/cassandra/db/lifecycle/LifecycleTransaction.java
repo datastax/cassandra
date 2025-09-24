@@ -219,9 +219,12 @@ public class LifecycleTransaction extends Transactional.AbstractTransactional im
         // since those that are not original are early readers that share the same desc with the finals
         maybeFail(prepareForObsoletion(filterIn(logged.obsolete, originals), log, obsoletions = new ArrayList<>(), tracker, null));
 
+        // Use original sstables instead of logged.obsolete which may change their starting position due to early-open
+        Set<SSTableReader> obsolete = Sets.newHashSet(filterIn(originals, logged.obsolete));
+        log.validate(obsolete, logged.update);
+
         // This needs to be called after checkpoint and having prepared the obsoletions because it will upload the deletion
         // marks in CNDB
-        log.validate(logged.obsolete, logged.update);
         log.prepareToCommit();
     }
 

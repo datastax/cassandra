@@ -22,7 +22,6 @@ import java.util.Set;
 import java.util.UUID;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
-import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.compaction.validation.CompactionValidationMetrics;
 import org.apache.cassandra.db.compaction.validation.CompactionValidationTask;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
@@ -61,10 +60,6 @@ public abstract class AbstractLogTransaction extends Transactional.AbstractTrans
 
         // Nothing to verify if no obsolete SSTables
         if (obsolete.isEmpty())
-            return;
-
-        // Early-open modifies obsolete SSTables' start keys, making validation unreliable
-        if (DatabaseDescriptor.getSSTablePreemptiveOpenIntervalInMB() > 0)
             return;
 
         CompactionValidationTask task = new CompactionValidationTask(id(), obsolete, update, CompactionValidationMetrics.INSTANCE);

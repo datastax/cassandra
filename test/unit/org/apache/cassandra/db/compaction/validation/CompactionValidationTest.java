@@ -55,7 +55,6 @@ public class CompactionValidationTest extends CQLTester
         CQLTester.setUpClass();
 
         DatabaseDescriptor.createAllDirectories();
-        DatabaseDescriptor.setSSTablePreemptiveOpenIntervalInMB(-1);
 
         requireNetwork();
     }
