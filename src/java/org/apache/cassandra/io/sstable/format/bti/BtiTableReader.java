@@ -169,6 +169,77 @@ public class BtiTableReader extends SSTableReaderWithFilter
         throw new IllegalArgumentException("Invalid op: " + operator);
     }
 
+    private TrieIndexEntry getApproximatePosition(PartitionPosition key, Operator op, boolean isLeftBound)
+    {
+        assert op == GT || op == GE;
+        // We currently only need this method in contexts where neither early opening nor zero copy transfer are used,
+        // which means we don't have to worry about `filterFirst`/`filterLast`. We could expand that method to support
+        // those, but it's unclear it will ever be needed, and this would require proper testing, so leaving aside for now.
+        assert openReason != OpenReason.MOVED_START : "Early opening is not supported with this method";
+        assert !sstableMetadata.zeroCopyMetadata.exists() : "SSTables with zero copy metadata are not supported";
+
+        try (PartitionIndex.Reader reader = partitionIndex.openReader())
+        {
+            return reader.ceiling(key, (pos, assumeNoMatch, compareKey) -> {
+                // The goal of the overall method, compared to `getPosition`, is to avoid reading the data file. If
+                // whatever partition we look at has a row index (`pos >= 0`), then `retrieveEntryIfAcceptable` may
+                // read the row index file, but it will never read the data file, so we can use it like in `getPosition`.
+                if (pos >= 0)
+                    return retrieveEntryIfAcceptable(op, compareKey, pos, assumeNoMatch);
+
+                // If `assumeNoMatch == false`, then it means we've matched a prefix of the searched key. This means
+                // `pos` points to a key `K` in the sstable that is "the closest on" to `searchKey`, but it may be
+                // before, equal or after `searchKey`. In `getPosition`, `retrieveEntryIfAcceptable` reads the
+                // actual key in data file to decide which case we're on, and base on that whether we want that entry,
+                // or the one after that (in order). But here, we explicitly want to avoid that read to the data file,
+                // so:
+                // - if it is a left bound, we eagerly accept a prefix entry. If `K > searchKey`, then that's the
+                //   "best" answer anyway. If `K < searchKey`, then returning the "next" key would have been "best",
+                //   but returning `K` is only "one off" and still covers `searchKey`, so it is acceptable.
+                // - if it is a right bound, then we do not accept a prefix. Whatever `K` is, we will only accept the
+                //   "next" key (`assumeNoMatch` will then be `true`). If it happened that `K < searchKey`, then
+                //   we were right to not return `K` and the "next" key is the best choice. If `K > searchKey`,
+                //   then we're again "one off" compared to the best option, but as we cover `searchKey`, it is
+                //   acceptable.
+                // We didn't mention `K = searchKey` above because whether it falls in the camp of `>` or `<` in the
+                // cases above depend on whether `searchOp` is GT or GE, but the overall resonable extend there
+                // otherwise.
+                return isLeftBound || assumeNoMatch ? new TrieIndexEntry(~pos) : null;
+            });
+        }
+        catch (IOException e)
+        {
+            markSuspect();
+            throw new CorruptSSTableException(e, rowIndexFile.path());
+        }
+    }
+
+    @Override
+    public PartitionPositionBounds getApproximatePositionsForBounds(AbstractBounds<PartitionPosition> bounds)
+    {
+        TrieIndexEntry rieLeft = getApproximatePosition(bounds.left, bounds.inclusiveLeft() ? Operator.GE : Operator.GT, true);
+        if (rieLeft == null) // empty range
+            return null;
+        long left = rieLeft.position;
+
+        TrieIndexEntry rieRight = bounds.right.isMinimum()
+                                 ? null
+                                 : getApproximatePosition(bounds.right, bounds.inclusiveRight() ? Operator.GT : Operator.GE, false);
+        long right;
+        if (rieRight != null)
+            right = rieRight.position;
+        else // right is beyond end
+            right = uncompressedLength();   // this should also be correct for EARLY readers
+
+        if (left >= right)
+        {
+            // empty range
+            return null;
+        }
+
+        return new PartitionPositionBounds(left, right);
+    }
+
     /**
      * Called by {@link #getRowIndexEntry} above (via Reader.ceiling/floor) to check if the position satisfies the full
      * key constraint. This is called once if there is a prefix match (which can be in any relationship with the sought
