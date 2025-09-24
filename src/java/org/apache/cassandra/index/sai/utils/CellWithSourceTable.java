@@ -148,6 +148,12 @@ public class CellWithSourceTable<T> extends Cell<T>
     }
 
     @Override
+    public int liveDataSize(long nowInSec)
+    {
+        return cell.liveDataSize(nowInSec);
+    }
+
+    @Override
     public long unsharedHeapSizeExcludingData()
     {
         return cell.unsharedHeapSizeExcludingData();
