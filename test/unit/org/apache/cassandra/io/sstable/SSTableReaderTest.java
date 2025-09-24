@@ -28,11 +28,14 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.EnumSet;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.NavigableMap;
 import java.util.Optional;
 import java.util.Random;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
@@ -67,6 +70,7 @@ import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.Mutation;
+import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.ReadExecutionController;
 import org.apache.cassandra.db.RowUpdateBuilder;
@@ -125,6 +129,7 @@ import static org.apache.cassandra.config.CassandraRelevantProperties.BF_FP_CHAN
 import static org.apache.cassandra.config.CassandraRelevantProperties.BF_RECREATE_ON_FP_CHANCE_CHANGE;
 import static org.apache.cassandra.cql3.QueryProcessor.executeInternal;
 import static org.apache.cassandra.db.ColumnFamilyStore.FlushReason.UNIT_TESTS;
+import static org.apache.cassandra.io.sstable.SSTable.logger;
 import static org.apache.cassandra.schema.CompressionParams.DEFAULT_CHUNK_LENGTH;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
@@ -1353,6 +1358,168 @@ public class SSTableReaderTest
         sections = bulkLoaded.getPositionsForRanges(ranges);
         assert sections.size() == 1 : "Expected to find range in sstable opened for bulk loading";
         bulkLoaded.selfRef().release();
+    }
+
+    @Test
+    public void testGetApproximatePositionsForRangesWithRowIndex()
+    {
+        int columnIndexSizeKiB = DatabaseDescriptor.getColumnIndexSizeInKiB();
+        // This ensures partitions of "any size" have a row index. Though in practice, the code never consider adding
+        // a row index entry unless there is at least 2 rows, hence we add 2 per-partition below.
+        DatabaseDescriptor.setColumnIndexSizeInKiB(0);
+        try
+        {
+            testGetApproximatePositionsForRanges(2);
+        }
+        finally
+        {
+            DatabaseDescriptor.setColumnIndexSizeInKiB(columnIndexSizeKiB);
+        }
+    }
+
+    @Test
+    public void testGetApproximatePositionsForRanges()
+    {
+        testGetApproximatePositionsForRanges(1);
+    }
+
+    public void testGetApproximatePositionsForRanges(int rowPerPartition)
+    {
+        ColumnFamilyStore store = discardSSTables(KEYSPACE1, CF_STANDARD2);
+        partitioner = store.getPartitioner();
+
+        String[] keys = new String[]{
+            "a",
+            "an",
+            "ant",
+            "ante",
+            "anti",
+            "to",
+            "tea",
+            "teal",
+            "team",
+            "ted",
+            "ten",
+            "tend",
+            "yen"
+        };
+        addPartitionsUnsafe(store, rowPerPartition, keys);
+
+        store.forceBlockingFlush(UNIT_TESTS);
+        CompactionManager.instance.performMaximal(store, false);
+
+        SSTableReader sstable = store.getLiveSSTables().iterator().next();
+
+        // To avoid depending on the details of the partitioner, we simply scan the full sstable to collect the
+        // positions of all keys in the data file (and keep them sorted in sstable order).
+        NavigableMap<PartitionPosition, Long> keyPositions = keyPositions(sstable);
+
+        // Ensure that getting the positions corresponding to the ranges passed in argument are "valid" (based on the
+        // actual positions we collected above). This tests both `SSTableReader#getPositionsForRanges` and
+        // `SSTableReader#getApproximatePositionsForRanges`.
+        validatePositions(sstable, new Range<>(partitioner.getMinimumToken(), partitioner.getMinimumToken()), keyPositions);
+        validatePositions(sstable, new Range<>(t("an"), partitioner.getMinimumToken()), keyPositions);
+        validatePositions(sstable, new Range<>(partitioner.getMinimumToken(), t("te")), keyPositions);
+        validatePositions(sstable, new Range<>(t("an"), t("b")), keyPositions);
+        validatePositions(sstable, new Range<>(t("te"), t("tea")), keyPositions);
+        validatePositions(sstable, new Range<>(t("g"), t("yen")), keyPositions);
+        validatePositions(sstable, new Range<>(t("ant"), t("t")), keyPositions);
+
+        // The rest of the tests are designed to work regardless of the partitioner, but those below do depend on
+        // order. Tests do run with ordered partitioner but being defensive.
+        if (partitioner.preservesOrder())
+        {
+            validateEmptyRange(sstable, new Range<>(t("bar"), t("foo")));
+            validateEmptyRange(sstable, new Range<>(t("zoo"), partitioner.getMinimumToken()));
+        }
+    }
+
+    private void addPartitionsUnsafe(ColumnFamilyStore store, int rowPerPartition, String... keys)
+    {
+        for (String key : keys)
+        {
+            for (int i = 0; i < rowPerPartition; i++)
+            {
+                new RowUpdateBuilder(store.metadata(), System.currentTimeMillis(), key)
+                .clustering(String.valueOf(i))
+                .add("val", ByteBufferUtil.EMPTY_BYTE_BUFFER)
+                .build()
+                .applyUnsafe();
+            }
+        }
+    }
+
+    // Returns a 2-length array with the first element of the iterator, and then the 2nd one. If any of those does not
+    // exist, it is set to the default value.
+    private long[] pullFirst2Values(Iterator<Map.Entry<PartitionPosition, Long>> iter, long defaultValue)
+    {
+        long[] result = new long[]{ defaultValue, defaultValue };
+        if (iter.hasNext())
+        {
+            result[0] = iter.next().getValue();
+            if (iter.hasNext())
+                result[1] = iter.next().getValue();
+        }
+        return result;
+    }
+
+    private void validateEmptyRange(SSTableReader sstable, Range<Token> range)
+    {
+        assertEquals(List.of(), sstable.getPositionsForRanges(List.of(range)));
+        assertEquals(List.of(), sstable.getApproximatePositionsForRanges(List.of(range)));
+    }
+
+    private void validatePositions(SSTableReader sstable, Range<Token> range, NavigableMap<PartitionPosition, Long> keyPositions)
+    {
+        // Testing `getPositionsForRanges` is easy: we can grab the position in `keyPosition` of the `ceiling` entry
+        // for the start, and the `floor` entry for the end, and this is what `getPositionsForRanges` should return.
+        // But `getApproximatePositionsForRanges` is allowed to be "one key off", as long as the returned offset range
+        // still fully cover the requested range (so for the `lowerPosition`, we can return the key just _before_ the
+        // expected one, and for `upperPosition`, we can return key just _after_ the expected one).
+        // To test both, we create 2-element arrays `start` and `end`. In both cases, the first element is the true
+        // expected value (what `getPositionsForRange` should return), and the 2nd element is the only other value that
+        // is still considered correct for `getApproximatePositionsForRange`.
+
+        var startIt = keyPositions.headMap(keyPositions.ceilingKey(range.left.maxKeyBound()), true).descendingMap().entrySet().iterator();
+        long[] start = pullFirst2Values(startIt, 0);
+
+        var endIt = range.right.isMinimum()
+                    ? Collections.<Map.Entry<PartitionPosition, Long>>emptyIterator()
+                    : keyPositions.tailMap(range.right.maxKeyBound(), true).entrySet().iterator();
+        long[] end = pullFirst2Values(endIt, sstable.uncompressedLength());
+
+        // getPositionsForRanges should give us the exact positions we expect.
+        var positions = sstable.getPositionsForRanges(List.of(range));
+        assertEquals(1, positions.size());
+        var pos = positions.get(0);
+        assertEquals(start[0], pos.lowerPosition);
+        assertEquals(end[0], pos.upperPosition);
+
+        // getApproximatePositionsForRanges can give us the exact positions, but it is allowed to be "one off" as
+        // long as it is in the right direction (meaning that the returned ranges covers at least the expected range).
+        positions = sstable.getApproximatePositionsForRanges(List.of(range));
+        assertEquals(1, positions.size());
+        pos = positions.get(0);
+        logger.info("Approx start: {}", pos.lowerPosition);
+        logger.info("Approx end  : {}", pos.upperPosition);
+        assertTrue(String.format("Computed lower position %d is neither %d nor %d", pos.lowerPosition, start[0], start[1]), pos.lowerPosition == start[0] ||  pos.lowerPosition == start[1]);
+        assertTrue(String.format("Computed upper position %d is neither %d nor %d", pos.upperPosition, end[0], end[1]), pos.upperPosition == end[0] ||  pos.upperPosition == end[1]);
+    }
+
+    // Sequentially read the sstable to extract the keys, in token order, and their starting position in the data file.
+    private NavigableMap<PartitionPosition, Long> keyPositions(SSTableReader sstable)
+    {
+        NavigableMap<PartitionPosition, Long> map = new TreeMap<>();
+        ISSTableScanner scanner = sstable.getScanner();
+        while (scanner.hasNext())
+        {
+            // The scanner is positioned at the start of the partition after the `hasNext`. After the `next()`, it will
+            // have read the partition key and be positioned after it. And the next `hasNext` is what "exhaust" the
+            // last returned partition, positioning the scanner after it (and so on the next partition).
+            long pos = scanner.getCurrentPosition();
+            map.put(scanner.next().partitionKey(), pos);
+        }
+        return map;
     }
 
     @Test
