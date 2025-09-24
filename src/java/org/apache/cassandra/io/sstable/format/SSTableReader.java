@@ -26,7 +26,6 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.EnumSet;
-import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -56,7 +55,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.clearspring.analytics.stream.cardinality.CardinalityMergeException;
-import com.clearspring.analytics.stream.cardinality.HyperLogLogPlus;
 import com.clearspring.analytics.stream.cardinality.ICardinality;
 import org.apache.cassandra.cache.InstrumentingCache;
 import org.apache.cassandra.cache.KeyCacheKey;
@@ -1430,6 +1428,45 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
                 positions.add(pb);
         }
         return positions;
+    }
+
+    /**
+     * Similar to {@link #getPositionsForRanges(Collection)}, but this method is allowed to return positions that
+     * cover "more" than strictly the provided ranges.
+     * <p>
+     * By allowing some imprecision, this method may be faster/avoid reads to the data file that are otherwise
+     * necessary. In practice, the positions returned by this method may be up to "one key off" for each bound of
+     * each range. In other words, say we pass range `(t_s, t_e]`, and let's denote by `k_i` the ith key in the
+     * underlying sstable. And suppose that `getPositionsForRanges([(t_s, t_e]])` returns `(k_s, k_e)` (with `s` < `e`),
+     * where `k_i` means the position to i-th key in the sstable. Then this method applied to this same range may return
+     * either one of `(k_s, k_e)` (same result), `(k_s-1, k_e)`, `(k_s, k_e+1)`, or `(k_s-1, k_e+1)`
+     * <p>
+     * Also note that as a consequence of this, the returned list of position bounds may have some strict overlap
+     * (the method could return something along the lines of `[(0, 100), (80, 200)]`). But all the starting positions
+     * and all the ending positions will still be ordered.
+     */
+    public List<PartitionPositionBounds> getApproximatePositionsForRanges(Collection<Range<Token>> ranges)
+    {
+        List<PartitionPositionBounds> positions = new ArrayList<>();
+        for (Range<Token> range : Range.normalize(ranges))
+        {
+            assert !range.isWrapAround() || range.right.isMinimum();
+            AbstractBounds<PartitionPosition> bounds = Range.makeRowRange(range);
+            PartitionPositionBounds pb = getApproximatePositionsForBounds(bounds);
+            if (pb != null)
+                positions.add(pb);
+        }
+        return positions;
+    }
+
+    /**
+     * This is to {@link #getPositionsForBounds(AbstractBounds)} what {@link #getApproximatePositionsForRanges(Collection)}
+     * is to {@link #getPositionsForRanges(Collection)}.
+     */
+    public PartitionPositionBounds getApproximatePositionsForBounds(AbstractBounds<PartitionPosition> bounds)
+    {
+        // Return the exact positions by default; this can be overridden by concrete sstable implementations.
+        return getPositionsForBounds(bounds);
     }
 
     /**
@@ -2902,6 +2939,12 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
                 return false;
             PartitionPositionBounds that = (PartitionPositionBounds)o;
             return lowerPosition == that.lowerPosition && upperPosition == that.upperPosition;
+        }
+
+        @Override
+        public String toString()
+        {
+            return String.format("(%d, %d)", lowerPosition, upperPosition);
         }
     }
 

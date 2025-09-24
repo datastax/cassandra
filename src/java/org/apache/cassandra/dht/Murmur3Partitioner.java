@@ -224,6 +224,11 @@ public class Murmur3Partitioner implements IPartitioner
             return new LongToken(token + 1);    // wraparound to MINIMUM if token is MAXIMUM
         }
 
+        @Override
+        public Token prevValidToken()
+        {
+            return new LongToken(token - 1);    // wraparound to MAXIMUM if token is MINIMUM
+        }
 
         /**
          * Reverses murmur3 to find a possible 16 byte key that generates a given token
