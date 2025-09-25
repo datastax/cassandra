@@ -92,18 +92,19 @@ public class CompactionValidationTask
         logger.info("Starting compaction validation for task {}", id);
         long startedNanos = System.nanoTime();
         metrics.incrementValidation();
-        
+
         Set<DecoratedKey> absentKeys = new HashSet<>();
         for (SSTableReader inputSSTable : inputSSTables)
         {
             DecoratedKey firstKey = inputSSTable.first;
             DecoratedKey lastKey = inputSSTable.last;
-            
+
             if (isKeyAbsentInOutputSSTables(firstKey))
             {
                 if (logger.isTraceEnabled())
                     logger.trace("[Task {}] First key {} from input sstable {} not found in update sstables",
                             id, firstKey, inputSSTable.descriptor);
+
                 absentKeys.add(firstKey);
             }
             
@@ -112,24 +113,25 @@ public class CompactionValidationTask
                 if (logger.isTraceEnabled())
                     logger.warn("[Task {}] Last key {} from input sstable {} not found in update sstables",
                             id, lastKey, inputSSTable.descriptor);
+
                 absentKeys.add(lastKey);
             }
         }
-        
+
         if (absentKeys.isEmpty())
         {
             metrics.incrementValidationWithoutAbsentKeys();
             logger.info("[Task {}] Compaction validation passed: all first/last keys found in update sstables, took {}ms",
-                    id, TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedNanos));
+                        id, TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedNanos));
             return;
         }
 
         metrics.incrementAbsentKeys(absentKeys.size());
-        validateAbsentKeysAgainstTombstones(absentKeys);
-        logger.info("[Task {}] Compaction validation passed: all absent keys are properly obsoleted due to tombstones, took {} ms",
-                id, TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedNanos));
+        if (validateAbsentKeysAgainstTombstones(absentKeys))
+            logger.info("[Task {}] Compaction validation passed: all absent keys are properly obsoleted due to tombstones, took {} ms",
+                        id, TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedNanos));
     }
-    
+
     private boolean isKeyAbsentInOutputSSTables(DecoratedKey key)
     {
         for (SSTableReader outputSSTable : outputSSTables)
@@ -144,11 +146,11 @@ public class CompactionValidationTask
         }
         return true;
     }
-    
-    private void validateAbsentKeysAgainstTombstones(Set<DecoratedKey> absentKeys)
+
+    private boolean validateAbsentKeysAgainstTombstones(Set<DecoratedKey> absentKeys)
     {
         logger.info("[Task {}] Validating {} absent keys against tombstones from input sstables", id, absentKeys.size());
-        
+
         for (DecoratedKey absentKey : absentKeys)
         {
             if (!isFullyExpired(absentKey))
@@ -160,8 +162,11 @@ public class CompactionValidationTask
                 logger.error(errorMsg);
                 if (!CassandraRelevantProperties.COMPACTION_VALIDATION_DRY_RUN.getBoolean())
                     throw new DataLossException(errorMsg);
+
+                return false;
             }
         }
+        return true;
     }
 
     private boolean isFullyExpired(DecoratedKey key)
