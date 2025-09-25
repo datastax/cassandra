@@ -472,27 +472,30 @@ public class TrieMemoryIndex extends MemoryIndex
             return data;
 
         ByteComparable lowerBound, upperBound;
+        boolean lowerInclusive, upperInclusive;
         if (expression.lower != null)
         {
             lowerBound = expression.getEncodedLowerBoundByteComparable(Version.latest());
-            // inclusivity is encoded in lowerBound
+            lowerInclusive = expression.lower.inclusive;
         }
         else
         {
             lowerBound = null;
+            lowerInclusive = false;
         }
 
         if (expression.upper != null)
         {
             upperBound = expression.getEncodedUpperBoundByteComparable(Version.latest());
-            // inclusivity is encoded in upperBound
+            upperInclusive = expression.upper.inclusive;
         }
         else
         {
             upperBound = null;
+            upperInclusive = false;
         }
 
-        return data.subtrie(lowerBound, upperBound);
+        return data.slice(lowerBound, lowerInclusive, upperBound, upperInclusive);
     }
 
     public ByteBuffer getMinTerm()
