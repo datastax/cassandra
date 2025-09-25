@@ -28,11 +28,8 @@ import org.apache.cassandra.db.DeletionPurger;
 import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.Digest;
 import org.apache.cassandra.db.LivenessInfo;
-import org.apache.cassandra.db.context.CounterContext;
 import org.apache.cassandra.db.filter.ColumnFilter;
-import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.ByteType;
-import org.apache.cassandra.db.marshal.CollectionType;
 import org.apache.cassandra.db.marshal.SetType;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.DroppedColumn;
@@ -144,6 +141,12 @@ public class ComplexColumnData extends ColumnData implements Iterable<Cell<?>>
         for (Cell<?> cell : this)
             size += cell.dataSize();
         return size;
+    }
+
+    @Override
+    public int liveDataSize(int nowInSec)
+    {
+        return complexDeletion.isLive() ? dataSize() : 0;
     }
 
     public long unsharedHeapSizeExcludingData()

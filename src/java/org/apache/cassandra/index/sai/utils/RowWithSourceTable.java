@@ -280,9 +280,9 @@ public class RowWithSourceTable implements Row
     }
 
     @Override
-    public int originalDataSize()
+    public int liveDataSize(int nowInSec)
     {
-        return row.originalDataSize();
+        return row.liveDataSize(nowInSec);
     }
 
     @Override
