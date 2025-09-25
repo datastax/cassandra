@@ -385,17 +385,17 @@ public class TrieMemoryIndex extends MemoryIndex
         lastQueueSize.set(mergingIteratorBuilder.size());
 
         if (!Version.current().onOrAfter(Version.DB) && TypeUtil.isComposite(expression.validator))
-            subtrie.entrySet().forEach(entry -> {
+            subtrie.forEachEntry((keyComparable, value) -> {
                 // Before version DB, we encoded composite types using a non order-preserving function. In order to
                 // perform a range query on a map, we use the bounds to get all entries for a given map key and then
                 // only keep the map entries that satisfy the expression.
-                assert entry.getKey().encodingVersion() == TypeUtil.BYTE_COMPARABLE_VERSION || Version.current() == Version.AA;
-                byte[] key = ByteSourceInverse.readBytes(entry.getKey().getPreencodedBytes());
+                assert keyComparable.encodingVersion() == TypeUtil.BYTE_COMPARABLE_VERSION || Version.current() == Version.AA;
+                byte[] key = ByteSourceInverse.readBytes(keyComparable.getPreencodedBytes());
                 if (expression.isSatisfiedBy(ByteBuffer.wrap(key)))
-                    mergingIteratorBuilder.add(entry.getValue());
+                    mergingIteratorBuilder.add(value);
             });
         else
-            subtrie.values().forEach(mergingIteratorBuilder::add);
+            subtrie.forEachValue(mergingIteratorBuilder::add);
 
         return mergingIteratorBuilder.isEmpty()
                ? KeyRangeIterator.empty()
@@ -523,27 +523,34 @@ public class TrieMemoryIndex extends MemoryIndex
             return data;
 
         ByteComparable lowerBound, upperBound;
+        boolean lowerInclusive, upperInclusive;
         if (expression.lower != null)
         {
             lowerBound = expression.getEncodedLowerBoundByteComparable(Version.current());
-            // inclusivity is encoded in lowerBound
+            lowerInclusive = expression.lower.inclusive ||
+                             // Pre-D versions use first-component prefixes and post-filtering for composite lookups.
+                             // To make sure we get all the content in the relevant branch, we force inclusivity on the
+                             // start bound (otherwise Trie would skip the branch, see [Trie#slice].
+                             !Version.current().onOrAfter(Version.DB) && TypeUtil.isComposite(expression.validator);
         }
         else
         {
             lowerBound = null;
+            lowerInclusive = false;
         }
 
         if (expression.upper != null)
         {
             upperBound = expression.getEncodedUpperBoundByteComparable(Version.current());
-            // inclusivity is encoded in upperBound
+            upperInclusive = expression.upper.inclusive;
         }
         else
         {
             upperBound = null;
+            upperInclusive = false;
         }
 
-        return data.subtrie(lowerBound, upperBound);
+        return data.slice(lowerBound, lowerInclusive, upperBound, upperInclusive);
     }
 
     public ByteBuffer getMinTerm()
