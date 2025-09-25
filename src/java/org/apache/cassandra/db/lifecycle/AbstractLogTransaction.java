@@ -52,8 +52,8 @@ public abstract class AbstractLogTransaction extends Transactional.AbstractTrans
      */
     public void validate(Set<SSTableReader> obsolete, Set<SSTableReader> update)
     {
-        // Only validate compaction tasks and GC tasks
-        if (opType() != COMPACTION && opType() != GARBAGE_COLLECT)
+        // Only validate compaction tasks.
+        if (opType() != COMPACTION)
             return;
 
         if (!CassandraRelevantProperties.COMPACTION_VALIDATION_ENABLED.getBoolean())
