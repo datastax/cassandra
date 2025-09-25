@@ -70,6 +70,26 @@ public interface Trie<T> extends BaseTrie<T, Cursor<T>, Trie<T>>
         return dir -> new IntersectionCursor.Plain<>(cursor(dir), set.cursor(dir));
     }
 
+    /// A version of subtrie that supports control over the inclusivity of bounds.
+    /// Neither of the two bounds can be a prefix of the other.
+    ///
+    /// Unlike `subtrie`, prefixes of the boundaries are reported only if they fall in the span (i.e. are prefixes of a
+    /// right bound), and the branches rooted at the relevant boundary are covered if and only if the boundary itself is
+    /// included.
+    ///
+    /// For example, `slice(20, false, 40, true)` excludes `2020` (which is a descendant of the excluded `20`) but
+    /// includes `4040` (a descendant of the included `40`).
+    default Trie<T> slice(ByteComparable left, boolean inclusiveLeft, ByteComparable right, boolean inclusiveRight)
+    {
+        return dir -> {
+            Cursor<T> cursor = cursor(dir);
+            return new IntersectionCursor.PlainSlice<>(cursor,
+                                                       new RangesCursor(dir, cursor.byteComparableVersion(), left, right),
+                                                       inclusiveLeft,
+                                                       inclusiveRight);
+        };
+    }
+
     /// Returns the values in any order. For some tries this is much faster than the ordered iterable.
     default Iterable<T> valuesUnordered()
     {

@@ -41,7 +41,7 @@ abstract class IntersectionCursor<T, C extends Cursor<T>> implements Cursor<T>
         this.direction = source.direction();
         this.source = source;
         this.set = set;
-        matchingPosition(depth());
+        setInitialState();
     }
 
     @Override
@@ -159,7 +159,7 @@ abstract class IntersectionCursor<T, C extends Cursor<T>> implements Cursor<T>
         return depth;
     }
 
-    private int matchingPosition(int depth)
+    int matchingPosition(int depth)
     {
         // If we are matching a boundary of the set, include all its children by using a set-ahead state, ensuring that
         // the set will only be advanced once the source ascends to its depth again.
@@ -168,6 +168,11 @@ abstract class IntersectionCursor<T, C extends Cursor<T>> implements Cursor<T>
         else
             state = State.MATCHING;
         return depth;
+    }
+
+    void setInitialState()
+    {
+        matchingPosition(depth());
     }
 
     private int exhausted()
@@ -194,6 +199,79 @@ abstract class IntersectionCursor<T, C extends Cursor<T>> implements Cursor<T>
         return source.byteComparableVersion();
     }
 
+    /// A variation of the intersection cursor that supports boundary inclusivity control and does not report content
+    /// in prefixes.
+    ///
+    /// Note: Exclusivity is ignored for empty bounds, i.e. if a boundary is empty, it is treated like null regardless
+    /// of the inclusivity flag.
+    abstract static class Slice<T, C extends Cursor<T>> extends IntersectionCursor<T, C>
+    {
+        final boolean startsInclusive;
+        final boolean endsInclusive;
+
+        Slice(C source, TrieSetCursor set, boolean startsInclusive, boolean endsInclusive)
+        {
+            super(source, set);
+
+            this.startsInclusive = startsInclusive;
+            this.endsInclusive = endsInclusive;
+        }
+
+        @Override
+        void setInitialState()
+        {
+            // Check if the set is fully unbounded, and make sure the empty position is reported if this is the case.
+            TrieSetCursor.RangeState setState = set.state();
+            if (setState == TrieSetCursor.RangeState.END_START_PREFIX || setState.isBoundary)
+                state = State.SET_AHEAD;
+            else
+                state = State.MATCHING;
+        }
+
+        @Override
+        int matchingPosition(int depth)
+        {
+            TrieSetCursor.RangeState setState = set.state();
+            if (!setState.isBoundary)
+            {
+                // This is a prefix, we still have set path bytes to follow.
+                state = State.MATCHING;
+                return depth;
+            }
+
+            // If the boundary is a start (for the direction of iteration), and we include starts, we should include branch.
+            // Also, if the boundary is an end (for the direction of travel), and we include ends.
+            if ((setState.precedingIncluded(Direction.FORWARD) || startsInclusive) &&
+                (setState.precedingIncluded(Direction.REVERSE) || endsInclusive))
+            {
+                // Report the content, and include all the branch's children by using a set-ahead state, ensuring that
+                // the set will only be advanced once the source ascends to this depth again.
+                state = State.SET_AHEAD;
+                return depth;
+            }
+
+            // Otherwise we need to skip this node and its branch by jumping to the next position on the same depth.
+            // Note that we can't mess up any `advanceMultiple` path reporting, as that cannot end up on a matching
+            // position while it is reporting bytes for a descending chain.
+            return skipTo(depth, incomingTransition() + direction.increase);
+        }
+
+        @Override
+        public T content()
+        {
+            switch (state)
+            {
+                case SET_AHEAD:
+                    return source.content();
+                case MATCHING:
+                    // This is a prefix (boundaries we either skip or mark as SET_AHEAD). Report if it leads to an end bound.
+                    return set.state().precedingIncluded(Direction.FORWARD) ? source.content() : null;
+                default:
+                    throw new AssertionError();
+            }
+        }
+    }
+
     /// Intersection cursor for [Trie].
     static class Plain<T> extends IntersectionCursor<T, Cursor<T>>
     {
@@ -209,6 +287,29 @@ abstract class IntersectionCursor<T, C extends Cursor<T>> implements Cursor<T>
             {
                 case MATCHING:
                     return new Plain<>(source.tailCursor(direction), set.tailCursor(direction));
+                case SET_AHEAD:
+                    return source.tailCursor(direction);
+                default:
+                    throw new AssertionError();
+            }
+        }
+    }
+
+    /// Slice cursor for [Trie].
+    static class PlainSlice<T> extends Slice<T, Cursor<T>>
+    {
+        public PlainSlice(Cursor<T> source, TrieSetCursor set, boolean startsInclusive, boolean endsInclusive)
+        {
+            super(source, set, startsInclusive, endsInclusive);
+        }
+
+        @Override
+        public Cursor<T> tailCursor(Direction direction)
+        {
+            switch (state)
+            {
+                case MATCHING:
+                    return new PlainSlice<>(source.tailCursor(direction), set.tailCursor(direction), startsInclusive, endsInclusive);
                 case SET_AHEAD:
                     return source.tailCursor(direction);
                 default:
