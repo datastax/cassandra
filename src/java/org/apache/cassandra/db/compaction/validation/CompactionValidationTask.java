@@ -23,7 +23,6 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
-import java.util.function.LongPredicate;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -32,10 +31,9 @@ import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Slices;
 import org.apache.cassandra.db.filter.ColumnFilter;
-import org.apache.cassandra.db.partitions.PurgeFunction;
+import org.apache.cassandra.db.rows.RowIterator;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.rows.UnfilteredRowIterators;
-import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
 import org.apache.cassandra.utils.FBUtilities;
@@ -54,7 +52,6 @@ public class CompactionValidationTask
     private final CompactionValidationMetrics metrics;
 
     private final int nowInSec;
-    private final int gcBefore;
 
     public CompactionValidationTask(UUID id, Set<SSTableReader> inputSSTables, Set<SSTableReader> outputSSTables, CompactionValidationMetrics metrics)
     {
@@ -62,11 +59,6 @@ public class CompactionValidationTask
         this.inputSSTables = inputSSTables;
         this.outputSSTables = outputSSTables;
         this.nowInSec = FBUtilities.nowInSeconds();
-        // Ideally, should use gc_grace_seconds from CompactionController for current compaction task,
-        // but requires additional LifecycleTransaction API changes to pass in gc_grace_seconds.
-        // Using gc_grace_seconds of 0 here, it means validation allows absent boundary keys as long as they
-        // are full of tombstones which are all considered droppable.
-        this.gcBefore = nowInSec;
         this.metrics = metrics;
     }
 
@@ -181,8 +173,8 @@ public class CompactionValidationTask
         // merge all input iterators
         try (UnfilteredRowIterator merged = UnfilteredRowIterators.merge(iterators))
         {
-            // apply purging function to get rid of all purgeable content
-            UnfilteredRowIterator purged = Transformation.apply(merged, new WithoutPurgeableTombstones(nowInSec, gcBefore));
+            // apply purging function to get rid of all tombstones
+            RowIterator purged = UnfilteredRowIterators.filter(merged, nowInSec);
             // if there are non-purgeable content, e.g. live rows or unexpired tombstones, they should appear in output sstables
             if (purged.staticRow() != null && !purged.staticRow().isEmpty())
                 return false;
@@ -196,24 +188,6 @@ public class CompactionValidationTask
     private UnfilteredRowIterator readPartition(DecoratedKey partitionKey, SSTableReader sstable)
     {
         return sstable.iterator(partitionKey, Slices.ALL, ColumnFilter.all(sstable.metadata()), false, SSTableReadsListener.NOOP_LISTENER);
-    }
-
-    private static class WithoutPurgeableTombstones extends PurgeFunction
-    {
-        public WithoutPurgeableTombstones(int nowInSec, int gcBefore)
-        {
-            super(nowInSec, gcBefore,
-                    // purge all expired tombstones regardless if it's repaired
-                    Integer.MIN_VALUE, false,
-                    // enforceStrictLiveness: only matters for MV
-                    false);
-        }
-
-        @Override
-        protected LongPredicate getPurgeEvaluator()
-        {
-            return time -> true;
-        }
     }
 
     public static class DataLossException extends RuntimeException
