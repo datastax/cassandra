@@ -335,16 +335,16 @@ public class TrieMemoryIndex extends MemoryIndex
         lastQueueSize.set(mergingIteratorBuilder.size());
 
         if (!Version.latest().onOrAfter(Version.DB) && TypeUtil.isComposite(expression.validator))
-            subtrie.entrySet().forEach(entry -> {
+            subtrie.forEachEntry((keyComparable, value) -> {
                 // Before version DB, we encoded composite types using a non order-preserving function. In order to
                 // perform a range query on a map, we use the bounds to get all entries for a given map key and then
                 // only keep the map entries that satisfy the expression.
-                byte[] key = ByteSourceInverse.readBytes(entry.getKey().asComparableBytes(TypeUtil.BYTE_COMPARABLE_VERSION));
+                byte[] key = ByteSourceInverse.readBytes(keyComparable.asComparableBytes(TypeUtil.BYTE_COMPARABLE_VERSION));
                 if (expression.isSatisfiedBy(ByteBuffer.wrap(key)))
-                    mergingIteratorBuilder.add(entry.getValue());
+                    mergingIteratorBuilder.add(value);
             });
         else
-            subtrie.values().forEach(mergingIteratorBuilder::add);
+            subtrie.forEachValue(mergingIteratorBuilder::add);
 
         return mergingIteratorBuilder.isEmpty()
                ? KeyRangeIterator.empty()
@@ -476,7 +476,12 @@ public class TrieMemoryIndex extends MemoryIndex
         if (expression.lower != null)
         {
             lowerBound = expression.getEncodedLowerBoundByteComparable(Version.latest());
-            lowerInclusive = expression.lower.inclusive;
+            lowerInclusive = expression.lower.inclusive ||
+                             // Pre-D versions use first-component prefixes and post-filtering for composite lookups.
+                             // To make sure we get all the content in the relevant branch, we force inclusivity on the
+                             // start bound (otherwise Trie would skip the branch, see [Trie#slice].
+                             !Version.latest().onOrAfter(Version.DB) && TypeUtil.isComposite(expression.validator);
+
         }
         else
         {
