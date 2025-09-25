@@ -331,7 +331,7 @@ public class TrieBackedPartition implements Partition
                                                                                 BYTE_COMPARABLE_VERSION,
                                                                                 rowToData(row)),
                        noConflictInData(),
-                       noConflictInTombstones(),
+                       mergeTombstoneRanges(),
                        noIncomingSelfDeletion(),
                        noExistingSelfDeletion(),
                        true,
@@ -375,7 +375,7 @@ public class TrieBackedPartition implements Partition
                                                   BYTE_COMPARABLE_VERSION,
                                                   TrieTombstoneMarker.covering(deletionTime)),
                        noConflictInData(),
-                       noConflictInTombstones(),
+                       mergeTombstoneRanges(),
                        noIncomingSelfDeletion(),
                        noExistingSelfDeletion(),
                        true,
@@ -689,11 +689,16 @@ public class TrieBackedPartition implements Partition
         return NO_CONFLICT_RESOLVER;
     }
 
-    /// Resolver for tombstones in trie-backed partitions. We don't permit any overwrites/merges.
-    @SuppressWarnings("rawtypes")
-    public static InMemoryTrie.UpsertTransformer<TrieTombstoneMarker, TrieTombstoneMarker> noConflictInTombstones()
+    /// Tombstone merging resolver. Even though we don't support overwrites, we get requests to add the two sides
+    /// of a boundary separately and must join them.
+    private static final InMemoryTrie.UpsertTransformer<TrieTombstoneMarker, TrieTombstoneMarker> MERGE_TOMBSTONE_RANGES =
+        (existing, update) -> existing != null ? existing.mergeWith(update) : update;
+
+    /// Tombstone merging resolver. Even though we don't support overwrites, we get requests to add the two sides
+    /// of a boundary separately and must join them.
+    public static InMemoryTrie.UpsertTransformer<TrieTombstoneMarker, TrieTombstoneMarker> mergeTombstoneRanges()
     {
-        return NO_CONFLICT_RESOLVER;
+        return MERGE_TOMBSTONE_RANGES;
     }
 
     private static InMemoryBaseTrie.UpsertTransformer<Object, TrieTombstoneMarker> IGNORE_UPDATE = (left, right) -> left;
@@ -782,6 +787,8 @@ public class TrieBackedPartition implements Partition
                 ++tombstoneCount;
                 if (unfiltered.isOpen(isReverseOrder))
                     openMarker = unfiltered;
+                else
+                    openMarker = null;
             }
             else
             {
