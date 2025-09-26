@@ -216,6 +216,13 @@ public enum CassandraRelevantProperties
     COMPACTION_SKIP_REPAIR_STATE_CHECKING("cassandra.compaction.skip_repair_state_checking", "false"),
 
     /**
+     * Compaction validation mode to determine whether to skip validation or warn on data loss or abort on data loss;
+     *
+     * Available options: NONE, WARN, ABORT. Default is NONE
+     */
+    COMPACTION_VALIDATION_MODE("cassandra.compaction_validation_mode", "NONE"),
+
+    /**
      * This property indicates the location for the access file. If com.sun.management.jmxremote.authenticate is false,
      * then this property and the password and access files, are ignored. Otherwise, the access file must exist and
      * be in the valid format. If the access file is empty or nonexistent, then no access is allowed.
