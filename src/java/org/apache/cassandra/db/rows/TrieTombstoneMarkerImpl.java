@@ -98,9 +98,17 @@ interface TrieTombstoneMarkerImpl extends TrieTombstoneMarker
         }
 
         @Override
+        public boolean hasPointData()
+        {
+            return false;
+        }
+
+        @Override
         public TrieTombstoneMarker mergeWith(TrieTombstoneMarker other)
         {
             if (other instanceof Boundary)
+                return other.mergeWith(this);
+            if (other instanceof Point)
                 return other.mergeWith(this);
 
             return combine(this, (Covering) other);
@@ -137,6 +145,12 @@ interface TrieTombstoneMarkerImpl extends TrieTombstoneMarker
         }
 
         @Override
+        public TrieTombstoneMarker asPoint()
+        {
+            return new Point(this, null);
+        }
+
+        @Override
         public DeletionTime deletionTime()
         {
             return this;
@@ -166,6 +180,12 @@ interface TrieTombstoneMarkerImpl extends TrieTombstoneMarker
                                         : rightDeletion == null ? leftDeletion
                                                                 : rightDeletion.supersedes(leftDeletion) ? rightDeletion
                                                                                                          : leftDeletion;
+        }
+
+        @Override
+        public boolean hasPointData()
+        {
+            return false;
         }
 
         @Override
@@ -204,6 +224,7 @@ interface TrieTombstoneMarkerImpl extends TrieTombstoneMarker
             if (existing == null)
                 return this;
 
+            assert !existing.hasPointData() : "Boundary cannot be merged with point deletion";
             TrieTombstoneMarkerImpl other = (TrieTombstoneMarkerImpl) existing;
             Covering otherLeft = other.leftDeletion();
             Covering newLeft = combine(leftDeletion, otherLeft);
@@ -271,6 +292,122 @@ interface TrieTombstoneMarkerImpl extends TrieTombstoneMarker
         public String toString()
         {
             return (leftDeletion != null ? leftDeletion : "LIVE") + " -> " + (rightDeletion != null ? rightDeletion : "LIVE");
+        }
+    }
+
+    static class Point implements TrieTombstoneMarkerImpl
+    {
+        final @Nullable Covering coveringDeletion;
+        final Covering pointDeletion;
+
+        public Point(Covering pointDeletion, @Nullable Covering coveringDeletion)
+        {
+            this.coveringDeletion = coveringDeletion;
+            this.pointDeletion = pointDeletion;
+        }
+
+        @Override
+        public Covering leftDeletion()
+        {
+            return coveringDeletion;
+        }
+
+        @Override
+        public Covering rightDeletion()
+        {
+            return coveringDeletion;
+        }
+
+        @Override
+        public DeletionTime deletionTime()
+        {
+            return pointDeletion;
+        }
+
+        @Override
+        public RangeTombstoneMarker toRangeTombstoneMarker(ByteComparable clusteringPrefixAsByteComparable,
+                                                    ByteComparable.Version byteComparableVersion,
+                                                    ClusteringComparator comparator,
+                                                    DeletionTime deletionToOmit)
+        {
+            return null;
+        }
+
+        @Override
+        public TrieTombstoneMarker mergeWith(TrieTombstoneMarker existing)
+        {
+            if (existing == null)
+                return this;
+
+            if (existing instanceof Covering)
+            {
+                Covering existingCovering = (Covering) existing;
+                if (!pointDeletion.supersedes(existingCovering))
+                {
+                    if (coveringDeletion == null || !coveringDeletion.supersedes(existingCovering))
+                        return null;
+                    else
+                        return coveringDeletion;
+                }
+
+                Covering newCovering = combine(coveringDeletion, existingCovering);
+                if (newCovering == coveringDeletion)
+                    return this;
+                else
+                    return new Point(pointDeletion, newCovering);
+            }
+            else if (existing instanceof Point)
+            {
+                Point existingPoint = (Point) existing;
+                Covering newCovering = combine(coveringDeletion, existingPoint.coveringDeletion);
+                Covering newPoint = combine(pointDeletion, existingPoint.pointDeletion);
+                if (newCovering == coveringDeletion && newPoint == pointDeletion)
+                    return this;
+                if (newCovering == existingPoint.coveringDeletion && newPoint == existingPoint.pointDeletion)
+                    return existingPoint;
+
+                return new Point(newPoint, newCovering);
+            }
+            else
+                throw new AssertionError("Boundaries cannot be positioned on row clusterings.");
+        }
+
+        @Override
+        public boolean hasPointData()
+        {
+            return true;
+        }
+
+        @Override
+        public TrieTombstoneMarker withUpdatedTimestamp(long l)
+        {
+            if (coveringDeletion != null)
+                return new Covering(l, coveringDeletion.localDeletionTime()); // subsumed by range deletion
+            return new Point(new Covering(l, pointDeletion.localDeletionTime()), null);
+        }
+
+        @Override
+        public boolean isBoundary()
+        {
+            return true;
+        }
+
+        @Override
+        public TrieTombstoneMarker precedingState(Direction direction)
+        {
+            return coveringDeletion;
+        }
+
+        @Override
+        public TrieTombstoneMarker restrict(boolean applicableBefore, boolean applicableAfter)
+        {
+            throw new AssertionError("Cannot have a row clustering as slice bound.");
+        }
+
+        @Override
+        public TrieTombstoneMarker asBoundary(Direction direction)
+        {
+            throw new AssertionError("Cannot have a row clustering as slice bound.");
         }
     }
 }

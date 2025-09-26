@@ -57,4 +57,10 @@ public interface RangeState<S extends RangeState<S>>
 
     /// Assuming this is a covering state, promote it to a boundary active in the specified direction.
     S asBoundary(Direction direction);
+
+    /// Assuming this is a covering state, convert it to a point deletion.
+    default S asPoint()
+    {
+        return null;
+    }
 }
