@@ -411,7 +411,8 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
 
         plan = plan.limitIntersectedClauses(intersectionClauseLimit);
 
-        if (plan.contains(node -> node instanceof Plan.AnnIndexScan))
+        if (plan.contains(node -> node instanceof Plan.Filter)
+            && plan.contains(node -> node instanceof Plan.IndexScan && ((Plan.IndexScan) node).ordering != null))
             queryContext.setFilterSortOrder(QueryContext.FilterSortOrder.SCAN_THEN_FILTER);
         if (plan.contains(node -> node instanceof Plan.KeysSort))
             queryContext.setFilterSortOrder(QueryContext.FilterSortOrder.SEARCH_THEN_ORDER);
