@@ -43,11 +43,12 @@ import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
  * The following kinds of query are tracked:
  * <ul>
  *    <li>All SAI queries.</li>
- *    <li>Filter queries (filtering only, no top-k).</li>
- *    <li>Top-k queries (top-k only, no filtering).</li>
- *    <li>Hybrid queries (both filtering and top-k).</li>
- *    <li>Single-partition queries.</li>
- *    <li>Multipartition queries.</li>
+ *    <li>Single-partition filter queries (filtering only, no top-k).</li>
+ *    <li>Multi-partition filter queries (filtering only, no top-k).</li>
+ *    <li>Single-partition top-k queries (top-k only, no filtering).</li>
+ *    <li>Multi-partition top-k queries (top-k only, no filtering).</li>
+ *    <li>Single-partition hybrid queries (both filtering and top-k).</li>
+ *    <li>Multi-partition hybrid queries (both filtering and top-k).</li>
  * </ul>
  * The general metrics for all SAI queries are always recorded. The other kinds of queries are recorded only if they are
  * enabled via the {@link CassandraRelevantProperties#SAI_QUERY_KIND_PER_TABLE_METRICS_ENABLED} and
@@ -64,21 +65,23 @@ public class TableQueryMetrics
     public TableQueryMetrics(TableMetadata table)
     {
         addMetrics(table, QueryKind.ALL, cmd -> true);
-        addMetrics(table, QueryKind.FILTER_ONLY, cmd -> !cmd.isTopK() && cmd.usesIndexFiltering()); // queries that are filtering only
-        addMetrics(table, QueryKind.TOPK_ONLY, cmd -> cmd.isTopK() && !cmd.usesIndexFiltering()); // queries that are top-k only
-        addMetrics(table, QueryKind.HYBRID, cmd -> cmd.isTopK() && cmd.usesIndexFiltering()); // queries that are both filtering and top-k
-        addMetrics(table, QueryKind.SINGLE_PARTITION, ReadCommand::isSinglePartition); // single-partition queries
-        addMetrics(table, QueryKind.MULTI_PARTITION, cmd -> !cmd.isSinglePartition()); // multipartition queries
+        addMetrics(table, QueryKind.SP_FILTER_ONLY, cmd -> !cmd.isTopK() && cmd.usesIndexFiltering() && cmd.isSinglePartition()); // single-partition-queries that are filtering only
+        addMetrics(table, QueryKind.MP_FILTER_ONLY, cmd -> !cmd.isTopK() && cmd.usesIndexFiltering() && !cmd.isSinglePartition()); // multi-partition queries that are filtering only
+        addMetrics(table, QueryKind.SP_TOPK_ONLY, cmd -> cmd.isTopK() && !cmd.usesIndexFiltering() && cmd.isSinglePartition()); // single-partition queries that are top-k only
+        addMetrics(table, QueryKind.MP_TOPK_ONLY, cmd -> cmd.isTopK() && !cmd.usesIndexFiltering() && !cmd.isSinglePartition()); // multi-partition queries that are top-k only
+        addMetrics(table, QueryKind.SP_HYBRID, cmd -> cmd.isTopK() && cmd.usesIndexFiltering() && cmd.isSinglePartition()); // single-partition queries that are both filtering and top-k
+        addMetrics(table, QueryKind.MP_HYBRID, cmd -> cmd.isTopK() && cmd.usesIndexFiltering() && !cmd.isSinglePartition()); // multi-partition queries that are both filtering and top-k
     }
 
     public enum QueryKind
     {
         ALL(""),
-        FILTER_ONLY("FilterOnly"),
-        TOPK_ONLY("TopKOnly"),
-        HYBRID("Hybrid"),
-        SINGLE_PARTITION("SinglePartition"),
-        MULTI_PARTITION("MultiPartition");
+        SP_FILTER_ONLY("SinglePartitionFilterOnly"),
+        MP_FILTER_ONLY("MultiPartitionFilterOnly"),
+        SP_TOPK_ONLY("SinglePartitionTopKOnly"),
+        MP_TOPK_ONLY("MultiPartitionTopKOnly"),
+        SP_HYBRID("SinglePartitionHybrid"),
+        MP_HYBRID("MultiPartitionHybrid");
 
         private final String name;
 
