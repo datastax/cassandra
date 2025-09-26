@@ -1955,7 +1955,9 @@ abstract public class Plan
          */
         public RowsIteration recheckFilter(@Nonnull RowFilter filter, @Nonnull RowsIteration source)
         {
-            return new Filter(this, nextId++, filter, source, source.selectivity(), defaultAccess);
+            return filter.isEmpty()
+                   ? source
+                   : new Filter(this, nextId++, filter, source, source.selectivity(), defaultAccess);
         }
 
         /**
