@@ -56,9 +56,6 @@ public abstract class AbstractLogTransaction extends Transactional.AbstractTrans
         if (opType() != COMPACTION)
             return;
 
-        if (!CassandraRelevantProperties.COMPACTION_VALIDATION_ENABLED.getBoolean())
-            return;
-
         // Nothing to verify if no obsolete SSTables
         if (obsolete.isEmpty())
             return;

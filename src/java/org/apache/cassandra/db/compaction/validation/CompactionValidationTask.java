@@ -46,12 +46,45 @@ public class CompactionValidationTask
 {
     private static final Logger logger = LoggerFactory.getLogger(CompactionValidationTask.class);
 
+    public enum Mode
+    {
+        NONE,
+        WARN,
+        ABORT;
+
+        public boolean shouldValidate()
+        {
+            return this != NONE;
+        }
+
+        public boolean shouldAbortOnDataLoss()
+        {
+            return this == ABORT;
+        }
+
+        public static Mode parseConfig()
+        {
+            String rawConfig = null;
+            try
+            {
+                rawConfig = CassandraRelevantProperties.COMPACTION_VALIDATION_MODE.getString();
+                return Mode.valueOf(rawConfig);
+            }
+            catch (IllegalArgumentException e)
+            {
+                logger.error("Unable to pase compaction validation config '{}', fall back to NONE", rawConfig, e);
+                return NONE;
+            }
+        }
+    }
+
     private final UUID id;
     private final Set<SSTableReader> inputSSTables;
     private final Set<SSTableReader> outputSSTables;
     private final CompactionValidationMetrics metrics;
 
     private final int nowInSec;
+    private final Mode mode;
 
     public CompactionValidationTask(UUID id, Set<SSTableReader> inputSSTables, Set<SSTableReader> outputSSTables, CompactionValidationMetrics metrics)
     {
@@ -60,10 +93,14 @@ public class CompactionValidationTask
         this.outputSSTables = outputSSTables;
         this.nowInSec = FBUtilities.nowInSeconds();
         this.metrics = metrics;
+        this.mode = Mode.parseConfig();
     }
 
     public void validate()
     {
+        if (!mode.shouldValidate())
+            return;
+
         try
         {
             doValidate();
@@ -103,7 +140,7 @@ public class CompactionValidationTask
             if (isKeyAbsentInOutputSSTables(lastKey))
             {
                 if (logger.isTraceEnabled())
-                    logger.warn("[Task {}] Last key {} from input sstable {} not found in update sstables",
+                    logger.trace("[Task {}] Last key {} from input sstable {} not found in update sstables",
                             id, lastKey, inputSSTable.descriptor);
 
                 absentKeys.add(lastKey);
@@ -152,7 +189,7 @@ public class CompactionValidationTask
                     "POTENTIAL DATA LOSS on compaction task %s: Key %s from input sstables not found in update sstables " +
                     "and the partition is not fully expired.", id, absentKey);
                 logger.error(errorMsg);
-                if (!CassandraRelevantProperties.COMPACTION_VALIDATION_DRY_RUN.getBoolean())
+                if (mode.shouldAbortOnDataLoss())
                     throw new DataLossException(errorMsg);
 
                 return false;

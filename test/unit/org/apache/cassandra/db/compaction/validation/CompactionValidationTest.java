@@ -62,7 +62,8 @@ public class CompactionValidationTest extends CQLTester
     @Before
     public void setup()
     {
-        CassandraRelevantProperties.COMPACTION_VALIDATION_DRY_RUN.reset();
+        CassandraRelevantProperties.COMPACTION_VALIDATION_MODE.reset();
+        CassandraRelevantProperties.COMPACTION_VALIDATION_MODE.setString("WARN");
     }
 
     @After
@@ -277,9 +278,9 @@ public class CompactionValidationTest extends CQLTester
     }
 
     @Test
-    public void testAbortOnDataLossWithNonDryRun() throws Throwable
+    public void testAbortOnDataLoss() throws Throwable
     {
-        CassandraRelevantProperties.COMPACTION_VALIDATION_DRY_RUN.setBoolean(false);
+        CassandraRelevantProperties.COMPACTION_VALIDATION_MODE.setString("ABORT");
         Injections.inject(SIMULATE_NOT_FULLY_EXPIRED);
 
         createTable(CREATE_TABLE_TEMPLATE + " WITH gc_grace_seconds = 1");
