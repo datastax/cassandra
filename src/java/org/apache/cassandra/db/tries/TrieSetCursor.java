@@ -145,7 +145,7 @@ interface TrieSetCursor extends RangeCursor<TrieSetCursor.RangeState>
             switch (this)
             {
                 case POINT:
-                    return null;
+                    return srcState.asPoint();
                 case COVERED:
                     return srcState;
                 case START:

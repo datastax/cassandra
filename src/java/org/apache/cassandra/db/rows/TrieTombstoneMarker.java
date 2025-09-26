@@ -54,6 +54,8 @@ public interface TrieTombstoneMarker extends RangeState<TrieTombstoneMarker>, IM
     /// equal) which is not stored or reported.
     TrieTombstoneMarker mergeWith(TrieTombstoneMarker existing);
 
+    boolean hasPointData();
+
     static TrieTombstoneMarker covering(DeletionTime deletionTime)
     {
         return TrieTombstoneMarkerImpl.covering(deletionTime);

@@ -38,6 +38,7 @@ import org.junit.runners.Parameterized;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
+import org.apache.cassandra.db.partitions.TrieBackedPartitionStage2;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.cql3.ColumnIdentifier;
@@ -60,7 +61,8 @@ public class PartitionImplementationTest
     enum Implementation
     {
         BTREE(ImmutableBTreePartition::create),
-        TRIE(TrieBackedPartition::fromIterator);
+        TRIE(TrieBackedPartition::fromIterator),
+        TRIE_STAGE_2(TrieBackedPartitionStage2::fromIterator);
 
         final Function<UnfilteredRowIterator, Partition> creator;
 
@@ -454,7 +456,7 @@ public class PartitionImplementationTest
             if (reversed)
                 Collections.reverse(slicelist);
 
-            assertIteratorsEqual(Iterators.concat(slicelist.toArray(new Iterator[0])), slicedIter);
+            assertIteratorsEqual(maybeFilterInvalidCloseThenOpen(Iterators.concat(slicelist.toArray(new Iterator[0])), reversed), slicedIter);
         }
     }
 
@@ -467,7 +469,47 @@ public class PartitionImplementationTest
 
     private Iterator<Clusterable> slice(NavigableSet<Clusterable> sortedContent, Slices slices)
     {
-        return Iterators.concat(streamOf(slices).map(slice -> slice(sortedContent, slice)).iterator());
+        Iterator<Clusterable> result = Iterators.concat(streamOf(slices).map(slice -> slice(sortedContent, slice)).iterator());
+        result = maybeFilterInvalidCloseThenOpen(result, false);
+
+        return result;
+    }
+
+    private static Iterator<Clusterable> maybeFilterInvalidCloseThenOpen(Iterator<Clusterable> result, boolean reversed)
+    {
+        // Older implementations concatenate the individual slices, which may create an invalid close+open sequence with the same clustering.
+        // Stage 3 tries fix this problem.
+        if (implementation != Implementation.TRIE || !result.hasNext())
+            return result;
+
+        List<Clusterable> list = new ArrayList<>();
+        Clusterable c1 = result.next();
+        while (result.hasNext())
+        {
+            Clusterable c2 = result.next();
+            if (metadata.comparator.compare(c1.clustering(), c2.clustering()) == 0)
+            {
+                assertTrue(c1 instanceof RangeTombstoneBoundMarker);
+                assertTrue(c2 instanceof RangeTombstoneBoundMarker);
+                RangeTombstoneBoundMarker m1 = (RangeTombstoneBoundMarker) c1;
+                RangeTombstoneBoundMarker m2 = (RangeTombstoneBoundMarker) c2;
+                assertTrue(m1.isClose(reversed));
+                assertTrue(m2.isOpen(reversed));
+                if (m1.deletionTime().equals(m2.deletionTime()))
+                    c1 = result.hasNext() ? result.next() : null;
+                else
+                    c1 = RangeTombstoneBoundaryMarker.makeBoundary(reversed, m1.clustering(), m2.clustering(), m1.deletionTime(), m2.deletionTime());
+            }
+            else
+            {
+                list.add(c1);
+                c1 = c2;
+            }
+        }
+        if (c1 != null)
+            list.add(c1);
+        result = list.iterator();
+        return result;
     }
 
     private Iterator<Clusterable> slice(NavigableSet<Clusterable> sortedContent, Slice slice)

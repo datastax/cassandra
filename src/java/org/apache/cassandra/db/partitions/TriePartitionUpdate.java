@@ -440,15 +440,16 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
                 Clustering<?> clustering = row.clustering();
                 DeletionTime deletionTime = row.deletion().time();
 
+                ByteComparable comparableClustering = metadata.comparator.asByteComparable(clustering);
                 if (!deletionTime.isLive())
                 {
-                    putDeletionInTrie(metadata.comparator.asByteComparable(clustering.asStartBound()),
-                                      metadata.comparator.asByteComparable(clustering.asEndBound()),
+                    putDeletionInTrie(comparableClustering,
+                                      comparableClustering,
                                       deletionTime);
                 }
                 if (!row.isEmptyAfterDeletion())
                 {
-                    trie.apply(DeletionAwareTrie.<Row, TrieTombstoneMarker>singleton(metadata.comparator.asByteComparable(clustering),
+                    trie.apply(DeletionAwareTrie.<Row, TrieTombstoneMarker>singleton(comparableClustering,
                                                                                      BYTE_COMPARABLE_VERSION,
                                                                                      row),
                                this::merge,

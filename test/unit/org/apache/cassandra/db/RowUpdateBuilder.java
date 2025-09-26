@@ -72,6 +72,17 @@ public class RowUpdateBuilder
         this.updateBuilder.nowInSec(localDeletionTime);
     }
 
+    public RowUpdateBuilder(TableMetadata metadata, DeletionTime partitionDeletion, int nowInSec, long timestamp, Object partitionKey)
+    {
+        this(PartitionUpdate.simpleBuilder(metadata, partitionKey));
+
+        this.updateBuilder.timestamp(partitionDeletion.markedForDeleteAt());
+        this.updateBuilder.nowInSec(partitionDeletion.localDeletionTime());
+        this.updateBuilder.delete();
+        this.updateBuilder.timestamp(timestamp);
+        this.updateBuilder.nowInSec(nowInSec);
+    }
+
     public RowUpdateBuilder timestamp(long ts)
     {
         updateBuilder.timestamp(ts);

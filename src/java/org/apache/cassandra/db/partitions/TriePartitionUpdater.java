@@ -85,7 +85,19 @@ implements InMemoryBaseTrie.UpsertTransformerWithKeyProducer<Object, Object>
     {
         if (indexer != UpdateTransaction.NO_OP)
         {
-            if (update.isBoundary())
+            if (update.hasPointData())
+            {
+                Clustering<?> clustering = metadata.comparator.clusteringFromByteComparable(
+                    ByteArrayAccessor.instance,
+                    ByteComparable.preencoded(TrieBackedPartition.BYTE_COMPARABLE_VERSION,
+                                              keyState.getBytes()));
+                if (existing != null)
+                    indexer.onUpdated(BTreeRow.emptyDeletedRow(clustering, Row.Deletion.regular(existing.deletionTime())),
+                                      BTreeRow.emptyDeletedRow(clustering, Row.Deletion.regular(update.deletionTime())));
+                else
+                    indexer.onInserted(BTreeRow.emptyDeletedRow(clustering, Row.Deletion.regular(update.deletionTime())));
+            }
+            else if (update.isBoundary())
             {
                 if (rangeTombstoneOpenPosition != null)
                 {
