@@ -220,6 +220,13 @@ public enum CassandraRelevantProperties
     UCS_COMPACTION_INCLUDE_NON_DATA_FILES_SIZE("unified_compaction.include_non_data_files_size", "true"),
 
     /**
+     * Compaction validation mode to determine whether to skip validation or warn on data loss or abort on data loss;
+     *
+     * Available options: NONE, WARN, ABORT. Default is NONE
+     */
+    COMPACTION_VALIDATION_MODE("cassandra.compaction_validation_mode", "NONE"),
+
+    /**
      * The factory for handler of the storage of sstables
      */
     REMOTE_STORAGE_HANDLER_FACTORY("cassandra.remote_storage_handler_factory"),
