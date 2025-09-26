@@ -27,11 +27,13 @@ import java.util.concurrent.TimeUnit;
 
 import com.google.common.util.concurrent.Uninterruptibles;
 import org.junit.Assume;
+import org.junit.BeforeClass;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.service.reads.thresholds.CoordinatorWarnings;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.assertj.core.api.Assertions;
 
@@ -88,6 +90,12 @@ public class PagingAggregationQueryTest extends CQLTester
         this.value = dataSize.value();
         this.flush = flush;
         enableCoordinatorExecution();
+    }
+
+    @BeforeClass
+    public static void setup()
+    {
+        CoordinatorWarnings.init();
     }
 
     /**
