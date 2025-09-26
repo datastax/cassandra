@@ -286,9 +286,9 @@ public class RowWithSourceTable implements Row
     }
 
     @Override
-    public int dataSizeBeforePurge()
+    public int liveDataSize(long nowInSec)
     {
-        return row.dataSizeBeforePurge();
+        return row.liveDataSize(nowInSec);
     }
 
     @Override
