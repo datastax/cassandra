@@ -34,6 +34,7 @@ import com.google.common.base.Predicate;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
+import com.google.common.collect.Sets;
 import com.google.common.util.concurrent.Runnables;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -237,6 +238,10 @@ public class LifecycleTransaction extends Transactional.AbstractTransactional im
         // prepare for compaction obsolete readers as long as they were part of the original set
         // since those that are not original are early readers that share the same desc with the finals
         maybeFail(prepareForObsoletion(filterIn(logged.obsolete, originals), log, obsoletions = new ArrayList<>(), tracker, null));
+
+        // Use original sstables instead of logged.obsolete which may change their starting position due to early-open
+        Set<SSTableReader> obsolete = Sets.newHashSet(filterIn(originals, logged.obsolete));
+        log.validate(obsolete, logged.update);
 
         // This needs to be called after checkpoint and having prepared the obsoletions because it will upload the deletion
         // marks in CNDB
