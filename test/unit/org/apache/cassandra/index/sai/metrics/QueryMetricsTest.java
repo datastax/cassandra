@@ -48,18 +48,20 @@ public class QueryMetricsTest extends AbstractMetricsTest
     private static final String CREATE_INDEX_TEMPLATE = "CREATE CUSTOM INDEX IF NOT EXISTS %s ON %s.%s(%s) USING 'StorageAttachedIndex'";
 
     private static final String TABLE_QUERY_METRIC_TYPE = TableQueryMetrics.PerTable.METRIC_TYPE;
-    private static final String TABLE_FILTER_QUERY_METRIC_TYPE = makeName(TABLE_QUERY_METRIC_TYPE, QueryKind.FILTER_ONLY);
-    private static final String TABLE_TOPK_QUERY_METRIC_TYPE = makeName(TABLE_QUERY_METRIC_TYPE, QueryKind.TOPK_ONLY);
-    private static final String TABLE_HYBRID_QUERY_METRIC_TYPE = makeName(TABLE_QUERY_METRIC_TYPE, QueryKind.HYBRID);
-    private static final String TABLE_SINGLE_PARTITION_QUERY_METRIC_TYPE = makeName(TABLE_QUERY_METRIC_TYPE, QueryKind.SINGLE_PARTITION);
-    private static final String TABLE_MULTI_PARTITION_QUERY_METRIC_TYPE = makeName(TABLE_QUERY_METRIC_TYPE, QueryKind.MULTI_PARTITION);
+    private static final String TABLE_SP_FILTER_QUERY_METRIC_TYPE = makeName(TABLE_QUERY_METRIC_TYPE, QueryKind.SP_FILTER_ONLY);
+    private static final String TABLE_MP_FILTER_QUERY_METRIC_TYPE = makeName(TABLE_QUERY_METRIC_TYPE, QueryKind.MP_FILTER_ONLY);
+    private static final String TABLE_SP_TOPK_QUERY_METRIC_TYPE = makeName(TABLE_QUERY_METRIC_TYPE, QueryKind.SP_TOPK_ONLY);
+    private static final String TABLE_MP_TOPK_QUERY_METRIC_TYPE = makeName(TABLE_QUERY_METRIC_TYPE, QueryKind.MP_TOPK_ONLY);
+    private static final String TABLE_SP_HYBRID_QUERY_METRIC_TYPE = makeName(TABLE_QUERY_METRIC_TYPE, QueryKind.SP_HYBRID);
+    private static final String TABLE_MP_HYBRID_QUERY_METRIC_TYPE = makeName(TABLE_QUERY_METRIC_TYPE, QueryKind.MP_HYBRID);
 
     private static final String PER_QUERY_METRIC_TYPE = TableQueryMetrics.PerQuery.METRIC_TYPE;
-    private static final String PER_FILTER_QUERY_METRIC_TYPE = makeName(PER_QUERY_METRIC_TYPE, QueryKind.FILTER_ONLY);
-    private static final String PER_TOPK_QUERY_METRIC_TYPE = makeName(PER_QUERY_METRIC_TYPE, QueryKind.TOPK_ONLY);
-    private static final String PER_HYBRID_QUERY_METRIC_TYPE = makeName(PER_QUERY_METRIC_TYPE, QueryKind.HYBRID);
-    private static final String PER_SINGLE_PARTITION_QUERY_METRIC_TYPE = makeName(PER_QUERY_METRIC_TYPE, QueryKind.SINGLE_PARTITION);
-    private static final String PER_MULTI_PARTITION_QUERY_METRIC_TYPE = makeName(PER_QUERY_METRIC_TYPE, QueryKind.MULTI_PARTITION);
+    private static final String PER_SP_FILTER_QUERY_METRIC_TYPE = makeName(PER_QUERY_METRIC_TYPE, QueryKind.SP_FILTER_ONLY);
+    private static final String PER_MP_FILTER_QUERY_METRIC_TYPE = makeName(PER_QUERY_METRIC_TYPE, QueryKind.MP_FILTER_ONLY);
+    private static final String PER_SP_TOPK_QUERY_METRIC_TYPE = makeName(PER_QUERY_METRIC_TYPE, QueryKind.SP_TOPK_ONLY);
+    private static final String PER_MP_TOPK_QUERY_METRIC_TYPE = makeName(PER_QUERY_METRIC_TYPE, QueryKind.MP_TOPK_ONLY);
+    private static final String PER_SP_HYBRID_QUERY_METRIC_TYPE = makeName(PER_QUERY_METRIC_TYPE, QueryKind.SP_HYBRID);
+    private static final String PER_MP_HYBRID_QUERY_METRIC_TYPE = makeName(PER_QUERY_METRIC_TYPE, QueryKind.MP_HYBRID);
 
     private static final String GLOBAL_METRIC_TYPE = "ColumnQueryMetrics";
 
@@ -503,86 +505,96 @@ public class QueryMetricsTest extends AbstractMetricsTest
         rows = execute("SELECT k, c FROM %s ORDER BY v ANN OF [1, 1] LIMIT 1000");
         assertEquals(numRows, rows.size());
 
+        // single partition top-k query (goes to the general, top-k and range query metrics)
+        rows = execute("SELECT k, c FROM %s WHERE k = 0 ORDER BY v ANN OF [1, 1] LIMIT 1000");
+        assertEquals(numRowsPerPartition, rows.size());
+
         // partition query (goes to the general, filter single-partition query metrics)
         rows = execute("SELECT k, c FROM %s WHERE k = 0 AND n = 1");
         assertEquals(numRowsPerPartition, rows.size());
 
-        // hybrid query (goes to the general, hybrid and range query metrics)
+        // hybrid query, postfiltering (goes to the general, hybrid and range query metrics)
         rows = execute("SELECT k, c FROM %s WHERE n = 1 ORDER BY v ANN OF [1, 1] LIMIT 1000");
         assertEquals(numRows, rows.size());
 
+        // hybrid query, single partition (goes to the general, hybrid and range query metrics)
+        rows = execute("SELECT k, c FROM %s WHERE k = 0 AND n = 1 ORDER BY v ANN OF [1, 1] LIMIT 1000");
+        assertEquals(numRowsPerPartition, rows.size());
+
         // Verify metrics for total queries completed.
         String name = "TotalQueriesCompleted";
-        waitForEquals(objectName(name, TABLE_QUERY_METRIC_TYPE), 4);
-        waitForEqualsIfExists(perTable, objectName(name, TABLE_FILTER_QUERY_METRIC_TYPE), 2);
-        waitForEqualsIfExists(perTable, objectName(name, TABLE_TOPK_QUERY_METRIC_TYPE), 1);
-        waitForEqualsIfExists(perTable, objectName(name, TABLE_HYBRID_QUERY_METRIC_TYPE), 1);
-        waitForEqualsIfExists(perTable, objectName(name, TABLE_SINGLE_PARTITION_QUERY_METRIC_TYPE), 1);
-        waitForEqualsIfExists(perTable, objectName(name, TABLE_MULTI_PARTITION_QUERY_METRIC_TYPE), 3);
+        waitForEquals(objectName(name, TABLE_QUERY_METRIC_TYPE), 6);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_SP_FILTER_QUERY_METRIC_TYPE), 1);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_MP_FILTER_QUERY_METRIC_TYPE), 1);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_SP_TOPK_QUERY_METRIC_TYPE), 1);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_MP_TOPK_QUERY_METRIC_TYPE), 1);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_SP_HYBRID_QUERY_METRIC_TYPE), 1);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_MP_HYBRID_QUERY_METRIC_TYPE), 1);
 
-        // Verify counters for total partition reads. Note that the top-k query creates a partition per matching row,
-        // without grouping them by partition. That means a partition for every row.
+        // Verify counters for total partition reads.
         name = "TotalPartitionReads";
-        waitForEquals(objectName(name, TABLE_QUERY_METRIC_TYPE), numPartitions + numRows + numRows + 1);
-        waitForEqualsIfExists(perTable, objectName(name, TABLE_FILTER_QUERY_METRIC_TYPE), numPartitions + 1);
-        waitForEqualsIfExists(perTable, objectName(name, TABLE_TOPK_QUERY_METRIC_TYPE), numRows);
-        waitForEqualsIfExists(perTable, objectName(name, TABLE_HYBRID_QUERY_METRIC_TYPE), numRows);
-        waitForEqualsIfExists(perTable, objectName(name, TABLE_SINGLE_PARTITION_QUERY_METRIC_TYPE), 1);
-        waitForEqualsIfExists(perTable, objectName(name, TABLE_MULTI_PARTITION_QUERY_METRIC_TYPE), numPartitions + numRows + numRows);
+        waitForEquals(objectName(name, TABLE_QUERY_METRIC_TYPE), 1 + numPartitions + numRowsPerPartition + numRows + numRowsPerPartition + numRows);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_SP_FILTER_QUERY_METRIC_TYPE), 1);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_MP_FILTER_QUERY_METRIC_TYPE), numPartitions);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_SP_TOPK_QUERY_METRIC_TYPE), numRowsPerPartition); // single-partition top-k issues a partition access per each row
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_MP_TOPK_QUERY_METRIC_TYPE), numRows);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_SP_HYBRID_QUERY_METRIC_TYPE), numRowsPerPartition); // single-partition top-k issues a partition access per each row
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_MP_HYBRID_QUERY_METRIC_TYPE), numRows);
 
         // Verify counters for total rows filtered.
         name = "TotalRowsFiltered";
-        waitForEquals(objectName(name, TABLE_QUERY_METRIC_TYPE), numRows + numRowsPerPartition + numRows + numRows);
-        waitForEqualsIfExists(perTable, objectName(name, TABLE_FILTER_QUERY_METRIC_TYPE), numRows + numRowsPerPartition);
-        waitForEqualsIfExists(perTable, objectName(name, TABLE_TOPK_QUERY_METRIC_TYPE), numRows);
-        waitForEqualsIfExists(perTable, objectName(name, TABLE_HYBRID_QUERY_METRIC_TYPE), numRows);
-        waitForEqualsIfExists(perTable, objectName(name, TABLE_SINGLE_PARTITION_QUERY_METRIC_TYPE), numRowsPerPartition);
-        waitForEqualsIfExists(perTable, objectName(name, TABLE_MULTI_PARTITION_QUERY_METRIC_TYPE), numRows + numRows + numRows);
+        waitForEquals(objectName(name, TABLE_QUERY_METRIC_TYPE), numRowsPerPartition + numRows + numRowsPerPartition + numRows + numRowsPerPartition + numRows);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_SP_FILTER_QUERY_METRIC_TYPE), numRowsPerPartition);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_MP_FILTER_QUERY_METRIC_TYPE), numRows);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_SP_TOPK_QUERY_METRIC_TYPE), numRowsPerPartition);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_MP_TOPK_QUERY_METRIC_TYPE), numRows);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_SP_HYBRID_QUERY_METRIC_TYPE), numRowsPerPartition);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_MP_HYBRID_QUERY_METRIC_TYPE), numRows);
 
         // Verify counters for timeouts.
         name = "TotalQueryTimeouts";
         waitForEquals(objectName(name, TABLE_QUERY_METRIC_TYPE), 0);
-        waitForEqualsIfExists(perTable, objectName(name, TABLE_FILTER_QUERY_METRIC_TYPE), 0);
-        waitForEqualsIfExists(perTable, objectName(name, TABLE_TOPK_QUERY_METRIC_TYPE), 0);
-        waitForEqualsIfExists(perTable, objectName(name, TABLE_HYBRID_QUERY_METRIC_TYPE), 0);
-        waitForEqualsIfExists(perTable, objectName(name, TABLE_SINGLE_PARTITION_QUERY_METRIC_TYPE), 0);
-        waitForEqualsIfExists(perTable, objectName(name, TABLE_MULTI_PARTITION_QUERY_METRIC_TYPE), 0);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_SP_FILTER_QUERY_METRIC_TYPE), 0);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_MP_FILTER_QUERY_METRIC_TYPE), 0);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_SP_TOPK_QUERY_METRIC_TYPE), 0);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_MP_TOPK_QUERY_METRIC_TYPE), 0);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_SP_HYBRID_QUERY_METRIC_TYPE), 0);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_MP_HYBRID_QUERY_METRIC_TYPE), 0);
 
-        // Verify counters for sort-then-filter queries.
+        // Verify counters for sort-then-filter hybrid queries.
+        // Topk-only queries do not count because they don't do filtering.
+        // We have no support for forcing the different order of operations in the query engine, so we cannot
+        // directly test sort-then-filter queries.
         name = "SortThenFilterQueriesCompleted";
-        waitForEquals(objectName(name, TABLE_QUERY_METRIC_TYPE), 1);
-        waitForEqualsIfExists(perTable, objectName(name, TABLE_FILTER_QUERY_METRIC_TYPE), 0);
-        waitForEqualsIfExists(perTable, objectName(name, TABLE_TOPK_QUERY_METRIC_TYPE), 1); // was 4
-        waitForEqualsIfExists(perTable, objectName(name, TABLE_HYBRID_QUERY_METRIC_TYPE), 0);
-        waitForEqualsIfExists(perTable, objectName(name, TABLE_SINGLE_PARTITION_QUERY_METRIC_TYPE), 0);
-        waitForEqualsIfExists(perTable, objectName(name, TABLE_MULTI_PARTITION_QUERY_METRIC_TYPE), 1);
+        waitForEquals(objectName(name, TABLE_QUERY_METRIC_TYPE), 0);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_SP_HYBRID_QUERY_METRIC_TYPE), 0);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_MP_HYBRID_QUERY_METRIC_TYPE), 0);
 
-        // Verify counters for filter-then-sort queries.
+        // Verify counters for filter-then-sort hybrid queries.
         name = "FilterThenSortQueriesCompleted";
-        waitForEquals(objectName(name, TABLE_QUERY_METRIC_TYPE), 1);
-        waitForEqualsIfExists(perTable, objectName(name, TABLE_FILTER_QUERY_METRIC_TYPE), 0);
-        waitForEqualsIfExists(perTable, objectName(name, TABLE_TOPK_QUERY_METRIC_TYPE), 0);
-        waitForEqualsIfExists(perTable, objectName(name, TABLE_HYBRID_QUERY_METRIC_TYPE), 1);
-        waitForEqualsIfExists(perTable, objectName(name, TABLE_SINGLE_PARTITION_QUERY_METRIC_TYPE), 0);
-        waitForEqualsIfExists(perTable, objectName(name, TABLE_MULTI_PARTITION_QUERY_METRIC_TYPE), 1);
+        waitForEquals(objectName(name, TABLE_QUERY_METRIC_TYPE), 2);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_SP_HYBRID_QUERY_METRIC_TYPE), 1);
+        waitForEqualsIfExists(perTable, objectName(name, TABLE_MP_HYBRID_QUERY_METRIC_TYPE), 1);
 
         // Verify histograms for partitions reads per query.
         name = "PartitionReads";
-        waitForHistogramCountEquals(objectName(name, PER_QUERY_METRIC_TYPE), 4);
-        waitForHistogramCountEqualsIfExists(perQuery, objectName(name, PER_FILTER_QUERY_METRIC_TYPE), 2);
-        waitForHistogramCountEqualsIfExists(perQuery, objectName(name, PER_TOPK_QUERY_METRIC_TYPE), 1);
-        waitForHistogramCountEqualsIfExists(perQuery, objectName(name, PER_HYBRID_QUERY_METRIC_TYPE), 1);
-        waitForHistogramCountEqualsIfExists(perQuery, objectName(name, PER_SINGLE_PARTITION_QUERY_METRIC_TYPE), 1);
-        waitForHistogramCountEqualsIfExists(perQuery, objectName(name, PER_MULTI_PARTITION_QUERY_METRIC_TYPE), 3);
+        waitForHistogramCountEquals(objectName(name, PER_QUERY_METRIC_TYPE), 6);
+        waitForHistogramCountEqualsIfExists(perQuery, objectName(name, PER_SP_FILTER_QUERY_METRIC_TYPE), 1);
+        waitForHistogramCountEqualsIfExists(perQuery, objectName(name, PER_MP_FILTER_QUERY_METRIC_TYPE), 1);
+        waitForHistogramCountEqualsIfExists(perQuery, objectName(name, PER_SP_TOPK_QUERY_METRIC_TYPE), 1);
+        waitForHistogramCountEqualsIfExists(perQuery, objectName(name, PER_MP_TOPK_QUERY_METRIC_TYPE), 1);
+        waitForHistogramCountEqualsIfExists(perQuery, objectName(name, PER_SP_HYBRID_QUERY_METRIC_TYPE), 1);
+        waitForHistogramCountEqualsIfExists(perQuery, objectName(name, PER_MP_HYBRID_QUERY_METRIC_TYPE), 1);
 
         // Verify histograms for rows filtered per query.
         name = "RowsFiltered";
-        waitForHistogramCountEquals(objectName(name, PER_QUERY_METRIC_TYPE), 4);
-        waitForHistogramCountEqualsIfExists(perQuery, objectName(name, PER_FILTER_QUERY_METRIC_TYPE), 2);
-        waitForHistogramCountEqualsIfExists(perQuery, objectName(name, PER_TOPK_QUERY_METRIC_TYPE), 1);
-        waitForHistogramCountEqualsIfExists(perQuery, objectName(name, PER_HYBRID_QUERY_METRIC_TYPE), 1);
-        waitForHistogramCountEqualsIfExists(perQuery, objectName(name, PER_SINGLE_PARTITION_QUERY_METRIC_TYPE), 1);
-        waitForHistogramCountEqualsIfExists(perQuery, objectName(name, PER_MULTI_PARTITION_QUERY_METRIC_TYPE), 3);
+        waitForHistogramCountEquals(objectName(name, PER_QUERY_METRIC_TYPE), 6);
+        waitForHistogramCountEqualsIfExists(perQuery, objectName(name, PER_SP_FILTER_QUERY_METRIC_TYPE), 1);
+        waitForHistogramCountEqualsIfExists(perQuery, objectName(name, PER_MP_FILTER_QUERY_METRIC_TYPE), 1);
+        waitForHistogramCountEqualsIfExists(perQuery, objectName(name, PER_SP_TOPK_QUERY_METRIC_TYPE), 1);
+        waitForHistogramCountEqualsIfExists(perQuery, objectName(name, PER_MP_TOPK_QUERY_METRIC_TYPE), 1);
+        waitForHistogramCountEqualsIfExists(perQuery, objectName(name, PER_SP_HYBRID_QUERY_METRIC_TYPE), 1);
+        waitForHistogramCountEqualsIfExists(perQuery, objectName(name, PER_MP_HYBRID_QUERY_METRIC_TYPE), 1);
     }
 
     private ObjectName objectName(String name, String type)
