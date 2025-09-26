@@ -658,10 +658,9 @@ public class DataResolverTest extends AbstractReadResponseTest
 
         // 1st "stream": a partition deletion and a range tombstone
         RangeTombstone rt1 = tombstone("0", true , "9", true, 11, nowInSec);
-        PartitionUpdate upd1 = new RowUpdateBuilder(cfm, nowInSec, 1L, dk)
+        PartitionUpdate upd1 = new RowUpdateBuilder(cfm, new DeletionTime(10, nowInSec), nowInSec, 1L, dk)
                                .addRangeTombstone(rt1)
                                .buildUpdate();
-        ((MutableDeletionInfo)upd1.deletionInfo()).add(new DeletionTime(10, nowInSec));
         UnfilteredPartitionIterator iter1 = iter(upd1);
 
         // 2nd "stream": a range tombstone that is covered by the other stream rt
