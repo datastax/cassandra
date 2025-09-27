@@ -288,16 +288,37 @@ abstract public class Plan
      */
     public final String toStringRecursive()
     {
-        TreeFormatter<Plan> formatter = new TreeFormatter<>(Plan::toString, Plan::subplans);
+        return toStringRecursive(true);
+    }
+
+    /**
+     * Formats the whole plan as a pretty tree
+     *
+     * @param redact whether to redact the queried column values.
+     */
+    public final String toStringRecursive(boolean redact)
+    {
+        TreeFormatter<Plan> formatter = new TreeFormatter<>(plan -> plan.toString(redact), Plan::subplans);
         return formatter.format(this);
     }
 
     /**
      * Returns the string representation of this node only
      */
+    @Override
     public final String toString()
     {
-        String title = title();
+        return toString(true);
+    }
+
+    /**
+     * Returns the string representation of this node only
+     *
+     * @param redact whether to redact the queried column values.
+     */
+    public final String toString(boolean redact)
+    {
+        String title = title(redact);
         String description = description();
         return (title.isEmpty())
                ? String.format("%s (%s)\n%s", getClass().getSimpleName(), cost(), description).stripTrailing()
@@ -309,7 +330,7 @@ abstract public class Plan
      * The information is included in the output of {@link #toString()} and {@link #toStringRecursive()}.
      * It is up to subclasses to implement it.
      */
-    protected String title()
+    protected String title(boolean redact)
     {
         return "";
     }
@@ -345,7 +366,7 @@ abstract public class Plan
     public final Plan optimize()
     {
         if (logger.isTraceEnabled())
-            logger.trace("Optimizing plan:\n{}", this.toStringRecursive());
+            logger.trace("Optimizing plan:\n{}", toStringRecursive());
 
         Plan bestPlanSoFar = this;
         List<Leaf> leaves = nodesOfType(Leaf.class);
@@ -796,7 +817,7 @@ abstract public class Plan
         }
 
         @Override
-        protected final String title()
+        protected final String title(boolean redact)
         {
             return String.format("of %s (sel: %.9f, step: %.1f)",
                                  getIndexName(), selectivity(), access.meanDistance());
@@ -1689,9 +1710,9 @@ abstract public class Plan
         }
 
         @Override
-        protected String title()
+        protected String title(boolean redact)
         {
-            return String.format("%s (sel: %.9f)", filter, selectivity() / source.get().selectivity());
+            return String.format("%s (sel: %.9f)", filter.toCQLString(redact), selectivity() / source.get().selectivity());
         }
     }
 
@@ -1757,7 +1778,7 @@ abstract public class Plan
         }
 
         @Override
-        protected String title()
+        protected String title(boolean redact)
         {
             return "" + limit;
         }

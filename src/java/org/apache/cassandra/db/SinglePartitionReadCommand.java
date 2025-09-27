@@ -41,7 +41,6 @@ import org.apache.cassandra.db.transform.RTBoundValidator;
 import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.index.Index;
-import org.apache.cassandra.index.sai.utils.RowWithSourceTable;
 import org.apache.cassandra.io.sstable.format.RowIndexEntry;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
@@ -1153,19 +1152,9 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
     }
 
     @Override
-    protected void appendCQLWhereClause(CqlBuilder builder)
+    public void appendCQLWhereClause(CqlBuilder builder, boolean redact)
     {
-        builder.append(" WHERE ");
-
-        builder.append(partitionKey().toCQLString(metadata()));
-
-        // We put the row filter first because the clustering index filter can end by "ORDER BY"
-        if (!rowFilter().isEmpty())
-            builder.append(" AND ").append(rowFilter());
-
-        String filterString = clusteringIndexFilter().toCQLString(metadata());
-        if (!filterString.isEmpty())
-            builder.append(" AND ").append(filterString);
+        SinglePartitionReadQuery.super.appendCQLWhereClause(builder, redact);
     }
 
     protected void serializeSelection(DataOutputPlus out, int version) throws IOException
